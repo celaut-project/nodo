@@ -224,6 +224,7 @@ if __name__ == '__main__':
                     "\n- prune_containers"
                     "\n- refresh_clients"
                     "\n- tx_history"
+                    "\n- force_execution <peer_id> [--name instance-name] [-e key value] <service id> | <service tag> | <'.celaut' file path>  (bypasses the execution balancer; delegates straight to peer_id, no fallback -- testing/dev only)"
                     "\n- increase_peer_deposit <peer id> <gas to add>"
                     "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
                     "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your gas balance on that peer afterward)"
@@ -261,9 +262,14 @@ if __name__ == '__main__':
                             flush=True
                         )
                         if ddns_info["resolves_to"]:
+                            from src.utils.network import resolve_public_port
+                            public_port = resolve_public_port(
+                                env_manager.get("network.PUBLIC_TCP_PORT", ""), GATEWAY_PORT
+                            )
                             print(
                                 f"  Reachable from outside only if your router forwards "
-                                f"{ddns_info['resolves_to']}:{GATEWAY_PORT} to this host.",
+                                f"{ddns_info['resolves_to']}:{public_port} to this host's "
+                                f"port {GATEWAY_PORT}.",
                                 flush=True
                             )
                         print("  Run 'nodo nat-guide' for the router steps.", flush=True)
@@ -437,6 +443,54 @@ if __name__ == '__main__':
                     sys.exit(1)
 
                 execute(service=arg, external=external, envs=envs, instance_name=instance_name)
+
+            case "force_execution":
+                # Testing/dev only: bypasses execution_balancer and delegates
+                # straight to <peer_id>, no cost comparison, no fallback. See
+                # `nodo help` -- this is deliberately separate from `execute`.
+                from src.commands.force_execution import force_execution
+                import sys
+
+                args = sys.argv[2:]
+
+                envs = {}
+                if "-e" in args:
+                    while "-e" in args:
+                        try:
+                            e_index = args.index("-e")
+                            key = args[e_index + 1]
+                            value = args[e_index + 2]
+                            envs[key] = value
+                            args = args[:e_index] + args[e_index + 3:]
+                        except IndexError:
+                            print("Error: -e requires a key and a value", flush=True)
+                            sys.exit(1)
+
+                instance_name = None
+                if "--name" in args:
+                    try:
+                        name_index = args.index("--name")
+                        instance_name = args[name_index + 1]
+                        args = args[:name_index] + args[name_index + 2:]
+                    except IndexError:
+                        print("Error: --name requires a value", flush=True)
+                        sys.exit(1)
+
+                if len(args) != 2:
+                    print(
+                        "Usage: nodo force_execution <peer_id> [--name instance-name] [-e key value] "
+                        "<service id|service tag|'.celaut' file path>",
+                        flush=True,
+                    )
+                    sys.exit(1)
+
+                try:
+                    service_arg = resolve_service_input(args[1])
+                except FileNotFoundError as e:
+                    print(f"Error: {str(e)}")
+                    sys.exit(1)
+
+                force_execution(peer_id=args[0], service=service_arg, envs=envs, instance_name=instance_name)
 
             case "estimate":
                 from src.commands.estimate import estimate

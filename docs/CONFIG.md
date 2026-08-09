@@ -110,18 +110,18 @@ The most important choice for anyone packing services. Full authoring format:
 | `packer.docker.BUILDX_NETWORK` / `BUILDX_BUILDER` | `host` / `nodo-hostnet` | Local-packer buildx settings. |
 
 The **default-mode** packer is *not* configured here by URL — it is referenced by
-its published content hash (service id) in the `core_services` list (below), which
+its published content hash (service id) in the `core_services` mapping (below), which
 is the single source of truth. nodo resolves a running instance of that id and
 packs against its `ip:port`.
 
 ## `core_services` — bootstrap services (by id)
 
-An array of `{name, id}` entries mapping a well-known role to a published service
-hash. The node will only auto-resolve/run a missing service if it is reachable
-through one of these configured core services; an empty list or a `"<SET_ME>"`
-placeholder fails closed ("Service not allowed.").
+A mapping of well-known role → published service hash. The node will only
+auto-resolve/run a missing service if it is reachable through one of these
+configured core services; an empty mapping or a `"<SET_ME>"` placeholder fails
+closed ("Service not allowed.").
 
-| `name` | Role |
+| Role (key) | Meaning |
 |---|---|
 | `source-application` | Maps a service id → its downloadable sources (manifest URLs). |
 | `packer` | The packer-service used by `nodo pack` (default mode). |
@@ -138,6 +138,9 @@ placeholder fails closed ("Service not allowed.").
 
 Controls exposure and remote execution. Key entries: `GATEWAY_PORT` (`auto`),
 `PUBLIC_IP` / `EXTERNAL_INTERFACE` (what `nodo execute --remote` advertises),
+`PUBLIC_TCP_PORT` / `PUBLIC_UDP_PORT` (the external port a router forwards, when it
+differs from the internal one — empty means "same as internal"; only
+`PUBLIC_TCP_PORT` is used today, since the gateway is TCP-only),
 `FREE_PORTS_RANGE` (ports used to expose services — match your router forwarding),
 `DISABLE_EXPOSE_OUTSIDE`, `ISOLATE_INTERNAL_CHILDREN`, and `DEFAULT_EXECUTE_REMOTE`
 (default remote for NAT/WSL2 nodes). See also [`NETWORKS.md`](NETWORKS.md).

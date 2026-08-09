@@ -115,6 +115,22 @@ def get_free_port(free_port_ranges=None) -> int:
     return port
 
 
+def resolve_public_port(configured, internal_port: int) -> int:
+    """The port to advertise externally, when a router forwards it to a different one.
+
+    ``configured`` is a ``network.PUBLIC_TCP_PORT``/``PUBLIC_UDP_PORT`` value: empty
+    or unparseable falls back to ``internal_port``, which is the right default when
+    the router forwards the same port number it listens on internally.
+    """
+    raw = str(configured or "").strip()
+    if not raw:
+        return internal_port
+    try:
+        return int(raw)
+    except ValueError:
+        return internal_port
+
+
 def get_local_ip() -> str:
     try:
         # Se conecta a un servidor remoto para determinar la IP de salida

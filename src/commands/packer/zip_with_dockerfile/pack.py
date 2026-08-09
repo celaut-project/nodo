@@ -17,8 +17,8 @@ Flow:
      METADATA_REGISTRY (reuses nodo's existing import logic).
 
 Configuring the packer (resolution order):
-  1. service id   the `{name: "packer", id: ...}` entry in the top-level
-     `core_services` list — the single source of truth for the packer id (there is
+  1. service id   the `packer:` entry in the top-level
+     `core_services` mapping — the single source of truth for the packer id (there is
      no env var and no `packer.*` id key). It is the published content hash of the
      packer-service. nodo treats the packer as a **core service**: if no instance is
      already running, it downloads and launches it on demand through the
@@ -81,8 +81,8 @@ _HEALTH_POLL_INTERVAL = 3
 def _resolve_packer_id() -> Optional[str]:
     """Resolve the packer-service id (content hash).
 
-    Single source of truth: the ``{name: "packer", id: ...}`` entry in the unified
-    top-level ``core_services`` list, keeping the packer consistent with every other
+    Single source of truth: the ``packer`` entry in the unified top-level
+    ``core_services`` mapping, keeping the packer consistent with every other
     core service the node bootstraps (source-application, low-demand-fallback, ...).
     There is no environment-variable or ``packer.*`` override — the id lives only in
     ``core_services``.
@@ -197,8 +197,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
             "  • config.yaml, alongside the other core services (the single source\n"
             "    of truth for the packer id):\n"
             "        core_services:\n"
-            "          - name: \"packer\"\n"
-            "            id: \"<packer-service published id>\"\n\n"
+            "          packer: \"<packer-service published id>\"\n\n"
             "To point at an out-of-band packer instead (one already running elsewhere),\n"
             "set the override URL in config.yaml:  packer.PACKER_SERVICE_URL: \"http://<ip>:8080\".\n"
         )

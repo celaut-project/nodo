@@ -23,25 +23,25 @@ class CoreServiceIdAccessorTests(unittest.TestCase):
         return patch.object(core_services._env_manager, "get", return_value=value)
 
     def test_returns_id_for_matching_role(self):
-        with self._patch_config([{"name": "source-application", "id": "abc123"}]):
+        with self._patch_config({"source-application": "abc123"}):
             self.assertEqual(
                 core_services.get_core_service_id("source-application"), "abc123"
             )
 
     def test_placeholder_is_treated_as_unset(self):
-        with self._patch_config([{"name": "source-application", "id": "<SET_ME>"}]):
+        with self._patch_config({"source-application": "<SET_ME>"}):
             self.assertIsNone(core_services.get_core_service_id("source-application"))
 
     def test_blank_id_is_unset(self):
-        with self._patch_config([{"name": "source-application", "id": "  "}]):
+        with self._patch_config({"source-application": "  "}):
             self.assertIsNone(core_services.get_core_service_id("source-application"))
 
     def test_missing_role_returns_none(self):
-        with self._patch_config([{"name": "packer", "id": "abc"}]):
+        with self._patch_config({"packer": "abc"}):
             self.assertIsNone(core_services.get_core_service_id("source-application"))
 
     def test_empty_or_invalid_config_returns_none(self):
-        for value in ([], None, "not-a-list"):
+        for value in ({}, None, "not-a-dict", [{"name": "source-application", "id": "abc"}]):
             with self._patch_config(value):
                 self.assertIsNone(core_services.get_core_service_id("source-application"))
 
