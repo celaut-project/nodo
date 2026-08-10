@@ -1,7 +1,7 @@
 import sqlite3
 from src.utils.config import ConfigManager
 from src.utils.logger import ssformat
-from src.utils.monetary import mu_to_erg_str
+from src.utils.monetary import format_mu
 
 env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
@@ -48,7 +48,7 @@ def list_clients():
 
             # Section: Balance & Usage
             print("[Balance & Usage]")
-            print(f"  Balance: {mu_to_erg_str(int(balance_mu))} ERG")
+            print(f"  Balance: {format_mu(int(balance_mu))}")
             print(f"  Last Usage: {last_usage if last_usage is not None else 'None'}")
             print()
 

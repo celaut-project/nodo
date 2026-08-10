@@ -37,72 +37,109 @@ Three deeper problems sit under the numbers:
 3. **Resources cannot be priced independently.** A node with scarce RAM and abundant
    disk has no way to say so.
 
-## The unit: MU
+## Three units, kept apart
 
-**MU (monetary unit) is the node's internal unit of account. It is always an integer.**
+The model turns on not conflating three different things.
 
-**1 MU = 1 nanoERG = 1e-9 ERG.** The peg is a definition, not a configuration key.
+**MU (monetary unit) is what the node counts in.** Prices, balances and charges are
+integer MU, everywhere, so no amount goes through a float. MU has no intrinsic value —
+it is the node's own accounting unit, like a ledger's internal cents.
 
-The peg is what makes cross-node rates meaningful — the exact property the gas model
-lacked. An abstract unit with no anchor reproduces that failure: two nodes quote
-numbers that cannot be compared.
+**What an MU is worth belongs to the payment contract, not to MU.** A contract declares
+how many MU one of its units buys; that is exactly what `ContractRate.mu_per_unit`
+carries on the wire, so a peer reading a price can convert it into money it understands.
+Ergo is currently the only payment system:
 
-The peg does **not** tie the node to Ergo. It fixes the *scale* in which prices are
-expressed, not the currency in which they are paid.
-
-### Other payment contracts
-
-A contract declares how many MU one unit of it is worth, through the `ContractRate`
-message (the renamed `GasPrice`):
-
-```
-ContractRate { contract, mu_per_unit }
+```yaml
+ledgers:
+  ergo:
+    payments:
+      MU_PER_NANOERG: 1     # one MU is one nanoERG
 ```
 
-Ergo is simply the first contract, with a fixed rate of `1e9` MU per ERG (the peg).
-A contract settling in another token declares its own rate — a config constant now,
-an oracle later. This is the same slot `src/payment_system/ledgers.py` used to fill
-with `GAS_PER_ERG`; only the meaning of the number changed, from "gas per nanoERG,
-undefined" to "MU per contract unit, pegged".
+`1` is the sensible default — the simplest mapping for the only ledger there is — but it
+is a setting, not a definition, because the next ledger will need its own. ERG↔nanoERG
+(1e9) is **not** configurable and lives in the code: it is fixed by the Ergo protocol,
+and making it a setting would only allow defining a wrong Ergo.
+
+**What the operator reads and types is a third thing again.**
+
+```yaml
+ui:
+  DISPLAY_UNIT: erg       # "erg" (default) or "mu"
+```
+
+Purely presentational: changing it never changes what anybody is charged. `erg` derives
+its rate from the ledger, so it cannot go stale when `MU_PER_NANOERG` changes. Any other
+name is declared explicitly, which is the hook for showing a fiat figure later:
+
+```yaml
+ui:
+  DISPLAY_UNIT: usd
+  UNITS:
+    usd:
+      MU_PER_UNIT: 500000000
+      SYMBOL: "USD"
+      DECIMALS: 2
+```
+
+A rate that moves in the real world is a static number there and **will** go stale —
+nothing in the node refreshes it. It only ever affects what is printed.
+
+### Why this is not gas again
+
+Gas was a unit nothing declared a rate for, anywhere. A peer reading `gas_amount_per_call`
+had no way to price it, and the shipped constants put charges (1e2) and payments (1e58)
+56 orders of magnitude apart, so no charge could ever be settled.
+
+Here the rate is explicit, it travels on the wire with every advertisement, and — since
+prices and the rate are now configured separately — the node **checks at startup** that a
+reference charge still converts to a non-zero amount on-chain, and warns if it does not.
+That specific failure cannot recur silently.
 
 ### What the user sees
 
-**Never MU.** Every CLI and log boundary renders ERG via `mu_to_erg_str`
-(`src/utils/monetary.py`), which is exact because of the peg. When a balance was
-paid through a non-Ergo contract, it is shown in that contract's own units with the
-ERG equivalent alongside.
+Never MU, unless they ask for it. Every CLI and log boundary renders the display unit
+through `format_mu` (`src/utils/monetary.py`), and every operator-supplied amount is
+parsed from it by `parse_to_mu`, which refuses anything that would not land on a whole MU
+rather than rounding it.
 
-MU exists so the accounting is integer and exact. It is an implementation detail.
+The exception is `nodo pay <peer> <amount>`, whose amount stays in **ERG** whatever the
+display unit says: what it moves is an on-chain ERG transfer, denominated by the ledger
+rather than by a presentation preference.
 
 ## The price vector
 
 There is no single price, and no conversion between resources. Each dimension carries
-its own price, set by the operator as a decimal ERG string and parsed once into
-integer MU with `erg_to_mu`:
+its own price, in whole MU:
 
 ```yaml
 pricing:
   # Recurring, charged every manager iteration.
-  RAM_ERG_PER_GIB_HOUR:    "0.001"
-  CPU_ERG_PER_VCPU_HOUR:   "0.004"
-  DISK_ERG_PER_GIB_HOUR:   "0.0001"
-  NET_ERG_PER_GIB:         "0.002"   # tunnelled traffic, both directions
+  RAM_MU_PER_GIB_HOUR:  1000000
+  CPU_MU_PER_VCPU_HOUR: 4000000
+  DISK_MU_PER_GIB_HOUR:  100000
+  NET_MU_PER_GIB:       2000000   # tunnelled traffic, both directions
   # One-off operations.
-  BUILD_ERG:               "0.01"
-  TUNNEL_OPEN_ERG:         "0.00001"
-  MODIFY_RESOURCES_ERG:    "0.00001"
+  BUILD_MU:            10000000
+  TUNNEL_OPEN_MU:         10000
+  MODIFY_RESOURCES_MU:    10000
   # Scarcity: per resource, never global.
   SCARCITY_MAX_MULTIPLIER: 10        # ceiling of the surcharge when a resource runs out
   SCARCITY_CURVE: 1.0                # 1.0 = linear; >1 stays flat until real scarcity
 
 free_tier:
-  CREDIT_ERG_PER_NEW_CLIENT: "0"     # 0 = no gift; >0 = starting credit
+  CREDIT_MU_PER_NEW_CLIENT: 0        # 0 = no gift; >0 = starting credit
   FREE_WHILE_SCARCITY_BELOW: 0.0     # charge nothing while every resource is under this load
 ```
 
-A price of `"0"` makes that resource free. `FREE_WHILE_SCARCITY_BELOW` makes the node
-free while it is idle and priced once it is not. Together they cover the whole range
-an operator may want: expensive, cheap, free, or free up to a point.
+Prices are whole MU because MU is the unit of account — there is nothing smaller to
+express, and a fractional price is a configuration mistake rather than a rounding
+problem, so it is refused.
+
+A price of `0` makes that resource free. `FREE_WHILE_SCARCITY_BELOW` makes the node free
+while it is idle and priced once it is not. Together they cover the whole range an
+operator may want: expensive, cheap, free, or free up to a point.
 
 ### Charge formula
 
@@ -119,7 +156,7 @@ availability, in `[1, SCARCITY_MAX_MULTIPLIER]`. This is the substantive change 
 at `EXECUTION_COST`; here a node short on RAM raises only its RAM multiplier, and the
 charge grows with the instance's actual size.
 
-One-off operations (`BUILD_ERG`, `TUNNEL_OPEN_ERG`, `MODIFY_RESOURCES_ERG`) are flat
+One-off operations (`BUILD_MU`, `TUNNEL_OPEN_MU`, `MODIFY_RESOURCES_MU`) are flat
 and not scarcity-scaled: they price work done once, not occupancy.
 
 ### Worked example
@@ -173,13 +210,13 @@ There is no balance migration: no node runs in production, so balances reset.
 
 | Removed | Replacement |
 | --- | --- |
-| `ledgers.ergo.GAS_PER_ERG` | the peg (`NANOERG_PER_ERG`, not configurable) |
-| `EXECUTION_COST`, `EXECUTION_BENEFIT` | `pricing.*_ERG_PER_*` price vector |
-| `BUILD_COST` | `pricing.BUILD_ERG` |
-| `MODIFY_RESOURCES_COST` | `pricing.MODIFY_RESOURCES_ERG` |
-| `TUNNEL_OPEN_COST`, `TUNNEL_COST_PER_KB` | `pricing.TUNNEL_OPEN_ERG`, `pricing.NET_ERG_PER_GIB` |
+| `ledgers.ergo.GAS_PER_ERG` | `ledgers.ergo.payments.MU_PER_NANOERG` (1 by default) |
+| `EXECUTION_COST`, `EXECUTION_BENEFIT` | `pricing.*_MU_*` price vector |
+| `BUILD_COST` | `pricing.BUILD_MU` |
+| `MODIFY_RESOURCES_COST` | `pricing.MODIFY_RESOURCES_MU` |
+| `TUNNEL_OPEN_COST`, `TUNNEL_COST_PER_KB` | `pricing.TUNNEL_OPEN_MU`, `pricing.NET_MU_PER_GIB` |
 | `FREE_GAS_THRESHOLD` | `free_tier.FREE_WHILE_SCARCITY_BELOW` |
-| `FREE_TRIAL_GAS_AMOUNT` | `free_tier.CREDIT_ERG_PER_NEW_CLIENT` |
+| `FREE_TRIAL_GAS_AMOUNT` | `free_tier.CREDIT_MU_PER_NEW_CLIENT` |
 | `DEFAULT_INITIAL_GAS_AMOUNT` (+ `_FACTOR`, `USE_`) | derived: price of the requested resources × a configured initial runtime window |
 | `MIN_DEPOSIT_PEER`, `TOTAL_REFILLED_DEPOSIT` | derived from the on-chain floor and a target fee overhead |
 | `DEV_CLIENT_GAS_AMOUNT` (1e256) | an `unmetered` flag on dev clients — that is what the number was trying to say |
@@ -196,15 +233,16 @@ selection, not to pricing.
 * `src/utils/cost_functions/general_cost_functions.py` — `node_advertised_rates`
   publishes the price vector in MU per resource-second, which a peer can finally act on.
 * `src/manager/maintain.py` — the tick charge; peer deposits derived from the floor.
-* `src/payment_system/ledgers.py`, `contracts/ergo/interface.py` — the peg replaces
-  `GAS_PER_ERG`; MU↔nanoERG becomes the identity.
+* `src/payment_system/ledgers.py`, `contracts/ergo/interface.py` — `MU_PER_NANOERG`
+  replaces `GAS_PER_ERG`, and is what peers are told as `ContractRate.mu_per_unit`.
 * `src/balancers/estimated_cost_sorter/estimated_cost_sorter.py` — simplifies: with all
   nodes quoting MU, `erg_per_gas_unit = 1 / (peer_gas_per_erg / local_gas_per_erg)`
   disappears.
 * `src/database/sql_connection.py`, `src/database/migrate.py` — the `gas` TEXT columns
   hold MU; rename to `balance_mu`.
-* CLI: `nodo increase_gas` / `decrease_gas` / `increase_peer_deposit` take ERG rather
-  than gas; `peers`, `clients`, `instances`, `estimate`, `observe`, `pay` render ERG.
+* CLI: `nodo increase_gas` / `decrease_gas` / `increase_peer_deposit` become
+  `increase_deposit` / `decrease_deposit` and take the display unit; `peers`, `clients`,
+  `instances`, `estimate`, `observe`, `pay` render it too.
 * `docs/CONCEPTS.md` "Gas" section, `docs/CONFIG.md` cost table, `docs/TUNNELING.md`
   metering paragraph.
 
@@ -233,11 +271,10 @@ selection, not to pricing.
    is deleted and `src/commands/tui/build.rs` compiles `protos/` directly. There is now
    one schema and no way for a second one to drift.
 
-3. **CLI: the commands act on the balance, expressed in ERG.** `increase_gas` /
-   `decrease_gas` / `increase_peer_deposit` become `increase_deposit` /
-   `decrease_deposit` / `increase_peer_deposit`, and take a decimal ERG amount — the
-   unit `nodo pay <peer> <ERG>` already takes. MU is what the node counts in; ERG is
-   what the operator types and reads.
+3. **CLI: the commands act on the balance, in the operator's display unit.**
+   `increase_gas` / `decrease_gas` become `increase_deposit` / `decrease_deposit` and
+   take an amount in `ui.DISPLAY_UNIT` (ERG by default). `nodo pay` is the exception and
+   stays in ERG: it moves an on-chain ERG transfer.
 
 ## Found while implementing
 

@@ -7,7 +7,7 @@ from protos.gateway_bee import StartService_input_indices
 from src.commands.execute import resolve_service_hash
 from src.manager.manager import get_dev_clients
 from src.utils.config import ConfigManager
-from src.utils.monetary import mu_to_erg_str
+from src.utils.monetary import format_mu
 from src.utils.utils import (
     from_amount,
     read_metadata_from_disk,
@@ -79,10 +79,10 @@ def estimate(service: str) -> None:
 
     print("Execution feasibility: YES")
     loop_seconds = estimated_cost.maintenance_seconds_loop or 1
-    per_hour = lambda amount: mu_to_erg_str(int(from_amount(amount) * 3600 / loop_seconds))
+    per_hour = lambda amount: format_mu(int(from_amount(amount) * 3600 / loop_seconds))
 
-    print("Estimated costs (ERG):")
-    print(f"- To start:                 {mu_to_erg_str(from_amount(estimated_cost.cost))}")
+    print("Estimated costs:")
+    print(f"- To start:                 {format_mu(from_amount(estimated_cost.cost))}")
     print(f"- Maintenance, as started:  {per_hour(estimated_cost.init_maintenance_cost)} per hour")
     print(f"- Maintenance, at its most: {per_hour(estimated_cost.max_maintenance_cost)} per hour")
     print(f"- Charged every:            {estimated_cost.maintenance_seconds_loop} seconds")

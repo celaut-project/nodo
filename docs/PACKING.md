@@ -776,7 +776,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
 | `port` | int | Yes | Port number the service listens on |
 | `transport` | string or array | No | Transport protocol(s). Defaults to `["tcp"]` |
 | `protocol` | array | No | Application-level protocol tags (e.g. `["grpc"]`). Accepts `None` if omitted |
-| `mu_per_call` | object | No | Map of method name → price in MU (integer; 1 MU = 1 nanoERG) |
+| `mu_per_call` | object | No | Map of method name → price in MU (integer; the node's unit of account) |
 
 **Example — Single gRPC slot:**
 ```json

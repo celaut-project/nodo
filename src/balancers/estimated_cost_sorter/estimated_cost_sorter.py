@@ -8,7 +8,7 @@ from src.utils.cost_functions.variance_cost_normalization import variance_cost_n
 from src.utils.config import ConfigManager
 from src.utils.utils import from_amount
 from src.utils.logger import LOGGER as logger
-from src.utils.monetary import HOUR_SECONDS, mu_to_erg_str
+from src.utils.monetary import HOUR_SECONDS, format_mu
 from src.database.sql_connection import SQLConnection
 
 env_manager = ConfigManager()
@@ -69,7 +69,7 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
 
         logger(
             f"Estimated cost score for peer {peer_id}: reputation {reputation}, "
-            f"cost {mu_to_erg_str(cost_mu)} ERG/h => score {score}\n"
+            f"cost {format_mu(cost_mu)}/h => score {score}\n"
         )
         return score
 

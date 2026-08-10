@@ -88,15 +88,19 @@ def transaction_url_reporting(reporter):
 
 
 def __mu_to_nanoerg(amount: int) -> int:
-    """MU -> nanoERG. The identity, because MU is pegged at 1 MU = 1 nanoERG.
+    """MU -> nanoERG, at this ledger's declared rate.
 
-    Kept as a named function rather than inlined: it is the single place the peg meets
-    the ledger, so a ledger that is NOT pegged one-to-one has one obvious place to
-    convert. It also documents why no configured factor appears here any more -- the
-    old `GAS_PER_ERG` was a float reciprocal that silently rounded every real charge to
-    zero nanoERG.
+    The rate lives in ``ledgers.ergo.payments.MU_PER_NANOERG`` (1 by default, which makes
+    the conversion the identity). It is the single point where the node's unit of account
+    meets real money, and it is the same number peers are told as
+    ``ContractRate.mu_per_unit``, so payer and receiver compute the same figure.
+
+    The old `GAS_PER_ERG` did this with a float reciprocal set to 1e58, which silently
+    turned every real charge into zero nanoERG.
     """
-    return int(amount)
+    from src.utils.monetary import mu_to_nanoerg
+
+    return mu_to_nanoerg(amount)
 
 
 def __nanoerg_to_erg(amount: int) -> float:

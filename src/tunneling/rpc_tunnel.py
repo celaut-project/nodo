@@ -31,8 +31,8 @@ including internal ones the service never meant to expose.
 Metering
 --------
 Relaying is metered against the instance's balance: a fixed charge to open
-(``pricing.TUNNEL_OPEN_ERG``) and then per byte relayed in either direction
-(``pricing.NET_ERG_PER_GIB``), billed every
+(``pricing.TUNNEL_OPEN_MU``) and then per byte relayed in either direction
+(``pricing.NET_MU_PER_GIB``), billed every
 ``costs.TUNNEL_CHARGE_INTERVAL_KB``. Running out closes the tunnel, the way
 ``maintain`` stops an instance that can no longer pay. See ``TrafficMeter``.
 
@@ -80,7 +80,7 @@ from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
 from src.utils.cost_functions.execution_cost import traffic_charge_mu
 from src.utils.logger import LOGGER as logger
-from src.utils.monetary import mu_to_erg_str, prices
+from src.utils.monetary import format_mu, prices
 from src.virtualizers.firewall import TransportProtocol, resolve_slot_transport_protocols
 
 sc = SQLConnection()
@@ -145,8 +145,8 @@ class TrafficMeter:
     before it closes. Shrink the interval to tighten that bound.
 
     The two rates are independent knobs, each self-disabling at zero:
-    ``pricing.TUNNEL_OPEN_ERG`` of 0 makes opening free (``charge_open`` spends 0, which
-    ``_spend`` treats as always affordable) and ``pricing.NET_ERG_PER_GIB`` of 0
+    ``pricing.TUNNEL_OPEN_MU`` of 0 makes opening free (``charge_open`` spends 0, which
+    ``_spend`` treats as always affordable) and ``pricing.NET_MU_PER_GIB`` of 0
     disables the per-traffic charge (``enabled`` is False, so ``add``/``settle``
     no-op). Zero on one does not disable the other. Note that whether an empty
     balance actually stops a tunnel depends on ``costs.ALLOW_DEBT``, which
@@ -196,7 +196,7 @@ class TrafficMeter:
 
         logger(
             f"{LOG_PREFIX} {self.target}: out of funds after {self._relayed_bytes} bytes "
-            f"({mu_to_erg_str(self._billed_mu)} ERG billed); closing the tunnel."
+            f"({format_mu(self._billed_mu)} billed); closing the tunnel."
         )
         self.exhausted.set()
         return False
@@ -204,7 +204,7 @@ class TrafficMeter:
     def charge_open(self) -> bool:
         """Charge for opening a tunnel. False means the caller cannot afford it.
 
-        Independent of the traffic rate: a ``pricing.TUNNEL_OPEN_ERG`` of 0 spends
+        Independent of the traffic rate: a ``pricing.TUNNEL_OPEN_MU`` of 0 spends
         nothing and always returns True, even when traffic metering is disabled.
         """
         return self._spend(prices().tunnel_open_mu)
@@ -239,7 +239,7 @@ class TrafficMeter:
             self._spend(traffic_charge_mu(pending))
 
         logger(
-            f"{LOG_PREFIX} {self.target}: billed {mu_to_erg_str(self._billed_mu)} ERG for "
+            f"{LOG_PREFIX} {self.target}: billed {format_mu(self._billed_mu)} for "
             f"{self._relayed_bytes} bytes."
         )
 

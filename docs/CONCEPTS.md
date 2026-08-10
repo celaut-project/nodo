@@ -54,6 +54,7 @@ service. Do not use `docker ps` to inspect a running instance — use
 Everything you pay for is priced in **ERG**, per resource. A node sets its own
 price for memory, CPU, disk and relayed traffic; nothing collapses them into a
 single number, so a node short on memory but rich in disk can charge accordingly.
+Prices are configured in MU and shown to you in ERG.
 Prices rise with contention, up to a ceiling the node advertises alongside them.
 
 A client tops up its balance on a node by generating a **deposit token** — a
@@ -69,9 +70,11 @@ is swept to an optional cold address.
 in ERG. Full model: [`PRICING.md`](PRICING.md) for what things cost,
 [`ERGO.md`](ERGO.md) for how they settle.
 
-Internally the node counts in **MU** (monetary unit), an integer pegged at
-1 MU = 1 nanoERG, so no balance ever goes through a float. You never have to see
-it: every command speaks ERG.
+Internally the node counts in **MU** (monetary unit), an integer, so no balance ever
+goes through a float. What an MU is worth is declared per payment system
+(`ledgers.ergo.payments.MU_PER_NANOERG`, 1 by default) and travels to peers alongside
+every price, which is what lets them compare two nodes. What *you* read and type is a
+separate setting again (`ui.DISPLAY_UNIT`), ERG by default.
 
 ## Address and token provisioning
 

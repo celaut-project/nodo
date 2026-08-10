@@ -32,7 +32,8 @@ sending anything.
 from typing import List, Optional, Tuple
 
 from src.utils.config import ConfigManager
-from src.utils.monetary import erg_to_mu, mu_to_erg_str
+from src.utils.ergo_units import erg_to_nanoerg
+from src.utils.monetary import format_mu, nanoerg_to_mu
 
 # Ledger id used for the peer contract-rate lookup, matching src.commands.peers.
 ERGO_LEDGER = "ergo"
@@ -41,11 +42,12 @@ ERGO_LEDGER = "ergo"
 def _erg_to_mu(amount_erg) -> int:
     """Convert a decimal ERG amount to the node's unit of account.
 
-    The peg makes this exact and configuration-free: 1 MU = 1 nanoERG. It used to go
-    through ``ledgers.ergo.GAS_PER_ERG``, whose value put a real payment 49 orders of
-    magnitude away from any charge the node ever computed.
+    This command's amount stays in ERG whatever `ui.DISPLAY_UNIT` says, because what it
+    moves is an on-chain ERG transfer: the ledger denominates it, not the operator's
+    presentation preference. The MU figure is what the peer will credit, at the rate it
+    advertises.
     """
-    return erg_to_mu(amount_erg)
+    return nanoerg_to_mu(erg_to_nanoerg(amount_erg))
 
 
 def _read_peer_balance(
@@ -178,13 +180,13 @@ def pay(peer_id: str, amount_erg: str) -> bool:
 
     balance_mu, _rate, balance_last_update = after
     print(
-        f"Peer {peer_id} now credits you: {mu_to_erg_str(balance_mu)} ERG, last update "
+        f"Peer {peer_id} now credits you: {format_mu(balance_mu)}, last update "
         f"{balance_last_update or 'None'}.",
         flush=True,
     )
     if before is not None:
         print(
-            f"  (+{mu_to_erg_str(balance_mu - before[0])} ERG since before this payment)",
+            f"  (+{format_mu(balance_mu - before[0])} since before this payment)",
             flush=True,
         )
     return True

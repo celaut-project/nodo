@@ -1,9 +1,10 @@
-"""The pricing model: the MU peg, per-resource scarcity, and derived deposits.
+"""The pricing model: the three units, per-resource scarcity, and derived deposits.
 
-These cover the properties the old gas model got wrong rather than the arithmetic:
-that a bigger instance costs more, that resources are priced independently of each
-other, that a payment and a charge live on the same scale, and that a deposit is never
-quietly eaten by its own transaction fee.
+MU is what the node counts in, `MU_PER_NANOERG` is what an MU is worth on the ledger,
+and `ui.DISPLAY_UNIT` is what the operator reads. These cover the properties the gas
+model got wrong rather than the arithmetic: that a bigger instance costs more, that
+resources are priced independently of each other, that a charge and a payment still
+land on the same scale, and that a deposit is never eaten by its own transaction fee.
 """
 
 import unittest
@@ -14,24 +15,27 @@ try:
     from protos import celaut_pb2 as celaut
     from src.utils.config import ConfigManager
     from src.utils.cost_functions import execution_cost
-    from src.utils.monetary import MU_PER_ERG, erg_to_mu, mu_to_erg_str, prices
+    from src.utils import monetary
+    from src.utils.monetary import format_mu, mu_per_erg, mu_to_nanoerg, parse_to_mu, prices
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     ConfigManager = None  # type: ignore[assignment]
 
 
 BASE_PRICES = {
-    "pricing.RAM_ERG_PER_GIB_HOUR": "0.001",
-    "pricing.CPU_ERG_PER_VCPU_HOUR": "0.004",
-    "pricing.DISK_ERG_PER_GIB_HOUR": "0.0001",
-    "pricing.NET_ERG_PER_GIB": "0.002",
-    "pricing.BUILD_ERG": "0.01",
-    "pricing.TUNNEL_OPEN_ERG": "0.00001",
-    "pricing.MODIFY_RESOURCES_ERG": "0.00001",
+    "pricing.RAM_MU_PER_GIB_HOUR": 1_000_000,
+    "pricing.CPU_MU_PER_VCPU_HOUR": 4_000_000,
+    "pricing.DISK_MU_PER_GIB_HOUR": 100_000,
+    "pricing.NET_MU_PER_GIB": 2_000_000,
+    "pricing.BUILD_MU": 10_000_000,
+    "pricing.TUNNEL_OPEN_MU": 10_000,
+    "pricing.MODIFY_RESOURCES_MU": 10_000,
     "pricing.SCARCITY_MAX_MULTIPLIER": 10,
     "pricing.SCARCITY_CURVE": 1.0,
-    "free_tier.CREDIT_ERG_PER_NEW_CLIENT": "0",
+    "free_tier.CREDIT_MU_PER_NEW_CLIENT": 0,
     "free_tier.FREE_WHILE_SCARCITY_BELOW": 0.0,
+    "ledgers.ergo.payments.MU_PER_NANOERG": 1,
+    "ui.DISPLAY_UNIT": "erg",
 }
 
 
@@ -64,27 +68,79 @@ IDLE = {"cpu": 0.0, "mem": 0.0, "disk": 0.0}
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class ThePegTests(unittest.TestCase):
-    def test_one_mu_is_one_nanoerg(self):
-        self.assertEqual(MU_PER_ERG, 1_000_000_000)
-        self.assertEqual(erg_to_mu("1"), 1_000_000_000)
-        self.assertEqual(mu_to_erg_str(1_000_000_000), "1")
+class TheThreeUnitsTests(unittest.TestCase):
+    """MU, what it is worth, and what the operator reads are three separate things."""
 
-    def test_the_peg_is_exact_in_both_directions(self):
-        for erg in ("0.000000001", "0.05", "1", "123.456789"):
-            with self.subTest(erg=erg):
-                self.assertEqual(mu_to_erg_str(erg_to_mu(erg)), erg.rstrip("0").rstrip(".") if "." in erg else erg)
+    def test_one_mu_is_one_nanoerg_by_default(self):
+        with _config():
+            self.assertEqual(mu_per_erg(), 1_000_000_000)
+            self.assertEqual(mu_to_nanoerg(1_000), 1_000)
 
-    def test_sub_nanoerg_precision_is_refused_not_rounded(self):
-        """Silently rounding a price would make the node charge something else."""
-        with self.assertRaises(ValueError):
-            erg_to_mu("0.0000000001")
+    def test_the_ledger_rate_rescales_what_an_mu_is_worth(self):
+        """The rate belongs to the payment contract, not to MU."""
+        with _config(**{"ledgers.ergo.payments.MU_PER_NANOERG": "0.001"}):
+            # A coarser MU: one MU is now a thousand nanoERG.
+            self.assertEqual(mu_per_erg(), 1_000_000)
+            self.assertEqual(mu_to_nanoerg(1_000), 1_000_000)
 
-    def test_a_charge_and_a_payment_are_on_the_same_scale(self):
-        """The defect the peg exists to prevent.
+    def test_a_rate_that_does_not_divide_an_erg_is_refused(self):
+        with _config(**{"ledgers.ergo.payments.MU_PER_NANOERG": "0.0000000003"}):
+            with self.assertRaises(ValueError):
+                mu_per_erg()
 
-        Under the old model a maintenance tick converted to 0 nanoERG and a deposit
-        was 1e64 gas, so nothing a node charged could ever be settled.
+    def test_prices_are_whole_mu(self):
+        """MU is the unit of account; there is nothing smaller to express."""
+        with _config(**{"pricing.RAM_MU_PER_GIB_HOUR": "0.5"}):
+            with self.assertRaises(ValueError):
+                prices()
+
+    def test_the_display_unit_is_erg_by_default(self):
+        with _config():
+            self.assertEqual(format_mu(1_000_000_000), "1 ERG")
+            self.assertEqual(parse_to_mu("1"), 1_000_000_000)
+
+    def test_the_operator_can_read_and_type_raw_mu(self):
+        with _config(**{"ui.DISPLAY_UNIT": "mu"}):
+            self.assertEqual(format_mu(14_582), "14582 MU")
+            self.assertEqual(parse_to_mu("14582"), 14_582)
+
+    def test_a_custom_unit_can_be_declared(self):
+        """The hook for showing a fiat figure later. Static rate, never refreshed."""
+        with _config(**{
+            "ui.DISPLAY_UNIT": "usd",
+            "ui.UNITS.usd": {"MU_PER_UNIT": 500_000_000, "SYMBOL": "USD", "DECIMALS": 4},
+        }):
+            self.assertEqual(format_mu(5_000_000_000), "10 USD")
+            self.assertEqual(parse_to_mu("2.5"), 1_250_000_000)
+
+    def test_an_undeclared_display_unit_is_refused(self):
+        with _config(**{"ui.DISPLAY_UNIT": "doblones"}):
+            with self.assertRaises(ValueError):
+                format_mu(1)
+
+    def test_an_amount_that_is_not_whole_mu_is_refused_not_rounded(self):
+        """The operator asked for an amount and must not silently be charged another."""
+        with _config():
+            with self.assertRaises(ValueError):
+                parse_to_mu("0.0000000001")
+
+    def test_display_never_changes_what_is_charged(self):
+        resources = _sysresources(mem_gib=1)
+        with _config():
+            in_erg = execution_cost.maintenance_charge_mu(
+                system_resources=resources, seconds=3600, scarcity=IDLE
+            )
+        with _config(**{"ui.DISPLAY_UNIT": "mu"}):
+            in_mu = execution_cost.maintenance_charge_mu(
+                system_resources=resources, seconds=3600, scarcity=IDLE
+            )
+        self.assertEqual(in_erg, in_mu)
+
+    def test_a_charge_and_a_payment_stay_on_the_same_scale(self):
+        """The defect this model exists to prevent.
+
+        Under gas a maintenance tick converted to 0 nanoERG and a deposit was 1e64 gas,
+        so nothing a node charged could ever be settled.
         """
         with _config():
             tick_mu = execution_cost.maintenance_charge_mu(
@@ -92,9 +148,18 @@ class ThePegTests(unittest.TestCase):
                 seconds=10,
                 scarcity=IDLE,
             )
-        self.assertGreater(tick_mu, 0)
-        # An hour of this instance is worth a readable fraction of an ERG.
-        self.assertEqual(mu_to_erg_str(tick_mu * 360), "0.00524952")
+            self.assertGreater(tick_mu, 0)
+            self.assertGreater(mu_to_nanoerg(tick_mu), 0)
+            self.assertEqual(format_mu(tick_mu * 360), "0.00524952 ERG")
+            self.assertTrue(monetary.reference_charge_is_settleable())
+
+    def test_prices_dwarfed_by_the_rate_are_detected(self):
+        """Exactly the gas failure: charges and payments on scales that never meet."""
+        with _config(**{
+            "pricing.RAM_MU_PER_GIB_HOUR": 100,
+            "ledgers.ergo.payments.MU_PER_NANOERG": 1_000_000,
+        }):
+            self.assertFalse(monetary.reference_charge_is_settleable())
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -120,8 +185,8 @@ class PerResourcePricingTests(unittest.TestCase):
             disk_only = execution_cost.maintenance_charge_mu(
                 system_resources=_sysresources(disk_gib=100), seconds=3600, scarcity=IDLE
             )
-        self.assertEqual(cpu_only, 2 * erg_to_mu("0.004"))
-        self.assertEqual(disk_only, 100 * erg_to_mu("0.0001"))
+        self.assertEqual(cpu_only, 2 * 4_000_000)
+        self.assertEqual(disk_only, 100 * 100_000)
 
     def test_vcpus_come_from_the_cfs_quota_pair(self):
         units = execution_cost.requested_units(_sysresources(vcpus=2.5))
@@ -187,7 +252,7 @@ class ScarcityTests(unittest.TestCase):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class FreeTierTests(unittest.TestCase):
     def test_a_zero_price_makes_that_resource_free(self):
-        with _config(**{"pricing.RAM_ERG_PER_GIB_HOUR": "0"}):
+        with _config(**{"pricing.RAM_MU_PER_GIB_HOUR": 0}):
             charge = execution_cost.maintenance_charge_mu(
                 system_resources=_sysresources(mem_gib=8), seconds=3600, scarcity=IDLE
             )
@@ -220,7 +285,7 @@ class DerivedDepositTests(unittest.TestCase):
             threshold = deposits.refill_threshold_mu()
 
         self.assertLessEqual(DEFAULT_FEE / full, 0.02)
-        self.assertEqual(mu_to_erg_str(full), "0.05")
+        self.assertEqual(format_mu(full), "0.05 ERG")
         self.assertEqual(threshold, full // 5)
 
     def test_a_deposit_is_never_below_what_the_ledger_can_settle(self):

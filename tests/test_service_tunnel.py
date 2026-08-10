@@ -360,11 +360,9 @@ class ServiceTunnelRejectionTests(unittest.TestCase):
 class ServiceTunnelMeteringTests(unittest.TestCase):
     """Relaying is metered against the tunnelled instance's balance."""
 
-    # 10 MU == 10 nanoERG, expressed the way an operator writes a price.
-    OPEN_ERG = "0.00000001"
     OPEN_MU = 10
     # 2 MU per KiB, quoted per GiB the way the price vector is: 2 * 1024 * 1024 MU.
-    NET_ERG_PER_GIB = "0.002097152"
+    NET_MU_PER_GIB = 2 * 1024 * 1024
     PER_KB_MU = 2
     INTERVAL_KB = 1  # Bill every KiB, so a small test payload crosses a block.
 
@@ -378,8 +376,8 @@ class ServiceTunnelMeteringTests(unittest.TestCase):
         """Override only the tunnel rates; ConfigManager is a shared singleton, so
         everything else must still reach the real config."""
         rates = {
-            "pricing.TUNNEL_OPEN_ERG": self.OPEN_ERG,
-            "pricing.NET_ERG_PER_GIB": self.NET_ERG_PER_GIB,
+            "pricing.TUNNEL_OPEN_MU": self.OPEN_MU,
+            "pricing.NET_MU_PER_GIB": self.NET_MU_PER_GIB,
             "costs.TUNNEL_CHARGE_INTERVAL_KB": self.INTERVAL_KB,
         }
         rates.update(overrides)
@@ -487,7 +485,7 @@ class ServiceTunnelMeteringTests(unittest.TestCase):
             [b"z" * 4096],
             port,
             spend,
-            rates=self._rates(**{"pricing.NET_ERG_PER_GIB": "0"}),
+            rates=self._rates(**{"pricing.NET_MU_PER_GIB": 0}),
         )
 
         # Only the open charge; no per-byte billing at all.
@@ -502,7 +500,7 @@ class ServiceTunnelMeteringTests(unittest.TestCase):
             port,
             spend,
             rates=self._rates(
-                **{"pricing.TUNNEL_OPEN_ERG": "0", "pricing.NET_ERG_PER_GIB": "0"}
+                **{"pricing.TUNNEL_OPEN_MU": 0, "pricing.NET_MU_PER_GIB": 0}
             ),
         )
 

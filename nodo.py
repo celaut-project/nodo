@@ -187,8 +187,8 @@ if __name__ == '__main__':
                     "\n- kill <instance id>"
                     "\n- observe <instance id> [--save <path>]"
                     "\n- tunnel <instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]"
-                    "\n- increase_deposit <instance id> <amount in ERG>"
-                    "\n- decrease_deposit <instance id> <amount in ERG>"
+                    "\n- increase_deposit <instance id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
+                    "\n- decrease_deposit <instance id> <amount>"
                     "\n- services"
                     "\n- tag <service id|tag> <new tag>"
                     "\n- clients"
@@ -225,7 +225,7 @@ if __name__ == '__main__':
                     "\n- refresh_clients"
                     "\n- tx_history"
                     "\n- force_execution <peer_id> [--name instance-name] [-e key value] <service id> | <service tag> | <'.celaut' file path>  (bypasses the execution balancer; delegates straight to peer_id, no fallback -- testing/dev only)"
-                    "\n- increase_peer_deposit <peer id> <amount in ERG>"
+                    "\n- increase_peer_deposit <peer id> <amount>"
                     "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
                     "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your balance on that peer afterward)"
                     "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
@@ -599,11 +599,11 @@ if __name__ == '__main__':
 
             case "increase_deposit":
                 from src.commands.modify_deposit import modify_instance_deposit
-                modify_instance_deposit(instance=sys.argv[2], erg=sys.argv[3], decrement=False)
+                modify_instance_deposit(instance=sys.argv[2], amount=sys.argv[3], decrement=False)
 
             case "decrease_deposit":
                 from src.commands.modify_deposit import modify_instance_deposit
-                modify_instance_deposit(instance=sys.argv[2], erg=sys.argv[3], decrement=True)
+                modify_instance_deposit(instance=sys.argv[2], amount=sys.argv[3], decrement=True)
 
             case "remove":
                 from src.commands.remove import remove
@@ -787,7 +787,7 @@ if __name__ == '__main__':
 
             case "increase_peer_deposit":
                 from src.commands.increase_peer_deposit import increase_peer_deposit
-                increase_peer_deposit(peer_id=sys.argv[2], erg=sys.argv[3])
+                increase_peer_deposit(peer_id=sys.argv[2], amount=sys.argv[3])
 
             case "verify_reputation":
                 if len(sys.argv) < 3:

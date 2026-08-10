@@ -19,12 +19,12 @@ from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_con
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
 from src.utils.utils import from_amount, generate_uris_by_peer_id
-from src.utils.monetary import erg_to_mu, mu_to_erg_str
+from src.utils.monetary import format_mu
 
 env_manager = ConfigManager()
 
-CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION = erg_to_mu(
-    env_manager.get("client.CLIENT_MIN_BALANCE_ERG_TO_RESET_EXPIRATION", "0") or "0"
+CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION = int(
+    env_manager.get("client.CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION", 0) or 0
 )
 TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get("ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT"))
 CLIENT_EXPIRATION_TIME = env_manager.get("CLIENT_EXPIRATION_TIME")
@@ -212,9 +212,9 @@ class SQLConnection(metaclass=Singleton):
             return (
                 balance_mu,
                 row['last_usage'],
-                # Third element is the human-readable form. It is ERG now, not
-                # scientific-notation MU: whoever prints this shows it to a person.
-                mu_to_erg_str(balance_mu),
+                # Third element is the human-readable form, in the operator's
+                # display unit: whoever prints this shows it to a person.
+                format_mu(balance_mu),
             )
                 
         log.LOGGER(f'Client not found: {client_id}')

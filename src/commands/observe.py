@@ -169,9 +169,9 @@ def format_balance(balance: Any) -> str:
     except (ValueError, TypeError):
         return "Invalid balance"
     try:
-        from src.utils.monetary import mu_to_erg_str
+        from src.utils.monetary import format_mu
 
-        return f"{mu_to_erg_str(balance_mu)} ERG"
+        return f"{format_mu(balance_mu)}"
     except Exception:
         return str(balance_mu)
 

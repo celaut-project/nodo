@@ -16,7 +16,7 @@ from src.database.sql_connection import SQLConnection
 
 from src.utils import logger as _l
 from src.utils.utils import to_amount, generate_uris_by_peer_id
-from src.utils.monetary import mu_to_erg_str
+from src.utils.monetary import format_mu
 from src.database.access_functions.ledgers import get_peer_contract_instances
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
@@ -234,7 +234,7 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None)
 
     amount = max(int(amount), full_deposit_mu())
 
-    _l.LOGGER(f"Increase deposit on peer {peer_id} by {mu_to_erg_str(amount)} ERG")
+    _l.LOGGER(f"Increase deposit on peer {peer_id} by {format_mu(amount)}")
     try:
         if __peer_payment_process(
             peer_id=peer_id,
