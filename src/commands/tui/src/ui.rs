@@ -328,7 +328,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             ),
             Cell::from(format_bytes(instance.memory_limit)),
             Cell::from(format_bytes(instance.disk_limit)),
-            Cell::from(instance.gas.clone()),
+            Cell::from(instance.balance.clone()),
         ])
     });
     let local_count = app.instances.items.iter().filter(|i| i.is_local()).count();
@@ -350,7 +350,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     )
     .header(header_row(vec![
         "Name", "Location", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max",
-        "Gas",
+        "Balance",
     ]))
     .block(section_block(
         format!(
@@ -376,7 +376,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             ),
             metric_line("Service", instance.service.clone()),
             metric_line("Endpoint", nonempty(&instance.ip, "—")),
-            metric_line("Gas", instance.gas.clone()),
+            metric_line("Balance", instance.balance.clone()),
         ]
     } else {
         vec![Line::from(Span::styled(
@@ -484,7 +484,7 @@ fn build_tree_lines<'a>(
             Style::default().fg(if instance.is_local() { GOOD } else { WARN }),
         ),
         Span::styled(
-            format!("  gas {}", instance.gas),
+            format!("  balance {}", instance.balance),
             Style::default().fg(ACCENT),
         ),
     ]));
@@ -585,7 +585,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
         Row::new(vec![
             Cell::from(peer.id.clone()),
             Cell::from(peer.uris.clone()),
-            Cell::from(peer.gas.clone()),
+            Cell::from(peer.balance.clone()),
             Cell::from(peer.reputation_score.clone()).style(Style::default().fg(GOOD).bold()),
             Cell::from(peer.reputation.clone()),
         ])
@@ -603,7 +603,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     .header(header_row(vec![
         "Peer ID",
         "Endpoints",
-        "Our Gas",
+        "Our balance",
         "Rep",
         "Reputation proof",
     ]))
@@ -620,7 +620,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     let clients = app.clients.items.iter().map(|client| {
         Row::new(vec![
             client.id.clone(),
-            client.gas.clone(),
+            client.balance.clone(),
             client.last_usage.clone(),
         ])
     });
@@ -632,7 +632,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Length(20),
         ],
     )
-    .header(header_row(vec!["Client ID", "Gas", "Last usage"]))
+    .header(header_row(vec!["Client ID", "Balance", "Last usage"]))
     .block(section_block(
         format!(
             " CLIENTS • {} known • Tab changes focus ",
@@ -645,9 +645,9 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(client_table, split[2], &mut app.clients.state);
 }
 
-/// Full breakdown of the peer highlighted in the peers table: identity, our gas
+/// Full breakdown of the peer highlighted in the peers table: identity, our balance
 /// with it, reputation, and every payment contract it has registered — ledger,
-/// contract, payout address and gas price per instance. Before this the only
+/// contract, payout address and per-unit rate per instance. Before this the only
 /// way to get at any of it was a raw sqlite query (issue #231).
 /// `compact` collapses each contract onto a single line and drops the fields the
 /// peers table already shows verbatim, for terminals too short for the full card.
@@ -666,7 +666,7 @@ fn peer_detail_lines(peer: Option<&Peer>, compact: bool) -> Vec<Line<'static>> {
             "Endpoints",
             nonempty(&peer.uris, "—").to_string(),
         ));
-        lines.push(metric_line("Our gas", peer.gas.clone()));
+        lines.push(metric_line("Our balance", peer.balance.clone()));
         lines.push(metric_line(
             "Reputation",
             format!(
@@ -697,10 +697,10 @@ fn peer_detail_lines(peer: Option<&Peer>, compact: bool) -> Vec<Line<'static>> {
                 Span::styled(contract.ledger.clone(), Style::default().fg(GOOD).bold()),
                 Span::styled(
                     format!(
-                        "  {}  {}  {} gas",
+                        "  {}  {}  {} MU/unit",
                         shorten(&contract.contract_hash, 14),
                         shorten(nonempty(&contract.address, "—"), 14),
-                        nonempty(&contract.gas_price, "—")
+                        nonempty(&contract.mu_per_unit, "—")
                     ),
                     Style::default().fg(Color::White),
                 ),
@@ -725,7 +725,7 @@ fn peer_detail_lines(peer: Option<&Peer>, compact: bool) -> Vec<Line<'static>> {
         lines.push(Line::from(vec![
             Span::styled("      price    ", Style::default().fg(MUTED)),
             Span::styled(
-                format!("{} gas", nonempty(&contract.gas_price, "—")),
+                format!("{} MU/unit", nonempty(&contract.mu_per_unit, "—")),
                 Style::default().fg(Color::White),
             ),
         ]));
@@ -1024,7 +1024,7 @@ mod tests {
         Peer {
             id: "f3b61c2e-aaaa-bbbb-cccc-ddddeeeeffff".to_string(),
             uris: "10.0.0.4:8080".to_string(),
-            gas: "1.000e3".to_string(),
+            balance: "0.000001 ERG".to_string(),
             reputation: String::new(),
             reputation_score: "7".to_string(),
             contracts,
@@ -1036,7 +1036,7 @@ mod tests {
             ledger: "ergo".to_string(),
             contract_hash: "1c691f72deadbeef".to_string(),
             address: "0008cd0392aabbcc".to_string(),
-            gas_price: "1.000e58".to_string(),
+            mu_per_unit: "1000000000".to_string(),
         }
     }
 
@@ -1068,7 +1068,7 @@ mod tests {
         assert!(text.contains("ergo"));
         assert!(text.contains("1c691f72deadbeef"));
         assert!(text.contains("0008cd0392aabbcc"));
-        assert!(text.contains("1.000e58 gas"));
+        assert!(text.contains("1000000000 MU/unit"));
     }
 
     #[test]
@@ -1078,7 +1078,7 @@ mod tests {
             ledger: "simulator".to_string(),
             contract_hash: "abc123".to_string(),
             address: "sim-address".to_string(),
-            gas_price: "5.000e2".to_string(),
+            mu_per_unit: "500".to_string(),
         };
         let text = rendered(peer_detail_lines(
             Some(&peer_with(vec![ergo_contract(), second])),
@@ -1134,7 +1134,7 @@ mod tests {
             ledger: "simulator".to_string(),
             contract_hash: "abc123def456".to_string(),
             address: "sim-address".to_string(),
-            gas_price: "5.000e2".to_string(),
+            mu_per_unit: "500".to_string(),
         };
         app.peers.items = vec![peer_with(vec![ergo_contract(), second])];
         app.peers.state.select(Some(0));

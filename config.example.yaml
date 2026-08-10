@@ -199,31 +199,65 @@ logs:
   MEMORY_LOGS: false
   DEBUG_MODE: false
 
+# What this node charges. Full model and worked examples: docs/PRICING.md.
+#
+# Every amount here is a decimal ERG string. It is parsed exactly once into the node's
+# integer unit of account (MU, pegged at 1 MU = 1 nanoERG), so no price ever goes
+# through a float. Nothing outside the node sees MU: the CLI shows ERG.
+#
+# There is no single "price of compute" on purpose. Each resource is priced on its own,
+# because a node may be short on memory and awash in disk and has to be able to say so.
+# Set a price to "0" to give that resource away.
+pricing:
+  RAM_ERG_PER_GIB_HOUR: "0.001"
+  CPU_ERG_PER_VCPU_HOUR: "0.004"
+  DISK_ERG_PER_GIB_HOUR: "0.0001"
+  # Tunnelled traffic, counting both directions (see docs/TUNNELING.md).
+  NET_ERG_PER_GIB: "0.002"
+  # One-off operations, charged once each. Not scaled by scarcity: they price work done
+  # once, not occupancy.
+  BUILD_ERG: "0.01"
+  TUNNEL_OPEN_ERG: "0.00001"
+  MODIFY_RESOURCES_ERG: "0.00001"
+  # Scarcity surcharge, applied to each resource independently from that resource's own
+  # availability: 1x while it is plentiful, up to SCARCITY_MAX_MULTIPLIER once it is
+  # exhausted. Set the maximum to 1 to price purely by consumption and ignore load.
+  SCARCITY_MAX_MULTIPLIER: 10
+  # How fast the surcharge arrives. 1.0 is linear in the missing supply; higher values
+  # stay near 1x until the resource is genuinely scarce, then rise sharply.
+  SCARCITY_CURVE: 1.0
+
+# What this node gives away.
+free_tier:
+  # Starting balance credited to every new client. "0" gives nothing away.
+  CREDIT_ERG_PER_NEW_CLIENT: "0"
+  # Charge nothing while EVERY resource sits below this share of its capacity (0.0 to
+  # 1.0). 0.0 disables it (always charge); 0.5 means "free while the node is under half
+  # load". This is how you run a node that is free until it is actually busy.
+  FREE_WHILE_SCARCITY_BELOW: 0.0
+
+# Deposit sizing. These are shares, not amounts: the node derives the ERG figures from
+# the ledger's own floor (an Ergo transaction costs a fee and cannot create an output
+# below the minimum box value), so a deposit is never quietly eaten by its own fee.
+deposits:
+  # Largest share of a peer deposit that may be lost to the transaction fee. 0.02 caps
+  # the fee at 2 % of the deposit, which with Ergo's 0.001 ERG fee sizes a deposit at
+  # 0.05 ERG. Lower it for cheaper transfers, at the cost of locking up more per peer.
+  MAX_FEE_OVERHEAD: 0.02
+  # Refill a peer once its remaining balance drops below this share of a full deposit.
+  REFILL_BELOW: 0.2
+  # How long a new instance is funded for when the client asks for no specific balance.
+  # The actual amount is the price of the resources it requested, for this long.
+  INITIAL_RUNTIME_HOURS: 1.0
+
 costs:
-  DEFAULT_INITIAL_GAS_AMOUNT_FACTOR: 1.0e-6
-  USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR: false
-  DEFAULT_INITIAL_GAS_AMOUNT: 1.0e+9
-  TOTAL_REFILLED_DEPOSIT: 1.0e+64
-  MIN_DEPOSIT_PEER: 1.0e+32
-  FREE_TRIAL_GAS_AMOUNT: 1.0e+66
-  INITIAL_PEER_DEPOSIT_FACTOR: 0.5
-  DEV_CLIENT_GAS_AMOUNT: 1.0e+256
-  INIT_COST_CONFIGURATION_FACTOR: 1
-  MAINTENANCE_COST_CONFIGURATION_FACTOR: 1.0e+6
   SOCIALIZATION_FACTOR: 2
   COST_AVERAGE_VARIATION: 1
-  FREE_GAS_THRESHOLD: 0
-  EXECUTION_COST: 100.0
-  EXECUTION_BENEFIT: 100.0
-  BUILD_COST: 10.0
-  MODIFY_RESOURCES_COST: 100.0
-  # Service tunneling is metered against the tunnelled instance's gas, since
-  # relaying costs this node CPU, memory and bandwidth. Running out closes the
-  # tunnel (subject to ALLOW_GAS_DEBT). Set a rate to 0 to stop charging for it.
-  TUNNEL_OPEN_COST: 10.0  # Charged once when a tunnel is opened. Refused up front if the instance cannot pay it.
-  TUNNEL_COST_PER_KB: 1.0  # Charged per KiB relayed, counting both directions.
-  TUNNEL_GAS_CHARGE_INTERVAL_KB: 1024  # How much traffic accumulates before it is billed. Smaller reacts faster to an empty balance, larger costs less bookkeeping.
-  ALLOW_GAS_DEBT: true
+  # How much tunnelled traffic accumulates before it is billed. Smaller reacts faster to
+  # an empty balance, larger costs less bookkeeping.
+  TUNNEL_CHARGE_INTERVAL_KB: 1024
+  # Let an instance keep running with a negative balance instead of being stopped.
+  ALLOW_DEBT: true
 
 timing:
   GENERAL_WAIT_TIME: 2
@@ -243,7 +277,9 @@ communication:
 
 client:
   MIN_SLOTS_OPEN_PER_PEER: 1
-  CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME: 1.0e+3
+  # A client whose balance is at least this much (decimal ERG) has its expiration
+  # pushed back when it tops up: a funded client is an active one.
+  CLIENT_MIN_BALANCE_ERG_TO_RESET_EXPIRATION: "0.000001"
   DEV_CLIENT_POOL_SIZE: 1
   DEV_EXTERNAL_CLIENT_POOL_SIZE: 1
 
@@ -373,7 +409,9 @@ general_flags:
 ledgers:
   ergo:
     tags: [ ergo ]
-    GAS_PER_ERG: 1.0e+58
+    # No conversion factor here: the node's unit of account is pegged at
+    # 1 MU = 1 nanoERG, so ERG needs no rate. A ledger settling in something other than
+    # ERG is the case that needs one, and declares it as its ContractRate.
     NODE_URL: "https://node.sigmaspace.io"
     GENESIS_BLOCK_ID: "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
     # The ONE mnemonic of the whole node. It is both the wallet the node controls and

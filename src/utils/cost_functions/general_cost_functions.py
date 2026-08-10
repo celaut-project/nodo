@@ -2,116 +2,82 @@ from typing import Dict
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.config import ConfigManager
-from src.utils.cost_functions.execution_cost import execution_cost, maintain_execution_cost
-from src.utils.logger import LOGGER as logger
+from src.utils.cost_functions.execution_cost import (
+    build_charge_mu,
+    maintenance_charge_mu,
+    start_charge_mu,
+)
+from src.utils.monetary import HOUR_SECONDS, prices
 
 env_manager = ConfigManager()
 
 # Keys of the rate map this node advertises to peers. Names are part of the wire
-# contract: a peer reads them out of Service.Api.Slot.gas_amount_per_call, so
-# renaming one silently drops it for everybody who already knows the old name.
-RATE_MAINTENANCE_PER_SECOND = "maintenance_max_per_second"
-RATE_TUNNEL_OPEN = "tunnel_open"
-RATE_TUNNEL_PER_KB = "tunnel_per_kb"
+# contract: a peer reads them out of Service.Api.Slot.mu_per_call, so renaming one
+# silently drops it for everybody who already knows the old name.
+#
+# Every rate is in MU, and MU is pegged (1 MU = 1 nanoERG), so a peer reading these can
+# compare two nodes in actual money. That is the whole reason the peg exists: the rates
+# this map used to carry were denominated in an undefined unit and meant nothing to the
+# node reading them.
+RATE_RAM_PER_GIB_SECOND = "ram_mu_per_gib_second"
+RATE_CPU_PER_VCPU_SECOND = "cpu_mu_per_vcpu_second"
+RATE_DISK_PER_GIB_SECOND = "disk_mu_per_gib_second"
+RATE_NET_PER_GIB = "net_mu_per_gib"
+RATE_BUILD = "build_mu"
+RATE_TUNNEL_OPEN = "tunnel_open_mu"
+RATE_SCARCITY_MAX_MULTIPLIER = "scarcity_max_multiplier"
 
 
 def compute_start_service_cost(
-        metadata: celaut.Metadata,
-        initial_gas_amount: int,
-        resource: celaut_pb2.Service.Container.Resources
+    metadata: celaut.Metadata,
+    initial_balance_mu: int,
+    resource: celaut_pb2.Service.Container.Resources,
+    seconds: float,
 ) -> int:
-    """
-    Computes the total initial cost to start a service instance.
-    
-    Combines execution costs (scaled by gas factor), initial gas allocation, 
-    and minimum system resource maintenance costs to determine total startup cost.
-    
-    Args:
-        metadata: Service configuration metadata
-        initial_gas_amount: Base gas amount required for service initialization
-        resource: Resources specifying minimum system requirements
-        
-    Returns:
-        Total startup cost as an integer value
-    """
-    return int(sum([
-        execution_cost(
-            metadata=metadata,
-            system_resources=resource.at_init
-        ),
-        initial_gas_amount,
-    ]))
+    """Total MU to start an instance: the one-off charges plus the balance it starts with."""
+    return int(
+        start_charge_mu(metadata=metadata, system_resources=resource.at_init, seconds=seconds)
+        + initial_balance_mu
+    )
 
 
-def compute_maintenance_cost(system_resources: celaut.Sysresources) -> int:
-    """
-    Calculates the ongoing maintenance cost.
-    
-    Args:
-        system_resources: System resources configuration object containing memory limits
-        
-    Returns:
-        Maintenance cost calculated as memory limit multiplied by cost factor
-    """
-    return maintain_execution_cost(system_resources=system_resources)
+def compute_maintenance_cost(system_resources: celaut.Sysresources, seconds: float) -> int:
+    """MU owed for holding `system_resources` for `seconds`."""
+    return maintenance_charge_mu(system_resources=system_resources, seconds=seconds)
 
 
-def normalized_maintain_cost(cost, timelapse) -> int:
-    """
-    Adjusts maintenance cost for a specific time period.
-
-    Args:
-        cost: Base maintenance cost per time unit
-        timelapse: Duration factor to scale the cost
-
-    Returns:
-        Time-scaled maintenance cost as integer
-    """
-    return cost * timelapse
-
-
-def _rate(key: str, default: float = 0.0) -> float:
-    try:
-        value = float(env_manager.get(key, default))
-        return value if value > 0 else 0.0
-    except (TypeError, ValueError):
-        logger(f"[RATES] {key} is not a number; advertising it as unset.")
-        return 0.0
+def compute_build_cost(metadata: celaut.Metadata) -> int:
+    return build_charge_mu(metadata=metadata)
 
 
 def node_advertised_rates() -> Dict[str, int]:
-    """The node's recurring rates, for peers to read before negotiating anything.
+    """This node's prices, for peers to read before negotiating anything.
 
-    These are the charges a peer cannot discover any other way. The cost of a
-    *specific service* is not here on purpose — that comes from
-    ``GetServiceEstimatedCost``, which prices the actual resources requested.
+    These are the charges a peer cannot discover any other way. The cost of a *specific
+    service* is not here on purpose -- that comes from ``GetServiceEstimatedCost``, which
+    prices the actual resources requested against current load.
 
-    Every value is a **ceiling**, not a quote:
+    Every rate is a base price, before the scarcity surcharge: what a peer pays is this
+    figure multiplied by between 1 and ``scarcity_max_multiplier``, depending on how
+    contended that particular resource is when it asks. Advertising the ceiling alongside
+    the base is what lets a peer bound its exposure without pretending the price is fixed.
 
-    * ``maintenance_max_per_second`` — the manager charges
-      ``maintain_execution_cost`` once per ``MANAGER_ITERATION_TIME``
-      (``src/manager/maintain.py``), and that function is bounded by
-      ``EXECUTION_COST`` when supply is exhausted. Dividing by the cadence gives a
-      per-second figure that is comparable between nodes whose manager ticks at
-      different rates. What a peer actually pays is lower whenever resources are
-      available, and there is deliberately no per-GiB or per-vCPU figure: the cost
-      model weights resources against current supply, so a fixed price per
-      resource does not exist to be advertised.
-    * ``tunnel_open`` / ``tunnel_per_kb`` — exact, since tunnel metering is linear
-      and independent of load (``src/tunneling/rpc_tunnel.py``).
-
-    A rate of zero is omitted rather than advertised as 0, so "free" is never
-    claimed by accident (an unset or malformed key reads as zero too).
+    Rates are per second (not per hour) so they compose with any measurement window, and
+    a rate of zero is omitted rather than advertised as 0, so "free" is never claimed by
+    accident.
     """
-    execution_ceiling = _rate("EXECUTION_COST")
-    iteration_seconds = _rate("MANAGER_ITERATION_TIME")
+    p = prices()
 
+    # Per-GiB-hour prices become per-GiB-second. Integer division truncates, so a price
+    # under 3600 MU per GiB-hour advertises as 0 and is therefore omitted -- correct, in
+    # that a peer cannot be quoted a per-second price that rounds to nothing.
     rates = {
-        RATE_TUNNEL_OPEN: _rate("costs.TUNNEL_OPEN_COST"),
-        RATE_TUNNEL_PER_KB: _rate("costs.TUNNEL_COST_PER_KB"),
+        RATE_RAM_PER_GIB_SECOND: p.ram_mu_per_gib_hour // HOUR_SECONDS,
+        RATE_CPU_PER_VCPU_SECOND: p.cpu_mu_per_vcpu_hour // HOUR_SECONDS,
+        RATE_DISK_PER_GIB_SECOND: p.disk_mu_per_gib_hour // HOUR_SECONDS,
+        RATE_NET_PER_GIB: p.net_mu_per_gib,
+        RATE_BUILD: p.build_mu,
+        RATE_TUNNEL_OPEN: p.tunnel_open_mu,
+        RATE_SCARCITY_MAX_MULTIPLIER: p.scarcity_max_multiplier,
     }
-
-    if execution_ceiling and iteration_seconds:
-        rates[RATE_MAINTENANCE_PER_SECOND] = execution_ceiling / iteration_seconds
-
     return {key: int(value) for key, value in rates.items() if int(value) > 0}

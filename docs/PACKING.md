@@ -412,7 +412,7 @@ The `service.json` file defines **runtime metadata** for the service: its archit
             "port": 8080,
             "transport": "tcp",
             "protocol": ["grpc"],
-            "gas_amount_per_call": {
+            "mu_per_call": {
                 "MyMethod": 100,
                 "HeavyMethod": 500
             }
@@ -769,14 +769,14 @@ The older `entrypoint` top-level field is still supported and will be automatica
 #### `api`
 - **Type:** `array of objects`
 - **Required:** No
-- **Description:** Declares the API slots (ports) exposed by the service, along with their transport protocol, application protocol stack, and gas cost per method call.
+- **Description:** Declares the API slots (ports) exposed by the service, along with their transport protocol, application protocol stack, and price per method call.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `port` | int | Yes | Port number the service listens on |
 | `transport` | string or array | No | Transport protocol(s). Defaults to `["tcp"]` |
 | `protocol` | array | No | Application-level protocol tags (e.g. `["grpc"]`). Accepts `None` if omitted |
-| `gas_amount_per_call` | object | No | Map of method name → gas cost (integer) |
+| `mu_per_call` | object | No | Map of method name → price in MU (integer; 1 MU = 1 nanoERG) |
 
 **Example — Single gRPC slot:**
 ```json
@@ -786,7 +786,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
             "port": 50051,
             "transport": "tcp",
             "protocol": ["grpc"],
-            "gas_amount_per_call": {
+            "mu_per_call": {
                 "Solve": 100,
                 "SolveStream": 200
             }
@@ -893,7 +893,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
             "port": 50051,
             "transport": "tcp",
             "protocol": ["grpc"],
-            "gas_amount_per_call": {
+            "mu_per_call": {
                 "Solve": 100
             }
         }
@@ -936,7 +936,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
             "port": 50051,
             "transport": "tcp",
             "protocol": ["grpc"],
-            "gas_amount_per_call": {
+            "mu_per_call": {
                 "Predict": 150,
                 "BatchPredict": 600
             }
@@ -1193,7 +1193,7 @@ exec java \
             "port": 8080,
             "transport": "tcp",
             "protocol": ["http1.1", "rest"],
-            "gas_amount_per_call": {
+            "mu_per_call": {
                 "POST /solve": 100,
                 "GET /status": 10
             }
@@ -1349,7 +1349,7 @@ exec php-fpm
             "port": 9000,
             "transport": "tcp",
             "protocol": ["fastcgi"],
-            "gas_amount_per_call": {
+            "mu_per_call": {
                 "request": 50
             }
         }
@@ -1455,7 +1455,7 @@ exec /app/myservice
             "port": 50051,
             "transport": "tcp",
             "protocol": ["grpc"],
-            "gas_amount_per_call": {
+            "mu_per_call": {
                 "Process": 75,
                 "ProcessStream": 150
             }
@@ -1563,7 +1563,7 @@ exec node /app/src/index.js
             "port": 3000,
             "transport": "tcp",
             "protocol": ["http1.1", "rest"],
-            "gas_amount_per_call": {
+            "mu_per_call": {
                 "POST /process": 80,
                 "GET /health": 5
             }
@@ -1913,7 +1913,7 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 │  API slots                                       │
 │  ├── port + transport protocol                   │
 │  ├── application protocol stack                  │
-│  └── gas cost per method                         │
+│  └── price per method                            │
 │                                                  │
 │  Environment variables                           │
 │  └── names only (envs); no descriptors embedded  │
@@ -1962,7 +1962,7 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 │  │       │   └── Protocol { tags[] }             │
 │  │       ├── protocol_stack[]                    │
 │  │       │   └── Protocol { tags[] }             │
-│  │       └── gas_amount_per_call{}               │
+│  │       └── mu_per_call{}                       │
 │  │           └── method → GasAmount              │
 │  │                                               │
 │  └── network[]                                   │
@@ -2035,7 +2035,7 @@ The tar archive is extracted to a local directory. The total size of all exporte
 Every file, directory, symlink, and device node in the exported filesystem is traversed recursively. File permissions and ownership metadata are captured and stored as extended attributes on each entry. Files below a configured size threshold are embedded directly as raw bytes in the service specification. Files above that threshold are written to separate content-addressed blocks stored on disk, with only a reference hash kept in the specification. This deduplicates large identical files across services and keeps the specification itself compact.
 
 **Metadata Parsing**
-All runtime configuration declared in `service.json` is read and embedded into the service specification: resource limits, entrypoint path, config file location, architecture, API slots with their transport and protocol tags, gas costs per method, environment-variable names (declared via `envs`; per-variable `.field` descriptors are not embedded — no target field in `pack.proto`), and network access requirements.
+All runtime configuration declared in `service.json` is read and embedded into the service specification: resource limits, entrypoint path, config file location, architecture, API slots with their transport and protocol tags, prices per method, environment-variable names (declared via `envs`; per-variable `.field` descriptors are not embedded — no target field in `pack.proto`), and network access requirements.
 
 **Service Spec., Hashing & Storage**
 The service identifier is generated by hashing the fully serialized Service definition—including container specification, API, and network requirements—where filesystem hashing incorporates either the raw filesystem bytes or the reconstructed multiblock directory contents, after which the resulting digests, tags, and nested filesystem hash are stored in a HashTag tree structure with duplicate-hash-type validation enforced before finalization.
@@ -2061,7 +2061,7 @@ All temporary directories created during extraction, building, and filesystem ex
 - Always specify `architecture` explicitly
 - Set realistic `at_init` and `at_most` resource values
 - Use `init.entry_path` (not the legacy `entrypoint` field)
-- Define all API slots accurately, including gas costs
+- Define all API slots accurately, including per-call prices
 
 ### Dependencies
 - Use dictionary format for `dependencies` when `dependencies_env: true`

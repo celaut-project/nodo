@@ -5,6 +5,7 @@ import threading
 import time
 import typing
 import ipaddress
+from decimal import Decimal
 from typing import Generator, Optional
 
 import netifaces as ni
@@ -285,28 +286,14 @@ def get_network_name(direction: str) -> Optional[str]:
         raise Exception('Error getting the network name: ' + str(e))
 
 
-"""
-Gas Amount implementation using float and exponent.  (Currently it's using string)
-
-def to_gas_amount(gas_amount: int) -> celaut_pb2.GasAmount:
-    if gas_amount is None: return None
-    s: str =  "{:e}".format(gas_amount)
-    return celaut_pb2.GasAmount(
-        gas_amount = float(s.split('e+')[0]),
-        exponent = int(s.split('e+')[1])
-    )
-
-def from_gas_amount(gas_amount: celaut_pb2.GasAmount) -> int:
-    i: int = str(gas_amount.gas_amount)[::-1].find('.')
-    return int(gas_amount.gas_amount * pow(10, i) * pow(10, gas_amount.exponent-i))
-"""
+def to_amount(gas_amount) -> celaut_pb2.Amount:
+    # Normalize through Decimal before stringifying: a float (or a config value read
+    # as one) stringifies to "1e+64", which is not a decimal integer literal and makes
+    # `from_amount` raise on the other side of the wire.
+    return celaut_pb2.Amount(n=str(int(Decimal(str(gas_amount)))))
 
 
-def to_gas_amount(gas_amount: int) -> celaut_pb2.GasAmount:
-    return celaut_pb2.GasAmount(n=str(gas_amount))
-
-
-def from_gas_amount(gas_amount: celaut_pb2.GasAmount) -> int:
+def from_amount(gas_amount: celaut_pb2.Amount) -> int:
     return int(gas_amount.n)
 
 

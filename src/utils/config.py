@@ -233,7 +233,11 @@ class ConfigManager(metaclass=Singleton):
 
             # Fail fast on removed keys from the pre-single-wallet layout. There is no
             # migration: a stale config must be updated by hand.
-            from src.utils.config_validation import _find_removed_keys, ConfigValidationError
+            from src.utils.config_validation import (
+                _find_removed_keys,
+                ConfigValidationError,
+                validate_pricing_config,
+            )
             _removed = _find_removed_keys(self._config)
             if _removed:
                 raise ConfigValidationError(
@@ -241,6 +245,10 @@ class ConfigManager(metaclass=Singleton):
                     "provided; update the config manually): "
                     + ", ".join(sorted(_removed))
                 )
+
+            # Prices are money: a malformed one stops the node rather than being coerced
+            # into something plausible (docs/PRICING.md).
+            validate_pricing_config(self._config)
 
             # Process dynamic values.
             gateway_port = self._get_nested(self._config, ["network", "GATEWAY_PORT"])

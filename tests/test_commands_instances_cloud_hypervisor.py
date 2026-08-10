@@ -38,7 +38,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     name TEXT NOT NULL UNIQUE,
                     ip TEXT,
                     father_id TEXT,
-                    gas TEXT,
+                    balance_mu TEXT,
                     mem_limit INTEGER,
                     serialized_instance BLOB,
                     service_id TEXT,
@@ -63,7 +63,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
             cur.execute(
                 """
                 INSERT INTO local_instances
-                (id, name, ip, father_id, gas, mem_limit, serialized_instance, service_id, virtualizer)
+                (id, name, ip, father_id, balance_mu, mem_limit, serialized_instance, service_id, virtualizer)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -81,7 +81,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
             cur.execute(
                 """
                 INSERT INTO local_instances
-                (id, name, ip, father_id, gas, mem_limit, serialized_instance, service_id, virtualizer)
+                (id, name, ip, father_id, balance_mu, mem_limit, serialized_instance, service_id, virtualizer)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (

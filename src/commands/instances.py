@@ -4,7 +4,8 @@ from src.manager.metrics import __get_metrics_external
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
-from src.utils.utils import from_gas_amount
+from src.utils.monetary import mu_to_erg_str
+from src.utils.utils import from_amount
 try:
     from src.virtualizers.ch.observability import get_vm_runtime_snapshot
 except Exception:  # pragma: no cover - defensive fallback for minimal environments
@@ -169,22 +170,19 @@ def list_instances(groupable: bool = False, search: str = ""):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='local_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT id, name, father_id, gas, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances"
+                "SELECT id, name, father_id, balance_mu, serialized_instance, service_id, mem_limit, disk_space, virtualizer FROM local_instances"
             )
-            for id_, name, father_id, gas, si, service, mem_limit, disk_space, virtualizer in cursor.fetchall():
+            for id_, name, father_id, balance_mu, si, service, mem_limit, disk_space, virtualizer in cursor.fetchall():
                 parent_type = (
                     'internal_service' if father_id in internal_ids else
                     'client' if father_id in client_ids else
                     'unknown'
                 )
                 runtime_virtualizer = str(virtualizer).strip() if virtualizer else DEFAULT_VIRTUALIZER
-                gas = int(gas)
-                gas_value = 'N/A'
-                if gas is not None:
-                   try:
-                       gas_value = ssformat(int(gas))
-                   except (ValueError, TypeError):
-                       gas_value = "Invalid Gas Data"
+                try:
+                    balance_value = f"{mu_to_erg_str(int(balance_mu))} ERG"
+                except (ValueError, TypeError):
+                    balance_value = "Invalid balance"
 
                 vm_pid = "N/A"
                 vm_uptime = "N/A"
@@ -210,7 +208,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'ip': get_http_ip(si) if si else "N/A",
                     'parent_id': father_id or 'None',
                     'parent_type': parent_type,
-                    'gas': gas_value,
+                    'balance': balance_value,
                     'location': 'local',
                     'virtualizer': runtime_virtualizer,
                     'mem_limit': bytes_to_readable(mem_limit),
@@ -232,9 +230,9 @@ def list_instances(groupable: bool = False, search: str = ""):
 
                 try:
                     metrics = __get_metrics_external(token=external_token, peer_id=peer_id)
-                    gas = ssformat(from_gas_amount(metrics.gas_amount))
+                    balance_value = f"{mu_to_erg_str(from_amount(metrics.balance))} ERG"
                 except:
-                    gas = "N/A"
+                    balance_value = "N/A"
                 
                 instances.append({
                     'id': id or 'N/A',
@@ -243,7 +241,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'ip': get_http_ip(si) if si else "N/A",
                     'parent_id': father_id or 'N/A',
                     'parent_type': parent_type,
-                    'gas': gas,
+                    'balance': balance_value,
                     'location': peer_id or 'Unknown Peer',
                     'virtualizer': 'delegated',
                     'mem_limit': 'N/A',
@@ -297,7 +295,7 @@ def list_instances(groupable: bool = False, search: str = ""):
             ("API", "ip"),
             ("Parent ID", "parent_id"),
             ("Parent Type", "parent_type"),
-            ("Gas", "gas"),
+            ("Balance", "balance"),
             ("Location", "location"),
             ("Virtualizer", "virtualizer"),
             ("Memory limit", "mem_limit"),

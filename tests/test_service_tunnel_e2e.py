@@ -111,8 +111,8 @@ class ServiceTunnelEndToEndTests(unittest.TestCase):
         self.channel = grpc.insecure_channel(self.gateway)
         self.stub = celaut_pb2_grpc.GatewayStub(self.channel)
 
-        # Everything except the instance catalogue and gas accounting is real.
-        # The instance is mocked rather than inserted, so spend_gas would refuse
+        # Everything except the instance catalogue and balance accounting is real.
+        # The instance is mocked rather than inserted, so spend_mu would refuse
         # every charge for an instance it cannot find; metering itself is covered
         # by ServiceTunnelGasTests.
         self.db_patches = [
@@ -126,7 +126,7 @@ class ServiceTunnelEndToEndTests(unittest.TestCase):
                 "get_internal_ip",
                 side_effect=lambda id: "127.0.0.1" if id == "tok" else None,
             ),
-            patch("src.manager.manager.spend_gas", return_value=True),
+            patch("src.manager.manager.spend_mu", return_value=True),
         ]
         for db_patch in self.db_patches:
             db_patch.start()

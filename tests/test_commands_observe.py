@@ -633,25 +633,26 @@ class CaptureUnavailableNoteTests(unittest.TestCase):
             self.assertIn("CAP_NET_RAW", body)
 
 
-class FormatGasTests(unittest.TestCase):
+class FormatBalanceTests(unittest.TestCase):
     def test_missing_or_empty_is_na(self):
-        self.assertEqual(observe.format_gas(None), "N/A")
-        self.assertEqual(observe.format_gas(""), "N/A")
+        self.assertEqual(observe.format_balance(None), "N/A")
+        self.assertEqual(observe.format_balance(""), "N/A")
 
     def test_non_numeric_is_flagged(self):
-        self.assertEqual(observe.format_gas("not-a-number"), "Invalid Gas Data")
+        self.assertEqual(observe.format_balance("not-a-number"), "Invalid balance")
 
     def test_numeric_matches_node_formatter(self):
-        # Gas is rendered exactly like `nodo instances` (ssformat), whether the
+        # A balance is rendered exactly like `nodo instances` does, whether the
         # catalogue hands us an int or the numeric string it actually stores.
         from src.utils.logger import ssformat
 
-        self.assertEqual(observe.format_gas(1000), ssformat(1000))
-        self.assertEqual(observe.format_gas("1000"), ssformat(1000))
+        # 1000 MU is 1000 nanoERG, rendered as ERG for whoever is reading the panel.
+        self.assertEqual(observe.format_balance(1000), "0.000001 ERG")
+        self.assertEqual(observe.format_balance("1000"), "0.000001 ERG")
 
 
-class InstanceGasCatalogueTests(unittest.TestCase):
-    """resolve_instance / read_instance_gas against a real sqlite catalogue."""
+class InstanceBalanceCatalogueTests(unittest.TestCase):
+    """resolve_instance / read_instance_balance against a real sqlite catalogue."""
 
     def setUp(self):
         import sqlite3
@@ -664,7 +665,7 @@ class InstanceGasCatalogueTests(unittest.TestCase):
         conn.execute(
             "CREATE TABLE local_instances ("
             "id TEXT, ip TEXT, father_id TEXT, service_id TEXT, "
-            "virtualizer TEXT, name TEXT, gas TEXT)"
+            "virtualizer TEXT, name TEXT, balance_mu TEXT)"
         )
         conn.execute(
             "INSERT INTO local_instances VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -677,27 +678,27 @@ class InstanceGasCatalogueTests(unittest.TestCase):
         observe.DATABASE_FILE = self._orig_db
         os.unlink(self._tmp.name)
 
-    def test_resolve_instance_includes_gas(self):
+    def test_resolve_instance_includes_balance(self):
         row = observe.resolve_instance("abc123")
         self.assertIsNotNone(row)
-        self.assertEqual(row["gas"], "5000")
+        self.assertEqual(row["balance_mu"], "5000")
 
     def test_read_instance_gas_reflects_updates(self):
         import sqlite3
 
-        self.assertEqual(observe.read_instance_gas("abc123"), "5000")
+        self.assertEqual(observe.read_instance_balance("abc123"), "5000")
         conn = sqlite3.connect(self._tmp.name)
-        conn.execute("UPDATE local_instances SET gas = ? WHERE id = ?",
+        conn.execute("UPDATE local_instances SET balance_mu = ? WHERE id = ?",
                      ("4200", "abc123"))
         conn.commit()
         conn.close()
-        self.assertEqual(observe.read_instance_gas("abc123"), "4200")
+        self.assertEqual(observe.read_instance_balance("abc123"), "4200")
 
     def test_read_instance_gas_unknown_id_is_none(self):
-        self.assertIsNone(observe.read_instance_gas("nope"))
+        self.assertIsNone(observe.read_instance_balance("nope"))
 
 
-class RenderGasPanelTests(unittest.TestCase):
+class RenderBalancePanelTests(unittest.TestCase):
     def test_render_shows_gas_balance(self):
         import io
         from contextlib import redirect_stdout
@@ -707,15 +708,15 @@ class RenderGasPanelTests(unittest.TestCase):
             observe._render(
                 header="inst",
                 metrics=observe.SessionMetrics(),
-                gas="1.20e+3",
+                balance="0.0000012 ERG",
                 events=[],
                 save_dir=None,
                 net_notice=None,
                 capture_mode="conntrack",
             )
         out = buf.getvalue()
-        self.assertIn("Gas", out)
-        self.assertIn("Balance: 1.20e+3", out)
+        self.assertIn("Balance", out)
+        self.assertIn("Current: 0.0000012 ERG", out)
 
 
 if __name__ == "__main__":

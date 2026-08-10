@@ -8,13 +8,13 @@ from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
 from src.manager.manager import (
-    default_initial_cost,
+    default_initial_balance,
     is_external_execute_client,
     reserve_instance_name,
 )
 from src.utils import utils, logger as log
 from src.utils.instance_names import extract_instance_name
-from src.utils.utils import from_gas_amount
+from src.utils.utils import from_amount
 from src.utils.network import get_free_port
 from src.utils.config import ConfigManager
 from src.virtualizers.firewall import resolve_slot_transport_protocols
@@ -136,7 +136,7 @@ def local_execution(
         metadata: celaut.Metadata,
         service: celaut.Service,
         service_id: Optional[str],
-        refund_gas: List[Callable]
+        refund_container: List[Callable]
 ) -> celaut_pb2.ServiceInstance:
     requested_instance_name, sanitized_config = extract_instance_name(config)
     config = sanitized_config or celaut_pb2.Configuration()
@@ -151,8 +151,8 @@ def local_execution(
     father_id = father_id if father_id else ""
     father_ip = father_ip if father_ip else ""
 
-    initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) \
-        if config.HasField("initial_gas_amount") else default_initial_cost(father_id=father_id)
+    initial_mu: int = from_amount(config.initial_mu) \
+        if config.HasField("initial_mu") else default_initial_balance(system_resources=resources.at_init)
 
     initial_system_resources: celaut.Sysresources = resources.at_init
 
@@ -166,9 +166,9 @@ def local_execution(
         try:
             log.LOGGER('Error building the service: ' + str(e))
             log.LOGGER(traceback.format_exc())
-            refund_gas.pop()()  # Refund the gas.
+            refund_container.pop()()  # Give the charge back.
         except IndexError:
-            log.LOGGER('Error refunding the gas.')
+            log.LOGGER('Error refunding the charge.')
         finally:
             log.LOGGER(str(e))
             raise e
@@ -365,7 +365,7 @@ def local_execution(
         container_id=vmachine_id,
         name=instance_name,
         container_ip=vmachine_ip,
-        gas=initial_gas_amount,
+        balance_mu=initial_mu,
         serialized_instance=instance.SerializeToString(),
         service_id=service_id,
         virtualizer=configured_virtualizer,

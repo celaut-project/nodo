@@ -18,10 +18,10 @@ runs it inside the ``Payable`` exchange, and ``increase_deposit_on_peer`` only
 returns True once the peer has accepted + validated the deposit server-side.
 
 Instead of pretending to verify locally, once the payment settles we read back
-**this node's gas balance registered on that peer** — the same peer-row value
+**this node's balance registered on that peer** — the same peer-row value
 shown by ``nodo peers`` — so the user can confirm the peer credited the deposit.
 ``increase_deposit_on_peer`` already updates that local peer row (via
-``add_gas_to_peer``) after the ``Payable`` exchange, so the read reflects the
+``add_balance_to_peer``) after the ``Payable`` exchange, so the read reflects the
 post-payment state.
 
 SAFETY: broadcasting moves real ERG. With no funded wallet or no reachable peer
@@ -32,32 +32,30 @@ sending anything.
 from typing import List, Optional, Tuple
 
 from src.utils.config import ConfigManager
-from src.utils.ergo_units import erg_to_nanoerg
-from src.utils.logger import ssformat
+from src.utils.monetary import erg_to_mu, mu_to_erg_str
 
-# Ledger id used for the peer gas-price lookup, matching src.commands.peers.
+# Ledger id used for the peer contract-rate lookup, matching src.commands.peers.
 ERGO_LEDGER = "ergo"
 
 
-def _erg_to_gas(amount_erg) -> int:
-    """Convert a decimal ERG amount to the node's internal gas unit.
+def _erg_to_mu(amount_erg) -> int:
+    """Convert a decimal ERG amount to the node's unit of account.
 
-    Inverts ``interface.__gas_to_nanoerg`` (nanoERG = gas / GAS_PER_ERG) with the
-    same ``ledgers.ergo.GAS_PER_ERG`` config value, so no conversion math is
-    duplicated: gas = erg_to_nanoerg(erg) * GAS_PER_ERG.
+    The peg makes this exact and configuration-free: 1 MU = 1 nanoERG. It used to go
+    through ``ledgers.ergo.GAS_PER_ERG``, whose value put a real payment 49 orders of
+    magnitude away from any charge the node ever computed.
     """
-    gas_per_erg = int(ConfigManager().get("ledgers.ergo.GAS_PER_ERG"))
-    return erg_to_nanoerg(amount_erg) * gas_per_erg
+    return erg_to_mu(amount_erg)
 
 
-def _read_peer_gas(
+def _read_peer_balance(
     peer_id: str, contract_hash: str
 ) -> Optional[Tuple[int, Optional[int], float, Optional[str]]]:
-    """Read this node's locally-recorded gas balance registered on ``peer_id``.
+    """Read this node's locally-recorded balance registered on ``peer_id``.
 
     Reuses the exact peer-row pattern from :mod:`src.commands.peers`: the peer's
-    stored ``gas`` / ``gas_last_update`` plus ``get_peer_gas_price`` to convert
-    gas -> nanoERG. Returns ``(gas, gas_price, gas_on_nanoerg, gas_last_update)``
+    stored ``balance_mu`` / ``balance_last_update`` plus ``get_peer_contract_rate``.
+    Returns ``(balance_mu, mu_per_unit, balance_last_update)``
     or ``None`` when the peer row is missing.
     """
     from src.database.sql_connection import SQLConnection
@@ -66,19 +64,18 @@ def _read_peer_gas(
     peer = sq.get_peer_by_id(peer_id=peer_id)
     if not peer:
         return None
-    gas = int(peer.get("gas") or 0)
-    gas_price = sq.get_peer_gas_price(
+    balance_mu = int(peer.get("balance_mu") or 0)
+    mu_per_unit = sq.get_peer_contract_rate(
         peer_id=peer_id, contract_hash=contract_hash, ledger_hash=ERGO_LEDGER
     )
-    gas_on_nanoerg = (gas / gas_price) if gas_price else 0
-    return gas, gas_price, gas_on_nanoerg, peer.get("gas_last_update")
+    return balance_mu, mu_per_unit, peer.get("balance_last_update")
 
 
 def pay(peer_id: str, amount_erg: str) -> bool:
     """Pay ``amount_erg`` ERG to ``peer_id`` via the single-wallet flow.
 
     Success means the tx was submitted and the receiving peer accepted +
-    validated the deposit server-side; afterwards this node's gas balance
+    validated the deposit server-side; afterwards this node's balance
     registered on the peer is read back and printed so the user can confirm the
     deposit was credited.
     """
@@ -92,21 +89,21 @@ def pay(peer_id: str, amount_erg: str) -> bool:
     from src.database.access_functions.ledgers import get_peer_contract_instances
 
     try:
-        gas_amount = _erg_to_gas(amount_erg)
+        amount_mu = _erg_to_mu(amount_erg)
     except (ValueError, TypeError) as exc:
         print(f"Invalid amount '{amount_erg}': {exc}", flush=True)
         return False
-    if gas_amount <= 0:
+    if amount_mu <= 0:
         print(f"Amount must be positive, got {amount_erg} ERG.", flush=True)
         return False
 
     print(
-        f"Paying {amount_erg} ERG ({ssformat(gas_amount)} gas) to peer {peer_id} ...",
+        f"Paying {amount_erg} ERG to peer {peer_id} ...",
         flush=True,
     )
 
     # Guard 1 — funded wallet. Clean stop at the no-funds boundary; nothing sent.
-    if not check_sender_balance(gas_amount):
+    if not check_sender_balance(amount_mu):
         print(
             "STOP: wallet balance is insufficient for this payment "
             "(no funded wallet configured?). Nothing was broadcast.",
@@ -139,7 +136,7 @@ def pay(peer_id: str, amount_erg: str) -> bool:
         return False
 
     # Snapshot the pre-payment balance so we can show the credited delta.
-    before = _read_peer_gas(peer_id, CONTRACT_HASH)
+    before = _read_peer_balance(peer_id, CONTRACT_HASH)
 
     # Pay via the existing single-wallet flow. On success the receiving peer has
     # accepted + validated the deposit with payment_process_validator (see module
@@ -149,7 +146,7 @@ def pay(peer_id: str, amount_erg: str) -> bool:
 
     paid = increase_deposit_on_peer(
         peer_id=peer_id,
-        amount=gas_amount,
+        amount=amount_mu,
         on_transaction_url=print_transaction_url,
     )
     if not paid:
@@ -166,29 +163,28 @@ def pay(peer_id: str, amount_erg: str) -> bool:
         flush=True,
     )
 
-    # Read back this node's gas balance registered on the peer to confirm the
+    # Read back this node's balance registered on the peer to confirm the
     # deposit was credited. increase_deposit_on_peer already updated the local
-    # peer row (add_gas_to_peer) after the Payable exchange, so this is the
+    # peer row (add_balance_to_peer) after the Payable exchange, so this is the
     # post-payment, locally-recorded balance.
-    after = _read_peer_gas(peer_id, CONTRACT_HASH)
+    after = _read_peer_balance(peer_id, CONTRACT_HASH)
     if after is None:
         print(
             f"(Payment succeeded, but no local peer row was found for {peer_id} "
-            "to read the gas balance back from.)",
+            "to read the balance back from.)",
             flush=True,
         )
         return True
 
-    gas, _gas_price, gas_on_nanoerg, gas_last_update = after
+    balance_mu, _rate, balance_last_update = after
     print(
-        f"Peer {peer_id} now credits you: {ssformat(gas)} gas "
-        f"({ssformat(gas_on_nanoerg)} nanoERG), last update "
-        f"{gas_last_update or 'None'}.",
+        f"Peer {peer_id} now credits you: {mu_to_erg_str(balance_mu)} ERG, last update "
+        f"{balance_last_update or 'None'}.",
         flush=True,
     )
     if before is not None:
         print(
-            f"  (+{ssformat(gas - before[0])} gas since before this payment)",
+            f"  (+{mu_to_erg_str(balance_mu - before[0])} ERG since before this payment)",
             flush=True,
         )
     return True

@@ -241,8 +241,8 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     # virtualizer stack, which imports this module back at import time.
     from src.utils.cost_functions.general_cost_functions import node_advertised_rates
 
-    for rate, gas in node_advertised_rates().items():
-        peer.gas_amount_per_call[rate].n = str(gas)
+    for rate, amount_mu in node_advertised_rates().items():
+        peer.mu_per_call[rate].n = str(amount_mu)
 
     payment_contracts = _local_payment_contracts()
     log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
@@ -273,8 +273,8 @@ def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     slot = instance.api.slot.add()
     slot.port = GATEWAY_PORT
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
-    for rate, gas in peer.gas_amount_per_call.items():
-        slot.gas_amount_per_call[rate].n = gas.n
+    for rate, amount in peer.mu_per_call.items():
+        slot.mu_per_call[rate].n = amount.n
     instance.api.payment_contracts.extend(peer.payment_contracts)
 
     uri_slot = instance.uri_slot.add()

@@ -29,15 +29,15 @@ The payment system between nodes is also implemented on **Ergo**. Here's how it 
 - Each node shares its **wallet** payment address with its clients.
 - Clients (other nodes or external entities) register with the node and receive a **private key** to authenticate themselves.
 
-#### 2. ERG Deposits (Gas)
+#### 2. ERG Deposits
 
-- To increase their gas amount, the client generates a **deposit token** — a **local identifier (UUID)** created and stored in the client's SQLite database, **not** an on-chain EIP-4 asset — and creates a normal **Ergo transaction** transferring a certain amount of native ERG, embedding that identifier in register **R4** of the transaction.
+- To increase their balance, the client generates a **deposit token** — a **local identifier (UUID)** created and stored in the client's SQLite database, **not** an on-chain EIP-4 asset — and creates a normal **Ergo transaction** transferring a certain amount of native ERG, embedding that identifier in register **R4** of the transaction.
 - The client then notifies the node once the transaction carrying the deposit token has been transferred.
 
 #### 3. Deposit Verification
 
 - The node verifies that the **deposit token** (the R4 identifier) belongs to the client.
-- If valid and the funds have been transferred to the node's **wallet**, the client’s gas is increased according to the amount of ERGs received.
+- If valid and the funds have been transferred to the node's **wallet**, the client's balance is increased according to the amount of ERGs received. The node's unit of account is pegged at 1 MU = 1 nanoERG, so the credit is exact (see [`PRICING.md`](PRICING.md)).
 - The deposit token is then marked `payed` (the legal states are `pending` / `payed` / `rejected`).
 
 #### 4. Wallet Management in the Nodo

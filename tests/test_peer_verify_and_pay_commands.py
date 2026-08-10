@@ -69,32 +69,28 @@ class VerifyReputationCommandTests(unittest.TestCase):
 
 class PayCommandTests(unittest.TestCase):
     """`pay(peer_id, amount_erg)` reuses the single-wallet payment flow and, on
-    success, reads back this node's gas balance registered on the peer."""
+    success, reads back this node's balance registered on the peer."""
 
-    def test_erg_to_gas_inverts_gas_to_nanoerg(self):
-        with mock.patch.object(pv, "ConfigManager",
-                               return_value=mock.Mock(get=lambda k: "1000")):
-            # gas = erg_to_nanoerg(erg) * GAS_PER_ERG = (2 * 1e9) * 1000
-            self.assertEqual(pv._erg_to_gas("2"), 2_000_000_000 * 1000)
+    def test_erg_to_mu_uses_the_peg(self):
+        # 1 MU == 1 nanoERG, so 2 ERG is exactly 2e9 MU. No configured factor is
+        # involved any more -- the old GAS_PER_ERG put a payment 49 orders of
+        # magnitude away from any charge the node computed.
+        self.assertEqual(pv._erg_to_mu("2"), 2_000_000_000)
 
     def test_rejects_invalid_amount(self):
-        with mock.patch.object(pv, "ConfigManager",
-                               return_value=mock.Mock(get=lambda k: "1000")):
-            self.assertFalse(pv.pay("peer-1", "not-a-number"))
+        self.assertFalse(pv.pay("peer-1", "not-a-number"))
 
     def _wire(self, balance_ok, scripts, paid, readback=None):
         """Patch the deferred payment/ledger imports the command pulls at call time.
 
-        ``readback`` optionally patches ``pay._read_peer_gas`` so the post-payment
-        gas readback is deterministic without a real DB. It is a list consumed as
+        ``readback`` optionally patches ``pay._read_peer_balance`` so the post-payment
+        readback is deterministic without a real DB. It is a list consumed as
         successive return values (before, after)."""
         import src.payment_system.contracts.ergo.interface as ergo_iface
         import src.payment_system.payment_process as payment_process
         import src.database.access_functions.ledgers as ledgers
 
         patches = [
-            mock.patch.object(pv, "ConfigManager",
-                              return_value=mock.Mock(get=lambda k: "1000")),
             mock.patch.object(ergo_iface, "check_sender_balance",
                               return_value=balance_ok),
             mock.patch.object(ledgers, "get_peer_contract_instances",
@@ -104,7 +100,7 @@ class PayCommandTests(unittest.TestCase):
         ]
         if readback is not None:
             patches.append(
-                mock.patch.object(pv, "_read_peer_gas", side_effect=list(readback))
+                mock.patch.object(pv, "_read_peer_balance", side_effect=list(readback))
             )
         return patches
 
@@ -127,9 +123,9 @@ class PayCommandTests(unittest.TestCase):
         self.assertFalse(self._run(balance_ok=True, scripts=[], paid=True))
 
     def test_pass_when_payment_completes(self):
-        # gas readback stubbed: (before, after) -> gas grew by the paid amount.
-        before = (5_000, 1000, 5.0, "2026-07-31T09:00:00")
-        after = (7_000, 1000, 7.0, "2026-07-31T10:00:00")
+        # balance readback stubbed: (before, after) -> it grew by the paid amount.
+        before = (5_000, 1000, "2026-07-31T09:00:00")
+        after = (7_000, 1000, "2026-07-31T10:00:00")
         self.assertTrue(
             self._run(balance_ok=True, scripts=[(b"s", object())], paid=True,
                       readback=[before, after])
@@ -138,11 +134,11 @@ class PayCommandTests(unittest.TestCase):
     def test_fail_when_payment_not_accepted(self):
         self.assertFalse(self._run(balance_ok=True, scripts=[(b"s", object())], paid=False))
 
-    def test_prints_gas_readback_on_successful_pay(self):
+    def test_prints_balance_readback_on_successful_pay(self):
         # The whole point of the command post-rework: after a successful pay it
-        # reads back and prints THIS node's gas balance registered on the peer.
-        before = (5_000, 1000, 5.0, "2026-07-31T09:00:00")
-        after = (7_000, 1000, 7.0, "2026-07-31T10:00:00")
+        # reads back and prints THIS node's balance registered on the peer.
+        before = (5_000, 1000, "2026-07-31T09:00:00")
+        after = (7_000, 1000, "2026-07-31T10:00:00")
         result, out = self._run(
             balance_ok=True, scripts=[(b"s", object())], paid=True,
             readback=[before, after], capture=True,
@@ -154,8 +150,8 @@ class PayCommandTests(unittest.TestCase):
         self.assertNotIn("VERIFIED", out)
 
     def test_prints_transaction_url_when_payment_reports_it(self):
-        before = (5_000, 1000, 5.0, "2026-07-31T09:00:00")
-        after = (7_000, 1000, 7.0, "2026-07-31T10:00:00")
+        before = (5_000, 1000, "2026-07-31T09:00:00")
+        after = (7_000, 1000, "2026-07-31T10:00:00")
         transaction_url = "https://sigmaspace.io/en/transaction/abc123"
 
         patches = self._wire(True, [(b"s", object())], True, [before, after])
@@ -173,24 +169,24 @@ class PayCommandTests(unittest.TestCase):
 
         self.assertIn(f"Transaction URL: {transaction_url}", buf.getvalue())
 
-    def test_paying_line_uses_scientific_gas_format(self):
-        # Regression for Josemi's feedback: the initial "Paying ..." line must
-        # sci-format the (huge ~1e63) gas integer via ssformat, matching the gas
-        # readback style below it — not dump the raw monster int.
-        from src.utils.logger import ssformat
+    def test_paying_line_is_in_erg_and_shows_no_internal_unit(self):
+        """The operator asked to pay in ERG and should read ERG back.
 
-        before = (5_000, 1000, 5.0, "2026-07-31T09:00:00")
-        after = (7_000, 1000, 7.0, "2026-07-31T10:00:00")
+        This replaces a regression test that asserted the line sci-formatted a ~1e63
+        gas integer. That number existed only because the unit was undefined; with the
+        peg there is nothing monstrous left to format, and MU must not surface here.
+        """
+        before = (5_000, 1000, "2026-07-31T09:00:00")
+        after = (7_000, 1000, "2026-07-31T10:00:00")
         _result, out = self._run(
             balance_ok=True, scripts=[(b"s", object())], paid=True,
             readback=[before, after], capture=True,
         )
-        # gas_amount is computed with the same mocked GAS_PER_ERG=1000 the command
-        # uses, so this is exactly what pay() should have formatted.
-        gas_amount = pv._erg_to_gas("1")
-        self.assertIn(f"Paying 1 ERG ({ssformat(gas_amount)} gas)", out)
-        # The raw integer must NOT appear on the Paying line.
-        self.assertNotIn(f"({gas_amount} gas)", out)
+        self.assertIn("Paying 1 ERG to peer peer-1", out)
+        self.assertNotIn("MU", out)
+        self.assertNotIn("gas", out)
+        # The readback is ERG too: 7000 MU is 0.000007 ERG.
+        self.assertIn("0.000007 ERG", out)
 
 
 if __name__ == "__main__":

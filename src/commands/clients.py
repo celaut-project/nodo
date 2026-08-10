@@ -1,6 +1,7 @@
 import sqlite3
 from src.utils.config import ConfigManager
 from src.utils.logger import ssformat
+from src.utils.monetary import mu_to_erg_str
 
 env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
@@ -10,7 +11,7 @@ def list_clients():
     """
     Lists all clients stored in the database, showing grouped information in sections:
       1. General
-      2. Gas & Usage
+      2. Balance & Usage
     If the table does not exist, it prints a warning message.
     """
     # Connect to the SQLite database
@@ -29,7 +30,7 @@ def list_clients():
         # Query the clients table for all columns
         cursor.execute(
             '''
-            SELECT id, gas, last_usage
+            SELECT id, balance_mu, last_usage
             FROM clients
             '''
         )
@@ -40,14 +41,14 @@ def list_clients():
             return
 
         for client in clients:
-            client_id, gas, last_usage = client
+            client_id, balance_mu, last_usage = client
 
             # Section: General
             print(f"ID: {client_id}")
 
-            # Section: Gas & Usage
-            print("[Gas & Usage]")
-            print(f"  Gas: {ssformat(int(gas))}")
+            # Section: Balance & Usage
+            print("[Balance & Usage]")
+            print(f"  Balance: {mu_to_erg_str(int(balance_mu))} ERG")
             print(f"  Last Usage: {last_usage if last_usage is not None else 'None'}")
             print()
 

@@ -8,7 +8,7 @@ from protos import celaut_pb2, celaut_pb2_grpc
 from src.manager.manager import get_client_id_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 
-from src.utils.utils import from_gas_amount, get_network_name, to_gas_amount, \
+from src.utils.utils import from_amount, get_network_name, to_amount, \
     generate_uris_by_peer_id
 from src.utils.logger import LOGGER as logger
 from src.utils.config import ConfigManager
@@ -31,9 +31,9 @@ def __get_metrics_client(client_id: str) -> celaut_pb2.Metrics:
     :rtype: celaut_pb2.Metrics
     :raises KeyError: If the provided client ID does not exist in the cached data.
     """
-    client_gas, _, _ = sc.get_client_gas(client_id=client_id)
+    client_gas, _, _ = sc.get_client_balance(client_id=client_id)
     return celaut_pb2.Metrics(
-        gas_amount=to_gas_amount(client_gas),
+        balance=to_amount(client_gas),
     )
 
 
@@ -50,7 +50,7 @@ def __get_metrics_internal(id: str) -> celaut_pb2.Metrics:
     :raises KeyError: If the provided token does not exist in the cached data.
     """
     return celaut_pb2.Metrics(
-        gas_amount=to_gas_amount(sc.get_container_gas(id=id)),
+        balance=to_amount(sc.get_instance_balance(id=id)),
     )
 
 
@@ -81,37 +81,37 @@ def __get_metrics_external(peer_id: str, token: str) -> celaut_pb2.Metrics:
     ))
 
 
-def gas_amount_on_other_peer(peer_id: str) -> int:
+def balance_on_other_peer(peer_id: str) -> int:
     """
-    Retrieve the gas amount from another peer.
+    Retrieve our balance held on another peer.
 
-    This function fetches the gas amount from a specified peer's client and returns it.
+    This function fetches our balance from a specified peer's client and returns it.
 
-    :param peer_id: The identifier of the peer from which to retrieve the gas amount.
+    :param peer_id: The identifier of the peer from which to retrieve the balance.
     :type peer_id: str
-    :return: The gas amount retrieved from the peer. If an error occurs, returns 0.
+    :return: The balance retrieved from the peer. If an error occurs, returns 0.
     :rtype: int
-    :raises Exception: If an error occurs while fetching the gas amount.
+    :raises Exception: If an error occurs while fetching the balance.
     """
 
     peer = sc.get_peer_by_id(peer_id=peer_id)
-    if peer and 'gas_last_update' in peer and peer['gas_last_update']:
-        last_update_time = datetime.datetime.fromisoformat(peer['gas_last_update'])
+    if peer and 'balance_last_update' in peer and peer['balance_last_update']:
+        last_update_time = datetime.datetime.fromisoformat(peer['balance_last_update'])
         if (datetime.datetime.now() - last_update_time).total_seconds() <= min(10.0, float(MANAGER_ITERATION_TIME)):
-            return peer['gas']
+            return peer['balance_mu']
 
     client_id = get_client_id_on_other_peer(peer_id=peer_id)
     try:
-        gas = from_gas_amount(
+        balance = from_amount(
             __get_metrics_external(
                 peer_id=peer_id,
                 token=client_id
-            ).gas_amount
+            ).balance
         )
-        sc.refresh_gas_for_peer(peer_id=peer_id, gas=gas)
-        return gas
+        sc.refresh_balance_for_peer(peer_id=peer_id, balance_mu=balance)
+        return balance
     except:
-        logger('Error getting gas amount from ' + peer_id + '.')
+        logger('Error getting our balance from ' + peer_id + '.')
         if is_peer_available(peer_id=peer_id):
             logger('It is assumed that the client was invalid on peer ' + peer_id)
             sc.delete_external_client(peer_id=peer_id)

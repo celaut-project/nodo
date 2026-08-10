@@ -140,11 +140,11 @@ pub struct DetailsView {
 pub struct Peer {
     pub id: String,
     pub uris: String,
-    /// Our gas balance on this peer. Source of truth is the `gas` column on the
+    /// Our balance on this peer. Source of truth is the `balance_mu` column on the
     /// `peer` table itself — NOT the local `clients` table. `peer.remote_client_id`
     /// identifies our client *inside the remote peer*, so it can never be joined
     /// against our local `clients` table (see issue #178).
-    pub gas: String,
+    pub balance: String,
     pub reputation: String,
     /// Local reputation score (nodo-managed, independent of the on-chain proof).
     pub reputation_score: String,
@@ -155,7 +155,7 @@ pub struct Peer {
 }
 
 /// One `contract_instance` row: the ledger a peer settles on, the contract it
-/// charges through, the address it gets paid at, and its gas price.
+/// charges through, the address it gets paid at, and what one of its units is worth.
 #[derive(Debug, Clone)]
 pub struct PeerContract {
     /// Ledger tag (e.g. "ergo"), falling back to the raw stored hash when the
@@ -163,7 +163,7 @@ pub struct PeerContract {
     pub ledger: String,
     pub contract_hash: String,
     pub address: String,
-    pub gas_price: String,
+    pub mu_per_unit: String,
 }
 
 impl Identifiable for Peer {
@@ -175,7 +175,7 @@ impl Identifiable for Peer {
 #[derive(Debug, Clone)]
 pub struct Client {
     pub id: String,
-    pub gas: String,
+    pub balance: String,
     pub last_usage: String,
 }
 
@@ -204,7 +204,7 @@ pub struct Instance {
     pub name: String,
     pub ip: String,
     pub service: String,
-    pub gas: String,
+    pub balance: String,
     pub virtualizer: String,
     pub memory_current: Option<u64>,
     pub memory_limit: u64,
@@ -1208,19 +1208,19 @@ fn parse_erg_amount(value: &str) -> Option<f64> {
 
 fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
     let connection = Connection::open(database)?;
-    // Our gas on a peer lives on the `peer` table's own `gas` column. The old
+    // Our balance on a peer lives on the `peer` table's own `balance_mu` column. The old
     // `LEFT JOIN clients c ON p.client_id = c.id` was wrong: `peer.remote_client_id`
     // is our client id *inside the remote peer*, never a key into our local
-    // `clients` table, so that join surfaced a bogus gas value (issue #178).
+    // `clients` table, so that join surfaced a bogus balance (issue #178).
     let mut statement = connection.prepare(
         "SELECT p.id,
                 COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
-                p.gas,
+                p.balance_mu,
                 COALESCE(p.reputation_proof_id, ''),
                 p.reputation_score
          FROM peer p
          LEFT JOIN uri u ON p.id = u.peer_id
-         GROUP BY p.id, p.gas, p.reputation_proof_id, p.reputation_score",
+         GROUP BY p.id, p.balance_mu, p.reputation_proof_id, p.reputation_score",
     )?;
     let peers = statement
         .query_map([], |row| {
@@ -1231,7 +1231,7 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
             let id: String = row.get(0)?;
             Ok(Peer {
                 uris: row.get(1)?,
-                gas: format_gas(row.get::<_, String>(2)?),
+                balance: format_erg(row.get::<_, String>(2)?),
                 reputation: row.get(3)?,
                 reputation_score,
                 // `contract_instance` isn't touched by the join above (it isn't
@@ -1256,7 +1256,7 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
 /// already runs, and before this the TUI surfaced none of it at all (issue #231).
 fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<PeerContract>> {
     let mut statement = connection.prepare(
-        "SELECT ci.contract_hash, ci.ledger_hash, ci.address, ci.gas_price, l.content
+        "SELECT ci.contract_hash, ci.ledger_hash, ci.address, ci.mu_per_unit, l.content
          FROM contract_instance ci
          LEFT JOIN ledger l ON ci.ledger_hash = l.hash
          WHERE ci.peer_id = ?1",
@@ -1275,10 +1275,9 @@ fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<P
                 ledger,
                 contract_hash: row.get(0)?,
                 address: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                gas_price: row
-                    .get::<_, Option<String>>(3)?
-                    .map(format_gas)
-                    .unwrap_or_default(),
+                // Not ERG-formatted: this is a rate (MU per unit of the contract),
+                // not a balance. For ERG the rate is the peg itself, 1e9.
+                mu_per_unit: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
             })
         })?
         .collect();
@@ -1306,7 +1305,7 @@ fn adjust_peer_reputation(database: &Path, peer_id: &str, delta: i64) -> SqlResu
 
 fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
     let connection = Connection::open(database)?;
-    let mut statement = connection.prepare("SELECT id, gas, last_usage FROM clients")?;
+    let mut statement = connection.prepare("SELECT id, balance_mu, last_usage FROM clients")?;
     let clients = statement
         .query_map([], |row| {
             let last_usage = row
@@ -1315,7 +1314,7 @@ fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
                 .unwrap_or_else(|| "—".to_string());
             Ok(Client {
                 id: row.get(0)?,
-                gas: format_gas(row.get::<_, String>(1)?),
+                balance: format_erg(row.get::<_, String>(1)?),
                 last_usage,
             })
         })?
@@ -1329,7 +1328,7 @@ fn get_instances(
 ) -> SqlResult<Vec<Instance>> {
     let connection = Connection::open(&paths.database)?;
     let mut statement = connection.prepare(
-        "SELECT id, name, ip, gas, service_id, mem_limit, disk_space, virtualizer, father_id
+        "SELECT id, name, ip, balance_mu, service_id, mem_limit, disk_space, virtualizer, father_id
          FROM local_instances",
     )?;
     let mut instances: Vec<Instance> = statement
@@ -1351,7 +1350,7 @@ fn get_instances(
                 id,
                 name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 ip: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                gas: format_gas(row.get::<_, String>(3)?),
+                balance: format_erg(row.get::<_, String>(3)?),
                 service,
                 memory_current,
                 memory_limit: row.get::<_, Option<u64>>(5)?.unwrap_or(0),
@@ -1366,7 +1365,7 @@ fn get_instances(
         .collect::<SqlResult<Vec<_>>>()?;
 
     // Delegated (remote) instances live on other peers. The table carries no
-    // gas / memory / disk columns, and remote gas needs an async gRPC call
+    // balance / memory / disk columns, and a remote balance needs an async gRPC call
     // (see manager/metrics.py __get_metrics_external) that would block the UI.
     // We therefore surface them here with placeholders ("—") and location set
     // to the owning peer id, without any blocking network round-trip.
@@ -1400,7 +1399,7 @@ fn get_delegated_instances(
                 id,
                 name: String::new(),
                 ip: String::new(),
-                gas: "—".to_string(),
+                balance: "—".to_string(),
                 service,
                 memory_current: None,
                 memory_limit: 0,
@@ -1620,11 +1619,28 @@ fn read_u64(path: &Path) -> Option<u64> {
     fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
-fn format_gas(value: String) -> String {
-    value
-        .parse::<f64>()
-        .map(|number| format!("{number:.3e}"))
-        .unwrap_or(value)
+/// Render an MU amount as ERG. MU is pegged at 1 MU = 1 nanoERG, so this is a
+/// fixed-point shift by 9 places -- done on the integer string rather than through
+/// f64, which cannot hold a large balance exactly. Mirrors
+/// `src/utils/ergo_units.py::nanoerg_to_erg_str`.
+fn format_erg(value: String) -> String {
+    let digits = value.trim();
+    let (sign, digits) = match digits.strip_prefix('-') {
+        Some(rest) => ("-", rest),
+        None => ("", digits),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return value;
+    }
+    let padded = format!("{digits:0>10}");
+    let split = padded.len() - 9;
+    let whole = &padded[..split];
+    let fraction = padded[split..].trim_end_matches('0');
+    if fraction.is_empty() {
+        format!("{sign}{whole} ERG")
+    } else {
+        format!("{sign}{whole}.{fraction} ERG")
+    }
 }
 
 fn push_history(history: &mut VecDeque<u64>, value: u64) {
@@ -1689,20 +1705,20 @@ mod tests {
         let connection = Connection::open(&path).unwrap();
         connection
             .execute_batch(
-                "CREATE TABLE peer (id TEXT PRIMARY KEY, gas TEXT, reputation_proof_id TEXT,
+                "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT, reputation_proof_id TEXT,
                                     reputation_score INTEGER);
                  CREATE TABLE uri (id INTEGER PRIMARY KEY, peer_id TEXT, ip TEXT, port INTEGER);
                  CREATE TABLE ledger (hash TEXT PRIMARY KEY, content BLOB);
                  CREATE TABLE contract_instance (id INTEGER PRIMARY KEY, address TEXT,
                                     ledger_hash TEXT, contract_hash TEXT, peer_id TEXT,
-                                    gas_price TEXT);
+                                    mu_per_unit TEXT);
                  INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7);",
             )
             .unwrap();
         for (contract_hash, ledger_hash, address, ledger_content) in instances {
             connection
                 .execute(
-                    "INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, gas_price)
+                    "INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit)
                      VALUES (?1, ?2, ?3, 'peer-1', '500')",
                     rusqlite::params![address, ledger_hash, contract_hash],
                 )
@@ -1747,7 +1763,7 @@ mod tests {
         assert_eq!(contract.ledger, "ergo");
         assert_eq!(contract.contract_hash, "contract-hash-1");
         assert_eq!(contract.address, "addr-1");
-        assert_eq!(contract.gas_price, format_gas("500".to_string()));
+        assert_eq!(contract.mu_per_unit, "500");
         let _ = fs::remove_dir_all(&dir);
     }
 

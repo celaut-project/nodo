@@ -5,10 +5,10 @@ from protos import celaut_pb2 as celaut, celaut_pb2
 from src.balancers.execution_balancer.execution_balancer import execution_balancer, estimate_cost_on_peer
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
-from src.manager.manager import default_initial_cost, spend_gas
+from src.manager.manager import default_initial_balance, spend_mu
 from src.utils import utils, logger as log
 from src.utils.tools.recursion_guard import RecursionGuard
-from src.utils.utils import from_gas_amount, to_gas_amount
+from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
 from src.utils.cost_functions.generate_estimated_cost import (
@@ -74,9 +74,9 @@ def _force_delegate(
 ) -> celaut_pb2.ServiceInstance:
     """`nodo force_execution`'s bypass: delegate straight to `forced_peer`, with
     no comparison against `local` or any other peer, and no cheapest-first
-    fallback if it fails. Still runs the same gas/cost accounting a
-    balancer-selected candidate would (`estimate_cost_on_peer`, `spend_gas`,
-    `delegate_execution`'s own `gas_amount_on_other_peer` check) -- only peer
+    fallback if it fails. Still runs the same cost accounting a
+    balancer-selected candidate would (`estimate_cost_on_peer`, `spend_mu`,
+    `delegate_execution`'s own `balance_on_other_peer` check) -- only peer
     *selection* is skipped, not the economics of running the service.
     """
     if not sc.peer_exists(forced_peer):
@@ -104,23 +104,23 @@ def _force_delegate(
             f"for service {service_id} (unreachable, or it doesn't have the service)."
         )
 
-    refund_gas = []
-    if not spend_gas(
+    refund_container = []
+    if not spend_mu(
             id=father_id,
-            gas_to_spend=from_gas_amount(estimated_cost.cost),
-            refund_gas_function_container=refund_gas
+            gas_to_spend=from_amount(estimated_cost.cost),
+            refund_function_container=refund_container
     ):
-        raise Exception(f"force_execution: error spending gas for {father_id}.")
+        raise Exception(f"force_execution: error charging {father_id}.")
 
     instance = delegate_execution(
         service_id=service_id,
         peer=forced_peer,
         father_id=father_id,
-        cost=from_gas_amount(estimated_cost.cost),
+        cost=from_amount(estimated_cost.cost),
         metadata=metadata,
         config=configuration,
         recursion_guard_token=recursion_guard_token,
-        refund_gas=refund_gas,
+        refund_container=refund_container,
         father_ip=father_ip,
     )
 
@@ -168,8 +168,12 @@ def launch_service(
         if not configuration:
             configuration = celaut_pb2.Configuration()
 
-        if not configuration.HasField('initial_gas_amount') or not configuration.initial_gas_amount:
-            configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost()))
+        if not configuration.HasField('initial_mu') or not configuration.initial_mu:
+            # Funded for what it asked for, not a flat amount: a 128 MiB instance and an
+            # 8 GiB one no longer start with the same balance.
+            configuration.initial_mu.CopyFrom(to_amount(
+                default_initial_balance(system_resources=service.container.resources.at_init)
+            ))
 
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never
@@ -228,14 +232,14 @@ def launch_service(
 
                 log.LOGGER(f'Service balancer select peer {peer}')
 
-                refund_gas = []
+                refund_container = []
 
-                if not spend_gas(
+                if not spend_mu(
                         id=father_id,
-                        gas_to_spend=from_gas_amount(estimated_cost.cost),
-                        refund_gas_function_container=refund_gas
+                        gas_to_spend=from_amount(estimated_cost.cost),
+                        refund_function_container=refund_container
                 ):
-                    raise Exception('Launch service error spending gas for ' + father_id)
+                    raise Exception('Launch service error charging ' + father_id)
 
                 # Delegate the service instance execution.
                 if peer != 'local':
@@ -243,11 +247,11 @@ def launch_service(
                         service_id=service_id,
                         peer=peer,
                         father_id=father_id,
-                        cost=from_gas_amount(estimated_cost.cost),
+                        cost=from_amount(estimated_cost.cost),
                         metadata=metadata,
                         config=configuration,
                         recursion_guard_token=recursion_guard_token,
-                        refund_gas=refund_gas,
+                        refund_container=refund_container,
                         # Needed to pick which of our addresses to advertise if the
                         # instance has to be tunnelled through this node.
                         father_ip=father_ip
@@ -260,7 +264,7 @@ def launch_service(
                         resources=service.container.resources,
                         father_id=father_id, father_ip=father_ip,
                         metadata=metadata, service=service, service_id=service_id,
-                        refund_gas=refund_gas
+                        refund_container=refund_container
                     )
 
                 #  If the service was from an internal instance, allow it to connect to it's new dependency.
