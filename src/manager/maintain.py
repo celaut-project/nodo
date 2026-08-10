@@ -17,7 +17,7 @@ from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.execution_cost import system_scarcity
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
-from src.utils.monetary import mu_to_erg_str
+from src.utils.monetary import format_mu
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
@@ -157,7 +157,7 @@ def maintain_vmachines(debug_mode: bool=False):
             scarcity=scarcity,
         )
         if debug_mode:
-            log.LOGGER(f"Charging {vmachine_id}: {mu_to_erg_str(charge_mu)} ERG for {MANAGER_ITERATION_TIME}s")
+            log.LOGGER(f"Charging {vmachine_id}: {format_mu(charge_mu)} for {MANAGER_ITERATION_TIME}s")
 
         if not spend_mu(id=vmachine_id, amount_mu=charge_mu, debug_mode=debug_mode):
             try:
@@ -242,7 +242,7 @@ def peer_deposits(debug_mode: bool = False):
 
         peer_balance = balance_on_other_peer(peer_id=peer_id)
         if debug_mode:
-            log.LOGGER(f"Peer {peer_id} balance: {mu_to_erg_str(peer_balance)} ERG")
+            log.LOGGER(f"Peer {peer_id} balance: {format_mu(peer_balance)}")
 
         # Both figures come from what the ledger can actually settle, not from a
         # hand-picked constant: see src/payment_system/deposits.py.
@@ -253,9 +253,9 @@ def peer_deposits(debug_mode: bool = False):
             if debug_mode:
                 log.LOGGER(
                     f"Insufficient balance for {peer_id}:\n"
-                    f"    - Current: {mu_to_erg_str(peer_balance)} ERG\n"
-                    f"    - Refill below: {mu_to_erg_str(refill_below)} ERG\n"
-                    f"    - Topping up by: {mu_to_erg_str(to_increase)} ERG"
+                    f"    - Current: {format_mu(peer_balance)}\n"
+                    f"    - Refill below: {format_mu(refill_below)}\n"
+                    f"    - Topping up by: {format_mu(to_increase)}"
                 )
 
             try:
@@ -270,7 +270,7 @@ def peer_deposits(debug_mode: bool = False):
                 if debug_mode: log.LOGGER(f"Successfully increased deposit for {peer_id}.")
         else:
             if debug_mode:
-                log.LOGGER(f"Peer {peer_id} has sufficient deposit: {mu_to_erg_str(peer_balance)} ERG.")
+                log.LOGGER(f"Peer {peer_id} has sufficient deposit: {format_mu(peer_balance)}.")
 
 
 def check_dev_clients():

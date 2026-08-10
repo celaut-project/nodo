@@ -15,17 +15,23 @@ Instead the operator states how much of a deposit may be lost to the fee
 from __future__ import annotations
 
 from src.utils.config import ConfigManager
-from src.utils.monetary import mu_to_erg_str
+from src.utils.monetary import format_mu, nanoerg_to_mu
 
 env_manager = ConfigManager()
 
 
 def _ergo_floors() -> tuple[int, int]:
-    """(fee, minimum box value) in MU. Imported lazily: the Ergo interface pulls in the
-    payment stack, and deposit sizing is read from the manager loop."""
+    """(fee, minimum box value), converted from nanoERG into MU.
+
+    Both constants are Ergo's, so they are nanoERG; a deposit is MU. They are only the
+    same number while MU_PER_NANOERG is 1, so the conversion is explicit.
+
+    Imported lazily: the Ergo interface pulls in the payment stack, and deposit sizing is
+    read from the manager loop.
+    """
     from src.payment_system.contracts.ergo.interface import DEFAULT_FEE, SAFE_MIN_BOX_VALUE
 
-    return int(DEFAULT_FEE), int(SAFE_MIN_BOX_VALUE)
+    return nanoerg_to_mu(DEFAULT_FEE), nanoerg_to_mu(SAFE_MIN_BOX_VALUE)
 
 
 def _share(key: str, default: float) -> float:
@@ -57,8 +63,8 @@ def refill_threshold_mu() -> int:
 
 
 def describe() -> str:
-    """One line for logs and `nodo info`, in ERG because a human reads it."""
+    """One line for logs and `nodo info`, in the display unit because a human reads it."""
     return (
-        f"peer deposit {mu_to_erg_str(full_deposit_mu())} ERG, "
-        f"refilled below {mu_to_erg_str(refill_threshold_mu())} ERG"
+        f"peer deposit {format_mu(full_deposit_mu())}, "
+        f"refilled below {format_mu(refill_threshold_mu())}"
     )

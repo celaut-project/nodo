@@ -226,7 +226,7 @@ nodo download <manifest url> [-o <output dir>]
 
 Before launching any workload, run `nodo estimate` to check the memory guard
 (`resources.at_most.mem_limit`) and prices. It prints an execution-feasibility
-verdict (`YES/NO`) and the estimated cost in ERG — it does not print a resource or
+verdict (`YES/NO`) and the estimated cost — it does not print a resource or
 hardware-availability table:
 
 ```bash
@@ -273,13 +273,13 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  # --save writes metrics.jsonl and a Wireshark-openable capture.pcap.
  nodo observe <instance id> [--save <path>]
 
- # List active instances (shows id, name, API address, balance in ERG, and virtualizer — the standard is `ch`).
+ # List active instances (shows id, name, API address, balance, and virtualizer — the standard is `ch`).
  nodo instances
  nodo instances --grouped        # grouped by parent service
 
  # Adjust the deposit of a running workload (amounts in ERG)
- nodo increase_deposit <instance id> 0.01   # ERG
- nodo decrease_deposit <instance id> 0.005  # ERG
+ nodo increase_deposit <instance id> 0.01   # in ui.DISPLAY_UNIT (ERG by default)
+ nodo decrease_deposit <instance id> 0.005
 
  # Stop a running instance (requires root)
  sudo nodo kill <instance id>

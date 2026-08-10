@@ -4,7 +4,7 @@ from src.manager.metrics import __get_metrics_external
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
-from src.utils.monetary import mu_to_erg_str
+from src.utils.monetary import format_mu
 from src.utils.utils import from_amount
 try:
     from src.virtualizers.ch.observability import get_vm_runtime_snapshot
@@ -180,7 +180,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                 )
                 runtime_virtualizer = str(virtualizer).strip() if virtualizer else DEFAULT_VIRTUALIZER
                 try:
-                    balance_value = f"{mu_to_erg_str(int(balance_mu))} ERG"
+                    balance_value = f"{format_mu(int(balance_mu))}"
                 except (ValueError, TypeError):
                     balance_value = "Invalid balance"
 
@@ -230,7 +230,7 @@ def list_instances(groupable: bool = False, search: str = ""):
 
                 try:
                     metrics = __get_metrics_external(token=external_token, peer_id=peer_id)
-                    balance_value = f"{mu_to_erg_str(from_amount(metrics.balance))} ERG"
+                    balance_value = f"{format_mu(from_amount(metrics.balance))}"
                 except:
                     balance_value = "N/A"
                 

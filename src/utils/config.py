@@ -247,8 +247,10 @@ class ConfigManager(metaclass=Singleton):
                 )
 
             # Prices are money: a malformed one stops the node rather than being coerced
-            # into something plausible (docs/PRICING.md).
-            validate_pricing_config(self._config)
+            # into something plausible (docs/PRICING.md). Non-fatal findings -- notably
+            # prices and the payment rate drifting onto different scales, which is the
+            # failure the gas model shipped with -- are logged instead.
+            validate_pricing_config(self._config, warn=lambda message: self.log(f"[PRICING] {message}"))
 
             # Process dynamic values.
             gateway_port = self._get_nested(self._config, ["network", "GATEWAY_PORT"])

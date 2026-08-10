@@ -8,9 +8,10 @@ reputation JSON. So the test that matters is the round trip: the rates have to
 survive being serialized and parsed back the way those two paths do it, or the whole
 mechanism is decoration.
 
-Every rate is in MU, and MU is pegged (1 MU = 1 nanoERG), which is what makes a rate
-actionable to the peer reading it. The model this replaced advertised an undefined
-"gas", so the numbers meant nothing off this node.
+Every rate is in MU. What an MU is worth travels alongside them as
+`ContractRate.mu_per_unit`, which is what makes a rate actionable to the peer reading
+it. The model this replaced advertised an undefined "gas", for which nothing anywhere
+declared a rate.
 """
 
 import unittest
@@ -33,13 +34,13 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 def _config(**overrides):
     """Override only the pricing keys; ConfigManager is a shared singleton."""
     values = {
-        "pricing.RAM_ERG_PER_GIB_HOUR": "0.001",
-        "pricing.CPU_ERG_PER_VCPU_HOUR": "0.004",
-        "pricing.DISK_ERG_PER_GIB_HOUR": "0.0001",
-        "pricing.NET_ERG_PER_GIB": "0.002",
-        "pricing.BUILD_ERG": "0.01",
-        "pricing.TUNNEL_OPEN_ERG": "0.00001",
-        "pricing.MODIFY_RESOURCES_ERG": "0.00001",
+        "pricing.RAM_MU_PER_GIB_HOUR": 1_000_000,
+        "pricing.CPU_MU_PER_VCPU_HOUR": 4_000_000,
+        "pricing.DISK_MU_PER_GIB_HOUR": 100_000,
+        "pricing.NET_MU_PER_GIB": 2_000_000,
+        "pricing.BUILD_MU": 10_000_000,
+        "pricing.TUNNEL_OPEN_MU": 10_000,
+        "pricing.MODIFY_RESOURCES_MU": 10_000,
         "pricing.SCARCITY_MAX_MULTIPLIER": 10,
         "pricing.SCARCITY_CURVE": 1.0,
     }
@@ -64,7 +65,7 @@ class NodeAdvertisedRatesTests(unittest.TestCase):
         self.assertEqual(
             advertised,
             {
-                # 0.001 ERG per GiB-hour == 1e6 MU / 3600s.
+                # 1e6 MU per GiB-hour / 3600s.
                 "ram_mu_per_gib_second": 277,
                 "cpu_mu_per_vcpu_second": 1111,
                 "disk_mu_per_gib_second": 27,
@@ -80,14 +81,14 @@ class NodeAdvertisedRatesTests(unittest.TestCase):
 
         This is the property the single `EXECUTION_COST` scalar could not express.
         """
-        with _config(**{"pricing.RAM_ERG_PER_GIB_HOUR": "0.1"}):
+        with _config(**{"pricing.RAM_MU_PER_GIB_HOUR": 100_000_000}):
             advertised = rates_module.node_advertised_rates()
 
         self.assertEqual(advertised["ram_mu_per_gib_second"], 27_777)
         self.assertEqual(advertised["disk_mu_per_gib_second"], 27)
 
     def test_a_zero_price_is_omitted_rather_than_advertised_as_free(self):
-        with _config(**{"pricing.TUNNEL_OPEN_ERG": "0"}):
+        with _config(**{"pricing.TUNNEL_OPEN_MU": 0}):
             advertised = rates_module.node_advertised_rates()
 
         self.assertNotIn("tunnel_open_mu", advertised)
@@ -95,13 +96,13 @@ class NodeAdvertisedRatesTests(unittest.TestCase):
 
     def test_a_malformed_price_is_rejected_not_silently_zeroed(self):
         """Reading a broken price as 0 would give the node's resources away."""
-        with _config(**{"pricing.RAM_ERG_PER_GIB_HOUR": "cheap"}):
+        with _config(**{"pricing.RAM_MU_PER_GIB_HOUR": "cheap"}):
             with self.assertRaises(ValueError):
                 rates_module.node_advertised_rates()
 
     def test_rates_below_one_mu_per_second_are_omitted(self):
         """An integer per-second rate cannot express a fraction; 0 would read as free."""
-        with _config(**{"pricing.DISK_ERG_PER_GIB_HOUR": "0.000000001"}):
+        with _config(**{"pricing.DISK_MU_PER_GIB_HOUR": 1}):
             advertised = rates_module.node_advertised_rates()
 
         self.assertNotIn("disk_mu_per_gib_second", advertised)

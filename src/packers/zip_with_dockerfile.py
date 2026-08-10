@@ -424,7 +424,7 @@ class ZipContainerPacker:
             if "gas_amount_per_call" in item:
                 raise ValueError(
                     f"service.json api slot port={slot.port}: 'gas_amount_per_call' was "
-                    "renamed to 'mu_per_call' (amounts in MU, where 1 MU = 1 nanoERG). "
+                    "renamed to 'mu_per_call' (amounts in MU, the node's unit of account). "
                     "See docs/PRICING.md."
                 )
             for method, amount_mu in item.get("mu_per_call", {}).items():

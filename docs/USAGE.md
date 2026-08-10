@@ -50,7 +50,7 @@ These are the most commonly used commands for daily tasks:
   Prints:
   - execution feasibility (`YES/NO`)
   - reason when execution is not possible
-  - estimated costs in ERG (to start, and maintenance per hour)
+  - estimated costs (to start, and maintenance per hour)
   
   **Examples:**  
   `nodo estimate 1234567890abcdef`  
@@ -181,12 +181,12 @@ These are the most commonly used commands for daily tasks:
   service locally and hands our client an endpoint of its own. That is controlled
   by `network.DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`).
 
-- **increase_deposit `<instance id> <amount in ERG>`**  
-  Adds to a service instance's deposit.  
+- **increase_deposit `<instance id> <amount>`**  
+  Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
   **Example:**  
   `nodo increase_deposit abcdef1234567890 0.01`
 
-- **decrease_deposit `<instance id> <amount in ERG>`**  
+- **decrease_deposit `<instance id> <amount>`**  
   Takes back part of a service instance's deposit.  
   **Example:**  
   `nodo decrease_deposit abcdef1234567890 0.005`

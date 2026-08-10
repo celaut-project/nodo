@@ -172,30 +172,43 @@ this machine's addresses filled in; `nodo info` and `sudo nodo doctor` report wh
 resolves and whether the port is listening. Nothing verifies the forwarding from
 *outside* yet — that needs a peer to connect back.
 
-## `pricing`, `free_tier`, `deposits`
+## `pricing`, `free_tier`, `ui`, `deposits`
 
-What this node charges. Every amount is a decimal ERG string, parsed once into the
-node's integer unit of account. Full model and worked examples:
-[`PRICING.md`](PRICING.md).
+What this node charges, in **MU** — its own unit of account. What an MU is worth is set
+per payment system (`ledgers.ergo.payments.MU_PER_NANOERG`, below) and what you read is
+set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING.md).
 
 | Key | Default | Meaning |
 |---|---|---|
-| `pricing.RAM_ERG_PER_GIB_HOUR` | `"0.001"` | Memory held, per GiB-hour. |
-| `pricing.CPU_ERG_PER_VCPU_HOUR` | `"0.004"` | Compute held, per vCPU-hour. |
-| `pricing.DISK_ERG_PER_GIB_HOUR` | `"0.0001"` | Disk held, per GiB-hour. |
-| `pricing.NET_ERG_PER_GIB` | `"0.002"` | Tunnelled traffic, both directions (see [`TUNNELING.md`](TUNNELING.md)). |
-| `pricing.BUILD_ERG` | `"0.01"` | Building a service container, charged once. |
-| `pricing.TUNNEL_OPEN_ERG` | `"0.00001"` | Opening a tunnel, charged once. |
-| `pricing.MODIFY_RESOURCES_ERG` | `"0.00001"` | Changing a running instance's resources. |
+| `pricing.RAM_MU_PER_GIB_HOUR` | `1000000` | Memory held, per GiB-hour. |
+| `pricing.CPU_MU_PER_VCPU_HOUR` | `4000000` | Compute held, per vCPU-hour. |
+| `pricing.DISK_MU_PER_GIB_HOUR` | `100000` | Disk held, per GiB-hour. |
+| `pricing.NET_MU_PER_GIB` | `2000000` | Tunnelled traffic, both directions (see [`TUNNELING.md`](TUNNELING.md)). |
+| `pricing.BUILD_MU` | `10000000` | Building a service container, charged once. |
+| `pricing.TUNNEL_OPEN_MU` | `10000` | Opening a tunnel, charged once. |
+| `pricing.MODIFY_RESOURCES_MU` | `10000` | Changing a running instance's resources. |
 | `pricing.SCARCITY_MAX_MULTIPLIER` | `10` | Ceiling of the surcharge when a resource runs out. `1` prices purely by consumption. |
 | `pricing.SCARCITY_CURVE` | `1.0` | How fast the surcharge arrives. `1.0` is linear; higher stays near 1x until the resource is genuinely scarce. |
-| `free_tier.CREDIT_ERG_PER_NEW_CLIENT` | `"0"` | Starting balance given to every new client. |
+| `free_tier.CREDIT_MU_PER_NEW_CLIENT` | `0` | Starting balance given to every new client. |
 | `free_tier.FREE_WHILE_SCARCITY_BELOW` | `0.0` | Charge nothing while *every* resource is below this share of capacity. `0.0` disables it. |
+| `ui.DISPLAY_UNIT` | `erg` | What you read and type. `erg`, `mu`, or a name declared under `ui.UNITS`. Purely presentational. |
 | `deposits.MAX_FEE_OVERHEAD` | `0.02` | Largest share of a peer deposit that may go to the transaction fee. Sizes the deposit. |
 | `deposits.REFILL_BELOW` | `0.2` | Refill a peer once its balance drops below this share of a full deposit. |
 | `deposits.INITIAL_RUNTIME_HOURS` | `1.0` | How long a new instance is funded for when the client asks for no specific balance. |
 
-Set any price to `"0"` to give that resource away.
+Prices are whole MU: there is nothing smaller to express, so a fractional one is refused
+rather than rounded. Set any price to `0` to give that resource away.
+
+A display unit other than `erg`/`mu` is declared explicitly — the hook for showing a
+fiat figure later. Its rate is static and nothing refreshes it, so it goes stale; it
+never affects what is charged:
+
+```yaml
+ui:
+  DISPLAY_UNIT: usd
+  UNITS:
+    usd: { MU_PER_UNIT: 500000000, SYMBOL: "USD", DECIMALS: 2 }
+```
 
 ## `costs`, `timing`, `client`
 
@@ -214,6 +227,7 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 |---|---|---|
 | `ledgers.ergo.WALLET_MNEMONIC` | `""` | The one wallet the node controls. Empty disables payments/reputation; `"auto"` generates a fresh mnemonic on first load. **Secret.** |
 | `ledgers.ergo.NODE_URL` | `https://node.sigmaspace.io` | Ergo node used for chain access. |
+| `ledgers.ergo.payments.MU_PER_NANOERG` | `1` | What one nanoERG buys in MU — the one place the node's unit of account meets real money, and what peers are told as `ContractRate.mu_per_unit`. ERG↔nanoERG is fixed in code, not here. |
 | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | `""` | This node's reputation proof id (reconciled by `nodo sync_reputation_proof`). |
 | `ledgers.ergo.payments.HOT_WALLET_LIMITS` | `100` | Max ERG kept in the operational wallet before sweeping. |
 | `ledgers.ergo.payments.COLD_WALLET` | `""` | Public address to sweep excess to. Empty disables sweeping. Never a mnemonic. |

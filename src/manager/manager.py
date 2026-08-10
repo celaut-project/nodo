@@ -22,7 +22,7 @@ from src.utils.utils import (
     generate_uris_by_peer_id
 )
 from src.utils.config import ConfigManager
-from src.utils.monetary import free_tier, mu_to_erg_str
+from src.utils.monetary import free_tier, format_mu
 from src.virtualizers.interface import remove_firewall_rule
 from src.virtualizers.interface import kill
 from src.virtualizers.interface import hotplug
@@ -516,7 +516,7 @@ def __refund_function_factory(
 
 
 def increase_local_balance_for_client(client_id: str, amount_mu: int) -> bool:
-    log.LOGGER(f"Credit client {client_id} with {mu_to_erg_str(amount_mu)} ERG")
+    log.LOGGER(f"Credit client {client_id} with {format_mu(amount_mu)}")
     if not sc.client_exists(client_id=client_id):
         raise Exception('Client ' + client_id + ' does not exists.')
     if not __refund(
@@ -524,7 +524,7 @@ def increase_local_balance_for_client(client_id: str, amount_mu: int) -> bool:
             add_function=lambda amount: sc.add_balance(client_id=client_id, balance_mu=amount),
             token=client_id
     ):
-        raise Exception(f"Manager error: cannot credit client {client_id} with {mu_to_erg_str(amount_mu)} ERG")
+        raise Exception(f"Manager error: cannot credit client {client_id} with {format_mu(amount_mu)}")
     return True
 
 
@@ -553,13 +553,13 @@ def spend_mu(
 
             if balance < amount_mu and not ALLOW_DEBT:
                 log.LOGGER(
-                    f"Insufficient balance for client '{id}': {mu_to_erg_str(balance)} ERG available, "
-                    f"needed {mu_to_erg_str(amount_mu)} ERG."
+                    f"Insufficient balance for client '{id}': {format_mu(balance)} available, "
+                    f"needed {format_mu(amount_mu)}."
                 )
                 return False
 
             if debug_mode:
-                log.LOGGER(f"Charging client {id} {mu_to_erg_str(amount_mu)} ERG")
+                log.LOGGER(f"Charging client {id} {format_mu(amount_mu)}")
             sc.reduce_balance(client_id=id, balance_mu=amount_mu)
 
             __refund_function_factory(
@@ -594,11 +594,11 @@ def spend_mu(
                 return False
             if spent is False:
                 log.LOGGER(
-                    f"Insufficient balance for container '{id}': needed {mu_to_erg_str(amount_mu)} ERG."
+                    f"Insufficient balance for container '{id}': needed {format_mu(amount_mu)}."
                 )
                 return False
             if debug_mode:
-                log.LOGGER(f"Container {id} charged {mu_to_erg_str(amount_mu)} ERG.")
+                log.LOGGER(f"Container {id} charged {format_mu(amount_mu)}.")
 
             __refund_function_factory(
                 amount_mu=amount_mu,
@@ -830,7 +830,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
 def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
     service_token = resolve_instance_token(service_token) or service_token
 
-    log.LOGGER(f"Modify deposit of {service_token} by {mu_to_erg_str(abs(amount_mu))} ERG")
+    log.LOGGER(f"Modify deposit of {service_token} by {format_mu(abs(amount_mu))}")
 
     is_internal = sc.internal_instance_exists(id=service_token)
 

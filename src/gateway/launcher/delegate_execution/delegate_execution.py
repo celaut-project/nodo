@@ -13,7 +13,7 @@ from src.manager.metrics import balance_on_other_peer
 from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
 from src.utils import utils, logger as log
-from src.utils.monetary import mu_to_erg_str
+from src.utils.monetary import format_mu
 
 
 env_manager = ConfigManager()
@@ -67,7 +67,7 @@ def delegate_execution(
         if balance_on_other_peer(peer_id=peer) <= cost:
             raise Exception(
                 'Launch service error: not enough balance on ' + peer + '. '
-                'Current: ' + mu_to_erg_str(balance_on_other_peer(peer_id=peer)) + ' ERG, required: ' + mu_to_erg_str(cost) + ' ERG.'
+                'Current: ' + format_mu(balance_on_other_peer(peer_id=peer)) + ', required: ' + format_mu(cost) + '.'
             )
 
         log.LOGGER('Go to launch the service on ' + str(peer))

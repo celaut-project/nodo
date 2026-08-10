@@ -199,26 +199,29 @@ logs:
   MEMORY_LOGS: false
   DEBUG_MODE: false
 
-# What this node charges. Full model and worked examples: docs/PRICING.md.
+# What this node charges, in MU (monetary unit) -- the node's own unit of account.
+# Full model and worked examples: docs/PRICING.md.
 #
-# Every amount here is a decimal ERG string. It is parsed exactly once into the node's
-# integer unit of account (MU, pegged at 1 MU = 1 nanoERG), so no price ever goes
-# through a float. Nothing outside the node sees MU: the CLI shows ERG.
+# MU has no intrinsic value on its own. What one MU is worth is declared per payment
+# system (see ledgers.ergo.payments.MU_PER_NANOERG below), and what you read and type is
+# a third setting again (ui.DISPLAY_UNIT). Keeping the three apart is what lets a node
+# be paid in something other than ERG, or show you a different unit, without touching a
+# single price.
 #
 # There is no single "price of compute" on purpose. Each resource is priced on its own,
 # because a node may be short on memory and awash in disk and has to be able to say so.
-# Set a price to "0" to give that resource away.
+# Set a price to 0 to give that resource away.
 pricing:
-  RAM_ERG_PER_GIB_HOUR: "0.001"
-  CPU_ERG_PER_VCPU_HOUR: "0.004"
-  DISK_ERG_PER_GIB_HOUR: "0.0001"
+  RAM_MU_PER_GIB_HOUR: 1000000
+  CPU_MU_PER_VCPU_HOUR: 4000000
+  DISK_MU_PER_GIB_HOUR: 100000
   # Tunnelled traffic, counting both directions (see docs/TUNNELING.md).
-  NET_ERG_PER_GIB: "0.002"
+  NET_MU_PER_GIB: 2000000
   # One-off operations, charged once each. Not scaled by scarcity: they price work done
   # once, not occupancy.
-  BUILD_ERG: "0.01"
-  TUNNEL_OPEN_ERG: "0.00001"
-  MODIFY_RESOURCES_ERG: "0.00001"
+  BUILD_MU: 10000000
+  TUNNEL_OPEN_MU: 10000
+  MODIFY_RESOURCES_MU: 10000
   # Scarcity surcharge, applied to each resource independently from that resource's own
   # availability: 1x while it is plentiful, up to SCARCITY_MAX_MULTIPLIER once it is
   # exhausted. Set the maximum to 1 to price purely by consumption and ignore load.
@@ -229,20 +232,36 @@ pricing:
 
 # What this node gives away.
 free_tier:
-  # Starting balance credited to every new client. "0" gives nothing away.
-  CREDIT_ERG_PER_NEW_CLIENT: "0"
+  # Starting balance credited to every new client, in MU. 0 gives nothing away.
+  CREDIT_MU_PER_NEW_CLIENT: 0
   # Charge nothing while EVERY resource sits below this share of its capacity (0.0 to
   # 1.0). 0.0 disables it (always charge); 0.5 means "free while the node is under half
   # load". This is how you run a node that is free until it is actually busy.
   FREE_WHILE_SCARCITY_BELOW: 0.0
 
-# Deposit sizing. These are shares, not amounts: the node derives the ERG figures from
-# the ledger's own floor (an Ergo transaction costs a fee and cannot create an output
-# below the minimum box value), so a deposit is never quietly eaten by its own fee.
+# What the operator reads and types. Purely presentational: changing it never changes
+# what anybody is charged.
+ui:
+  # "erg" (default) or "mu". "erg" derives its rate from the ledger, so it stays correct
+  # if you change MU_PER_NANOERG.
+  #
+  # Any other name must be declared under ui.UNITS below. That is the hook for showing,
+  # say, a fiat figure -- but note the rate would be a static number nothing refreshes,
+  # so it goes stale. It never affects what is charged, only what is printed.
+  DISPLAY_UNIT: erg
+  # UNITS:
+  #   usd:
+  #     MU_PER_UNIT: 500000000
+  #     SYMBOL: "USD"
+  #     DECIMALS: 2
+
+# Deposit sizing. These are shares, not amounts: the node derives the figures from the
+# ledger's own floor (an Ergo transaction costs a fee and cannot create an output below
+# the minimum box value), so a deposit is never quietly eaten by its own fee.
 deposits:
   # Largest share of a peer deposit that may be lost to the transaction fee. 0.02 caps
-  # the fee at 2 % of the deposit, which with Ergo's 0.001 ERG fee sizes a deposit at
-  # 0.05 ERG. Lower it for cheaper transfers, at the cost of locking up more per peer.
+  # the fee at 2 % of the deposit. Lower it for cheaper transfers, at the cost of
+  # locking up more per peer.
   MAX_FEE_OVERHEAD: 0.02
   # Refill a peer once its remaining balance drops below this share of a full deposit.
   REFILL_BELOW: 0.2
@@ -277,9 +296,9 @@ communication:
 
 client:
   MIN_SLOTS_OPEN_PER_PEER: 1
-  # A client whose balance is at least this much (decimal ERG) has its expiration
-  # pushed back when it tops up: a funded client is an active one.
-  CLIENT_MIN_BALANCE_ERG_TO_RESET_EXPIRATION: "0.000001"
+  # A client whose balance is at least this many MU has its expiration pushed back
+  # when it tops up: a funded client is an active one.
+  CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION: 1000
   DEV_CLIENT_POOL_SIZE: 1
   DEV_EXTERNAL_CLIENT_POOL_SIZE: 1
 
@@ -409,9 +428,6 @@ general_flags:
 ledgers:
   ergo:
     tags: [ ergo ]
-    # No conversion factor here: the node's unit of account is pegged at
-    # 1 MU = 1 nanoERG, so ERG needs no rate. A ledger settling in something other than
-    # ERG is the case that needs one, and declares it as its ContractRate.
     NODE_URL: "https://node.sigmaspace.io"
     GENESIS_BLOCK_ID: "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
     # The ONE mnemonic of the whole node. It is both the wallet the node controls and
@@ -433,6 +449,19 @@ ledgers:
       PLAIN_TEXT_TYPE_NFT_ID: "8299d98e15ebee7fa39ad716de7c8bb191790a1bf4b7c3f91af35a0e36187706"
       CELAUT_NODE_TYPE_NFT_ID: "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
     payments:
+      # What one nanoERG buys, in MU. This is the ONE place the node's unit of account
+      # meets real money; it is what peers are told as ContractRate.mu_per_unit, so they
+      # can convert this node's prices into something they can compare.
+      #
+      # 1 is the sensible default: Ergo is the only payment system, so the simplest
+      # mapping is the right one, and it makes one MU one nanoERG. Change it only to
+      # rescale what MU means against ERG -- and if you do, re-read `pricing:`, since
+      # the two have to stay on the same scale (the node warns at startup if a
+      # reference charge would convert to zero nanoERG).
+      #
+      # Note that ERG <-> nanoERG (1e9) is NOT configurable: it is fixed by the Ergo
+      # protocol and lives in the code.
+      MU_PER_NANOERG: 1
       PAYMENT_MANAGER_ITERATION_TIME: 86400
       # Maximum balance (ERG, decimal string) retained in the operational wallet.
       HOT_WALLET_LIMITS: "100"

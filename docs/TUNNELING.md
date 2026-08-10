@@ -136,11 +136,11 @@ authorises the tunnel in the first place.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `pricing.TUNNEL_OPEN_ERG` | `"0.00001"` | Charged once per tunnel. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
-| `pricing.NET_ERG_PER_GIB` | `"0.002"` | Charged per GiB relayed, counting **both** directions. |
+| `pricing.TUNNEL_OPEN_MU` | `10000` | Charged once per tunnel. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
+| `pricing.NET_MU_PER_GIB` | `2000000` | Charged per GiB relayed, counting **both** directions. |
 | `costs.TUNNEL_CHARGE_INTERVAL_KB` | `1024` | How much traffic accumulates before it is billed. |
 
-Set a price to `"0"` to stop charging for it. Prices are in ERG; see
+Set a price to `0` to stop charging for it. Prices are in MU; see
 [`PRICING.md`](PRICING.md).
 
 Billing is incremental rather than at the end, since a tunnel has no fixed length
@@ -163,8 +163,9 @@ Two honest details:
 `tunnel_open_mu` and `net_mu_per_gib` are advertised to peers, together with the
 per-resource rates and the scarcity ceiling, inside `mu_per_call` of the gateway
 slot in this node's `Instance` — so a peer knows the prices before it negotiates
-anything. They are in MU (1 MU = 1 nanoERG), which is what makes them comparable
-between nodes. `nodo peers` shows them per peer under `[Rates]`.
+anything. They are in MU, and what an MU is worth travels with them as
+`ContractRate.mu_per_unit`, which is what makes them comparable between nodes.
+`nodo peers` shows them per peer under `[Rates]`.
 
 They are **ceilings, not quotes**, and the price of a *specific service* still
 comes from `GetServiceEstimatedCost`, which prices the actual resources requested.
@@ -321,7 +322,7 @@ they existed:
 * **`network.service_tunneling`, `network.tunnel_protocol`, `network.ddns`.**
   These specific keys never existed. The tunnelling settings that do exist are
   `network.DELEGATION_TUNNEL_POLICY`, `network.TUNNEL_UDP_IDLE_TIMEOUT_S`, and the
-  prices under `pricing.TUNNEL_OPEN_ERG` / `pricing.NET_ERG_PER_GIB` (see
+  prices under `pricing.TUNNEL_OPEN_MU` / `pricing.NET_MU_PER_GIB` (see
   *Metering*, above). Dynamic DNS is real too,
   just under a plain top-level `ddns:` section rather than nested in `network.` —
   see [CONFIG.md](CONFIG.md).

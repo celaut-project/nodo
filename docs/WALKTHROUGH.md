@@ -126,10 +126,9 @@ grpcurl -H "authorization: <instance id>" -d '{"input": "..."}' \
   203.0.113.10:50051 my.solver.Solver/Solve
 ```
 
-Each call is metered per `service.json → api.mu_per_call` (here `Solve` costs
-100 MU, i.e. 100 nanoERG). Top up a running instance with
-`nodo increase_deposit c92ae2ff1b7d4a0e… 0.001` (use the full instance id); the
-amount is in ERG.
+Each call is metered per `service.json → api.mu_per_call` (here `Solve` costs 100 MU).
+Top up a running instance with `nodo increase_deposit c92ae2ff1b7d4a0e… 0.001` (use the
+full instance id); the amount is in whatever `ui.DISPLAY_UNIT` says, ERG by default.
 
 ## 6. Observe live metrics and network activity
 

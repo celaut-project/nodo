@@ -15,10 +15,11 @@ env_manager = ConfigManager()
 # contract: a peer reads them out of Service.Api.Slot.mu_per_call, so renaming one
 # silently drops it for everybody who already knows the old name.
 #
-# Every rate is in MU, and MU is pegged (1 MU = 1 nanoERG), so a peer reading these can
-# compare two nodes in actual money. That is the whole reason the peg exists: the rates
-# this map used to carry were denominated in an undefined unit and meant nothing to the
-# node reading them.
+# Every rate is in MU. What an MU is worth travels alongside them in
+# `Peer.payment_contracts` as `ContractRate.mu_per_unit`, so a peer reading a rate can
+# convert it into real money and compare two nodes. The rates this map used to carry
+# were denominated in "gas", which nothing anywhere declared a rate for, so they meant
+# nothing to the node reading them.
 RATE_RAM_PER_GIB_SECOND = "ram_mu_per_gib_second"
 RATE_CPU_PER_VCPU_SECOND = "cpu_mu_per_vcpu_second"
 RATE_DISK_PER_GIB_SECOND = "disk_mu_per_gib_second"

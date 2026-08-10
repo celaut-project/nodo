@@ -4,7 +4,7 @@ from protos import celaut_pb2 as celaut
 from src.database.access_functions.ledgers import get_peer_contract_instances
 from src.utils.utils import to_amount
 from src.utils.logger import LOGGER
-from src.utils.monetary import MU_PER_ERG
+from src.utils.monetary import mu_per_erg
 from src.utils.contract_xattrs import set_contract_type, set_script, set_token_id
 
 CONTRACT = "proveDlog(decodePoint())"
@@ -75,10 +75,10 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
         set_contract_type(contract_ledger, CONTRACT.encode("utf-8"))
         set_token_id(contract_ledger, "ERG")
 
-        # What one unit of this contract is worth. For ERG that is the peg itself:
-        # a peer paying 1 ERG credits MU_PER_ERG MU. A ledger settling in something
-        # else is where this rate stops being a constant.
+        # What one unit of this contract is worth, in this node's MU. This is the only
+        # thing that makes a price quoted in MU actionable to whoever reads it, so it
+        # travels with every advertisement.
         yield celaut.ContractRate(
             contract=contract_ledger,
-            mu_per_unit=to_amount(MU_PER_ERG),
+            mu_per_unit=to_amount(mu_per_erg()),
         )

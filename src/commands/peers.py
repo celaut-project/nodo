@@ -3,7 +3,7 @@ import sqlite3
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
-from src.utils.monetary import mu_to_erg_str
+from src.utils.monetary import format_mu
 from src.database.sql_connection import SQLConnection
 
 env_manager = ConfigManager()
@@ -95,7 +95,7 @@ def list_peers():
             # Section: Client & Balance
             print("[Client & Balance]")
             print(f"  Remote Client ID: {remote_client_id}")
-            print(f"  Our balance there: {mu_to_erg_str(balance)} ERG")
+            print(f"  Our balance there: {format_mu(balance)}")
             print(f"  Balance last update: {balance_last_update or 'None'}")
             print()
 
@@ -118,7 +118,7 @@ def list_peers():
             # What this peer charges on a recurring basis, as it advertised. These
             # are ceilings, not quotes -- the price of a specific service still
             # comes from GetServiceEstimatedCost.
-            print("[Rates] (base prices in MU; 1 MU = 1 nanoERG)")
+            print("[Rates] (base prices in MU; see [Contracts] for what an MU is worth)")
             if advertised_rates:
                 for rate, value in sorted(advertised_rates.items()):
                     print(f"  {rate}: {value}")
