@@ -103,7 +103,7 @@ is concrete rather than hand-wavy.
 ### 2.4 Stopping the fallback (preemption path)
 
 - `src/manager/manager.py:531` — `stop_instance(token: str)` is the canonical
-  stop. It handles internal and external instances, refunds gas, purges DB, and
+  stop. It handles internal and external instances, refunds the balance, purges DB, and
   calls `kill(vmachine_id=...)`.
 - Gateway exposes it: `Gateway.StopService` at `src/gateway/gateway.py:31` calls
   `stop_instance(token=token)`.

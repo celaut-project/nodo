@@ -37,7 +37,7 @@ _OLD_LOCAL_INSTANCES = """
         name TEXT NOT NULL UNIQUE,
         ip TEXT,
         father_id TEXT,
-        gas TEXT,
+        balance_mu TEXT,
         mem_limit INTEGER,
         disk_space INTEGER,
         serialized_instance TEXT,

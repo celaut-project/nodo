@@ -17,11 +17,12 @@ from src.utils import utils
 from src.utils.config import ConfigManager
 from src.utils.instance_names import normalize_instance_name, random_instance_name
 from src.utils.utils import (
-    from_gas_amount,
-    to_gas_amount,
+    from_amount,
+    to_amount,
     generate_uris_by_peer_id
 )
 from src.utils.config import ConfigManager
+from src.utils.monetary import free_tier, mu_to_erg_str
 from src.virtualizers.interface import remove_firewall_rule
 from src.virtualizers.interface import kill
 from src.virtualizers.interface import hotplug
@@ -32,22 +33,11 @@ from src.virtualizers.firewall import (
 
 env_manager = ConfigManager()
 
-ALLOW_GAS_DEBT = env_manager.get("ALLOW_GAS_DEBT")
+ALLOW_DEBT = bool(env_manager.get("ALLOW_DEBT", True))
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MIN_SLOTS_OPEN_PER_PEER = env_manager.get("MIN_SLOTS_OPEN_PER_PEER")
-DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
-DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
-USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR = env_manager.get("USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR")
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
-def _parse_config_int(value, *, name: str) -> int:
-    try:
-        return int(Decimal(str(value)))
-    except (ValueError, InvalidOperation) as e:
-        raise ValueError(f"Invalid integer-like config value for {name}: {value}") from e
 
-
-FEE_TRIAL_GAS_AMOUNT = _parse_config_int(env_manager.get("FREE_TRIAL_GAS_AMOUNT"), name="FREE_TRIAL_GAS_AMOUNT")
-DEV_CLIENT_GAS_AMOUNT = _parse_config_int(env_manager.get("DEV_CLIENT_GAS_AMOUNT"), name="DEV_CLIENT_GAS_AMOUNT")
 DEV_CLIENT_PREFIX = "dev-"
 EXTERNAL_DEV_CLIENT_PREFIX = "dev-external-"
 STANDARD_DEV_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_CLIENT_POOL_SIZE", 1))
@@ -90,33 +80,42 @@ def _get_dev_clients_by_prefix(prefix: str) -> List[str]:
     return [client_id for client_id in sc.get_dev_clients() if str(client_id).startswith(prefix)]
 
 
-def _get_client_gas_amount(client_id: str) -> Optional[int]:
-    client_gas = sc.get_client_gas(client_id=client_id)
+def _get_client_balance(client_id: str) -> Optional[int]:
+    client_gas = sc.get_client_balance(client_id=client_id)
     if not client_gas:
-        log.LOGGER(f"Client {client_id} has no readable gas entry. Skipping.")
+        log.LOGGER(f"Client {client_id} has no readable balance entry. Skipping.")
         return None
     return client_gas[0]
 
 
-def _target_dev_client_gas(gas_amount: int) -> int:
-    return max(DEV_CLIENT_GAS_AMOUNT, int(gas_amount) + 1)
+def _target_dev_client_balance(amount_mu: int) -> int:
+    """Dev clients are unmetered, so their balance only has to clear whatever the
+    caller is about to spend.
+
+    This used to be `max(DEV_CLIENT_GAS_AMOUNT, ...)` with DEV_CLIENT_GAS_AMOUNT set to
+    1e256 -- a number chosen to mean "never runs out", which is a flag pretending to be
+    an amount. `sc.add_client(unmetered=True)` says it directly, and the balance stays a
+    figure a human can read.
+    """
+    return int(amount_mu) + 1
 
 
-def _create_dev_client(prefix: str, gas_amount: Optional[int] = None) -> str:
+def _create_dev_client(prefix: str, amount_mu: Optional[int] = None) -> str:
     client_id = f"{prefix}{uuid4()}"
     sc.add_client(
         client_id=client_id,
-        gas=_target_dev_client_gas(gas_amount or 0),
+        balance_mu=_target_dev_client_balance(amount_mu or 0),
         last_usage=None,
+        unmetered=True,
     )
     return client_id
 
 
-def _create_verified_dev_client(prefix: str, gas_amount: int) -> str:
+def _create_verified_dev_client(prefix: str, amount_mu: int) -> str:
     for _ in range(3):
-        client_id = _create_dev_client(prefix, gas_amount=gas_amount)
-        client_gas = _get_client_gas_amount(client_id=client_id)
-        if client_gas is not None and client_gas > gas_amount:
+        client_id = _create_dev_client(prefix, amount_mu=amount_mu)
+        client_gas = _get_client_balance(client_id=client_id)
+        if client_gas is not None and client_gas > amount_mu:
             return client_id
         log.LOGGER(f"Dev client {client_id} was created but not readable. Retrying.")
     raise RuntimeError(f"No dev client available for prefix {prefix}.")
@@ -126,17 +125,17 @@ def _ensure_dev_client_pool(prefix: str, pool_size: int) -> List[str]:
     clients = _get_dev_clients_by_prefix(prefix)
     readable_clients: List[str] = []
     for client_id in clients:
-        client_gas = _get_client_gas_amount(client_id=client_id)
+        client_gas = _get_client_balance(client_id=client_id)
         if client_gas is None:
             continue
-        target_gas = _target_dev_client_gas(0)
+        target_gas = _target_dev_client_balance(0)
         if client_gas < target_gas:
-            sc.add_gas(client_id=client_id, gas=target_gas - client_gas)
+            sc.add_balance(client_id=client_id, balance_mu=target_gas - client_gas)
         readable_clients.append(client_id)
     missing_clients = max(0, pool_size - len(readable_clients))
     for _ in range(missing_clients):
         log.LOGGER(f"Adds dev client for prefix {prefix}.")
-        readable_clients.append(_create_verified_dev_client(prefix, gas_amount=0))
+        readable_clients.append(_create_verified_dev_client(prefix, amount_mu=0))
     return readable_clients
 
 
@@ -145,40 +144,40 @@ def ensure_dev_client_pools() -> None:
     _ensure_dev_client_pool(EXTERNAL_DEV_CLIENT_PREFIX, DEV_EXTERNAL_CLIENT_POOL_SIZE)
 
 
-def _acquire_dev_client(prefix: str, pool_size: int, gas_amount: int) -> str:
+def _acquire_dev_client(prefix: str, pool_size: int, amount_mu: int) -> str:
     clients = _ensure_dev_client_pool(prefix, pool_size)
 
     for client_id in clients:
-        client_gas = _get_client_gas_amount(client_id=client_id)
-        if client_gas is not None and client_gas > gas_amount:
+        client_gas = _get_client_balance(client_id=client_id)
+        if client_gas is not None and client_gas > amount_mu:
             return client_id
 
     if not clients:
-        return _create_verified_dev_client(prefix, gas_amount=gas_amount)
+        return _create_verified_dev_client(prefix, amount_mu=amount_mu)
 
     client_id = clients[0]
-    current_gas = _get_client_gas_amount(client_id=client_id)
+    current_gas = _get_client_balance(client_id=client_id)
     if current_gas is None:
-        return _create_verified_dev_client(prefix, gas_amount=gas_amount)
+        return _create_verified_dev_client(prefix, amount_mu=amount_mu)
 
-    target_gas = _target_dev_client_gas(gas_amount)
+    target_gas = _target_dev_client_balance(amount_mu)
     if current_gas < target_gas:
-        sc.add_gas(client_id=client_id, gas=target_gas - current_gas)
+        sc.add_balance(client_id=client_id, balance_mu=target_gas - current_gas)
     return client_id
 
 
-def get_dev_clients(gas_amount: int) -> Generator[str, None, None]:
+def get_dev_clients(amount_mu: int) -> Generator[str, None, None]:
     clients = _ensure_dev_client_pool(DEV_CLIENT_PREFIX, STANDARD_DEV_CLIENT_POOL_SIZE)
     for client_id in clients:
-        client_gas = _get_client_gas_amount(client_id=client_id)
-        if client_gas is not None and client_gas > gas_amount:
+        client_gas = _get_client_balance(client_id=client_id)
+        if client_gas is not None and client_gas > amount_mu:
             yield client_id
 
 
-def get_execute_client(gas_amount: int, external: bool = False) -> str:
+def get_execute_client(amount_mu: int, external: bool = False) -> str:
     prefix = EXTERNAL_DEV_CLIENT_PREFIX if external else DEV_CLIENT_PREFIX
     pool_size = DEV_EXTERNAL_CLIENT_POOL_SIZE if external else STANDARD_DEV_CLIENT_POOL_SIZE
-    return _acquire_dev_client(prefix, pool_size, gas_amount)
+    return _acquire_dev_client(prefix, pool_size, amount_mu)
             
 def add_reputation_proof(contract_ledger, peer_id) -> bool:
     from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_ergo_reputation
@@ -318,7 +317,7 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
         if not sc.peer_exists(peer_id=peer_id):
             # Migration (issue #236): this peer may already be here under the random
             # uuid4 id it got before node identity existed. Adopt that row instead of
-            # starting a second one, or its gas, external client id, contracts and
+            # starting a second one, or its balance, external client id, contracts and
             # reputation would be stranded on a record nothing references again.
             legacy_id = _known_peer_id(peer.uri)
             if legacy_id and legacy_id != peer_id and sc.rekey_peer(legacy_id, peer_id):
@@ -373,12 +372,12 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     _store_peer_uris(peer=peer, peer_id=peer_id)
 
     # Contracts
-    for gas_price in peer.payment_contracts:
-        log.LOGGER(f"Adding contract {gas_price.contract} for peer {peer_id}")
+    for rate in peer.payment_contracts:
+        log.LOGGER(f"Adding contract {rate.contract} for peer {peer_id}")
         try:
-            sc.add_contract(contract=gas_price.contract, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
+            sc.add_contract(contract=rate.contract, peer_id=peer_id, mu_per_unit=from_amount(rate.mu_per_unit))
         except Exception as e:
-            log.LOGGER(f"Error adding contract {gas_price.contract} for peer {peer_id}: {e}")
+            log.LOGGER(f"Error adding contract {rate.contract} for peer {peer_id}: {e}")
 
     for contract in peer.reputation_proofs:
         log.LOGGER(f"Adding reputation proof {contract} for peer {peer_id}")
@@ -406,13 +405,13 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
     # Contracts
     if not peer.payment_contracts:
         log.LOGGER(f"Peer {peer_id} advertises no payment contract; it cannot be paid.")
-    for gas_price in peer.payment_contracts:
-        log.LOGGER(f"Adding contract {gas_price.contract} for peer {peer_id}")
+    for rate in peer.payment_contracts:
+        log.LOGGER(f"Adding contract {rate.contract} for peer {peer_id}")
         try:
-            sc.add_contract(contract=gas_price.contract, peer_id=peer_id, gas_price=from_gas_amount(gas_price.gas_amount))
+            sc.add_contract(contract=rate.contract, peer_id=peer_id, mu_per_unit=from_amount(rate.mu_per_unit))
         except Exception as e:
             # One malformed contract must not abort the rest of the refresh.
-            log.LOGGER(f"Error adding contract {gas_price.contract} for peer {peer_id}: {e}")
+            log.LOGGER(f"Error adding contract {rate.contract} for peer {peer_id}: {e}")
 
     for contract_ledger in peer.reputation_proofs:
         if not add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
@@ -490,13 +489,13 @@ def accept_peer_refresh(peer: celaut_pb2.Peer, peer_id: str) -> bool:
 def get_internal_service_id_by_uri(uri: str) -> str:
     return sc.get_local_instance_id_by_uri(uri=uri)
 
-def __refund_gas(
-        gas: int = None,
+def __refund(
+        amount_mu: int = None,
         token: str = None,
-        add_function=None,  # Lambda function if cache is not a dict of token:gas
+        add_function=None,  # Lambda if the cache is not a dict of token:balance
 ) -> bool:
     try:
-        add_function(gas)
+        add_function(amount_mu)
     except Exception as e:
         log.LOGGER('Manager error: ' + str(e))
         return False
@@ -504,66 +503,70 @@ def __refund_gas(
 
 
 # Only can be executed once.
-def __refund_gas_function_factory(
-        gas: int = None,
+def __refund_function_factory(
+        amount_mu: int = None,
         token: str = None,
         container: list = None,
         add_function=None
 ) -> lambda: None:
     if container is not None:
         container.append(
-            lambda: __refund_gas(gas=gas, token=token, add_function=add_function)
+            lambda: __refund(amount_mu=amount_mu, token=token, add_function=add_function)
         )
 
 
-def increase_local_gas_for_client(client_id: str, amount: int) -> bool:
-    log.LOGGER('Increase local gas for client ' + client_id + ' of ' + str(amount))
+def increase_local_balance_for_client(client_id: str, amount_mu: int) -> bool:
+    log.LOGGER(f"Credit client {client_id} with {mu_to_erg_str(amount_mu)} ERG")
     if not sc.client_exists(client_id=client_id):
         raise Exception('Client ' + client_id + ' does not exists.')
-    if not __refund_gas(
-            gas=amount,
-            add_function=lambda gas: sc.add_gas(client_id=client_id, gas=gas),
+    if not __refund(
+            amount_mu=amount_mu,
+            add_function=lambda amount: sc.add_balance(client_id=client_id, balance_mu=amount),
             token=client_id
     ):
-        raise Exception('Manager error: cannot increase local gas for client ' + client_id + ' by ' + str(amount))
+        raise Exception(f"Manager error: cannot credit client {client_id} with {mu_to_erg_str(amount_mu)} ERG")
     return True
 
 
-def spend_gas(
+def spend_mu(
         id: str,
-        gas_to_spend: int,
-        refund_gas_function_container: list = None,
+        amount_mu: int,
+        refund_function_container: list = None,
         debug_mode: bool=True
 ) -> bool:
     """
-    Attempts to deduct gas from a client or container.
+    Attempts to deduct MU from a client or instance.
     Returns True if successful, False otherwise (with logging on failures).
     """
-    gas_to_spend = int(gas_to_spend)
+    amount_mu = int(amount_mu)
     try:
         is_client = sc.client_exists(client_id=id)
         # If the identifier corresponds to a client
         if is_client:
-            client_data = sc.get_client_gas(client_id=id)
+            client_data = sc.get_client_balance(client_id=id)
             if not client_data:
-                log.LOGGER(f"No gas record found for client '{id}'.")
+                log.LOGGER(f"No balance record found for client '{id}'.")
                 return False
 
-            actual_gas, last_usage, sci_not = client_data
-            actual_gas = int(actual_gas)
+            balance, last_usage, _ = client_data
+            balance = int(balance)
 
-            if actual_gas < gas_to_spend and not bool(ALLOW_GAS_DEBT):
-                log.LOGGER(f"Insufficient gas for client '{id}': {sci_not} available, needed {log.ssformat(gas_to_spend)}.")
+            if balance < amount_mu and not ALLOW_DEBT:
+                log.LOGGER(
+                    f"Insufficient balance for client '{id}': {mu_to_erg_str(balance)} ERG available, "
+                    f"needed {mu_to_erg_str(amount_mu)} ERG."
+                )
                 return False
 
-            if debug_mode: log.LOGGER(f"Reduce {log.ssformat(gas_to_spend)} gas for the client {id}")
-            sc.reduce_gas(client_id=id, gas=gas_to_spend)
+            if debug_mode:
+                log.LOGGER(f"Charging client {id} {mu_to_erg_str(amount_mu)} ERG")
+            sc.reduce_balance(client_id=id, balance_mu=amount_mu)
 
-            __refund_gas_function_factory(
-                gas=gas_to_spend,
+            __refund_function_factory(
+                amount_mu=amount_mu,
                 token=id,
-                add_function=lambda gas: sc.add_gas(client_id=id, gas=gas),
-                container=refund_gas_function_container
+                add_function=lambda amount: sc.add_balance(client_id=id, balance_mu=amount),
+                container=refund_function_container
             )
             return True
 
@@ -583,34 +586,37 @@ def spend_gas(
             # Atomic read-check-write: a service tunnel bills the same container
             # from both relay directions at once, and a separate get/update would
             # let two threads read the same balance and lose one deduction.
-            spent = sc.spend_container_gas(
-                id=id, gas_to_spend=gas_to_spend, allow_debt=bool(ALLOW_GAS_DEBT)
+            spent = sc.spend_instance_balance(
+                id=id, amount_mu=amount_mu, allow_debt=ALLOW_DEBT
             )
             if spent is None:
-                log.LOGGER(f"Container '{id}' does not exist; cannot spend gas.")
+                log.LOGGER(f"Container '{id}' does not exist; cannot charge it.")
                 return False
             if spent is False:
-                log.LOGGER(f"Insufficient gas for container '{id}': needed {log.ssformat(gas_to_spend)}.")
+                log.LOGGER(
+                    f"Insufficient balance for container '{id}': needed {mu_to_erg_str(amount_mu)} ERG."
+                )
                 return False
-            if debug_mode: log.LOGGER(f"Container {id} spent {log.ssformat(gas_to_spend)} gas.")
+            if debug_mode:
+                log.LOGGER(f"Container {id} charged {mu_to_erg_str(amount_mu)} ERG.")
 
-            __refund_gas_function_factory(
-                gas=gas_to_spend,
-                add_function=lambda gas: sc.update_gas_to_container(id=id, gas=gas),
+            __refund_function_factory(
+                amount_mu=amount_mu,
+                add_function=lambda amount: sc.update_instance_balance(id=id, balance_mu=amount),
                 token=id,
-                container=refund_gas_function_container
+                container=refund_function_container
             )
             return True
 
     except Exception as e:
-        log.LOGGER(f"Manager error spending gas for '{id}': {e}")
+        log.LOGGER(f"Manager error charging '{id}': {e}")
         return False
 
 
 def generate_client() -> celaut_pb2.Client:
     # No collisions expected.
     client_id = uuid4().hex
-    sc.add_client(client_id=client_id, gas=FEE_TRIAL_GAS_AMOUNT, last_usage=None)
+    sc.add_client(client_id=client_id, balance_mu=free_tier().credit_mu_per_new_client, last_usage=None)
     log.LOGGER('New client created ' + client_id)
     return celaut_pb2.Client(
         client_id=client_id,
@@ -667,13 +673,20 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
     return new_client_id
 
 
-def default_initial_cost(
-        father_id: str = None,
-) -> int:
-    log.LOGGER('Default cost for ' + (father_id if father_id else 'local'))
-    return (int(
-        sc.get_gas_amount_by_father_id(id=father_id) * DEFAULT_INITIAL_GAS_AMOUNT_FACTOR)
-    ) if father_id and USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR else int(DEFAULT_INITIAL_GAS_AMOUNT)
+def default_initial_balance(system_resources: celaut_pb2.Sysresources = None) -> int:
+    """MU to fund a new instance with when nobody asked for a specific amount.
+
+    Derived rather than configured: it is what the requested resources actually cost for
+    `deposits.INITIAL_RUNTIME_HOURS`. The flat `DEFAULT_INITIAL_GAS_AMOUNT` this replaces
+    funded a 128 MiB instance and an 8 GiB one identically, which meant it was either
+    far too much for one or far too little for the other.
+    """
+    hours = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0))
+    if hours <= 0 or system_resources is None:
+        return 0
+    from src.utils.cost_functions.execution_cost import maintenance_charge_mu
+
+    return maintenance_charge_mu(system_resources=system_resources, seconds=hours * 3600)
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     sys_req = sc.get_sys_req(id=id)
@@ -682,9 +695,7 @@ def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
             mem_limit=sys_req["mem_limit"],
             disk_space=sys_req["disk_space"],
         ),
-        gas=to_gas_amount(
-            gas_amount=sc.get_container_gas(id=id)
-        )
+        balance=to_amount(sc.get_instance_balance(id=id))
     )
 
 
@@ -710,7 +721,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
         serialized_instance = sc.get_internal_instance(id=token)
         
         try:
-            refund = sc.get_container_gas(id=token)
+            refund = sc.get_instance_balance(id=token)
             if reserved_mem_limit > 0:
                 #  IOBigData().unlock_ram(ram_amount=reserved_mem_limit)
                 IOBigData().log_snapshot(
@@ -741,13 +752,16 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
                 log.LOGGER(f"No peer uri for the peer {peer_id}")
                 return None
             
-            refund = utils.from_gas_amount(
+            refund = utils.from_amount(
                 next(bee.client_grpc(
                     method=celaut_pb2_grpc.GatewayStub(
                         grpc.insecure_channel(peer_uri)
                     ).StopService,
                         partitions_message_mode_parser=True,
-                        indices_parser=celaut_pb2.ModifyGasDepositOutput,
+                        # StopService answers with a Refund, whose field is `amount`.
+                        # This parsed it as a deposit-modification output, which has no
+                        # such field -- pre-existing, surfaced by the rename.
+                        indices_parser=celaut_pb2.Refund,
                         input=celaut_pb2.TokenMessage(token=external_token)
                 )).amount
             )
@@ -807,74 +821,66 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
         except Exception as e:
             log.LOGGER(f"Exception removing rules for the father {father_id}")
 
-    # __refound_gas() # TODO refound gas to parent.
+    # TODO refund the remaining balance to the parent.
     #  env variable could be used.
     return refund
 
 
-# Modify Gas Deposit
-def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
+# Modify an instance's deposit, in MU.
+def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
     service_token = resolve_instance_token(service_token) or service_token
-    
-    log.LOGGER(f"Modify {gas_amount} gas of the service {service_token}")
-    
+
+    log.LOGGER(f"Modify deposit of {service_token} by {mu_to_erg_str(abs(amount_mu))} ERG")
+
     is_internal = sc.internal_instance_exists(id=service_token)
-    
+
     if is_internal:
         father_id = sc.get_internal_father_id(id=service_token)
     else:
         external_token = sc.get_delegated_token_by_id(id=service_token)
         if not external_token:
             log.LOGGER(f"ERROR: The service {service_token} is not a valid external service.")
-            return False, 'Invalid external service token' 
+            return False, 'Invalid external service token'
 
         father_id = sc.get_external_father_id(token=external_token)
-        
+
     if not father_id:
         log.LOGGER(f"ERROR: The service {service_token} (internal {is_internal})  doesn't have father.  This should never happen.")
         return False, 'No father id'
-    
-    # if gas_amount > father_amount: 
-    #   return False, "The father does not have enough gas."    
-    #   #  If it cannot, it will throw an exception later.
-    
-    if gas_amount > 0:
-        log.LOGGER(f"Spend gas from father {father_id}")
-        if not spend_gas(
+
+    if amount_mu > 0:
+        log.LOGGER(f"Charge father {father_id}")
+        if not spend_mu(
                 id=father_id,
-                gas_to_spend=gas_amount,
-                refund_gas_function_container=[]
+                amount_mu=amount_mu,
+                refund_function_container=[]
         ):
-            return False, 'Error spending gas'
-    
-    elif gas_amount < 0:
-        # This should be a increase_gas() function, reverse to spend_gas()
-        log.LOGGER(f"Add gas to father {father_id}")
-        
+            return False, 'Error charging the father'
+
+    elif amount_mu < 0:
+        # The reverse of spend_mu(): what the instance gives back goes to its father.
+        log.LOGGER(f"Credit father {father_id}")
+
         if sc.internal_instance_exists(id=father_id):
-            _gas = sc.get_container_gas(id=father_id)
-            _gas += abs(gas_amount)
-            sc.update_gas_to_container(id=service_token, gas=_gas)
-            
+            father_balance = sc.get_instance_balance(id=father_id) + abs(amount_mu)
+            sc.update_instance_balance(id=father_id, balance_mu=father_balance)
+
         elif sc.client_exists(client_id=father_id):
-            sc.add_gas(client_id=father_id, gas=gas_amount)
-        
+            sc.add_balance(client_id=father_id, balance_mu=abs(amount_mu))
+
         else:
             return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
-            
-        pass
-    
+
     else:
-        return True, '0 gas have no sense'
-    
+        return True, 'Nothing to modify'
+
     if is_internal:
-        current_gas = sc.get_container_gas(id=service_token)
-        desired_amount = current_gas+gas_amount
-        
+        desired_amount = sc.get_instance_balance(id=service_token) + amount_mu
+
         if desired_amount < 0:
             return False, "Negative amount have no sense"
-        sc.update_gas_to_container(id=service_token, gas=desired_amount)
-    
+        sc.update_instance_balance(id=service_token, balance_mu=desired_amount)
+
     else:
         try:
             external_token = sc.get_delegated_token_by_id(id=service_token)
@@ -886,23 +892,23 @@ def modify_gas_deposit(gas_amount: int, service_token: str) -> Tuple[bool, str]:
             if not peer_id:
                 log.LOGGER(f"No peer for the token {external_token}")
                 return False, "No peer found for the external service."
-                
+
             _output = next(bee.client_grpc(
                 method=celaut_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(utils.generate_uris_by_peer_id(peer_id))
                     )
-                ).ModifyGasDeposit,
+                ).ModifyDeposit,
                 partitions_message_mode_parser=True,
-                indices_parser=celaut_pb2.ModifyGasDepositOutput,
-                input=celaut_pb2.ModifyGasDepositInput(
-                    gas_difference=utils.to_gas_amount(gas_amount),
+                indices_parser=celaut_pb2.ModifyDepositOutput,
+                input=celaut_pb2.ModifyDepositInput(
+                    difference=utils.to_amount(amount_mu),
                     service_token=external_token
                 )
             ))
             return _output.success, _output.message
         except Exception as e:
-            log.LOGGER(f"Exception on modify_gas_deposit for external service: {e}")
+            log.LOGGER(f"Exception on modify_deposit for external service: {e}")
             return False, "Node error."
-    
-    return True, "Gas modified correctly"
+
+    return True, "Deposit modified correctly"

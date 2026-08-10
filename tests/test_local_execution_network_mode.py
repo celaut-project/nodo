@@ -5,12 +5,12 @@ IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
     import src.gateway.launcher.local_execution.local_execution as local_execute
-    from src.utils.utils import to_gas_amount
+    from src.utils.utils import to_amount
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]
     local_execute = None  # type: ignore[assignment]
-    to_gas_amount = None  # type: ignore[assignment]
+    to_amount = None  # type: ignore[assignment]
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -33,7 +33,7 @@ class LocalExecutionNetworkModeTests(unittest.TestCase):
 
     def test_external_execute_advertises_host_ip_for_reserved_external_dev_client(self):
         config = celaut.Configuration(
-            initial_gas_amount=to_gas_amount(1234),
+            initial_mu=to_amount(1234),
         )
         resources = celaut.Service.Container.Resources(at_init=celaut.Sysresources(mem_limit=128))
         service = celaut.Service(
@@ -86,7 +86,7 @@ class LocalExecutionNetworkModeTests(unittest.TestCase):
                 metadata=metadata,
                 service=service,
                 service_id="svc-hash",
-                refund_gas=[],
+                refund_container=[],
             )
 
         self.assertEqual(instance.instance.uri_slot[0].internal_port, 8080)
@@ -95,7 +95,7 @@ class LocalExecutionNetworkModeTests(unittest.TestCase):
 
     def test_local_execution_filters_reserved_instance_name_env_before_virtualizer(self):
         config = celaut.Configuration(
-            initial_gas_amount=to_gas_amount(1234),
+            initial_mu=to_amount(1234),
         )
         config.environment_variables["__nodo_instance_name"] = b"My Instance"
         config.environment_variables["APP_ENV"] = b"prod"
@@ -155,7 +155,7 @@ class LocalExecutionNetworkModeTests(unittest.TestCase):
                 metadata=metadata,
                 service=service,
                 service_id="svc-hash",
-                refund_gas=[],
+                refund_container=[],
             )
 
         reserve_name_mock.assert_called_once_with(requested_name="my-instance")

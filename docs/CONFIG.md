@@ -172,13 +172,37 @@ this machine's addresses filled in; `nodo info` and `sudo nodo doctor` report wh
 resolves and whether the port is listening. Nothing verifies the forwarding from
 *outside* yet — that needs a peer to connect back.
 
+## `pricing`, `free_tier`, `deposits`
+
+What this node charges. Every amount is a decimal ERG string, parsed once into the
+node's integer unit of account. Full model and worked examples:
+[`PRICING.md`](PRICING.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `pricing.RAM_ERG_PER_GIB_HOUR` | `"0.001"` | Memory held, per GiB-hour. |
+| `pricing.CPU_ERG_PER_VCPU_HOUR` | `"0.004"` | Compute held, per vCPU-hour. |
+| `pricing.DISK_ERG_PER_GIB_HOUR` | `"0.0001"` | Disk held, per GiB-hour. |
+| `pricing.NET_ERG_PER_GIB` | `"0.002"` | Tunnelled traffic, both directions (see [`TUNNELING.md`](TUNNELING.md)). |
+| `pricing.BUILD_ERG` | `"0.01"` | Building a service container, charged once. |
+| `pricing.TUNNEL_OPEN_ERG` | `"0.00001"` | Opening a tunnel, charged once. |
+| `pricing.MODIFY_RESOURCES_ERG` | `"0.00001"` | Changing a running instance's resources. |
+| `pricing.SCARCITY_MAX_MULTIPLIER` | `10` | Ceiling of the surcharge when a resource runs out. `1` prices purely by consumption. |
+| `pricing.SCARCITY_CURVE` | `1.0` | How fast the surcharge arrives. `1.0` is linear; higher stays near 1x until the resource is genuinely scarce. |
+| `free_tier.CREDIT_ERG_PER_NEW_CLIENT` | `"0"` | Starting balance given to every new client. |
+| `free_tier.FREE_WHILE_SCARCITY_BELOW` | `0.0` | Charge nothing while *every* resource is below this share of capacity. `0.0` disables it. |
+| `deposits.MAX_FEE_OVERHEAD` | `0.02` | Largest share of a peer deposit that may go to the transaction fee. Sizes the deposit. |
+| `deposits.REFILL_BELOW` | `0.2` | Refill a peer once its balance drops below this share of a full deposit. |
+| `deposits.INITIAL_RUNTIME_HOURS` | `1.0` | How long a new instance is funded for when the client asks for no specific balance. |
+
+Set any price to `"0"` to give that resource away.
+
 ## `costs`, `timing`, `client`
 
-Gas/cost economics (`EXECUTION_COST`, `BUILD_COST`, deposit factors, gas
-thresholds), maintenance-loop timing, and client slot/expiration policy. Defaults
-are sensible for a single dev node; change only with the economics in mind.
-Tunnel metering lives here too: `TUNNEL_OPEN_COST`, `TUNNEL_COST_PER_KB` and
-`TUNNEL_GAS_CHARGE_INTERVAL_KB` (see [`TUNNELING.md`](TUNNELING.md)).
+What is left after pricing moved out: `SOCIALIZATION_FACTOR` and
+`COST_AVERAGE_VARIATION` (peer selection, not pricing), `TUNNEL_CHARGE_INTERVAL_KB`
+(how much traffic accumulates before it is billed) and `ALLOW_DEBT`; plus
+maintenance-loop timing and client slot/expiration policy.
 
 ## `ledgers.ergo` — payments & reputation
 
@@ -190,7 +214,6 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 |---|---|---|
 | `ledgers.ergo.WALLET_MNEMONIC` | `""` | The one wallet the node controls. Empty disables payments/reputation; `"auto"` generates a fresh mnemonic on first load. **Secret.** |
 | `ledgers.ergo.NODE_URL` | `https://node.sigmaspace.io` | Ergo node used for chain access. |
-| `ledgers.ergo.GAS_PER_ERG` | `1.0e+58` | Gas-to-ERG conversion. |
 | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | `""` | This node's reputation proof id (reconciled by `nodo sync_reputation_proof`). |
 | `ledgers.ergo.payments.HOT_WALLET_LIMITS` | `100` | Max ERG kept in the operational wallet before sweeping. |
 | `ledgers.ergo.payments.COLD_WALLET` | `""` | Public address to sweep excess to. Empty disables sweeping. Never a mnemonic. |

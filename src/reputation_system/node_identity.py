@@ -102,11 +102,11 @@ def _canonical_contract_message(contract) -> str:
     ])
 
 
-def _canonical_contract(gas_price) -> str:
-    """Deterministic encoding of one advertised payment contract and its price."""
+def _canonical_contract(contract_rate) -> str:
+    """Deterministic encoding of one advertised payment contract and its rate."""
     return "~".join([
-        _canonical_contract_message(gas_price.contract),
-        gas_price.gas_amount.n,
+        _canonical_contract_message(contract_rate.contract),
+        contract_rate.mu_per_unit.n,
     ])
 
 
@@ -136,7 +136,7 @@ def canonical_peer_content_digest(peer) -> str:
 
     The signature has to cover the *whole* advertisement, not just the addresses:
     ``payment_contracts`` is what decides where this node's money is sent, and
-    ``gas_amount_per_call`` carries the advertised rates. Leaving them unsigned let
+    ``mu_per_call`` carries the advertised rates. Leaving them unsigned let
     anyone take a legitimately signed ``Peer``, swap in their own payment contract,
     and have it accepted and stored (``add_contract`` is INSERT OR IGNORE, so the
     forged contract lands *next to* the real one rather than replacing it). Each
@@ -159,7 +159,7 @@ def canonical_peer_content_digest(peer) -> str:
     contracts = sorted(_canonical_contract(gp) for gp in peer.payment_contracts)
     proofs = sorted(_canonical_contract_message(c) for c in peer.reputation_proofs)
     rates = ";".join(
-        f"{key}={peer.gas_amount_per_call[key].n}" for key in sorted(peer.gas_amount_per_call)
+        f"{key}={peer.mu_per_call[key].n}" for key in sorted(peer.mu_per_call)
     )
 
     canonical = "|".join(["/".join(uris), "/".join(contracts), "/".join(proofs), rates])

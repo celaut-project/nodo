@@ -49,18 +49,29 @@ the *packing* step (and only in the opt-in `packer.local` mode); it never runs a
 service. Do not use `docker ps` to inspect a running instance — use
 `nodo instances` / `nodo observe`.
 
-## Gas
+## Balances and prices
 
-The unit of compute a client pays for. A client tops up its gas balance on a node
-by generating a **deposit token** — a locally-generated identifier, not an
-on-chain asset — and submitting an Ergo transaction that carries that identifier
-(in register R4) plus some ERG; the node verifies the deposit belongs to the
-client and that the funds reached its wallet, then credits gas. Nodes run a
-single hot wallet (`ledgers.ergo.WALLET_MNEMONIC`); clients pay its derived P2PK
-address, and excess is swept to an optional cold address. `nodo estimate` reports
-a service's gas cost before you run it;
-`nodo increase_gas` / `nodo decrease_gas` adjust a running instance. Full model:
-[`ERGO.md`](ERGO.md).
+Everything you pay for is priced in **ERG**, per resource. A node sets its own
+price for memory, CPU, disk and relayed traffic; nothing collapses them into a
+single number, so a node short on memory but rich in disk can charge accordingly.
+Prices rise with contention, up to a ceiling the node advertises alongside them.
+
+A client tops up its balance on a node by generating a **deposit token** — a
+locally-generated identifier, not an on-chain asset — and submitting an Ergo
+transaction that carries that identifier (in register R4) plus some ERG; the node
+verifies the deposit belongs to the client and that the funds reached its wallet,
+then credits the balance. Nodes run a single hot wallet
+(`ledgers.ergo.WALLET_MNEMONIC`); clients pay its derived P2PK address, and excess
+is swept to an optional cold address.
+
+`nodo estimate` reports what a service costs before you run it, and
+`nodo increase_deposit` / `nodo decrease_deposit` adjust a running instance — both
+in ERG. Full model: [`PRICING.md`](PRICING.md) for what things cost,
+[`ERGO.md`](ERGO.md) for how they settle.
+
+Internally the node counts in **MU** (monetary unit), an integer pegged at
+1 MU = 1 nanoERG, so no balance ever goes through a float. You never have to see
+it: every command speaks ERG.
 
 ## Address and token provisioning
 
@@ -68,7 +79,7 @@ To talk to a running instance you need its **communication address** (`ip:port`,
 from the ports the service declares in `service.json → api`) and an
 **authentication token**. Providing these is a core node responsibility
 (project [`README.md`](../README.md)); the API's transport, `protocol` (e.g.
-`grpc`) and `gas_amount_per_call` come from the service's own `service.json → api`
+`grpc`) and `mu_per_call` come from the service's own `service.json → api`
 block (see [`PACKING.md`](PACKING.md)).
 
 ## Block
@@ -83,7 +94,7 @@ their content hash, which deduplicates identical large files across services. Se
 **Peers** are other nodes this node has connected to; nodes reciprocally offer and
 request services from their peers, so a node can run a workload locally or hand it
 to a peer. **Clients** are the entities (nodes or external callers) that have
-registered with this node and pay it gas. `nodo peers` / `nodo clients` list them.
+registered with this node and pay it. `nodo peers` / `nodo clients` list them.
 
 ## Service composition (dependencies)
 

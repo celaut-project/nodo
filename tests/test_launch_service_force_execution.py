@@ -42,7 +42,7 @@ class ForceDelegateTests(unittest.TestCase):
     def test_an_unconnected_peer_fails_fast_before_any_gas_is_touched(self):
         with patch.object(launch_service_mod.sc, "peer_exists", return_value=False), patch.object(
             launch_service_mod, "estimate_cost_on_peer"
-        ) as mock_estimate, patch.object(launch_service_mod, "spend_gas") as mock_spend, patch.object(
+        ) as mock_estimate, patch.object(launch_service_mod, "spend_mu") as mock_spend, patch.object(
             launch_service_mod, "delegate_execution"
         ) as mock_delegate:
             with self.assertRaises(Exception):
@@ -66,7 +66,7 @@ class ForceDelegateTests(unittest.TestCase):
             launch_service_mod, "service_requires_parent_colocation", return_value=False
         ), patch.object(
             launch_service_mod, "estimate_cost_on_peer", return_value=None
-        ), patch.object(launch_service_mod, "spend_gas") as mock_spend:
+        ), patch.object(launch_service_mod, "spend_mu") as mock_spend:
             with self.assertRaises(Exception):
                 self._call()
 
@@ -77,7 +77,7 @@ class ForceDelegateTests(unittest.TestCase):
             launch_service_mod, "service_requires_parent_colocation", return_value=False
         ), patch.object(
             launch_service_mod, "estimate_cost_on_peer", return_value=self.cost
-        ), patch.object(launch_service_mod, "spend_gas", return_value=False), patch.object(
+        ), patch.object(launch_service_mod, "spend_mu", return_value=False), patch.object(
             launch_service_mod, "delegate_execution"
         ) as mock_delegate:
             with self.assertRaises(Exception):
@@ -91,7 +91,7 @@ class ForceDelegateTests(unittest.TestCase):
             launch_service_mod, "service_requires_parent_colocation", return_value=False
         ), patch.object(
             launch_service_mod, "estimate_cost_on_peer", return_value=self.cost
-        ), patch.object(launch_service_mod, "spend_gas", return_value=True), patch.object(
+        ), patch.object(launch_service_mod, "spend_mu", return_value=True), patch.object(
             launch_service_mod, "delegate_execution", return_value=instance
         ) as mock_delegate, patch.object(
             launch_service_mod.sc, "internal_instance_exists", return_value=False

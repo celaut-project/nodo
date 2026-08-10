@@ -240,29 +240,29 @@ class EventToProtoTests(unittest.TestCase):
         self.assertEqual(proto.session.link_type, 1)
         self.assertEqual(proto.session.snaplen, 65535)
 
-    def test_session_conversion_maps_gas(self):
+    def test_session_conversion_maps_balance(self):
         proto = OI._event_to_proto({
             "kind": "session", "time": "12:00:00", "instance_id": "inst-1",
-            "capture_mode": "pcap", "gas": "5000",
+            "capture_mode": "pcap", "balance_mu": "5000",
         })
-        self.assertEqual(proto.session.gas, "5000")
-        # Absent gas → empty string (unknown), never a crash.
+        self.assertEqual(proto.session.balance, "5000")
+        # Absent balance → empty string (unknown), never a crash.
         bare = OI._event_to_proto({
             "kind": "session", "time": "12:00:00", "instance_id": "inst-1",
             "capture_mode": "pcap",
         })
-        self.assertEqual(bare.session.gas, "")
+        self.assertEqual(bare.session.balance, "")
 
-    def test_metrics_conversion_maps_gas(self):
+    def test_metrics_conversion_maps_balance(self):
         proto = OI._event_to_proto({
-            "kind": "metrics", "time": "12:00:01", "alive": True, "gas": "4200",
+            "kind": "metrics", "time": "12:00:01", "alive": True, "balance_mu": "4200",
         })
-        self.assertEqual(proto.metrics.gas, "4200")
-        # Absent gas stays the default empty string.
+        self.assertEqual(proto.metrics.balance, "4200")
+        # Absent balance stays the default empty string.
         bare = OI._event_to_proto({
             "kind": "metrics", "time": "12:00:01", "alive": True,
         })
-        self.assertEqual(bare.metrics.gas, "")
+        self.assertEqual(bare.metrics.balance, "")
 
     def test_packet_conversion_maps_raw_frame_and_timestamp(self):
         frame = bytes(range(64))

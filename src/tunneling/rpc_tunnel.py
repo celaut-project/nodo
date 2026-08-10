@@ -28,13 +28,13 @@ that the node actually published as a ``uri_slot`` can be tunnelled to. Without
 that check the token would grant access to every port inside the microVM,
 including internal ones the service never meant to expose.
 
-Gas
----
-Relaying is metered against the instance's gas: a fixed charge to open
-(``costs.TUNNEL_OPEN_COST``) and then per KiB relayed in either direction
-(``costs.TUNNEL_COST_PER_KB``), billed every
-``costs.TUNNEL_GAS_CHARGE_INTERVAL_KB``. Running out closes the tunnel, the way
-``maintain`` stops an instance that can no longer pay. See ``GasMeter``.
+Metering
+--------
+Relaying is metered against the instance's balance: a fixed charge to open
+(``pricing.TUNNEL_OPEN_ERG``) and then per byte relayed in either direction
+(``pricing.NET_ERG_PER_GIB``), billed every
+``costs.TUNNEL_CHARGE_INTERVAL_KB``. Running out closes the tunnel, the way
+``maintain`` stops an instance that can no longer pay. See ``TrafficMeter``.
 
 Transports
 ----------
@@ -78,7 +78,9 @@ from typing import Callable, Generator, Iterator, List, Optional, Tuple
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
+from src.utils.cost_functions.execution_cost import traffic_charge_mu
 from src.utils.logger import LOGGER as logger
+from src.utils.monetary import mu_to_erg_str, prices
 from src.virtualizers.firewall import TransportProtocol, resolve_slot_transport_protocols
 
 sc = SQLConnection()
@@ -107,9 +109,6 @@ DEFAULT_UDP_IDLE_TIMEOUT_S = 30.0
 # Grace period for the writer thread to notice the tunnel is closing.
 WRITER_JOIN_TIMEOUT_S = 2.0
 
-# Gas defaults, used when the costs.* keys are unset. Zero disables a charge.
-DEFAULT_TUNNEL_OPEN_COST = 10.0
-DEFAULT_TUNNEL_COST_PER_KB = 1.0
 DEFAULT_TUNNEL_CHARGE_INTERVAL_KB = 1024  # Bill once per MiB relayed.
 
 BYTES_PER_KB = 1024
@@ -126,42 +125,32 @@ class TunnelError(Exception):
     """
 
 
-def _cost(key: str, default: float) -> float:
-    """Read a costs.* rate at use time, so a config reload takes effect."""
-    try:
-        value = float(env_manager.get(f"costs.{key}", default))
-        return value if value > 0 else 0.0
-    except (TypeError, ValueError):
-        logger(f"{LOG_PREFIX} costs.{key} is not a number; using {default}.")
-        return default
-
-
-class GasMeter:
-    """Charges an instance's gas for the traffic its tunnel relays.
+class TrafficMeter:
+    """Charges an instance's balance for the traffic its tunnel relays.
 
     Relaying costs this node real CPU, memory and bandwidth, so it is metered the
     same way ``maintain`` meters a running instance: charged to the instance, and
-    when the gas runs out the thing being paid for stops. The instance is the
+    when the balance runs out the thing being paid for stops. The instance is the
     right payer because possession of its token is what authorises the tunnel in
     the first place.
 
-    Billing is incremental — every ``costs.TUNNEL_GAS_CHARGE_INTERVAL_KB`` of
+    Billing is incremental — every ``costs.TUNNEL_CHARGE_INTERVAL_KB`` of
     traffic, counting both directions — because a tunnel has no fixed length and
     charging only at the end would let a caller relay for free by never closing.
     Whatever is left over is settled when the tunnel closes.
 
     Traffic is accounted *after* it moves, never before, so data already written
-    is never thrown away for lack of gas. The cost is that an empty balance is
+    is never thrown away for lack of funds. The cost is that an empty balance is
     noticed one block late: a tunnel can overrun by up to the charge interval
     before it closes. Shrink the interval to tighten that bound.
 
     The two rates are independent knobs, each self-disabling at zero:
-    ``TUNNEL_OPEN_COST`` of 0 makes opening free (``charge_open`` spends 0, which
-    ``_spend`` treats as always affordable) and ``TUNNEL_COST_PER_KB`` of 0
+    ``pricing.TUNNEL_OPEN_ERG`` of 0 makes opening free (``charge_open`` spends 0, which
+    ``_spend`` treats as always affordable) and ``pricing.NET_ERG_PER_GIB`` of 0
     disables the per-traffic charge (``enabled`` is False, so ``add``/``settle``
     no-op). Zero on one does not disable the other. Note that whether an empty
-    balance actually stops a tunnel depends on ``costs.ALLOW_GAS_DEBT``, which
-    ``spend_gas`` honours for us.
+    balance actually stops a tunnel depends on ``costs.ALLOW_DEBT``, which
+    ``spend_mu`` honours for us.
     """
 
     def __init__(self, token: str, target: str) -> None:
@@ -171,14 +160,13 @@ class GasMeter:
 
         self._lock = threading.Lock()
         self._unbilled_bytes = 0
-        self._billed_gas = 0
+        self._billed_mu = 0
         self._relayed_bytes = 0
 
-        self._per_kb = _cost("TUNNEL_COST_PER_KB", DEFAULT_TUNNEL_COST_PER_KB)
         try:
             interval_kb = int(
                 env_manager.get(
-                    "costs.TUNNEL_GAS_CHARGE_INTERVAL_KB", DEFAULT_TUNNEL_CHARGE_INTERVAL_KB
+                    "costs.TUNNEL_CHARGE_INTERVAL_KB", DEFAULT_TUNNEL_CHARGE_INTERVAL_KB
                 )
             )
         except (TypeError, ValueError):
@@ -187,28 +175,28 @@ class GasMeter:
 
     @property
     def enabled(self) -> bool:
-        return self._per_kb > 0
+        return prices().net_mu_per_gib > 0
 
-    def _spend(self, gas: int) -> bool:
-        if gas <= 0:
+    def _spend(self, amount_mu: int) -> bool:
+        if amount_mu <= 0:
             return True
 
         # Imported here rather than at module scope: the manager pulls in the
         # virtualizer stack, and the relay must stay importable without it.
-        from src.manager.manager import spend_gas
+        from src.manager.manager import spend_mu
 
-        if spend_gas(id=self.token, gas_to_spend=gas, debug_mode=False):
-            # _spend() itself runs unlocked (spend_gas can be slow, and add()
-            # already serializes the accounting that decides `gas`), but the
+        if spend_mu(id=self.token, amount_mu=amount_mu, debug_mode=False):
+            # _spend() itself runs unlocked (spend_mu can be slow, and add()
+            # already serializes the accounting that decides the amount), but the
             # writer thread and this generator's thread can both land here, so
             # the increment itself still needs the lock.
             with self._lock:
-                self._billed_gas += gas
+                self._billed_mu += amount_mu
             return True
 
         logger(
-            f"{LOG_PREFIX} {self.target}: out of gas after {self._relayed_bytes} bytes "
-            f"({self._billed_gas} gas billed); closing the tunnel."
+            f"{LOG_PREFIX} {self.target}: out of funds after {self._relayed_bytes} bytes "
+            f"({mu_to_erg_str(self._billed_mu)} ERG billed); closing the tunnel."
         )
         self.exhausted.set()
         return False
@@ -216,15 +204,15 @@ class GasMeter:
     def charge_open(self) -> bool:
         """Charge for opening a tunnel. False means the caller cannot afford it.
 
-        Independent of the per-KB rate: a ``TUNNEL_OPEN_COST`` of 0 spends
-        nothing and always returns True, even when per-KB metering is disabled.
+        Independent of the traffic rate: a ``pricing.TUNNEL_OPEN_ERG`` of 0 spends
+        nothing and always returns True, even when traffic metering is disabled.
         """
-        return self._spend(int(_cost("TUNNEL_OPEN_COST", DEFAULT_TUNNEL_OPEN_COST)))
+        return self._spend(prices().tunnel_open_mu)
 
     def add(self, byte_count: int) -> bool:
         """Account ``byte_count`` of relayed traffic, billing whole blocks.
 
-        Returns False once the gas is gone, which the relay treats as a close.
+        Returns False once the balance is gone, which the relay treats as a close.
         """
         if not self.enabled or byte_count <= 0:
             return not self.exhausted.is_set()
@@ -235,9 +223,9 @@ class GasMeter:
             blocks, self._unbilled_bytes = divmod(self._unbilled_bytes, self._interval_bytes)
             if not blocks:
                 return not self.exhausted.is_set()
-            gas = int(blocks * self._interval_bytes / BYTES_PER_KB * self._per_kb)
+            amount_mu = traffic_charge_mu(blocks * self._interval_bytes)
 
-        return self._spend(gas)
+        return self._spend(amount_mu)
 
     def settle(self) -> None:
         """Bill the partial block left over when the tunnel closes."""
@@ -248,10 +236,10 @@ class GasMeter:
             pending, self._unbilled_bytes = self._unbilled_bytes, 0
 
         if pending:
-            self._spend(int(pending / BYTES_PER_KB * self._per_kb))
+            self._spend(traffic_charge_mu(pending))
 
         logger(
-            f"{LOG_PREFIX} {self.target}: billed {self._billed_gas} gas for "
+            f"{LOG_PREFIX} {self.target}: billed {mu_to_erg_str(self._billed_mu)} ERG for "
             f"{self._relayed_bytes} bytes."
         )
 
@@ -393,7 +381,7 @@ def _pump_to_service(
     caller_done: threading.Event,
     target: str,
     is_udp: bool,
-    meter: GasMeter,
+    meter: TrafficMeter,
     activity: List[float],
 ) -> None:
     """Forward caller payload to the service until the caller stops sending.
@@ -433,7 +421,7 @@ def _pump_to_service(
             activity[0] = time.monotonic()  # caller->service counts as activity too
 
             if not meter.add(len(message)):
-                break  # Out of gas.
+                break  # Out of funds.
 
     except Exception as e:
         # Includes the caller cancelling the RPC and the service closing its
@@ -462,7 +450,7 @@ def _relay(
     is_active: Callable[[], bool],
     target: str,
     is_udp: bool,
-    meter: GasMeter,
+    meter: TrafficMeter,
 ) -> Generator[bytes, None, None]:
     """Yield everything the service sends while forwarding the caller's payload."""
     stop = threading.Event()
@@ -528,7 +516,7 @@ def _relay(
             billable = meter.add(len(data))
             yield data
             if not billable:
-                break  # Out of gas.
+                break  # Out of funds.
 
     except OSError as e:
         # For connected UDP this is where an ICMP port-unreachable lands.
@@ -580,10 +568,10 @@ def service_tunnel(
 
     # Charged before connecting: an instance that cannot pay to open the tunnel
     # gets a clean refusal instead of a socket it will lose mid-transfer.
-    meter = GasMeter(token=token, target=target)
+    meter = TrafficMeter(token=token, target=target)
     if not meter.charge_open():
         raise TunnelError(
-            f"Instance '{token}' has not enough gas to open a tunnel."
+            f"Instance '{token}' has not enough balance to open a tunnel."
         )
 
     conn = _connect(ip, port, transport)

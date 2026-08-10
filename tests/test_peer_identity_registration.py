@@ -3,7 +3,7 @@ may not do to our stored view of a peer.
 
 These pin the defects found reviewing the first cut of the implementation:
 a relayed announcement with a swapped payment contract, a legacy uuid-keyed peer
-losing its gas on upgrade, and a superseded address never being dropped.
+losing its balance on upgrade, and a superseded address never being dropped.
 """
 import os
 import sqlite3
@@ -62,9 +62,9 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         for ip, port in uris:
             uri = peer.uri.add(ip=ip, port=port)
             uri.transport.tags.append(transport)
-        gas_price = peer.payment_contracts.add()
-        gas_price.contract.ledger.formal = contract
-        gas_price.gas_amount.n = "1"
+        mu_per_unit = peer.payment_contracts.add()
+        mu_per_unit.contract.ledger.formal = contract
+        mu_per_unit.mu_per_unit.n = "1"
         if signed:
             peer.public_key, peer.ts = self.pubkey, ts
             peer.signature = bip_ecdsa_sign(
@@ -148,14 +148,14 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         legacy = manager.add_peer_instance(self._peer([("10.0.0.1", 9999)], signed=False))
         self.assertNotEqual(legacy, self.pubkey)
         self.conn.execute(
-            "UPDATE peer SET gas='999999', remote_client_id='client-abc' WHERE id=?", (legacy,)
+            "UPDATE peer SET balance_mu='999999', remote_client_id='client-abc' WHERE id=?", (legacy,)
         )
         self.conn.commit()
 
         self.assertEqual(
             manager.add_peer_instance(self._peer([("10.0.0.1", 9999)], ts=200)), self.pubkey
         )
-        rows = self.conn.execute("SELECT id, gas, remote_client_id FROM peer").fetchall()
+        rows = self.conn.execute("SELECT id, balance_mu, remote_client_id FROM peer").fetchall()
         self.assertEqual(len(rows), 1, "the legacy row must be adopted, not duplicated")
         self.assertEqual(rows[0][0], self.pubkey)
         self.assertEqual(rows[0][1], "999999")

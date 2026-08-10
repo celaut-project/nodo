@@ -2,7 +2,7 @@ import os
 import sys
 import threading
 import time
-from typing import Any, Generator
+from typing import Any, Generator, Optional
 import contextlib
 import io
 
@@ -14,18 +14,17 @@ from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
 from src.commands.inspect import inspect as inspect_service
 from src.commands.__by_tag import get_id
 from src.core_services.source_application import acquire_service
-from src.manager.manager import get_execute_client
+from src.manager.manager import default_initial_balance, get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.instance_names import inject_instance_name
-from src.utils.utils import to_gas_amount
+from src.utils.utils import to_amount
 
 env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
-DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
 CONFIGURED_HASH_ID = get_configured_hash_id(env_manager)
 
 
@@ -53,13 +52,21 @@ def resolve_service_hash(service: str) -> str:
 def generator(
     _hash: str,
     mem_limit: int = 50 * pow(10, 4),
-    initial_gas_amount: int = DEFAULT_INITIAL_GAS_AMOUNT,
+    initial_mu: Optional[int] = None,
     external: bool = False,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
 ) -> Generator[Any, None, None]:
+    # No amount asked for: let the node fund the instance for what it requested,
+    # priced for deposits.INITIAL_RUNTIME_HOURS. The flat default this replaces read a
+    # config key that no longer exists, so it silently passed None down the chain.
+    if initial_mu is None:
+        initial_mu = default_initial_balance(
+            system_resources=celaut_pb2.Sysresources(mem_limit=mem_limit)
+        )
+
     try:
-        client_id = get_execute_client(gas_amount=initial_gas_amount, external=external)
+        client_id = get_execute_client(amount_mu=initial_mu, external=external)
     except Exception:
         raise RuntimeError("No execute client available.")
 
@@ -67,7 +74,7 @@ def generator(
         yield celaut_pb2.Client(client_id=client_id)
 
         config = celaut_pb2.Configuration(
-            initial_gas_amount=to_gas_amount(initial_gas_amount)
+            initial_mu=to_amount(initial_mu)
         )
         if envs:
             config.environment_variables.update({
@@ -241,7 +248,7 @@ def execute(
             service=service,
             input_generator=generator(
                 _hash=service,
-                initial_gas_amount=10**16,
+                initial_mu=10**16,
                 mem_limit=10**9,
                 external=external,
                 envs=envs,

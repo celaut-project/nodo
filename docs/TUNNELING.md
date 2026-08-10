@@ -96,8 +96,8 @@ Code that depends on UDP being lossy will not see loss here.
 
 A tunnel that cannot be established fails with gRPC `INVALID_ARGUMENT` and a
 message saying why (unknown token, undeclared slot, no host-supported transport,
-unreachable TCP service, not enough gas to open it). Establishment is *eager*: the
-handshake, validation, gas charge and connect all happen before the first byte is
+unreachable TCP service, not enough balance to open it). Establishment is *eager*:
+the handshake, validation, charge and connect all happen before the first byte is
 serialized, so a broken tunnel never looks like a service that simply had nothing
 to say.
 
@@ -127,41 +127,44 @@ applies. Note what this does and does not mean:
 
 ---
 
-## Gas
+## Metering
 
 Relaying costs this node CPU, memory and bandwidth, so it is metered — the same
 way `maintain` meters a running instance, and charged to the same payer: **the
 tunnelled instance**. That is the right payer because holding its token is what
 authorises the tunnel in the first place.
 
-| Key (under `costs`) | Default | Meaning |
+| Key | Default | Meaning |
 | --- | --- | --- |
-| `TUNNEL_OPEN_COST` | `10.0` | Charged once per tunnel. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
-| `TUNNEL_COST_PER_KB` | `1.0` | Charged per KiB relayed, counting **both** directions. |
-| `TUNNEL_GAS_CHARGE_INTERVAL_KB` | `1024` | How much traffic accumulates before it is billed. |
+| `pricing.TUNNEL_OPEN_ERG` | `"0.00001"` | Charged once per tunnel. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
+| `pricing.NET_ERG_PER_GIB` | `"0.002"` | Charged per GiB relayed, counting **both** directions. |
+| `costs.TUNNEL_CHARGE_INTERVAL_KB` | `1024` | How much traffic accumulates before it is billed. |
 
-Set a rate to `0` to stop charging for it.
+Set a price to `"0"` to stop charging for it. Prices are in ERG; see
+[`PRICING.md`](PRICING.md).
 
 Billing is incremental rather than at the end, since a tunnel has no fixed length
-and a caller that never closes would otherwise relay for free. Running out of gas
-closes the tunnel.
+and a caller that never closes would otherwise relay for free. Running out of
+funds closes the tunnel.
 
 Two honest details:
 
 * Traffic is accounted **after** it moves, never before, so data already written
-  is never discarded for lack of gas. The cost is that an empty balance is noticed
-  one block late — a tunnel can overrun by up to `TUNNEL_GAS_CHARGE_INTERVAL_KB`
-  before closing. Shrink the interval to tighten that bound.
-* Whether an empty balance actually stops anything depends on
-  `costs.ALLOW_GAS_DEBT`, which is `true` in the shipped config. With debt
-  allowed, tunnels are metered and logged but not cut off.
+  is never discarded for lack of funds. The cost is that an empty balance is
+  noticed one block late — a tunnel can overrun by up to
+  `costs.TUNNEL_CHARGE_INTERVAL_KB` before closing. Shrink the interval to tighten
+  that bound.
+* Whether an empty balance actually stops anything depends on `costs.ALLOW_DEBT`,
+  which is `true` in the shipped config. With debt allowed, tunnels are metered
+  and logged but not cut off.
 
 ### Peers can see these rates before using them
 
-`tunnel_open` and `tunnel_per_kb` are advertised to peers, together with
-`maintenance_max_per_second`, inside `gas_amount_per_call` of the gateway slot in
-this node's `Instance` — so a peer knows the recurring rates before it negotiates
-anything. `nodo peers` shows them per peer under `[Rates]`.
+`tunnel_open_mu` and `net_mu_per_gib` are advertised to peers, together with the
+per-resource rates and the scarcity ceiling, inside `mu_per_call` of the gateway
+slot in this node's `Instance` — so a peer knows the prices before it negotiates
+anything. They are in MU (1 MU = 1 nanoERG), which is what makes them comparable
+between nodes. `nodo peers` shows them per peer under `[Rates]`.
 
 They are **ceilings, not quotes**, and the price of a *specific service* still
 comes from `GetServiceEstimatedCost`, which prices the actual resources requested.
@@ -318,7 +321,8 @@ they existed:
 * **`network.service_tunneling`, `network.tunnel_protocol`, `network.ddns`.**
   These specific keys never existed. The tunnelling settings that do exist are
   `network.DELEGATION_TUNNEL_POLICY`, `network.TUNNEL_UDP_IDLE_TIMEOUT_S`, and the
-  gas rates under `costs.TUNNEL_*` (see *Gas*, above). Dynamic DNS is real too,
+  prices under `pricing.TUNNEL_OPEN_ERG` / `pricing.NET_ERG_PER_GIB` (see
+  *Metering*, above). Dynamic DNS is real too,
   just under a plain top-level `ddns:` section rather than nested in `network.` —
   see [CONFIG.md](CONFIG.md).
 * **A persistent tunnel registry.** An early design kept one long-lived tunnel

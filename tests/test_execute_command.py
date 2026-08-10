@@ -20,7 +20,7 @@ class ExecuteCommandTests(unittest.TestCase):
             messages = list(
                 execute_cmd.generator(
                     _hash="ab" * 32,
-                    initial_gas_amount=123,
+                    initial_mu=123,
                     instance_name="My Instance",
                 )
             )
@@ -100,7 +100,7 @@ class ExecuteCommandTests(unittest.TestCase):
             execute_cmd.execute("svc", external=True)
 
         mock_get_execute_client.assert_called_once_with(
-            gas_amount=10**16,
+            amount_mu=10**16,
             external=True,
         )
         mock_channel.return_value.close.assert_called_once()

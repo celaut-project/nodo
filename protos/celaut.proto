@@ -25,15 +25,24 @@ message Contract {
     map<string, bytes> xattrs = 2;
 }
 
-// Defines an abstract amount of gas (cost unit) as a numeric string.
-message GasAmount {
+// An amount in MU (monetary unit), as a numeric string.
+//
+// MU is the unit of account, and it is pegged: 1 MU = 1 nanoERG = 1e-9 ERG. The peg is
+// what makes an amount comparable between nodes -- the "gas" this replaced was an
+// abstract unit, so a price quoted in it carried no information to whoever read it.
+// A string rather than an integer because a balance is unbounded.
+message Amount {
     string n = 1;
 }
 
-// Associates a payment contract ledger with a gas amount (price).
-message GasPrice {
+// How much one unit of a payment contract is worth, in MU.
+//
+// This is what lets a node be paid in something other than ERG without giving up a
+// common scale: ERG is simply the contract whose rate is the peg (1e9 MU per ERG), and
+// another ledger declares its own.
+message ContractRate {
     Contract contract = 1;
-    GasAmount gas_amount = 2;
+    Amount mu_per_unit = 2;
 }
 
 // Metadata structure with optional hashtags, data format, and reputation proofs.
@@ -80,17 +89,17 @@ message Service {
             Protocol transport = 2;
             // Protocol stack definitions for this slot.
             repeated Protocol protocol_stack = 3;
-            // Gas amount per declared method in protocol_stack.
-            map<string, GasAmount> gas_amount_per_call = 4;
+            // MU charged per declared method in protocol_stack.
+            map<string, Amount> mu_per_call = 4;
         }
 
         repeated Slot slot = 1;
 
-        // Accepted payment contracts with conversion to gas.
-        repeated GasPrice payment_contracts = 2;
-        
+        // Accepted payment contracts and what one unit of each is worth in MU.
+        repeated ContractRate payment_contracts = 2;
+
         /*
-         The cost of the service is measured in "gas":
+         A service costs MU in two ways:
            1. Initial fixed cost (one-time).
            2. Usage-based cost (variable).
          Detailed cost rules are specified within the API protocol.
@@ -276,8 +285,8 @@ message Configuration {
     // Service specification slots.
     repeated int32 spec_slot = 2;
 
-    // Optional initial gas deposit for service execution.
-    optional GasAmount initial_gas_amount = 3;
+    // Optional initial MU balance for service execution.
+    optional Amount initial_mu = 3;
 }
 
 message ConfigurationFile {
@@ -323,25 +332,25 @@ message TokenMessage {
 }
 
 message EstimatedCost {
-    GasAmount cost = 1;
-    GasAmount init_maintenance_cost = 2;
-    GasAmount max_maintenance_cost = 3;
+    Amount cost = 1;
+    Amount init_maintenance_cost = 2;
+    Amount max_maintenance_cost = 3;
     int32 maintenance_seconds_loop = 4;
     float variance = 5;
 }
 
 message Refund {
-    GasAmount amount = 1;
+    Amount amount = 1;
 }
 
 message Payment {
     string deposit_token = 1;
     Contract contract = 2;
-    GasAmount gas_amount = 3;
+    Amount amount = 3;
 }
 
 message Metrics {
-    GasAmount gas_amount = 1;
+    Amount balance = 1;
 }
 
 message ServiceInstance {
@@ -388,12 +397,12 @@ message Peer {
     // charges on a recurring basis. A node's rates do not depend on which of its
     // addresses you reach it through (see cost_functions.node_advertised_rates,
     // which has no notion of a port), so they are not repeated per Uri.
-    repeated GasPrice payment_contracts = 3;
-    map<string, GasAmount> gas_amount_per_call = 4;
+    repeated ContractRate payment_contracts = 3;
+    map<string, Amount> mu_per_call = 4;
 
     // Node identity (issue #236): the raw 33-byte SEC-compressed public key (hex) of
     // the node's identity keypair, and a signature over the canonical encoding of
-    // (public_key, ts, uri, payment_contracts, gas_amount_per_call) -- see
+    // (public_key, ts, uri, payment_contracts, mu_per_call) -- see
     // node_identity.canonical_peer_payload.
     // Verifying it proves the sender controls public_key without any interactive
     // challenge, so GetPeerInfo alone is enough (SignPublicKey is removed). Absent on
@@ -416,7 +425,7 @@ message RecursionGuard {
 
 message ModifyServiceSystemResourcesOutput {
     Sysresources sysreq = 1;
-    GasAmount gas = 2;
+    Amount balance = 2;
 }
 
 message ModifyServiceSystemResourcesInput {
@@ -424,12 +433,12 @@ message ModifyServiceSystemResourcesInput {
     Sysresources max_sysreq = 2;
 }
 
-message ModifyGasDepositInput {
-    GasAmount gas_difference = 1;
+message ModifyDepositInput {
+    Amount difference = 1;
     string service_token = 2;
 }
 
-message ModifyGasDepositOutput {
+message ModifyDepositOutput {
     bool success = 1;
     string message = 2;
 }
@@ -456,7 +465,7 @@ message ObserveEvent {
         string degraded_reason = 4;  // empty when full AF_PACKET capture is live.
         int32 link_type = 5;         // libpcap LINKTYPE for the global header (1=ethernet, 101=raw IP).
         uint32 snaplen = 6;          // capture snap length for the pcap global header.
-        string gas = 7;              // instance gas balance at attach (celaut GasAmount numeric string); "" when unknown.
+        string balance = 7;          // instance MU balance at attach (celaut Amount numeric string); "" when unknown.
     }
 
     // One CPU+memory sample (the fields of observe.metrics_record).
@@ -477,9 +486,9 @@ message ObserveEvent {
         optional uint64 net_tx_bytes = 9;
         optional uint64 net_rx_packets = 10;
         optional uint64 net_tx_packets = 11;
-        // Instance gas balance at this sample (celaut GasAmount numeric string),
+        // Instance MU balance at this sample (celaut Amount numeric string),
         // re-read each tick so a consumer sees it spent live. "" when unknown.
-        string gas = 12;
+        string balance = 12;
     }
 
     // One parsed connection event (the fields of observe.serialize_event).
@@ -525,7 +534,7 @@ message ObserveEvent {
 service Gateway {
     rpc StartService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Configuration | Hash | Client | RecursionGuard | Service -> Instance
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Refund
-    rpc ModifyGasDeposit(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyGasDepositInput -> ModifyGasDepositOutput
+    rpc ModifyDeposit(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyDepositInput -> ModifyDepositOutput
 
     rpc GetPeerInfo(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Peer
     rpc IntroducePeer(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Peer -> 

@@ -9,7 +9,7 @@ import socket
 import threading
 import time
 import unittest
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from typing import Callable, List, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
@@ -18,10 +18,12 @@ try:
     from bee_rpc import client as bee
     from protos import celaut_pb2 as celaut
     from src.tunneling import rpc_tunnel
+    from src.utils.config import ConfigManager
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     bee = None  # type: ignore[assignment]
     celaut = None  # type: ignore[assignment]
+    ConfigManager = None  # type: ignore[assignment]
     rpc_tunnel = None  # type: ignore[assignment]
 
 # Every relay in these tests gets a deadline instead of `lambda: True`, so a
@@ -35,15 +37,15 @@ def _deadline(seconds: float = RELAY_DEADLINE_S) -> Callable[[], bool]:
 
 
 @contextmanager
-def _gas_granted():
-    """Let every gas charge succeed.
+def _charges_granted():
+    """Let every charge succeed.
 
-    Relaying is metered (see ``rpc_tunnel.GasMeter``), and these tests mock the
-    instance catalogue rather than populating it, so ``spend_gas`` would refuse
+    Relaying is metered (see ``rpc_tunnel.TrafficMeter``), and these tests mock the
+    instance catalogue rather than populating it, so ``spend_mu`` would refuse
     every charge for an instance it cannot find. Charging itself is covered by
-    ``ServiceTunnelGasTests``.
+    ``ServiceTunnelMeteringTests``.
     """
-    with patch("src.manager.manager.spend_gas", return_value=True) as spend:
+    with patch("src.manager.manager.spend_mu", return_value=True) as spend:
         yield spend
 
 
@@ -144,7 +146,7 @@ class ServiceTunnelRelayTests(unittest.TestCase):
     ):
         with patch.object(
             rpc_tunnel.sc, "get_internal_instance", return_value=instance
-        ), patch.object(rpc_tunnel.sc, "get_internal_ip", return_value=ip), _gas_granted():
+        ), patch.object(rpc_tunnel.sc, "get_internal_ip", return_value=ip), _charges_granted():
             _conn, relay = rpc_tunnel.service_tunnel(iter(messages), is_active=_deadline())
             return relay
 
@@ -215,7 +217,7 @@ class ServiceTunnelUdpTests(unittest.TestCase):
             rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"
         ), patch.object(
             rpc_tunnel, "_udp_idle_timeout", return_value=self.IDLE_TIMEOUT_S
-        ), _gas_granted():
+        ), _charges_granted():
             _conn, relay = rpc_tunnel.service_tunnel(iter(messages), is_active=_deadline())
             # Drain inside the patch context: the idle timeout is read per relay.
             return list(relay)
@@ -292,7 +294,7 @@ class ServiceTunnelRejectionTests(unittest.TestCase):
     ) -> str:
         with patch.object(
             rpc_tunnel.sc, "get_internal_instance", return_value=instance
-        ), patch.object(rpc_tunnel.sc, "get_internal_ip", return_value=ip), _gas_granted():
+        ), patch.object(rpc_tunnel.sc, "get_internal_ip", return_value=ip), _charges_granted():
             with self.assertRaises(rpc_tunnel.TunnelError) as caught:
                 rpc_tunnel.service_tunnel(iter(messages), is_active=_deadline())
         return str(caught.exception)
@@ -355,11 +357,15 @@ class ServiceTunnelRejectionTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class ServiceTunnelGasTests(unittest.TestCase):
-    """Relaying is metered against the tunnelled instance's gas."""
+class ServiceTunnelMeteringTests(unittest.TestCase):
+    """Relaying is metered against the tunnelled instance's balance."""
 
-    OPEN_COST = 10.0
-    PER_KB = 2.0
+    # 10 MU == 10 nanoERG, expressed the way an operator writes a price.
+    OPEN_ERG = "0.00000001"
+    OPEN_MU = 10
+    # 2 MU per KiB, quoted per GiB the way the price vector is: 2 * 1024 * 1024 MU.
+    NET_ERG_PER_GIB = "0.002097152"
+    PER_KB_MU = 2
     INTERVAL_KB = 1  # Bill every KiB, so a small test payload crosses a block.
 
     @classmethod
@@ -372,26 +378,43 @@ class ServiceTunnelGasTests(unittest.TestCase):
         """Override only the tunnel rates; ConfigManager is a shared singleton, so
         everything else must still reach the real config."""
         rates = {
-            "costs.TUNNEL_OPEN_COST": self.OPEN_COST,
-            "costs.TUNNEL_COST_PER_KB": self.PER_KB,
-            "costs.TUNNEL_GAS_CHARGE_INTERVAL_KB": self.INTERVAL_KB,
+            "pricing.TUNNEL_OPEN_ERG": self.OPEN_ERG,
+            "pricing.NET_ERG_PER_GIB": self.NET_ERG_PER_GIB,
+            "costs.TUNNEL_CHARGE_INTERVAL_KB": self.INTERVAL_KB,
         }
         rates.update(overrides)
-        real_get = rpc_tunnel.env_manager.get
+        real_get = ConfigManager().get
 
         def get(key, default=None):
             return rates[key] if key in rates else real_get(key, default)
 
         return get
 
+    @staticmethod
+    @contextmanager
+    def _patched_config(get):
+        """Patch every ConfigManager the metering path may be holding.
+
+        Prices resolve ``ConfigManager()`` per call while ``rpc_tunnel`` captured its
+        own reference at import, and a test module elsewhere swaps the singleton at
+        import time -- so under a full-suite run those two can be different objects.
+        Patching only one leaves the real config answering half the reads.
+        """
+        managers = {id(rpc_tunnel.env_manager): rpc_tunnel.env_manager}
+        managers.setdefault(id(ConfigManager()), ConfigManager())
+        with ExitStack() as stack:
+            for manager in managers.values():
+                stack.enter_context(patch.object(manager, "get", side_effect=get))
+            yield
+
     def _run_tunnel(self, payload: List[bytes], port: int, spend, rates=None):
         with patch.object(
             rpc_tunnel.sc, "get_internal_instance", return_value=_serialized_instance(port)
         ), patch.object(
             rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"
-        ), patch.object(
-            rpc_tunnel.env_manager, "get", side_effect=rates or self._rates()
-        ), patch("src.manager.manager.spend_gas", spend):
+        ), self._patched_config(
+            rates or self._rates()
+        ), patch("src.manager.manager.spend_mu", spend):
             _conn, relay = rpc_tunnel.service_tunnel(
                 iter([celaut.TokenMessage(token="tok", slot=str(port))] + payload),
                 is_active=_deadline(),
@@ -400,7 +423,7 @@ class ServiceTunnelGasTests(unittest.TestCase):
 
     @staticmethod
     def _charges(spend) -> List[int]:
-        return [call.kwargs["gas_to_spend"] for call in spend.call_args_list]
+        return [call.kwargs["amount_mu"] for call in spend.call_args_list]
 
     def test_opening_a_tunnel_is_charged_to_the_instance(self):
         port, _ = _start_server(_echo)
@@ -411,7 +434,7 @@ class ServiceTunnelGasTests(unittest.TestCase):
         self.assertTrue(spend.call_args_list)
         first = spend.call_args_list[0]
         self.assertEqual(first.kwargs["id"], "tok")  # the instance pays
-        self.assertEqual(first.kwargs["gas_to_spend"], int(self.OPEN_COST))
+        self.assertEqual(first.kwargs["amount_mu"], self.OPEN_MU)
 
     def test_a_tunnel_is_refused_when_the_open_charge_cannot_be_paid(self):
         port, _ = _start_server(_echo)
@@ -421,30 +444,28 @@ class ServiceTunnelGasTests(unittest.TestCase):
             rpc_tunnel.sc, "get_internal_instance", return_value=_serialized_instance(port)
         ), patch.object(
             rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"
-        ), patch.object(
-            rpc_tunnel.env_manager, "get", side_effect=self._rates()
-        ), patch("src.manager.manager.spend_gas", spend):
+        ), self._patched_config(self._rates()), patch("src.manager.manager.spend_mu", spend):
             with self.assertRaises(rpc_tunnel.TunnelError) as caught:
                 rpc_tunnel.service_tunnel(
                     iter([celaut.TokenMessage(token="tok", slot=str(port))]),
                     is_active=_deadline(),
                 )
 
-        self.assertIn("gas", str(caught.exception))
+        self.assertIn("balance", str(caught.exception))
 
     def test_relayed_traffic_is_billed_per_block_in_both_directions(self):
         port, _ = _start_server(_echo)
         spend = MagicMock(return_value=True)
 
-        # 2 KiB out, echoed back as 2 KiB in: 4 blocks of 1 KiB at 2 gas each.
+        # 2 KiB out, echoed back as 2 KiB in: 4 blocks of 1 KiB at 2 MU each.
         self._run_tunnel([b"x" * 2048], port, spend)
 
         charges = self._charges(spend)
-        self.assertEqual(charges[0], int(self.OPEN_COST))
-        traffic_gas = sum(charges[1:])
-        self.assertEqual(traffic_gas, 4 * int(self.PER_KB))
+        self.assertEqual(charges[0], self.OPEN_MU)
+        traffic_mu = sum(charges[1:])
+        self.assertEqual(traffic_mu, 4 * self.PER_KB_MU)
 
-    def test_running_out_of_gas_stops_relaying_further_traffic(self):
+    def test_running_out_of_funds_stops_relaying_further_traffic(self):
         """Billing is per block, so the block in flight still lands; the next never does."""
         port, _ = _start_server(_echo)
         # Let the open charge through, then refuse everything else.
@@ -466,11 +487,11 @@ class ServiceTunnelGasTests(unittest.TestCase):
             [b"z" * 4096],
             port,
             spend,
-            rates=self._rates(**{"costs.TUNNEL_COST_PER_KB": 0}),
+            rates=self._rates(**{"pricing.NET_ERG_PER_GIB": "0"}),
         )
 
         # Only the open charge; no per-byte billing at all.
-        self.assertEqual(self._charges(spend), [int(self.OPEN_COST)])
+        self.assertEqual(self._charges(spend), [self.OPEN_MU])
 
     def test_all_rates_zero_means_no_charge_at_all(self):
         port, _ = _start_server(_echo)
@@ -481,7 +502,7 @@ class ServiceTunnelGasTests(unittest.TestCase):
             port,
             spend,
             rates=self._rates(
-                **{"costs.TUNNEL_OPEN_COST": 0, "costs.TUNNEL_COST_PER_KB": 0}
+                **{"pricing.TUNNEL_OPEN_ERG": "0", "pricing.NET_ERG_PER_GIB": "0"}
             ),
         )
 
@@ -512,7 +533,7 @@ class ServiceTunnelSerializationTests(unittest.TestCase):
             rpc_tunnel.sc, "get_internal_instance", return_value=_serialized_instance(port)
         ), patch.object(
             rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"
-        ), _gas_granted():
+        ), _charges_granted():
             _conn, relay = rpc_tunnel.service_tunnel(
                 iter([celaut.TokenMessage(token="tok", slot=str(port)), b"payload"]),
                 is_active=_deadline(),
@@ -540,7 +561,7 @@ class ServiceTunnelSerializationTests(unittest.TestCase):
             rpc_tunnel.sc, "get_internal_instance", return_value=_serialized_instance(port)
         ), patch.object(
             rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"
-        ), _gas_granted():
+        ), _charges_granted():
             _conn, relay = rpc_tunnel.service_tunnel(
                 iter([celaut.TokenMessage(token="tok", slot=str(port)), b"ignored"]),
                 is_active=_deadline(),

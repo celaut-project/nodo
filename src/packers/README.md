@@ -18,7 +18,7 @@
       "port": 8080,
       "transport": ["tcp"],
       "protocol": ["http"],
-      "gas_amount_per_call": {
+      "mu_per_call": {
         "health": "1",
         "infer": "50"
       }
@@ -86,7 +86,7 @@
 - If `service.json` provides slash-based input (for example `"/config/runtime/node.pb"`), packer normalizes it to segmented form.
 - `api[].transport` is required and serialized to `api.slot[].transport.tags` (host transport, e.g. `tcp`, `udp`).
 - `api[].protocol` is serialized to `api.slot[].protocol_stack[*].tags` (application protocol stack over transport).
-- `api[].gas_amount_per_call` is serialized to `api.slot[].gas_amount_per_call`.
+- `api[].mu_per_call` is serialized to `api.slot[].mu_per_call` (amounts in MU, where 1 MU = 1 nanoERG).
 - `resources.start_time_ms` no longer exists.
 - `possible_environment_workload[]` declares the **worst-case descendant workloads** the service
   may request during its lifetime, for scheduling admission decisions. It is serialized
