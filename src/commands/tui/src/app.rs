@@ -35,16 +35,18 @@ pub enum Page {
     Instances,
     Services,
     Network,
+    Pricing,
     Config,
     Logs,
 }
 
 impl Page {
-    pub const ALL: [Page; 6] = [
+    pub const ALL: [Page; 7] = [
         Page::Overview,
         Page::Instances,
         Page::Services,
         Page::Network,
+        Page::Pricing,
         Page::Config,
         Page::Logs,
     ];
@@ -55,6 +57,7 @@ impl Page {
             Page::Instances => "INSTANCES",
             Page::Services => "SERVICES",
             Page::Network => "NETWORK",
+            Page::Pricing => "PRICING",
             Page::Config => "CONFIG",
             Page::Logs => "LOGS",
         }
@@ -140,7 +143,9 @@ pub struct DetailsView {
 pub struct Peer {
     pub id: String,
     pub uris: String,
-    /// Our balance on this peer. Source of truth is the `balance_mu` column on the
+    /// Our balance on this peer, in raw MU as stored. Rendered in the operator's
+    /// display unit at draw time (see `Money`), never at read time, so changing the
+    /// unit does not need a data refresh. Source of truth is the `balance_mu` column on the
     /// `peer` table itself — NOT the local `clients` table. `peer.remote_client_id`
     /// identifies our client *inside the remote peer*, so it can never be joined
     /// against our local `clients` table (see issue #178).
@@ -337,6 +342,249 @@ impl Paths {
     }
 }
 
+/// How the operator's money is denominated, mirroring `src/utils/monetary.py`.
+///
+/// Three separate things, and the TUI has to keep them apart the same way the node
+/// does: amounts are stored in **MU**, what an MU is worth on the ledger comes from
+/// `ledgers.ergo.payments.MU_PER_NANOERG`, and what the operator reads is
+/// `ui.DISPLAY_UNIT`. The TUI reads the catalogue database directly, so it resolves all
+/// three from `config.yaml` itself rather than asking the node.
+#[derive(Debug, Clone)]
+pub struct Money {
+    pub unit_name: String,
+    pub symbol: String,
+    /// MU in one display unit.
+    pub mu_per_unit: f64,
+    /// Set when `mu_per_unit` is an exact power of ten, which lets formatting be a
+    /// digit shift on the decimal string instead of an f64 division — exact for any
+    /// balance, however large. The built-in units and any whole-numbered custom rate
+    /// land here; only an awkward custom rate falls back to floating point, where the
+    /// configured decimals round it anyway.
+    pub mu_per_unit_pow10: Option<u32>,
+    pub decimals: usize,
+    /// MU bought by one nanoERG. Only meaningful against the Ergo ledger.
+    pub mu_per_nanoerg: f64,
+}
+
+impl Default for Money {
+    fn default() -> Self {
+        Self {
+            unit_name: "erg".to_string(),
+            symbol: "ERG".to_string(),
+            mu_per_unit: 1e9,
+            mu_per_unit_pow10: Some(9),
+            decimals: 9,
+            mu_per_nanoerg: 1.0,
+        }
+    }
+}
+
+fn exact_pow10(value: f64) -> Option<u32> {
+    if !(value.is_finite() && value >= 1.0) {
+        return None;
+    }
+    let exponent = value.log10().round();
+    if !(0.0..=30.0).contains(&exponent) {
+        return None;
+    }
+    let candidate = 10f64.powf(exponent);
+    ((candidate - value).abs() < f64::EPSILON * candidate.max(1.0)).then_some(exponent as u32)
+}
+
+impl Money {
+    /// Resolve the display unit from `config.yaml`, falling back to ERG.
+    pub fn load(config: &Path) -> Self {
+        let document = read_yaml(config).ok();
+        let mu_per_nanoerg = yaml_scalar(
+            document.as_ref(),
+            &["ledgers", "ergo", "payments", "MU_PER_NANOERG"],
+        )
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| *value > 0.0)
+        .unwrap_or(1.0);
+
+        let name = yaml_string(document.as_ref(), &["ui", "DISPLAY_UNIT"])
+            .unwrap_or_else(|| "erg".to_string())
+            .trim()
+            .to_lowercase();
+
+        match name.as_str() {
+            "mu" => Self {
+                unit_name: name,
+                symbol: "MU".to_string(),
+                mu_per_unit: 1.0,
+                mu_per_unit_pow10: Some(0),
+                decimals: 0,
+                mu_per_nanoerg,
+            },
+            "erg" => {
+                let mu_per_unit = mu_per_nanoerg * 1e9;
+                Self {
+                    unit_name: name,
+                    symbol: "ERG".to_string(),
+                    mu_per_unit_pow10: exact_pow10(mu_per_unit),
+                    mu_per_unit,
+                    decimals: 9,
+                    mu_per_nanoerg,
+                }
+            }
+            // A unit the operator declared under `ui.UNITS.<name>`. Its rate is static
+            // and nothing refreshes it, exactly as on the node side.
+            _ => {
+                let unit_keys = ["ui", "UNITS", name.as_str()];
+                let mu_per_unit = yaml_scalar(
+                    document.as_ref(),
+                    &[unit_keys[0], unit_keys[1], unit_keys[2], "MU_PER_UNIT"],
+                )
+                .and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| *value > 0.0)
+                .unwrap_or(1.0);
+                Self {
+                    symbol: yaml_string(
+                        document.as_ref(),
+                        &[unit_keys[0], unit_keys[1], unit_keys[2], "SYMBOL"],
+                    )
+                    .unwrap_or_else(|| name.to_uppercase()),
+                    decimals: yaml_scalar(
+                        document.as_ref(),
+                        &[unit_keys[0], unit_keys[1], unit_keys[2], "DECIMALS"],
+                    )
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(2),
+                    unit_name: name,
+                    mu_per_unit_pow10: exact_pow10(mu_per_unit),
+                    mu_per_unit,
+                    mu_per_nanoerg,
+                }
+            }
+        }
+    }
+
+    /// Render a raw MU amount (as stored in the catalogue) in the display unit.
+    /// Anything unparseable is passed through untouched rather than guessed at.
+    pub fn format_raw(&self, raw: &str) -> String {
+        let digits = raw.trim();
+        let (sign, digits) = match digits.strip_prefix('-') {
+            Some(rest) => ("-", rest),
+            None => ("", digits),
+        };
+        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return raw.to_string();
+        }
+
+        let text = match self.mu_per_unit_pow10 {
+            Some(0) => digits.trim_start_matches('0').to_string(),
+            Some(shift) => {
+                let shift = shift as usize;
+                let padded = format!("{digits:0>width$}", width = shift + 1);
+                let split = padded.len() - shift;
+                let whole = &padded[..split];
+                let fraction = padded[split..].trim_end_matches('0');
+                if fraction.is_empty() {
+                    whole.to_string()
+                } else {
+                    format!("{whole}.{fraction}")
+                }
+            }
+            None => {
+                let Ok(value) = digits.parse::<f64>() else {
+                    return raw.to_string();
+                };
+                let text = format!("{:.*}", self.decimals, value / self.mu_per_unit);
+                text.trim_end_matches('0').trim_end_matches('.').to_string()
+            }
+        };
+        let text = if text.is_empty() { "0" } else { &text };
+        format!("{sign}{text} {}", self.symbol)
+    }
+
+    pub fn format_mu(&self, mu: u64) -> String {
+        self.format_raw(&mu.to_string())
+    }
+}
+
+/// One configurable price. The catalogue mirrors `PRICE_KEYS` in
+/// `src/utils/config_validation.py`; keeping the two in step is what makes the bars an
+/// editor for the real config rather than a decoration.
+#[derive(Debug, Clone)]
+pub struct PriceEntry {
+    /// Key under `pricing:` in config.yaml.
+    pub key: &'static str,
+    /// Short label for the bar.
+    pub short: &'static str,
+    /// What the price is charged per, for the legend.
+    pub per: &'static str,
+    /// Recurring prices are charged for as long as a resource is held; one-off ones
+    /// price an event. They are shown apart because their magnitudes are unrelated,
+    /// and a shared axis would flatten one of the groups into nothing.
+    pub recurring: bool,
+    pub mu: u64,
+}
+
+impl Identifiable for PriceEntry {
+    fn id(&self) -> &str {
+        self.key
+    }
+}
+
+const PRICE_CATALOGUE: [(&str, &str, &str, bool); 7] = [
+    ("RAM_MU_PER_GIB_HOUR", "RAM", "per GiB-hour", true),
+    ("CPU_MU_PER_VCPU_HOUR", "CPU", "per vCPU-hour", true),
+    ("DISK_MU_PER_GIB_HOUR", "DISK", "per GiB-hour", true),
+    ("NET_MU_PER_GIB", "NET", "per GiB relayed", true),
+    ("BUILD_MU", "BUILD", "per container build", false),
+    ("TUNNEL_OPEN_MU", "TUNNEL", "per tunnel opened", false),
+    ("MODIFY_RESOURCES_MU", "RESIZE", "per resource change", false),
+];
+
+/// The scarcity surcharge, which bounds what any of these prices can become.
+#[derive(Debug, Clone, Copy)]
+pub struct Scarcity {
+    pub max_multiplier: u64,
+    pub curve: f64,
+}
+
+impl Default for Scarcity {
+    fn default() -> Self {
+        Self {
+            max_multiplier: 1,
+            curve: 1.0,
+        }
+    }
+}
+
+fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
+    let document = read_yaml(config).ok();
+    let read = |key: &str| -> u64 {
+        yaml_scalar(document.as_ref(), &["pricing", key])
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(|value| value as u64)
+            .unwrap_or(0)
+    };
+    let entries = PRICE_CATALOGUE
+        .iter()
+        .map(|(key, short, per, recurring)| PriceEntry {
+            key,
+            short,
+            per,
+            recurring: *recurring,
+            mu: read(key),
+        })
+        .collect();
+    let scarcity = Scarcity {
+        max_multiplier: yaml_scalar(document.as_ref(), &["pricing", "SCARCITY_MAX_MULTIPLIER"])
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .unwrap_or(1)
+            .max(1),
+        curve: yaml_scalar(document.as_ref(), &["pricing", "SCARCITY_CURVE"])
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|value| *value > 0.0)
+            .unwrap_or(1.0),
+    };
+    (entries, scarcity)
+}
+
 fn read_yaml(path: &Path) -> Result<Value, String> {
     let content = fs::read_to_string(path)
         .map_err(|error| format!("Unable to read {}: {error}", path.display()))?;
@@ -350,6 +598,24 @@ fn yaml_string(document: Option<&Value>, keys: &[&str]) -> Option<String> {
         value = value.get(*key)?;
     }
     value.as_str().map(ToString::to_string)
+}
+
+/// Read a scalar as text, whatever YAML type it happens to be.
+///
+/// `yaml_string` only sees quoted strings, so a price written as a bare `1000000` --
+/// which is how prices are written, they are numbers -- reads as absent and would
+/// silently show as free. Anything that is not a scalar still reads as absent.
+fn yaml_scalar(document: Option<&Value>, keys: &[&str]) -> Option<String> {
+    let mut value = document?;
+    for key in keys {
+        value = value.get(*key)?;
+    }
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
 }
 
 fn resolve_config_path(value: &str, main_dir: &Path, storage: Option<&Path>) -> PathBuf {
@@ -468,6 +734,10 @@ pub struct App {
     pub config: StatefulList<ConfigEntry>,
     pub config_all: Vec<ConfigEntry>,
     pub config_filter: String,
+    /// Editable price vector, and how the operator's money is denominated.
+    pub prices: StatefulList<PriceEntry>,
+    pub scarcity: Scarcity,
+    pub money: Money,
     pub network_focus: usize,
     pub instances_grouped: bool,
     pub app_logs: Vec<String>,
@@ -503,6 +773,7 @@ impl Default for App {
     fn default() -> Self {
         let paths = Paths::discover();
         let config_all = get_config_entries(&paths.config).unwrap_or_default();
+        let (prices, scarcity) = get_prices(&paths.config);
         let now = Instant::now();
         Self {
             title: "NODO OPERATIONS",
@@ -515,6 +786,9 @@ impl Default for App {
             config: StatefulList::with_items(config_all.clone()),
             config_all,
             config_filter: String::new(),
+            prices: StatefulList::with_items(prices),
+            scarcity,
+            money: Money::load(&paths.config),
             network_focus: 0,
             instances_grouped: false,
             app_logs: vec!["TUI ready".to_string()],
@@ -571,6 +845,7 @@ impl App {
             Page::Services => self.services.previous(),
             Page::Network if self.network_focus == 0 => self.peers.previous(),
             Page::Network => self.clients.previous(),
+            Page::Pricing => self.prices.previous(),
             Page::Config => self.config.previous(),
             _ => {}
         }
@@ -582,6 +857,7 @@ impl App {
             Page::Services => self.services.next(),
             Page::Network if self.network_focus == 0 => self.peers.next(),
             Page::Network => self.clients.next(),
+            Page::Pricing => self.prices.next(),
             Page::Config => self.config.next(),
             _ => {}
         }
@@ -814,41 +1090,169 @@ impl App {
             return;
         }
 
-        let expression = format!("{} = env(NODO_TUI_VALUE)", yq_path_expression(&path));
-        let backup = self.paths.config.with_extension("yaml.tui.bak");
-        if let Err(error) = fs::copy(&self.paths.config, &backup) {
-            self.status = format!("Could not create config backup: {error}");
-            return;
+        let value = self.input.clone();
+        match self.write_config_value(&path, &value).await {
+            Ok(()) => {
+                self.reload_after_config_write();
+                self.close_input();
+                self.status =
+                    "Configuration saved • restart nodo to apply runtime changes".to_string();
+            }
+            Err(error) => self.status = error,
         }
+    }
+
+    /// Write one value into config.yaml through `yq`, keeping a backup.
+    ///
+    /// Shared by the configuration editor and the pricing bars so a price is written
+    /// exactly the way any other setting is -- same quoting, same backup, same failure
+    /// reporting -- rather than through a second, subtly different path.
+    async fn write_config_value(
+        &mut self,
+        path: &[ConfigPathSegment],
+        value: &str,
+    ) -> Result<(), String> {
+        let expression = format!("{} = env(NODO_TUI_VALUE)", yq_path_expression(path));
+        let backup = self.paths.config.with_extension("yaml.tui.bak");
+        fs::copy(&self.paths.config, &backup)
+            .map_err(|error| format!("Could not create config backup: {error}"))?;
 
         let output = Command::new(&self.paths.yq)
             .arg("e")
             .arg("-i")
             .arg(expression)
             .arg(&self.paths.config)
-            .env("NODO_TUI_VALUE", &self.input)
+            .env("NODO_TUI_VALUE", value)
             .output()
             .await;
 
         match output {
             Ok(output) if output.status.success() => {
                 self.paths = Paths::discover();
-                self.config_all = get_config_entries(&self.paths.config).unwrap_or_default();
-                self.apply_config_filter();
-                self.close_input();
-                self.status = format!(
-                    "Configuration saved • backup: {} • restart nodo to apply runtime changes",
-                    backup.display()
-                );
+                Ok(())
             }
-            Ok(output) => {
-                let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                self.status = format!("yq could not update configuration: {message}");
+            Ok(output) => Err(format!(
+                "yq could not update configuration: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )),
+            Err(error) => Err(format!(
+                "Could not run {}: {error}",
+                self.paths.yq.display()
+            )),
+        }
+    }
+
+    // --- Pricing ----------------------------------------------------------
+
+    /// Nudge the selected price up or down.
+    ///
+    /// Steps by 10 % rather than by 1, because prices span decades: +1 MU on a build
+    /// price of 10 000 000 is not an edit anybody can see. The floor of 1 MU keeps a
+    /// price that is being raised from zero from staying there, and a price is only
+    /// ever taken to exactly 0 (free) by typing it, never by nudging.
+    pub async fn adjust_selected_price(&mut self, delta: i32) {
+        if self.page() != Page::Pricing {
+            return;
+        }
+        let Some(entry) = self.prices.selected().cloned() else {
+            self.status = "Select a price first".to_string();
+            return;
+        };
+
+        let step = ((entry.mu as f64) * 0.1).round() as u64;
+        let step = step.max(1);
+        let next = if delta >= 0 {
+            entry.mu.saturating_add(step)
+        } else {
+            entry.mu.saturating_sub(step).max(1)
+        };
+        if next == entry.mu {
+            return;
+        }
+
+        self.write_price(entry.key, next.to_string()).await;
+    }
+
+    /// Open the ordinary config editor on the selected price, for an exact value.
+    pub fn open_price_editor(&mut self) {
+        if self.page() != Page::Pricing {
+            return;
+        }
+        let Some(entry) = self.prices.selected().cloned() else {
+            self.status = "Select a price first".to_string();
+            return;
+        };
+        self.input_mode = InputMode::EditConfig;
+        self.input_title = format!("Edit pricing.{} (MU, {})", entry.key, entry.per);
+        self.input = entry.mu.to_string();
+        self.edit_config_path = Some(vec![
+            ConfigPathSegment::Key("pricing".to_string()),
+            ConfigPathSegment::Key(entry.key.to_string()),
+        ]);
+        self.edit_config_secret = false;
+        self.edit_kind = EditKind::Number;
+    }
+
+    /// Persist one price and reload, so the bars always show what is on disk rather
+    /// than what the TUI hoped it wrote.
+    async fn write_price(&mut self, key: &str, value: String) {
+        let path = vec![
+            ConfigPathSegment::Key("pricing".to_string()),
+            ConfigPathSegment::Key(key.to_string()),
+        ];
+        match self.write_config_value(&path, &value).await {
+            Ok(()) => {
+                self.reload_after_config_write();
+                let shown = self
+                    .prices
+                    .items
+                    .iter()
+                    .find(|entry| entry.key == key)
+                    .map(|entry| self.money.format_mu(entry.mu))
+                    .unwrap_or_default();
+                self.status = format!("pricing.{key} = {value} MU ({shown}) • restart nodo to apply");
             }
-            Err(error) => {
-                self.status = format!("Could not run {}: {error}", self.paths.yq.display());
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// Re-read prices, the scarcity ceiling and the display unit from config.yaml,
+    /// keeping whatever price was selected selected.
+    fn reload_money(&mut self) {
+        let selected = self.prices.state_id.clone();
+        let (prices, scarcity) = get_prices(&self.paths.config);
+        self.prices.refresh(prices);
+        if let Some(id) = selected {
+            if let Some(index) = self.prices.items.iter().position(|entry| entry.key == id) {
+                self.prices.state.select(Some(index));
+                self.prices.state_id = Some(id);
             }
         }
+        self.scarcity = scarcity;
+        self.money = Money::load(&self.paths.config);
+    }
+
+    /// Everything a config write invalidates: the money view and the config table.
+    fn reload_after_config_write(&mut self) {
+        self.reload_money();
+        self.config_all = get_config_entries(&self.paths.config).unwrap_or_default();
+        self.apply_config_filter();
+    }
+
+    /// What an hour of a reference instance costs at the current prices, with no
+    /// scarcity surcharge. A worked example beats a price list for judging whether a
+    /// change was the one intended.
+    pub fn reference_hourly_mu(&self) -> u64 {
+        let price = |key: &str| -> u64 {
+            self.prices
+                .items
+                .iter()
+                .find(|entry| entry.key == key)
+                .map(|entry| entry.mu)
+                .unwrap_or(0)
+        };
+        // 256 MiB of memory, one vCPU, 10 GiB of disk -- the example in docs/PRICING.md.
+        price("RAM_MU_PER_GIB_HOUR") / 4 + price("CPU_MU_PER_VCPU_HOUR") + price("DISK_MU_PER_GIB_HOUR") * 10
     }
 
     pub fn execute_selected_service(&mut self) {
@@ -1068,6 +1472,12 @@ impl App {
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
         self.node_logs = read_last_lines(&self.paths.log, 250).unwrap_or_default();
 
+        // Prices and the display unit come from config.yaml, which the operator may be
+        // editing from outside the TUI. Re-reading them here keeps the bars and every
+        // balance on screen consistent with the file rather than with whatever was
+        // loaded at startup.
+        self.reload_money();
+
         self.sys.refresh_cpu();
         self.sys.refresh_memory();
         self.stats.cpu_percent = self.sys.global_cpu_info().cpu_usage().round() as u64;
@@ -1231,7 +1641,7 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
             let id: String = row.get(0)?;
             Ok(Peer {
                 uris: row.get(1)?,
-                balance: format_erg(row.get::<_, String>(2)?),
+                balance: row.get::<_, String>(2)?,
                 reputation: row.get(3)?,
                 reputation_score,
                 // `contract_instance` isn't touched by the join above (it isn't
@@ -1314,7 +1724,7 @@ fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
                 .unwrap_or_else(|| "—".to_string());
             Ok(Client {
                 id: row.get(0)?,
-                balance: format_erg(row.get::<_, String>(1)?),
+                balance: row.get::<_, String>(1)?,
                 last_usage,
             })
         })?
@@ -1350,7 +1760,7 @@ fn get_instances(
                 id,
                 name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 ip: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                balance: format_erg(row.get::<_, String>(3)?),
+                balance: row.get::<_, String>(3)?,
                 service,
                 memory_current,
                 memory_limit: row.get::<_, Option<u64>>(5)?.unwrap_or(0),
@@ -1619,30 +2029,6 @@ fn read_u64(path: &Path) -> Option<u64> {
     fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
-/// Render an MU amount as ERG. MU is pegged at 1 MU = 1 nanoERG, so this is a
-/// fixed-point shift by 9 places -- done on the integer string rather than through
-/// f64, which cannot hold a large balance exactly. Mirrors
-/// `src/utils/ergo_units.py::nanoerg_to_erg_str`.
-fn format_erg(value: String) -> String {
-    let digits = value.trim();
-    let (sign, digits) = match digits.strip_prefix('-') {
-        Some(rest) => ("-", rest),
-        None => ("", digits),
-    };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return value;
-    }
-    let padded = format!("{digits:0>10}");
-    let split = padded.len() - 9;
-    let whole = &padded[..split];
-    let fraction = padded[split..].trim_end_matches('0');
-    if fraction.is_empty() {
-        format!("{sign}{whole} ERG")
-    } else {
-        format!("{sign}{whole}.{fraction} ERG")
-    }
-}
-
 fn push_history(history: &mut VecDeque<u64>, value: u64) {
     if history.len() >= HISTORY_POINTS {
         history.pop_front();
@@ -1696,6 +2082,128 @@ pub fn shorten(value: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The display layer, mirroring `tests/test_pricing_model.py` on the node side.
+    /// The TUI reads the catalogue database directly, so if these two drift the
+    /// operator sees a different number in the TUI than in the CLI.
+    mod money {
+        use super::super::Money;
+
+        fn erg(mu_per_nanoerg: f64) -> Money {
+            let mu_per_unit = mu_per_nanoerg * 1e9;
+            Money {
+                unit_name: "erg".to_string(),
+                symbol: "ERG".to_string(),
+                mu_per_unit_pow10: super::super::exact_pow10(mu_per_unit),
+                mu_per_unit,
+                decimals: 9,
+                mu_per_nanoerg,
+            }
+        }
+
+        #[test]
+        fn erg_is_an_exact_digit_shift_not_a_float_division() {
+            let money = erg(1.0);
+            assert_eq!(money.format_raw("1000000000"), "1 ERG");
+            assert_eq!(money.format_raw("5000"), "0.000005 ERG");
+            // Beyond f64's integer precision, which is why formatting shifts digits.
+            assert_eq!(
+                money.format_raw("123456789012345678901"),
+                "123456789012.345678901 ERG"
+            );
+        }
+
+        #[test]
+        fn the_ledger_rate_rescales_what_an_mu_is_worth() {
+            // One MU is a thousand nanoERG, so the same balance is worth 1000x more.
+            assert_eq!(erg(0.001).format_raw("1000000"), "1 ERG");
+        }
+
+        #[test]
+        fn raw_mu_can_be_shown_untouched() {
+            let money = Money {
+                unit_name: "mu".to_string(),
+                symbol: "MU".to_string(),
+                mu_per_unit: 1.0,
+                mu_per_unit_pow10: Some(0),
+                decimals: 0,
+                mu_per_nanoerg: 1.0,
+            };
+            assert_eq!(money.format_raw("14582"), "14582 MU");
+        }
+
+        #[test]
+        fn a_custom_unit_rounds_to_its_declared_decimals() {
+            let money = Money {
+                unit_name: "usd".to_string(),
+                symbol: "USD".to_string(),
+                mu_per_unit: 5e8,
+                mu_per_unit_pow10: None,
+                decimals: 2,
+                mu_per_nanoerg: 1.0,
+            };
+            assert_eq!(money.format_raw("5000000000"), "10 USD");
+            assert_eq!(money.format_raw("1250000000"), "2.5 USD");
+        }
+
+        #[test]
+        fn an_unparseable_balance_is_passed_through_not_guessed_at() {
+            assert_eq!(erg(1.0).format_raw("N/A"), "N/A");
+            assert_eq!(erg(1.0).format_raw(""), "");
+        }
+
+        #[test]
+        fn negative_balances_keep_their_sign() {
+            // Reachable: costs.ALLOW_DEBT lets an instance run past zero.
+            assert_eq!(erg(1.0).format_raw("-2500000000"), "-2.5 ERG");
+        }
+    }
+
+    #[test]
+    fn the_price_catalogue_matches_the_config_keys() {
+        // Every key the node validates must be editable here, or the bars silently
+        // stop covering part of what the node charges for.
+        let keys: Vec<&str> = super::PRICE_CATALOGUE.iter().map(|(key, ..)| *key).collect();
+        assert_eq!(
+            keys,
+            vec![
+                "RAM_MU_PER_GIB_HOUR",
+                "CPU_MU_PER_VCPU_HOUR",
+                "DISK_MU_PER_GIB_HOUR",
+                "NET_MU_PER_GIB",
+                "BUILD_MU",
+                "TUNNEL_OPEN_MU",
+                "MODIFY_RESOURCES_MU",
+            ]
+        );
+    }
+
+    #[test]
+    fn prices_are_read_from_the_config_file() {
+        let dir = std::env::temp_dir().join(format!("nodo-tui-prices-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("config.yaml");
+        fs::write(
+            &config,
+            "pricing:\n  RAM_MU_PER_GIB_HOUR: 1000000\n  BUILD_MU: 7\n  SCARCITY_MAX_MULTIPLIER: 4\n",
+        )
+        .unwrap();
+
+        let (prices, scarcity) = super::get_prices(&config);
+        let ram = prices.iter().find(|p| p.key == "RAM_MU_PER_GIB_HOUR").unwrap();
+        assert_eq!(ram.mu, 1_000_000);
+        assert!(ram.recurring);
+        let build = prices.iter().find(|p| p.key == "BUILD_MU").unwrap();
+        assert_eq!(build.mu, 7);
+        assert!(!build.recurring);
+        // An absent key is a free resource, not a crash.
+        let net = prices.iter().find(|p| p.key == "NET_MU_PER_GIB").unwrap();
+        assert_eq!(net.mu, 0);
+        assert_eq!(scarcity.max_multiplier, 4);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     /// A database with just the tables `get_peers` touches, one peer, and
