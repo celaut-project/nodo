@@ -245,22 +245,26 @@ def __address_in_network(ip_or_uri, net) -> bool:
         ni.ifaddresses(net)[ni.AF_INET6][0]['addr'] == ip_or_uri
 
 
-def get_network_name(direction: str) -> str:
+def get_network_name(direction: str) -> Optional[str]:
     """
     Get the network name for a given direction. If the direction contains a port, it will be removed.
-    If the direction is localhost, it will return 'localhost'.
-    
+
     Args:
         direction (str): The direction to get the network name for.
-        
+
     Returns:
-        str: The network name. Returns 'localhost' if no matching network is found.
-        
+        Optional[str]: The name of one of our own interfaces whose subnet contains
+        ``direction``. ``"localhost"`` specifically means ``direction`` is our own
+        loopback (``0.0.0.0``/``::1``). ``None`` means ``direction`` is not on any
+        network we are on -- e.g. a real peer reached over the internet -- which is
+        a different situation from loopback and must not be treated as if it were
+        one (there is no interface actually named "localhost" to resolve an IP from).
+
     Raises:
         Exception: If there's an error processing the network interfaces
     """
     direction = _extract_direction_host(direction)
-    
+
     # If is localhost
     if "::1" in direction or '0.0.0.0' == direction:
         return "localhost"
@@ -273,10 +277,10 @@ def get_network_name(direction: str) -> str:
                     return network
             except KeyError:
                 continue
-        
-        # If no network is found, return localhost
-        return "localhost"
-     
+
+        # direction does not belong to any network we are on.
+        return None
+
     except Exception as e:
         raise Exception('Error getting the network name: ' + str(e))
 
