@@ -167,12 +167,7 @@ def _is_reachable(instance: celaut_pb2.Instance) -> bool:
     ``instance.uri_slot``, which only lists what the peer *chose* to expose. A
     peer that could not give an address for a declared slot (no ``Uri_Slot`` for
     it at all, e.g. it has no local network in common with us and no public IP
-    configured) is exactly the case that must count as unreachable, since
-    treating "nothing said" as "nothing to check" would skip tunnelling it.
-
-    Probed from this node with a TCP connect, so it is an approximation of what
-    our client can reach. A UDP slot has no handshake to probe, so it counts as
-    unreachable rather than being assumed fine.
+    configured) is exactly the case that must count as unreachable.
     """
     transports = _slot_transports(instance)
     given = {uri_slot.internal_port: uri_slot for uri_slot in instance.uri_slot}
