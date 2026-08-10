@@ -160,27 +160,40 @@ def _slot_transports(instance: celaut_pb2.Instance) -> Dict[int, Optional[Transp
 
 
 def _is_reachable(instance: celaut_pb2.Instance) -> bool:
-    """Does every declared slot answer at one of its advertised addresses?
+    """Does every slot the service declares answer at one of its addresses?
+
+    Which slots exist comes from ``instance.api.slot`` -- the service's own
+    specification, echoed back unconditionally by whoever ran it -- not from
+    ``instance.uri_slot``, which only lists what the peer *chose* to expose. A
+    peer that could not give an address for a declared slot (no ``Uri_Slot`` for
+    it at all, e.g. it has no local network in common with us and no public IP
+    configured) is exactly the case that must count as unreachable, since
+    treating "nothing said" as "nothing to check" would skip tunnelling it.
 
     Probed from this node with a TCP connect, so it is an approximation of what
     our client can reach. A UDP slot has no handshake to probe, so it counts as
     unreachable rather than being assumed fine.
     """
     transports = _slot_transports(instance)
+    given = {uri_slot.internal_port: uri_slot for uri_slot in instance.uri_slot}
 
-    for uri_slot in instance.uri_slot:
-        transport = transports.get(uri_slot.internal_port)
+    for internal_port, transport in transports.items():
         if transport is not TransportProtocol.TCP:
             logger(
-                f"{LOG_PREFIX} Slot {uri_slot.internal_port} is "
+                f"{LOG_PREFIX} Slot {internal_port} is "
                 f"{transport.value if transport else 'untyped'}; cannot probe it, "
                 "treating as unreachable."
             )
             return False
 
+        uri_slot = given.get(internal_port)
+        if uri_slot is None or not uri_slot.uri:
+            logger(f"{LOG_PREFIX} Slot {internal_port} was given no address at all.")
+            return False
+
         if not any(utils.is_open(ip=uri.ip, port=uri.port) for uri in uri_slot.uri):
             logger(
-                f"{LOG_PREFIX} Slot {uri_slot.internal_port} does not answer at "
+                f"{LOG_PREFIX} Slot {internal_port} does not answer at "
                 f"{[f'{uri.ip}:{uri.port}' for uri in uri_slot.uri]}."
             )
             return False
@@ -197,8 +210,8 @@ def should_tunnel(instance: celaut_pb2.Instance) -> bool:
     if policy == POLICY_ALWAYS:
         return True
 
-    if not instance.uri_slot:
-        return False  # Nothing advertised; nothing to stand in for.
+    if not instance.api.slot:
+        return False  # The service itself declares no API slots; nothing to stand in for.
 
     return not _is_reachable(instance)
 
@@ -226,6 +239,9 @@ def advertise_ip_for(father_id: str, father_ip: str) -> Optional[str]:
         network = utils.get_network_name(direction=father_ip)
         if network == "localhost":
             return "127.0.0.1"
+        if network is None:
+            logger(f"{LOG_PREFIX} {father_ip} is not on any of our own networks.")
+            return None
         return utils.get_local_ip_from_network(network=network, allow_link_local=False)
     except Exception as e:
         logger(f"{LOG_PREFIX} Cannot resolve our IP towards {father_ip}: {e}")
@@ -386,37 +402,44 @@ def _publish_locked(
         close(token)
 
     transports = _slot_transports(instance)
+    given = {uri_slot.internal_port: uri_slot for uri_slot in instance.uri_slot}
     rewritten = celaut_pb2.Instance()
     rewritten.api.CopyFrom(instance.api)
 
     opened: List[_Endpoint] = []
-    for uri_slot in instance.uri_slot:
-        transport = transports.get(uri_slot.internal_port)
+    # Iterate the service's own declared slots, not instance.uri_slot: a slot the
+    # peer could not give any address for (no local network in common, no public
+    # IP configured) is precisely the one that most needs a tunnel, and it may
+    # not have an entry in instance.uri_slot at all.
+    for internal_port, transport in transports.items():
+        peer_uri_slot = given.get(internal_port)
         if transport is None:
-            logger(
-                f"{LOG_PREFIX} Slot {uri_slot.internal_port} of {token} has no usable "
-                "transport; leaving its addresses untouched."
-            )
-            rewritten.uri_slot.append(uri_slot)
+            if peer_uri_slot is not None:
+                logger(
+                    f"{LOG_PREFIX} Slot {internal_port} of {token} has no usable "
+                    "transport; leaving its addresses untouched."
+                )
+                rewritten.uri_slot.append(peer_uri_slot)
             continue
 
         endpoint = _open_endpoint(
             token=token,
-            internal_port=uri_slot.internal_port,
+            internal_port=internal_port,
             transport=transport,
             peer_gateway=peer_gateway,
             bind_ip=bind_ip,
-            local_port=(port_by_slot or {}).get(uri_slot.internal_port),
+            local_port=(port_by_slot or {}).get(internal_port),
         )
         if endpoint is None:
-            # Better to advertise the peer's own address than nothing at all.
-            rewritten.uri_slot.append(uri_slot)
+            # Better to advertise the peer's own address, if it gave one, than nothing at all.
+            if peer_uri_slot is not None:
+                rewritten.uri_slot.append(peer_uri_slot)
             continue
 
         opened.append(endpoint)
         rewritten.uri_slot.append(
             celaut_pb2.Instance.Uri_Slot(
-                internal_port=uri_slot.internal_port,
+                internal_port=internal_port,
                 uri=[celaut_pb2.Instance.Uri(ip=bind_ip, port=endpoint.local_port)],
             )
         )
