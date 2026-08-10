@@ -178,23 +178,38 @@ def local_execution(
     isolate_internal_children = env_manager.get("network.ISOLATE_INTERNAL_CHILDREN", True)
     is_dev_client = "dev" in father_id and env_manager.get("network.CONSIDER_DEV_AS_INTERNAL", True)
     disabled_outside = env_manager.get("network.DISABLE_EXPOSE_OUTSIDE", False)
-    force_external_exposure = is_external_execute_client(father_id)
+    # `dev-external-` client ids are a synthetic pool used to exercise the
+    # "exposed outside" code paths locally for testing, without a real remote
+    # peer -- not a signal that the actual father is on another network (that
+    # is what cross_network, below, is for).
+    is_dev_forced_external = is_external_execute_client(father_id)
     # In case of dev instances, we consider them as internal.
     # If the father is internal, but isolate internal children is disabled, the child should be exposed outside.
     expose_outside: bool = not disabled_outside and (
-        force_external_exposure
+        is_dev_forced_external
         or (not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children))
     )
-    if force_external_exposure and disabled_outside:
+    if is_dev_forced_external and disabled_outside:
         log.LOGGER(
             "External exposure requested by configuration, but network.DISABLE_EXPOSE_OUTSIDE is enabled."
         )
+
+    # Which of our own networks (if any) father_ip belongs to. None means father_ip
+    # shares no subnet with any of our interfaces -- e.g. a real peer reached over
+    # the internet -- which is a different situation from "not exposed" and must
+    # not be resolved as if it were our own loopback (see get_network_name).
+    resolved_network: Optional[str] = None
+    if expose_outside and not is_dev_forced_external:
+        resolved_network = utils.get_network_name(direction=father_ip)
+    same_network = resolved_network is not None
+    cross_network = expose_outside and not is_dev_forced_external and not same_network
+
     log.LOGGER(
         "Internal child isolation is "
         + ("enabled" if isolate_internal_children else "disabled")
         + (
             f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside}, "
-            f"force_external_exposure={force_external_exposure})"
+            f"is_dev_forced_external={is_dev_forced_external}, cross_network={cross_network})"
         )
     )
 
@@ -218,14 +233,38 @@ def local_execution(
         )
 
     free_port_ranges = env_manager.get("network.FREE_PORTS_RANGE", [])
-    assigment_ports = {
-        port: (
-            get_free_port(free_port_ranges=free_port_ranges)
-            if expose_outside
-            else port
-        )
-        for port in supported_slot_ports
-    }
+    # father_ip is on a network of its own: the only address we could ever give it
+    # is our own PUBLIC_IP, and that is only worth pairing with a port we believe
+    # the operator's router forwards (network.FREE_PORTS_RANGE) -- an OS-assigned
+    # ephemeral port is exactly as unreachable to father_ip as our LAN address
+    # would be. Neither is auto-detected: the operator states both explicitly.
+    configured_public_ip = ""
+    if cross_network:
+        configured_public_ip = str(env_manager.get("network.PUBLIC_IP", "") or "").strip()
+
+    # Only allocate (and later DNAT) the slots we can actually route to from
+    # outside. same_network and the dev-forced-external test path behave as
+    # before: an OS ephemeral port when FREE_PORTS_RANGE is exhausted or unset is
+    # still fine there, since it stays reachable on this node's own network.
+    # cross_network with no PUBLIC_IP configured, or with every configured range
+    # already taken, leaves the slot out entirely instead of failing the whole
+    # launch: a tunnelled request reaches the container directly on its internal
+    # address (src/tunneling/rpc_tunnel.py), bypassing this mapping, so nothing
+    # needs to be opened on this host for a slot nobody will be told about.
+    assigment_ports: Dict[int, int] = {}
+    for port in supported_slot_ports:
+        if not expose_outside:
+            assigment_ports[port] = port
+        elif cross_network:
+            if not configured_public_ip or not free_port_ranges:
+                continue
+            try:
+                assigment_ports[port] = get_free_port(free_port_ranges=free_port_ranges)
+            except RuntimeError as e:
+                log.LOGGER(f"[LOCAL_EXEC] {e} (slot {port}); leaving it unadvertised.")
+        else:
+            assigment_ports[port] = get_free_port(free_port_ranges=free_port_ranges)
+
     log.LOGGER(
         f"Execution network mode: by_local={not expose_outside}, "
         f"assigment_ports={assigment_ports}"
@@ -238,52 +277,66 @@ def local_execution(
 
     # Execute virtualizer process.
     vmachine_id, vmachine_ip = execute(
-        assigment_ports=assigment_ports, 
-        by_local=not expose_outside, 
-        service_id=service_id, 
-        service=service, 
-        config=config, 
-        initial_system_resources=initial_system_resources, 
+        assigment_ports=assigment_ports,
+        by_local=not expose_outside,
+        service_id=service_id,
+        service=service,
+        config=config,
+        initial_system_resources=initial_system_resources,
         father_id=father_id
     )
     log.LOGGER(f"Virtualizer execute returned: vmachine_id={vmachine_id}, vmachine_ip={vmachine_ip}")
 
     # Resolve slots
     uri_slots: List[celaut.Instance.Uri_Slot] = []
-    resolved_network = ""
     try:
-        if expose_outside and not force_external_exposure:
-            resolved_network = utils.get_network_name(direction=father_ip)
-
-        log.LOGGER(f"Preparing published URI slots: resolved_network={resolved_network} and father IP={father_ip if father_ip else 'N/A'}")
-
         # get the host ip to be published for this instance. If the instance doesn't require to be exposed, publish the vmachine_ip, otherwise publish the local IP of this node.:
         if not expose_outside:
             _ip = vmachine_ip
-        elif force_external_exposure:
+        elif is_dev_forced_external:
             _ip = _get_external_advertised_host_ip(father_ip=father_ip)
-        else:
+        elif same_network:
             _ip = utils.get_local_ip_from_network(
                 network=resolved_network,
                 allow_link_local=False,
             )
+        elif configured_public_ip:
+            _ip = configured_public_ip
+        else:
+            _ip = None
+            log.LOGGER(
+                "[LOCAL_EXEC] father is on a different network and network.PUBLIC_IP is not "
+                "configured; no address will be advertised -- the caller must use the service tunnel."
+            )
 
-        for internal, external in assigment_ports.items():
+        log.LOGGER(
+            f"Preparing published URI slots: resolved_network={resolved_network}, "
+            f"cross_network={cross_network}, advertised_ip={_ip or 'none'}, "
+            f"father IP={father_ip if father_ip else 'N/A'}"
+        )
+
+        for internal in supported_slot_ports:
             uri_slot = celaut.Instance.Uri_Slot()
             uri_slot.internal_port = internal
 
-            uri_slot.uri.append(
-                celaut.Instance.Uri(
-                    ip=_ip,
-                    port=external
+            external = assigment_ports.get(internal)
+            if _ip is not None and external is not None:
+                uri_slot.uri.append(
+                    celaut.Instance.Uri(
+                        ip=_ip,
+                        port=external
+                    )
                 )
-            )
-            log.LOGGER(
-                f"Published URI mapping: internal_port={internal}, advertised={_ip}:{external}, "
-                f"vmachine_ip={vmachine_ip}, by_local={not expose_outside}"
-            )
+                log.LOGGER(
+                    f"Published URI mapping: internal_port={internal}, advertised={_ip}:{external}, "
+                    f"vmachine_ip={vmachine_ip}, by_local={not expose_outside}"
+                )
+            else:
+                log.LOGGER(
+                    f"[LOCAL_EXEC] Slot {internal} has no advertisable address; the caller must tunnel it."
+                )
             uri_slots.append(uri_slot)
-            
+
     except Exception as e:
         log.LOGGER(f"Exception setting uri_slot: {str(e)}")
         log.LOGGER(traceback.format_exc())
