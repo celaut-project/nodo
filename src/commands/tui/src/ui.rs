@@ -1,6 +1,6 @@
 use crate::app::{
-    format_bytes, percent, shorten, App, EditKind, Instance, InputMode, Money, Page, Peer,
-    PriceEntry, HISTORY_POINTS,
+    format_bytes, format_bytes_compact, format_rate_compact, percent, shorten, App, EditKind,
+    InputMode, Instance, Money, Page, Peer, PriceEntry, HISTORY_POINTS,
 };
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
@@ -306,9 +306,10 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_instances_tree(frame, app, area);
         return;
     }
-    // 8 = 6 detail lines + the block's two border rows. At 6 the card clipped its
-    // last line (Balance) even before the `observe` hint was added.
-    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(8)]).split(area);
+    // 12 = 10 detail lines + the block's two border rows. The card carries the figures
+    // the row has no width for: the disk allocation, the vCPU allowance the CPU% is
+    // measured against, and the cumulative disk/net totals.
+    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(12)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
         let location = if instance.is_local() {
             "local".to_string()
@@ -327,14 +328,24 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             Cell::from(instance.service.clone()),
             Cell::from(instance.ip.clone()),
             Cell::from(instance.virtualizer.clone()),
-            Cell::from(
+            Cell::from(format_cpu_percent(instance.usage.cpu_percent))
+                .style(Style::default().fg(cpu_load_color(instance))),
+            // Used against allocated in one cell: two columns made the operator do the
+            // division, which is the whole question being asked of this page.
+            Cell::from(format!(
+                "{} / {}",
                 instance
+                    .usage
                     .memory_current
-                    .map(format_bytes)
+                    .map(format_bytes_compact)
                     .unwrap_or_else(|| "—".to_string()),
-            ),
-            Cell::from(format_bytes(instance.memory_limit)),
-            Cell::from(format_bytes(instance.disk_limit)),
+                format_bytes_compact(instance.memory_limit)
+            )),
+            Cell::from(format!(
+                "{} / {}",
+                format_rate_compact(instance.usage.net_rx_rate),
+                format_rate_compact(instance.usage.net_tx_rate)
+            )),
             Cell::from(app.money.format_raw(&instance.balance)),
         ])
     });
@@ -349,14 +360,22 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Length(18),
             Constraint::Length(15),
             Constraint::Length(7),
-            Constraint::Length(9),
-            Constraint::Length(9),
-            Constraint::Length(9),
+            Constraint::Length(7),
+            Constraint::Length(14),
+            Constraint::Length(14),
             Constraint::Min(12),
         ],
     )
     .header(header_row(vec![
-        "Name", "Location", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max",
+        "Name",
+        "Location",
+        "Instance",
+        "Service",
+        "IP",
+        "VM",
+        "CPU%",
+        "RAM now/max",
+        "Net ↓/↑ per s",
         "Balance",
     ]))
     .block(section_block(
@@ -384,6 +403,29 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             ),
             metric_line("Service", instance.service.clone()),
             metric_line("Endpoint", nonempty(&instance.ip, "—")),
+            metric_line("CPU", cpu_detail(instance)),
+            metric_line(
+                "RAM",
+                format!(
+                    "{} / {}",
+                    instance
+                        .usage
+                        .memory_current
+                        .map(format_bytes)
+                        .unwrap_or_else(|| "—".to_string()),
+                    format_bytes(instance.memory_limit)
+                ),
+            ),
+            metric_line(
+                "Disk",
+                format!(
+                    "read {} • wrote {} • {} allocated",
+                    optional_bytes(instance.usage.disk_read_bytes),
+                    optional_bytes(instance.usage.disk_write_bytes),
+                    format_bytes(instance.disk_limit)
+                ),
+            ),
+            metric_line("Net", net_detail(instance)),
             metric_line("Balance", money.format_raw(&instance.balance)),
         ];
         // `observe` attaches to a local process, so it is only offered for local
@@ -408,6 +450,65 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         detail,
         Color::LightBlue,
     );
+}
+
+/// A CPU reading for a table cell. `—` covers both "no cgroup to read" (delegated or
+/// stopped) and "only one sample so far", which are equally not-a-measurement; a `0%`
+/// there would claim the instance is idle.
+fn format_cpu_percent(cpu_percent: Option<f64>) -> String {
+    match cpu_percent {
+        Some(value) if value.is_finite() => format!("{value:.0}%"),
+        _ => "—".to_string(),
+    }
+}
+
+/// Colour for the CPU cell: muted when there is no reading, and a warning once the
+/// instance is within a tenth of its whole vCPU allowance — the point at which the
+/// figure stops being informational and starts meaning "this one is throttling".
+fn cpu_load_color(instance: &Instance) -> Color {
+    match (instance.usage.cpu_percent, instance.cpu_allowance_percent()) {
+        (None, _) => MUTED,
+        (Some(used), Some(allowance)) if allowance > 0.0 && used >= allowance * 0.9 => WARN,
+        _ => GOOD,
+    }
+}
+
+/// The CPU line for the detail card: what the instance is using, next to the allowance
+/// that makes the number legible. `observe` reports cumulative core time, so `180%` is
+/// unremarkable on a 2-vCPU guest and impossible on a 1-vCPU one — without the
+/// allowance beside it the percentage cannot be judged.
+fn cpu_detail(instance: &Instance) -> String {
+    let used = format_cpu_percent(instance.usage.cpu_percent);
+    match instance.cpu_allowance_percent() {
+        Some(allowance) => format!(
+            "{used} of {allowance:.0}% allowance ({:.2} vCPU)",
+            instance.vcpus.unwrap_or(0.0)
+        ),
+        None => format!("{used} • no vCPU quota recorded"),
+    }
+}
+
+/// The network line for the detail card: current rates plus the totals they accumulate
+/// into. Orientation is the host tap's (see `InstanceUsage`), so `↓` is traffic the
+/// host took *from* the VM.
+fn net_detail(instance: &Instance) -> String {
+    let rate = |value: Option<f64>| match value {
+        Some(value) if value.is_finite() && value >= 0.0 => {
+            format!("{}/s", format_bytes(value.round() as u64))
+        }
+        _ => "—".to_string(),
+    };
+    format!(
+        "↓ {} ↑ {} • total {} / {}",
+        rate(instance.usage.net_rx_rate),
+        rate(instance.usage.net_tx_rate),
+        optional_bytes(instance.usage.net_rx_bytes),
+        optional_bytes(instance.usage.net_tx_bytes)
+    )
+}
+
+fn optional_bytes(bytes: Option<u64>) -> String {
+    bytes.map(format_bytes).unwrap_or_else(|| "—".to_string())
 }
 
 /// Render instances as a dependency tree grouped by `father_id`, porting the
@@ -1348,8 +1449,146 @@ mod tests {
         }
     }
 
+    /// The instances page has to answer "is this instance using what it was given?".
+    /// These tests pin the two halves of that: a live figure appears next to its
+    /// allocation, and an instance we cannot see into says so instead of reading idle.
+    mod instances {
+        use super::super::{cpu_detail, cpu_load_color, net_detail, GOOD, MUTED, WARN};
+        use crate::app::{Instance, InstanceUsage};
+
+        fn instance(vcpus: Option<f64>, usage: InstanceUsage) -> Instance {
+            Instance {
+                id: "8f4e2c".to_string(),
+                name: "worker".to_string(),
+                ip: "10.0.0.7:4040".to_string(),
+                service: "builder".to_string(),
+                balance: "1000".to_string(),
+                virtualizer: "ch".to_string(),
+                memory_limit: 1 << 30,
+                disk_limit: 10 << 30,
+                vcpus,
+                usage,
+                location: "local".to_string(),
+                father_id: String::new(),
+            }
+        }
+
+        /// A raw percentage is ambiguous on its own: 180% is nearly idle on 4 vCPUs and
+        /// impossible on 1. The card carries the allowance so the figure can be judged.
+        #[test]
+        fn the_cpu_line_states_the_allowance_the_percentage_is_measured_against() {
+            let usage = InstanceUsage {
+                cpu_percent: Some(182.4),
+                ..InstanceUsage::default()
+            };
+            let detail = cpu_detail(&instance(Some(2.0), usage.clone()));
+            assert!(detail.contains("182%"), "{detail}");
+            assert!(detail.contains("200%"), "{detail}");
+            assert!(detail.contains("2.00 vCPU"), "{detail}");
+
+            // No quota recorded: say so rather than inventing a denominator.
+            let unbounded = cpu_detail(&instance(None, usage));
+            assert!(unbounded.contains("182%"), "{unbounded}");
+            assert!(unbounded.contains("no vCPU quota"), "{unbounded}");
+        }
+
+        #[test]
+        fn an_unreadable_cpu_reads_as_unknown_in_both_the_text_and_the_colour() {
+            let blind = instance(Some(2.0), InstanceUsage::default());
+            assert!(cpu_detail(&blind).contains('—'), "{}", cpu_detail(&blind));
+            assert_eq!(cpu_load_color(&blind), MUTED);
+        }
+
+        /// The colour is the at-a-glance signal for oversubscription, so it has to turn
+        /// on the allowance rather than on a flat percentage.
+        #[test]
+        fn the_cpu_colour_warns_only_near_the_instances_own_allowance() {
+            let at = |percent: f64, vcpus: f64| {
+                cpu_load_color(&instance(
+                    Some(vcpus),
+                    InstanceUsage {
+                        cpu_percent: Some(percent),
+                        ..InstanceUsage::default()
+                    },
+                ))
+            };
+            // 95% of one core is nearly saturated; the same figure on four cores is not.
+            assert_eq!(at(95.0, 1.0), WARN);
+            assert_eq!(at(95.0, 4.0), GOOD);
+            assert_eq!(at(390.0, 4.0), WARN);
+        }
+
+        #[test]
+        fn the_net_line_shows_rates_and_the_totals_they_accumulate() {
+            let detail = net_detail(&instance(
+                Some(1.0),
+                InstanceUsage {
+                    net_rx_bytes: Some(3 << 30),
+                    net_tx_bytes: Some(512 << 20),
+                    net_rx_rate: Some(1024.0 * 1024.0),
+                    net_tx_rate: Some(2048.0),
+                    ..InstanceUsage::default()
+                },
+            ));
+            assert!(detail.contains("1.0 MiB/s"), "{detail}");
+            assert!(detail.contains("2.0 KiB/s"), "{detail}");
+            assert!(detail.contains("3.0 GiB"), "{detail}");
+            assert!(detail.contains("512.0 MiB"), "{detail}");
+
+            let blind = net_detail(&instance(Some(1.0), InstanceUsage::default()));
+            assert!(!blind.contains('0'), "a missing tap is not silence: {blind}");
+        }
+    }
+
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};
+
+    /// The whole point of the page is the live column, so it has to survive the draw at
+    /// the sizes an operator actually uses — including 80 columns, where the row is far
+    /// wider than the terminal and ratatui has to truncate it.
+    #[test]
+    fn the_instances_table_shows_live_usage_beside_the_allocation() {
+        let usage = crate::app::InstanceUsage {
+            memory_current: Some(412 << 20),
+            cpu_percent: Some(143.0),
+            net_rx_rate: Some(1024.0 * 1024.0),
+            net_tx_rate: Some(2048.0),
+            ..crate::app::InstanceUsage::default()
+        };
+        let mut app = App::new();
+        app.instances_grouped = false;
+        app.instances.refresh(vec![Instance {
+            id: "8f4e2c".to_string(),
+            name: "worker".to_string(),
+            ip: "10.0.0.7:4040".to_string(),
+            service: "builder".to_string(),
+            balance: "1000".to_string(),
+            virtualizer: "ch".to_string(),
+            memory_limit: 1 << 30,
+            disk_limit: 10 << 30,
+            vcpus: Some(2.0),
+            usage,
+            location: "local".to_string(),
+            father_id: String::new(),
+        }]);
+        app.instances.state.select(Some(0));
+        app.instances.state_id = Some("8f4e2c".to_string());
+
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        terminal
+            .draw(|frame| draw_instances(frame, &mut app, frame.size()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+
+        assert!(text.contains("CPU%"), "missing the CPU column header");
+        assert!(text.contains("143%"), "missing the live CPU reading");
+        // Used and allocated in the same cell, so no division is left to the operator.
+        assert!(text.contains("412M / 1.0G"), "missing RAM used/allocated");
+        assert!(text.contains("1.0M / 2.0K"), "missing the net rates");
+        // And the detail card explains what the 143% is a fraction of.
+        assert!(text.contains("2.00 vCPU"), "missing the vCPU allowance");
+    }
 
     #[test]
     fn every_page_renders_at_common_terminal_sizes() {
