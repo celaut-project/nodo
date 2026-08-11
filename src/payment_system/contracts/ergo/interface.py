@@ -9,6 +9,10 @@ from src.utils.logger import LOGGER
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import set_address, set_script, set_token_id, set_contract_type
 from src.utils.ergo_units import erg_to_nanoerg, nanoerg_to_erg_str
+# This ledger's MU rate and its conversions. A separate, light module on purpose: it is
+# also what `monetary.display_unit` resolves ERG through, and that runs on log lines, so
+# it must not pull in everything below.
+from src.payment_system.contracts.ergo import rate
 from src.utils.ergo_tree import (
     ergo_contract_from_proposition_bytes,
     proposition_bytes_from_address,
@@ -88,7 +92,7 @@ def transaction_url_reporting(reporter):
 
 
 def __mu_to_nanoerg(amount: int) -> int:
-    """MU -> nanoERG, at this ledger's declared rate.
+    """MU -> nanoERG, at this ledger's declared rate (see ``rate.py``, next to this file).
 
     The rate lives in ``ledgers.ergo.payments.MU_PER_NANOERG`` (1 by default, which makes
     the conversion the identity). It is the single point where the node's unit of account
@@ -98,9 +102,7 @@ def __mu_to_nanoerg(amount: int) -> int:
     The old `GAS_PER_ERG` did this with a float reciprocal set to 1e58, which silently
     turned every real charge into zero nanoERG.
     """
-    from src.utils.monetary import mu_to_nanoerg
-
-    return mu_to_nanoerg(amount)
+    return rate.mu_to_nanoerg(amount)
 
 
 def settlement_floors_mu() -> Tuple[int, int]:
@@ -115,9 +117,7 @@ def settlement_floors_mu() -> Tuple[int, int]:
     ``MU_PER_NANOERG`` is 1, so the conversion is explicit. A ledger with no fee and no
     minimum output reports ``(0, 0)`` and simply imposes no floor.
     """
-    from src.utils.monetary import nanoerg_to_mu
-
-    return nanoerg_to_mu(DEFAULT_FEE), nanoerg_to_mu(SAFE_MIN_BOX_VALUE)
+    return rate.nanoerg_to_mu(DEFAULT_FEE), rate.nanoerg_to_mu(SAFE_MIN_BOX_VALUE)
 
 
 def __nanoerg_to_erg(amount: int) -> float:

@@ -4,7 +4,7 @@ from protos import celaut_pb2 as celaut
 from src.database.access_functions.ledgers import get_peer_contract_instances
 from src.utils.utils import to_amount
 from src.utils.logger import LOGGER
-from src.utils.monetary import mu_per_erg
+from src.payment_system.contracts.ergo.rate import mu_per_erg
 from src.utils.contract_xattrs import set_contract_type, set_script, set_token_id
 
 CONTRACT = "proveDlog(decodePoint())"

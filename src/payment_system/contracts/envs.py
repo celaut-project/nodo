@@ -1,5 +1,5 @@
 from textwrap import dedent
-from typing import Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Tuple
 from contextlib import nullcontext
 from protos import celaut_pb2
 
@@ -55,6 +55,30 @@ def check_sender_balances() -> Dict[contract_hash, Callable[[amount], bool]]:
         **({simulated.CONTRACT_HASH: simulated.check_sender_balance} if SIMULATED else {}),
         ergo.CONTRACT_HASH: ergo.check_sender_balance
     }
+
+
+def display_units() -> Dict[str, Dict[str, Any]]:
+    """Display units the payment contracts contribute, keyed by unit name.
+
+    Lets `monetary.display_unit` offer the operator the unit their payment system settles
+    in without the accounting core naming a ledger. Each entry has the shape of a
+    hand-declared `ui.UNITS.<name>` block, except that its rate is derived from the ledger
+    and so cannot go stale.
+
+    Only the *light* rate module is imported, never `ergo.interface`: this is reached from
+    `format_mu`, which runs on log lines all over the node.
+
+    A payment stack that will not import contributes nothing rather than raising -- money
+    still gets rendered, in raw MU. A rate that is present but *malformed* does raise: that
+    is a configuration error, and quietly falling back to MU would hide it.
+    """
+    units: Dict[str, Dict[str, Any]] = {}
+    try:
+        from src.payment_system.contracts.ergo import rate as ergo_rate
+    except (ImportError, ModuleNotFoundError, OSError):
+        return units
+    units.update(ergo_rate.display_units())
+    return units
 
 
 def settlement_floors() -> Dict[contract_hash, Callable[[], Tuple[amount, amount]]]:

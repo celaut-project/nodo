@@ -51,11 +51,46 @@ service. Do not use `docker ps` to inspect a running instance — use
 
 ## Balances and prices
 
-Everything you pay for is priced in **ERG**, per resource. A node sets its own
-price for memory, CPU, disk and relayed traffic; nothing collapses them into a
-single number, so a node short on memory but rich in disk can charge accordingly.
-Prices are configured in MU and shown to you in ERG.
-Prices rise with contention, up to a ceiling the node advertises alongside them.
+A node prices each resource on its own — memory, CPU, disk, relayed traffic — and
+nothing collapses them into a single number, so a node short on memory but rich in
+disk can charge accordingly. Prices rise with contention, up to a ceiling the node
+advertises alongside them.
+
+Three things are kept apart, and conflating them is what the previous "gas" model got
+wrong:
+
+| | What it is |
+|---|---|
+| **MU** (monetary unit) | What the node *counts in*. An integer, so no balance goes through a float. It is the node's own unit of account and has **no intrinsic value**. |
+| The **contract rate** | What one MU is *worth*. A property of the payment system, not of MU: each payment contract declares how many MU one of its units buys, and that declaration travels to peers with every price. |
+| `ui.DISPLAY_UNIT` | What *you* read and type. Purely presentational; changing it never changes what anybody is charged. |
+
+### Where ERG fits
+
+Ergo is the **default** payment system and ERG the default representation. Neither is
+fixed, and neither is part of the definition of anything. A payment system is just a
+contract that declares its own rate; Ergo is simply the first one implemented
+(`src/payment_system/contracts/ergo/`), and it sits beside a simulated contract used
+for testing. The accounting core names no ledger — MU is not pegged to ERG, and code
+reading a price is expected to read the rate rather than assume one.
+
+Two consequences worth stating plainly:
+
+* **Another node need not accept ERG.** Every node advertises the payment contracts it
+  accepts (`Peer.payment_contracts`). Paying a peer means finding a contract you both
+  hold; a peer that shares none with you will show you its prices and be unpayable by
+  you. Sharing at least one is what makes two nodes able to trade at all.
+* **A node may accept several at once**, ERG among them or not. What a node advertises
+  is a list, not a choice, and which contract settles a given payment is decided per
+  payment by matching against what the payer can actually pay with.
+
+Because the rate is declared per contract instead of assumed, a price quoted in MU
+stays meaningful to a node that settles in something else entirely.
+
+### Topping up
+
+The flow below is Ergo's, being the payment system currently implemented; another
+contract would define its own equivalent.
 
 A client tops up its balance on a node by generating a **deposit token** — a
 locally-generated identifier, not an on-chain asset — and submitting an Ergo
@@ -66,15 +101,11 @@ then credits the balance. Nodes run a single hot wallet
 is swept to an optional cold address.
 
 `nodo estimate` reports what a service costs before you run it, and
-`nodo increase_deposit` / `nodo decrease_deposit` adjust a running instance — both
-in ERG. Full model: [`PRICING.md`](PRICING.md) for what things cost,
-[`ERGO.md`](ERGO.md) for how they settle.
-
-Internally the node counts in **MU** (monetary unit), an integer, so no balance ever
-goes through a float. What an MU is worth is declared per payment system
-(`ledgers.ergo.payments.MU_PER_NANOERG`, 1 by default) and travels to peers alongside
-every price, which is what lets them compare two nodes. What *you* read and type is a
-separate setting again (`ui.DISPLAY_UNIT`), ERG by default.
+`nodo increase_deposit` / `nodo decrease_deposit` adjust a running instance — all in
+your display unit, ERG unless you changed it. `nodo pay` is the exception and always
+takes ERG: what it moves is an on-chain ERG transfer, denominated by the ledger rather
+than by a display preference. Full model: [`PRICING.md`](PRICING.md) for what things
+cost, [`ERGO.md`](ERGO.md) for how they settle.
 
 ## Address and token provisioning
 

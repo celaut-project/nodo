@@ -16,10 +16,13 @@ import unittest
 from unittest.mock import patch
 
 from protos import celaut_pb2 as celaut
+# The MU rate and its conversions belong to the payment contract, not to the accounting
+# core -- importing them from here is what keeps `monetary` ledger-agnostic.
+from src.payment_system.contracts.ergo.rate import mu_per_erg, mu_to_nanoerg
 from src.utils.config import ConfigManager
 from src.utils.config_validation import validate_pricing_config
 from src.utils.cost_functions import execution_cost
-from src.utils.monetary import format_mu, mu_per_erg, mu_to_nanoerg, parse_to_mu, prices
+from src.utils.monetary import format_mu, parse_to_mu, prices
 
 
 BASE_PRICES = {
@@ -142,6 +145,53 @@ class TheThreeUnitsTests(unittest.TestCase):
         with _config(**{"ui.DISPLAY_UNIT": "doblones"}):
             with self.assertRaises(ValueError):
                 format_mu(1)
+
+    def test_the_accounting_core_names_no_ledger(self):
+        """`monetary` must not know what an MU is worth in real money.
+
+        The rate is a property of the payment contract, so `mu_per_nanoerg`,
+        `mu_to_nanoerg`, `nanoerg_to_mu` and `mu_per_erg` live with the contract. They
+        used to sit in `monetary`, which made the accounting core read one ledger's
+        config section and hardcode its display unit — so a second payment system meant
+        editing the core.
+        """
+        from src.utils import monetary
+
+        for moved in ("mu_per_nanoerg", "mu_to_nanoerg", "nanoerg_to_mu", "mu_per_erg"):
+            self.assertFalse(
+                hasattr(monetary, moved),
+                f"monetary.{moved} is back; the ledger rate belongs to the contract.",
+            )
+
+    def test_the_display_unit_comes_from_the_payment_contract(self):
+        """ERG is on offer because the Ergo contract contributes it, not because
+        `monetary` has a branch for it."""
+        from src.utils import monetary
+
+        with _config():
+            self.assertIn("erg", monetary.contract_display_units())
+            self.assertEqual(monetary.default_display_unit_name(), "erg")
+
+    def test_a_node_with_no_payment_contract_falls_back_to_raw_mu(self):
+        """The honest answer when nothing can say what an MU is worth.
+
+        Display must not be the thing that breaks: `format_mu` runs on log lines, so a
+        payment stack that will not import renders balances in MU rather than raising.
+        """
+        from src.utils import monetary
+
+        with _config(**{"ui.DISPLAY_UNIT": None}), \
+             patch.object(monetary, "contract_display_units", return_value={}):
+            self.assertEqual(monetary.default_display_unit_name(), "mu")
+            self.assertEqual(format_mu(14_582), "14582 MU")
+
+    def test_a_contract_unit_cannot_be_shadowed_by_a_hand_written_one(self):
+        """A ledger-derived rate is live; a hand-declared one goes stale. The live one wins."""
+        with _config(**{
+            "ui.DISPLAY_UNIT": "erg",
+            "ui.UNITS.erg": {"MU_PER_UNIT": 1, "SYMBOL": "FAKE", "DECIMALS": 0},
+        }):
+            self.assertEqual(format_mu(1_000_000_000), "1 ERG")
 
     def test_an_amount_that_is_not_whole_mu_is_refused_not_rounded(self):
         """The operator asked for an amount and must not silently be charged another."""

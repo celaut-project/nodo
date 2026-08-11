@@ -342,13 +342,16 @@ impl Paths {
     }
 }
 
-/// How the operator's money is denominated, mirroring `src/utils/monetary.py`.
+/// How the operator's money is denominated.
 ///
 /// Three separate things, and the TUI has to keep them apart the same way the node
-/// does: amounts are stored in **MU**, what an MU is worth on the ledger comes from
-/// `ledgers.ergo.payments.MU_PER_NANOERG`, and what the operator reads is
+/// does: amounts are stored in **MU** (the node's unit of account, see
+/// `src/utils/monetary.py`), what an MU is worth is the *payment contract's* rate — for
+/// Ergo, `ledgers.ergo.payments.MU_PER_NANOERG`, whose Python side lives in
+/// `src/payment_system/contracts/ergo/rate.py` — and what the operator reads is
 /// `ui.DISPLAY_UNIT`. The TUI reads the catalogue database directly, so it resolves all
-/// three from `config.yaml` itself rather than asking the node.
+/// three from `config.yaml` itself rather than asking the node; a second payment system
+/// would need its rate read here too.
 #[derive(Debug, Clone)]
 pub struct Money {
     pub unit_name: String,
