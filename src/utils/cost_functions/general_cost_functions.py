@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils.config import ConfigManager
@@ -42,9 +42,19 @@ def compute_start_service_cost(
     )
 
 
-def compute_maintenance_cost(system_resources: celaut.Sysresources, seconds: float) -> int:
-    """MU owed for holding `system_resources` for `seconds`."""
-    return maintenance_charge_mu(system_resources=system_resources, seconds=seconds)
+def compute_maintenance_cost(
+    system_resources: celaut.Sysresources,
+    seconds: float,
+    scarcity: Optional[Dict[str, float]] = None,
+) -> int:
+    """MU owed for holding `system_resources` for `seconds`.
+
+    `scarcity` lets a caller sweeping many instances read system load once and price
+    them all against the same snapshot; omitted, each call samples it itself.
+    """
+    return maintenance_charge_mu(
+        system_resources=system_resources, seconds=seconds, scarcity=scarcity
+    )
 
 
 def compute_build_cost(metadata: celaut.Metadata) -> int:
