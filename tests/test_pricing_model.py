@@ -396,6 +396,49 @@ class DerivedDepositTests(unittest.TestCase):
         with _config(**{"deposits.MAX_FEE_OVERHEAD": 1.0}):
             self.assertGreaterEqual(deposits.full_deposit_mu(), SAFE_MIN_BOX_VALUE + DEFAULT_FEE)
 
+    def test_the_floors_come_from_the_contracts_not_from_a_named_ledger(self):
+        """Deposit sizing must not know which payment system it is sizing for.
+
+        It used to import Ergo's `DEFAULT_FEE` and `SAFE_MIN_BOX_VALUE` directly, so
+        Ergo's box-value floor applied to every contract — including the simulated one,
+        whose payments never reach a chain. The floors now arrive through the same
+        per-contract dispatch as the rest of the payment flow.
+        """
+        from src.payment_system import deposits
+
+        # A contract that costs nothing to settle imposes no floor at all, so the only
+        # thing left deciding the deposit is the fee-overhead rule against a zero fee.
+        with _config(), patch.object(deposits, "_ledger_floors", return_value=(0, 0)):
+            self.assertEqual(deposits.full_deposit_mu(), 0)
+
+        # And a stricter ledger raises it, without deposits.py naming any of them.
+        with _config(**{"deposits.MAX_FEE_OVERHEAD": 0.02}), \
+             patch.object(deposits, "_ledger_floors", return_value=(2_000_000, 3_000_000)):
+            self.assertEqual(deposits.full_deposit_mu(), 100_000_000)
+
+    def test_the_strictest_contract_sets_the_floor(self):
+        """One figure has to be payable on every available system.
+
+        Deposit sizing runs before anyone has picked a contract, so it takes the maximum
+        rather than the cheapest — a deposit sized for a free ledger would be refused by
+        a chain that charges a fee.
+        """
+        from src.payment_system import deposits
+
+        with _config(**{"deposits.MAX_FEE_OVERHEAD": 1.0}), \
+             patch("src.payment_system.contracts.envs.settlement_floors", return_value={
+                 "free-contract": lambda: (0, 0),
+                 "costly-contract": lambda: (1_000_000, 1_000_000),
+             }):
+            self.assertEqual(deposits._ledger_floors(), (1_000_000, 1_000_000))
+            self.assertEqual(deposits.full_deposit_mu(), 2_000_000)
+
+    def test_a_simulated_contract_reports_no_settlement_floor(self):
+        """The answer that makes the abstraction real rather than decorative."""
+        from src.payment_system.contracts.simulator import interface as simulated
+
+        self.assertEqual(simulated.settlement_floors_mu(), (0, 0))
+
 
 if __name__ == "__main__":
     unittest.main()

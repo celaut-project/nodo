@@ -250,10 +250,18 @@ def peer_deposits(debug_mode: bool = False):
         if debug_mode:
             log.LOGGER(f"Peer {peer_id} balance: {format_mu(peer_balance)}")
 
-        # Both figures come from what the ledger can actually settle, not from a
-        # hand-picked constant: see src/payment_system/deposits.py.
-        refill_below = refill_threshold_mu()
-        if peer_balance < refill_below:
+        # Sizing a deposit asks the payment contracts what they can settle, so it fails
+        # when none is reachable -- inside the guarded block, because this loop is the
+        # manager thread and nothing above it catches anything. Raising out of here would
+        # stop every instance from being charged, which is how the `UnboundLocalError`
+        # this function used to hold managed to take the whole node's billing down.
+        try:
+            refill_below = refill_threshold_mu()
+            if peer_balance >= refill_below:
+                if debug_mode:
+                    log.LOGGER(f"Peer {peer_id} has sufficient deposit: {format_mu(peer_balance)}.")
+                continue
+
             log.LOGGER(f"[WARNING] The peer {peer_id} has not enough deposit.")
             # `floor=True` raises this to a full deposit if it is smaller, so log what
             # will actually be sent rather than the shortfall -- the two differ whenever
@@ -267,21 +275,17 @@ def peer_deposits(debug_mode: bool = False):
                     f"    - Topping up by: {format_mu(to_increase)}"
                 )
 
-            try:
-                increased = _payment_process_module().increase_deposit_on_peer(
-                    peer_id=peer_id, amount=to_increase, floor=True
-                )
-            except JavaDependencyMissing:
-                log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
-                increased = False
+            increased = _payment_process_module().increase_deposit_on_peer(
+                peer_id=peer_id, amount=to_increase, floor=True
+            )
+        except JavaDependencyMissing:
+            log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
+            increased = False
 
-            if not increased:
-                log.LOGGER(f"[ERROR] Manager error: the peer {peer_id} could not be increased.")
-            else:
-                if debug_mode: log.LOGGER(f"Successfully increased deposit for {peer_id}.")
-        else:
-            if debug_mode:
-                log.LOGGER(f"Peer {peer_id} has sufficient deposit: {format_mu(peer_balance)}.")
+        if not increased:
+            log.LOGGER(f"[ERROR] Manager error: the peer {peer_id} could not be increased.")
+        elif debug_mode:
+            log.LOGGER(f"Successfully increased deposit for {peer_id}.")
 
 
 def check_dev_clients():

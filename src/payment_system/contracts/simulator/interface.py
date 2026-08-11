@@ -1,5 +1,6 @@
-from ast import Return
-from protos import celaut_pb2, celaut_pb2
+from typing import Tuple
+
+from protos import celaut_pb2
 from hashlib import sha3_256
 from src.utils.logger import LOGGER
 
@@ -72,3 +73,15 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
 
 def check_sender_balance(amount: int) -> bool:
     return True
+
+
+def settlement_floors_mu() -> Tuple[int, int]:
+    """``(fee, smallest payable output)``, both zero: nothing here reaches a chain.
+
+    A simulated payment costs nothing and has no minimum output, so this contract imposes
+    no floor on how small a deposit may be. Answering honestly rather than borrowing
+    Ergo's box-value floor is the point of asking the contract at all -- deposit sizing
+    used to import Ergo's constants directly, so a node running purely on this contract
+    still sized its deposits against a chain it never touched.
+    """
+    return 0, 0

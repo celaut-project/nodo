@@ -103,6 +103,23 @@ def __mu_to_nanoerg(amount: int) -> int:
     return mu_to_nanoerg(amount)
 
 
+def settlement_floors_mu() -> Tuple[int, int]:
+    """``(fee, smallest payable output)`` for this ledger, in MU.
+
+    The two hard limits any deposit has to clear on Ergo: every transaction pays a fee,
+    and the network refuses an output below its technical minimum box value.
+
+    Reported in MU rather than nanoERG because the caller sizing a deposit
+    (``src/payment_system/deposits.py``) is ledger-agnostic and counts in MU; both
+    constants here are Ergo's own and therefore nanoERG. The two coincide only while
+    ``MU_PER_NANOERG`` is 1, so the conversion is explicit. A ledger with no fee and no
+    minimum output reports ``(0, 0)`` and simply imposes no floor.
+    """
+    from src.utils.monetary import nanoerg_to_mu
+
+    return nanoerg_to_mu(DEFAULT_FEE), nanoerg_to_mu(SAFE_MIN_BOX_VALUE)
+
+
 def __nanoerg_to_erg(amount: int) -> float:
     return amount / 1_000_000_000
 
