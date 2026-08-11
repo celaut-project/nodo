@@ -33,7 +33,8 @@ from typing import List, Optional, Tuple
 
 from src.utils.config import ConfigManager
 from src.utils.ergo_units import erg_to_nanoerg
-from src.utils.monetary import format_mu, nanoerg_to_mu
+from src.payment_system.contracts.ergo.rate import nanoerg_to_mu
+from src.utils.monetary import format_mu
 
 # Ledger id used for the peer contract-rate lookup, matching src.commands.peers.
 ERGO_LEDGER = "ergo"

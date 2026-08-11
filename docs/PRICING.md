@@ -48,7 +48,11 @@ it is the node's own accounting unit, like a ledger's internal cents.
 **What an MU is worth belongs to the payment contract, not to MU.** A contract declares
 how many MU one of its units buys; that is exactly what `ContractRate.mu_per_unit`
 carries on the wire, so a peer reading a price can convert it into money it understands.
-Ergo is currently the only payment system:
+It also belongs there *in the code*: the rate and its conversions live in
+`src/payment_system/contracts/ergo/rate.py`, not in the accounting core, which names no
+ledger. Ergo is the default and currently the only implemented payment system, not a
+peg — a peer may accept it, not accept it, or accept others alongside it (see
+[`CONCEPTS.md`](CONCEPTS.md), "Where ERG fits"):
 
 ```yaml
 ledgers:
@@ -269,8 +273,13 @@ selection, not to pricing.
 * `src/utils/cost_functions/general_cost_functions.py` — `node_advertised_rates`
   publishes the price vector in MU per resource-second, which a peer can finally act on.
 * `src/manager/maintain.py` — the tick charge; peer deposits derived from the floor.
-* `src/payment_system/ledgers.py`, `contracts/ergo/interface.py` — `MU_PER_NANOERG`
-  replaces `GAS_PER_ERG`, and is what peers are told as `ContractRate.mu_per_unit`.
+* `src/payment_system/contracts/ergo/rate.py` — this ledger's rate and its MU↔nanoERG
+  conversions, replacing `GAS_PER_ERG`. Deliberately light and separate from
+  `interface.py`, because `format_mu` resolves the display unit through it on log lines.
+* `src/payment_system/contracts/envs.py` — `display_units()` and `settlement_floors()`
+  join the existing per-contract dispatch, so nothing generic names a ledger: `monetary`
+  gets its display units from here and `deposits.py` its floors.
+* `src/payment_system/ledgers.py` — publishes the rate as `ContractRate.mu_per_unit`.
 * `src/balancers/estimated_cost_sorter/estimated_cost_sorter.py` — simplifies: with all
   nodes quoting MU, `erg_per_gas_unit = 1 / (peer_gas_per_erg / local_gas_per_erg)`
   disappears.
