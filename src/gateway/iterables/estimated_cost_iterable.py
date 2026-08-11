@@ -7,10 +7,10 @@ from protos import celaut_pb2
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
-from src.manager.manager import default_initial_cost
+from src.manager.manager import default_initial_balance
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils.logger import LOGGER as logger
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
+from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 
 
 class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
@@ -35,12 +35,6 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 if not self.configuration:
                     self.configuration = celaut_pb2.Configuration()
 
-                if not self.configuration.HasField('initial_gas_amount') or not self.configuration.initial_gas_amount:
-                    self.configuration.initial_gas_amount.CopyFrom(to_gas_amount(default_initial_cost(
-                        father_id=self.client_id if self.client_id
-                            else get_only_the_ip_from_context(context_peer=self.context.peer())
-                        )))
-
                 if not self.service_hash:
                     raise Exception("No service hash provided.")
 
@@ -51,6 +45,13 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
 
                 resources = service.container.resources
                 del service
+
+                # Needs the requested resources to price, so it happens here rather than
+                # before the service is read.
+                if not self.configuration.HasField('initial_mu') or not self.configuration.initial_mu:
+                    self.configuration.initial_mu.CopyFrom(
+                        to_amount(default_initial_balance(system_resources=resources.at_init))
+                    )
 
                 yield from bee.serialize_to_buffer(
                     message_iterator=generate_estimated_cost(

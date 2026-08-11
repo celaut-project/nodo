@@ -4,18 +4,15 @@ from typing import Dict, Tuple, Generator
 from statistics import mean
 from protos import celaut_pb2
 from src.reputation_system.interface import compute_reputation
-from src.utils.cost_functions.general_cost_functions import normalized_maintain_cost as nmc
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization as vcnorm
 from src.utils.config import ConfigManager
-from src.utils.utils import from_gas_amount
+from src.utils.utils import from_amount
 from src.utils.logger import LOGGER as logger
+from src.utils.monetary import HOUR_SECONDS, format_mu
 from src.database.sql_connection import SQLConnection
 
 env_manager = ConfigManager()
 SOCIALIZATION_FACTOR = float(env_manager.get("SOCIALIZATION_FACTOR"))
-INIT_COST_CONFIGURATION_FACTOR = env_manager.get("INIT_COST_CONFIGURATION_FACTOR")
-MAINTENANCE_COST_CONFIGURATION_FACTOR = env_manager.get("MAINTENANCE_COST_CONFIGURATION_FACTOR")
-GAS_PER_ERG = int(env_manager.get("ledgers.ergo.GAS_PER_ERG"))
 ERGO_LEDGER = "ergo"
 ERGO_CONTRACT_HASH = sha3_256("proveDlog(decodePoint())".encode("utf-8")).hexdigest()
 
@@ -38,59 +35,42 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
             logger(f"Estimated cost for peer {peer_id} is missing required fields, skipping. Estimated cost: {estimated_cost}")
             return float('inf')  # Assign a very high cost to skip this peer
 
-        gas_cost: int = int(
-            INIT_COST_CONFIGURATION_FACTOR * vcnorm(
-                cost=from_gas_amount(estimated_cost.cost),
-                variance=estimated_cost.variance
+        # Every node quotes in MU, and MU is pegged, so two peers' estimates are
+        # directly comparable. This used to convert through each node's own
+        # gas-per-ERG factor (`1 / (peer_gas_per_erg / local_gas_per_erg)`), which only
+        # existed because "gas" meant something different on every node.
+        def maintenance_mu_per_hour(amount) -> int:
+            seconds = estimated_cost.maintenance_seconds_loop
+            if seconds <= 0:
+                return 0
+            return int(
+                vcnorm(cost=from_amount(amount), variance=estimated_cost.variance)
+                * HOUR_SECONDS
+                / seconds
             )
-            +
-            MAINTENANCE_COST_CONFIGURATION_FACTOR * int(
-                mean([
-                    vcnorm(
-                        cost=nmc(
-                            cost=from_gas_amount(estimated_cost.init_maintenance_cost),
-                            timelapse=estimated_cost.maintenance_seconds_loop
-                        ),
-                        variance=estimated_cost.variance
-                    ),
-                    vcnorm(
-                        cost=nmc(
-                            cost=from_gas_amount(estimated_cost.max_maintenance_cost),
-                            timelapse=estimated_cost.maintenance_seconds_loop
-                        ),
-                        variance=estimated_cost.variance
-                    )
-                ])
-            )
+
+        cost_mu: int = int(
+            vcnorm(cost=from_amount(estimated_cost.cost), variance=estimated_cost.variance)
+            + mean([
+                maintenance_mu_per_hour(estimated_cost.init_maintenance_cost),
+                maintenance_mu_per_hour(estimated_cost.max_maintenance_cost),
+            ])
         )
 
-        local_gas_per_erg: int = GAS_PER_ERG
-        
-        if local_gas_per_erg:
-
-            if peer_id != "local":
-                from typing import Optional
-                peer_gas_per_erg: Optional[int] = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_hash=ERGO_LEDGER)
-                if peer_gas_per_erg is None:
-                    logger(f"No ergo gas price on peer {peer_id}, continue.")
-                    return 0
-            else:
-                peer_gas_per_erg = local_gas_per_erg
-
-            erg_per_gas_unit = 1 / (peer_gas_per_erg / local_gas_per_erg)
-            normalized_cost_in_ergs = gas_cost * erg_per_gas_unit
-        
-        else:
-            normalized_cost_in_ergs = 0.0
-        
         if peer_id == 'local':
-            reputation: float = 1 
+            reputation: float = 1
         else:
             reputation: float = ((compute_reputation(peer_id=peer_id) / total_reputation) if total_reputation else 0 ) * SOCIALIZATION_FACTOR  # TODO Should be improved, because should not be relation on how many peers are.
-        
-        score = reputation - log(normalized_cost_in_ergs)  # TODO Could have weights on envs.
-        
-        logger(f"Computing estimated cost score for peer {peer_id}: reputation {reputation}, cost {log(normalized_cost_in_ergs)} => score {score}\n")
+
+        # A free peer is the best possible offer, not a math domain error. log(0) used
+        # to raise here, and a price of zero is reachable now that a node can give its
+        # capacity away (free_tier).
+        score = reputation - log(cost_mu) if cost_mu > 0 else float('inf')
+
+        logger(
+            f"Estimated cost score for peer {peer_id}: reputation {reputation}, "
+            f"cost {format_mu(cost_mu)}/h => score {score}\n"
+        )
         return score
 
     return (

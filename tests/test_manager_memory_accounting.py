@@ -40,7 +40,7 @@ class StopInstanceMemoryAccountingTests(unittest.TestCase):
         ), patch.object(
             manager_module.sc, "get_internal_instance", return_value=None
         ), patch.object(
-            manager_module.sc, "get_container_gas", return_value=123
+            manager_module.sc, "get_instance_balance", return_value=123
         ), patch.object(
             manager_module.sc, "purge_internal", return_value=None
         ), patch.object(

@@ -1,12 +1,17 @@
-"""Tests for the recurring rates a node advertises to its peers.
+"""Tests for the prices a node advertises to its peers.
 
-The rates ride in ``Peer.gas_amount_per_call`` -- node-wide, not per-address, since
+The rates ride in ``Peer.mu_per_call`` -- node-wide, not per-address, since
 they do not depend on which of a node's addresses you reach it through. A receiving
 peer stores the whole message verbatim in ``peer.advertisement``
 (``manager.add_peer_instance``) and ``submit_to_ledger`` republishes it for the
 reputation JSON. So the test that matters is the round trip: the rates have to
 survive being serialized and parsed back the way those two paths do it, or the whole
 mechanism is decoration.
+
+Every rate is in MU. What an MU is worth travels alongside them as
+`ContractRate.mu_per_unit`, which is what makes a rate actionable to the peer reading
+it. The model this replaced advertised an undefined "gas", for which nothing anywhere
+declared a rate.
 """
 
 import unittest
@@ -17,79 +22,116 @@ try:
     from google.protobuf.json_format import MessageToJson
 
     from protos import celaut_pb2 as celaut
+    from src.utils.config import ConfigManager
     from src.utils.cost_functions import general_cost_functions as rates_module
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]
     rates_module = None  # type: ignore[assignment]
+    ConfigManager = None  # type: ignore[assignment]
 
 
 def _config(**overrides):
-    """Override only the rate keys; ConfigManager is a shared singleton."""
+    """Override only the pricing keys; ConfigManager is a shared singleton."""
     values = {
-        "EXECUTION_COST": 100.0,
-        "MANAGER_ITERATION_TIME": 10,
-        "costs.TUNNEL_OPEN_COST": 10.0,
-        "costs.TUNNEL_COST_PER_KB": 1.0,
+        "pricing.RAM_MU_PER_GIB_HOUR": 1_000_000,
+        "pricing.CPU_MU_PER_VCPU_HOUR": 4_000_000,
+        "pricing.DISK_MU_PER_GIB_HOUR": 100_000,
+        "pricing.NET_MU_PER_GIB": 2_000_000,
+        "pricing.BUILD_MU": 10_000_000,
+        "pricing.TUNNEL_OPEN_MU": 10_000,
+        "pricing.MODIFY_RESOURCES_MU": 10_000,
+        "pricing.SCARCITY_MAX_MULTIPLIER": 10,
+        "pricing.SCARCITY_CURVE": 1.0,
     }
     values.update(overrides)
-    real_get = rates_module.env_manager.get
+    # Patch the singleton itself: pricing resolves ConfigManager() per call, so a
+    # module-level reference would be the wrong object depending on import order.
+    manager = ConfigManager()
+    real_get = manager.get
 
     def get(key, default=None):
         return values[key] if key in values else real_get(key, default)
 
-    return patch.object(rates_module.env_manager, "get", side_effect=get)
+    return patch.object(manager, "get", side_effect=get)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class NodeAdvertisedRatesTests(unittest.TestCase):
-    def test_the_three_recurring_rates_are_advertised(self):
+    def test_every_priced_resource_is_advertised_separately(self):
         with _config():
             advertised = rates_module.node_advertised_rates()
 
         self.assertEqual(
             advertised,
             {
-                # 100 gas ceiling charged once per 10s manager tick -> 10 gas/s.
-                "maintenance_max_per_second": 10,
-                "tunnel_open": 10,
-                "tunnel_per_kb": 1,
+                # 1e6 MU per GiB-hour / 3600s.
+                "ram_mu_per_gib_second": 277,
+                "cpu_mu_per_vcpu_second": 1111,
+                "disk_mu_per_gib_second": 27,
+                "net_mu_per_gib": 2_000_000,
+                "build_mu": 10_000_000,
+                "tunnel_open_mu": 10_000,
+                "modify_resources_mu": 10_000,
+                "scarcity_max_multiplier": 10,
             },
         )
 
-    def test_maintenance_is_normalised_by_the_manager_cadence(self):
-        """A slower manager loop means a lower per-second ceiling, comparably."""
-        with _config(**{"MANAGER_ITERATION_TIME": 50}):
+    def test_resources_are_priced_independently(self):
+        """A node short on memory can charge for it without touching disk.
+
+        This is the property the single `EXECUTION_COST` scalar could not express.
+        """
+        with _config(**{"pricing.RAM_MU_PER_GIB_HOUR": 100_000_000}):
             advertised = rates_module.node_advertised_rates()
 
-        self.assertEqual(advertised["maintenance_max_per_second"], 2)
+        self.assertEqual(advertised["ram_mu_per_gib_second"], 27_777)
+        self.assertEqual(advertised["disk_mu_per_gib_second"], 27)
 
-    def test_a_zero_rate_is_omitted_rather_than_advertised_as_free(self):
-        with _config(**{"costs.TUNNEL_OPEN_COST": 0}):
+    def test_a_zero_price_is_omitted_rather_than_advertised_as_free(self):
+        with _config(**{"pricing.TUNNEL_OPEN_MU": 0}):
             advertised = rates_module.node_advertised_rates()
 
-        self.assertNotIn("tunnel_open", advertised)
-        self.assertIn("tunnel_per_kb", advertised)
+        self.assertNotIn("tunnel_open_mu", advertised)
+        self.assertIn("net_mu_per_gib", advertised)
 
-    def test_a_malformed_rate_is_omitted_not_crashing(self):
-        with _config(**{"costs.TUNNEL_COST_PER_KB": "cheap"}):
+    def test_a_malformed_price_is_rejected_not_silently_zeroed(self):
+        """Reading a broken price as 0 would give the node's resources away."""
+        with _config(**{"pricing.RAM_MU_PER_GIB_HOUR": "cheap"}):
+            with self.assertRaises(ValueError):
+                rates_module.node_advertised_rates()
+
+    def test_rates_below_one_mu_per_second_are_omitted(self):
+        """An integer per-second rate cannot express a fraction; 0 would read as free."""
+        with _config(**{"pricing.DISK_MU_PER_GIB_HOUR": 1}):
             advertised = rates_module.node_advertised_rates()
 
-        self.assertNotIn("tunnel_per_kb", advertised)
+        self.assertNotIn("disk_mu_per_gib_second", advertised)
+        self.assertIn("ram_mu_per_gib_second", advertised)
 
-    def test_a_missing_cadence_drops_only_the_maintenance_rate(self):
-        with _config(**{"MANAGER_ITERATION_TIME": 0}):
+    def test_every_one_off_charge_is_advertised(self):
+        """A charge a peer cannot discover any other way belongs in this map.
+
+        `modify_resources_mu` was the only one-off price left out of it while
+        `Gateway.ModifyServiceSystemResources` charged it, so a peer could be billed for
+        a resize at a price it had no way to read beforehand.
+        """
+        with _config():
             advertised = rates_module.node_advertised_rates()
 
-        self.assertNotIn("maintenance_max_per_second", advertised)
-        self.assertIn("tunnel_open", advertised)
+        for rate in (
+            rates_module.RATE_BUILD,
+            rates_module.RATE_TUNNEL_OPEN,
+            rates_module.RATE_MODIFY_RESOURCES,
+        ):
+            self.assertIn(rate, advertised)
 
-    def test_rates_below_one_gas_are_omitted(self):
-        """Integer gas cannot express a fraction; claiming 0 would read as free."""
-        with _config(**{"EXECUTION_COST": 1.0, "MANAGER_ITERATION_TIME": 100}):
+    def test_the_scarcity_ceiling_is_advertised_with_the_base_prices(self):
+        """A base price alone does not bound what a peer may be charged."""
+        with _config(**{"pricing.SCARCITY_MAX_MULTIPLIER": 4}):
             advertised = rates_module.node_advertised_rates()
 
-        self.assertNotIn("maintenance_max_per_second", advertised)
+        self.assertEqual(advertised["scarcity_max_multiplier"], 4)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -106,8 +148,8 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
         uri = peer.uri.add(ip="1.2.3.4", port=8090)
         uri.transport.tags.append("tcp")
         with _config():
-            for rate, gas in rates_module.node_advertised_rates().items():
-                peer.gas_amount_per_call[rate].n = str(gas)
+            for rate, amount_mu in rates_module.node_advertised_rates().items():
+                peer.mu_per_call[rate].n = str(amount_mu)
         return peer
 
     def test_rates_survive_the_advertisement_round_trip(self):
@@ -118,11 +160,16 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
         parsed.ParseFromString(stored)
 
         self.assertEqual(
-            {rate: gas.n for rate, gas in parsed.gas_amount_per_call.items()},
+            {rate: amount.n for rate, amount in parsed.mu_per_call.items()},
             {
-                "maintenance_max_per_second": "10",
-                "tunnel_open": "10",
-                "tunnel_per_kb": "1",
+                "ram_mu_per_gib_second": "277",
+                "cpu_mu_per_vcpu_second": "1111",
+                "disk_mu_per_gib_second": "27",
+                "net_mu_per_gib": "2000000",
+                "build_mu": "10000000",
+                "tunnel_open_mu": "10000",
+                "modify_resources_mu": "10000",
+                "scarcity_max_multiplier": "10",
             },
         )
         # The addresses are untouched by carrying rates alongside them.
@@ -136,18 +183,8 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
 
         published = MessageToJson(parsed)
 
-        self.assertIn("maintenance_max_per_second", published)
-        self.assertIn("tunnel_per_kb", published)
-
-    def test_a_peer_from_an_older_version_has_no_rates_and_that_is_fine(self):
-        """Peers predating this feature must not break the reader."""
-        old = celaut.Peer()
-        old.uri.add(ip="1.2.3.4", port=8090)
-
-        parsed = celaut.Peer()
-        parsed.ParseFromString(old.SerializeToString())
-
-        self.assertEqual(dict(parsed.gas_amount_per_call), {})
+        self.assertIn("ram_mu_per_gib_second", published)
+        self.assertIn("net_mu_per_gib", published)
 
 
 if __name__ == "__main__":

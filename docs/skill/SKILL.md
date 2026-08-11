@@ -63,10 +63,12 @@ Understand these before running anything. Full glossary:
 * **microVM execution:** services **run** as isolated Cloud Hypervisor (`ch`)
   microVMs — never Docker containers. Docker, if used at all, only builds the
   filesystem during packing (§2).
-* **Gas:** the compute unit clients pay for. A client tops up gas by generating a
+* **Balances and prices:** everything is priced in ERG, per resource (memory, CPU,
+  disk, relayed traffic), each with its own price and its own scarcity surcharge. A
+  client tops up its balance by generating a
   **deposit token** — a locally-generated identifier, not an on-chain asset — and
   submitting an Ergo transaction carrying that identifier plus ERG; the node
-  verifies it and credits gas. Nodes run a single hot wallet
+  verifies it and credits the balance. Nodes run a single hot wallet
   (`ledgers.ergo.WALLET_MNEMONIC`); clients pay its derived P2PK address, and
   excess is swept to an optional cold address. See
   [`../ERGO.md`](../ERGO.md).
@@ -223,8 +225,8 @@ nodo download <manifest url> [-o <output dir>]
 ### Feasibility & Cost Estimation
 
 Before launching any workload, run `nodo estimate` to check the memory guard
-(`resources.at_most.mem_limit`) and gas fees. It prints an execution-feasibility
-verdict (`YES/NO`) and the estimated gas costs — it does not print a resource or
+(`resources.at_most.mem_limit`) and prices. It prints an execution-feasibility
+verdict (`YES/NO`) and the estimated cost — it does not print a resource or
 hardware-availability table:
 
 ```bash
@@ -265,19 +267,19 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
  and the available `http` endpoints, not an id, token, or address (see
  [`../CONCEPTS.md`](../CONCEPTS.md)).
 
-3. **Observation, Monitoring & Gas Control:**
+3. **Observation, Monitoring & Balance Control:**
  ```bash
  # Live CPU/memory + a live per-flow network view for one instance (Ctrl-C to exit).
  # --save writes metrics.jsonl and a Wireshark-openable capture.pcap.
  nodo observe <instance id> [--save <path>]
 
- # List active instances (shows id, name, API address, gas, and virtualizer — the standard is `ch`).
+ # List active instances (shows id, name, API address, balance, and virtualizer — the standard is `ch`).
  nodo instances
  nodo instances --grouped        # grouped by parent service
 
- # Adjust gas for a running workload
- nodo increase_gas <instance id> 100
- nodo decrease_gas <instance id> 50
+ # Adjust the deposit of a running workload (amounts in ERG)
+ nodo increase_deposit <instance id> 0.01   # in ui.DISPLAY_UNIT (ERG by default)
+ nodo decrease_deposit <instance id> 0.005
 
  # Stop a running instance (requires root)
  sudo nodo kill <instance id>
@@ -421,7 +423,7 @@ sudo nodo update
 3. **Sudo Privileges Handling:** Automated installation, system daemon management (`daemon`, `doctor`, `update`), and instance/service teardown (`kill`, `remove`) require root elevation. Ensure non-interactive execution (`sudo -n true`) is permitted or handle prompt elevation safely.
 4. **Strict Environment Variable Declaration:** When preparing `nodo execute -e <key> <value>`, **never guess environment variables**. Always run `nodo inspect <service>` first to determine the exact environment variables declared and supported by the service package.
 5. **MicroVM Execution Awareness:** Understand that services execute inside isolated microVMs (`ch`). Do not attempt to use Docker commands to inspect running service instances; Docker is used only for the `nodo pack` build phase (and only locally in the opt-in `packer.local` mode) — never for execution.
-6. **Pre-flight Estimation:** Always run `nodo estimate <service>` before deploying unknown workloads to verify memory guard limits (`resources.at_most.mem_limit`) and ensure sufficient gas availability.
+6. **Pre-flight Estimation:** Always run `nodo estimate <service>` before deploying unknown workloads to verify memory guard limits (`resources.at_most.mem_limit`) and ensure a sufficient balance.
 7. **Problem-First Discovery:** When seeking AI capabilities, query Unstoppable Skills **through the read-only MCP server** (start with `load_skills`, then `load_skill_tree`) to evaluate comparative `Results` and verifiable `Coverage` before selecting a service id. There is no `nodo` CLI for Skills; publishing (if ever needed) uses the `reputation-system` library, not this agent path.
 8. **Disclose Irreversibility Before Funds:** Before any operation that configures a wallet, spends ERG, pays a peer, or submits reputation, disclose to the user that Nodo is **alpha** and that Ergo payments are **final and irreversible** with self-custodied keys and no recourse (see [`../KyA.md`](../KyA.md)). Do not initiate on-chain spending without explicit user consent.
 

@@ -96,6 +96,17 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Network => {
             app.adjust_selected_peer_reputation(-1)
         }
+        // Pricing mirrors Network's +/- and Config's `e`: nudge in place, or open the
+        // ordinary editor for an exact figure.
+        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Pricing => {
+            app.adjust_selected_price(1).await
+        }
+        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Pricing => {
+            app.adjust_selected_price(-1).await
+        }
+        (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Pricing => {
+            app.open_price_editor()
+        }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Config => {
             app.open_config_editor()
         }

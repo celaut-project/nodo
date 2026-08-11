@@ -8,9 +8,9 @@ peer-to-peer delegation and tunneling hard to test deterministically.
 
 This command bypasses the balancer and delegates straight to a named peer: no
 cost comparison against `local` or any other peer, no cheapest-first fallback
-if it fails. It still goes through the normal cost/gas accounting for the
-delegated instance (the peer's own `GetServiceEstimatedCost`, `spend_gas`,
-`gas_amount_on_other_peer`) -- only peer *selection* is skipped.
+if it fails. It still goes through the normal cost accounting for the
+delegated instance (the peer's own `GetServiceEstimatedCost`, `spend_mu`,
+`balance_on_other_peer`) -- only peer *selection* is skipped.
 
 The bypass is server-side (`launch_service._force_delegate`), correlated via a
 one-time token this command generates and stores against the peer id
@@ -33,7 +33,7 @@ from src.manager.manager import get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.instance_names import inject_instance_name
-from src.utils.utils import to_gas_amount
+from src.utils.utils import to_amount
 
 env_manager = ConfigManager()
 
@@ -45,12 +45,12 @@ sc = SQLConnection()
 def _forced_generator(
     _hash: str,
     token: str,
-    initial_gas_amount: int,
+    initial_mu: int,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
 ):
     try:
-        client_id = get_execute_client(gas_amount=initial_gas_amount, external=False)
+        client_id = get_execute_client(amount_mu=initial_mu, external=False)
     except Exception:
         raise RuntimeError("No execute client available.")
 
@@ -62,7 +62,7 @@ def _forced_generator(
         yield celaut_pb2.RecursionGuard(token=token)
 
         config = celaut_pb2.Configuration(
-            initial_gas_amount=to_gas_amount(initial_gas_amount)
+            initial_mu=to_amount(initial_mu)
         )
         if envs:
             config.environment_variables.update({
@@ -109,7 +109,7 @@ def force_execution(
             input_generator=_forced_generator(
                 _hash=service,
                 token=token,
-                initial_gas_amount=10**16,
+                initial_mu=10**16,
                 envs=envs,
                 instance_name=instance_name,
             ),

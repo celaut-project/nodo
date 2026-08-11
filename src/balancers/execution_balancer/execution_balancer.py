@@ -64,7 +64,7 @@ def estimate_cost_on_peer(
     The single-peer half of what `execution_balancer` does for every connected
     peer in its comparison loop below. Also used by `launch_service`'s
     `force_execution` bypass, which still needs the peer's own cost estimate
-    (for `spend_gas`/`gas_amount_on_other_peer`) without comparing it to anyone
+    (for `spend_mu`/`balance_on_other_peer`) without comparing it to anyone
     else's. Returns None (logging why) instead of raising, matching how the
     balancer's loop already treats an unreachable/incompatible peer.
     """

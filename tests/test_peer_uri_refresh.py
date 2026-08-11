@@ -36,7 +36,7 @@ class PeerUriRefreshTests(unittest.TestCase):
         self._orig = SQLConnection._connection
         SQLConnection._connection = conn
         self.conn = conn
-        conn.execute("INSERT INTO peer (id, advertisement, remote_client_id, gas) "
+        conn.execute("INSERT INTO peer (id, advertisement, remote_client_id, balance_mu) "
                      "VALUES (?, ?, '', '0')", (PEER, b""))
         conn.commit()
 

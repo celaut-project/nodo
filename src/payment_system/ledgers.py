@@ -2,12 +2,11 @@ from hashlib import sha3_256
 from typing import Generator
 from protos import celaut_pb2 as celaut
 from src.database.access_functions.ledgers import get_peer_contract_instances
-from src.utils.config import ConfigManager
-from src.utils.utils import to_gas_amount
+from src.utils.utils import to_amount
 from src.utils.logger import LOGGER
+from src.payment_system.contracts.ergo.rate import mu_per_erg
 from src.utils.contract_xattrs import set_contract_type, set_script, set_token_id
 
-GAS_PER_ERG = int(ConfigManager().get("ledgers.ergo.GAS_PER_ERG"))
 CONTRACT = "proveDlog(decodePoint())"
 CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 
@@ -45,7 +44,7 @@ def register_local_contracts() -> None:
             LOGGER(f"Could not register the local contract {contract_hash[:6]}: {e}")
 
 
-def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
+def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
     """Advertise this node's payment contracts, in the form peers must receive.
 
     ``get_peer_contract_instances`` yields the stored instance value as raw bytes:
@@ -76,9 +75,10 @@ def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
         set_contract_type(contract_ledger, CONTRACT.encode("utf-8"))
         set_token_id(contract_ledger, "ERG")
 
-        gas_price = celaut.GasPrice(
+        # What one unit of this contract is worth, in this node's MU. This is the only
+        # thing that makes a price quoted in MU actionable to whoever reads it, so it
+        # travels with every advertisement.
+        yield celaut.ContractRate(
             contract=contract_ledger,
-            gas_amount=to_gas_amount(GAS_PER_ERG)
+            mu_per_unit=to_amount(mu_per_erg()),
         )
-
-        yield gas_price

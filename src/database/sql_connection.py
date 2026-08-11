@@ -18,16 +18,18 @@ from src.utils import logger as log, logger
 from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
-from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
+from src.utils.utils import from_amount, generate_uris_by_peer_id
+from src.utils.monetary import format_mu
 
 env_manager = ConfigManager()
 
-CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = env_manager.get("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME")
+CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION = int(
+    env_manager.get("client.CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION", 0) or 0
+)
 TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get("ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT"))
 CLIENT_EXPIRATION_TIME = env_manager.get("CLIENT_EXPIRATION_TIME")
 STORAGE = env_manager.get("STORAGE")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
-DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
 
 
 class SQLConnection(metaclass=Singleton):
@@ -110,20 +112,30 @@ class SQLConnection(metaclass=Singleton):
 
     # Client Methods
 
-    def add_client(self, client_id: str, gas: int, last_usage: Optional[float]):
+    def add_client(self, client_id: str, balance_mu: int, last_usage: Optional[float],
+                   unmetered: bool = False):
         """
         Adds a client to the database, updating if a conflict occurs.
 
         Args:
             client_id (str): The ID of the client.
-            gas (int): The gas amount.
+            balance_mu (int): Its starting balance, in MU.
             last_usage (Optional[float]): The last usage time.
+            unmetered (bool): Never charge this client. Set for the node's own dev
+                clients, which used to express the same thing by holding a balance of
+                1e256 -- a flag written as a number.
         """
-        gas = str(gas)
         self._execute('''
-            INSERT INTO clients (id, gas, last_usage)
-            VALUES (?, ?, ?)
-        ''', (client_id, gas, last_usage))
+            INSERT INTO clients (id, balance_mu, last_usage, unmetered)
+            VALUES (?, ?, ?, ?)
+        ''', (client_id, str(balance_mu), last_usage, int(bool(unmetered))))
+
+    def client_is_unmetered(self, client_id: str) -> bool:
+        """True for a client the node never charges (its own dev clients)."""
+        row = self._execute(
+            'SELECT unmetered FROM clients WHERE id = ?', (client_id,)
+        ).fetchone()
+        return bool(row['unmetered']) if row else False
 
     def get_clients(self) -> List[dict]:
         """
@@ -133,8 +145,8 @@ class SQLConnection(metaclass=Singleton):
             List[dict]: A list of dictionaries containing client details.
         """
         try:
-            result = self._execute("SELECT id, gas, last_usage FROM clients")
-            clients = [{'id': row[0], 'gas': row[1], 'last_usage': row[2]} for row in result.fetchall()]
+            result = self._execute("SELECT id, balance_mu, last_usage FROM clients")
+            clients = [{'id': row[0], 'balance_mu': row[1], 'last_usage': row[2]} for row in result.fetchall()]
             return clients
         except sqlite3.Error as e:
             logger.LOGGER(f'Error fetching clients: {e}')
@@ -177,30 +189,32 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('SELECT id FROM clients WHERE id LIKE ?', ('dev-%',))
         return [row['id'] for row in result.fetchall()]
 
-    def get_client_gas(self, client_id: str) -> Optional[Tuple[int, float, str]]:
+    def get_client_balance(self, client_id: str) -> Optional[Tuple[int, float, str]]:
         """
-        Retrieves the gas and last usage time for a client.
+        Retrieves the balance_mu and last usage time for a client.
 
         Args:
             client_id (str): The ID of the client.
 
         Returns:
-            Tuple[int, float, str]: The gas amount, last usage time and gas in scientific notation.
+            Tuple[int, float, str]: The balance_mu amount, last usage time and balance_mu in scientific notation.
         """
         result = self._execute('''
-            SELECT gas, last_usage FROM clients WHERE id = ?
+            SELECT balance_mu, last_usage FROM clients WHERE id = ?
         ''', (client_id,))
         row = result.fetchone()
         if row:
             try:
-                gas = int(Decimal(str(row['gas'])))
+                balance_mu = int(Decimal(str(row['balance_mu'])))
             except (ValueError, InvalidOperation):
-                logger.LOGGER(f'Invalid gas value for client {client_id}: {row["gas"]}')
+                logger.LOGGER(f'Invalid balance_mu value for client {client_id}: {row["balance_mu"]}')
                 return None
             return (
-                gas,
+                balance_mu,
                 row['last_usage'],
-                f"{gas:e}"
+                # Third element is the human-readable form, in the operator's
+                # display unit: whoever prints this shows it to a person.
+                format_mu(balance_mu),
             )
                 
         log.LOGGER(f'Client not found: {client_id}')
@@ -212,30 +226,32 @@ class SQLConnection(metaclass=Singleton):
             DELETE FROM clients WHERE id = ?
         ''', (client_id,))
 
-    def add_gas(self, client_id: str, gas: int = 0):
+    def add_balance(self, client_id: str, balance_mu: int = 0):
         """
-        Adds gas to a client's balance.
+        Adds balance_mu to a client's balance.
 
         Args:
             client_id (str): The ID of the client.
-            gas (int): The amount of gas to add.
+            balance_mu (int): The amount of balance_mu to add.
         """
-        _gas, _last_usage, _ = self.get_client_gas(client_id)
-        total_gas = _gas + gas
-        if _last_usage and total_gas >= CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME:
+        current, _last_usage, _ = self.get_client_balance(client_id)
+        total = current + balance_mu
+        # A funded client is an active one: topping up past the threshold clears the
+        # expiry clock.
+        if _last_usage and total >= CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION:
             _last_usage = None
-        self.__update_client(client_id, total_gas, _last_usage)
+        self.__update_client(client_id, total, _last_usage)
 
-    def reduce_gas(self, client_id: str, gas: int):
+    def reduce_balance(self, client_id: str, balance_mu: int):
         """
-        Reduces gas from a client's balance.
+        Reduces balance_mu from a client's balance.
 
         Args:
             client_id (str): The ID of the client.
-            gas (int): The amount of gas to reduce.
+            balance_mu (int): The amount of balance_mu to reduce.
         """
-        _gas, _last_usage, _ = self.get_client_gas(client_id)
-        total_gas = _gas - gas
+        _gas, _last_usage, _ = self.get_client_balance(client_id)
+        total_gas = _gas - balance_mu
         if total_gas == 0 and _last_usage is None:
             _last_usage = time.time()
         self.__update_client(client_id, total_gas, _last_usage)
@@ -250,33 +266,33 @@ class SQLConnection(metaclass=Singleton):
         Returns:
             bool: True if the client has expired, False otherwise.
         """
-        _gas, _last_usage, _ = self.get_client_gas(client_id)
+        _gas, _last_usage, _ = self.get_client_balance(client_id)
         return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
 
-    def __update_client(self, client_id: str, gas: int, last_usage: float):
-        """Updates the gas and last usage time for a client."""
-        gas = str(gas)
+    def __update_client(self, client_id: str, balance_mu: int, last_usage: float):
+        """Updates the balance_mu and last usage time for a client."""
+        balance_mu = str(balance_mu)
         self._execute('''
-            UPDATE clients SET gas = ?, last_usage = ? WHERE id = ?
-        ''', (gas, last_usage, client_id))
+            UPDATE clients SET balance_mu = ?, last_usage = ? WHERE id = ?
+        ''', (balance_mu, last_usage, client_id))
 
-    def get_gas_amount_by_client_id(self, id: str) -> int:
+    def get_balance_by_client_id(self, id: str) -> int:
         """
-        Retrieves the gas amount for a client ID.
+        Retrieves the balance_mu amount for a client ID.
 
         Args:
             id (str): The client ID.
 
         Returns:
-            int: The gas amount.
+            int: The balance_mu amount.
         """
         result = self._execute('''
-            SELECT gas FROM clients WHERE id = ?
+            SELECT balance_mu FROM clients WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
-            return int(row['gas'])
-        raise Exception(f'Gas amount not found for ID: {id}')
+            return int(row['balance_mu'])
+        raise Exception(f'Balance not found for ID: {id}')
 
     # Local instance Methods
 
@@ -286,22 +302,32 @@ class SQLConnection(metaclass=Singleton):
         container_ip: str,
         container_id: str,
         name: str,
-        gas: int,
+        balance_mu: int,
         serialized_instance: str,
         service_id: str,
         virtualizer: str,
         disk_space: int,
         envs: str,
+        mem_limit: int = 0,
+        cpu_period: int = 0,
+        cpu_quota: int = 0,
     ):
         """
         Adds an internal container to the database.
+
+        The four resource columns are what the maintenance tick prices this instance by
+        (``src/manager/maintain.py`` reads them back through :meth:`get_sys_req`), so
+        they must record what the instance actually holds. ``mem_limit`` used to be
+        written as a literal 0 here and only ever corrected by a later
+        ``modify_resources``, which meant every instance was billed no memory at all for
+        as long as nobody resized it.
 
         Args:
             father_id (str): The father ID.
             container_ip (str): The IP address of the container.
             container_id (str): The container ID.
             name (str): Friendly instance name.
-            gas (int): The gas amount.
+            balance_mu (int): The balance_mu amount.
             serialized_instance (str): Serialized celaut instance
             service_id (str): Service id
             virtualizer (Optional[str]): Virtualizer backend name
@@ -309,11 +335,16 @@ class SQLConnection(metaclass=Singleton):
             envs (Optional[str]): JSON object of the environment variables the
                 instance was launched with (e.g. signer mode/seed for a
                 source-application), so the node can later tell how it was configured.
+            mem_limit (int): Memory the instance holds, in bytes.
+            cpu_period (int): CFS period, as the hypervisor expresses vCPUs.
+            cpu_quota (int): CFS quota; quota/period is the vCPU count.
         """
         self._execute('''
-            INSERT INTO local_instances (id, name, ip, father_id, gas, mem_limit, disk_space, serialized_instance, service_id, virtualizer, envs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, name, container_ip, father_id, str(gas), 0, disk_space, serialized_instance, service_id, virtualizer, envs))
+            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
+              disk_space, int(cpu_period or 0), int(cpu_quota or 0),
+              serialized_instance, service_id, virtualizer, envs))
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
     def get_local_instance_envs(self, id: str) -> Optional[str]:
@@ -426,6 +457,10 @@ class SQLConnection(metaclass=Singleton):
         """
         Retrieves system requirements for an internal container.
 
+        All four resource columns, because this is what the maintenance tick prices the
+        instance by: memory and disk in bytes, plus the CFS pair from which the vCPU
+        count is derived. Returning only memory and disk is what left compute unbilled.
+
         Args:
             id (str): The id of the internal container.
 
@@ -433,29 +468,29 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space FROM local_instances WHERE id = ?
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
             return row
         raise Exception(f'Internal service {id}')
 
-    def get_container_gas(self, id: str) -> int:
+    def get_instance_balance(self, id: str) -> int:
         """
-        Retrieves the gas amount for an internal container.
+        Retrieves the balance_mu amount for an internal container.
 
         Args:
             id (str): The id of the internal container.
 
         Returns:
-            int: The gas amount.
+            int: The balance_mu amount.
         """
         result = self._execute('''
-            SELECT gas FROM local_instances WHERE id = ?
+            SELECT balance_mu FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
-            return int(row['gas'])
+            return int(row['balance_mu'])
         raise Exception(f'Internal service {id}')
     
     def get_service_id_by_container_id(self, id: str) -> str:
@@ -515,48 +550,48 @@ class SQLConnection(metaclass=Singleton):
         ''', (name,))
         return result.fetchone()[0] > 0
 
-    def update_gas_to_container(self, id: str, gas: int):
+    def update_instance_balance(self, id: str, balance_mu: int):
         """
-        Updates the gas amount for a container.
+        Updates the balance_mu amount for a container.
 
         Args:
             id (str): The id of the container.
-            gas (int): The new gas amount.
+            balance_mu (int): The new balance_mu amount.
         """
         
-        gas = str(gas)
+        balance_mu = str(balance_mu)
         self._execute('''
-            UPDATE local_instances SET gas = ? WHERE id = ?
-        ''', (gas, id))
+            UPDATE local_instances SET balance_mu = ? WHERE id = ?
+        ''', (balance_mu, id))
 
-    def spend_container_gas(self, id: str, gas_to_spend: int, allow_debt: bool) -> Optional[bool]:
-        """Atomically deduct ``gas_to_spend`` from a container's balance.
+    def spend_instance_balance(self, id: str, amount_mu: int, allow_debt: bool) -> Optional[bool]:
+        """Atomically deduct ``amount_mu`` from a container's balance.
 
         The read, the sufficiency check and the write happen under a single hold
         of the connection lock, so two threads billing the same instance (e.g.
         the two directions of a service tunnel) can never both read the same
         balance and clobber each other's deduction — the lost-update race that a
-        separate ``get_container_gas`` + ``update_gas_to_container`` allows.
+        separate ``get_instance_balance`` + ``update_instance_balance`` allows.
 
-        Returns True when the gas was spent, False when the balance is
+        Returns True when the balance_mu was spent, False when the balance is
         insufficient and debt is not allowed, and None when the container does
-        not exist. ``gas`` is stored as TEXT, so the arithmetic is done in
+        not exist. ``balance_mu`` is stored as TEXT, so the arithmetic is done in
         Python (``int``) rather than in SQL to avoid affinity surprises.
         """
-        gas_to_spend = int(gas_to_spend)
+        amount_mu = int(amount_mu)
         with SQLConnection._lock:
             try:
                 cursor = SQLConnection._connection.cursor()
-                cursor.execute('SELECT gas FROM local_instances WHERE id = ?', (id,))
+                cursor.execute('SELECT balance_mu FROM local_instances WHERE id = ?', (id,))
                 row = cursor.fetchone()
                 if row is None:
                     return None
-                current = int(row['gas'])
-                if current < gas_to_spend and not allow_debt:
+                current = int(row['balance_mu'])
+                if current < amount_mu and not allow_debt:
                     return False
                 cursor.execute(
-                    'UPDATE local_instances SET gas = ? WHERE id = ?',
-                    (str(current - gas_to_spend), id),
+                    'UPDATE local_instances SET balance_mu = ? WHERE id = ?',
+                    (str(current - amount_mu), id),
                 )
                 SQLConnection._connection.commit()
                 return True
@@ -923,13 +958,13 @@ class SQLConnection(metaclass=Singleton):
             List[dict]: A list of dictionaries containing peer details.
         """
         result = self._execute('''
-            SELECT id, token, remote_client_id, gas FROM peer
+            SELECT id, token, remote_client_id, balance_mu FROM peer
         ''')
 
         peers = []
         for row in result.fetchall():
             peer = dict(row)
-            peer['gas'] = int(peer.pop('gas'))
+            peer['balance_mu'] = int(peer.pop('balance_mu'))
             peers.append(peer)
 
         return peers
@@ -952,7 +987,10 @@ class SQLConnection(metaclass=Singleton):
             if row:
                 # Convert the row to a dictionary
                 peer_info = dict(row)
-                peer_info['gas'] = float(peer_info.pop('gas'))
+                # The balance is stored as TEXT and is an integer everywhere else (Python ints
+                # are unbounded; a float both loses precision and re-serializes as
+                # "1e+64", which `from_amount` cannot parse back).
+                peer_info['balance_mu'] = int(Decimal(str(peer_info.pop('balance_mu') or 0)))
                 return peer_info
             else:
                 return {}  # Return empty dict if peer not found
@@ -960,9 +998,9 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching peer details for ID {peer_id}: {e}')
             return {}
         
-    def get_peer_gas_price(self, peer_id: str, contract_hash: str, ledger_hash: str) -> Optional[int]:
+    def get_peer_contract_rate(self, peer_id: str, contract_hash: str, ledger_hash: str) -> Optional[int]:
         """
-        Fetches the gas price for a specific contract instance, identified by
+        Fetches the balance_mu price for a specific contract instance, identified by
         peer, contract hash, and ledger ID.
 
         Parameters:
@@ -974,13 +1012,13 @@ class SQLConnection(metaclass=Singleton):
           never find the row the peer's advertisement created.
 
         Returns:
-        - int: The gas price as an integer if the specific contract instance is found.
+        - int: The balance_mu price as an integer if the specific contract instance is found.
         - None: If the specific contract instance is not found or an error occurs.
         """
         try:
             for stored_hash in self.ledger_hashes(ledger_hash):
                 result = self._execute('''
-                    SELECT gas_price
+                    SELECT mu_per_unit
                     FROM contract_instance
                     WHERE peer_id = ? AND contract_hash = ? AND ledger_hash = ?
                 ''', (peer_id, contract_hash, stored_hash))
@@ -990,12 +1028,12 @@ class SQLConnection(metaclass=Singleton):
                 if not row:
                     continue
 
-                gas_price_str = row['gas_price']
+                gas_price_str = row['mu_per_unit']
                 try:
-                    # Convert the string gas_price to an integer
+                    # Convert the string mu_per_unit to an integer
                     return int(gas_price_str)
                 except (ValueError, TypeError) as ve:
-                    logger.LOGGER(f'Error converting stored gas_price "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {ve}')
+                    logger.LOGGER(f'Error converting stored mu_per_unit "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {ve}')
                     return None # Return None if conversion fails
 
             # No row found for the given criteria
@@ -1003,7 +1041,7 @@ class SQLConnection(metaclass=Singleton):
 
         except Exception as e:
             # Catch potential database errors during execution
-            logger.LOGGER(f'Database error fetching gas price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {e}')
+            logger.LOGGER(f'Database error fetching balance_mu price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {e}')
             return None # Return None on database error
 
     def get_peer_payment_contracts(self, peer_id: str) -> List[dict]:
@@ -1019,10 +1057,10 @@ class SQLConnection(metaclass=Singleton):
             List[dict]: One entry per ``contract_instance`` row, each with
             ``contract_hash``, ``ledger_tag`` (falling back to the raw
             ``ledger_hash`` if the ledger content can't be resolved to a tag),
-            ``address``, and ``gas_price`` (int, or None if unset/invalid).
+            ``address``, and ``mu_per_unit`` (int, or None if unset/invalid).
         """
         rows = self._execute(
-            "SELECT contract_hash, ledger_hash, address, gas_price "
+            "SELECT contract_hash, ledger_hash, address, mu_per_unit "
             "FROM contract_instance WHERE peer_id = ?",
             (peer_id,)
         ).fetchall()
@@ -1043,15 +1081,15 @@ class SQLConnection(metaclass=Singleton):
                     logger.LOGGER(f'Could not parse stored ledger {row["ledger_hash"]}: {e}')
 
             try:
-                gas_price = int(row['gas_price'])
+                mu_per_unit = int(row['mu_per_unit'])
             except (TypeError, ValueError):
-                gas_price = None
+                mu_per_unit = None
 
             contracts.append({
                 'contract_hash': row['contract_hash'],
                 'ledger_tag': ledger_tag,
                 'address': row['address'],
-                'gas_price': gas_price,
+                'mu_per_unit': mu_per_unit,
             })
 
         return contracts
@@ -1071,68 +1109,68 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching peer IDs: {e}')
             return []
 
-    def add_gas_to_peer(self, peer_id: str, gas: int) -> bool:
+    def add_balance_to_peer(self, peer_id: str, balance_mu: int) -> bool:
         """
-        Adds the specified amount of gas to the existing gas value of a peer.
+        Adds the specified amount of balance_mu to the existing balance_mu value of a peer.
 
         Parameters:
         - peer_id (str): The unique identifier of the peer.
-        - gas (int): The amount of gas to be added to the peer's existing gas.
+        - balance_mu (int): The amount of balance_mu to be added to the peer's existing balance_mu.
 
         Returns:
         - bool: True if the operation was successful, False otherwise.
         """
         try:
-            # Retrieve the current gas values from the database.
-            result = self._execute('SELECT gas FROM peer WHERE id = ?', (peer_id,))
+            # Retrieve the current balance_mu values from the database.
+            result = self._execute('SELECT balance_mu FROM peer WHERE id = ?', (peer_id,))
             row = result.fetchone()
 
             if row:
-                current_gas = int(row['gas'])
+                current_gas = int(row['balance_mu'])
 
-                # Add the specified gas to the current amount.
-                total_gas = str(current_gas + gas)
+                # Add the specified balance_mu to the current amount.
+                total_gas = str(current_gas + balance_mu)
 
-                # Get the current timestamp for gas_last_update.
+                # Get the current timestamp for balance_last_update.
                 current_time = datetime.datetime.now().isoformat()
 
-                # Update the peer's gas values and gas_last_update in the database.
+                # Update the peer's balance_mu values and balance_last_update in the database.
                 self._execute('''
-                    UPDATE peer SET gas = ?, gas_last_update = ? WHERE id = ?
+                    UPDATE peer SET balance_mu = ?, balance_last_update = ? WHERE id = ?
                 ''', (total_gas, current_time, peer_id))
 
                 return True
             else:
                 raise Exception(f'Peer not found: {peer_id}')
         except Exception as e:
-            logger.LOGGER(f'Error adding gas to peer {peer_id}: {e}')
+            logger.LOGGER(f'Error adding balance_mu to peer {peer_id}: {e}')
             return False
 
-    def refresh_gas_for_peer(self, peer_id: str, gas: int) -> bool:
+    def refresh_balance_for_peer(self, peer_id: str, balance_mu: int) -> bool:
         """
-        Sets the gas value of a peer to a specified amount, replacing any existing value.
+        Sets the balance_mu value of a peer to a specified amount, replacing any existing value.
 
         Parameters:
         - peer_id (str): The unique identifier of the peer.
-        - gas (int): The new gas amount to set for the peer.
+        - balance_mu (int): The new balance_mu amount to set for the peer.
 
         Returns:
         - bool: True if the operation was successful, False otherwise.
         """
         try:
-            gas = str(gas)
+            balance_mu = str(balance_mu)
 
-            # Get the current timestamp for gas_last_update.
+            # Get the current timestamp for balance_last_update.
             current_time = datetime.datetime.now().isoformat()
 
-            # Update the peer's gas and gas_last_update directly in the database.
+            # Update the peer's balance_mu and balance_last_update directly in the database.
             self._execute('''
-                UPDATE peer SET gas = ?, gas_last_update = ? WHERE id = ?
-            ''', (gas, current_time, peer_id))
+                UPDATE peer SET balance_mu = ?, balance_last_update = ? WHERE id = ?
+            ''', (balance_mu, current_time, peer_id))
 
             return True
         except Exception as e:
-            logger.LOGGER(f'Error refreshing gas for peer {peer_id}: {e}')
+            logger.LOGGER(f'Error refreshing balance_mu for peer {peer_id}: {e}')
             return False
 
     def add_peer(self, peer_id: str, advertisement: bytes) -> bool:
@@ -1153,8 +1191,8 @@ class SQLConnection(metaclass=Singleton):
         if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    INSERT INTO peer (id, advertisement, remote_client_id, gas)
-                    VALUES (?, ?, '', '0')  -- Initialize with empty remote_client_id and 0 gas
+                    INSERT INTO peer (id, advertisement, remote_client_id, balance_mu)
+                    VALUES (?, ?, '', '0')  -- Initialize with empty remote_client_id and 0 balance_mu
                 ''', (peer_id, advertisement))
                 logger.LOGGER(f'Peer {peer_id} added')
                 return True
@@ -1280,14 +1318,14 @@ class SQLConnection(metaclass=Singleton):
         # If the loop finishes without finding a match, return the same.
         return ledger_to_check
 
-    def add_contract(self, contract: celaut_pb2.Contract, peer_id: str = "LOCAL", gas_price: int = 0):
+    def add_contract(self, contract: celaut_pb2.Contract, peer_id: str = "LOCAL", mu_per_unit: int = 0):
         """
         Adds a contract to the database.
 
         Args:
             contract (celaut_pb2.Contract): The contract to add.
             peer_id (Optional[str]): The ID of the peer or None for a self contract (to be send to clients.)
-            gas_price (Int): Gas per unit of the token if the contract represents one, or gas per contract spend/execution/usage.
+            mu_per_unit (Int): MU that one unit of this contract is worth.
         """
         # The per-instance value is the raw ErgoTree/propositionBytes (script xattr). It is
         # stored as hex so it round-trips as binary, never as a textual address. The
@@ -1304,7 +1342,7 @@ class SQLConnection(metaclass=Singleton):
         contract_hash: str = sha3_256(type_bytes).hexdigest()
         ledger_hash: str = sha3_256(ledger_str).hexdigest()
 
-        gas_str = str(gas_price)
+        gas_str = str(mu_per_unit)
 
         self._execute("INSERT OR IGNORE INTO contract (hash, content) VALUES (?,?)",
                     (contract_hash, type_bytes))
@@ -1312,7 +1350,7 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT OR IGNORE INTO ledger (hash, content) VALUES (?,?)",
                     (ledger_hash, ledger_str))
 
-        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_hash, contract_hash, peer_id, gas_price) "
+        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit) "
                     "VALUES (?,?,?,?,?)", (instance_value, ledger_hash, contract_hash, peer_id, gas_str))
 
     def get_peer_contract_instances(self, contract_hash: str, peer_id: str = "LOCAL") -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger], None, None]:
@@ -1481,7 +1519,7 @@ class SQLConnection(metaclass=Singleton):
         The migration path for issue #236: peers registered before node identity
         existed hold a random uuid4 id, and the first time such a peer re-handshakes
         with a valid signature we must adopt its public key as the id *in place* --
-        otherwise it registers as a brand-new peer and its gas balance, external
+        otherwise it registers as a brand-new peer and its balance_mu balance, external
         client id, payment contracts and reputation stay stranded on an orphaned row
         that nothing references again.
 
@@ -1847,7 +1885,7 @@ class SQLConnection(metaclass=Singleton):
 
     def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:  # TODO delete?
         """
-        Purges an external container and refunds gas.
+        Purges an external container and refunds balance_mu.
 
         Args:
             agent_id (str): The agent ID.
@@ -1855,7 +1893,7 @@ class SQLConnection(metaclass=Singleton):
             his_token (str): The token of the external container.
 
         Returns:
-            int: The gas amount refunded.
+            int: The balance_mu amount refunded.
         """
         refund = 0
 
@@ -1868,7 +1906,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (his_token,))
 
         try:
-            refund = from_gas_amount(next(bee.client_grpc(
+            refund = from_amount(next(bee.client_grpc(
                 method=celaut_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(generate_uris_by_peer_id(peer_id=peer_id))
@@ -1906,22 +1944,24 @@ class SQLConnection(metaclass=Singleton):
         
         log.LOGGER(f'Container not found for URI: {uri}')
 
-    def get_gas_amount_by_father_id(self, id: str) -> int:
+    def get_balance_by_father_id(self, id: str) -> int:
         """
-        Retrieves the gas amount for a father ID, checking both clients and internal containers.
+        Retrieves the balance_mu amount for a father ID, checking both clients and internal containers.
 
         Args:
             id (str): The father ID.
 
         Returns:
-            int: The gas amount.
+            int: The balance_mu amount.
         """
         if self.client_exists(client_id=id):
-            return self.get_gas_amount_by_client_id(id=id)
+            return self.get_balance_by_client_id(id=id)
         elif self.internal_instance_exists(id=id):
-            return self.get_container_gas(id=id)
-        else:
-            return int(DEFAULT_INITIAL_GAS_AMOUNT)
+            return self.get_instance_balance(id=id)
+        # An unknown father has no balance. It used to report a flat default here, which
+        # invented funds nobody had paid for.
+        log.LOGGER(f'No client or instance found for father id {id}; reporting zero balance.')
+        return 0
 
     # Payment system
     def add_deposit_token(self, client_id: str, status: str) -> str:

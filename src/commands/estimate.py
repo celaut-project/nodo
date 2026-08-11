@@ -7,17 +7,20 @@ from protos.gateway_bee import StartService_input_indices
 from src.commands.execute import resolve_service_hash
 from src.manager.manager import get_dev_clients
 from src.utils.config import ConfigManager
+from src.utils.monetary import format_mu
 from src.utils.utils import (
-    from_gas_amount,
+    from_amount,
     read_metadata_from_disk,
-    to_gas_amount,
+    to_amount,
     service_extended,
 )
 
 env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
-ESTIMATION_INITIAL_GAS_AMOUNT = 10 ** 16
+# Balance the throwaway estimation client is given. It only has to clear whatever the
+# node quotes; it is never actually spent, since estimating launches nothing.
+ESTIMATION_BALANCE_MU = 10 ** 16
 
 
 def estimate(service: str) -> None:
@@ -32,15 +35,15 @@ def estimate(service: str) -> None:
         return
 
     # Obtain a dev client to authenticate the request.
-    clients = get_dev_clients(gas_amount=ESTIMATION_INITIAL_GAS_AMOUNT)
+    clients = get_dev_clients(amount_mu=ESTIMATION_BALANCE_MU)
     try:
         client_id = next(clients)
     except StopIteration:
-        print("There is no dev client available with enough gas.")
+        print("There is no dev client available with enough balance.")
         return
 
     configuration = celaut_pb2.Configuration(
-        initial_gas_amount=to_gas_amount(gas_amount=ESTIMATION_INITIAL_GAS_AMOUNT)
+        initial_mu=to_amount(ESTIMATION_BALANCE_MU)
     )
 
     channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
@@ -75,8 +78,11 @@ def estimate(service: str) -> None:
         return
 
     print("Execution feasibility: YES")
-    print("Estimated costs (gas units):")
-    print(f"- Initial cost:             {from_gas_amount(estimated_cost.cost)}")
-    print(f"- Initial maintenance:      {from_gas_amount(estimated_cost.init_maintenance_cost)}")
-    print(f"- Max maintenance:          {from_gas_amount(estimated_cost.max_maintenance_cost)}")
-    print(f"- Maintenance loop (secs):  {estimated_cost.maintenance_seconds_loop}")
+    loop_seconds = estimated_cost.maintenance_seconds_loop or 1
+    per_hour = lambda amount: format_mu(int(from_amount(amount) * 3600 / loop_seconds))
+
+    print("Estimated costs:")
+    print(f"- To start:                 {format_mu(from_amount(estimated_cost.cost))}")
+    print(f"- Maintenance, as started:  {per_hour(estimated_cost.init_maintenance_cost)} per hour")
+    print(f"- Maintenance, at its most: {per_hour(estimated_cost.max_maintenance_cost)} per hour")
+    print(f"- Charged every:            {estimated_cost.maintenance_seconds_loop} seconds")

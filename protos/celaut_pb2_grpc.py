@@ -28,8 +28,8 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
-        self.ModifyGasDeposit = channel.stream_stream(
-                '/celaut.Gateway/ModifyGasDeposit',
+        self.ModifyDeposit = channel.stream_stream(
+                '/celaut.Gateway/ModifyDeposit',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
@@ -109,7 +109,7 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ModifyGasDeposit(self, request_iterator, context):
+    def ModifyDeposit(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -194,8 +194,8 @@ def add_GatewayServicer_to_server(servicer, server):
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
-            'ModifyGasDeposit': grpc.stream_stream_rpc_method_handler(
-                    servicer.ModifyGasDeposit,
+            'ModifyDeposit': grpc.stream_stream_rpc_method_handler(
+                    servicer.ModifyDeposit,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -303,7 +303,7 @@ class Gateway(object):
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def ModifyGasDeposit(request_iterator,
+    def ModifyDeposit(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -313,7 +313,7 @@ class Gateway(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ModifyGasDeposit',
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ModifyDeposit',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

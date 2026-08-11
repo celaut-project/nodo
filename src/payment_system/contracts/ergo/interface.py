@@ -9,6 +9,10 @@ from src.utils.logger import LOGGER
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import set_address, set_script, set_token_id, set_contract_type
 from src.utils.ergo_units import erg_to_nanoerg, nanoerg_to_erg_str
+# This ledger's MU rate and its conversions. A separate, light module on purpose: it is
+# also what `monetary.display_unit` resolves ERG through, and that runs on log lines, so
+# it must not pull in everything below.
+from src.payment_system.contracts.ergo import rate
 from src.utils.ergo_tree import (
     ergo_contract_from_proposition_bytes,
     proposition_bytes_from_address,
@@ -45,7 +49,6 @@ CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 # swept to the cold wallet (a public address, never a mnemonic in Nodo).
 WALLET_MNEMONIC = lambda: env_manager.get("ledgers.ergo.WALLET_MNEMONIC")
 ERGO_NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
-GAS_PER_ERG_L = lambda: int(env_manager.get("ledgers.ergo.GAS_PER_ERG"))
 COLD_WALLET = lambda: env_manager.get("ledgers.ergo.payments.COLD_WALLET") or ""
 ERGO_DONATION_WALLET = lambda: env_manager.get("ledgers.ergo.payments.DONATION_WALLET") or ""
 
@@ -88,9 +91,33 @@ def transaction_url_reporting(reporter):
         _transaction_url_reporter.reset(token)
 
 
-def __gas_to_nanoerg(amount: int) -> int:
-    gas_price = 1 / GAS_PER_ERG_L()
-    return int(round(amount * gas_price))
+def __mu_to_nanoerg(amount: int) -> int:
+    """MU -> nanoERG, at this ledger's declared rate (see ``rate.py``, next to this file).
+
+    The rate lives in ``ledgers.ergo.payments.MU_PER_NANOERG`` (1 by default, which makes
+    the conversion the identity). It is the single point where the node's unit of account
+    meets real money, and it is the same number peers are told as
+    ``ContractRate.mu_per_unit``, so payer and receiver compute the same figure.
+
+    The old `GAS_PER_ERG` did this with a float reciprocal set to 1e58, which silently
+    turned every real charge into zero nanoERG.
+    """
+    return rate.mu_to_nanoerg(amount)
+
+
+def settlement_floors_mu() -> Tuple[int, int]:
+    """``(fee, smallest payable output)`` for this ledger, in MU.
+
+    The two hard limits any deposit has to clear on Ergo: every transaction pays a fee,
+    and the network refuses an output below its technical minimum box value.
+
+    Reported in MU rather than nanoERG because the caller sizing a deposit
+    (``src/payment_system/deposits.py``) is ledger-agnostic and counts in MU; both
+    constants here are Ergo's own and therefore nanoERG. The two coincide only while
+    ``MU_PER_NANOERG`` is 1, so the conversion is explicit. A ledger with no fee and no
+    minimum output reports ``(0, 0)`` and simply imposes no floor.
+    """
+    return rate.nanoerg_to_mu(DEFAULT_FEE), rate.nanoerg_to_mu(SAFE_MIN_BOX_VALUE)
 
 
 def __nanoerg_to_erg(amount: int) -> float:
@@ -167,7 +194,9 @@ def init():
 
 def check_sender_balance(amount: int) -> bool:
     try:
-        required = __gas_to_nanoerg(amount)
+        # The transaction also has to cover its own fee, and the wallet has to be left
+        # able to build a change box; a balance of exactly the payment is not enough.
+        required = __mu_to_nanoerg(amount) + DEFAULT_FEE + SAFE_MIN_BOX_VALUE
         available = __confirmed_balance_nanoerg(__get_sender_addr(WALLET_MNEMONIC()))
         check = available > required
         if not check:
@@ -261,8 +290,18 @@ def manager():
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> celaut_pb2.Contract:
     with payment_lock:
-        amount = __gas_to_nanoerg(amount)
+        amount = __mu_to_nanoerg(amount)
         LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount} nanoERG")
+
+        # Ergo rejects an output below the technical minimum box value, so a payment
+        # worth less than that cannot be settled on-chain at all. Fail loudly here
+        # instead of building a transaction the network will refuse.
+        if amount < SAFE_MIN_BOX_VALUE:
+            raise Exception(
+                f"Payment of {nanoerg_to_erg_str(amount)} ERG is below Ergo's minimum box "
+                f"value ({nanoerg_to_erg_str(SAFE_MIN_BOX_VALUE)} ERG). Nothing can be "
+                "settled for that amount; see deposits.MAX_FEE_OVERHEAD in the config."
+            )
 
         try:
             _, _, jpype, org_appkit = _ergo_runtime()
@@ -355,7 +394,7 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
             return False
 
         utxos = response.json()
-        expected = __gas_to_nanoerg(amount)
+        expected = __mu_to_nanoerg(amount)
         for box_dict in utxos:
             if "additionalRegisters" in box_dict and "R4" in box_dict["additionalRegisters"]:
                 r4_value = box_dict["additionalRegisters"]["R4"]["renderedValue"]

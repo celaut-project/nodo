@@ -50,7 +50,7 @@ These are the most commonly used commands for daily tasks:
   Prints:
   - execution feasibility (`YES/NO`)
   - reason when execution is not possible
-  - estimated gas costs (initial and maintenance)
+  - estimated costs (to start, and maintenance per hour)
   
   **Examples:**  
   `nodo estimate 1234567890abcdef`  
@@ -181,15 +181,15 @@ These are the most commonly used commands for daily tasks:
   service locally and hands our client an endpoint of its own. That is controlled
   by `network.DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`).
 
-- **increase_gas `<instance id> <gas amount>`**  
-  Increases the allocated gas for a service instance.  
+- **increase_deposit `<instance id> <amount>`**  
+  Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
   **Example:**  
-  `nodo increase_gas abcdef1234567890 100`
+  `nodo increase_deposit abcdef1234567890 0.01`
 
-- **decrease_gas `<instance id> <gas amount>`**  
-  Decreases the allocated gas for a service instance.  
+- **decrease_deposit `<instance id> <amount>`**  
+  Takes back part of a service instance's deposit.  
   **Example:**  
-  `nodo decrease_gas abcdef1234567890 50`
+  `nodo decrease_deposit abcdef1234567890 0.005`
 
 - **services**  
   Lists all available services on the node.  
@@ -338,7 +338,7 @@ These commands offer extended management and exploration features:
 
 These are the **internal** server-side calculations `nodo estimate` performs to
 decide feasibility; they are **not** printed by the command (its output is the
-feasibility verdict and the gas figures only). `nodo estimate` uses the same
+feasibility verdict and the price figures only). `nodo estimate` uses the same
 internal checks as runtime cost estimation:
 
 - **Execution feasibility check**
@@ -419,8 +419,8 @@ These are intended for development or advanced maintenance environments:
   (cheapest local-or-connected-peer candidate, tried in cost order). This command
   skips that entirely and delegates straight to `peer_id` — no comparison against
   `local` or any other peer, and no fallback if it fails. It still goes through the
-  normal cost/gas accounting for the delegated instance (the peer's own cost
-  estimate, `spend_gas`, `gas_amount_on_other_peer`) — only peer *selection* is
+  normal cost accounting for the delegated instance (the peer's own cost
+  estimate, `spend_mu`, `balance_on_other_peer`) — only peer *selection* is
   skipped. Fails immediately if `peer_id` isn't currently connected (see `nodo peers`).
   Useful for exercising peer-to-peer delegation and tunneling deterministically
   without disconnecting every other peer first.  
@@ -552,7 +552,7 @@ commands that take one, the identifier of the relevant object:
 
 - **Service id or tag** — `execute`, `estimate`, `inspect`, `remove`, `publish`, `tag`,
   `export`, `integrity`
-- **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_gas`, `decrease_gas`
+- **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_deposit`, `decrease_deposit`
 - **Peer id** — `disconnect`, `increase_peer_deposit`
 - **Subcommands** — `daemon start|status|stop|restart`
 

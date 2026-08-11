@@ -46,7 +46,7 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
             "contract_hash": "abc123",
             "ledger_hash": "deadbeef",
             "address": "0008cd0392",
-            "gas_price": "9999999999999999438119489974413630815797154428513196965888",
+            "mu_per_unit": "9999999999999999438119489974413630815797154428513196965888",
         }
         ledger_row = {"content": self.ergo.SerializeToString()}
 
@@ -62,7 +62,7 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
         self.assertEqual(contract["ledger_tag"], "ergo")
         self.assertEqual(contract["address"], "0008cd0392")
         self.assertEqual(
-            contract["gas_price"],
+            contract["mu_per_unit"],
             9999999999999999438119489974413630815797154428513196965888,
         )
 
@@ -73,7 +73,7 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
             "contract_hash": "abc123",
             "ledger_hash": "deadbeef",
             "address": "addr",
-            "gas_price": "5",
+            "mu_per_unit": "5",
         }
         with patch.object(
             self.conn, "_execute",
@@ -88,7 +88,7 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
             "contract_hash": "abc123",
             "ledger_hash": "deadbeef",
             "address": "addr",
-            "gas_price": None,
+            "mu_per_unit": None,
         }
         with patch.object(
             self.conn, "_execute",
@@ -96,14 +96,14 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
         ):
             result = self.conn.get_peer_payment_contracts("peer-1")
 
-        self.assertIsNone(result[0]["gas_price"])
+        self.assertIsNone(result[0]["mu_per_unit"])
 
     def test_multiple_instances_for_one_peer_are_all_returned(self):
         # The old code could only ever show one contract per peer; a peer with
         # several must not get truncated to the first.
         rows = [
-            {"contract_hash": "c1", "ledger_hash": "l1", "address": "a1", "gas_price": "1"},
-            {"contract_hash": "c2", "ledger_hash": "l2", "address": "a2", "gas_price": "2"},
+            {"contract_hash": "c1", "ledger_hash": "l1", "address": "a1", "mu_per_unit": "1"},
+            {"contract_hash": "c2", "ledger_hash": "l2", "address": "a2", "mu_per_unit": "2"},
         ]
         with patch.object(
             self.conn, "_execute",
