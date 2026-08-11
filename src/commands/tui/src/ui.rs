@@ -306,7 +306,9 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_instances_tree(frame, app, area);
         return;
     }
-    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(6)]).split(area);
+    // 8 = 6 detail lines + the block's two border rows. At 6 the card clipped its
+    // last line (Balance) even before the `observe` hint was added.
+    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(8)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
         let location = if instance.is_local() {
             "local".to_string()
@@ -370,7 +372,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let money = &app.money;
     let detail = if let Some(instance) = app.instances.selected() {
-        vec![
+        let mut lines = vec![
             metric_line("Instance", instance.id.clone()),
             metric_line(
                 "Location",
@@ -383,7 +385,16 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             metric_line("Service", instance.service.clone()),
             metric_line("Endpoint", nonempty(&instance.ip, "—")),
             metric_line("Balance", money.format_raw(&instance.balance)),
-        ]
+        ];
+        // `observe` attaches to a local process, so it is only offered for local
+        // instances. Full id, so the line can be copied as-is.
+        if instance.is_local() {
+            lines.push(metric_line(
+                "Live view",
+                format!("nodo observe {}", instance.id),
+            ));
+        }
+        lines
     } else {
         vec![Line::from(Span::styled(
             "Select an instance to inspect its complete identity and allocation.",
