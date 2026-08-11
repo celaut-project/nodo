@@ -9,10 +9,11 @@ from src.utils.config import ConfigManager
 from protos import celaut_pb2, celaut_pb2_grpc
 from protos.gateway_bee import StartService_input_indices
 from src.manager.manager import get_client_id_on_other_peer
-from src.manager.metrics import gas_amount_on_other_peer
+from src.manager.metrics import balance_on_other_peer
 from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
 from src.utils import utils, logger as log
+from src.utils.monetary import format_mu
 
 
 env_manager = ConfigManager()
@@ -57,16 +58,16 @@ def delegate_execution(
                         father_id: str,
                         cost: int, metadata, config,
                         recursion_guard_token,
-                        refund_gas: List[Callable],
+                        refund_container: List[Callable],
                         father_ip: str = ""
                    ) -> celaut_pb2.ServiceInstance:
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
 
-        if gas_amount_on_other_peer(peer_id=peer) <= cost:
+        if balance_on_other_peer(peer_id=peer) <= cost:
             raise Exception(
-                'Launch service error: Not enough gas on ' + peer + '. '
-                'Current gas: ' + str(gas_amount_on_other_peer(peer_id=peer)) + ', required: ' + str(cost) + '.'
+                'Launch service error: not enough balance on ' + peer + '. '
+                'Current: ' + format_mu(balance_on_other_peer(peer_id=peer)) + ', required: ' + format_mu(cost) + '.'
             )
 
         log.LOGGER('Go to launch the service on ' + str(peer))
@@ -121,7 +122,7 @@ def delegate_execution(
     except Exception as e:
         log.LOGGER('Failed starting a service on peer, occurs the error: ' + str(e))
         try:
-            refund_gas.pop()()
+            refund_container.pop()()
         except IndexError:
             pass
         raise e

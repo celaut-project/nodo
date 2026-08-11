@@ -1,5 +1,6 @@
 use crate::app::{
-    format_bytes, percent, shorten, App, EditKind, Instance, InputMode, Page, Peer, HISTORY_POINTS,
+    format_bytes, percent, shorten, App, EditKind, Instance, InputMode, Money, Page, Peer,
+    PriceEntry, HISTORY_POINTS,
 };
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
@@ -23,6 +24,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Instances => draw_instances(frame, app, layout[1]),
         Page::Services => draw_services(frame, app, layout[1]),
         Page::Network => draw_network(frame, app, layout[1]),
+        Page::Pricing => draw_pricing(frame, app, layout[1]),
         Page::Config => draw_config(frame, app, layout[1]),
         Page::Logs => draw_logs(frame, app, layout[1]),
     }
@@ -219,7 +221,10 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
             shorten(nonempty(&app.node_info.reputation_proof, "not registered"), 28)
         )),
         Line::from(Span::styled(
-            nonempty(&app.node_info.error, "Balances refresh every 60 seconds"),
+            nonempty(
+                &app.node_info.error,
+                "On-chain ERG, not a node balance • refreshes every 60s",
+            ),
             Style::default().fg(if app.node_info.error.is_empty() {
                 MUTED
             } else {
@@ -328,7 +333,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             ),
             Cell::from(format_bytes(instance.memory_limit)),
             Cell::from(format_bytes(instance.disk_limit)),
-            Cell::from(instance.gas.clone()),
+            Cell::from(app.money.format_raw(&instance.balance)),
         ])
     });
     let local_count = app.instances.items.iter().filter(|i| i.is_local()).count();
@@ -350,7 +355,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     )
     .header(header_row(vec![
         "Name", "Location", "Instance", "Service", "IP", "VM", "RAM now", "RAM max", "Disk max",
-        "Gas",
+        "Balance",
     ]))
     .block(section_block(
         format!(
@@ -363,6 +368,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     .highlight_symbol("▸ ");
     frame.render_stateful_widget(table, layout[0], &mut app.instances.state);
 
+    let money = &app.money;
     let detail = if let Some(instance) = app.instances.selected() {
         vec![
             metric_line("Instance", instance.id.clone()),
@@ -376,7 +382,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             ),
             metric_line("Service", instance.service.clone()),
             metric_line("Endpoint", nonempty(&instance.ip, "—")),
-            metric_line("Gas", instance.gas.clone()),
+            metric_line("Balance", money.format_raw(&instance.balance)),
         ]
     } else {
         vec![Line::from(Span::styled(
@@ -424,7 +430,7 @@ fn draw_instances_tree(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     let mut printed: HashSet<&str> = HashSet::new();
     for root in &roots {
-        build_tree_lines(root, 0, &inst_map, &children, &mut printed, &mut lines);
+        build_tree_lines(&app.money, root, 0, &inst_map, &children, &mut printed, &mut lines);
     }
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -448,6 +454,7 @@ fn draw_instances_tree(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn build_tree_lines<'a>(
+    money: &Money,
     node_id: &'a str,
     depth: usize,
     inst_map: &HashMap<&'a str, &'a Instance>,
@@ -484,14 +491,14 @@ fn build_tree_lines<'a>(
             Style::default().fg(if instance.is_local() { GOOD } else { WARN }),
         ),
         Span::styled(
-            format!("  gas {}", instance.gas),
+            format!("  balance {}", money.format_raw(&instance.balance)),
             Style::default().fg(ACCENT),
         ),
     ]));
 
     if let Some(kids) = children.get(node_id) {
         for kid in kids {
-            build_tree_lines(kid, depth + 1, inst_map, children, printed, lines);
+            build_tree_lines(money, kid, depth + 1, inst_map, children, printed, lines);
         }
     }
 }
@@ -557,11 +564,11 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     // Prefer the roomy breakdown, but fall back to one line per contract rather
     // than let a short terminal clip the contracts away silently -- an empty
     // card reads as "no contract registered", the exact confusion #231 is about.
-    let full = peer_detail_lines(selected, false);
+    let full = peer_detail_lines(&app.money, selected, false);
     let detail = if full.len() as u16 + 2 <= available {
         full
     } else {
-        peer_detail_lines(selected, true)
+        peer_detail_lines(&app.money, selected, true)
     };
     let detail_height = (detail.len() as u16 + 2).min(available);
     let split = Layout::vertical([
@@ -585,7 +592,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
         Row::new(vec![
             Cell::from(peer.id.clone()),
             Cell::from(peer.uris.clone()),
-            Cell::from(peer.gas.clone()),
+            Cell::from(app.money.format_raw(&peer.balance)),
             Cell::from(peer.reputation_score.clone()).style(Style::default().fg(GOOD).bold()),
             Cell::from(peer.reputation.clone()),
         ])
@@ -603,7 +610,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     .header(header_row(vec![
         "Peer ID",
         "Endpoints",
-        "Our Gas",
+        "Our balance",
         "Rep",
         "Reputation proof",
     ]))
@@ -620,7 +627,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     let clients = app.clients.items.iter().map(|client| {
         Row::new(vec![
             client.id.clone(),
-            client.gas.clone(),
+            app.money.format_raw(&client.balance),
             client.last_usage.clone(),
         ])
     });
@@ -632,7 +639,7 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Length(20),
         ],
     )
-    .header(header_row(vec!["Client ID", "Gas", "Last usage"]))
+    .header(header_row(vec!["Client ID", "Balance", "Last usage"]))
     .block(section_block(
         format!(
             " CLIENTS • {} known • Tab changes focus ",
@@ -645,13 +652,13 @@ fn draw_network(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(client_table, split[2], &mut app.clients.state);
 }
 
-/// Full breakdown of the peer highlighted in the peers table: identity, our gas
+/// Full breakdown of the peer highlighted in the peers table: identity, our balance
 /// with it, reputation, and every payment contract it has registered — ledger,
-/// contract, payout address and gas price per instance. Before this the only
+/// contract, payout address and per-unit rate per instance. Before this the only
 /// way to get at any of it was a raw sqlite query (issue #231).
 /// `compact` collapses each contract onto a single line and drops the fields the
 /// peers table already shows verbatim, for terminals too short for the full card.
-fn peer_detail_lines(peer: Option<&Peer>, compact: bool) -> Vec<Line<'static>> {
+fn peer_detail_lines(money: &Money, peer: Option<&Peer>, compact: bool) -> Vec<Line<'static>> {
     let Some(peer) = peer else {
         return vec![Line::from(Span::styled(
             "Select a peer to inspect its endpoints, reputation and payment contracts.",
@@ -666,7 +673,7 @@ fn peer_detail_lines(peer: Option<&Peer>, compact: bool) -> Vec<Line<'static>> {
             "Endpoints",
             nonempty(&peer.uris, "—").to_string(),
         ));
-        lines.push(metric_line("Our gas", peer.gas.clone()));
+        lines.push(metric_line("Our balance", money.format_raw(&peer.balance)));
         lines.push(metric_line(
             "Reputation",
             format!(
@@ -697,10 +704,11 @@ fn peer_detail_lines(peer: Option<&Peer>, compact: bool) -> Vec<Line<'static>> {
                 Span::styled(contract.ledger.clone(), Style::default().fg(GOOD).bold()),
                 Span::styled(
                     format!(
-                        "  {}  {}  {} gas",
+                        "  {}  {}  1 {} = {} MU",
                         shorten(&contract.contract_hash, 14),
                         shorten(nonempty(&contract.address, "—"), 14),
-                        nonempty(&contract.gas_price, "—")
+                        contract.ledger.to_uppercase(),
+                        nonempty(&contract.mu_per_unit, "—")
                     ),
                     Style::default().fg(Color::White),
                 ),
@@ -723,14 +731,211 @@ fn peer_detail_lines(peer: Option<&Peer>, compact: bool) -> Vec<Line<'static>> {
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("      price    ", Style::default().fg(MUTED)),
+            Span::styled("      rate     ", Style::default().fg(MUTED)),
             Span::styled(
-                format!("{} gas", nonempty(&contract.gas_price, "—")),
+                // What this peer says one unit of its ledger buys in ITS MU. This is
+                // what makes a price it quotes convertible into money we understand,
+                // so it is stated as an equation rather than as a bare number.
+                format!(
+                    "1 {} = {} MU",
+                    contract.ledger.to_uppercase(),
+                    nonempty(&contract.mu_per_unit, "—")
+                ),
                 Style::default().fg(Color::White),
             ),
         ]));
     }
     lines
+}
+
+/// The pricing page: what this node charges, as bars you can nudge.
+///
+/// Recurring and one-off prices get their own chart because their magnitudes are
+/// unrelated -- a build price three orders of magnitude above a tunnel-open price would
+/// flatten the whole one-off group to nothing on a shared axis. Exact figures live in
+/// the table below, which is also where the selection lives; the bars are for judging
+/// proportion at a glance while editing.
+fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
+    let columns = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
+        .split(area);
+    let left = Layout::vertical([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ])
+    .split(columns[0]);
+
+    let selected = app.prices.state_id.clone();
+    draw_price_bars(
+        frame,
+        left[0],
+        PriceChart {
+            title: " RECURRING • charged while held ",
+            recurring: true,
+            color: ACCENT,
+        },
+        &app.prices.items,
+        selected.as_deref(),
+        &app.money,
+    );
+    draw_price_bars(
+        frame,
+        left[1],
+        PriceChart {
+            title: " ONE-OFF • charged per event ",
+            recurring: false,
+            color: Color::Magenta,
+        },
+        &app.prices.items,
+        selected.as_deref(),
+        &app.money,
+    );
+
+    // 13 rows fit the card's tallest state (a price selected, plus the worked
+    // example on the last line); anything shorter silently clips the example.
+    let right = Layout::vertical([Constraint::Length(13), Constraint::Min(4)]).split(columns[1]);
+    draw_money_card(frame, app, right[0]);
+    draw_price_table(frame, app, right[1]);
+}
+
+/// Which half of the price vector a chart draws, and how it looks.
+struct PriceChart<'a> {
+    title: &'a str,
+    /// Recurring prices are charged for as long as a resource is held; one-off ones
+    /// price an event.
+    recurring: bool,
+    color: Color,
+}
+
+/// One vertical bar per price in the requested group.
+fn draw_price_bars(
+    frame: &mut Frame,
+    area: Rect,
+    chart: PriceChart,
+    prices: &[PriceEntry],
+    selected: Option<&str>,
+    money: &Money,
+) {
+    let PriceChart {
+        title,
+        recurring,
+        color,
+    } = chart;
+    let group: Vec<&PriceEntry> = prices
+        .iter()
+        .filter(|entry| entry.recurring == recurring)
+        .collect();
+    if group.is_empty() {
+        return;
+    }
+
+    // A zero-height bar prints no value -- BarChart draws the amount inside the bar --
+    // so "free" has to ride in the label, which is always rendered. Without it a price
+    // deliberately set to nothing looks identical to a missing feature. Amounts small
+    // but non-zero legitimately render as a short bar; the table beside the chart is
+    // what carries every exact figure.
+    let bars: Vec<Bar> = group
+        .iter()
+        .map(|entry| {
+            let highlighted = selected == Some(entry.key);
+            Bar::default()
+                .value(entry.mu)
+                .text_value(money.format_raw(&entry.mu.to_string()))
+                .label(Line::from(if entry.mu == 0 {
+                    format!("{} free", entry.short)
+                } else {
+                    entry.short.to_string()
+                }))
+                .style(Style::default().fg(if highlighted { Color::White } else { color }))
+                .value_style(if highlighted {
+                    Style::default().fg(Color::Black).bg(Color::White).bold()
+                } else {
+                    Style::default().fg(Color::Black).bg(color)
+                })
+        })
+        .collect();
+
+    let width = ((area.width.saturating_sub(4)) / group.len().max(1) as u16).clamp(3, 14);
+    let chart = BarChart::default()
+        .block(section_block(title.to_string(), color))
+        .data(BarGroup::default().bars(&bars))
+        .bar_width(width.saturating_sub(1).max(1))
+        .bar_gap(1)
+        .label_style(Style::default().fg(MUTED));
+    frame.render_widget(chart, area);
+}
+
+/// What the numbers on the bars actually mean: the display unit, the ledger rate, the
+/// scarcity ceiling that bounds every price, and a worked example.
+fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
+    let money = &app.money;
+    let hourly = app.reference_hourly_mu();
+    let selected = app.prices.selected();
+
+    let mut lines = vec![
+        metric_line("Unit", format!("{} ({})", money.symbol, money.unit_name)),
+        metric_line("1 MU", {
+            // What one MU is worth on the ledger. This is the piece that makes a price
+            // in MU mean anything to a peer, so it is stated rather than implied.
+            let nanoerg = 1.0 / money.mu_per_nanoerg;
+            format!("{nanoerg} nanoERG")
+        }),
+        metric_line(
+            "Scarcity",
+            format!(
+                "x1 .. x{} (curve {})",
+                app.scarcity.max_multiplier, app.scarcity.curve
+            ),
+        ),
+        Line::from(""),
+    ];
+
+    if let Some(entry) = selected {
+        lines.push(Line::from(Span::styled(
+            format!("pricing.{}", entry.key),
+            Style::default().fg(Color::White).bold(),
+        )));
+        lines.push(metric_line("Price", format!("{} MU {}", entry.mu, entry.per)));
+        lines.push(metric_line("That is", money.format_mu(entry.mu)));
+        lines.push(metric_line(
+            "At max load",
+            money.format_mu(entry.mu.saturating_mul(app.scarcity.max_multiplier)),
+        ));
+    }
+
+    lines.push(Line::from(""));
+    // Approximate on purpose: the node charges per manager tick and truncates each one
+    // to whole MU, so an hour of ticks comes to a hair less than the hourly price.
+    lines.push(metric_line("1h example", "256MiB+1vCPU+10GiB"));
+    lines.push(Line::from(Span::styled(
+        format!("{:<12}~ {}", "", money.format_mu(hourly)),
+        Style::default().fg(GOOD),
+    )));
+
+    draw_card(frame, area, "MONEY", lines, GOOD);
+}
+
+fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
+    let money = app.money.clone();
+    let rows = app.prices.items.iter().map(|entry| {
+        Row::new(vec![
+            entry.short.to_string(),
+            entry.mu.to_string(),
+            money.format_mu(entry.mu),
+        ])
+    });
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(8),
+            Constraint::Percentage(45),
+            Constraint::Percentage(45),
+        ],
+    )
+    .header(header_row(vec!["Price", "MU", money.symbol.as_str()]))
+    .block(section_block(" PRICES • +/- adjust, e exact ", Color::Yellow))
+    .highlight_style(selected_style())
+    .highlight_symbol("> ");
+    frame.render_stateful_widget(table, area, &mut app.prices.state);
 }
 
 fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -798,6 +1003,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         }
         Page::Services => "↑/↓ select  •  e execute  •  i details  •  d delete  •  ←/→ page  •  q quit",
         Page::Network => "↑/↓ select  •  Tab peers/clients  •  +/- reputation  •  c connect  •  q quit",
+        Page::Pricing => {
+            "↑/↓ select  •  +/- adjust 10%  •  e exact value  •  ←/→ page  •  r refresh  •  q quit"
+        }
         Page::Config => "↑/↓ select  •  e edit  •  / filter  •  x clear filter  •  q quit",
         Page::Logs => "←/→ page  •  r refresh  •  q quit",
     };
@@ -1004,6 +1212,131 @@ fn visible_tail(lines: &[String], count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The bars are an editor, so what matters is that every price is actually on
+    /// screen -- including a free one and one small enough to round to no bar at all,
+    /// which is exactly when a chart quietly stops telling the truth.
+    mod pricing {
+        use super::super::{draw_price_bars, PriceChart, ACCENT};
+        use crate::app::{Money, PriceEntry};
+        use ratatui::{backend::TestBackend, Terminal};
+
+        fn entry(key: &'static str, short: &'static str, mu: u64, recurring: bool) -> PriceEntry {
+            PriceEntry {
+                key,
+                short,
+                per: "per unit",
+                recurring,
+                mu,
+            }
+        }
+
+        fn render(prices: &[PriceEntry], selected: Option<&str>) -> String {
+            let mut terminal = Terminal::new(TestBackend::new(60, 14)).unwrap();
+            terminal
+                .draw(|frame| {
+                    draw_price_bars(
+                        frame,
+                        frame.size(),
+                        PriceChart {
+                            title: " RECURRING ",
+                            recurring: true,
+                            color: ACCENT,
+                        },
+                        prices,
+                        selected,
+                        &Money::default(),
+                    );
+                })
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect()
+        }
+
+        #[test]
+        fn every_price_gets_a_labelled_bar() {
+            let prices = vec![
+                entry("RAM_MU_PER_GIB_HOUR", "RAM", 1_000_000, true),
+                entry("CPU_MU_PER_VCPU_HOUR", "CPU", 4_000_000, true),
+                entry("DISK_MU_PER_GIB_HOUR", "DISK", 100_000, true),
+            ];
+            let text = render(&prices, Some("CPU"));
+            for label in ["RAM", "CPU", "DISK"] {
+                assert!(text.contains(label), "missing {label} in:\n{text}");
+            }
+        }
+
+        #[test]
+        fn a_free_resource_is_labelled_rather_than_missing() {
+            // A bar of height zero is indistinguishable from an absent feature, so a
+            // price of zero says so in words.
+            let prices = vec![entry("NET_MU_PER_GIB", "NET", 0, true)];
+            let text = render(&prices, None);
+            assert!(text.contains("NET"));
+            assert!(text.contains("free"), "expected 'free' in:\n{text}");
+        }
+
+        #[test]
+        fn a_price_dwarfed_by_its_neighbour_still_shows_its_amount() {
+            // At 1/1000 of the tallest bar there is no bar left to draw, and that is
+            // the honest picture. BarChart still prints the amount for any non-zero
+            // value, so the price does not vanish -- which is precisely why a price of
+            // exactly zero needs the `free` label instead.
+            let prices = vec![
+                entry("BUILD_MU", "BUILD", 10_000_000, true),
+                entry("TUNNEL_OPEN_MU", "TUNNEL", 10_000, true),
+            ];
+            let text = render(&prices, None);
+            assert!(text.contains("TUNNEL"), "missing label in:\n{text}");
+            assert!(text.contains("0.00001"), "missing amount in:\n{text}");
+        }
+
+        #[test]
+        fn the_table_carries_every_exact_figure() {
+            // The chart is for proportion; this is the part that must never lose a
+            // number, however small, and it shows both the raw MU and the display unit.
+            let mut app = crate::app::App::default();
+            app.money = Money::default();
+            app.prices = crate::app::StatefulList::with_items(vec![
+                entry("BUILD_MU", "BUILD", 10_000_000, false),
+                entry("TUNNEL_OPEN_MU", "TUNNEL", 10_000, false),
+            ]);
+
+            let mut terminal = Terminal::new(TestBackend::new(70, 8)).unwrap();
+            terminal
+                .draw(|frame| super::super::draw_price_table(frame, &mut app, frame.size()))
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+
+            assert!(text.contains("10000000"), "raw MU missing in:\n{text}");
+            assert!(text.contains("0.01 ERG"), "display unit missing in:\n{text}");
+            assert!(text.contains("10000"), "the small price is missing in:\n{text}");
+            assert!(text.contains("0.00001 ERG"), "its amount is missing in:\n{text}");
+        }
+
+        #[test]
+        fn the_other_group_is_not_drawn() {
+            let prices = vec![
+                entry("RAM_MU_PER_GIB_HOUR", "RAM", 1_000_000, true),
+                entry("BUILD_MU", "BUILD", 10_000_000, false),
+            ];
+            let text = render(&prices, None);
+            assert!(text.contains("RAM"));
+            assert!(!text.contains("BUILD"));
+        }
+    }
+
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};
 
@@ -1024,7 +1357,8 @@ mod tests {
         Peer {
             id: "f3b61c2e-aaaa-bbbb-cccc-ddddeeeeffff".to_string(),
             uris: "10.0.0.4:8080".to_string(),
-            gas: "1.000e3".to_string(),
+            // Raw MU, as the catalogue stores it; formatting happens at draw time.
+            balance: "1000".to_string(),
             reputation: String::new(),
             reputation_score: "7".to_string(),
             contracts,
@@ -1036,7 +1370,7 @@ mod tests {
             ledger: "ergo".to_string(),
             contract_hash: "1c691f72deadbeef".to_string(),
             address: "0008cd0392aabbcc".to_string(),
-            gas_price: "1.000e58".to_string(),
+            mu_per_unit: "1000000000".to_string(),
         }
     }
 
@@ -1055,7 +1389,7 @@ mod tests {
 
     #[test]
     fn peer_detail_prompts_when_nothing_is_selected() {
-        let text = rendered(peer_detail_lines(None, false));
+        let text = rendered(peer_detail_lines(&Money::default(), None, false));
         assert!(text.contains("Select a peer"));
     }
 
@@ -1063,12 +1397,13 @@ mod tests {
     fn peer_detail_shows_ledger_contract_address_and_price() {
         // The whole point of issue #231: these four facts were only reachable
         // through a raw sqlite query before.
-        let text = rendered(peer_detail_lines(Some(&peer_with(vec![ergo_contract()])), false));
+        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![ergo_contract()])), false));
         assert!(text.contains("Payment contracts (1)"));
         assert!(text.contains("ergo"));
         assert!(text.contains("1c691f72deadbeef"));
         assert!(text.contains("0008cd0392aabbcc"));
-        assert!(text.contains("1.000e58 gas"));
+        // The rate reads as an equation: what one unit of that ledger buys in MU.
+        assert!(text.contains("1 ERGO = 1000000000 MU"));
     }
 
     #[test]
@@ -1078,9 +1413,10 @@ mod tests {
             ledger: "simulator".to_string(),
             contract_hash: "abc123".to_string(),
             address: "sim-address".to_string(),
-            gas_price: "5.000e2".to_string(),
+            mu_per_unit: "500".to_string(),
         };
         let text = rendered(peer_detail_lines(
+            &Money::default(),
             Some(&peer_with(vec![ergo_contract(), second])),
             false,
         ));
@@ -1094,7 +1430,7 @@ mod tests {
     fn peer_detail_says_so_when_no_contract_is_registered() {
         // Must stay distinguishable from "peer charges through something we
         // don't render", which is exactly what the old hardcoded lookup did.
-        let text = rendered(peer_detail_lines(Some(&peer_with(vec![])), false));
+        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![])), false));
         assert!(text.contains("No payment contract registered"));
     }
 
@@ -1134,7 +1470,7 @@ mod tests {
             ledger: "simulator".to_string(),
             contract_hash: "abc123def456".to_string(),
             address: "sim-address".to_string(),
-            gas_price: "5.000e2".to_string(),
+            mu_per_unit: "500".to_string(),
         };
         app.peers.items = vec![peer_with(vec![ergo_contract(), second])];
         app.peers.state.select(Some(0));
@@ -1255,5 +1591,34 @@ mod tests {
         assert!(screen.contains("ERGO WALLET"));
         assert!(screen.contains("rep-proof-xyz"));
         assert_eq!(screen.matches("rep-proof-xyz").count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod pricing_preview {
+    //! Prints the pricing page once so a change to the layout is visible in the test
+    //! output. `cargo test -- --nocapture pricing_preview` renders it.
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn preview() {
+        let mut app = App::new();
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Pricing)
+            .unwrap();
+        app.prices.state.select(Some(1));
+        app.prices.state_id = Some("CPU_MU_PER_VCPU_HOUR".to_string());
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        for y in 0..buffer.area.height {
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer.get(x, y).symbol())
+                .collect();
+            println!("{row}");
+        }
     }
 }

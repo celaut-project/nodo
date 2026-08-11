@@ -10,11 +10,27 @@ particular installation directory.
 | Page | Purpose |
 |---|---|
 | **Overview** | Node status/version/address, host CPU and RAM, current and reserved instance resources, disk usage, nodo storage size, peer/client counts, service count, reputation proof, and Ergo wallet balances. |
-| **Instances** | Running instances with service, endpoint, virtualizer, current cgroup memory, configured RAM/disk limits, and gas. |
+| **Instances** | Running instances with service, endpoint, virtualizer, current cgroup memory, configured RAM/disk limits, and balance. |
 | **Services** | Locally available services, metadata tag, content ID, stored size, and execution action. |
-| **Network** | Connected peers/endpoints/reputation and known clients. The obsolete tunnels page was removed. |
+| **Network** | Connected peers/endpoints/reputation and known clients, with each peer's payment contracts and the rate it declares. The obsolete tunnels page was removed. |
+| **Pricing** | What this node charges, per resource, as vertical bars you can nudge. Recurring and one-off prices are charted apart because their magnitudes are unrelated. Beside them: the display unit, what one MU is worth on the ledger, the scarcity ceiling, and a worked hourly example. |
 | **Config** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited. |
 | **Logs** | Tail of `storage/app.log` beside commands/actions launched from the TUI. |
+
+## Money
+
+Amounts are stored in **MU**, the node's unit of account, and rendered in whatever
+`ui.DISPLAY_UNIT` says (ERG by default). The TUI reads the catalogue database directly, so it
+resolves the display unit, the ledger rate (`ledgers.ergo.payments.MU_PER_NANOERG`) and the
+price vector from `config.yaml` itself — the same three settings the node uses, documented in
+[`docs/PRICING.md`](../../../docs/PRICING.md). Formatting happens at draw time rather than at
+read time, so changing the unit takes effect on the next frame.
+
+The Ergo wallet card on Overview is the exception: it shows on-chain ERG from `nodo info`, not
+a node balance, and is never converted.
+
+Prices written from the Pricing page go through the same `yq` path as the configuration
+editor, backup included. `nodo` must be restarted for a price change to affect a running node.
 
 Ergo information is refreshed asynchronously through `nodo info` every 60 seconds so JVM or
 explorer latency cannot freeze the interface. Local database/system data refreshes every two
@@ -29,7 +45,8 @@ seconds; the recursive storage scan is limited to every 30 seconds.
 | `r` | Force a refresh |
 | `Tab` | Switch peer/client focus on Network |
 | `c` | Connect a peer from Network |
-| `e` | Execute the selected service, or edit the selected Config value |
+| `e` | Execute the selected service, or edit the selected Config or Pricing value |
+| `+` / `-` | Adjust peer reputation on Network, or the selected price by 10 % on Pricing |
 | `/` | Filter Config paths/values |
 | `x` | Clear the Config filter |
 | `Enter` / `Esc` | Save/cancel a modal |

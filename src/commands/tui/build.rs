@@ -1,8 +1,16 @@
 use std::fs;
 
+// The TUI compiles the repository's ONE canonical proto, at ../../../protos. It used
+// to keep its own copy under tui/protos, which silently drifted: `Service.Api.slot`
+// ended up as field 4 here and field 1 in the canonical schema, so the two spoke
+// incompatible wire formats while `protos/README.md` declared them identical. A
+// second copy of a wire contract has no way to stay honest; there is now only one.
+const PROTO_DIR: &str = "../../../protos";
+
 fn main() {
     // Tells cargo to rerun the build script if the .proto files change.
-    println!("cargo:rerun-if-changed=protos/celaut.proto");
+    println!("cargo:rerun-if-changed={PROTO_DIR}/celaut.proto");
+    println!("cargo:rerun-if-changed={PROTO_DIR}/buffer.proto");
 
     fs::create_dir_all("src/protos").expect("Failed to create protos directory");
 
@@ -16,6 +24,6 @@ fn main() {
     prost_build::Config::new()
         .out_dir("src/protos")
         .protoc_arg("--experimental_allow_proto3_optional")
-        .compile_protos(&["protos/celaut.proto"], &["protos"])
+        .compile_protos(&[format!("{PROTO_DIR}/celaut.proto")], &[PROTO_DIR])
         .expect("Failed to compile protobuf files");
 }

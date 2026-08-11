@@ -37,8 +37,8 @@ def create_tables(cursor):
                 id TEXT PRIMARY KEY,
                 advertisement BLOB,
                 remote_client_id TEXT,
-                gas TEXT,
-                gas_last_update DATETIME DEFAULT NULL,
+                balance_mu TEXT,
+                balance_last_update DATETIME DEFAULT NULL,
                 reputation_proof_id TEXT,
                 reputation_score INTEGER,
                 reputation_index INTEGER,
@@ -49,8 +49,9 @@ def create_tables(cursor):
         "clients": '''
             CREATE TABLE IF NOT EXISTS clients (
                 id TEXT PRIMARY KEY,
-                gas TEXT,
-                last_usage FLOAT NULL
+                balance_mu TEXT,
+                last_usage FLOAT NULL,
+                unmetered INTEGER NOT NULL DEFAULT 0
             )
         ''',
         "uri": '''
@@ -86,22 +87,28 @@ def create_tables(cursor):
                 ledger_hash TEXT,
                 contract_hash TEXT,
                 peer_id TEXT NOT NULL,
-                gas_price TEXT,
+                mu_per_unit TEXT,
                 FOREIGN KEY (ledger_hash) REFERENCES ledger (id),
                 FOREIGN KEY (contract_hash) REFERENCES contract (hash),
                 FOREIGN KEY (peer_id) REFERENCES peer (id),
                 UNIQUE (address, ledger_hash, contract_hash, peer_id)
             )
         ''',
+        # mem_limit, disk_space and the CFS pair (cpu_period/cpu_quota) are what the
+        # maintenance tick prices an instance by, so all four have to be here: the tick
+        # reads this row, not the service's manifest. Storing memory and disk but not
+        # CPU meant compute was never billed on the recurring path, whatever the price.
         "local_instances": '''
             CREATE TABLE IF NOT EXISTS local_instances (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL UNIQUE,
                 ip TEXT,
                 father_id TEXT,
-                gas TEXT,
+                balance_mu TEXT,
                 mem_limit INTEGER,
                 disk_space INTEGER,
+                cpu_period INTEGER,
+                cpu_quota INTEGER,
                 serialized_instance TEXT,
                 service_id TEXT,
                 virtualizer TEXT DEFAULT NULL,

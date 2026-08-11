@@ -15,7 +15,8 @@ from protos import celaut_pb2_grpc, celaut_pb2
 from src.database.sql_connection import SQLConnection
 
 from src.utils import logger as _l
-from src.utils.utils import to_gas_amount, generate_uris_by_peer_id
+from src.utils.utils import to_amount, generate_uris_by_peer_id
+from src.utils.monetary import format_mu
 from src.database.access_functions.ledgers import get_peer_contract_instances
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
@@ -24,7 +25,6 @@ env_manager = ConfigManager()
 
 COMMUNICATION_ATTEMPTS = int(env_manager.get("COMMUNICATION_ATTEMPTS"))
 COMMUNICATION_ATTEMPTS_DELAY = int(env_manager.get("COMMUNICATION_ATTEMPTS_DELAY"))
-MIN_DEPOSIT_PEER = int(env_manager.get("MIN_DEPOSIT_PEER"))
 PAYMENT_MANAGER_ITERATION_TIME = int(env_manager.get("ledgers.ergo.payments.PAYMENT_MANAGER_ITERATION_TIME"))
 
 sc = SQLConnection()
@@ -207,7 +207,7 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
                 method=grpc_stub.Payable,
                 partitions_message_mode_parser=True,
                 input=celaut_pb2.Payment(
-                    gas_amount=to_gas_amount(amount),
+                    amount=to_amount(amount),
                     deposit_token=deposit_token,
                     contract=contract_ledger,
                 )
@@ -226,23 +226,42 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
     return False
 
 
-def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None) -> bool:
-    if amount < MIN_DEPOSIT_PEER: amount = MIN_DEPOSIT_PEER
-    
-    _l.LOGGER('Increase deposit on peer ' + peer_id + ' by ' + str(_l.ssformat(amount)))
+def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
+                             floor: bool = False) -> bool:
+    """Deposit ``amount`` MU with ``peer_id``.
+
+    ``floor`` raises the amount to a full deposit when it is smaller, and belongs to the
+    *automatic* refill only (``maintain.peer_deposits``), where nobody named a figure and
+    a transfer worth less than its own fee is simply waste. An operator who typed an
+    amount gets that amount: silently sending 0.05 ERG for a requested 0.001 would
+    contradict `parse_to_mu`, which refuses to round an operator's figure two calls
+    earlier. Too small to settle is caught downstream by `process_payment`, against
+    Ergo's actual minimum box value, with a message saying so.
+
+    The floor itself is derived from what the ledger can settle, not configured; see
+    src/payment_system/deposits.py.
+    """
+    if floor:
+        from src.payment_system.deposits import full_deposit_mu
+
+        amount = max(int(amount), full_deposit_mu())
+    else:
+        amount = int(amount)
+
+    _l.LOGGER(f"Increase deposit on peer {peer_id} by {format_mu(amount)}")
     try:
         if __peer_payment_process(
             peer_id=peer_id,
             amount=amount,
             on_transaction_url=on_transaction_url,
         ):
-            if sc.add_gas_to_peer(peer_id=peer_id, gas=amount):
+            if sc.add_balance_to_peer(peer_id=peer_id, balance_mu=amount):
                 return True
             else:
-                _l.LOGGER(f'Failed to update the gas peer {peer_id} on DB')
+                _l.LOGGER(f'Failed to update the balance for peer {peer_id} on DB')
                 return False
         else:
-            _l.LOGGER(f'Failed to add gas to peer {peer_id}')
+            _l.LOGGER(f'Failed to add balance to peer {peer_id}')
             return False
     except Exception as e:
         _l.LOGGER(f'Error increasing deposit on peer {peer_id}: {e}')
@@ -256,7 +275,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         _r = __check_payment_process(
             amount=amount, ledger=ledger, token=token,
             contract=contract, script=script
-        ) and _manager_module().increase_local_gas_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount=amount)  # TODO allow for containers too.
+        ) and _manager_module().increase_local_balance_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount_mu=amount)  # TODO allow for containers too.
     except: _r = False
     sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
     _l.LOGGER(f"Pending deposit tokens updated, there are still {len(sc.get_deposit_tokens(status='pending'))} tokens in the queue.")

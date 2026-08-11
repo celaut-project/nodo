@@ -3,9 +3,8 @@ import psutil
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.manager.resources import IOBigData, could_ve_this_sysreq
-from src.utils.cost_functions.execution_cost import is_free_gas
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost
-from src.utils.utils import from_gas_amount, to_gas_amount
+from src.utils.utils import from_amount, to_amount
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -70,36 +69,36 @@ def generate_estimated_cost(
         resources: celaut.Service.Container.Resources
 ) -> Optional[celaut_pb2.EstimatedCost]:
 
-    initial_gas_amount = from_gas_amount(config.initial_gas_amount) \
-        if config and config.HasField("initial_gas_amount") else 0
+    initial_mu = from_amount(config.initial_mu) \
+        if config and config.HasField("initial_mu") else 0
 
     if not get_resource_availability(resources=resources)["can_execute"]:
         return
 
-    if is_free_gas(system_resources=resources.at_init):
-        initial_gas = 0
-    else:
-        initial_gas = compute_start_service_cost(
-                metadata=metadata,
-                initial_gas_amount=initial_gas_amount,
-                resource=resources
-            )
+    # What the client pays up front: the one-off build, plus the balance the instance
+    # starts with. That balance is what buys the runtime window (it is derived from the
+    # requested resources by `default_initial_balance`), so the window is not also
+    # charged here -- doing both billed it twice.
+    initial_cost_mu = compute_start_service_cost(
+        metadata=metadata,
+        initial_balance_mu=initial_mu,
+    )
 
     # Calculate estimated cost for local execution.
     return celaut.EstimatedCost(
         
         # Initial cost.
-        cost=to_gas_amount(initial_gas),
-        
-        # Minimal maintenance cost.
-        init_maintenance_cost=to_gas_amount(compute_maintenance_cost(
-            system_resources=resources.at_init
-        )) if resources.HasField('at_init') else to_gas_amount(gas_amount=0),
-        
-        # Maximum maintenance cost.
-        max_maintenance_cost=to_gas_amount(compute_maintenance_cost(
-            system_resources=resources.at_most
-        )) if resources.HasField('at_most') else to_gas_amount(gas_amount=0),
+        cost=to_amount(initial_cost_mu),
+
+        # Maintenance cost per manager iteration, at the resources it starts with.
+        init_maintenance_cost=to_amount(compute_maintenance_cost(
+            system_resources=resources.at_init, seconds=MANAGER_ITERATION_TIME
+        )) if resources.HasField('at_init') else to_amount(0),
+
+        # Maintenance cost per manager iteration, at the most it may grow to.
+        max_maintenance_cost=to_amount(compute_maintenance_cost(
+            system_resources=resources.at_most, seconds=MANAGER_ITERATION_TIME
+        )) if resources.HasField('at_most') else to_amount(0),
         
         # Maintenance frecuency in seconds.
         maintenance_seconds_loop=MANAGER_ITERATION_TIME,

@@ -53,7 +53,7 @@ resources:
   at_most:  mem_limit=524288000 (500 MB)  disk_space=10737418240 (10 GB)
 api:
   - port 50051  transport=tcp  protocol=[grpc]
-    gas_amount_per_call: { Solve: 100 }
+    mu_per_call: { Solve: 100 }
 envs (declared):   WORKERS, TIMEOUT
 network:           [ipv4, public]
 ```
@@ -70,7 +70,7 @@ nodo estimate my-solver
 
 ```
 Execution feasibility: YES
-Estimated gas:
+Estimated cost:
   initial:      1.20e+08
   maintenance:  3.00e+06 / iteration
 ```
@@ -107,7 +107,7 @@ nodo instances
 ```
 
 ```
-ID                 SERVICE (TAG)   API                  VIRTUALIZER   GAS
+ID                 SERVICE (TAG)   API                  VIRTUALIZER   BALANCE
 c92ae2ff1b7d4a0e…  my-solver       203.0.113.10:50051   ch            1.20e+08
 ```
 
@@ -126,9 +126,9 @@ grpcurl -H "authorization: <instance id>" -d '{"input": "..."}' \
   203.0.113.10:50051 my.solver.Solver/Solve
 ```
 
-Each call is metered per `service.json → api.gas_amount_per_call` (here `Solve`
-costs 100 gas). Top up a running instance with
-`nodo increase_gas c92ae2ff1b7d4a0e… 100` (use the full instance id).
+Each call is metered per `service.json → api.mu_per_call` (here `Solve` costs 100 MU).
+Top up a running instance with `nodo increase_deposit c92ae2ff1b7d4a0e… 0.001` (use the
+full instance id); the amount is in whatever `ui.DISPLAY_UNIT` says, ERG by default.
 
 ## 6. Observe live metrics and network activity
 

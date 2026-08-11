@@ -3,6 +3,7 @@ import sqlite3
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
+from src.utils.monetary import format_mu
 from src.database.sql_connection import SQLConnection
 
 env_manager = ConfigManager()
@@ -14,7 +15,7 @@ def list_peers():
     """
     Lists all peers stored in the database, showing grouped information in sections:
       1. General
-      2. Client & Gas
+      2. Client & Balance
       3. Rates advertised by the peer
       4. Reputation
     If the table does not exist, it prints a warning message.
@@ -37,7 +38,7 @@ def list_peers():
             '''
             SELECT
                 id, advertisement, remote_client_id,
-                gas, gas_last_update,
+                balance_mu, balance_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
             FROM peer
@@ -52,7 +53,7 @@ def list_peers():
         for peer in peers:
             (
                 peer_id, advertisement, remote_client_id,
-                gas_str, gas_last_update,
+                balance_str, balance_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
             ) = peer
@@ -79,10 +80,10 @@ def list_peers():
                 # Rates the peer advertised. Absent for peers running a version from
                 # before nodes published them.
                 advertised_rates = {
-                    rate: gas.n for rate, gas in announced.gas_amount_per_call.items()
+                    rate: amount.n for rate, amount in announced.mu_per_call.items()
                 }
 
-            gas = int(gas_str)
+            balance = int(balance_str)
             contracts = sq.get_peer_payment_contracts(peer_id)
 
             # Section: General
@@ -91,11 +92,11 @@ def list_peers():
             print(f"  Protocol stack: {protocol_stack_tags}")
             print()
 
-            # Section: Client & Gas
-            print("[Client & Gas]")
+            # Section: Client & Balance
+            print("[Client & Balance]")
             print(f"  Remote Client ID: {remote_client_id}")
-            print(f"  Gas: {ssformat(gas)}")
-            print(f"  Gas Last Update: {gas_last_update or 'None'}")
+            print(f"  Our balance there: {format_mu(balance)}")
+            print(f"  Balance last update: {balance_last_update or 'None'}")
             print()
 
             # Section: Payment contracts
@@ -107,8 +108,8 @@ def list_peers():
                     print(f"  Ledger: {contract['ledger_tag']}")
                     print(f"    Contract hash: {contract['contract_hash']}")
                     print(f"    Address:       {contract['address'] or 'N/A'}")
-                    gas_price = contract['gas_price']
-                    print(f"    Gas price:     {ssformat(gas_price) if gas_price is not None else 'N/A'}")
+                    mu_per_unit = contract['mu_per_unit']
+                    print(f"    MU per unit:   {mu_per_unit if mu_per_unit is not None else 'N/A'}")
             else:
                 print("  No payment contract registered for this peer.")
             print()
@@ -117,10 +118,10 @@ def list_peers():
             # What this peer charges on a recurring basis, as it advertised. These
             # are ceilings, not quotes -- the price of a specific service still
             # comes from GetServiceEstimatedCost.
-            print("[Rates] (advertised ceilings, gas)")
+            print("[Rates] (base prices in MU; see [Contracts] for what an MU is worth)")
             if advertised_rates:
-                for rate, gas_value in sorted(advertised_rates.items()):
-                    print(f"  {rate}: {gas_value}")
+                for rate, value in sorted(advertised_rates.items()):
+                    print(f"  {rate}: {value}")
             else:
                 print("  Not advertised by this peer.")
             print()

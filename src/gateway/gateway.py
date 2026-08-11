@@ -9,16 +9,16 @@ from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_full_node_peer_info
-from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
+from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount
+from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 from src.utils.config import ConfigManager
+from src.utils.monetary import prices
 
 env_manager = ConfigManager()
-MODIFY_RESOURCES_COST = env_manager.get("MODIFY_RESOURCES_COST")
 
 
 class Gateway(celaut_pb2_grpc.Gateway):
@@ -44,31 +44,31 @@ class Gateway(celaut_pb2_grpc.Gateway):
             log.LOGGER(f'Stopped instance {token}.')
             yield from bee.serialize_to_buffer(
                     message_iterator=celaut_pb2.Refund(
-                        amount=to_gas_amount(refunded_amount)
+                        amount=to_amount(refunded_amount)
                     )
             )
         except Exception as e:
             raise Exception('Was imposible stop the service. ' + str(e))
 
-    def ModifyGasDeposit(self, request_iterator, context, **kwargs):
+    def ModifyDeposit(self, request_iterator, context, **kwargs):
         try:
-            log.LOGGER('Modifying gas deposit on service.')
+            log.LOGGER('Modifying deposit on service.')
 
             _input = next(bee.parse_from_buffer(
                                 request_iterator=request_iterator,
-                                indices=celaut_pb2.ModifyGasDepositInput,
+                                indices=celaut_pb2.ModifyDepositInput,
                                 partitions_message_mode=True
                             ), 0)
 
-            success, message = modify_gas_deposit(
-                        gas_amount=from_gas_amount(_input.gas_difference),
+            success, message = modify_deposit(
+                        amount_mu=from_amount(_input.difference),
                         service_token=_input.service_token
                     )
 
-            log.LOGGER(f"Message on modify gas deposit: {message}")
+            log.LOGGER(f"Message on modify deposit: {message}")
 
             yield from bee.serialize_to_buffer(
-                    message_iterator=celaut_pb2.ModifyGasDepositOutput(
+                    message_iterator=celaut_pb2.ModifyDepositOutput(
                         success=success,
                         message=message
                     )
@@ -116,12 +116,12 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for modify service system resources.')
         token = get_internal_service_id_by_uri(uri=get_only_the_ip_from_context(context_peer=context.peer()))
-        refund_gas = []
-        if not spend_gas(
+        refund_container = []
+        if not spend_mu(
                 id=token,
-                gas_to_spend=MODIFY_RESOURCES_COST,
-                refund_gas_function_container=refund_gas
-        ): raise Exception('Launch service error spending gas for ' + context.peer())
+                amount_mu=prices().modify_resources_mu,
+                refund_function_container=refund_container
+        ): raise Exception('Error charging for the resource change of ' + context.peer())
         if not hotplug(
                 vmachine_id=token,
                 system_requeriments_range=next(bee.parse_from_buffer(
@@ -131,7 +131,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 ), None)
         ):
             try:
-                refund_gas.pop()()
+                refund_container.pop()()
             except IndexError:
                 pass
             raise Exception('Exception on service modify method.')
@@ -155,7 +155,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # raw ErgoTree/propositionBytes travels as ``script`` (never a textual address).
         contract_type = get_contract_type(payment.contract) or raw_script
         if not validate_payment_process(
-                amount=from_gas_amount(payment.gas_amount),
+                amount=from_amount(payment.amount),
                 ledger=payment.contract.ledger,
                 contract=contract_type,
                 script=raw_script,

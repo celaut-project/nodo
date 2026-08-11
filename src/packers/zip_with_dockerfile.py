@@ -417,8 +417,18 @@ class ZipContainerPacker:
                     tags=item.get('protocol')
                 )
             )
-            for method, gas_amount in item.get("gas_amount_per_call", {}).items():
-                slot.gas_amount_per_call[method].n = str(gas_amount)
+            # `gas_amount_per_call` was renamed to `mu_per_call` with the pricing
+            # rework. Rejecting the old key rather than ignoring it is deliberate: a
+            # service.json that still uses it would otherwise pack with no per-call
+            # price at all, i.e. silently free.
+            if "gas_amount_per_call" in item:
+                raise ValueError(
+                    f"service.json api slot port={slot.port}: 'gas_amount_per_call' was "
+                    "renamed to 'mu_per_call' (amounts in MU, the node's unit of account). "
+                    "See docs/PRICING.md."
+                )
+            for method, amount_mu in item.get("mu_per_call", {}).items():
+                slot.mu_per_call[method].n = str(amount_mu)
             self.service.api.slot.append(slot)
             
     def parseNetwork(self):

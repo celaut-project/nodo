@@ -39,7 +39,7 @@ class ManagerTransportCleanupTests(unittest.TestCase):
         ), patch.object(
             manager.sc, "get_internal_instance", return_value=serialized_instance
         ), patch.object(
-            manager.sc, "get_container_gas", return_value=42
+            manager.sc, "get_instance_balance", return_value=42
         ), patch.object(
             manager.sc, "purge_internal", return_value=None
         ), patch.object(
