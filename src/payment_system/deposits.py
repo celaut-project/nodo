@@ -1,35 +1,51 @@
-"""How large a deposit has to be, derived from what the ledger actually allows.
+"""How large a deposit has to be, derived from what the payment system actually allows.
 
-A deposit is not a number someone picks. Two hard floors decide it:
+A deposit is not a number someone picks. Two hard floors decide it, and both come from
+the ledger rather than from configuration:
 
 * a transaction costs a fee, and
-* Ergo will not create an output below its minimum box value,
+* a ledger may refuse to create an output below some minimum,
 
-so the smallest payment that can exist at all is ``min_box + fee`` -- and at that size
-the fee IS half the deposit. Sizing deposits by hand is how the old model ended up
-refilling peers with an amount worth exactly one transaction fee.
+so the smallest payment that can exist at all is ``minimum_output + fee`` -- and at that
+size the fee is a large share of the deposit. Sizing deposits by hand is how the old model
+ended up refilling peers with an amount worth exactly one transaction fee.
 
 Instead the operator states how much of a deposit may be lost to the fee
 (``deposits.MAX_FEE_OVERHEAD``) and the amount follows from it.
+
+**No ledger is named in this module.** The floors are asked of each payment contract
+through ``contracts.envs.settlement_floors``, the same dispatch the rest of the payment
+flow uses, so adding a second payment system does not mean editing deposit sizing. This
+used to import Ergo's ``DEFAULT_FEE`` and ``SAFE_MIN_BOX_VALUE`` directly, which imposed
+Ergo's box-value floor on every contract -- including the simulated one, whose payments
+never reach a chain.
 """
 from __future__ import annotations
 
+from typing import Tuple
+
 from src.utils.config import ConfigManager
-from src.utils.monetary import format_mu, nanoerg_to_mu
 
 
-def _ergo_floors() -> tuple[int, int]:
-    """(fee, minimum box value), converted from nanoERG into MU.
+def _ledger_floors() -> Tuple[int, int]:
+    """The strictest ``(fee, minimum output)`` across the available contracts, in MU.
 
-    Both constants are Ergo's, so they are nanoERG; a deposit is MU. They are only the
-    same number while MU_PER_NANOERG is 1, so the conversion is explicit.
+    The strictest, because deposit sizing has no contract in hand: it produces one figure,
+    used before anyone has chosen which contract will settle it. Taking the maximum makes
+    that figure payable on every available system rather than only the cheapest. A contract
+    with no fee and no minimum reports ``(0, 0)`` and so never raises the floor.
 
-    Imported lazily: the Ergo interface pulls in the payment stack, and deposit sizing is
+    ``settlement_floors`` either yields at least one contract or raises
+    ``JavaDependencyMissing``, so there is no empty case to handle here. It can raise, which
+    is why callers in the manager loop size deposits inside their guarded block.
+
+    Imported lazily: the contract dispatch reaches the whole payment stack, and this is
     read from the manager loop.
     """
-    from src.payment_system.contracts.ergo.interface import DEFAULT_FEE, SAFE_MIN_BOX_VALUE
+    from src.payment_system.contracts.envs import settlement_floors
 
-    return nanoerg_to_mu(DEFAULT_FEE), nanoerg_to_mu(SAFE_MIN_BOX_VALUE)
+    floors = [read() for read in settlement_floors().values()]
+    return max(fee for fee, _ in floors), max(minimum for _, minimum in floors)
 
 
 def _share(key: str, default: float) -> float:
@@ -48,9 +64,9 @@ def full_deposit_mu() -> int:
     Large enough that the transaction fee stays under ``MAX_FEE_OVERHEAD`` of it, and
     never below what the ledger can actually settle.
     """
-    fee, min_box = _ergo_floors()
+    fee, minimum_output = _ledger_floors()
     by_overhead = int(fee / _share("MAX_FEE_OVERHEAD", 0.02))
-    return max(by_overhead, min_box + fee)
+    return max(by_overhead, minimum_output + fee)
 
 
 def refill_threshold_mu() -> int:
@@ -61,11 +77,3 @@ def refill_threshold_mu() -> int:
     on every single iteration).
     """
     return int(full_deposit_mu() * _share("REFILL_BELOW", 0.2))
-
-
-def describe() -> str:
-    """One line for logs and `nodo info`, in the display unit because a human reads it."""
-    return (
-        f"peer deposit {format_mu(full_deposit_mu())}, "
-        f"refilled below {format_mu(refill_threshold_mu())}"
-    )

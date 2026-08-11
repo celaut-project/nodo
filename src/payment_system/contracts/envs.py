@@ -1,5 +1,5 @@
 from textwrap import dedent
-from typing import Callable, Dict
+from typing import Callable, Dict, Tuple
 from contextlib import nullcontext
 from protos import celaut_pb2
 
@@ -54,6 +54,21 @@ def check_sender_balances() -> Dict[contract_hash, Callable[[amount], bool]]:
     return {
         **({simulated.CONTRACT_HASH: simulated.check_sender_balance} if SIMULATED else {}),
         ergo.CONTRACT_HASH: ergo.check_sender_balance
+    }
+
+
+def settlement_floors() -> Dict[contract_hash, Callable[[], Tuple[amount, amount]]]:
+    """Per contract: ``(fee, smallest payable output)`` in MU.
+
+    What a deposit has to clear before it can be settled at all. Kept here with the rest
+    of the per-contract dispatch so `deposits.py` can size a deposit without naming a
+    ledger -- it used to import Ergo's `DEFAULT_FEE` and `SAFE_MIN_BOX_VALUE` directly,
+    which put a chain-specific floor on every payment system, including the simulated one.
+    """
+    ergo = _ergo_interface()
+    return {
+        **({simulated.CONTRACT_HASH: simulated.settlement_floors_mu} if SIMULATED else {}),
+        ergo.CONTRACT_HASH: ergo.settlement_floors_mu
     }
 
 
