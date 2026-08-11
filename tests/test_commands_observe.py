@@ -392,6 +392,98 @@ class CaptureAvailabilityTests(unittest.TestCase):
             observe.interface_exists = original_exists
 
 
+class ConntrackDiagnosisTests(unittest.TestCase):
+    """A missing /proc/net/nf_conntrack has three causes; only one is "wrong host"."""
+
+    def _reason(self, *, procfs, count, linux=True):
+        present = set()
+        if procfs:
+            present.add(observe.CONNTRACK_PATH)
+        if count:
+            present.add(observe.CONNTRACK_COUNT_PATH)
+        original_exists = observe.os.path.exists
+        original_avail = observe.capture_available
+        try:
+            observe.os.path.exists = lambda path: path in present
+            observe.capture_available = lambda: linux
+            return observe.conntrack_unavailable_reason()
+        finally:
+            observe.os.path.exists = original_exists
+            observe.capture_available = original_avail
+
+    def test_readable_table_is_not_a_problem(self):
+        self.assertIsNone(self._reason(procfs=True, count=True))
+
+    def test_ubuntu_kernel_blames_the_build_option_not_the_host(self):
+        # nf_conntrack loaded (count file present), procfs interface not compiled in.
+        reason = self._reason(procfs=False, count=True)
+        self.assertIn("CONFIG_NF_CONNTRACK_PROCFS", reason)
+        self.assertNotIn("run this on the node", reason)
+
+    def test_module_not_loaded_says_so(self):
+        self.assertIn("not loaded", self._reason(procfs=False, count=False))
+
+    def test_non_linux_still_points_at_the_node(self):
+        self.assertIn(
+            "not a Linux host",
+            self._reason(procfs=False, count=False, linux=False),
+        )
+
+    def test_reason_reaches_the_event_reader(self):
+        original_exists = observe.os.path.exists
+        try:
+            observe.os.path.exists = lambda path: path == observe.CONNTRACK_COUNT_PATH
+            events, reason = observe.read_conntrack_events("10.0.0.2")
+            self.assertEqual(events, [])
+            self.assertIn("CONFIG_NF_CONNTRACK_PROCFS", reason)
+        finally:
+            observe.os.path.exists = original_exists
+
+
+class RenderNetworkVolumeTests(unittest.TestCase):
+    def test_tap_counters_are_shown_even_in_degraded_mode(self):
+        import io
+        from contextlib import redirect_stdout
+
+        metrics = observe.SessionMetrics()
+        metrics.update_io({"net_rx_bytes": 2 * 1024 ** 2, "net_tx_bytes": 4096,
+                           "net_rx_packets": 1234, "net_tx_packets": 7})
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            observe._render(
+                header="inst",
+                metrics=metrics,
+                balance="N/A",
+                events=[],
+                save_dir=None,
+                net_notice="per-flow table unavailable",
+                capture_mode="conntrack",
+            )
+        out = buf.getvalue()
+        self.assertIn("Network volume", out)
+        self.assertIn("2 MB", out)
+        self.assertIn("1,234 pkts", out)
+
+    def test_missing_counters_read_as_unknown_not_zero(self):
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            observe._render(
+                header="inst",
+                metrics=observe.SessionMetrics(),
+                balance="N/A",
+                events=[],
+                save_dir=None,
+                net_notice=None,
+                capture_mode="pcap",
+            )
+        out = buf.getvalue()
+        self.assertIn("N/A", out)
+        self.assertNotIn("0 B", out)
+
+
 class HumanBytes1dpTests(unittest.TestCase):
     def test_one_decimal_scaling(self):
         self.assertEqual(observe.human_bytes_1dp(None), "N/A")
