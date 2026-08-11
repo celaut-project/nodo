@@ -107,7 +107,7 @@ def _force_delegate(
     refund_container = []
     if not spend_mu(
             id=father_id,
-            gas_to_spend=from_amount(estimated_cost.cost),
+            amount_mu=from_amount(estimated_cost.cost),
             refund_function_container=refund_container
     ):
         raise Exception(f"force_execution: error charging {father_id}.")
@@ -236,7 +236,7 @@ def launch_service(
 
                 if not spend_mu(
                         id=father_id,
-                        gas_to_spend=from_amount(estimated_cost.cost),
+                        amount_mu=from_amount(estimated_cost.cost),
                         refund_function_container=refund_container
                 ):
                     raise Exception('Launch service error charging ' + father_id)

@@ -261,7 +261,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         _r = __check_payment_process(
             amount=amount, ledger=ledger, token=token,
             contract=contract, script=script
-        ) and _manager_module().increase_local_balance_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount=amount)  # TODO allow for containers too.
+        ) and _manager_module().increase_local_balance_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount_mu=amount)  # TODO allow for containers too.
     except: _r = False
     sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
     _l.LOGGER(f"Pending deposit tokens updated, there are still {len(sc.get_deposit_tokens(status='pending'))} tokens in the queue.")

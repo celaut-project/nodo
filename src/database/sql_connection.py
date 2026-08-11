@@ -545,8 +545,8 @@ class SQLConnection(metaclass=Singleton):
             UPDATE local_instances SET balance_mu = ? WHERE id = ?
         ''', (balance_mu, id))
 
-    def spend_instance_balance(self, id: str, gas_to_spend: int, allow_debt: bool) -> Optional[bool]:
-        """Atomically deduct ``gas_to_spend`` from a container's balance.
+    def spend_instance_balance(self, id: str, amount_mu: int, allow_debt: bool) -> Optional[bool]:
+        """Atomically deduct ``amount_mu`` from a container's balance.
 
         The read, the sufficiency check and the write happen under a single hold
         of the connection lock, so two threads billing the same instance (e.g.
@@ -559,7 +559,7 @@ class SQLConnection(metaclass=Singleton):
         not exist. ``balance_mu`` is stored as TEXT, so the arithmetic is done in
         Python (``int``) rather than in SQL to avoid affinity surprises.
         """
-        gas_to_spend = int(gas_to_spend)
+        amount_mu = int(amount_mu)
         with SQLConnection._lock:
             try:
                 cursor = SQLConnection._connection.cursor()
@@ -568,11 +568,11 @@ class SQLConnection(metaclass=Singleton):
                 if row is None:
                     return None
                 current = int(row['balance_mu'])
-                if current < gas_to_spend and not allow_debt:
+                if current < amount_mu and not allow_debt:
                     return False
                 cursor.execute(
                     'UPDATE local_instances SET balance_mu = ? WHERE id = ?',
-                    (str(current - gas_to_spend), id),
+                    (str(current - amount_mu), id),
                 )
                 SQLConnection._connection.commit()
                 return True
