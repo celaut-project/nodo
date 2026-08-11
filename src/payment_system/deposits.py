@@ -17,8 +17,6 @@ from __future__ import annotations
 from src.utils.config import ConfigManager
 from src.utils.monetary import format_mu, nanoerg_to_mu
 
-env_manager = ConfigManager()
-
 
 def _ergo_floors() -> tuple[int, int]:
     """(fee, minimum box value), converted from nanoERG into MU.
@@ -35,7 +33,10 @@ def _ergo_floors() -> tuple[int, int]:
 
 
 def _share(key: str, default: float) -> float:
-    value = float(env_manager.get(f"deposits.{key}", default))
+    # Resolved per call, not captured at import, for the same reason as
+    # `monetary._config`: ConfigManager is a replaceable singleton, so a module-level
+    # binding would make a deposit's size depend on import order. The lookup is a dict hit.
+    value = float(ConfigManager().get(f"deposits.{key}", default))
     if not 0 < value <= 1:
         raise ValueError(f"deposits.{key} must be a share in (0, 1], got {value}.")
     return value

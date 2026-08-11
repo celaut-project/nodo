@@ -5,21 +5,21 @@ and `ui.DISPLAY_UNIT` is what the operator reads. These cover the properties the
 model got wrong rather than the arithmetic: that a bigger instance costs more, that
 resources are priced independently of each other, that a charge and a payment still
 land on the same scale, and that a deposit is never eaten by its own transaction fee.
+
+The imports below are deliberately NOT guarded by a try/skipIf. Everything here checks
+arithmetic on money, and a suite that reports OK because a dependency was missing is
+worse than one that fails: it claims the sums were verified when nothing ran. A missing
+`mnemonic` or `psutil` must turn this file red, not green-with-skips.
 """
 
 import unittest
 from unittest.mock import patch
 
-IMPORT_ERROR = None
-try:
-    from protos import celaut_pb2 as celaut
-    from src.utils.config import ConfigManager
-    from src.utils.cost_functions import execution_cost
-    from src.utils import monetary
-    from src.utils.monetary import format_mu, mu_per_erg, mu_to_nanoerg, parse_to_mu, prices
-except Exception as import_exc:  # pragma: no cover - environment-dependent
-    IMPORT_ERROR = import_exc
-    ConfigManager = None  # type: ignore[assignment]
+from protos import celaut_pb2 as celaut
+from src.utils.config import ConfigManager
+from src.utils.config_validation import validate_pricing_config
+from src.utils.cost_functions import execution_cost
+from src.utils.monetary import format_mu, mu_per_erg, mu_to_nanoerg, parse_to_mu, prices
 
 
 BASE_PRICES = {
@@ -51,6 +51,32 @@ def _config(**overrides):
     return patch.object(manager, "get", side_effect=get)
 
 
+def _nested_config(**overrides) -> dict:
+    """BASE_PRICES as the nested mapping `validate_pricing_config` reads.
+
+    That check runs inside `load_config`, before the ConfigManager singleton is usable,
+    so it takes the parsed YAML directly rather than going through `get()`. Derived from
+    BASE_PRICES rather than written out twice, so the two cannot drift.
+    """
+    values = dict(BASE_PRICES)
+    values.update(overrides)
+    config: dict = {}
+    for dotted, value in values.items():
+        *parents, leaf = dotted.split(".")
+        node = config
+        for key in parents:
+            node = node.setdefault(key, {})
+        node[leaf] = value
+    return config
+
+
+def _settlement_warnings(**overrides) -> list:
+    """Non-fatal findings from the load-time pricing check."""
+    warnings: list = []
+    validate_pricing_config(_nested_config(**overrides), warn=warnings.append)
+    return warnings
+
+
 def _sysresources(mem_gib=0.0, vcpus=0, disk_gib=0.0) -> "celaut.Sysresources":
     resources = celaut.Sysresources()
     if mem_gib:
@@ -67,7 +93,6 @@ def _sysresources(mem_gib=0.0, vcpus=0, disk_gib=0.0) -> "celaut.Sysresources":
 IDLE = {"cpu": 0.0, "mem": 0.0, "disk": 0.0}
 
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class TheThreeUnitsTests(unittest.TestCase):
     """MU, what it is worth, and what the operator reads are three separate things."""
 
@@ -151,18 +176,24 @@ class TheThreeUnitsTests(unittest.TestCase):
             self.assertGreater(tick_mu, 0)
             self.assertGreater(mu_to_nanoerg(tick_mu), 0)
             self.assertEqual(format_mu(tick_mu * 360), "0.00524952 ERG")
-            self.assertTrue(monetary.reference_charge_is_settleable())
+        # And the load-time check agrees, since that is the one that actually runs.
+        self.assertEqual(_settlement_warnings(), [])
 
     def test_prices_dwarfed_by_the_rate_are_detected(self):
-        """Exactly the gas failure: charges and payments on scales that never meet."""
-        with _config(**{
+        """Exactly the gas failure: charges and payments on scales that never meet.
+
+        Checked through `validate_pricing_config`, which is what `load_config` calls.
+        A second copy of this rule used to live in `monetary` and was reached only from
+        here, so the test passed while nothing verified the running node.
+        """
+        warnings = _settlement_warnings(**{
             "pricing.RAM_MU_PER_GIB_HOUR": 100,
             "ledgers.ergo.payments.MU_PER_NANOERG": 1_000_000,
-        }):
-            self.assertFalse(monetary.reference_charge_is_settleable())
+        })
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("RAM_MU_PER_GIB_HOUR", warnings[0])
 
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class PerResourcePricingTests(unittest.TestCase):
     def test_a_bigger_instance_costs_more(self):
         """The single availability scalar priced 128 MiB and 8 GiB almost identically."""
@@ -205,7 +236,51 @@ class PerResourcePricingTests(unittest.TestCase):
         self.assertEqual(once, twice)
 
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class StartCostTests(unittest.TestCase):
+    """What starting an instance costs, and what the client gets for it."""
+
+    def _cost(self, initial_balance_mu: int, build_mu: int = 10_000_000,
+              free: bool = False) -> int:
+        from src.utils.cost_functions import general_cost_functions as rates
+
+        # Both patched in the namespace that calls them: `general_cost_functions` binds
+        # these at import, so patching `execution_cost` would miss it.
+        #
+        # `is_free` is stubbed rather than driven through a threshold because it samples
+        # the real machine when given no scarcity reading -- a load-dependent test would
+        # pass or fail with whatever else is running. What the free tier does to a charge
+        # is covered against explicit readings in FreeTierTests; what matters here is
+        # only that the start cost is behind that guard at all.
+        with patch.object(rates, "build_charge_mu", return_value=build_mu), \
+             patch.object(rates, "is_free", return_value=free):
+            return rates.compute_start_service_cost(
+                metadata=celaut.Metadata(), initial_balance_mu=initial_balance_mu
+            )
+
+    def test_the_runtime_window_is_charged_exactly_once(self):
+        """It used to be charged twice.
+
+        The start charge added `INITIAL_RUNTIME_HOURS` of occupancy, and the instance was
+        *also* funded with a balance derived from the same window -- so the client paid
+        for two hours and got one, with the difference buying nothing. Everything charged
+        here must either buy the build or become the instance's balance.
+        """
+        with _config():
+            window_mu = execution_cost.maintenance_charge_mu(
+                system_resources=_sysresources(mem_gib=0.25, vcpus=1, disk_gib=10),
+                seconds=3600,
+                scarcity=IDLE,
+            )
+            cost = self._cost(initial_balance_mu=window_mu)
+
+        self.assertEqual(window_mu, 5_250_000)  # an hour of the documented instance
+        self.assertEqual(cost, 10_000_000 + 5_250_000)
+
+    def test_a_free_node_charges_nothing_to_start(self):
+        with _config():
+            self.assertEqual(self._cost(initial_balance_mu=5_250_000, free=True), 0)
+
+
 class ScarcityTests(unittest.TestCase):
     def test_scarcity_applies_per_resource_not_globally(self):
         """A node short on memory but rich in disk charges more for memory only.
@@ -240,6 +315,32 @@ class ScarcityTests(unittest.TestCase):
             # And nothing beyond it, whatever the reading.
             self.assertEqual(execution_cost.scarcity_bp(5.0), 30_000)
 
+    def test_a_curve_above_one_holds_the_surcharge_back(self):
+        """The whole point of the setting, and the case nothing used to cover.
+
+        Only the linear curve was ever tested, and linear is the one value at which the
+        exponent and its reciprocal agree -- so the code raised `lack` to `1/curve` and
+        made the surcharge arrive *earlier* as the curve rose, while five separate
+        descriptions promised the opposite. At curve 2.0 a tenth of the supply gone must
+        cost about 1.09x, not 3.85x.
+        """
+        with _config(**{"pricing.SCARCITY_MAX_MULTIPLIER": 10, "pricing.SCARCITY_CURVE": 2.0}):
+            self.assertEqual(execution_cost.scarcity_bp(0.1), 10_900)
+            self.assertEqual(execution_cost.scarcity_bp(0.5), 32_500)
+            # The endpoints are fixed whatever the curve: no surcharge when plentiful,
+            # the full ceiling when gone.
+            self.assertEqual(execution_cost.scarcity_bp(0.0), 10_000)
+            self.assertEqual(execution_cost.scarcity_bp(1.0), 100_000)
+
+    def test_a_steeper_curve_never_charges_more_than_a_flatter_one(self):
+        """The direction of the knob, stated as a property rather than as three numbers."""
+        for lack in (0.1, 0.25, 0.5, 0.75, 0.9):
+            with _config(**{"pricing.SCARCITY_CURVE": 1.0}):
+                linear = execution_cost.scarcity_bp(lack)
+            with _config(**{"pricing.SCARCITY_CURVE": 3.0}):
+                steep = execution_cost.scarcity_bp(lack)
+            self.assertLess(steep, linear, f"curve 3.0 overcharged at lack={lack}")
+
     def test_an_unreadable_machine_is_priced_as_scarce_not_free(self):
         """Failing open would give the node away; failing closed only refuses a client."""
         import psutil
@@ -249,7 +350,6 @@ class ScarcityTests(unittest.TestCase):
         self.assertEqual(scarcity, {"cpu": 1.0, "mem": 1.0, "disk": 1.0})
 
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class FreeTierTests(unittest.TestCase):
     def test_a_zero_price_makes_that_resource_free(self):
         with _config(**{"pricing.RAM_MU_PER_GIB_HOUR": 0}):
@@ -274,7 +374,6 @@ class FreeTierTests(unittest.TestCase):
             self.assertFalse(execution_cost.is_free(scarcity={"cpu": 0.1, "mem": 0.9, "disk": 0.1}))
 
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DerivedDepositTests(unittest.TestCase):
     def test_a_deposit_keeps_the_fee_under_the_configured_share(self):
         from src.payment_system import deposits

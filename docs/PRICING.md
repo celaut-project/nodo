@@ -97,6 +97,10 @@ prices and the rate are now configured separately — the node **checks at start
 reference charge still converts to a non-zero amount on-chain, and warns if it does not.
 That specific failure cannot recur silently.
 
+The check lives in one place, `config_validation._warn_if_charges_cannot_settle`, called
+from `load_config`. It reads the parsed YAML rather than going through `ConfigManager.get`,
+because it runs while that singleton is still being built.
+
 ### What the user sees
 
 Never MU, unless they ask for it. Every CLI and log boundary renders the display unit
@@ -159,6 +163,30 @@ charge grows with the instance's actual size.
 One-off operations (`BUILD_MU`, `TUNNEL_OPEN_MU`, `MODIFY_RESOURCES_MU`) are flat
 and not scarcity-scaled: they price work done once, not occupancy.
 
+`SCARCITY_CURVE` is the exponent applied to the missing supply, so raising it holds the
+surcharge back: at `2.0`, a tenth of a resource gone costs 1.09x rather than the 1.90x
+linear would charge. Raising `lack` to the *reciprocal* of the curve does the opposite,
+and is the shape this shipped with — the two agree only at `1.0`, which was the one
+value under test.
+
+### Starting an instance
+
+```
+start_MU = BUILD_MU (if it is not built already)
+         + the balance the instance starts with
+```
+
+The balance is what buys runtime, and it is derived from the requested resources for
+`deposits.INITIAL_RUNTIME_HOURS` (`manager.default_initial_balance`) — so a 128 MiB
+instance and an 8 GiB one no longer start with the same funding. The maintenance ticks
+then spend that balance down.
+
+Occupancy is deliberately **not** charged again as part of the start. Doing both billed
+the same window twice: the client paid for the hour once as a start charge that bought
+nothing and once as the balance that actually funded it. Worse, the start charge's
+occupancy carried the live scarcity surcharge, so the quoted price to start swung with
+whatever else the machine happened to be doing that second.
+
 ### Worked example
 
 At the defaults above, an instance with 256 MiB RAM, 1 vCPU and 10 GiB disk, on an
@@ -203,6 +231,14 @@ constant:
 `MIN_DEPOSIT_PEER` and `TOTAL_REFILLED_DEPOSIT` are replaced by values **derived** from
 this floor and from a target fee overhead, not written by hand. Recommended default
 peer deposit: **0.05 ERG**.
+
+That floor governs the **automatic** refill only — `maintain.peer_deposits`, where nobody
+named a figure and a transfer worth less than its own fee is simply waste. A command that
+was given an amount sends that amount: `nodo pay <peer> 0.001` moves 0.001 ERG. Raising it
+silently to 0.05 would contradict `parse_to_mu`, which refuses to round an operator's
+figure two calls earlier; and an amount genuinely too small to settle is refused
+downstream by `process_payment`, against Ergo's real minimum box value, with a message
+saying so.
 
 ## Constant migration
 
@@ -281,7 +317,15 @@ selection, not to pricing.
 * **CPU and disk were never billed.** `execution_cost` read `cpu_limit` and
   `disk_limit` off `Sysresources` through `getattr(..., None)`. Neither field exists
   on that message — it carries `cpu_period` / `cpu_quota` (CFS) and `disk_space` — so
-  both always read as absent and only memory ever moved a price. They are billed now.
+  both always read as absent and only memory ever moved a price.
+
+  Fixing the cost function was not enough: the recurring charge prices an instance from
+  its `local_instances` row, and that row had no CPU columns at all, while `mem_limit`
+  was inserted as a literal `0` and only ever corrected by a later `modify_resources`.
+  So the tick billed disk and nothing else, however the prices were set — the per-resource
+  model was real in the unit tests and absent in production. `local_instances` now carries
+  all four (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`), `add_local_instance`
+  writes what the instance actually holds, and the tick passes all four through.
 * **`service.json` renames `gas_amount_per_call` to `mu_per_call`.** The packer
   rejects the old key rather than ignoring it: a service that kept it would otherwise
   pack with no per-call price at all, i.e. silently free.

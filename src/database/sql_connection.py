@@ -308,9 +308,19 @@ class SQLConnection(metaclass=Singleton):
         virtualizer: str,
         disk_space: int,
         envs: str,
+        mem_limit: int = 0,
+        cpu_period: int = 0,
+        cpu_quota: int = 0,
     ):
         """
         Adds an internal container to the database.
+
+        The four resource columns are what the maintenance tick prices this instance by
+        (``src/manager/maintain.py`` reads them back through :meth:`get_sys_req`), so
+        they must record what the instance actually holds. ``mem_limit`` used to be
+        written as a literal 0 here and only ever corrected by a later
+        ``modify_resources``, which meant every instance was billed no memory at all for
+        as long as nobody resized it.
 
         Args:
             father_id (str): The father ID.
@@ -325,11 +335,16 @@ class SQLConnection(metaclass=Singleton):
             envs (Optional[str]): JSON object of the environment variables the
                 instance was launched with (e.g. signer mode/seed for a
                 source-application), so the node can later tell how it was configured.
+            mem_limit (int): Memory the instance holds, in bytes.
+            cpu_period (int): CFS period, as the hypervisor expresses vCPUs.
+            cpu_quota (int): CFS quota; quota/period is the vCPU count.
         """
         self._execute('''
-            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, serialized_instance, service_id, virtualizer, envs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, name, container_ip, father_id, str(balance_mu), 0, disk_space, serialized_instance, service_id, virtualizer, envs))
+            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
+              disk_space, int(cpu_period or 0), int(cpu_quota or 0),
+              serialized_instance, service_id, virtualizer, envs))
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
     def get_local_instance_envs(self, id: str) -> Optional[str]:
@@ -442,6 +457,10 @@ class SQLConnection(metaclass=Singleton):
         """
         Retrieves system requirements for an internal container.
 
+        All four resource columns, because this is what the maintenance tick prices the
+        instance by: memory and disk in bytes, plus the CFS pair from which the vCPU
+        count is derived. Returning only memory and disk is what left compute unbilled.
+
         Args:
             id (str): The id of the internal container.
 
@@ -449,7 +468,7 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space FROM local_instances WHERE id = ?
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:

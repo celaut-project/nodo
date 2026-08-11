@@ -72,6 +72,7 @@ class NodeAdvertisedRatesTests(unittest.TestCase):
                 "net_mu_per_gib": 2_000_000,
                 "build_mu": 10_000_000,
                 "tunnel_open_mu": 10_000,
+                "modify_resources_mu": 10_000,
                 "scarcity_max_multiplier": 10,
             },
         )
@@ -107,6 +108,23 @@ class NodeAdvertisedRatesTests(unittest.TestCase):
 
         self.assertNotIn("disk_mu_per_gib_second", advertised)
         self.assertIn("ram_mu_per_gib_second", advertised)
+
+    def test_every_one_off_charge_is_advertised(self):
+        """A charge a peer cannot discover any other way belongs in this map.
+
+        `modify_resources_mu` was the only one-off price left out of it while
+        `Gateway.ModifyServiceSystemResources` charged it, so a peer could be billed for
+        a resize at a price it had no way to read beforehand.
+        """
+        with _config():
+            advertised = rates_module.node_advertised_rates()
+
+        for rate in (
+            rates_module.RATE_BUILD,
+            rates_module.RATE_TUNNEL_OPEN,
+            rates_module.RATE_MODIFY_RESOURCES,
+        ):
+            self.assertIn(rate, advertised)
 
     def test_the_scarcity_ceiling_is_advertised_with_the_base_prices(self):
         """A base price alone does not bound what a peer may be charged."""
@@ -150,6 +168,7 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
                 "net_mu_per_gib": "2000000",
                 "build_mu": "10000000",
                 "tunnel_open_mu": "10000",
+                "modify_resources_mu": "10000",
                 "scarcity_max_multiplier": "10",
             },
         )

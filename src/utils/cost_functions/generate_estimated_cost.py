@@ -3,7 +3,6 @@ import psutil
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.manager.resources import IOBigData, could_ve_this_sysreq
-from src.utils.cost_functions.execution_cost import is_free
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost
 from src.utils.utils import from_amount, to_amount
 from src.utils.config import ConfigManager
@@ -76,18 +75,14 @@ def generate_estimated_cost(
     if not get_resource_availability(resources=resources)["can_execute"]:
         return
 
-    # What the client pays up front: the one-off charges plus the balance the instance
-    # starts with, priced for the runtime window the node funds by default.
-    initial_runtime_seconds = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0)) * 3600
-    if is_free():
-        initial_cost_mu = 0
-    else:
-        initial_cost_mu = compute_start_service_cost(
-                metadata=metadata,
-                initial_balance_mu=initial_mu,
-                resource=resources,
-                seconds=initial_runtime_seconds,
-            )
+    # What the client pays up front: the one-off build, plus the balance the instance
+    # starts with. That balance is what buys the runtime window (it is derived from the
+    # requested resources by `default_initial_balance`), so the window is not also
+    # charged here -- doing both billed it twice.
+    initial_cost_mu = compute_start_service_cost(
+        metadata=metadata,
+        initial_balance_mu=initial_mu,
+    )
 
     # Calculate estimated cost for local execution.
     return celaut.EstimatedCost(

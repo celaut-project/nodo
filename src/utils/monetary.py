@@ -21,8 +21,9 @@ one key without touching a price.
 Why this is not the gas model it replaced: gas had no declared rate anywhere, so a
 price quoted in it meant nothing to the node reading it, and the shipped numbers put
 charges and payments 56 orders of magnitude apart. Here the rate is explicit, travels
-on the wire, and :func:`reference_charge_is_settleable` checks at load time that the two
-scales still meet.
+on the wire, and ``config_validation._warn_if_charges_cannot_settle`` checks at load
+time -- against the raw config mapping, before this module's singleton is usable -- that
+the two scales still meet.
 
 Note that ERG↔nanoERG (1e9) is NOT configurable and lives in ``ergo_units``: it is
 fixed by the Ergo protocol, and making it a setting would only allow defining a wrong
@@ -300,22 +301,11 @@ def free_tier() -> FreeTier:
     )
 
 
-def reference_charge_is_settleable() -> bool:
-    """Do this node's prices and its payment rate still meet on the same scale?
-
-    The failure this guards against is the one the gas model actually shipped with:
-    charges of order 1e2 and a conversion factor of 1e58, so every real charge became
-    zero on-chain and nothing could ever be settled. Splitting prices (MU) from the
-    payment rate (MU per nanoERG) makes that reachable again by misconfiguration, so it
-    is checked rather than assumed.
-
-    The reference is an hour of one GiB of memory. A node that prices everything at 0 is
-    deliberately free and passes.
-    """
-    reference_mu = prices().ram_mu_per_gib_hour
-    if reference_mu <= 0:
-        return True
-    return mu_to_nanoerg(reference_mu) > 0
+# There is deliberately no settleability check here. Whether this node's prices and its
+# payment rate still land on the same scale is asked once, at config load, by
+# `config_validation._warn_if_charges_cannot_settle`, which reads the raw mapping. A
+# second copy in this module was only ever called by its own tests, while the docstring
+# claimed it ran at load time -- two implementations of one rule, one of them dead.
 
 
 # --------------------------------------------------------------------------------

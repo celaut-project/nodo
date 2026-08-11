@@ -27,9 +27,14 @@ message Contract {
 
 // An amount in MU (monetary unit), as a numeric string.
 //
-// MU is the unit of account, and it is pegged: 1 MU = 1 nanoERG = 1e-9 ERG. The peg is
-// what makes an amount comparable between nodes -- the "gas" this replaced was an
-// abstract unit, so a price quoted in it carried no information to whoever read it.
+// MU is the issuing node's own unit of account and has no intrinsic value. What one MU
+// is worth is declared by each payment contract, as ContractRate.mu_per_unit, so a peer
+// reading a price can convert it into money it understands -- that declaration is what
+// the "gas" this replaced never had anywhere, which is why a price quoted in gas carried
+// no information to whoever read it. Do NOT assume a peg: Ergo is currently the only
+// payment system and defaults to 1 MU = 1 nanoERG, but that is a default the operator
+// can rescale (ledgers.ergo.payments.MU_PER_NANOERG), not a definition. Read the rate.
+//
 // A string rather than an integer because a balance is unbounded.
 message Amount {
     string n = 1;

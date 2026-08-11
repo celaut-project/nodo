@@ -347,16 +347,14 @@ def local_execution(
             uri_slot=uri_slots
         )
 
-    # Store the instance in the database, including the disk space from the system requirements range.
-    system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
-                min_sysreq=initial_system_resources,
-                max_sysreq=initial_system_resources
-            )
-    disk_space = None
-    if system_requirements_range and system_requirements_range.max_sysreq:
-        sysreq = system_requirements_range.max_sysreq
-        if sysreq.HasField("disk_space"):
-            disk_space = int(sysreq.disk_space)
+    # Store the instance in the database with every resource it holds, not just its
+    # disk: these columns are what the maintenance tick prices it by, so a field left
+    # unrecorded is a resource billed as zero for the instance's whole life.
+    def _sysreq(field: str) -> int:
+        return int(getattr(initial_system_resources, field)) \
+            if initial_system_resources.HasField(field) else 0
+
+    disk_space = _sysreq("disk_space")
     if not disk_space:
         raise Exception("Disk space is not specified in the system requirements range.")
 
@@ -371,6 +369,9 @@ def local_execution(
         virtualizer=configured_virtualizer,
         disk_space=disk_space,
         envs=_serialize_envs(config),
+        mem_limit=_sysreq("mem_limit"),
+        cpu_period=_sysreq("cpu_period"),
+        cpu_quota=_sysreq("cpu_quota"),
     )
     log.LOGGER(
         f"Instance provisioned in DB: vmachine_id={vmachine_id}, virtualizer={configured_virtualizer}, "

@@ -33,7 +33,10 @@ from src.virtualizers.firewall import (
 
 env_manager = ConfigManager()
 
-ALLOW_DEBT = bool(env_manager.get("ALLOW_DEBT", True))
+# Namespaced, matching where it actually lives in config.yaml and how rpc_tunnel refers
+# to it. The bare name resolved to the same value only via ConfigManager's flat-key
+# fallback, which searches every section -- fine until two sections hold the name.
+ALLOW_DEBT = bool(env_manager.get("costs.ALLOW_DEBT", True))
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MIN_SLOTS_OPEN_PER_PEER = env_manager.get("MIN_SLOTS_OPEN_PER_PEER")
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
@@ -81,11 +84,11 @@ def _get_dev_clients_by_prefix(prefix: str) -> List[str]:
 
 
 def _get_client_balance(client_id: str) -> Optional[int]:
-    client_gas = sc.get_client_balance(client_id=client_id)
-    if not client_gas:
+    client_balance = sc.get_client_balance(client_id=client_id)
+    if not client_balance:
         log.LOGGER(f"Client {client_id} has no readable balance entry. Skipping.")
         return None
-    return client_gas[0]
+    return client_balance[0]
 
 
 def _target_dev_client_balance(amount_mu: int) -> int:
@@ -114,8 +117,8 @@ def _create_dev_client(prefix: str, amount_mu: Optional[int] = None) -> str:
 def _create_verified_dev_client(prefix: str, amount_mu: int) -> str:
     for _ in range(3):
         client_id = _create_dev_client(prefix, amount_mu=amount_mu)
-        client_gas = _get_client_balance(client_id=client_id)
-        if client_gas is not None and client_gas > amount_mu:
+        client_balance = _get_client_balance(client_id=client_id)
+        if client_balance is not None and client_balance > amount_mu:
             return client_id
         log.LOGGER(f"Dev client {client_id} was created but not readable. Retrying.")
     raise RuntimeError(f"No dev client available for prefix {prefix}.")
@@ -125,12 +128,12 @@ def _ensure_dev_client_pool(prefix: str, pool_size: int) -> List[str]:
     clients = _get_dev_clients_by_prefix(prefix)
     readable_clients: List[str] = []
     for client_id in clients:
-        client_gas = _get_client_balance(client_id=client_id)
-        if client_gas is None:
+        client_balance = _get_client_balance(client_id=client_id)
+        if client_balance is None:
             continue
-        target_gas = _target_dev_client_balance(0)
-        if client_gas < target_gas:
-            sc.add_balance(client_id=client_id, balance_mu=target_gas - client_gas)
+        target_balance = _target_dev_client_balance(0)
+        if client_balance < target_balance:
+            sc.add_balance(client_id=client_id, balance_mu=target_balance - client_balance)
         readable_clients.append(client_id)
     missing_clients = max(0, pool_size - len(readable_clients))
     for _ in range(missing_clients):
@@ -148,29 +151,29 @@ def _acquire_dev_client(prefix: str, pool_size: int, amount_mu: int) -> str:
     clients = _ensure_dev_client_pool(prefix, pool_size)
 
     for client_id in clients:
-        client_gas = _get_client_balance(client_id=client_id)
-        if client_gas is not None and client_gas > amount_mu:
+        client_balance = _get_client_balance(client_id=client_id)
+        if client_balance is not None and client_balance > amount_mu:
             return client_id
 
     if not clients:
         return _create_verified_dev_client(prefix, amount_mu=amount_mu)
 
     client_id = clients[0]
-    current_gas = _get_client_balance(client_id=client_id)
-    if current_gas is None:
+    current_balance = _get_client_balance(client_id=client_id)
+    if current_balance is None:
         return _create_verified_dev_client(prefix, amount_mu=amount_mu)
 
-    target_gas = _target_dev_client_balance(amount_mu)
-    if current_gas < target_gas:
-        sc.add_balance(client_id=client_id, balance_mu=target_gas - current_gas)
+    target_balance = _target_dev_client_balance(amount_mu)
+    if current_balance < target_balance:
+        sc.add_balance(client_id=client_id, balance_mu=target_balance - current_balance)
     return client_id
 
 
 def get_dev_clients(amount_mu: int) -> Generator[str, None, None]:
     clients = _ensure_dev_client_pool(DEV_CLIENT_PREFIX, STANDARD_DEV_CLIENT_POOL_SIZE)
     for client_id in clients:
-        client_gas = _get_client_balance(client_id=client_id)
-        if client_gas is not None and client_gas > amount_mu:
+        client_balance = _get_client_balance(client_id=client_id)
+        if client_balance is not None and client_balance > amount_mu:
             yield client_id
 
 
@@ -689,11 +692,19 @@ def default_initial_balance(system_resources: celaut_pb2.Sysresources = None) ->
     return maintenance_charge_mu(system_resources=system_resources, seconds=hours * 3600)
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
+    """What an instance holds and what it has left to spend.
+
+    All four resource fields: this is the reply to ModifyServiceSystemResources, so a
+    client that just resized an instance reads back its real shape. Omitting the CFS pair
+    reported every instance as having no CPU at all.
+    """
     sys_req = sc.get_sys_req(id=id)
     return celaut_pb2.ModifyServiceSystemResourcesOutput(
         sysreq=celaut_pb2.Sysresources(
-            mem_limit=sys_req["mem_limit"],
-            disk_space=sys_req["disk_space"],
+            mem_limit=sys_req["mem_limit"] or 0,
+            disk_space=sys_req["disk_space"] or 0,
+            cpu_period=sys_req["cpu_period"] or 0,
+            cpu_quota=sys_req["cpu_quota"] or 0,
         ),
         balance=to_amount(sc.get_instance_balance(id=id))
     )
