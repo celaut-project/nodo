@@ -226,13 +226,27 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
     return False
 
 
-def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None) -> bool:
-    # Never send less than a full deposit. That floor is derived from what the ledger
-    # can actually settle -- a smaller transfer would spend more on its own fee than it
-    # delivers -- so it is computed, not configured. See src/payment_system/deposits.py.
-    from src.payment_system.deposits import full_deposit_mu
+def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
+                             floor: bool = False) -> bool:
+    """Deposit ``amount`` MU with ``peer_id``.
 
-    amount = max(int(amount), full_deposit_mu())
+    ``floor`` raises the amount to a full deposit when it is smaller, and belongs to the
+    *automatic* refill only (``maintain.peer_deposits``), where nobody named a figure and
+    a transfer worth less than its own fee is simply waste. An operator who typed an
+    amount gets that amount: silently sending 0.05 ERG for a requested 0.001 would
+    contradict `parse_to_mu`, which refuses to round an operator's figure two calls
+    earlier. Too small to settle is caught downstream by `process_payment`, against
+    Ergo's actual minimum box value, with a message saying so.
+
+    The floor itself is derived from what the ledger can settle, not configured; see
+    src/payment_system/deposits.py.
+    """
+    if floor:
+        from src.payment_system.deposits import full_deposit_mu
+
+        amount = max(int(amount), full_deposit_mu())
+    else:
+        amount = int(amount)
 
     _l.LOGGER(f"Increase deposit on peer {peer_id} by {format_mu(amount)}")
     try:

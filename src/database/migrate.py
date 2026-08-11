@@ -94,6 +94,10 @@ def create_tables(cursor):
                 UNIQUE (address, ledger_hash, contract_hash, peer_id)
             )
         ''',
+        # mem_limit, disk_space and the CFS pair (cpu_period/cpu_quota) are what the
+        # maintenance tick prices an instance by, so all four have to be here: the tick
+        # reads this row, not the service's manifest. Storing memory and disk but not
+        # CPU meant compute was never billed on the recurring path, whatever the price.
         "local_instances": '''
             CREATE TABLE IF NOT EXISTS local_instances (
                 id TEXT PRIMARY KEY,
@@ -103,6 +107,8 @@ def create_tables(cursor):
                 balance_mu TEXT,
                 mem_limit INTEGER,
                 disk_space INTEGER,
+                cpu_period INTEGER,
+                cpu_quota INTEGER,
                 serialized_instance TEXT,
                 service_id TEXT,
                 virtualizer TEXT DEFAULT NULL,

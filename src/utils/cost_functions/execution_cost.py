@@ -93,10 +93,15 @@ def system_scarcity(force_refresh: bool = False) -> Dict[str, float]:
             MEM: 1.0 - (memory.available / memory.total if memory.total else 0.0),
             DISK: 1.0 - (disk.free / disk.total if disk.total else 0.0),
         }
-    except psutil.Error as e:
+    except (psutil.Error, OSError) as e:
         # Treat an unreadable machine as exhausted rather than free: the failure mode of
         # over-charging is a refused client, and of under-charging is giving the node
         # away. Only one of those is recoverable.
+        #
+        # OSError as well as psutil.Error, and they are unrelated types: `disk_usage`
+        # raises the former (a missing or unreadable mount point), and this runs inside
+        # the manager loop, which does not guard its calls -- an escaping exception here
+        # kills the thread that charges every instance.
         logger(f"[PRICING] Could not read system load ({e}); pricing as fully scarce.")
         scarcity = {resource: 1.0 for resource in RESOURCES}
 
@@ -110,10 +115,15 @@ def scarcity_bp(lack_of_supply: float, price_vector: Optional[Prices] = None) ->
     Runs from 1x when the resource is plentiful to SCARCITY_MAX_MULTIPLIER when it is
     gone. SCARCITY_CURVE shapes the approach: 1.0 is linear, higher values stay near 1x
     until the resource is genuinely scarce and then climb steeply.
+
+    The exponent is the curve itself, not its reciprocal: at curve 2.0 a tenth of the
+    supply gone costs 1.09x, not 3.85x. Reciprocating it made the surcharge arrive
+    *earlier* as the curve rose, the opposite of what every description of the setting
+    says, and only the linear case (1.0, where the two agree) had a test.
     """
     p = price_vector or prices()
     lack = max(0.0, min(float(lack_of_supply), 1.0))
-    shaped = lack ** (1.0 / p.scarcity_curve)
+    shaped = lack ** p.scarcity_curve
     multiplier = 1.0 + (p.scarcity_max_multiplier - 1) * shaped
     return int(round(multiplier * SCARCITY_SCALE))
 
@@ -185,14 +195,8 @@ def build_charge_mu(metadata: celaut.Metadata) -> int:
         raise
 
 
-def start_charge_mu(metadata: celaut.Metadata, system_resources: celaut.Sysresources, seconds: float) -> int:
-    """MU owed to start an instance: the one-off build, plus `seconds` of occupancy.
-
-    The occupancy part is what funds the instance until the first maintenance tick; the
-    caller decides how long it is buying (`deposits.INITIAL_RUNTIME_HOURS`).
-    """
-    if is_free():
-        return 0
-    return build_charge_mu(metadata=metadata) + maintenance_charge_mu(
-        system_resources=system_resources, seconds=seconds
-    )
+# There is deliberately no `start_charge_mu`. Starting an instance costs the one-off
+# build and nothing else: the runtime window is priced exactly once, as the balance the
+# instance starts with (`manager.default_initial_balance`), which the maintenance ticks
+# then spend. Charging occupancy for that same window here as well billed it twice --
+# the client paid for two hours and got one. See compute_start_service_cost.

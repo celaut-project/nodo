@@ -31,9 +31,9 @@ def __get_metrics_client(client_id: str) -> celaut_pb2.Metrics:
     :rtype: celaut_pb2.Metrics
     :raises KeyError: If the provided client ID does not exist in the cached data.
     """
-    client_gas, _, _ = sc.get_client_balance(client_id=client_id)
+    client_balance, _, _ = sc.get_client_balance(client_id=client_id)
     return celaut_pb2.Metrics(
-        balance=to_amount(client_gas),
+        balance=to_amount(client_balance),
     )
 
 

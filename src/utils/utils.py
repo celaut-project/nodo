@@ -286,15 +286,15 @@ def get_network_name(direction: str) -> Optional[str]:
         raise Exception('Error getting the network name: ' + str(e))
 
 
-def to_amount(gas_amount) -> celaut_pb2.Amount:
+def to_amount(amount_mu) -> celaut_pb2.Amount:
     # Normalize through Decimal before stringifying: a float (or a config value read
     # as one) stringifies to "1e+64", which is not a decimal integer literal and makes
     # `from_amount` raise on the other side of the wire.
-    return celaut_pb2.Amount(n=str(int(Decimal(str(gas_amount)))))
+    return celaut_pb2.Amount(n=str(int(Decimal(str(amount_mu)))))
 
 
-def from_amount(gas_amount: celaut_pb2.Amount) -> int:
-    return int(gas_amount.n)
+def from_amount(amount: celaut_pb2.Amount) -> int:
+    return int(amount.n)
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:

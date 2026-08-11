@@ -1,19 +1,19 @@
 from typing import Dict, Optional
 
-from protos import celaut_pb2 as celaut, celaut_pb2
+from protos import celaut_pb2 as celaut
 from src.utils.config import ConfigManager
 from src.utils.cost_functions.execution_cost import (
     build_charge_mu,
+    is_free,
     maintenance_charge_mu,
-    start_charge_mu,
 )
 from src.utils.monetary import HOUR_SECONDS, prices
 
 env_manager = ConfigManager()
 
 # Keys of the rate map this node advertises to peers. Names are part of the wire
-# contract: a peer reads them out of Service.Api.Slot.mu_per_call, so renaming one
-# silently drops it for everybody who already knows the old name.
+# contract: a peer reads them out of Peer.mu_per_call (see gateway.utils._build_peer),
+# so renaming one silently drops it for everybody who already knows the old name.
 #
 # Every rate is in MU. What an MU is worth travels alongside them in
 # `Peer.payment_contracts` as `ContractRate.mu_per_unit`, so a peer reading a rate can
@@ -26,20 +26,28 @@ RATE_DISK_PER_GIB_SECOND = "disk_mu_per_gib_second"
 RATE_NET_PER_GIB = "net_mu_per_gib"
 RATE_BUILD = "build_mu"
 RATE_TUNNEL_OPEN = "tunnel_open_mu"
+RATE_MODIFY_RESOURCES = "modify_resources_mu"
 RATE_SCARCITY_MAX_MULTIPLIER = "scarcity_max_multiplier"
 
 
-def compute_start_service_cost(
-    metadata: celaut.Metadata,
-    initial_balance_mu: int,
-    resource: celaut_pb2.Service.Container.Resources,
-    seconds: float,
-) -> int:
-    """Total MU to start an instance: the one-off charges plus the balance it starts with."""
-    return int(
-        start_charge_mu(metadata=metadata, system_resources=resource.at_init, seconds=seconds)
-        + initial_balance_mu
-    )
+def compute_start_service_cost(metadata: celaut.Metadata, initial_balance_mu: int) -> int:
+    """Total MU to start an instance: the one-off build, plus the balance it starts with.
+
+    The build is the only thing the *start* charges for. The runtime window is priced
+    once, as ``initial_balance_mu`` -- the balance the instance holds and the maintenance
+    ticks then spend.
+
+    This used to add ``seconds`` of occupancy on top of that balance, billing the same
+    window twice: on an idle node the documented instance cost 0.0205 ERG to start where
+    0.01525 ERG buys the build and funds the hour, and the difference bought nothing. On a
+    loaded node it was worse, because that occupancy carried the live scarcity surcharge —
+    so the price quoted to start swung with whatever else the machine was doing.
+
+    Takes no resources for the same reason: nothing here is priced per resource any more.
+    """
+    if is_free():
+        return 0
+    return int(build_charge_mu(metadata=metadata) + initial_balance_mu)
 
 
 def compute_maintenance_cost(
@@ -89,6 +97,7 @@ def node_advertised_rates() -> Dict[str, int]:
         RATE_NET_PER_GIB: p.net_mu_per_gib,
         RATE_BUILD: p.build_mu,
         RATE_TUNNEL_OPEN: p.tunnel_open_mu,
+        RATE_MODIFY_RESOURCES: p.modify_resources_mu,
         RATE_SCARCITY_MAX_MULTIPLIER: p.scarcity_max_multiplier,
     }
     return {key: int(value) for key, value in rates.items() if int(value) > 0}

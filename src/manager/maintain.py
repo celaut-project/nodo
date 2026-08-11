@@ -148,10 +148,16 @@ def maintain_vmachines(debug_mode: bool=False):
             
         # Charge for the interval that just elapsed, so the price of an hour is the
         # same however often this node's manager ticks.
+        #
+        # Every resource the row records, including the CFS pair: passing only memory
+        # and disk left `pricing.CPU_MU_PER_VCPU_HOUR` unbilled on the one path that
+        # actually charges anybody, whatever it was set to.
         charge_mu = compute_maintenance_cost(
             system_resources=celaut.Sysresources(
-                mem_limit=sys_req['mem_limit'],
-                disk_space=sys_req['disk_space'],
+                mem_limit=sys_req['mem_limit'] or 0,
+                disk_space=sys_req['disk_space'] or 0,
+                cpu_period=sys_req['cpu_period'] or 0,
+                cpu_quota=sys_req['cpu_quota'] or 0,
             ),
             seconds=MANAGER_ITERATION_TIME,
             scarcity=scarcity,
@@ -249,7 +255,10 @@ def peer_deposits(debug_mode: bool = False):
         refill_below = refill_threshold_mu()
         if peer_balance < refill_below:
             log.LOGGER(f"[WARNING] The peer {peer_id} has not enough deposit.")
-            to_increase = full_deposit_mu() - peer_balance
+            # `floor=True` raises this to a full deposit if it is smaller, so log what
+            # will actually be sent rather than the shortfall -- the two differ whenever
+            # the peer still holds something.
+            to_increase = max(full_deposit_mu() - peer_balance, full_deposit_mu())
             if debug_mode:
                 log.LOGGER(
                     f"Insufficient balance for {peer_id}:\n"
@@ -259,7 +268,9 @@ def peer_deposits(debug_mode: bool = False):
                 )
 
             try:
-                increased = _payment_process_module().increase_deposit_on_peer(peer_id=peer_id, amount=to_increase)
+                increased = _payment_process_module().increase_deposit_on_peer(
+                    peer_id=peer_id, amount=to_increase, floor=True
+                )
             except JavaDependencyMissing:
                 log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
                 increased = False

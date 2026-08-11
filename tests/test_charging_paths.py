@@ -9,19 +9,18 @@ swallowed by a bare `except`.
 They deliberately stop short of the database and the ledger -- what is under test is
 that the charging call is well-formed and lands with the right amount, not what SQLite
 or Ergo do with it afterwards.
+
+The imports below are deliberately NOT guarded by a try/skipIf: a missing dependency has
+to turn this file red. Reporting OK because nothing ran is the worse failure on a path
+that moves money.
 """
 
 import unittest
 from unittest.mock import MagicMock, patch
 
-IMPORT_ERROR = None
-try:
-    from protos import celaut_pb2 as celaut
-    from src.utils.config import ConfigManager
-    from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
-except Exception as import_exc:  # pragma: no cover - environment-dependent
-    IMPORT_ERROR = import_exc
-    ConfigManager = None  # type: ignore[assignment]
+from protos import celaut_pb2 as celaut
+from src.utils.config import ConfigManager
+from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 
 
 PRICES = {
@@ -50,7 +49,6 @@ def _config(**overrides):
     return patch.object(manager, "get", side_effect=get)
 
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class MaintenanceTickTests(unittest.TestCase):
     """The manager's per-iteration charge, the node's main revenue path."""
 
@@ -82,14 +80,22 @@ class MaintenanceTickTests(unittest.TestCase):
             )
         self.assertEqual(scarce, idle * 4)
 
-    def test_the_manager_charges_each_running_instance(self):
-        """The whole tick, from the instance list to the deduction."""
+    # What one instance row says it holds: 1 GiB of memory, 1 vCPU, 10 GiB of disk.
+    SYS_REQ = {
+        "mem_limit": 1024 ** 3,
+        "disk_space": 10 * 1024 ** 3,
+        "cpu_period": 100_000,
+        "cpu_quota": 100_000,
+    }
+
+    def _charge_for(self, sys_req: dict) -> int:
+        """Run one manager sweep over a single instance and return what it charged."""
         from src.manager import maintain
 
         spend = MagicMock(return_value=True)
         with _config(), \
              patch.object(maintain.sc, "get_all_internal_containers_ids", return_value=["vm-1"]), \
-             patch.object(maintain.sc, "get_sys_req", return_value={"mem_limit": 1024 ** 3, "disk_space": 0}), \
+             patch.object(maintain.sc, "get_sys_req", return_value=sys_req), \
              patch.object(maintain, "vm_maintain"), \
              patch.object(maintain, "spend_mu", spend), \
              patch.object(maintain, "system_scarcity", return_value=IDLE), \
@@ -99,12 +105,39 @@ class MaintenanceTickTests(unittest.TestCase):
 
         spend.assert_called_once()
         self.assertEqual(spend.call_args.kwargs["id"], "vm-1")
-        # One GiB for one manager iteration, at 1e6 MU per GiB-hour.
-        expected = 1_000_000 * maintain.MANAGER_ITERATION_TIME // 3600
-        self.assertEqual(spend.call_args.kwargs["amount_mu"], expected)
+        return spend.call_args.kwargs["amount_mu"]
+
+    def test_the_manager_charges_each_running_instance(self):
+        """The whole tick, from the instance list to the deduction."""
+        from src.manager import maintain
+
+        seconds = maintain.MANAGER_ITERATION_TIME
+        # Per resource, each truncated on its own, the way maintenance_charge_mu sums it.
+        expected = (
+            1_000_000 * seconds // 3600            # 1 GiB of memory
+            + 4_000_000 * seconds // 3600          # 1 vCPU
+            + 100_000 * 10 * seconds // 3600       # 10 GiB of disk
+        )
+        self.assertEqual(self._charge_for(dict(self.SYS_REQ)), expected)
+
+    def test_the_tick_bills_the_cpu_the_row_records(self):
+        """The tick built a Sysresources out of memory and disk only.
+
+        `requested_units` then read no CFS pair and priced the instance at zero vCPUs, so
+        `pricing.CPU_MU_PER_VCPU_HOUR` was never charged on the one path that bills
+        anybody -- the same shape as the `cpu_limit` field that never existed.
+        """
+        with_cpu = self._charge_for(dict(self.SYS_REQ))
+        without_cpu = self._charge_for({**self.SYS_REQ, "cpu_period": 0, "cpu_quota": 0})
+
+        from src.manager import maintain
+
+        self.assertEqual(
+            with_cpu - without_cpu,
+            4_000_000 * maintain.MANAGER_ITERATION_TIME // 3600,
+        )
 
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class InstanceDeductionTests(unittest.TestCase):
     """`autospec=True` throughout, deliberately.
 
@@ -138,7 +171,6 @@ class InstanceDeductionTests(unittest.TestCase):
         reduce_balance.assert_called_once_with(client_id="client-1", balance_mu=4_242)
 
 
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class PaymentCreditTests(unittest.TestCase):
     def test_a_validated_payment_credits_the_client(self):
         """This one failed silently rather than loudly.
