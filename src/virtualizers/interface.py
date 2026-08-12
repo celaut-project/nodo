@@ -77,9 +77,13 @@ def execute(
         config: Optional[celaut_pb2.Configuration],
         initial_system_resources: celaut_pb2.Sysresources,
         father_id: str,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, celaut_pb2.Sysresources]:
     """
-    Execute a built service and return (vmachine_id, vmachine_ip).
+    Execute a built service and return (vmachine_id, vmachine_ip, resolved_resources).
+
+    ``resolved_resources`` is what the virtualizer actually reserved for the guest --
+    defaults and floors already applied -- so the launcher persists what the instance
+    holds rather than what its manifest requested (#249).
     """
     return ch_execute(
         assigment_ports=assigment_ports,
