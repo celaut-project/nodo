@@ -3,6 +3,7 @@ use ratatui::widgets::TableState;
 use regex::Regex;
 use rusqlite::{Connection, Result as SqlResult};
 use serde_yaml::Value;
+use sha1::{Digest, Sha1};
 use std::collections::{HashMap, VecDeque};
 use std::error;
 use std::fs::{self, File};
@@ -20,6 +21,11 @@ pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 pub const HISTORY_POINTS: usize = 120;
 const DATA_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const WALLET_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+/// Shortest gap between two counter samples that yields a meaningful rate. The
+/// ordinary sweep is `DATA_REFRESH_INTERVAL` apart, but a forced refresh (after a
+/// kill, or an `r` keypress) can land immediately after one; dividing a counter
+/// delta by a few milliseconds of wall time produces noise, not a measurement.
+const MIN_RATE_INTERVAL: Duration = Duration::from_millis(500);
 
 pub mod protos {
     include!(concat!("protos", "/celaut.rs"));
@@ -203,6 +209,36 @@ impl Identifiable for Service {
     }
 }
 
+/// What an instance is *using* right now, as opposed to what it was allocated.
+///
+/// Every field is read from cgroupfs/sysfs on each refresh, exactly where
+/// `nodo observe` reads it (`src/commands/observe.py`,
+/// `src/virtualizers/ch/observability.py`). All of them stay `None` — never `0` —
+/// when the source file is absent or unreadable: a delegated instance has no local
+/// cgroup, a non-`ch` virtualizer has no tap, and a dying instance loses both
+/// mid-sweep. `0` would read as "idle", which is a different claim than "unknown".
+#[derive(Debug, Clone, Default)]
+pub struct InstanceUsage {
+    pub memory_current: Option<u64>,
+    /// Cumulative `usage_usec` from the instance's cgroup `cpu.stat`. Kept on the
+    /// row so the next sweep can delta against it (see `derive_instance_rates`).
+    pub cpu_usage_usec: Option<u64>,
+    /// CPU use over the interval between the last two sweeps, in the convention
+    /// `observe` uses (`compute_cpu_percent`, `observe.py:192`): cumulative core
+    /// time, so a 2-vCPU guest pinning both cores reads 200%, not 100%. The
+    /// allowance it should be judged against is `Instance::vcpus`.
+    pub cpu_percent: Option<f64>,
+    pub disk_read_bytes: Option<u64>,
+    pub disk_write_bytes: Option<u64>,
+    pub net_rx_bytes: Option<u64>,
+    pub net_tx_bytes: Option<u64>,
+    /// Bytes per second over the same interval, from the tap byte counters.
+    /// Orientation is the host tap's, as in `_tap_net_snapshot`: `rx` is what the
+    /// host received from the VM (VM egress), `tx` what it sent to the VM.
+    pub net_rx_rate: Option<f64>,
+    pub net_tx_rate: Option<f64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Instance {
     pub id: String,
@@ -211,9 +247,14 @@ pub struct Instance {
     pub service: String,
     pub balance: String,
     pub virtualizer: String,
-    pub memory_current: Option<u64>,
     pub memory_limit: u64,
     pub disk_limit: u64,
+    /// vCPU allowance from the CFS pair (`cpu_quota / cpu_period`), or `None` when
+    /// the row stores no quota (unbounded). This is what `usage.cpu_percent` is
+    /// saturating when it reaches `vcpus * 100`.
+    pub vcpus: Option<f64>,
+    /// Live readings, sampled per refresh; see `InstanceUsage`.
+    pub usage: InstanceUsage,
     /// "local" for locally-run instances, otherwise the owning peer id for
     /// delegated/remote instances.
     pub location: String,
@@ -225,6 +266,30 @@ impl Instance {
     pub fn is_local(&self) -> bool {
         self.location == "local"
     }
+
+    /// The CPU percentage that means "saturating its whole allowance", against which
+    /// `usage.cpu_percent` is read. `None` when the instance has no quota.
+    pub fn cpu_allowance_percent(&self) -> Option<f64> {
+        self.vcpus.map(|vcpus| vcpus * 100.0)
+    }
+}
+
+/// One instance's raw counters plus the rates last derived from them.
+///
+/// `refresh()` rebuilds the instance list wholesale, so the previous sweep's
+/// counters have to be kept here, keyed by instance id, and matched up on the next
+/// one. The derived rates are stored alongside so a *forced* refresh landing a few
+/// milliseconds after the previous one can carry them forward instead of blanking
+/// the columns (see `MIN_RATE_INTERVAL`).
+#[derive(Debug, Clone)]
+struct InstanceCounters {
+    sampled_at: Instant,
+    cpu_usage_usec: Option<u64>,
+    net_rx_bytes: Option<u64>,
+    net_tx_bytes: Option<u64>,
+    cpu_percent: Option<f64>,
+    net_rx_rate: Option<f64>,
+    net_tx_rate: Option<f64>,
 }
 
 impl Identifiable for Instance {
@@ -764,6 +829,10 @@ pub struct App {
     pub details: Option<DetailsView>,
     pub status: String,
     pub sys: System,
+    /// Previous sweep's per-instance counters, keyed by instance id, so CPU and
+    /// network *rates* can be derived across refresh ticks. Rebuilt every sweep, so
+    /// an instance that disappears takes its entry with it.
+    instance_counters: HashMap<String, InstanceCounters>,
     last_data_refresh: Instant,
     last_storage_refresh: Instant,
     last_wallet_refresh: Instant,
@@ -814,6 +883,7 @@ impl Default for App {
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             sys: System::new_all(),
+            instance_counters: HashMap::new(),
             last_data_refresh: now.checked_sub(DATA_REFRESH_INTERVAL).unwrap_or(now),
             last_storage_refresh: now.checked_sub(Duration::from_secs(30)).unwrap_or(now),
             last_wallet_refresh: now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now),
@@ -1467,8 +1537,9 @@ impl App {
             .map(|service| (service.id.clone(), service.tag.clone()))
             .collect::<HashMap<_, _>>();
         self.services.refresh(services);
-        self.instances
-            .refresh(get_instances(&self.paths, &service_names).unwrap_or_default());
+        let mut instances = get_instances(&self.paths, &service_names).unwrap_or_default();
+        self.derive_instance_rates(&mut instances, Instant::now());
+        self.instances.refresh(instances);
         self.peers
             .refresh(get_peers(&self.paths.database).unwrap_or_default());
         self.clients
@@ -1495,7 +1566,7 @@ impl App {
             .instances
             .items
             .iter()
-            .filter_map(|instance| instance.memory_current)
+            .filter_map(|instance| instance.usage.memory_current)
             .sum();
         self.stats.instance_memory_reserved = self
             .instances
@@ -1512,6 +1583,76 @@ impl App {
         push_history(&mut self.cpu_history, self.stats.cpu_percent);
         let ram_percent = percent(self.stats.memory_used, self.stats.memory_total);
         push_history(&mut self.ram_history, ram_percent);
+    }
+
+    /// Turn the cumulative counters just read into rates, using the previous sweep's
+    /// readings for the same instance id.
+    ///
+    /// The first tick after an instance appears has nothing to delta against, so its
+    /// rate columns show `—` rather than `0`: the instance may well be busy, we just
+    /// have not watched it for long enough to say. The counter map is rebuilt from the
+    /// instances present now, which is what keeps it from growing with every instance
+    /// that has ever run.
+    ///
+    /// `now` is passed in rather than read here so a test can advance the clock without
+    /// sleeping through `MIN_RATE_INTERVAL`.
+    fn derive_instance_rates(&mut self, instances: &mut [Instance], now: Instant) {
+        let mut counters = HashMap::with_capacity(instances.len());
+        for instance in instances.iter_mut() {
+            let sample = match self.instance_counters.get(&instance.id) {
+                // Too soon after the previous sweep for a trustworthy delta: keep the
+                // older baseline (so the *next* sweep still measures a full interval)
+                // along with the rates it produced.
+                Some(previous) if now.duration_since(previous.sampled_at) < MIN_RATE_INTERVAL => {
+                    previous.clone()
+                }
+                Some(previous) => {
+                    let elapsed = now.duration_since(previous.sampled_at).as_secs_f64();
+                    // usage_usec is CPU-microseconds; a microsecond of CPU per second of
+                    // wall clock is 1/10_000 of a percent of one core. Dividing by
+                    // 10_000 therefore reproduces observe's `(Δusage / Δwall) * 100`,
+                    // deliberately un-normalised by the vCPU count so a 2-vCPU guest
+                    // pinning both cores reads 200% and the two commands agree.
+                    let cpu_percent = counter_rate(
+                        previous.cpu_usage_usec,
+                        instance.usage.cpu_usage_usec,
+                        elapsed,
+                    )
+                    .map(|usec_per_sec| usec_per_sec / 10_000.0);
+                    InstanceCounters {
+                        sampled_at: now,
+                        cpu_usage_usec: instance.usage.cpu_usage_usec,
+                        net_rx_bytes: instance.usage.net_rx_bytes,
+                        net_tx_bytes: instance.usage.net_tx_bytes,
+                        cpu_percent,
+                        net_rx_rate: counter_rate(
+                            previous.net_rx_bytes,
+                            instance.usage.net_rx_bytes,
+                            elapsed,
+                        ),
+                        net_tx_rate: counter_rate(
+                            previous.net_tx_bytes,
+                            instance.usage.net_tx_bytes,
+                            elapsed,
+                        ),
+                    }
+                }
+                None => InstanceCounters {
+                    sampled_at: now,
+                    cpu_usage_usec: instance.usage.cpu_usage_usec,
+                    net_rx_bytes: instance.usage.net_rx_bytes,
+                    net_tx_bytes: instance.usage.net_tx_bytes,
+                    cpu_percent: None,
+                    net_rx_rate: None,
+                    net_tx_rate: None,
+                },
+            };
+            instance.usage.cpu_percent = sample.cpu_percent;
+            instance.usage.net_rx_rate = sample.net_rx_rate;
+            instance.usage.net_tx_rate = sample.net_tx_rate;
+            counters.insert(instance.id.clone(), sample);
+        }
+        self.instance_counters = counters;
     }
 
     async fn poll_wallet_task(&mut self) {
@@ -1741,7 +1882,8 @@ fn get_instances(
 ) -> SqlResult<Vec<Instance>> {
     let connection = Connection::open(&paths.database)?;
     let mut statement = connection.prepare(
-        "SELECT id, name, ip, balance_mu, service_id, mem_limit, disk_space, virtualizer, father_id
+        "SELECT id, name, ip, balance_mu, service_id, mem_limit, disk_space, virtualizer,
+                father_id, cpu_period, cpu_quota
          FROM local_instances",
     )?;
     let mut instances: Vec<Instance> = statement
@@ -1752,20 +1894,21 @@ fn get_instances(
                 .get(&service_id)
                 .cloned()
                 .unwrap_or_else(|| shorten(&service_id, 18));
-            let memory_current = read_u64(
-                &paths
-                    .cgroups
-                    .join("nodo-ch")
-                    .join(&id)
-                    .join("memory.current"),
-            );
+            let cpu_period: Option<i64> = row.get(9)?;
+            let cpu_quota: Option<i64> = row.get(10)?;
+            let cgroup = instance_cgroup_dir(paths, &id);
+            // The live ceiling first, the catalogue row only as a fallback: see
+            // `read_cpu_max_allowance` for why the row cannot be trusted here.
+            let vcpus = read_cpu_max_allowance(&cgroup.join("cpu.max"))
+                .or_else(|| vcpu_allowance(cpu_period, cpu_quota));
             Ok(Instance {
+                usage: read_instance_usage(&cgroup, &id),
+                vcpus,
                 id,
                 name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 ip: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 balance: row.get::<_, String>(3)?,
                 service,
-                memory_current,
                 memory_limit: row.get::<_, Option<u64>>(5)?.unwrap_or(0),
                 disk_limit: row.get::<_, Option<u64>>(6)?.unwrap_or(0),
                 virtualizer: row
@@ -1814,7 +1957,11 @@ fn get_delegated_instances(
                 ip: String::new(),
                 balance: "—".to_string(),
                 service,
-                memory_current: None,
+                // A delegated instance runs inside another peer: there is no local
+                // cgroup and no local tap to read, so every live figure stays unset
+                // and the UI shows "—" rather than a fabricated zero.
+                usage: InstanceUsage::default(),
+                vcpus: None,
                 memory_limit: 0,
                 disk_limit: 0,
                 virtualizer: "remote".to_string(),
@@ -2032,6 +2179,169 @@ fn read_u64(path: &Path) -> Option<u64> {
     fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
+/// Where the CH virtualizer puts an instance's cgroup: `<CGROUPS_BASE_DIR>/nodo-ch/<id>`
+/// (`ch/cgroups.py::_vm_cgroup_dir`). The base comes from config, so an operator who
+/// moves it keeps working readings.
+fn instance_cgroup_dir(paths: &Paths, instance_id: &str) -> PathBuf {
+    paths.cgroups.join("nodo-ch").join(instance_id)
+}
+
+/// One sweep of an instance's live counters, read straight from cgroupfs and sysfs.
+///
+/// This is the TUI's port of what `nodo observe` samples per tick. `cgroup` is the
+/// instance's leaf directory (`instance_cgroup_dir`) and the tap name is re-derived from
+/// the id, so nothing here needs a catalogue column or any privilege beyond reading.
+/// Every read is independently fallible and independently `None`: a leaf cgroup that
+/// carries `cpu`/`memory` but no delegated `io` controller yields CPU and memory but no
+/// disk figures, which is the common case on a real node rather than an error worth
+/// reporting.
+fn read_instance_usage(cgroup: &Path, instance_id: &str) -> InstanceUsage {
+    let (disk_read_bytes, disk_write_bytes) = read_cgroup_io_bytes(&cgroup.join("io.stat"));
+    let tap = tap_ifname_for_instance(instance_id);
+    InstanceUsage {
+        memory_current: read_u64(&cgroup.join("memory.current")),
+        cpu_usage_usec: read_cgroup_keyed_u64(&cgroup.join("cpu.stat"), "usage_usec"),
+        disk_read_bytes,
+        disk_write_bytes,
+        net_rx_bytes: read_net_counter(&tap, "rx_bytes"),
+        net_tx_bytes: read_net_counter(&tap, "tx_bytes"),
+        // Rates need a previous sample; `App::derive_instance_rates` fills them in.
+        cpu_percent: None,
+        net_rx_rate: None,
+        net_tx_rate: None,
+    }
+}
+
+/// Read one `key value` line out of a flat cgroup v2 stat file (`cpu.stat` and
+/// friends). Mirrors `observe.py::_read_cgroup_cpu_usage_usec`.
+fn read_cgroup_keyed_u64(path: &Path, key: &str) -> Option<u64> {
+    let contents = fs::read_to_string(path).ok()?;
+    contents.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        if fields.next()? != key {
+            return None;
+        }
+        fields.next()?.parse().ok()
+    })
+}
+
+/// Cumulative block-IO from cgroup v2 `io.stat`, summed over every backing device.
+///
+/// Each line is `MAJ:MIN key=value …` carrying `rbytes`/`wbytes`. A port of
+/// `observability.py::_cgroup_io_snapshot`, including its central caveat: when the
+/// file exists but names no counters, the answer is `None` rather than `(0, 0)` — the
+/// `io` controller simply is not delegated to this leaf.
+fn read_cgroup_io_bytes(path: &Path) -> (Option<u64>, Option<u64>) {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return (None, None);
+    };
+    let mut read_total = 0u64;
+    let mut write_total = 0u64;
+    let mut saw_any = false;
+    for field in contents
+        .lines()
+        .flat_map(|line| line.split_whitespace().skip(1))
+    {
+        let Some((key, value)) = field.split_once('=') else {
+            continue;
+        };
+        let Ok(number) = value.parse::<u64>() else {
+            continue;
+        };
+        match key {
+            "rbytes" => {
+                read_total = read_total.saturating_add(number);
+                saw_any = true;
+            }
+            "wbytes" => {
+                write_total = write_total.saturating_add(number);
+                saw_any = true;
+            }
+            _ => {}
+        }
+    }
+    if saw_any {
+        (Some(read_total), Some(write_total))
+    } else {
+        (None, None)
+    }
+}
+
+/// The host tap interface the CH virtualizer creates for `instance_id`: `tap` plus the
+/// first 10 hex chars of its sha1. A pure re-derivation of
+/// `ch/execute.py::_create_tap`, matching `observe.py::tap_ifname_for_instance`, so it
+/// can never drift from the name the runtime actually programmed.
+fn tap_ifname_for_instance(instance_id: &str) -> String {
+    let digest = Sha1::digest(instance_id.as_bytes());
+    let mut name = String::from("tap");
+    for byte in digest.iter().take(5) {
+        name.push_str(&format!("{byte:02x}"));
+    }
+    name
+}
+
+/// A `/sys/class/net/<ifname>/statistics/<counter>` reading, or `None` when the
+/// interface is gone (delegated instance, non-`ch` virtualizer, VM already torn down).
+fn read_net_counter(ifname: &str, counter: &str) -> Option<u64> {
+    if ifname.is_empty() {
+        return None;
+    }
+    read_u64(
+        &PathBuf::from("/sys/class/net")
+            .join(ifname)
+            .join("statistics")
+            .join(counter),
+    )
+}
+
+/// The vCPU allowance the runtime actually programmed, read from the cgroup's `cpu.max`.
+///
+/// This is the same "re-derive it, don't trust a stored copy" reasoning as the tap name,
+/// and here it is load-bearing: `apply_cpu_limit` (`ch/cgroups.py:117`) writes the
+/// resolved CFS pair to `cpu.max`, but `_resolve_initial_resources`'s result never
+/// reaches the `local_instances` row, which stores `0 / 0` for every instance in
+/// practice. Reading the row alone would mean no instance ever showed an allowance.
+///
+/// The file is `"<quota|max> <period>"`; a literal `max` means unbounded, which is `None`
+/// here — the same answer as an unreadable file, because in both cases there is no
+/// ceiling to compare the percentage against.
+fn read_cpu_max_allowance(path: &Path) -> Option<f64> {
+    let contents = fs::read_to_string(path).ok()?;
+    let mut fields = contents.split_whitespace();
+    let quota = fields.next()?;
+    let period: f64 = fields.next()?.parse().ok()?;
+    if quota == "max" || period <= 0.0 {
+        return None;
+    }
+    let quota: f64 = quota.parse().ok()?;
+    (quota > 0.0).then_some(quota / period)
+}
+
+/// vCPU allowance from a CFS pair, as the maintenance tick prices it: `quota / period`.
+/// `None` when either half is missing or non-positive, i.e. the instance is unbounded.
+fn vcpu_allowance(period: Option<i64>, quota: Option<i64>) -> Option<f64> {
+    match (period, quota) {
+        (Some(period), Some(quota)) if period > 0 && quota > 0 => {
+            Some(quota as f64 / period as f64)
+        }
+        _ => None,
+    }
+}
+
+/// A monotonic counter's per-second rate between two samples.
+///
+/// `None` — never `0` — whenever the delta cannot be trusted: an endpoint is missing,
+/// the samples are too close together to measure, or the counter went *backwards*,
+/// which means the cgroup was recreated (the instance restarted) and the two readings
+/// belong to different lifetimes. Same guards as `observe.py::compute_cpu_percent`.
+fn counter_rate(previous: Option<u64>, current: Option<u64>, elapsed_secs: f64) -> Option<f64> {
+    let (previous, current) = (previous?, current?);
+    if elapsed_secs <= 0.0 || current < previous {
+        return None;
+    }
+    Some((current - previous) as f64 / elapsed_secs)
+}
+
 fn push_history(history: &mut VecDeque<u64>, value: u64) {
     if history.len() >= HISTORY_POINTS {
         history.pop_front();
@@ -2062,6 +2372,35 @@ pub fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// `format_bytes` squeezed into a table cell: a single-letter unit and no space, so a
+/// used/allocated pair (`412M / 1.0G`) fits where one `format_bytes` value used to.
+/// The detail card keeps the spelled-out form.
+pub fn format_bytes_compact(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "K", "M", "G", "T"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes}B")
+    } else if value < 10.0 {
+        format!("{value:.1}{}", UNITS[unit])
+    } else {
+        format!("{value:.0}{}", UNITS[unit])
+    }
+}
+
+/// A byte-per-second rate for a table cell, or `—` when there is no reading yet.
+/// Deliberately unit-suffixed only in the header (`Net ↓/↑ B/s`) to save width.
+pub fn format_rate_compact(rate: Option<f64>) -> String {
+    match rate {
+        Some(rate) if rate.is_finite() && rate >= 0.0 => format_bytes_compact(rate.round() as u64),
+        _ => "—".to_string(),
+    }
+}
+
 pub fn shorten(value: &str, max: usize) -> String {
     if value.chars().count() <= max {
         return value.to_string();
@@ -2085,6 +2424,314 @@ pub fn shorten(value: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// Live per-instance usage. The point of these numbers is that an operator can
+    /// trust them against `nodo observe`, so what is pinned here is the arithmetic and
+    /// — just as importantly — every case that must read as "unknown" rather than
+    /// "idle": a missing cgroup, a single sample, a restarted instance.
+    mod usage {
+        use super::super::{
+            counter_rate, format_bytes_compact, format_rate_compact, read_cgroup_io_bytes,
+            read_cgroup_keyed_u64, read_cpu_max_allowance, tap_ifname_for_instance, vcpu_allowance,
+            App, Instance,
+            InstanceUsage,
+        };
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::{Duration, Instant};
+
+        fn instance(id: &str, usage: InstanceUsage) -> Instance {
+            Instance {
+                id: id.to_string(),
+                name: id.to_string(),
+                ip: String::new(),
+                service: String::new(),
+                balance: "0".to_string(),
+                virtualizer: "ch".to_string(),
+                memory_limit: 1 << 30,
+                disk_limit: 0,
+                vcpus: Some(2.0),
+                usage,
+                location: "local".to_string(),
+                father_id: String::new(),
+            }
+        }
+
+        fn cpu_only(usage_usec: Option<u64>) -> InstanceUsage {
+            InstanceUsage {
+                cpu_usage_usec: usage_usec,
+                ..InstanceUsage::default()
+            }
+        }
+
+        /// A directory under the system temp dir, removed when the guard drops, so a
+        /// failing assertion cannot leave the next run reading a stale file.
+        struct TempDir(PathBuf);
+
+        impl TempDir {
+            fn new(name: &str) -> Self {
+                let path = std::env::temp_dir().join(format!("nodo-tui-usage-{name}"));
+                let _ = fs::remove_dir_all(&path);
+                fs::create_dir_all(&path).unwrap();
+                Self(path)
+            }
+
+            fn write(&self, name: &str, contents: &str) -> PathBuf {
+                let path = self.0.join(name);
+                fs::write(&path, contents).unwrap();
+                path
+            }
+
+            fn path(&self, name: &str) -> PathBuf {
+                self.0.join(name)
+            }
+        }
+
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        /// The acceptance criterion of issue #245: the same counter and the same
+        /// normalisation as `observe.py::compute_cpu_percent`, which is deliberately
+        /// *not* divided by the vCPU count. Two seconds of wall clock against four
+        /// CPU-seconds is 200% — a 2-vCPU guest pinning both cores — and if this were
+        /// normalised it would read 100% and disagree with `nodo observe`.
+        #[test]
+        fn cpu_percent_is_cumulative_core_time_like_observe() {
+            let mut app = App::default();
+            let start = Instant::now();
+
+            let mut first = vec![instance("busy", cpu_only(Some(1_000_000)))];
+            app.derive_instance_rates(&mut first, start);
+            assert_eq!(
+                first[0].usage.cpu_percent, None,
+                "one sample is not a measurement"
+            );
+
+            let mut second = vec![instance("busy", cpu_only(Some(5_000_000)))];
+            app.derive_instance_rates(&mut second, start + Duration::from_secs(2));
+            let cpu = second[0].usage.cpu_percent.expect("two samples, one rate");
+            assert!((cpu - 200.0).abs() < 1e-6, "expected 200%, got {cpu}");
+            // And the figure is legible only next to the allowance it saturates.
+            assert_eq!(second[0].cpu_allowance_percent(), Some(200.0));
+        }
+
+        /// An instance that restarts gets a fresh cgroup, so its counter falls back to
+        /// near zero. Subtracting the old value would produce a huge negative — or, if
+        /// clamped, a fake zero. Neither is a reading.
+        #[test]
+        fn a_restarted_instance_reports_unknown_not_zero() {
+            let mut app = App::default();
+            let start = Instant::now();
+            app.derive_instance_rates(&mut [instance("r", cpu_only(Some(9_000_000)))], start);
+
+            let mut after = vec![instance("r", cpu_only(Some(12_000)))];
+            app.derive_instance_rates(&mut after, start + Duration::from_secs(2));
+            assert_eq!(after[0].usage.cpu_percent, None);
+        }
+
+        /// A delegated instance has no local cgroup and no local tap. Every live field
+        /// stays unset however many times it is swept, because "we cannot see it from
+        /// here" is not the same claim as "it is doing nothing".
+        #[test]
+        fn an_instance_with_no_cgroup_never_gains_a_zero() {
+            let mut app = App::default();
+            let start = Instant::now();
+            for tick in 0..3 {
+                let mut instances = vec![instance("delegated", InstanceUsage::default())];
+                app.derive_instance_rates(&mut instances, start + Duration::from_secs(2 * tick));
+                assert_eq!(instances[0].usage.cpu_percent, None);
+                assert_eq!(instances[0].usage.net_rx_rate, None);
+                assert_eq!(instances[0].usage.net_tx_rate, None);
+            }
+        }
+
+        /// A forced refresh (an `r` keypress, or the sweep after a kill) can land
+        /// milliseconds after the previous one. Dividing a counter delta by that is
+        /// noise, so the last real rate is carried forward and the *baseline is kept*,
+        /// leaving the following sweep a full interval to measure over.
+        #[test]
+        fn a_refresh_too_soon_carries_the_last_rate_rather_than_flickering() {
+            let mut app = App::default();
+            let start = Instant::now();
+            app.derive_instance_rates(&mut [instance("busy", cpu_only(Some(0)))], start);
+            let mut measured = vec![instance("busy", cpu_only(Some(2_000_000)))];
+            app.derive_instance_rates(&mut measured, start + Duration::from_secs(2));
+            let established = measured[0].usage.cpu_percent.unwrap();
+            assert!((established - 100.0).abs() < 1e-6);
+
+            let mut forced = vec![instance("busy", cpu_only(Some(2_000_100)))];
+            app.derive_instance_rates(&mut forced, start + Duration::from_millis(2_050));
+            assert_eq!(forced[0].usage.cpu_percent, Some(established));
+
+            // The baseline was not advanced, so the next sweep still measures against
+            // the 2s mark: 2_000_000 → 6_000_000 over 2s is another 200%.
+            let mut next = vec![instance("busy", cpu_only(Some(6_000_000)))];
+            app.derive_instance_rates(&mut next, start + Duration::from_secs(4));
+            let cpu = next[0].usage.cpu_percent.unwrap();
+            assert!((cpu - 200.0).abs() < 1e-6, "got {cpu}");
+        }
+
+        /// The counter map is rebuilt from the instances present, so a node that has
+        /// churned through instances does not carry their entries forever.
+        #[test]
+        fn counters_for_vanished_instances_are_dropped() {
+            let mut app = App::default();
+            let start = Instant::now();
+            app.derive_instance_rates(
+                &mut [
+                    instance("kept", cpu_only(Some(1))),
+                    instance("gone", cpu_only(Some(1))),
+                ],
+                start,
+            );
+            assert_eq!(app.instance_counters.len(), 2);
+
+            app.derive_instance_rates(
+                &mut [instance("kept", cpu_only(Some(2)))],
+                start + Duration::from_secs(2),
+            );
+            assert_eq!(app.instance_counters.len(), 1);
+            assert!(app.instance_counters.contains_key("kept"));
+        }
+
+        #[test]
+        fn net_rates_are_bytes_per_second_of_wall_clock() {
+            let mut app = App::default();
+            let start = Instant::now();
+            let sample = |rx: u64, tx: u64| InstanceUsage {
+                net_rx_bytes: Some(rx),
+                net_tx_bytes: Some(tx),
+                ..InstanceUsage::default()
+            };
+            app.derive_instance_rates(&mut [instance("n", sample(1_000, 500))], start);
+            let mut after = vec![instance("n", sample(5_000, 2_500))];
+            app.derive_instance_rates(&mut after, start + Duration::from_secs(2));
+            assert_eq!(after[0].usage.net_rx_rate, Some(2_000.0));
+            assert_eq!(after[0].usage.net_tx_rate, Some(1_000.0));
+        }
+
+        /// The tap name is re-derived rather than stored, so it has to match what
+        /// `ch/execute.py::_create_tap` programmed, byte for byte. These expectations
+        /// are `sha1(id)` truncated to 10 hex chars, cross-checked against
+        /// `observe.py::tap_ifname_for_instance`.
+        #[test]
+        fn tap_name_matches_the_virtualizers_derivation() {
+            assert_eq!(tap_ifname_for_instance("instance-a"), "tap494d457064");
+            assert_eq!(tap_ifname_for_instance("8f4e2c"), "tapaed13fbbf7");
+            // 3 for "tap" + 10 hex chars: longer would exceed IFNAMSIZ.
+            assert_eq!(tap_ifname_for_instance("anything").len(), 13);
+        }
+
+        #[test]
+        fn cpu_stat_is_read_by_key_not_by_line_number() {
+            let dir = TempDir::new("cpu-stat");
+            // `usage_usec` is first in practice, but nothing guarantees the order and
+            // the neighbouring keys are all plausible-looking integers.
+            let path = dir.write(
+                "cpu.stat",
+                "nr_periods 12\nnr_throttled 3\nusage_usec 4815162342\nuser_usec 900\n",
+            );
+            assert_eq!(
+                read_cgroup_keyed_u64(&path, "usage_usec"),
+                Some(4_815_162_342)
+            );
+            assert_eq!(read_cgroup_keyed_u64(&path, "system_usec"), None);
+            assert_eq!(
+                read_cgroup_keyed_u64(&dir.path("absent.stat"), "usage_usec"),
+                None
+            );
+        }
+
+        #[test]
+        fn io_stat_sums_every_backing_device() {
+            let dir = TempDir::new("io-stat");
+            let path = dir.write(
+                "io.stat",
+                "8:0 rbytes=1000 wbytes=200 rios=5 wios=2\n\
+                 8:16 rbytes=24 wbytes=8 rios=1 wios=1\n",
+            );
+            assert_eq!(read_cgroup_io_bytes(&path), (Some(1024), Some(208)));
+        }
+
+        /// The `io` controller is often not delegated to the instance's leaf cgroup, so
+        /// the file exists but names no counters. That is "unknown", not "no I/O" —
+        /// `observability.py::_cgroup_io_snapshot` draws the same distinction.
+        #[test]
+        fn an_io_stat_with_no_counters_is_unknown_not_zero() {
+            let dir = TempDir::new("io-stat-empty");
+            assert_eq!(
+                read_cgroup_io_bytes(&dir.write("io.stat", "")),
+                (None, None)
+            );
+            assert_eq!(read_cgroup_io_bytes(&dir.path("absent")), (None, None));
+        }
+
+        /// `cpu.max` is the allowance the hypervisor is actually enforcing, and it is the
+        /// primary source precisely because the catalogue row stores `0 / 0` for every
+        /// real instance (`_resolve_initial_resources` never persists what it resolved).
+        #[test]
+        fn the_allowance_comes_from_the_enforced_cpu_max() {
+            let dir = TempDir::new("cpu-max");
+            assert_eq!(
+                read_cpu_max_allowance(&dir.write("one", "100000 100000\n")),
+                Some(1.0)
+            );
+            assert_eq!(
+                read_cpu_max_allowance(&dir.write("two", "200000 100000\n")),
+                Some(2.0)
+            );
+            // "max" is unbounded: there is no ceiling to read the percentage against,
+            // which is the same answer as not being able to read the file at all.
+            assert_eq!(read_cpu_max_allowance(&dir.write("un", "max 100000\n")), None);
+            assert_eq!(read_cpu_max_allowance(&dir.path("absent")), None);
+            assert_eq!(read_cpu_max_allowance(&dir.write("junk", "hello\n")), None);
+        }
+
+        #[test]
+        fn vcpu_allowance_comes_from_the_cfs_pair() {
+            assert_eq!(vcpu_allowance(Some(100_000), Some(200_000)), Some(2.0));
+            assert_eq!(vcpu_allowance(Some(100_000), Some(50_000)), Some(0.5));
+            // An unbounded instance has no allowance to be judged against.
+            assert_eq!(vcpu_allowance(Some(100_000), None), None);
+            assert_eq!(vcpu_allowance(Some(100_000), Some(-1)), None);
+            assert_eq!(vcpu_allowance(Some(0), Some(200_000)), None);
+        }
+
+        #[test]
+        fn counter_rate_refuses_what_it_cannot_measure() {
+            assert_eq!(counter_rate(Some(0), Some(100), 2.0), Some(50.0));
+            assert_eq!(counter_rate(None, Some(100), 2.0), None);
+            assert_eq!(counter_rate(Some(0), None, 2.0), None);
+            assert_eq!(counter_rate(Some(100), Some(0), 2.0), None);
+            assert_eq!(counter_rate(Some(0), Some(100), 0.0), None);
+        }
+
+        /// Table cells are a few characters wide, and a truncated figure is worse than
+        /// a rounded one.
+        #[test]
+        fn compact_bytes_stay_inside_a_table_cell() {
+            assert_eq!(format_bytes_compact(0), "0B");
+            assert_eq!(format_bytes_compact(512), "512B");
+            assert_eq!(format_bytes_compact(432 * 1024), "432K");
+            assert_eq!(format_bytes_compact(1024 * 1024), "1.0M");
+            assert_eq!(format_bytes_compact(3 * 1024 * 1024 * 1024), "3.0G");
+            // Widest unit is TiB, as in `format_bytes`; anything an instance can
+            // actually be allocated or can actually transfer fits in five columns.
+            for bytes in [0, 999, 1 << 20, 1 << 34, 900 * (1 << 40)] {
+                assert!(format_bytes_compact(bytes).len() <= 5, "{bytes}");
+            }
+        }
+
+        #[test]
+        fn an_absent_rate_renders_as_unknown() {
+            assert_eq!(format_rate_compact(None), "—");
+            assert_eq!(format_rate_compact(Some(f64::NAN)), "—");
+            assert_eq!(format_rate_compact(Some(2048.0)), "2.0K");
+        }
+    }
 
     /// The display layer, mirroring `tests/test_pricing_model.py` on the node side.
     /// The TUI reads the catalogue database directly, so if these two drift the
@@ -2561,3 +3208,4 @@ Cold Wallet: 9cold\n";
         assert_eq!(percent(1, 0), 0);
     }
 }
+
