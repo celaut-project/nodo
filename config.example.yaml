@@ -177,6 +177,15 @@ network:
     - START: 50000
       END: 60000
   DEFAULT_EXECUTE_REMOTE: false  # If true, `nodo execute` will default to remote execution. Use for nodes running in environments without reliable public IPs or with strict isolation requirements, e.g. on-premises servers behind NAT or in private cloud VPCs, or WSL2 Windows nodes.
+  # If false, this node never asks a peer to run a service for it: the balancer stops
+  # polling peers for prices and only ever selects "local", so a service this node
+  # cannot run itself fails instead of being delegated. The automatic peer-deposit
+  # refill stops too -- a deposit buys execution on that peer and nothing else, so
+  # funding one would be ERG spent on a service never requested. `nodo pay`,
+  # `nodo increase_peer_deposit` and `nodo force_execution` still work: an operator
+  # typing the command is overriding this default on purpose. Peers can still ask THIS
+  # node to run services for them -- that direction is client.ACCEPT_NEW_DEPOSITS.
+  DELEGATE_EXECUTION: true
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
@@ -301,6 +310,11 @@ client:
   CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION: 1000
   DEV_CLIENT_POOL_SIZE: 1
   DEV_EXTERNAL_CLIENT_POOL_SIZE: 1
+  # If false, no client (local or peer) can open a NEW deposit -- GenerateDepositToken
+  # is refused outright. A client that already holds MU keeps spending it normally;
+  # this only cuts off acquiring more. Use to stop onboarding new demand (or new
+  # top-ups from existing clients) without touching anyone's current balance.
+  ACCEPT_NEW_DEPOSITS: true
 
 misc:
   MIN_BUFFER_BLOCK_SIZE: 1.0e+7

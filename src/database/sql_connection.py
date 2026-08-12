@@ -2090,6 +2090,26 @@ class SQLConnection(metaclass=Singleton):
 
         return tokens
 
+    def expire_pending_deposit_tokens(self, ttl_seconds: int) -> int:
+        """Reject deposit tokens left 'pending' for longer than ``ttl_seconds``.
+
+        A token only leaves 'pending' when the client calls ``Payable``
+        (``validate_payment_process``); one that is never paid would otherwise stay
+        pending forever, and the cold-wallet sweep waits on pending tokens before it
+        may spend the wallet's boxes. Returns how many were expired.
+
+        ``created_at`` defaults to CURRENT_TIMESTAMP, and both sides are UTC
+        ('YYYY-MM-DD HH:MM:SS'), so the string comparison is a chronological one. A
+        payment that lands after its token expired is refused, so the TTL is sized
+        well above what a payment actually takes.
+        """
+        result = self._execute('''
+            UPDATE deposit_tokens SET status = 'rejected'
+            WHERE status = 'pending' AND created_at <= datetime('now', ?)
+        ''', (f'-{int(ttl_seconds)} seconds',))
+
+        return result.rowcount
+
     def client_id_from_deposit_token(self, token_id: str) -> str:
         """
         Retrieves the client ID associated with a given deposit token ID.
