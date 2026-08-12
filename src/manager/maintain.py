@@ -175,6 +175,11 @@ def maintain_vmachines(debug_mode: bool=False):
                 raise Exception(f'Error purging {vmachine_id}: {str(e)}')
         else:
             _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=10)
+            # The charge just succeeded, so this interval is a real cost the operator
+            # paid: sample it for the burn-rate figure. Sourced from charge_mu (not a
+            # balance diff) so a top-up between ticks never reads as negative spend. The
+            # dev-vmachine skip above means no sample is recorded when nothing is charged.
+            sc.record_instance_consumption(id=vmachine_id, charge_mu=charge_mu, seconds=MANAGER_ITERATION_TIME)
             if debug_mode: log.LOGGER(f"Updated reputation for {vmachine_id} due to successful maintenance.")
 
     # Cloud Hypervisor janitor: cleanup stale/orphan runtime resources not tracked by DB.
