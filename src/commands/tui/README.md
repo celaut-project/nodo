@@ -10,7 +10,7 @@ particular installation directory.
 | Page | Purpose |
 |---|---|
 | **Overview** | Node status/version/address, host CPU and RAM, current and reserved instance resources, disk usage, nodo storage size, peer/client counts, service count, reputation proof, and Ergo wallet balances. |
-| **Instances** | Running instances with service, endpoint, virtualizer, current cgroup memory, configured RAM/disk limits, and balance. |
+| **Instances** | Running instances with service, endpoint, virtualizer, balance, and what each one is *using* rather than only what it was allocated: live CPU%, memory used against its limit, and network rates. The detail card adds the vCPU allowance the CPU% is measured against, cumulative disk and network totals, and the disk allocation. |
 | **Services** | Locally available services, metadata tag, content ID, stored size, and execution action. |
 | **Network** | Connected peers/endpoints/reputation and known clients, with each peer's payment contracts and the rate it declares. The obsolete tunnels page was removed. |
 | **Pricing** | What this node charges, per resource, as vertical bars you can nudge. Recurring and one-off prices are charted apart because their magnitudes are unrelated. Beside them: the display unit, what one MU is worth on the ledger, the scarcity ceiling, and a worked hourly example. |
@@ -35,6 +35,28 @@ editor, backup included. `nodo` must be restarted for a price change to affect a
 Ergo information is refreshed asynchronously through `nodo info` every 60 seconds so JVM or
 explorer latency cannot freeze the interface. Local database/system data refreshes every two
 seconds; the recursive storage scan is limited to every 30 seconds.
+
+## Live instance usage
+
+The Instances page reads each instance's usage from the same places `nodo observe` does, on
+every two-second sweep: `cpu.stat`, `memory.current` and `io.stat` inside the instance's
+cgroup (`<virtualizers.ch.CGROUPS_BASE_DIR>/nodo-ch/<id>`), and the byte counters of its tap
+interface under `/sys/class/net`. The tap name is re-derived from the instance id rather than
+stored, so it cannot drift from the one the virtualizer programmed. CPU% and the network rates
+are deltas between consecutive sweeps, which is why they read `—` for one tick after an
+instance appears.
+
+CPU% follows `nodo observe`'s convention: **cumulative core time, not normalised by the vCPU
+count**, so an instance saturating two vCPUs reads `200%`. The detail card states the
+allowance it is measured against — taken from the cgroup's `cpu.max`, the ceiling actually
+being enforced, because the `cpu_period`/`cpu_quota` columns on `local_instances` are stored
+as `0` — and the CPU cell turns amber once the instance is within a tenth of that allowance.
+
+A figure reads `—` when it cannot be measured, never `0`: an idle instance and one we cannot
+see into are different claims. Expect `—` for every live figure on a delegated instance (it
+runs on another peer, so there is no local cgroup or tap), and for the disk read/write totals
+whenever the `io` controller is not delegated to the instance's leaf cgroup, which is the
+common case.
 
 ## Controls
 
