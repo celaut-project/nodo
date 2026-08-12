@@ -1,9 +1,10 @@
 use crate::app::{
-    format_bytes, format_bytes_compact, format_rate_compact, percent, shorten, App, EditKind,
-    InputMode, Instance, Money, Page, Peer, PriceEntry, HISTORY_POINTS,
+    format_bytes, format_bytes_compact, format_rate_compact, percent, segment_token, shorten, App,
+    ConfigEntry, EditKind, InputMode, Instance, Money, Page, Peer, PriceEntry, HISTORY_POINTS,
 };
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
+use tui_tree_widget::{Tree, TreeItem};
 
 const ACCENT: Color = Color::Cyan;
 const MUTED: Color = Color::DarkGray;
@@ -1106,39 +1107,177 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
-    let filter = if app.config_filter.is_empty() {
-        "all values".to_string()
-    } else {
-        format!("filter: {}", app.config_filter)
-    };
-    let rows = app.config.items.iter().map(|entry| {
-        Row::new(vec![
-            entry.path.clone(),
-            entry.display_value(),
-            entry.value_type.clone(),
-        ])
-    });
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Percentage(44),
-            Constraint::Percentage(46),
-            Constraint::Length(10),
-        ],
-    )
-    .header(header_row(vec!["Configuration path", "Value", "Type"]))
-    .block(section_block(
+    let needle = app.config_filter.to_lowercase();
+    // Owns its Strings (`'static`), so it doesn't borrow `app` and the tree state
+    // can be mutated (pre-selection, render) alongside it.
+    let items = build_config_tree(&app.config_all, &needle);
+
+    // On first entry nothing is selected yet; land on the first top-level section
+    // so the selection highlight (and later Enter/e) has a target.
+    if app.config_tree_state.selected().is_empty() {
+        if let Some(first) = items.first() {
+            app.config_tree_state
+                .select(vec![first.identifier().clone()]);
+        }
+    }
+
+    let title = if app.config_filter.is_empty() {
         format!(
-            " CONFIGURATION • {} of {} values • {} ",
-            app.config.items.len(),
+            " CONFIGURATION • {} values • all sections ",
+            app.config_all.len()
+        )
+    } else {
+        let matches = app
+            .config_all
+            .iter()
+            .filter(|entry| {
+                entry.path.to_lowercase().contains(&needle)
+                    || (!entry.secret && entry.value.to_lowercase().contains(&needle))
+            })
+            .count();
+        format!(
+            " CONFIGURATION • {} values • filter \"{}\" • {} match ",
             app.config_all.len(),
-            filter
+            app.config_filter,
+            matches
+        )
+    };
+
+    let tree = Tree::new(&items)
+        .expect("config tree identifiers are unique within each section")
+        .block(section_block(title, Color::Yellow))
+        .highlight_style(selected_style())
+        .node_closed_symbol("▸ ")
+        .node_open_symbol("▾ ")
+        .node_no_children_symbol("· ");
+    frame.render_stateful_widget(tree, area, &mut app.config_tree_state);
+}
+
+/// Build the collapsible configuration tree from the flat, document-ordered
+/// [`ConfigEntry`] list. Each mapping/sequence becomes a branch and every scalar
+/// a leaf; the branch structure comes straight from each entry's
+/// `path_segments`, so the data model is unchanged — this only shapes how it is
+/// drawn. `needle` (already lowercased; empty means no filter) highlights the
+/// nodes that match, without removing any of the others.
+fn build_config_tree(entries: &[ConfigEntry], needle: &str) -> Vec<TreeItem<'static, String>> {
+    // An ordered intermediate tree: children stay in document order, and a node
+    // either carries a scalar (`leaf`) or has children, never both.
+    #[derive(Default)]
+    struct Node {
+        children: Vec<(String, Node)>,
+        leaf: Option<usize>,
+    }
+    fn child_mut<'a>(node: &'a mut Node, token: &str) -> &'a mut Node {
+        if let Some(pos) = node.children.iter().position(|(t, _)| t == token) {
+            &mut node.children[pos].1
+        } else {
+            node.children.push((token.to_string(), Node::default()));
+            &mut node.children.last_mut().unwrap().1
+        }
+    }
+
+    let mut root = Node::default();
+    for (index, entry) in entries.iter().enumerate() {
+        let mut cursor = &mut root;
+        for segment in &entry.path_segments {
+            let token = segment_token(segment);
+            cursor = child_mut(cursor, &token);
+        }
+        cursor.leaf = Some(index);
+    }
+
+    fn convert(
+        token: &str,
+        node: Node,
+        parent_path: &str,
+        entries: &[ConfigEntry],
+        needle: &str,
+    ) -> TreeItem<'static, String> {
+        let display_path = join_config_path(parent_path, token);
+        match node.leaf {
+            Some(index) => {
+                let entry = &entries[index];
+                let highlighted = !needle.is_empty()
+                    && (entry.path.to_lowercase().contains(needle)
+                        || (!entry.secret && entry.value.to_lowercase().contains(needle)));
+                TreeItem::new_leaf(token.to_string(), config_leaf_line(entry, highlighted))
+            }
+            None => {
+                let count = node.children.len();
+                let highlighted = !needle.is_empty() && display_path.to_lowercase().contains(needle);
+                let children = node
+                    .children
+                    .into_iter()
+                    .map(|(child_token, child)| {
+                        convert(&child_token, child, &display_path, entries, needle)
+                    })
+                    .collect::<Vec<_>>();
+                TreeItem::new(
+                    token.to_string(),
+                    config_branch_line(token, count, highlighted),
+                    children,
+                )
+                .expect("config tree identifiers are unique within each section")
+            }
+        }
+    }
+
+    root.children
+        .into_iter()
+        .map(|(token, node)| convert(&token, node, "", entries, needle))
+        .collect()
+}
+
+/// Reconstruct the dotted display path (`a.b[1].c`) from a parent path and one
+/// more token, matching `config_path_display` so highlight tests hit the same
+/// strings the flat table used to show.
+fn join_config_path(parent: &str, token: &str) -> String {
+    if parent.is_empty() {
+        token.to_string()
+    } else if token.starts_with('[') {
+        format!("{parent}{token}")
+    } else {
+        format!("{parent}.{token}")
+    }
+}
+
+/// A scalar leaf: `key: value  [type]`, with the value masked exactly as the
+/// table did (via [`ConfigEntry::display_value`]). The key is reverse-video when
+/// it matches the active filter.
+fn config_leaf_line(entry: &ConfigEntry, highlighted: bool) -> Line<'static> {
+    let key = entry
+        .path_segments
+        .last()
+        .map(segment_token)
+        .unwrap_or_default();
+    let key_style = if highlighted {
+        Style::default().fg(Color::Black).bg(WARN).bold()
+    } else {
+        Style::default().fg(Color::White)
+    };
+    Line::from(vec![
+        Span::styled(key, key_style),
+        Span::styled(": ", Style::default().fg(MUTED)),
+        Span::styled(entry.display_value(), Style::default().fg(ACCENT)),
+        Span::styled(
+            format!("  [{}]", entry.value_type),
+            Style::default().fg(MUTED),
         ),
-        Color::Yellow,
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
-    frame.render_stateful_widget(table, area, &mut app.config.state);
+    ])
+}
+
+/// A section branch: its name plus the number of direct children, highlighted
+/// (reverse-video) when the section's path matches the active filter.
+fn config_branch_line(token: &str, count: usize, highlighted: bool) -> Line<'static> {
+    let name_style = if highlighted {
+        Style::default().fg(Color::Black).bg(WARN).bold()
+    } else {
+        Style::default().fg(WARN).bold()
+    };
+    Line::from(vec![
+        Span::styled(token.to_string(), name_style),
+        Span::styled(format!("  ({count})"), Style::default().fg(MUTED)),
+    ])
 }
 
 fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
@@ -1173,7 +1312,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Page::Pricing => {
             "↑/↓ select  •  +/- adjust 10%  •  e exact value  •  ←/→ page  •  r refresh  •  q quit"
         }
-        Page::Config => "↑/↓ select  •  e edit  •  / filter  •  x clear filter  •  q quit",
+        Page::Config => {
+            "↑/↓ select  •  ⏎ expand/collapse  •  e edit  •  / filter  •  x clear  •  q quit"
+        }
         Page::Logs => "←/→ page  •  r refresh  •  q quit",
     };
     let lines = vec![
@@ -1938,6 +2079,167 @@ mod pricing_preview {
             let row: String = (0..buffer.area.width)
                 .map(|x| buffer.get(x, y).symbol())
                 .collect();
+            println!("{row}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod config_tree {
+    //! The Config page is a collapsible tree, so the properties that matter are
+    //! that sections start collapsed, expanding reveals the nested (indented)
+    //! scalars, and the `/` filter *expands and highlights* matches instead of
+    //! hiding everything else.
+    use super::*;
+    use crate::app::ConfigPathSegment;
+    use ratatui::buffer::Buffer;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn entry(path: &str, value: &str, value_type: &str, secret: bool) -> ConfigEntry {
+        ConfigEntry {
+            path: path.to_string(),
+            path_segments: path
+                .split('.')
+                .map(|key| ConfigPathSegment::Key(key.to_string()))
+                .collect(),
+            value: value.to_string(),
+            edit_value: value.to_string(),
+            value_type: value_type.to_string(),
+            secret,
+        }
+    }
+
+    fn render_buffer(app: &mut App) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| draw_config(frame, app, frame.size()))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn rows_of(buffer: &Buffer) -> Vec<String> {
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer.get(x, y).symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    /// Leading spaces of the row containing `needle`, after the left border — the
+    /// tree indents each level by two, so a deeper node has a larger value.
+    fn indent_of(rows: &[String], needle: &str) -> usize {
+        let row = rows
+            .iter()
+            .find(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("no row contains {needle} in:\n{}", rows.join("\n")));
+        let body = row.trim_start_matches('│');
+        body.len() - body.trim_start().len()
+    }
+
+    #[test]
+    fn sections_start_collapsed_and_expand_to_reveal_indented_nested_values() {
+        let mut app = App::default();
+        app.config_all = vec![
+            entry("virtualizers.ch.MIN_MEM_MIB", "512", "number", false),
+            entry("virtualizers.ch.MAX_MEM_MIB", "2048", "number", false),
+            entry("network.GATEWAY_PORT", "5000", "number", false),
+        ];
+
+        // Collapsed: the top-level sections show, their nested scalars do not.
+        let screen = rows_of(&render_buffer(&mut app)).join("\n");
+        assert!(screen.contains("virtualizers"), "{screen}");
+        assert!(screen.contains("network"), "{screen}");
+        assert!(
+            !screen.contains("MIN_MEM_MIB"),
+            "a collapsed tree must hide nested leaves:\n{screen}"
+        );
+
+        // Expand the branch and its child mapping: the nested scalar now renders,
+        // carrying its value, and is indented deeper than its parent section.
+        app.config_tree_state.open(vec!["virtualizers".to_string()]);
+        app.config_tree_state
+            .open(vec!["virtualizers".to_string(), "ch".to_string()]);
+        let rows = rows_of(&render_buffer(&mut app));
+        let screen = rows.join("\n");
+        assert!(screen.contains("MIN_MEM_MIB"), "{screen}");
+        assert!(screen.contains("512"), "{screen}");
+        assert!(
+            indent_of(&rows, "MIN_MEM_MIB") > indent_of(&rows, "virtualizers"),
+            "nested leaf should be indented deeper than its section:\n{screen}"
+        );
+    }
+
+    #[test]
+    fn filter_expands_and_highlights_the_match_without_hiding_context() {
+        let mut app = App::default();
+        app.config_all = vec![
+            entry("virtualizers.ch.MIN_MEM_MIB", "512", "number", false),
+            entry("virtualizers.ch.MAX_MEM_MIB", "2048", "number", false),
+            entry("network.GATEWAY_PORT", "5000", "number", false),
+        ];
+
+        app.config_filter = "mem".to_string();
+        app.apply_config_filter();
+
+        let buffer = render_buffer(&mut app);
+        let screen = rows_of(&buffer).join("\n");
+
+        // Both matches' ancestors were opened, so the nested leaves are revealed...
+        assert!(screen.contains("MIN_MEM_MIB"), "{screen}");
+        assert!(screen.contains("MAX_MEM_MIB"), "{screen}");
+        // ...and the unrelated section is still on screen (filter expands, not hides).
+        assert!(
+            screen.contains("network"),
+            "filter must keep non-matching sections visible for context:\n{screen}"
+        );
+        // The title reports a match count, not a shrunken row count.
+        assert!(screen.contains("2 match"), "{screen}");
+
+        // A match that isn't the (selected) first one is highlighted with the
+        // filter colour — the selected row carries the selection style instead,
+        // which is why the assertion looks at a second, non-selected match.
+        let has_highlight = (0..buffer.area.height).any(|y| {
+            (0..buffer.area.width).any(|x| {
+                let cell = buffer.get(x, y);
+                cell.symbol() != " " && cell.style().bg == Some(WARN)
+            })
+        });
+        assert!(has_highlight, "expected a non-selected filter match to be highlighted");
+    }
+
+    /// Prints the Config page once so a layout change is visible in the test
+    /// output. `cargo test -- --nocapture config_tree::preview` renders it.
+    #[test]
+    fn preview() {
+        let mut app = App::default();
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Config)
+            .unwrap();
+        app.config_all = vec![
+            entry("main.MAIN_DIR", "/var/lib/nodo", "string", false),
+            entry("virtualizers.ch.MIN_MEM_MIB", "512", "number", false),
+            entry("virtualizers.ch.MAX_MEM_MIB", "2048", "number", false),
+            entry("ledgers.ergo.NODE_URL", "http://localhost:9053", "string", false),
+            entry("ledgers.ergo.WALLET_MNEMONIC", "word word word", "string", true),
+            entry("network.GATEWAY_PORT", "5000", "number", false),
+            entry("core_services.packer", "Qm…packer", "string", false),
+        ];
+        app.config_tree_state.open(vec!["virtualizers".to_string()]);
+        app.config_tree_state
+            .open(vec!["virtualizers".to_string(), "ch".to_string()]);
+        app.config_tree_state.open(vec!["ledgers".to_string()]);
+        app.config_tree_state
+            .open(vec!["ledgers".to_string(), "ergo".to_string()]);
+        app.config_tree_state.select(vec![
+            "virtualizers".to_string(),
+            "ch".to_string(),
+            "MIN_MEM_MIB".to_string(),
+        ]);
+
+        for row in rows_of(&render_buffer(&mut app)) {
             println!("{row}");
         }
     }
