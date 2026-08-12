@@ -4,6 +4,7 @@ import math
 import uuid
 import sqlite3
 import time
+from collections import deque
 from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
@@ -30,11 +31,26 @@ TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get("ledgers.ergo.reputation.TOT
 CLIENT_EXPIRATION_TIME = env_manager.get("CLIENT_EXPIRATION_TIME")
 STORAGE = env_manager.get("STORAGE")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
+MANAGER_ITERATION_TIME = int(env_manager.get("MANAGER_ITERATION_TIME"))
+
+# The burn-rate average covers roughly the last hour of maintenance ticks, so the
+# figure an operator reads reflects recent cost rather than an instance's whole
+# lifetime. One sample is recorded per tick (MANAGER_ITERATION_TIME seconds apart),
+# so the ring holds ~3600 / MANAGER_ITERATION_TIME samples; at least one so a slow
+# tick never yields an empty window.
+CONSUMPTION_WINDOW_SECONDS = 3600
+CONSUMPTION_WINDOW_SAMPLES = max(1, CONSUMPTION_WINDOW_SECONDS // max(1, MANAGER_ITERATION_TIME))
 
 
 class SQLConnection(metaclass=Singleton):
     _connection = None
     _lock = Lock()
+    # Per-instance ring of the last CONSUMPTION_WINDOW_SAMPLES burn-rate samples (MU
+    # per second). Only the running average is persisted; this in-memory window is what
+    # that average is computed over. Guarded by its own lock so recording a sample
+    # never contends with a database write holding _lock.
+    _consumption_lock = Lock()
+    _consumption_windows: Dict[str, deque] = {}
 
     def __init__(self):
         """Initializes the SQLConnection, ensuring storage directory and establishing a database connection."""
@@ -550,6 +566,40 @@ class SQLConnection(metaclass=Singleton):
         ''', (name,))
         return result.fetchone()[0] > 0
 
+    def record_instance_consumption(self, id: str, charge_mu: int, seconds: int) -> None:
+        """Record one maintenance-tick charge as a burn-rate sample for an instance.
+
+        The sample is the charge the tick just applied (``charge_mu`` over
+        ``seconds``), *not* a balance delta: a top-up moves ``balance_mu`` but never
+        the charge, so the rate stays honest across refills. A bounded in-memory ring
+        keeps roughly the last hour of samples per instance; only the running average
+        is persisted, in ``instance_consumption``, so the TUI can read a per-second
+        rate and derive per-minute / per-hour figures from it.
+
+        Callers must record a sample only when the charge actually happened: if the
+        tick skips charging (e.g. dev vmachines) it must skip recording too, so the
+        stored rate never diverges from what was billed.
+        """
+        if seconds <= 0:
+            return
+        mu_per_second = float(charge_mu) / float(seconds)
+        with SQLConnection._consumption_lock:
+            window = SQLConnection._consumption_windows.get(id)
+            if window is None:
+                window = deque(maxlen=CONSUMPTION_WINDOW_SAMPLES)
+                SQLConnection._consumption_windows[id] = window
+            window.append(mu_per_second)
+            average = sum(window) / len(window)
+            sample_count = len(window)
+        self._execute('''
+            INSERT INTO instance_consumption (instance_id, mu_per_second, sample_count, last_refresh)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(instance_id) DO UPDATE SET
+                mu_per_second = excluded.mu_per_second,
+                sample_count = excluded.sample_count,
+                last_refresh = excluded.last_refresh
+        ''', (id, average, sample_count))
+
     def update_instance_balance(self, id: str, balance_mu: int):
         """
         Updates the balance_mu amount for a container.
@@ -643,6 +693,13 @@ class SQLConnection(metaclass=Singleton):
         self._execute('''
             DELETE FROM local_instances WHERE id = ?
         ''', (id,))
+        # Drop the burn-rate row and its in-memory window together with the instance,
+        # so a later instance that reuses this id never inherits a stale rate.
+        self._execute('''
+            DELETE FROM instance_consumption WHERE instance_id = ?
+        ''', (id,))
+        with SQLConnection._consumption_lock:
+            SQLConnection._consumption_windows.pop(id, None)
 
     # Peer Methods
 

@@ -157,6 +157,22 @@ def create_tables(cursor):
                 peer_id TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
+        ''',
+        # Per-instance MU burn rate. The maintenance tick already computes what each
+        # instance costs for the interval it just held its resources; that charge is
+        # sampled here (see SQLConnection.record_instance_consumption) so the TUI can
+        # show a spend rate next to the balance. Kept in its own table -- not columns on
+        # local_instances -- so it survives instance churn and keeps the hot row small.
+        # `mu_per_second` is the running average of the last ~hour of samples; the TUI
+        # derives per-minute / per-hour from it and renders in ui.DISPLAY_UNIT.
+        "instance_consumption": '''
+            CREATE TABLE IF NOT EXISTS instance_consumption (
+                instance_id TEXT PRIMARY KEY,
+                mu_per_second REAL,
+                sample_count INTEGER,
+                last_refresh DATETIME,
+                FOREIGN KEY (instance_id) REFERENCES local_instances (id)
+            )
         '''
     }
 
