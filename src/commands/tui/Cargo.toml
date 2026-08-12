@@ -18,6 +18,9 @@ prost-derive = "0.11"
 prost-types = "0.11"
 serde_json = "1"
 serde_yaml = "0.9"
+# Collapsible tree view for the Config page (issue #248). 0.20.0 is the newest
+# release built on ratatui ^0.26, matching the pinned ratatui above.
+tui-tree-widget = "0.20.0"
 # Re-derives each instance's tap interface name (sha1 of the instance id) the same
 # way the CH virtualizer programmed it, so the live network counters need no new
 # catalogue column. Not a security use — but hand-rolling the digest would risk

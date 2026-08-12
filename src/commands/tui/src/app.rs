@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use sysinfo::{Disks, System};
 use tokio::process::Command;
 use tokio::task::JoinHandle;
+use tui_tree_widget::TreeState;
 
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
@@ -799,9 +800,13 @@ pub struct App {
     pub clients: StatefulList<Client>,
     pub instances: StatefulList<Instance>,
     pub services: StatefulList<Service>,
-    pub config: StatefulList<ConfigEntry>,
     pub config_all: Vec<ConfigEntry>,
     pub config_filter: String,
+    /// Open/selected state for the collapsible configuration tree. The identifier
+    /// is the per-segment token path (e.g. `["virtualizers", "ch", "MIN_MEM_MIB"]`,
+    /// or `["servers", "[1]", "id"]` for a sequence element), which lets the tree
+    /// keep its expanded sections and selection stable across refreshes and edits.
+    pub config_tree_state: TreeState<String>,
     /// Editable price vector, and how the operator's money is denominated.
     pub prices: StatefulList<PriceEntry>,
     pub scarcity: Scarcity,
@@ -855,9 +860,9 @@ impl Default for App {
             clients: StatefulList::with_items(get_clients(&paths.database).unwrap_or_default()),
             instances: StatefulList::with_items(Vec::new()),
             services: StatefulList::with_items(Vec::new()),
-            config: StatefulList::with_items(config_all.clone()),
             config_all,
             config_filter: String::new(),
+            config_tree_state: TreeState::default(),
             prices: StatefulList::with_items(prices),
             scarcity,
             money: Money::load(&paths.config),
@@ -919,7 +924,9 @@ impl App {
             Page::Network if self.network_focus == 0 => self.peers.previous(),
             Page::Network => self.clients.previous(),
             Page::Pricing => self.prices.previous(),
-            Page::Config => self.config.previous(),
+            Page::Config => {
+                self.config_tree_state.key_up();
+            }
             _ => {}
         }
     }
@@ -931,9 +938,17 @@ impl App {
             Page::Network if self.network_focus == 0 => self.peers.next(),
             Page::Network => self.clients.next(),
             Page::Pricing => self.prices.next(),
-            Page::Config => self.config.next(),
+            Page::Config => {
+                self.config_tree_state.key_down();
+            }
             _ => {}
         }
+    }
+
+    /// Expand or collapse the selected configuration section (Enter/Space on the
+    /// Config page). A no-op on a scalar leaf, which has nothing to expand.
+    pub fn toggle_selected_config_node(&mut self) {
+        self.config_tree_state.toggle_selected();
     }
 
     pub fn toggle_focus(&mut self) {
@@ -1017,9 +1032,24 @@ impl App {
         self.status = "Configuration filter cleared".to_string();
     }
 
+    /// Resolve the config tree's current selection to the editable scalar it
+    /// points at. Returns `None` when nothing is selected or the selection is a
+    /// section (mapping/sequence) node, which has no single value to edit.
+    pub fn selected_config_entry(&self) -> Option<ConfigEntry> {
+        let selected = self.config_tree_state.selected();
+        if selected.is_empty() {
+            return None;
+        }
+        self.config_all
+            .iter()
+            .find(|entry| entry_tokens(entry).as_slice() == selected)
+            .cloned()
+    }
+
     pub fn open_config_editor(&mut self) {
-        let Some(entry) = self.config.selected().cloned() else {
-            self.status = "Select a configuration value first".to_string();
+        let Some(entry) = self.selected_config_entry() else {
+            self.status =
+                "Select a value to edit (press Enter to expand a section)".to_string();
             return;
         };
         self.input_mode = InputMode::EditConfig;
@@ -1094,19 +1124,56 @@ impl App {
         }
     }
 
+    /// Apply the `/` filter to the tree. Unlike the old flat table, a filter does
+    /// not hide non-matching rows: it opens the ancestors of every match so the
+    /// matching leaves become visible in place (their siblings stay for context),
+    /// selects the first match, and lets [`draw_config`] highlight the matches.
+    /// An empty needle leaves the tree's expansion/selection untouched, so
+    /// clearing the filter keeps whatever the operator had open.
     pub fn apply_config_filter(&mut self) {
         let needle = self.config_filter.to_lowercase();
-        let filtered = self
-            .config_all
+        if needle.is_empty() {
+            return;
+        }
+        // Collect the opens/selection first so the immutable borrow of
+        // `config_all` is released before mutating `config_tree_state`.
+        let mut ancestors: Vec<Vec<String>> = Vec::new();
+        let mut first_match: Option<Vec<String>> = None;
+        for entry in &self.config_all {
+            let matches = entry.path.to_lowercase().contains(&needle)
+                || (!entry.secret && entry.value.to_lowercase().contains(&needle));
+            if !matches {
+                continue;
+            }
+            let tokens = entry_tokens(entry);
+            for depth in 1..tokens.len() {
+                ancestors.push(tokens[..depth].to_vec());
+            }
+            if first_match.is_none() {
+                first_match = Some(tokens);
+            }
+        }
+        for identifier in ancestors {
+            self.config_tree_state.open(identifier);
+        }
+        if let Some(identifier) = first_match {
+            self.config_tree_state.select(identifier);
+        }
+    }
+
+    /// How many scalar values match the current filter (all of them when empty).
+    fn config_match_count(&self) -> usize {
+        let needle = self.config_filter.to_lowercase();
+        if needle.is_empty() {
+            return self.config_all.len();
+        }
+        self.config_all
             .iter()
             .filter(|entry| {
-                needle.is_empty()
-                    || entry.path.to_lowercase().contains(&needle)
+                entry.path.to_lowercase().contains(&needle)
                     || (!entry.secret && entry.value.to_lowercase().contains(&needle))
             })
-            .cloned()
-            .collect();
-        self.config.refresh(filtered);
+            .count()
     }
 
     pub async fn submit_input(&mut self) {
@@ -1116,7 +1183,7 @@ impl App {
             InputMode::FilterConfig => {
                 self.config_filter = self.input.trim().to_string();
                 self.apply_config_filter();
-                let count = self.config.items.len();
+                let count = self.config_match_count();
                 self.close_input();
                 self.status = format!("Configuration filter: {count} matching values");
             }
@@ -2075,6 +2142,21 @@ fn yaml_type(value: &Value) -> &'static str {
         Value::Mapping(_) => "object",
         Value::Tagged(_) => "tagged",
     }
+}
+
+/// The tree-identifier token for a single path segment: the key itself, or a
+/// bracketed index (`[1]`) for a sequence element. Joined across a path these
+/// tokens form the `Vec<String>` identifier that `tui-tree-widget` keys the
+/// tree's open/selected state by, and that maps a selection back to its entry.
+pub(crate) fn segment_token(segment: &ConfigPathSegment) -> String {
+    match segment {
+        ConfigPathSegment::Key(key) => key.clone(),
+        ConfigPathSegment::Index(index) => format!("[{index}]"),
+    }
+}
+
+pub(crate) fn entry_tokens(entry: &ConfigEntry) -> Vec<String> {
+    entry.path_segments.iter().map(segment_token).collect()
 }
 
 fn config_path_display(path: &[ConfigPathSegment]) -> String {
@@ -3039,8 +3121,8 @@ Cold Wallet: 9cold\n";
     }
 
     fn select_config_entry(app: &mut App, entry: ConfigEntry) {
-        app.config = StatefulList::with_items(vec![entry]);
-        app.config.state.select(Some(0));
+        app.config_tree_state.select(entry_tokens(&entry));
+        app.config_all = vec![entry];
     }
 
     #[test]
@@ -3133,21 +3215,32 @@ Cold Wallet: 9cold\n";
     }
 
     #[test]
-    fn typing_in_a_filter_narrows_results_live_without_pressing_enter() {
+    fn typing_in_a_filter_expands_and_selects_the_match_live_without_hiding_the_rest() {
         let mut app = App::default();
         app.config_all = vec![
             config_entry("network.GATEWAY_PORT", "5000", "5000", "number", false),
             config_entry("packer.local", "false", "false", "bool", false),
         ];
-        app.config = StatefulList::with_items(app.config_all.clone());
         app.input_mode = InputMode::FilterConfig;
 
-        app.input = "network".to_string();
+        app.input = "gateway".to_string();
         app.on_input_changed();
-        assert_eq!(app.config.items.len(), 1);
-        assert_eq!(app.config.items[0].path, "network.GATEWAY_PORT");
-        // Live narrowing shouldn't require Enter to have been pressed.
-        assert_eq!(app.config_filter, "network");
+
+        // The filter no longer hides anything: both sections are still present so
+        // the surrounding context stays visible.
+        assert_eq!(app.config_all.len(), 2);
+        // The matching branch's ancestor is opened so the match is revealed...
+        assert!(app
+            .config_tree_state
+            .opened()
+            .contains(&vec!["network".to_string()]));
+        // ...and the match itself is selected.
+        assert_eq!(
+            app.config_tree_state.selected(),
+            &["network".to_string(), "GATEWAY_PORT".to_string()]
+        );
+        // Live expansion shouldn't require Enter to have been pressed.
+        assert_eq!(app.config_filter, "gateway");
     }
 
     #[test]
