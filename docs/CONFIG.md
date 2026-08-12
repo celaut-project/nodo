@@ -148,6 +148,17 @@ differs from the internal one — empty means "same as internal"; only
 Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) and
 `TUNNEL_UDP_IDLE_TIMEOUT_S` — see [`TUNNELING.md`](TUNNELING.md).
 
+| Key | Default | Meaning |
+|---|---|---|
+| `network.DELEGATE_EXECUTION` | `true` | Set `false` and this node never asks a peer to run a service for it: the balancer stops polling peers for prices and only ever selects `local`, so a service it cannot run itself fails rather than being delegated. The automatic peer-deposit refill stops too — a deposit buys execution on that peer and nothing else. `nodo pay`, `nodo increase_peer_deposit` and `nodo force_execution` still work, since an operator typing the command overrides the default on purpose. |
+
+The two directions are separate settings, and neither implies the other:
+
+| Want | Set |
+|---|---|
+| Don't run services **for** other peers (client-only) | `client.ACCEPT_NEW_DEPOSITS: false` |
+| Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
+
 ## `ddns`
 
 Keeps a hostname pointing at this node's public IP, so peers can find it by name
@@ -216,6 +227,10 @@ What is left after pricing moved out: `SOCIALIZATION_FACTOR` and
 `COST_AVERAGE_VARIATION` (peer selection, not pricing), `TUNNEL_CHARGE_INTERVAL_KB`
 (how much traffic accumulates before it is billed) and `ALLOW_DEBT`; plus
 maintenance-loop timing and client slot/expiration policy.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `client.ACCEPT_NEW_DEPOSITS` | `true` | Set `false` to stop `GenerateDepositToken` for every client (local or peer): no one can open a new deposit, so no one can acquire MU beyond what they already hold. Existing balances keep spending normally -- this only closes the door on new top-ups. Use to stop onboarding new demand, or to cap growth even while demand exists. |
 
 ## `ledgers.ergo` — payments & reputation
 

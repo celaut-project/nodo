@@ -251,6 +251,17 @@ def peer_deposits(debug_mode: bool = False):
         else:
             if debug_mode: log.LOGGER(f"Peer {peer_id} is available. Skipping info fetch.")
 
+        # A deposit on a peer buys execution there and nothing else, so a node that
+        # will not delegate must not keep topping one up: that is real ERG leaving the
+        # wallet on-chain for a service it will never ask for. The refresh above still
+        # runs -- knowing who is reachable stays useful (`nodo peers`, service
+        # downloads) -- and `nodo pay` / `nodo increase_peer_deposit` still fund a peer
+        # on demand, since an operator typing the command overrides the default policy.
+        if not env_manager.get("network.DELEGATE_EXECUTION", True):
+            if debug_mode:
+                log.LOGGER(f"network.DELEGATE_EXECUTION is off; not funding peer {peer_id}.")
+            continue
+
         peer_balance = balance_on_other_peer(peer_id=peer_id)
         if debug_mode:
             log.LOGGER(f"Peer {peer_id} balance: {format_mu(peer_balance)}")

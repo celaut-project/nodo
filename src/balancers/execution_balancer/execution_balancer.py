@@ -121,21 +121,29 @@ def execution_balancer(
         log.LOGGER('Error getting the local cost ' + str(e))
         raise e
 
-    try:
-        for peer_id in peers_id_iterator(ignore_network=ignore_network):
-            log.LOGGER('Check cost on peer ' + peer_id)
-            # TODO could use async or concurrency
-            cost = estimate_cost_on_peer(
-                peer_id=peer_id,
-                resources=resources,
-                metadata=metadata,
-                configuration=configuration,
-                recursion_guard_token=recursion_guard_token,
-            )
-            if cost is not None:
-                peers[peer_id] = cost
-    except Exception as e:
-        log.LOGGER('Error iterating peers on service balancer:' + str(e))
+    # A node that will not delegate does not ask anyone for a price: the peer loop is
+    # one GetServiceEstimatedCost round-trip per known peer, all of it spent on
+    # candidates that could never be selected. Skipping it leaves 'local' as the only
+    # option, so the caller either runs the service here or fails -- which is what
+    # network.DELEGATE_EXECUTION: false asks for.
+    if env_manager.get("network.DELEGATE_EXECUTION", True):
+        try:
+            for peer_id in peers_id_iterator(ignore_network=ignore_network):
+                log.LOGGER('Check cost on peer ' + peer_id)
+                # TODO could use async or concurrency
+                cost = estimate_cost_on_peer(
+                    peer_id=peer_id,
+                    resources=resources,
+                    metadata=metadata,
+                    configuration=configuration,
+                    recursion_guard_token=recursion_guard_token,
+                )
+                if cost is not None:
+                    peers[peer_id] = cost
+        except Exception as e:
+            log.LOGGER('Error iterating peers on service balancer:' + str(e))
+    else:
+        log.LOGGER('network.DELEGATE_EXECUTION is off; only the local node is considered.')
 
     try:
         log.LOGGER(f"Collected costs of execution {__pretty_format_peers(peers)}")
