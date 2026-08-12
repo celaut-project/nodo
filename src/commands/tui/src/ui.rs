@@ -306,10 +306,11 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_instances_tree(frame, app, area);
         return;
     }
-    // 12 = 10 detail lines + the block's two border rows. The card carries the figures
+    // 13 = 11 detail lines + the block's two border rows. The card carries the figures
     // the row has no width for: the disk allocation, the vCPU allowance the CPU% is
-    // measured against, and the cumulative disk/net totals.
-    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(12)]).split(area);
+    // measured against, the cumulative disk/net totals, and the burn rate broken out
+    // per minute and per hour with the age and sample count of the average.
+    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(13)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
         let location = if instance.is_local() {
             "local".to_string()
@@ -347,6 +348,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
                 format_rate_compact(instance.usage.net_tx_rate)
             )),
             Cell::from(app.money.format_raw(&instance.balance)),
+            Cell::from(format_burn_rate(instance.mu_per_hour, &app.money)),
         ])
     });
     let local_count = app.instances.items.iter().filter(|i| i.is_local()).count();
@@ -363,6 +365,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Length(7),
             Constraint::Length(14),
             Constraint::Length(14),
+            Constraint::Length(14),
             Constraint::Min(12),
         ],
     )
@@ -377,6 +380,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         "RAM now/max",
         "Net ↓/↑ per s",
         "Balance",
+        "Burn/h",
     ]))
     .block(section_block(
         format!(
@@ -427,6 +431,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             ),
             metric_line("Net", net_detail(instance)),
             metric_line("Balance", money.format_raw(&instance.balance)),
+            metric_line("Burn", burn_detail(instance, money)),
         ];
         // `observe` attaches to a local process, so it is only offered for local
         // instances. Full id, so the line can be copied as-is.
@@ -509,6 +514,56 @@ fn net_detail(instance: &Instance) -> String {
 
 fn optional_bytes(bytes: Option<u64>) -> String {
     bytes.map(format_bytes).unwrap_or_else(|| "—".to_string())
+}
+
+/// The `Burn/h` table cell: an hourly spend rate in the display unit, or `—` when the
+/// instance has never been charged (a `0` there would claim it is free, not unknown).
+/// A rate only needs formatting, not a second unit system, so it reuses `format_mu`.
+fn format_burn_rate(mu_per_hour: Option<f64>, money: &Money) -> String {
+    match mu_per_hour {
+        Some(rate) if rate.is_finite() && rate >= 0.0 => money.format_mu(rate.round() as u64),
+        _ => "—".to_string(),
+    }
+}
+
+/// The burn line for the detail card: both the per-minute and per-hour figures, plus
+/// how many samples the average is built from and how long ago it was last updated — a
+/// rate from two stale samples must not read like a fresh one. It prices *reserved*
+/// resources at current scarcity, so it is the cost of keeping the instance running at
+/// present prices, not measured resource usage (#245); the label says so.
+fn burn_detail(instance: &Instance, money: &Money) -> String {
+    match (instance.mu_per_minute, instance.mu_per_hour) {
+        (Some(per_minute), Some(per_hour)) => {
+            let samples = instance.consumption_samples.unwrap_or(0);
+            let age = instance
+                .consumption_age_secs
+                .map(format_age_secs)
+                .unwrap_or_else(|| "—".to_string());
+            format!(
+                "{} /min • {} /h • {} sample{} averaged, updated {} ago • reserved-resource cost at current prices",
+                money.format_mu(per_minute.round().max(0.0) as u64),
+                money.format_mu(per_hour.round().max(0.0) as u64),
+                samples,
+                if samples == 1 { "" } else { "s" },
+                age,
+            )
+        }
+        // No maintenance tick has charged this instance yet (or it is delegated).
+        _ => "— • no samples yet".to_string(),
+    }
+}
+
+/// A compact "how long ago" for the burn-rate average: seconds under a minute and a
+/// half, then minutes, then hours, so an operator can tell a fresh figure from a stale one.
+fn format_age_secs(secs: f64) -> String {
+    let secs = secs.max(0.0);
+    if secs < 90.0 {
+        format!("{:.0}s", secs)
+    } else if secs < 5400.0 {
+        format!("{:.0}m", secs / 60.0)
+    } else {
+        format!("{:.1}h", secs / 3600.0)
+    }
 }
 
 /// Render instances as a dependency tree grouped by `father_id`, porting the
@@ -1470,6 +1525,10 @@ mod tests {
                 usage,
                 location: "local".to_string(),
                 father_id: String::new(),
+                mu_per_minute: None,
+                mu_per_hour: None,
+                consumption_samples: None,
+                consumption_age_secs: None,
             }
         }
 
@@ -1570,6 +1629,12 @@ mod tests {
             usage,
             location: "local".to_string(),
             father_id: String::new(),
+            // 1e6 MU/s → 6e7 MU/min, 3.6e9 MU/h; in the default ERG unit (1e9 MU) the
+            // Burn/h column reads "3.6 ERG", exercising the rate through format_mu.
+            mu_per_minute: Some(60_000_000.0),
+            mu_per_hour: Some(3_600_000_000.0),
+            consumption_samples: Some(12),
+            consumption_age_secs: Some(45.0),
         }]);
         app.instances.state.select(Some(0));
         app.instances.state_id = Some("8f4e2c".to_string());
@@ -1588,6 +1653,11 @@ mod tests {
         assert!(text.contains("1.0M / 2.0K"), "missing the net rates");
         // And the detail card explains what the 143% is a fraction of.
         assert!(text.contains("2.00 vCPU"), "missing the vCPU allowance");
+        // The burn rate is a column of its own and a detail line: 3.6e9 MU/h renders
+        // as "3.6 ERG" in the default unit, and the card states what it is built from.
+        assert!(text.contains("Burn/h"), "missing the burn-rate column header");
+        assert!(text.contains("3.6 ERG"), "missing the per-hour burn rate");
+        assert!(text.contains("12 samples"), "missing the burn-rate sample count");
     }
 
     #[test]
