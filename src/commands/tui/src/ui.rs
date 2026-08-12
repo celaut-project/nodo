@@ -1303,19 +1303,23 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let controls = match app.page() {
-        Page::Overview => "←/→ page  •  r refresh  •  q quit",
+        Page::Overview => "tab/shift+tab cycle  •  r refresh  •  q quit",
         Page::Instances => {
-            "↑/↓ select  •  g tree/flat  •  k kill  •  ←/→ page  •  r refresh  •  q quit"
+            "tab/shift+tab cycle  •  ↑/↓ select  •  g tree/flat  •  k kill  •  r refresh  •  q quit"
         }
-        Page::Services => "↑/↓ select  •  e execute  •  i details  •  d delete  •  ←/→ page  •  q quit",
-        Page::Network => "↑/↓ select  •  Tab peers/clients  •  +/- reputation  •  c connect  •  q quit",
+        Page::Services => {
+            "tab/shift+tab cycle  •  ↑/↓ select  •  e execute  •  i details  •  d delete  •  q quit"
+        }
+        Page::Network => {
+            "tab/shift+tab cycle  •  ↑/↓ select  •  f peers/clients  •  +/- reputation  •  c connect  •  q quit"
+        }
         Page::Pricing => {
-            "↑/↓ select  •  +/- adjust 10%  •  e exact value  •  ←/→ page  •  r refresh  •  q quit"
+            "tab/shift+tab cycle  •  ↑/↓ select  •  +/- adjust 10%  •  e exact value  •  r refresh  •  q quit"
         }
         Page::Config => {
-            "↑/↓ select  •  ⏎ expand/collapse  •  e edit  •  / filter  •  x clear  •  q quit"
+            "tab/shift+tab cycle  •  ↑/↓ select  •  ⏎ expand/collapse  •  e edit  •  / filter  •  x clear  •  q quit"
         }
-        Page::Logs => "←/→ page  •  r refresh  •  q quit",
+        Page::Logs => "tab/shift+tab cycle  •  r refresh  •  q quit",
     };
     let lines = vec![
         Line::from(Span::styled(&app.status, Style::default().fg(WARN))),
