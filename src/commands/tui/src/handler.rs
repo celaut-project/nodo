@@ -75,11 +75,19 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::CONTROL, KeyCode::Char('c'))
         | (KeyModifiers::NONE, KeyCode::Esc)
         | (KeyModifiers::NONE, KeyCode::Char('q')) => app.quit(),
-        (_, KeyCode::Left) => app.on_left(),
-        (_, KeyCode::Right) => app.on_right(),
+        // Tab cycles pages forward, Shift+Tab backward; both wrap. crossterm reports
+        // Shift+Tab as BackTab under the legacy encoding and as Tab + SHIFT under the
+        // kitty keyboard protocol, so match both or the binding silently dies depending
+        // on the terminal. ←/→ are no longer page navigation: they are page-local now
+        // and ignored by pages that do not claim them.
+        (KeyModifiers::NONE, KeyCode::Tab) => app.on_right(),
+        (_, KeyCode::BackTab) | (KeyModifiers::SHIFT, KeyCode::Tab) => app.on_left(),
         (_, KeyCode::Up) => app.on_up(),
         (_, KeyCode::Down) => app.on_down(),
-        (_, KeyCode::Tab) => app.toggle_focus(),
+        // `f` toggles the peers/clients focus on Network (previously Tab).
+        (KeyModifiers::NONE, KeyCode::Char('f')) if app.page() == Page::Network => {
+            app.toggle_focus()
+        }
         (KeyModifiers::NONE, KeyCode::Char('r')) => app.refresh(true).await,
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Instances => {
             app.toggle_instances_grouped()
