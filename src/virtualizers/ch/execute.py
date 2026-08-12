@@ -924,7 +924,7 @@ def execute(
     config: Optional[celaut.Configuration],
     initial_system_resources: celaut.Sysresources,
     father_id: str,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, celaut.Sysresources]:
     vmachine_id = _generate_vmachine_id()
     runtime_dir = _runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []
@@ -1093,6 +1093,15 @@ def execute(
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
         vcpus, mem_b, cpu_quota, cpu_period = _resolve_initial_resources(initial_system_resources)
+        # The row must record what was resolved here -- the values actually enforced
+        # on the guest (cgroup cpu.max + VM memory size) below -- not what the
+        # manifest requested. Persisting the manifest is what billed instances for
+        # what they asked rather than for what they hold (#249).
+        resolved_resources = celaut.Sysresources(
+            cpu_period=cpu_period,
+            cpu_quota=cpu_quota,
+            mem_limit=mem_b,
+        )
         mem_mib = math.ceil(mem_b / (1024 * 1024))
         netmask = str(network.netmask)
         kernel_cmdline = _kernel_cmdline(vm_ip=vm_ip, netmask=netmask)
@@ -1266,7 +1275,7 @@ def execute(
         log.LOGGER(
             f"Cloud Hypervisor VM started: {vmachine_id} ({vm_ip}), runtime_dir={runtime_dir}"
         )
-        return vmachine_id, vm_ip
+        return vmachine_id, vm_ip, resolved_resources
 
     except Exception as e:
         log.LOGGER(f"[CH][{vmachine_id}] execute failed: {type(e).__name__}: {e}")

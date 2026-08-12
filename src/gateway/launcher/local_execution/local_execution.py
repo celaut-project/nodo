@@ -276,7 +276,7 @@ def local_execution(
     )
 
     # Execute virtualizer process.
-    vmachine_id, vmachine_ip = execute(
+    vmachine_id, vmachine_ip, resolved_resources = execute(
         assigment_ports=assigment_ports,
         by_local=not expose_outside,
         service_id=service_id,
@@ -350,11 +350,14 @@ def local_execution(
     # Store the instance in the database with every resource it holds, not just its
     # disk: these columns are what the maintenance tick prices it by, so a field left
     # unrecorded is a resource billed as zero for the instance's whole life.
-    def _sysreq(field: str) -> int:
-        return int(getattr(initial_system_resources, field)) \
-            if initial_system_resources.HasField(field) else 0
-
-    disk_space = _sysreq("disk_space")
+    # The compute/memory figures come from ``resolved_resources`` -- the values the
+    # virtualizer actually reserved (defaults and the MIN_MEM_MIB floor already
+    # applied) -- never from a second, defaults-free re-read of the manifest. That
+    # divergence is exactly what billed instances for what they asked rather than
+    # what they hold (#249). disk_space is resolved at build time and is not part of
+    # the resolver's output, so it is still read from the (validated) manifest here.
+    disk_space = int(initial_system_resources.disk_space) \
+        if initial_system_resources.HasField("disk_space") else 0
     if not disk_space:
         raise Exception("Disk space is not specified in the system requirements range.")
 
@@ -369,9 +372,9 @@ def local_execution(
         virtualizer=configured_virtualizer,
         disk_space=disk_space,
         envs=_serialize_envs(config),
-        mem_limit=_sysreq("mem_limit"),
-        cpu_period=_sysreq("cpu_period"),
-        cpu_quota=_sysreq("cpu_quota"),
+        mem_limit=int(resolved_resources.mem_limit),
+        cpu_period=int(resolved_resources.cpu_period),
+        cpu_quota=int(resolved_resources.cpu_quota),
     )
     log.LOGGER(
         f"Instance provisioned in DB: vmachine_id={vmachine_id}, virtualizer={configured_virtualizer}, "
