@@ -93,9 +93,14 @@ class MaintenanceTickTests(unittest.TestCase):
         from src.manager import maintain
 
         spend = MagicMock(return_value=True)
+        # Recording the burn-rate sample is a database write; like `spend_mu` it is
+        # stubbed so this stays a test of the charge, not of SQLite. The sample and the
+        # charge must not diverge, so it is asserted to land with the same amount below.
+        record = MagicMock()
         with _config(), \
              patch.object(maintain.sc, "get_all_internal_containers_ids", return_value=["vm-1"]), \
              patch.object(maintain.sc, "get_sys_req", return_value=sys_req), \
+             patch.object(maintain.sc, "record_instance_consumption", record), \
              patch.object(maintain, "vm_maintain"), \
              patch.object(maintain, "spend_mu", spend), \
              patch.object(maintain, "system_scarcity", return_value=IDLE), \
@@ -105,7 +110,14 @@ class MaintenanceTickTests(unittest.TestCase):
 
         spend.assert_called_once()
         self.assertEqual(spend.call_args.kwargs["id"], "vm-1")
-        return spend.call_args.kwargs["amount_mu"]
+        amount_mu = spend.call_args.kwargs["amount_mu"]
+        # A successful charge records exactly one burn-rate sample, for the same
+        # instance, of the same amount, over the interval that was just billed.
+        record.assert_called_once()
+        self.assertEqual(record.call_args.kwargs["id"], "vm-1")
+        self.assertEqual(record.call_args.kwargs["charge_mu"], amount_mu)
+        self.assertEqual(record.call_args.kwargs["seconds"], maintain.MANAGER_ITERATION_TIME)
+        return amount_mu
 
     def test_the_manager_charges_each_running_instance(self):
         """The whole tick, from the instance list to the deduction."""

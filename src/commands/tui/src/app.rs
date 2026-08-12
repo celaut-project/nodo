@@ -260,6 +260,19 @@ pub struct Instance {
     pub location: String,
     /// Parent instance id (from `father_id`); empty when this is a root.
     pub father_id: String,
+    /// Burn rate: what this instance costs to keep running, in MU per minute / per
+    /// hour, derived from the `instance_consumption` running average
+    /// (`mu_per_second`). `None` — rendered `—`, never `0` — when no maintenance tick
+    /// has charged it yet, and always `None` for delegated instances (their charge
+    /// happens on the owning peer). It prices *reserved* resources at current
+    /// scarcity, so it is "cost at present prices", not measured resource usage (#245).
+    pub mu_per_minute: Option<f64>,
+    pub mu_per_hour: Option<f64>,
+    /// How many samples the average is built from, and how long ago it was last
+    /// updated (seconds), so a rate from two stale samples reads differently from a
+    /// fresh one. Both `None` when there is no consumption row.
+    pub consumption_samples: Option<u64>,
+    pub consumption_age_secs: Option<f64>,
 }
 
 impl Instance {
@@ -1881,11 +1894,24 @@ fn get_instances(
     service_names: &HashMap<String, String>,
 ) -> SqlResult<Vec<Instance>> {
     let connection = Connection::open(&paths.database)?;
-    let mut statement = connection.prepare(
-        "SELECT id, name, ip, balance_mu, service_id, mem_limit, disk_space, virtualizer,
-                father_id, cpu_period, cpu_quota
-         FROM local_instances",
-    )?;
+    // The burn-rate columns live in `instance_consumption`, LEFT JOINed so an instance
+    // with no samples yet reads NULL (→ `—`) rather than a fabricated 0. The table is
+    // created by the node's migration on first run; guard for the case where the TUI
+    // opens a database the node has never migrated, so a fresh DB still lists instances.
+    let has_consumption = table_exists(&connection, "instance_consumption");
+    let base = "SELECT li.id, li.name, li.ip, li.balance_mu, li.service_id, li.mem_limit,
+                li.disk_space, li.virtualizer, li.father_id, li.cpu_period, li.cpu_quota";
+    let sql = if has_consumption {
+        format!(
+            "{base}, ic.mu_per_second, ic.sample_count,
+                CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', ic.last_refresh) AS INTEGER)
+             FROM local_instances li
+             LEFT JOIN instance_consumption ic ON ic.instance_id = li.id"
+        )
+    } else {
+        format!("{base} FROM local_instances li")
+    };
+    let mut statement = connection.prepare(&sql)?;
     let mut instances: Vec<Instance> = statement
         .query_map([], |row| {
             let id: String = row.get(0)?;
@@ -1901,6 +1927,12 @@ fn get_instances(
             // `read_cpu_max_allowance` for why the row cannot be trusted here.
             let vcpus = read_cpu_max_allowance(&cgroup.join("cpu.max"))
                 .or_else(|| vcpu_allowance(cpu_period, cpu_quota));
+            // Burn-rate columns are only present when the join ran; a per-second
+            // average scales to per-minute / per-hour, and all four fields stay `None`
+            // when the instance has no consumption row yet.
+            let mu_per_second: Option<f64> = if has_consumption { row.get(11)? } else { None };
+            let consumption_samples: Option<i64> = if has_consumption { row.get(12)? } else { None };
+            let consumption_age_secs: Option<i64> = if has_consumption { row.get(13)? } else { None };
             Ok(Instance {
                 usage: read_instance_usage(&cgroup, &id),
                 vcpus,
@@ -1916,6 +1948,10 @@ fn get_instances(
                     .unwrap_or_else(|| "ch".to_string()),
                 location: "local".to_string(),
                 father_id: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                mu_per_minute: mu_per_second.map(|rate| rate * 60.0),
+                mu_per_hour: mu_per_second.map(|rate| rate * 3600.0),
+                consumption_samples: consumption_samples.map(|count| count as u64),
+                consumption_age_secs: consumption_age_secs.map(|secs| secs as f64),
             })
         })?
         .collect::<SqlResult<Vec<_>>>()?;
@@ -1967,10 +2003,29 @@ fn get_delegated_instances(
                 virtualizer: "remote".to_string(),
                 location,
                 father_id: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                // A delegated instance is charged on the owning peer, so there is no
+                // local consumption row to read and no rate to show — reading it would
+                // mean the same blocking gRPC round-trip already ruled out for balance.
+                mu_per_minute: None,
+                mu_per_hour: None,
+                consumption_samples: None,
+                consumption_age_secs: None,
             })
         })?
         .collect();
     instances
+}
+
+/// Whether a table exists, so a query can degrade gracefully against a database the
+/// node has not migrated yet (e.g. a brand-new install the TUI opens first).
+fn table_exists(connection: &Connection, name: &str) -> bool {
+    connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [name],
+            |_| Ok(()),
+        )
+        .is_ok()
 }
 
 fn get_services(paths: &Paths) -> Result<Vec<Service>, io::Error> {
@@ -2454,6 +2509,10 @@ mod tests {
                 usage,
                 location: "local".to_string(),
                 father_id: String::new(),
+                mu_per_minute: None,
+                mu_per_hour: None,
+                consumption_samples: None,
+                consumption_age_secs: None,
             }
         }
 
