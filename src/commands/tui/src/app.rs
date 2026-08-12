@@ -989,7 +989,7 @@ impl App {
             return;
         }
         let Some(peer) = self.peers.selected().cloned() else {
-            self.status = "Select a peer first (Tab focuses peers)".to_string();
+            self.status = "Select a peer first (f focuses peers)".to_string();
             return;
         };
         match adjust_peer_reputation(&self.paths.database, &peer.id, delta) {
