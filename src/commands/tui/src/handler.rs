@@ -119,6 +119,11 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Services => {
             app.open_delete_service_confirm()
         }
+        // Enter/Space expands or collapses the selected config section. `e` still
+        // opens the value editor, so these never fight over the same key.
+        (_, KeyCode::Enter | KeyCode::Char(' ')) if app.page() == Page::Config => {
+            app.toggle_selected_config_node()
+        }
         (KeyModifiers::NONE, KeyCode::Char('/')) if app.page() == Page::Config => {
             app.open_config_filter()
         }
