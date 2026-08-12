@@ -13,6 +13,8 @@ def modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
     current_sys_req = sc.get_sys_req(id=id)
     current_mem_limit = current_sys_req['mem_limit']
     current_disk_space = current_sys_req['disk_space']
+    current_cpu_period = current_sys_req['cpu_period']
+    current_cpu_quota = current_sys_req['cpu_quota']
 
     if sys_req.HasField('mem_limit'):
         variation = sys_req.mem_limit - current_mem_limit
@@ -36,12 +38,20 @@ def modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
 
     new_mem_limit = sys_req.mem_limit if sys_req.HasField('mem_limit') else current_mem_limit
     new_disk_space = sys_req.disk_space if sys_req.HasField('disk_space') else current_disk_space
+    # Persist the CFS pair too, so a CPU resize is recorded rather than enforced on
+    # the guest while the row keeps its stale value and the caller is told it
+    # persisted (#249).
+    new_cpu_period = sys_req.cpu_period if sys_req.HasField('cpu_period') else current_cpu_period
+    new_cpu_quota = sys_req.cpu_quota if sys_req.HasField('cpu_quota') else current_cpu_quota
 
-    if new_mem_limit != current_mem_limit or new_disk_space != current_disk_space:
+    if (new_mem_limit != current_mem_limit or new_disk_space != current_disk_space
+            or new_cpu_period != current_cpu_period or new_cpu_quota != current_cpu_quota):
         if not sc.update_sys_req(
             id=id,
             mem_limit=new_mem_limit,
             disk_space=new_disk_space,
+            cpu_period=new_cpu_period,
+            cpu_quota=new_cpu_quota,
         ):
             return False
 

@@ -370,22 +370,48 @@ class SQLConnection(metaclass=Singleton):
         id: str,
         mem_limit: Optional[int],
         disk_space: Optional[int] = None,
+        cpu_period: Optional[int] = None,
+        cpu_quota: Optional[int] = None,
     ) -> bool:
         """
         Updates system requirements for an internal container.
 
+        Only the columns whose values are provided (non-``None``) are written. The
+        CFS pair is included so a CPU hotplug actually persists: previously this
+        method had no CPU parameters, so a resize enforced ``cpu.max`` on the guest
+        and was reported as persisted while the row kept its stale value (#249).
+
         Args:
             id (str): The id of the internal container.
-            mem_limit (Optional[int]): The new memory limit.
-            disk_space (Optional[int]): The new disk limit.
+            mem_limit (Optional[int]): The new memory limit, in bytes.
+            disk_space (Optional[int]): The new disk limit, in bytes.
+            cpu_period (Optional[int]): The new CFS period, in microseconds.
+            cpu_quota (Optional[int]): The new CFS quota, in microseconds.
 
         Returns:
             bool: True if update was successful, False otherwise.
         """
+        assignments = []
+        params: list = []
+        for column, value in (
+            ("mem_limit", mem_limit),
+            ("disk_space", disk_space),
+            ("cpu_period", cpu_period),
+            ("cpu_quota", cpu_quota),
+        ):
+            if value is not None:
+                assignments.append(f"{column} = ?")
+                params.append(value)
+
+        if not assignments:
+            return True
+
+        params.append(id)
         try:
-            self._execute('''
-                UPDATE local_instances SET mem_limit = ?, disk_space = ? WHERE id = ?
-            ''', (mem_limit, disk_space, id))
+            self._execute(
+                f"UPDATE local_instances SET {', '.join(assignments)} WHERE id = ?",
+                tuple(params),
+            )
             return True
         except:
             return False
