@@ -130,6 +130,7 @@ def create_tables(cursor):
                 id TEXT PRIMARY KEY,
                 client_id TEXT,
                 status TEXT CHECK( status IN ('pending', 'payed', 'rejected') ) NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (client_id) REFERENCES clients (id)
             )
         ''',
