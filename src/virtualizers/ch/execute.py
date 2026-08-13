@@ -23,6 +23,9 @@ from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_bytes
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.virtualizers.ch.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
+# The guest floors live in `limits`: the pricing side applies the same ones to quote an
+# instance before it exists, so both sides read one definition.
+from src.virtualizers.ch import limits
 from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.ch.virtiofs import (
     attach_virtiofs_backends,
@@ -64,20 +67,6 @@ GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     8,
 )
 CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.ch.CONSERVE_RUNTIME_DIR_ON_FAILURE", False)
-
-def _env_int(key: str, default: int) -> int:
-    try:
-        return int(env_manager.get(key, default))
-    except Exception:
-        return int(default)
-
-
-DEFAULT_VCPUS = 1
-DEFAULT_MEM_MIB = max(16, _env_int("virtualizers.ch.DEFAULT_MEM_MIB", 256))
-MIN_MEM_MIB = max(16, _env_int("virtualizers.ch.MIN_MEM_MIB", 128))
-if DEFAULT_MEM_MIB < MIN_MEM_MIB:
-    DEFAULT_MEM_MIB = MIN_MEM_MIB
-
 
 class CHExecuteError(RuntimeError):
     pass
@@ -416,39 +405,6 @@ def _runtime_disk_bytes(vmachine_id: str, rootfs_path: Path) -> int:
             "leaving disk_space unresolved."
         )
         return 0
-
-
-def _resolve_initial_resources(resources: celaut.Sysresources) -> Tuple[int, int, int, int]:
-    vcpus = DEFAULT_VCPUS
-    mem_b = DEFAULT_MEM_MIB * (1024 * 1024)  # Convert MiB to bytes
-
-    # Default values: 1 vCPU
-    cpu_period = 100000
-    cpu_quota = 100000
-
-    try:
-        if resources:
-            if resources.HasField("cpu_period") and resources.cpu_period > 0:
-                cpu_period = resources.cpu_period
-
-            if resources.HasField("cpu_quota") and resources.cpu_quota > 0:
-                cpu_quota = resources.cpu_quota
-
-            if cpu_period > 0 and cpu_quota > 0:
-                vcpus = max(1, int(math.ceil(cpu_quota / cpu_period)))
-
-            if resources.HasField("mem_limit") and resources.mem_limit > 0:
-                # mem_b is in bytes; MIN_MEM_MIB is a MiB floor, so convert it to
-                # bytes before comparing. Without the conversion the floor is a
-                # no-op (128 < any real byte count) and a service declaring e.g.
-                # mem_limit=50MB boots with ~48 MiB of guest RAM — too little for
-                # the kernel+initramfs to reach console, so the guest never brings
-                # up eth0 and launch fails with "Guest network did not become ready".
-                mem_b = max(MIN_MEM_MIB * 1024 * 1024, int(resources.mem_limit))
-    except Exception:
-        pass
-
-    return vcpus, mem_b, cpu_quota, cpu_period
 
 
 def _build_network_resolution(
@@ -1113,7 +1069,7 @@ def execute(
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
-        vcpus, mem_b, cpu_quota, cpu_period = _resolve_initial_resources(initial_system_resources)
+        vcpus, mem_b, cpu_quota, cpu_period = limits.resolve_initial_resources(initial_system_resources)
         # The row must record what was resolved here -- the values actually enforced
         # on the guest (cgroup cpu.max + VM memory size) below -- not what the
         # manifest requested. Persisting the manifest is what billed instances for
@@ -1121,7 +1077,7 @@ def execute(
         #
         # Disk is the size of the rootfs image this instance was just given, which is
         # the manifest's `disk_space` only when that figure happened to be the largest
-        # of the three inputs to `_resolve_initial_rootfs_size_bytes` -- the build also
+        # of the three inputs to `limits.initial_rootfs_size_bytes` -- the build also
         # floors it at MIN_ROOTFS_BYTES, at the populated tree plus overhead, and grows
         # it further whenever mkfs.ext4 ran out of space. Every one of those makes the
         # instance hold more disk than it asked for, and the manifest figure would bill

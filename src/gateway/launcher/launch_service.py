@@ -172,7 +172,10 @@ def launch_service(
             # Funded for what it asked for, not a flat amount: a 128 MiB instance and an
             # 8 GiB one no longer start with the same balance.
             configuration.initial_mu.CopyFrom(to_amount(
-                default_initial_balance(system_resources=service.container.resources.at_init)
+                default_initial_balance(
+                    system_resources=service.container.resources.at_init,
+                    service_hash=service_id,
+                )
             ))
 
         # `nodo force_execution` bypass (testing/dev only): the call carries a
