@@ -397,6 +397,27 @@ def _delete_tap(tap_name: str) -> None:
     _run(["ip", "link", "del", tap_name], check=False)
 
 
+def _runtime_disk_bytes(vmachine_id: str, rootfs_path: Path) -> int:
+    """Bytes of disk this instance actually holds: the size of its own rootfs image.
+
+    Each instance gets a private copy of the service's rootfs (``shutil.copy2`` into
+    its runtime dir), so the image's size is what the node has committed on its
+    behalf, whatever the manifest asked for.
+
+    Returns 0 if the image cannot be stat'd, which the launcher reads as "the
+    virtualizer did not resolve disk" and falls back to the manifest for -- never
+    persisting a zero, since that would bill the instance no disk at all.
+    """
+    try:
+        return int(rootfs_path.stat().st_size)
+    except OSError as e:
+        log.LOGGER(
+            f"[CH][{vmachine_id}] could not stat runtime rootfs {rootfs_path} ({e}); "
+            "leaving disk_space unresolved."
+        )
+        return 0
+
+
 def _resolve_initial_resources(resources: celaut.Sysresources) -> Tuple[int, int, int, int]:
     vcpus = DEFAULT_VCPUS
     mem_b = DEFAULT_MEM_MIB * (1024 * 1024)  # Convert MiB to bytes
@@ -1097,10 +1118,20 @@ def execute(
         # on the guest (cgroup cpu.max + VM memory size) below -- not what the
         # manifest requested. Persisting the manifest is what billed instances for
         # what they asked rather than for what they hold (#249).
+        #
+        # Disk is the size of the rootfs image this instance was just given, which is
+        # the manifest's `disk_space` only when that figure happened to be the largest
+        # of the three inputs to `_resolve_initial_rootfs_size_bytes` -- the build also
+        # floors it at MIN_ROOTFS_BYTES, at the populated tree plus overhead, and grows
+        # it further whenever mkfs.ext4 ran out of space. Every one of those makes the
+        # instance hold more disk than it asked for, and the manifest figure would bill
+        # it for the smaller number.
+        disk_b = _runtime_disk_bytes(vmachine_id=vmachine_id, rootfs_path=rootfs_path)
         resolved_resources = celaut.Sysresources(
             cpu_period=cpu_period,
             cpu_quota=cpu_quota,
             mem_limit=mem_b,
+            disk_space=disk_b,
         )
         mem_mib = math.ceil(mem_b / (1024 * 1024))
         netmask = str(network.netmask)

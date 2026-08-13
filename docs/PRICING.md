@@ -335,6 +335,14 @@ selection, not to pricing.
   model was real in the unit tests and absent in production. `local_instances` now carries
   all four (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`), `add_local_instance`
   writes what the instance actually holds, and the tick passes all four through.
+
+  "What it holds" includes disk: the row records the size of the rootfs image the
+  instance was actually handed, not the `disk_space` its manifest declared. The build
+  floors the image at `MIN_ROOTFS_BYTES`, at the populated tree plus overhead, and grows
+  it again on every `mkfs.ext4` out-of-space retry, so the image is routinely larger
+  than the declared figure and the declared figure would under-bill it. The manifest is
+  still required (a service that names no disk is rejected) and remains the fallback for
+  a virtualizer that does not report disk back.
 * **`service.json` renames `gas_amount_per_call` to `mu_per_call`.** The packer
   rejects the old key rather than ignoring it: a service that kept it would otherwise
   pack with no per-call price at all, i.e. silently free.
