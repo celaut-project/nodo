@@ -8,7 +8,6 @@ config load when unset. It is both the node's wallet and its identity, so a repu
 proof published later is already tied to this node's identity for free, and the
 identity can never change underneath the peers that recorded it.
 """
-import hashlib
 import string
 from functools import lru_cache
 from typing import Optional
@@ -16,10 +15,11 @@ from typing import Optional
 import ecdsa
 
 from src.reputation_system.bip_wallet_verification import (
-    bip_ecdsa_verify_proposition,
+    bip_schnorr_verify_proposition,
     derive_keypair,
     sign_with_key,
 )
+from src.utils import ergo_schnorr
 from src.utils.config import ConfigManager
 
 # P2PK propositionBytes are `0008cd` + 33-byte SEC-compressed public key (see
@@ -163,7 +163,12 @@ def canonical_peer_content_digest(peer) -> str:
     )
 
     canonical = "|".join(["/".join(uris), "/".join(contracts), "/".join(proofs), rates])
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    # Blake2b-256, Ergo's hash, for the same reason the signature is Ergo's Schnorr: this
+    # digest is what the signature commits to, so keeping it on a different hash family
+    # than everything else in the identity path would be the one remaining nodo-only
+    # primitive. Nothing outside this function reads the value -- it is recomputed by the
+    # verifier from the peer's own advertisement, never stored or transmitted.
+    return ergo_schnorr.blake2b256(canonical.encode("utf-8")).hex()
 
 
 def canonical_peer_payload(public_key_hex: str, ts: int, content_digest: str) -> str:
@@ -198,4 +203,4 @@ def verify_peer_payload(public_key_hex: str, payload: str, signature_hex: str) -
         proposition_bytes = bytes.fromhex(node_proposition_hex(public_key_hex))
     except (ValueError, TypeError):
         return False
-    return bip_ecdsa_verify_proposition(proposition_bytes, payload, signature_hex)
+    return bip_schnorr_verify_proposition(proposition_bytes, payload, signature_hex)

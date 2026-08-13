@@ -1596,43 +1596,6 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to remove peer {peer_id}: {e}')
             return False
 
-    def rekey_peer(self, old_peer_id: str, new_peer_id: str) -> bool:
-        """Move a peer's whole record from ``old_peer_id`` to ``new_peer_id``.
-
-        The migration path for issue #236: peers registered before node identity
-        existed hold a random uuid4 id, and the first time such a peer re-handshakes
-        with a valid signature we must adopt its public key as the id *in place* --
-        otherwise it registers as a brand-new peer and its balance_mu balance, external
-        client id, payment contracts and reputation stay stranded on an orphaned row
-        that nothing references again.
-
-        ``peer_id`` is a foreign key in uri, contract_instance and delegated_instances,
-        so all four tables move together, in one transaction. ``"LOCAL"`` is a reserved
-        sentinel for this node's own contracts and is never a discovered peer, so it is
-        refused outright.
-        """
-        if not old_peer_id or not new_peer_id or old_peer_id == new_peer_id:
-            return False
-        if "LOCAL" in (old_peer_id, new_peer_id):
-            logger.LOGGER('Refusing to re-key the reserved LOCAL peer id.')
-            return False
-        if self.peer_exists(peer_id=new_peer_id):
-            logger.LOGGER(f'Cannot re-key {old_peer_id}: {new_peer_id} already exists.')
-            return False
-
-        try:
-            self._execute2([
-                ('UPDATE peer SET id = ? WHERE id = ?', (new_peer_id, old_peer_id)),
-                ('UPDATE uri SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
-                ('UPDATE contract_instance SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
-                ('UPDATE delegated_instances SET peer_id = ? WHERE peer_id = ?', (new_peer_id, old_peer_id)),
-            ])
-            logger.LOGGER(f'Re-keyed peer {old_peer_id} to its public key {new_peer_id}.')
-            return True
-        except sqlite3.Error as e:
-            logger.LOGGER(f'Failed to re-key peer {old_peer_id} to {new_peer_id}: {e}')
-            return False
-
     def prune_peer_uris(self, peer_id: str, keep: Iterable[Tuple[str, int]]) -> int:
         """Drop every URI of ``peer_id`` that is not in ``keep``; return how many went.
 
@@ -1687,27 +1650,6 @@ class SQLConnection(metaclass=Singleton):
             (peer_id,),
         ).fetchone()
         return int(row[0]) if row and row[0] is not None else None
-
-    def peer_uris_exist(self, uris) -> bool:
-        """True if any of ``uris`` (each exposing ``.ip``/``.port``) is already known.
-
-        Args:
-            uris: an iterable of URI-shaped objects (e.g. ``celaut_pb2.Peer.Uri``).
-
-        Returns:
-            bool:
-                - True if at least one URI exists in the database.
-                - True in case of an unexpected error (failsafe behavior).
-                - False if no URIs exist in the database or ``uris`` is empty.
-        """
-        try:
-            for uri in uris:
-                if self.uri_exists(uri=uri):
-                    return True
-        except Exception as e:
-            logger.LOGGER(f"Error while checking peer URI existence: {e}")
-            return True  # Failsafe: Return True to prevent disruption in case of error
-        return False
 
     def uri_exists(self, uri: str|celaut_pb2.Instance.Uri) -> bool:
         """
