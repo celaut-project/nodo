@@ -10,7 +10,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sysinfo::{Disks, System};
 use tokio::process::Command;
 use tokio::task::JoinHandle;
@@ -1255,7 +1255,7 @@ impl App {
         }
     }
 
-    /// Write one value into config.yaml through `yq`, keeping a backup.
+    /// Write one value into config.yaml through `yq`, keeping a timestamped backup.
     ///
     /// Shared by the configuration editor and the pricing bars so a price is written
     /// exactly the way any other setting is -- same quoting, same backup, same failure
@@ -1266,8 +1266,7 @@ impl App {
         value: &str,
     ) -> Result<(), String> {
         let expression = format!("{} = env(NODO_TUI_VALUE)", yq_path_expression(path));
-        let backup = self.paths.config.with_extension("yaml.tui.bak");
-        fs::copy(&self.paths.config, &backup)
+        backup_config(&self.paths.config)
             .map_err(|error| format!("Could not create config backup: {error}"))?;
 
         let output = Command::new(&self.paths.yq)
@@ -2559,8 +2558,253 @@ pub fn shorten(value: &str, max: usize) -> String {
     format!("{start}…{end}")
 }
 
+/// How many timestamped config backups to keep. The Python ConfigManager
+/// (src/utils/config.py) prunes to the same count, so a node's backup directory
+/// looks identical however the last write happened (issue #255).
+const CONFIG_BACKUP_RETENTION: usize = 10;
+
+/// Snapshot `config` to `config-<YYYYMMDDHHMMSS>.yaml` beside it, then prune to the
+/// newest `CONFIG_BACKUP_RETENTION`. Timestamps are UTC so the filename sorts the
+/// same whatever the machine's timezone and matches the Python path byte for byte.
+/// Returns the backup path written.
+fn backup_config(config: &Path) -> io::Result<PathBuf> {
+    let backup = config.with_file_name(format!("config-{}.yaml", utc_stamp(SystemTime::now())));
+    fs::copy(config, &backup)?;
+    prune_config_backups(config)?;
+    Ok(backup)
+}
+
+/// Delete all but the newest `CONFIG_BACKUP_RETENTION` `config-<stamp>.yaml` files
+/// in `config`'s directory. A lexical sort is a time sort because the stamp is
+/// zero-padded, so "keep the last N names" is "keep the N most recent".
+fn prune_config_backups(config: &Path) -> io::Result<()> {
+    let dir = config.parent().filter(|p| !p.as_os_str().is_empty());
+    let dir = dir.unwrap_or_else(|| Path::new("."));
+    let mut backups: Vec<PathBuf> = fs::read_dir(dir)?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| is_config_backup(path))
+        .collect();
+    if backups.len() <= CONFIG_BACKUP_RETENTION {
+        return Ok(());
+    }
+    backups.sort();
+    for stale in &backups[..backups.len() - CONFIG_BACKUP_RETENTION] {
+        let _ = fs::remove_file(stale);
+    }
+    Ok(())
+}
+
+/// True for a `config-<14 digits>.yaml` backup name, so pruning never touches
+/// `config.yaml` itself or anything a user dropped in the directory.
+fn is_config_backup(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let Some(stamp) = name
+        .strip_prefix("config-")
+        .and_then(|rest| rest.strip_suffix(".yaml"))
+    else {
+        return false;
+    };
+    stamp.len() == 14 && stamp.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Format a `SystemTime` as `YYYYMMDDHHMMSS` in UTC, without pulling in a date
+/// crate. Times before the epoch (a badly wrong clock) fall back to the epoch
+/// rather than panicking -- a backup is never worth aborting a config write over.
+fn utc_stamp(time: SystemTime) -> String {
+    let secs = time.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let days = (secs / 86_400) as i64;
+    let tod = secs % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}{month:02}{day:02}{:02}{:02}{:02}",
+        tod / 3_600,
+        (tod % 3_600) / 60,
+        tod % 60,
+    )
+}
+
+/// Days-since-epoch to (year, month, day), UTC. Howard Hinnant's `civil_from_days`
+/// -- the same arithmetic every date library uses, small enough to inline rather
+/// than take a dependency for six filename characters.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64; // [0, 146096]
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+    let year = yoe as i64 + era * 400 + if month <= 2 { 1 } else { 0 };
+    (year, month, day)
+}
+
 #[cfg(test)]
 mod tests {
+
+    /// Timestamped config.yaml backups + retention (issue #255). The prune is
+    /// pinned on hand-made filenames rather than real writes so nothing here has to
+    /// sleep a second per backup to get distinct UTC stamps.
+    mod config_backups {
+        use super::super::{
+            backup_config, civil_from_days, is_config_backup, prune_config_backups, utc_stamp,
+            CONFIG_BACKUP_RETENTION,
+        };
+        use std::fs;
+        use std::path::{Path, PathBuf};
+        use std::time::{Duration, UNIX_EPOCH};
+
+        /// A temp dir removed on drop, so a failed assertion can't strand files for
+        /// the next run.
+        struct TempDir(PathBuf);
+
+        impl TempDir {
+            fn new(name: &str) -> Self {
+                let path = std::env::temp_dir().join(format!("nodo-tui-backup-{name}"));
+                let _ = fs::remove_dir_all(&path);
+                fs::create_dir_all(&path).unwrap();
+                Self(path)
+            }
+            fn config(&self) -> PathBuf {
+                self.0.join("config.yaml")
+            }
+            fn touch(&self, name: &str) {
+                fs::write(self.0.join(name), "x").unwrap();
+            }
+            fn names(&self) -> Vec<String> {
+                let mut names: Vec<String> = fs::read_dir(&self.0)
+                    .unwrap()
+                    .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                    .collect();
+                names.sort();
+                names
+            }
+        }
+
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        /// The stamp is the acceptance criterion of the whole feature: it has to be
+        /// UTC and it has to match Python's `time.strftime("%Y%m%d%H%M%S", gmtime)`.
+        /// 1_700_000_000 is 2023-11-14 22:13:20 UTC.
+        #[test]
+        fn stamp_is_zero_padded_utc() {
+            let t = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+            assert_eq!(utc_stamp(t), "20231114221320");
+            assert_eq!(utc_stamp(UNIX_EPOCH), "19700101000000");
+            // A day with single-digit month/day/time must stay 14 chars wide.
+            let jan = UNIX_EPOCH + Duration::from_secs(1_704_070_805); // 2024-01-01 01:00:05
+            assert_eq!(utc_stamp(jan), "20240101010005");
+        }
+
+        /// The civil-date arithmetic across a leap day, since that is the one place
+        /// the formula earns its keep.
+        #[test]
+        fn civil_from_days_handles_leap_years() {
+            // 2000-02-29 is day 11016 since the 1970 epoch.
+            assert_eq!(civil_from_days(11_016), (2000, 2, 29));
+            assert_eq!(civil_from_days(0), (1970, 1, 1));
+        }
+
+        /// Only `config-<14 digits>.yaml` is a backup. `config.yaml` itself, and
+        /// anything else in the directory, must survive a prune.
+        #[test]
+        fn recognises_only_timestamped_backups() {
+            assert!(is_config_backup(Path::new("/x/config-20231114221320.yaml")));
+            assert!(!is_config_backup(Path::new("/x/config.yaml")));
+            assert!(!is_config_backup(Path::new("/x/config-2023.yaml")));
+            assert!(!is_config_backup(Path::new("/x/config-20231114221320.yaml.bak")));
+            assert!(!is_config_backup(Path::new("/x/notes.yaml")));
+        }
+
+        /// Twelve backups in, exactly ten survive, and they are the ten newest.
+        #[test]
+        fn prune_keeps_the_ten_newest() {
+            let dir = TempDir::new("prune");
+            fs::write(dir.config(), "current").unwrap();
+            for i in 0..12 {
+                dir.touch(&format!("config-202401010000{:02}.yaml", i));
+            }
+            dir.touch("keep-me.txt"); // a foreign file must be untouched
+            prune_config_backups(&dir.config()).unwrap();
+
+            let backups: Vec<String> = dir
+                .names()
+                .into_iter()
+                .filter(|n| n.starts_with("config-") && n.ends_with(".yaml"))
+                .collect();
+            assert_eq!(backups.len(), CONFIG_BACKUP_RETENTION);
+            assert_eq!(backups.first().unwrap(), "config-20240101000002.yaml");
+            assert_eq!(backups.last().unwrap(), "config-20240101000011.yaml");
+            assert!(dir.names().contains(&"config.yaml".to_string()));
+            assert!(dir.names().contains(&"keep-me.txt".to_string()));
+        }
+
+        /// Under the cap, nothing is pruned.
+        #[test]
+        fn prune_is_a_noop_below_the_cap() {
+            let dir = TempDir::new("under");
+            for i in 0..5 {
+                dir.touch(&format!("config-202401010000{:02}.yaml", i));
+            }
+            prune_config_backups(&dir.config()).unwrap();
+            assert_eq!(dir.names().len(), 5);
+        }
+
+        /// End-to-end mirror of the Python demo in the PR: twelve *real*
+        /// `backup_config` calls -- the exact function `write_config_value` runs on
+        /// each save -- a second apart so every UTC stamp is distinct, must leave
+        /// exactly ten backups, the oldest two pruned. `#[ignore]`d because it sleeps
+        /// ~13s; run with `cargo test -- --ignored`.
+        #[test]
+        #[ignore]
+        fn demo_twelve_real_writes_keep_ten() {
+            let dir = TempDir::new("demo12");
+            let cfg = dir.config();
+            for i in 0..12 {
+                fs::write(&cfg, format!("write-{i}")).unwrap();
+                backup_config(&cfg).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(1_050));
+            }
+            let mut backups: Vec<String> = dir
+                .names()
+                .into_iter()
+                .filter(|n| n.starts_with("config-") && n.ends_with(".yaml"))
+                .collect();
+            backups.sort();
+            eprintln!("RUST PATH (backup_config x12): {} kept", backups.len());
+            eprintln!("  oldest kept: {}", backups.first().unwrap());
+            eprintln!("  newest kept: {}", backups.last().unwrap());
+            assert_eq!(backups.len(), CONFIG_BACKUP_RETENTION);
+        }
+
+        /// The write path: `backup_config` copies the live file's bytes to a
+        /// timestamped name and, past the cap, leaves exactly ten behind.
+        #[test]
+        fn backup_config_copies_and_bounds_to_ten() {
+            let dir = TempDir::new("write");
+            fs::write(dir.config(), "the-current-config").unwrap();
+            // Pre-seed ten old backups so this write has to prune one.
+            for i in 0..10 {
+                dir.touch(&format!("config-202401010000{:02}.yaml", i));
+            }
+            let backup = backup_config(&dir.config()).unwrap();
+            assert!(is_config_backup(&backup));
+            assert_eq!(fs::read_to_string(&backup).unwrap(), "the-current-config");
+
+            let backups: Vec<String> = dir
+                .names()
+                .into_iter()
+                .filter(|n| n.starts_with("config-") && n.ends_with(".yaml"))
+                .collect();
+            assert_eq!(backups.len(), CONFIG_BACKUP_RETENTION);
+        }
+    }
 
     /// Live per-instance usage. The point of these numbers is that an operator can
     /// trust them against `nodo observe`, so what is pinned here is the arithmetic and

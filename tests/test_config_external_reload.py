@@ -1,3 +1,4 @@
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -143,8 +144,21 @@ class ExternalConfigChangeTests(unittest.TestCase):
             manager = self._manager(config_path)
             manager.set("network.GATEWAY_PORT", 5050)
 
-            # No leftover temporary files, and a reader only ever sees whole YAML.
-            self.assertEqual([p.name for p in Path(tmpdir).iterdir()], ["config.yaml"])
+            # No leftover atomic-write temp files -- mkstemp writes a dotted
+            # ".config-*.yaml" scratch file and os.replace should consume it -- and a
+            # reader only ever sees whole YAML.
+            names = sorted(p.name for p in Path(tmpdir).iterdir())
+            self.assertEqual(
+                [n for n in names if n.startswith(".config-")], [],
+                f"atomic-write temp file left behind: {names}",
+            )
+            # The write left exactly one timestamped backup beside the config
+            # (issue #255): config-<YYYYMMDDHHMMSS>.yaml.
+            self.assertEqual(
+                [n for n in names if re.fullmatch(r"config-\d{14}\.yaml", n)].__len__(),
+                1, names,
+            )
+            self.assertIn("config.yaml", names)
             self.assertEqual(
                 yaml.safe_load(config_path.read_text(encoding="utf-8"))["network"]["GATEWAY_PORT"],
                 5050,
