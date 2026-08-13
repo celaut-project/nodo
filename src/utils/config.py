@@ -1,5 +1,7 @@
 import copy
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -86,6 +88,46 @@ _TolerantLoader.add_multi_constructor(
 # it on the next `set()`. Re-stat the file at most once every
 # _RELOAD_CHECK_INTERVAL seconds and reload when it changed on disk.
 _RELOAD_CHECK_INTERVAL = 5.0
+
+
+# --- config.yaml backups (issue #255) ---------------------------------------
+# Keep the newest N timestamped backups. The Rust TUI (src/commands/tui/src/app.rs)
+# uses the same constant, filename pattern and retention so a node's backup
+# directory looks identical however the last write happened.
+CONFIG_BACKUP_RETENTION = 10
+
+_CONFIG_BACKUP_RE = re.compile(r"^config-\d{14}\.yaml$")
+
+
+def _prune_config_backups(directory: str, retention: int) -> None:
+    """Delete all but the newest `retention` config-<stamp>.yaml files. Names sort
+    chronologically because the stamp is zero-padded UTC, so a lexical sort is a
+    time sort."""
+    try:
+        names = sorted(n for n in os.listdir(directory) if _CONFIG_BACKUP_RE.match(n))
+    except OSError:
+        return
+    stale = names[:-retention] if retention > 0 else names
+    for name in stale:
+        try:
+            os.remove(os.path.join(directory, name))
+        except OSError:
+            pass
+
+
+def backup_config_file(config_path: str, retention: int = CONFIG_BACKUP_RETENTION) -> Optional[str]:
+    """Snapshot config_path to config-<YYYYMMDDHHMMSS>.yaml beside it, then prune to
+    the newest `retention`. Timestamps are UTC so the filename sorts the same
+    whatever the machine's timezone and matches the Rust TUI byte for byte. Returns
+    the backup path, or None when there's nothing to back up yet."""
+    if not os.path.isfile(config_path):
+        return None
+    directory = os.path.dirname(config_path) or "."
+    stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
+    backup_path = os.path.join(directory, f"config-{stamp}.yaml")
+    shutil.copy2(config_path, backup_path)
+    _prune_config_backups(directory, retention)
+    return backup_path
 
 
 class ConfigManager(metaclass=Singleton):
@@ -296,6 +338,15 @@ class ConfigManager(metaclass=Singleton):
 
     def _save_config_unlocked(self):
         """Internal save method without locking (assumes caller holds lock)."""
+        # Before overwriting, snapshot the current file to a timestamped backup and
+        # prune to the newest CONFIG_BACKUP_RETENTION, so every write -- a .set() or
+        # the dirty-config-on-load path -- is recoverable (issue #255). Beside the
+        # real file, matching where the atomic replace lands. Best-effort: a node
+        # must still be able to persist its config if the backup copy fails.
+        try:
+            backup_config_file(os.path.realpath(self.config_path))
+        except OSError as error:
+            self.log(f"Could not create config backup: {error}")
         # Coerce to native types first, then use safe_dump so a foreign object can
         # never again be persisted as a `!!python/object:...` tag.
         safe_config = to_yaml_safe(self._config)
