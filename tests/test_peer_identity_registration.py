@@ -1,9 +1,10 @@
 """Peer registration under node identity (#236): what a signed announcement may and
 may not do to our stored view of a peer.
 
-These pin the defects found reviewing the first cut of the implementation:
-a relayed announcement with a swapped payment contract, a legacy uuid-keyed peer
-losing its balance on upgrade, and a superseded address never being dropped.
+These pin the defects found reviewing the first cut of the implementation: a relayed
+announcement with a swapped payment contract, and a superseded address never being
+dropped. They also pin that an identity is *mandatory* -- an announcement the node
+cannot attribute to a key is refused outright rather than registered under a random id.
 """
 import os
 import sqlite3
@@ -19,7 +20,7 @@ try:
     from src.database.sql_connection import SQLConnection
     from src.reputation_system import node_identity as ni
     from src.reputation_system.bip_wallet_verification import (
-        bip_ecdsa_sign,
+        bip_schnorr_sign,
         derive_compressed_pubkey,
     )
     import src.manager.manager as manager
@@ -30,9 +31,9 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class PeerIdentityRegistrationTests(unittest.TestCase):
     def setUp(self):
-        # A file-backed DB: _known_peer_id goes through query_interface.fetch_query,
-        # which opens its own connection to DATABASE_FILE and cannot see an
-        # in-memory one.
+        # A file-backed DB: parts of the registration path go through
+        # query_interface.fetch_query, which opens its own connection to DATABASE_FILE
+        # and cannot see an in-memory one.
         handle, self.db_path = tempfile.mkstemp(suffix=".sqlite")
         os.close(handle)
         self._orig_db = manager.sc  # keep the module-level singleton reference
@@ -67,7 +68,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         mu_per_unit.mu_per_unit.n = "1"
         if signed:
             peer.public_key, peer.ts = self.pubkey, ts
-            peer.signature = bip_ecdsa_sign(
+            peer.signature = bip_schnorr_sign(
                 self.mnemonic,
                 ni.canonical_peer_payload(
                     self.pubkey, ts, ni.canonical_peer_content_digest(peer)
@@ -103,7 +104,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         peer.uri[0].transport.tags.append("udp")
         self.assertIsNone(manager._verified_peer_public_key(peer))
 
-    def test_an_unsigned_message_cannot_hijack_an_identified_peer(self):
+    def test_a_forged_message_cannot_hijack_an_identified_peer(self):
         # A peer's addresses are public (GetPeerInfo serves them, and they go
         # on-chain). Naming one must not let a stranger rewrite that peer's
         # advertisement or payment contracts without signing for its identity.
@@ -144,22 +145,51 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
             "udp",
         )
 
-    def test_legacy_uuid_peer_is_adopted_keeping_its_state(self):
-        legacy = manager.add_peer_instance(self._peer([("10.0.0.1", 9999)], signed=False))
-        self.assertNotEqual(legacy, self.pubkey)
-        self.conn.execute(
-            "UPDATE peer SET balance_mu='999999', remote_client_id='client-abc' WHERE id=?", (legacy,)
-        )
-        self.conn.commit()
+    def test_an_unsigned_peer_is_not_registered_at_all(self):
+        # An identity is mandatory: there is no id to give a peer that does not sign,
+        # and the uuid4 fallback that used to name one accepted peers nobody could
+        # authenticate, at an address anyone can claim.
+        self.assertIsNone(manager.add_peer_instance(self._peer([("10.0.0.1", 9999)], signed=False)))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM peer").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM uri").fetchone()[0], 0)
 
-        self.assertEqual(
-            manager.add_peer_instance(self._peer([("10.0.0.1", 9999)], ts=200)), self.pubkey
+    def test_a_badly_signed_peer_is_not_registered_at_all(self):
+        peer = self._peer([("10.0.0.1", 9999)], signed=False)
+        peer.public_key, peer.ts, peer.signature = self.pubkey, 100, "not-a-signature"
+        self.assertIsNone(manager.add_peer_instance(peer))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM peer").fetchone()[0], 0)
+
+    def test_every_stored_peer_id_is_a_public_key(self):
+        for signed in (False, True):
+            manager.add_peer_instance(self._peer([("10.0.0.1", 9999)], signed=signed))
+        ids = [row[0] for row in self.conn.execute("SELECT id FROM peer").fetchall()]
+        self.assertEqual(ids, [self.pubkey])
+        for peer_id in ids:
+            self.assertIsNotNone(ni.normalize_public_key_hex(peer_id))
+
+    def test_accept_peer_refresh_requires_a_signature_from_that_identity(self):
+        # This runs immediately before `pay` sends money and feeds payment_contracts
+        # straight into the DB, so whoever answers at the address must prove they are
+        # the peer we meant to reach -- the channel has no TLS.
+        manager.add_peer_instance(self._peer([("1.2.3.4", 9999)], ts=100))
+
+        self.assertTrue(
+            manager.accept_peer_refresh(self._peer([("1.2.3.4", 9999)], ts=300), self.pubkey)
         )
-        rows = self.conn.execute("SELECT id, balance_mu, remote_client_id FROM peer").fetchall()
-        self.assertEqual(len(rows), 1, "the legacy row must be adopted, not duplicated")
-        self.assertEqual(rows[0][0], self.pubkey)
-        self.assertEqual(rows[0][1], "999999")
-        self.assertEqual(rows[0][2], "client-abc")
+        self.assertFalse(
+            manager.accept_peer_refresh(
+                self._peer([("9.9.9.9", 9999)], signed=False), self.pubkey
+            ),
+            "an unsigned GetPeerInfo response was accepted as a peer's own",
+        )
+        forged = self._peer([("9.9.9.9", 9999)], signed=False)
+        forged.public_key, forged.ts, forged.signature = self.pubkey, 400, "not-a-signature"
+        self.assertFalse(manager.accept_peer_refresh(forged, self.pubkey))
+        self.assertFalse(
+            manager.accept_peer_refresh(self._peer([("1.2.3.4", 9999)], ts=200), self.pubkey),
+            "a stale ts was accepted",
+        )
+        self.assertEqual(self._uris(self.pubkey), ["1.2.3.4"])
 
     def test_a_newer_signed_announcement_drops_superseded_addresses(self):
         manager.add_peer_instance(self._peer([("1.2.3.4", 9999)], ts=100))

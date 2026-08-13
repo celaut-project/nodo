@@ -33,7 +33,17 @@ def connect(peer: str):
         
         peer_id = add_peer_instance(peer_info)
         if not peer_id:
-            print("Failed to add a peer.")
+            if not peer_info.public_key or not peer_info.signature:
+                # Distinguish a policy refusal from a failure: this peer answered, it
+                # just did not identify itself, and no amount of retrying will change
+                # that. A node signs with the identity key derived from its wallet
+                # mnemonic, so one that does not sign is running code that predates it.
+                print(
+                    f"Refused peer {peer}: it did not sign its announcement, so there is "
+                    "no identity to register it under."
+                )
+            else:
+                print("Failed to add a peer.")
         else:
             print(f'Added peer {peer} with id {peer_id}')
             if not peer_info.payment_contracts:

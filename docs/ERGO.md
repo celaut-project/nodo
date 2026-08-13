@@ -81,6 +81,43 @@ with `Decimal` into nanoERG; all subsequent arithmetic is integer nanoERG.
 The node operator can manually provide the mnemonic for the single wallet if the node
 has been reinstalled. This same wallet is used to add reputation proofs to the network.
 
+### Node identity signatures
+
+A node's identity keypair is derived from `ledgers.ergo.WALLET_MNEMONIC` on Ergo's
+derivation path (`m/44'/429'/0'/0/0`), and its 33-byte SEC-compressed public key is both
+the node's `peer_id` and the owner recorded in a reputation proof's R7
+(`0008cd` + public key). See `src/reputation_system/node_identity.py`.
+
+What that key signs — the `GetPeerInfo` response (`Peer.signature`) and the
+ownership challenge for a reputation proof — is signed with **Ergo's own Schnorr scheme
+over secp256k1**, the same one `proveDlog` (P2PK) proofs use and the one ChainCash/Basis
+reuse off-chain:
+
+```
+signature = a || z            (65 bytes: 33-byte compressed point, 32-byte scalar)
+a = compress(k*G)             k random per signature
+e = blake2b256(a || message || public_key)      read as a SIGNED big-endian integer
+z = (k + e*s) mod n
+```
+
+Verification is the group identity `z*G == A + e*P`. Two encoding rules are not optional,
+because they are what the on-chain verifier does — ErgoScript's `byteArrayToBigInt` reads a
+32-byte value as two's-complement:
+
+* `e` is interpreted **signed**, matching the reserve contract's
+  `g.exp(z) == a.multiply(pk.exp(e))`.
+* When signing, the nonce is redrawn until the top byte of both `e` and `z` is `< 0x80`, so
+  neither is read as negative and the signature verifies under the unsigned convention too.
+
+The implementation is pure Python (`src/utils/ergo_schnorr.py`) — no JVM and no Ergo node,
+so a node can sign from first boot. It is checked against the Scala reference
+implementation's cross-validation vectors in `tests/test_ergo_schnorr.py`.
+
+**An identity is mandatory.** A `Peer` that carries no public key, or whose signature does
+not verify against it, is refused: `add_peer_instance` returns nothing and stores nothing,
+and `accept_peer_refresh` rejects a `GetPeerInfo` response not signed by the peer whose
+address it was fetched from. Every peer id in the database is therefore a public key.
+
 ### Sharing Information Between Celaut Nodes
 
 When a node shares information with another, it provides two key elements:
