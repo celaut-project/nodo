@@ -1990,10 +1990,13 @@ fn get_instances(
             let cpu_period: Option<i64> = row.get(9)?;
             let cpu_quota: Option<i64> = row.get(10)?;
             let cgroup = instance_cgroup_dir(paths, &id);
-            // The live ceiling first, the catalogue row only as a fallback: see
-            // `read_cpu_max_allowance` for why the row cannot be trusted here.
-            let vcpus = read_cpu_max_allowance(&cgroup.join("cpu.max"))
-                .or_else(|| vcpu_allowance(cpu_period, cpu_quota));
+            // The persisted CFS pair from the `local_instances` row is the source of
+            // truth (PR #251 makes both the launch and hotplug paths write the *resolved*
+            // period/quota there), and it is the only answer for delegated instances,
+            // which have no local cgroup. `read_cpu_max_allowance` stays as a defensive
+            // fallback for a row written before #251 that still holds `0 / 0`.
+            let vcpus = vcpu_allowance(cpu_period, cpu_quota)
+                .or_else(|| read_cpu_max_allowance(&cgroup.join("cpu.max")));
             // Burn-rate columns are only present when the join ran; a per-second
             // average scales to per-minute / per-hour, and all four fields stay `None`
             // when the instance has no consumption row yet.
@@ -2433,11 +2436,12 @@ fn read_net_counter(ifname: &str, counter: &str) -> Option<u64> {
 
 /// The vCPU allowance the runtime actually programmed, read from the cgroup's `cpu.max`.
 ///
-/// This is the same "re-derive it, don't trust a stored copy" reasoning as the tap name,
-/// and here it is load-bearing: `apply_cpu_limit` (`ch/cgroups.py:117`) writes the
-/// resolved CFS pair to `cpu.max`, but `_resolve_initial_resources`'s result never
-/// reaches the `local_instances` row, which stores `0 / 0` for every instance in
-/// practice. Reading the row alone would mean no instance ever showed an allowance.
+/// `apply_cpu_limit` (`ch/cgroups.py:117`) writes the resolved CFS pair to `cpu.max`.
+/// Since PR #251 that same resolved pair is persisted to the `local_instances` row (the
+/// launch path stores what `_resolve_initial_resources` produced, and hotplugs persist
+/// their resizes), so `get_instances` trusts the row first. This cgroupfs read is kept
+/// only as a defensive fallback for a row written before #251 that still holds `0 / 0`;
+/// it has no answer for delegated instances, which have no local cgroup.
 ///
 /// The file is `"<quota|max> <period>"`; a literal `max` means unbounded, which is `None`
 /// here — the same answer as an unreadable file, because in both cases there is no
@@ -2810,11 +2814,11 @@ mod tests {
             assert_eq!(read_cgroup_io_bytes(&dir.path("absent")), (None, None));
         }
 
-        /// `cpu.max` is the allowance the hypervisor is actually enforcing, and it is the
-        /// primary source precisely because the catalogue row stores `0 / 0` for every
-        /// real instance (`_resolve_initial_resources` never persists what it resolved).
+        /// `read_cpu_max_allowance` parses the enforced `cpu.max`. Since PR #251 the row
+        /// is the primary source (see `get_instances`); this covers the defensive fallback
+        /// the TUI drops to only when a pre-#251 row still reads `0 / 0`.
         #[test]
-        fn the_allowance_comes_from_the_enforced_cpu_max() {
+        fn cpu_max_allowance_parses_the_enforced_cpu_max() {
             let dir = TempDir::new("cpu-max");
             assert_eq!(
                 read_cpu_max_allowance(&dir.write("one", "100000 100000\n")),
