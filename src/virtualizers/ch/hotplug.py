@@ -33,6 +33,36 @@ def _cpu_requested(sysreq: celaut_pb2.Sysresources) -> bool:
     return (period > 0) or (quota > 0)
 
 
+def _applied_sysreq(
+    sysreq: celaut_pb2.Sysresources,
+    report: Dict[str, Any],
+) -> celaut_pb2.Sysresources:
+    """The subset of `sysreq` this hotplug enforced on the guest.
+
+    `local_instances` is what the maintenance tick prices, so a field reaches it only
+    once it has been applied: a resize the guest never received must not move the
+    instance's price. `disk_space` never qualifies -- Cloud Hypervisor cannot resize a
+    live rootfs, and no path in this function touches the image -- so the disk an
+    instance is billed for is the one it was created with.
+
+    A field left unset here keeps the value the row already holds (`modify_sysreq`
+    writes only the fields it is given), which is the right outcome for a resize the
+    virtualizer declined.
+    """
+    applied = celaut_pb2.Sysresources()
+    results = report.get("results", {})
+
+    if results.get("mem_limit", {}).get("status") == "applied":
+        applied.mem_limit = int(sysreq.mem_limit)
+
+    if results.get("cpu", {}).get("status") == "applied":
+        applied.cpu_period = int(sysreq.cpu_period)
+        applied.cpu_quota = int(sysreq.cpu_quota)
+
+    # disk_space is deliberately never copied; see the docstring.
+    return applied
+
+
 def _persist_report(
     vmachine_id: str,
     state: Dict[str, Any],
@@ -148,20 +178,31 @@ def hotplug(
             return False
 
     if mem_requested:
-        try:
-            assert vm_cgroup is not None  # guarded by supported_requested
-            apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=int(sysreq.mem_limit))
+        if int(sysreq.mem_limit) <= 0:
+            # `apply_memory_limit` writes memory.max=max for a non-positive limit, i.e.
+            # unbounded RAM. The row has no way to say "unlimited" -- it would record 0,
+            # which `requested_units` reads as no memory at all -- so granting this hands
+            # out unbounded RAM and bills nothing for it. Refused rather than applied.
             report["results"]["mem_limit"] = _field_result(
-                status="applied",
-                detail=f"Applied memory.max in {cgroup_path}",
+                status="unsupported",
+                detail="mem_limit=0 asks for an unlimited cgroup, which the node cannot price.",
                 requested=int(sysreq.mem_limit),
             )
-        except Exception as e:
-            report["results"]["mem_limit"] = _field_result(
-                status="failed",
-                detail=str(e),
-                requested=int(sysreq.mem_limit),
-            )
+        else:
+            try:
+                assert vm_cgroup is not None  # guarded by supported_requested
+                apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=int(sysreq.mem_limit))
+                report["results"]["mem_limit"] = _field_result(
+                    status="applied",
+                    detail=f"Applied memory.max in {cgroup_path}",
+                    requested=int(sysreq.mem_limit),
+                )
+            except Exception as e:
+                report["results"]["mem_limit"] = _field_result(
+                    status="failed",
+                    detail=str(e),
+                    requested=int(sysreq.mem_limit),
+                )
     else:
         report["results"]["mem_limit"] = _field_result(
             status="ignored",
@@ -175,6 +216,14 @@ def hotplug(
             report["results"]["cpu"] = _field_result(
                 status="failed",
                 detail="cpu_period must be > 0 when CPU limits are requested.",
+                requested={"cpu_quota": quota, "cpu_period": period},
+            )
+        elif quota <= 0:
+            # Same as mem_limit=0: `apply_cpu_limit` writes cpu.max="max <period>", and a
+            # quota of 0 in the row prices as zero vCPUs. Unlimited CPU for free.
+            report["results"]["cpu"] = _field_result(
+                status="unsupported",
+                detail="cpu_quota=0 asks for an unlimited cgroup, which the node cannot price.",
                 requested={"cpu_quota": quota, "cpu_period": period},
             )
         else:
@@ -206,7 +255,13 @@ def hotplug(
         strict_ok = False
 
     if strict_ok:
-        if not modify_sysreq(id=vmachine_id, sys_req=sysreq):
+        applied_sysreq = _applied_sysreq(sysreq=sysreq, report=report)
+        if not applied_sysreq.ListFields():
+            report["results"]["db"] = _field_result(
+                status="ignored",
+                detail="No field was applied to the guest, so there is nothing to persist.",
+            )
+        elif not modify_sysreq(id=vmachine_id, sys_req=applied_sysreq):
             report["results"]["db"] = _field_result(
                 status="failed",
                 detail="modify_sysreq rejected DB update for system requirements.",
