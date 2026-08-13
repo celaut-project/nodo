@@ -1,6 +1,6 @@
 from hashlib import sha3_256
 from threading import Thread
-from time import sleep
+from time import monotonic, sleep
 from datetime import datetime, timedelta
 from threading import Lock
 from typing import Optional
@@ -30,6 +30,14 @@ PAYMENT_MANAGER_ITERATION_TIME = int(env_manager.get("ledgers.ergo.payments.PAYM
 sc = SQLConnection()
 deposit_generation_locked = False
 
+# How long a sweep waits for in-flight deposits before giving up on this iteration.
+DEPOSIT_DRAIN_TIMEOUT = 300
+
+# How long a deposit token may sit 'pending' before it is written off. A payment takes
+# seconds (submit the transaction, then call Payable), so an hour is not a deadline
+# anyone meets by accident -- and a client whose payment lands after it is refused.
+DEPOSIT_TOKEN_TTL = 3600
+
 auxiliar_script_reputation = {}
 auxiliar_script_reputation_lock = Lock()
 
@@ -49,6 +57,8 @@ def _manager_module():
     return manager
 
 def generate_deposit_token(client_id: str) -> str:
+    if not env_manager.get("client.ACCEPT_NEW_DEPOSITS", True):
+        raise Exception("This node is not accepting new deposits.")
     if deposit_generation_locked:
         raise Exception("Deposit generation locked. Try later.")
     _l.LOGGER("Generate deposit token.")
@@ -297,31 +307,69 @@ def __check_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, tok
     return _validator(amount, token, ledger, script)
 
 
+def _pause_and_drain_deposits(timeout: int = DEPOSIT_DRAIN_TIMEOUT) -> bool:
+    """Stop issuing deposit tokens and wait for the in-flight ones to settle.
+
+    ``ergo.manager`` sweeps the wallet by SPENDING its boxes, while
+    ``payment_process_validator`` proves an incoming payment by finding an
+    *unspent* box carrying the deposit token in R4. A sweep that consumes that box
+    turns a client's honest payment into a rejected one, so no sweep may run while
+    a deposit is still in flight. Generation is paused for the wait because
+    otherwise a busy node never reaches zero pending.
+
+    Tokens past ``DEPOSIT_TOKEN_TTL`` are written off first, since a client's
+    ``Payable`` call is the only thing that ever moves one out of 'pending'; without
+    that, a single deposit nobody paid would block every future sweep. The timeout
+    still bounds this iteration, for a token too young to expire but already dead:
+    returning False skips the sweep, rather than wedging this thread and -- with
+    generation paused -- locking out every future deposit as well.
+
+    The pause exists only because the validator needs the box unspent.
+    Proving payment from the confirmed transaction instead would remove the need
+    for it entirely.
+    """
+    global deposit_generation_locked
+    deposit_generation_locked = True
+    expired = sc.expire_pending_deposit_tokens(DEPOSIT_TOKEN_TTL)
+    if expired:
+        _l.LOGGER(f"Expired {expired} deposit token(s) left unpaid for over {DEPOSIT_TOKEN_TTL}s.")
+    deadline = monotonic() + timeout
+    while sc.get_deposit_tokens(status="pending"):
+        if monotonic() >= deadline:
+            return False
+        sleep(1)
+    return True
+
+
 def __manage_interfaces():
+    global deposit_generation_locked
     while True:
         sleep(PAYMENT_MANAGER_ITERATION_TIME)
         _l.LOGGER("Execute payment manager iteration.")
 
-        deposit_generation_locked = True
+        try:
+            if not _pause_and_drain_deposits():
+                _l.LOGGER(
+                    f"{len(sc.get_deposit_tokens(status='pending'))} deposit token(s) still "
+                    "pending after the drain timeout; skipping this iteration so their boxes "
+                    "stay unspent."
+                )
+                continue
 
-        while True:
-            sleep(1)
-            if len(sc.get_deposit_tokens(status="pending")) == 0:
-                _l.LOGGER("Any pending deposit token, now payment interfaces can be managed.")
-                break
+            _l.LOGGER("No pending deposit token, now payment interfaces can be managed.")
 
-        for key, _manage in _payment_envs().manage_interfaces().items():
-            if callable(_manage):
-                try:
-                    _manage()
-                except JavaDependencyMissing:
-                    log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
-                except Exception as e:
-                    _l.LOGGER(f"Exception on manage interface {key}. {str(e)}")
-            else:
-                _l.LOGGER(f"Warning: {_manage} is not callable.")
-
-        deposit_generation_locked = False
+            for key, _manage in _payment_envs().manage_interfaces().items():
+                if callable(_manage):
+                    try:
+                        _manage()
+                    except JavaDependencyMissing:
+                        log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
+                    except Exception as e:
+                        _l.LOGGER(f"Exception on manage interface {key}. {str(e)}")
+                else:
+                    _l.LOGGER(f"Warning: {_manage} is not callable.")
+        finally:
+            deposit_generation_locked = False
 
 
 def init_interfaces():
