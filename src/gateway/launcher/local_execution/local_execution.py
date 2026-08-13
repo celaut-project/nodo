@@ -354,12 +354,23 @@ def local_execution(
     # virtualizer actually reserved (defaults and the MIN_MEM_MIB floor already
     # applied) -- never from a second, defaults-free re-read of the manifest. That
     # divergence is exactly what billed instances for what they asked rather than
-    # what they hold (#249). disk_space is resolved at build time and is not part of
-    # the resolver's output, so it is still read from the (validated) manifest here.
-    disk_space = int(initial_system_resources.disk_space) \
+    # what they hold (#249).
+    #
+    # Disk follows the same rule: the manifest still has to declare it (a service that
+    # names no disk is rejected), but what gets persisted is the size of the image the
+    # virtualizer actually handed the instance, which is >= the declared figure once
+    # the build's floors and mkfs growth are applied. The manifest is only the fallback
+    # for a virtualizer that does not report disk back.
+    declared_disk_space = int(initial_system_resources.disk_space) \
         if initial_system_resources.HasField("disk_space") else 0
-    if not disk_space:
+    if not declared_disk_space:
         raise Exception("Disk space is not specified in the system requirements range.")
+    disk_space = int(resolved_resources.disk_space) or declared_disk_space
+    if disk_space != declared_disk_space:
+        log.LOGGER(
+            f"Instance {vmachine_id} holds {disk_space} bytes of disk against a declared "
+            f"{declared_disk_space}; billing the resolved figure."
+        )
 
     sc.add_local_instance(
         father_id=father_id,
