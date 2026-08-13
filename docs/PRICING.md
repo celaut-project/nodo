@@ -191,6 +191,33 @@ nothing and once as the balance that actually funded it. Worse, the start charge
 occupancy carried the live scarcity surcharge, so the quoted price to start swung with
 whatever else the machine happened to be doing that second.
 
+### A quote prices what the instance will hold
+
+`GetServiceEstimatedCost` and the balance above are the only prices computed *before* the
+instance exists. Both run the manifest through
+`virtualizers.interface.resolve_billable_resources`, which applies the floors the
+virtualizer applies when it creates the guest, so a quote and the ticks that follow it
+read the same figures:
+
+| Manifest says | Guest gets | Where the floor lives |
+| --- | --- | --- |
+| no `cpu_period` / `cpu_quota` | 1 vCPU (`100000/100000`) | `limits.resolve_initial_resources` |
+| `mem_limit` under `MIN_MEM_MIB` | `MIN_MEM_MIB` (a boot requirement, not a policy) | same |
+| `disk_space` under `MIN_ROOTFS_BYTES` | `MIN_ROOTFS_BYTES` | `limits.initial_rootfs_size_bytes` |
+| anything, once built | the rootfs image it is handed | the built bundle |
+
+An instance is therefore funded for `deposits.INITIAL_RUNTIME_HOURS` at the prices the
+ticks will charge it, and the window it pays for is the window it gets.
+
+Disk is exact for a service already built here — `build.built_rootfs_size_bytes` reads
+the size of the image its instances receive — and a **lower bound** otherwise: the
+populated-tree floor and the `mkfs.ext4` growth retries are knowable only once the image
+exists. A service not yet built here can cost more than its quote, never less.
+
+The floors live in one module, `virtualizers/ch/limits.py`, imported both by the code
+that creates a guest (`execute`, `build`) and by the code that prices one. A floor
+defined anywhere else would be a price the node charges without quoting.
+
 ### Worked example
 
 At the defaults above, an instance with 256 MiB RAM, 1 vCPU and 10 GiB disk, on an
