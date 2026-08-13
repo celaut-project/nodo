@@ -26,6 +26,7 @@ from src.utils.monetary import free_tier, format_mu
 from src.virtualizers.interface import remove_firewall_rule
 from src.virtualizers.interface import kill
 from src.virtualizers.interface import hotplug
+from src.virtualizers.interface import resolve_billable_resources
 from src.virtualizers.firewall import (
     TransportProtocol,
     resolve_slot_transport_protocols,
@@ -676,20 +677,32 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
     return new_client_id
 
 
-def default_initial_balance(system_resources: celaut_pb2.Sysresources = None) -> int:
+def default_initial_balance(
+    system_resources: celaut_pb2.Sysresources = None,
+    service_hash: Optional[str] = None,
+) -> int:
     """MU to fund a new instance with when nobody asked for a specific amount.
 
     Derived rather than configured: it is what the requested resources actually cost for
     `deposits.INITIAL_RUNTIME_HOURS`. The flat `DEFAULT_INITIAL_GAS_AMOUNT` this replaces
     funded a 128 MiB instance and an 8 GiB one identically, which meant it was either
     far too much for one or far too little for the other.
+
+    Priced for what the instance will hold rather than for what its manifest asks: the
+    ticks that spend this balance charge the resolved row, so the balance is computed
+    from those same figures or it funds fewer hours than INITIAL_RUNTIME_HOURS.
+    `service_hash`, when known, prices an already-built service's real rootfs image
+    instead of the floor.
     """
     hours = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0))
     if hours <= 0 or system_resources is None:
         return 0
     from src.utils.cost_functions.execution_cost import maintenance_charge_mu
 
-    return maintenance_charge_mu(system_resources=system_resources, seconds=hours * 3600)
+    return maintenance_charge_mu(
+        system_resources=resolve_billable_resources(system_resources, service_hash),
+        seconds=hours * 3600,
+    )
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     """What an instance holds and what it has left to spend.

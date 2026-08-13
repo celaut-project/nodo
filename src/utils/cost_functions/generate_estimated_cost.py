@@ -6,6 +6,9 @@ from src.manager.resources import IOBigData, could_ve_this_sysreq
 from src.utils.cost_functions.general_cost_functions import compute_start_service_cost, compute_maintenance_cost
 from src.utils.utils import from_amount, to_amount
 from src.utils.config import ConfigManager
+from src.utils.logger import LOGGER as logger
+from src.utils.verify import get_service_hex_main_hash
+from src.virtualizers.interface import resolve_billable_resources
 
 env_manager = ConfigManager()
 MANAGER_ITERATION_TIME = env_manager.get("MANAGER_ITERATION_TIME")
@@ -63,6 +66,21 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
     }
 
 
+def _service_hash_or_none(metadata: celaut.Metadata) -> Optional[str]:
+    """The hash to look the built image up by, or None if metadata does not carry one.
+
+    Only ever refines the quote (an already-built service prices its real image
+    instead of the floor), so an unreadable hash falls back rather than failing the
+    quote -- the caller's next step is `build_charge_mu`, which reports it properly.
+    """
+    try:
+        return get_service_hex_main_hash(metadata=metadata)
+    except Exception as e:
+        logger(f"[PRICING] Could not read the service hash from metadata ({e}); "
+               "quoting disk at its floor.")
+        return None
+
+
 def generate_estimated_cost(
         metadata: celaut.Metadata,
         config: celaut.Configuration,
@@ -84,20 +102,29 @@ def generate_estimated_cost(
         initial_balance_mu=initial_mu,
     )
 
+    # Both maintenance figures are quoted for what the instance will *hold*, not for
+    # what its manifest asks for. The virtualizer raises anything below a floor when it
+    # creates the guest -- undeclared CPU becomes one vCPU, RAM below MIN_MEM_MIB is
+    # raised to it, the rootfs image is at least MIN_ROOTFS_BYTES -- and the tick then
+    # charges the resolved row, so a quote has to describe that same shape.
+    service_hash = _service_hash_or_none(metadata)
+
     # Calculate estimated cost for local execution.
     return celaut.EstimatedCost(
-        
+
         # Initial cost.
         cost=to_amount(initial_cost_mu),
 
         # Maintenance cost per manager iteration, at the resources it starts with.
         init_maintenance_cost=to_amount(compute_maintenance_cost(
-            system_resources=resources.at_init, seconds=MANAGER_ITERATION_TIME
+            system_resources=resolve_billable_resources(resources.at_init, service_hash),
+            seconds=MANAGER_ITERATION_TIME,
         )) if resources.HasField('at_init') else to_amount(0),
 
         # Maintenance cost per manager iteration, at the most it may grow to.
         max_maintenance_cost=to_amount(compute_maintenance_cost(
-            system_resources=resources.at_most, seconds=MANAGER_ITERATION_TIME
+            system_resources=resolve_billable_resources(resources.at_most, service_hash),
+            seconds=MANAGER_ITERATION_TIME,
         )) if resources.HasField('at_most') else to_amount(0),
         
         # Maintenance frecuency in seconds.

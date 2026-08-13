@@ -152,7 +152,8 @@ def local_execution(
     father_ip = father_ip if father_ip else ""
 
     initial_mu: int = from_amount(config.initial_mu) \
-        if config.HasField("initial_mu") else default_initial_balance(system_resources=resources.at_init)
+        if config.HasField("initial_mu") \
+        else default_initial_balance(system_resources=resources.at_init, service_hash=service_id)
 
     initial_system_resources: celaut.Sysresources = resources.at_init
 
