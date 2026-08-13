@@ -83,7 +83,8 @@ def execute(
 
     ``resolved_resources`` is what the virtualizer actually reserved for the guest --
     defaults and floors already applied -- so the launcher persists what the instance
-    holds rather than what its manifest requested (#249).
+    holds rather than what its manifest requested (#249). A field left at 0 means the
+    virtualizer does not resolve it, and the launcher falls back to the manifest.
     """
     return ch_execute(
         assigment_ports=assigment_ports,
