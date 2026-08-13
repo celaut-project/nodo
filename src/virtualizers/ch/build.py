@@ -24,6 +24,9 @@ from src.utils.filesystem_xattrs import (
 from src.utils.logger import LOGGER as logger
 from src.utils.verify import get_service_hex_main_hash
 from src.virtualizers.architecture import get_arch_tag, UnsupportedArchitectureException
+# Image floors and the sizing they feed. Shared with the pricing side, so a quote is
+# computed from the same numbers the image is formatted at (see `limits`).
+from src.virtualizers.ch import limits
 
 env_manager = ConfigManager()
 
@@ -32,11 +35,8 @@ KERNEL_PATHS = env_manager.get("virtualizers.ch.KERNEL_PATHS") or {}
 INITRAMFS_PATHS = env_manager.get("virtualizers.ch.INITRAMFS_PATHS") or {}
 SECURITY_CONFIG = env_manager.get("virtualizers.ch.SECURITY", {}) or {}
 
-OVERHEAD_BYTES = 64 * 1024 * 1024
-MIN_ROOTFS_BYTES = 128 * 1024 * 1024
 BLOCK_SIZE = 4096
 MKFS_MAX_ATTEMPTS = 3
-MKFS_GROWTH_FACTOR = 2
 _EXEC_BITS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 _DANGEROUS_MODE_BITS = stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX
 
@@ -881,7 +881,7 @@ def _mkfs_ext4(rootfs_dir: Path, image_path: Path, size_bytes: int) -> int:
                 attempt < MKFS_MAX_ATTEMPTS
                 and _is_mkfs_out_of_space_error(stderr=stderr, stdout=stdout)
             ):
-                current_size = int(current_size * MKFS_GROWTH_FACTOR)
+                current_size = int(current_size * limits.MKFS_GROWTH_FACTOR)
                 logger(
                     "mkfs.ext4 ran out of space while populating rootfs. "
                     f"Retrying with larger image ({current_size} bytes)."
@@ -898,40 +898,6 @@ def _mkfs_ext4(rootfs_dir: Path, image_path: Path, size_bytes: int) -> int:
             ) from e
 
     raise RuntimeError("mkfs.ext4 failed after exhausting retries.")
-
-
-def _resolve_requested_disk_space_bytes(service: celaut_pb2.Service) -> Optional[int]:
-    try:
-        resources = service.container.resources
-    except Exception:
-        return None
-
-    requested_bytes = 0
-    for scope_name in ("at_init", "at_most"):
-        scope = getattr(resources, scope_name, None)
-        if scope is None:
-            continue
-        try:
-            value = int(getattr(scope, "disk_space", 0) or 0)
-            return value if value > 0 else None  # if disk_space is set in at_init, we use it directly as the requested size
-        except Exception:
-            value = 0
-        if value > requested_bytes:
-            requested_bytes = value
-
-    return requested_bytes if requested_bytes > 0 else None
-
-
-def _resolve_initial_rootfs_size_bytes(
-    service: celaut_pb2.Service,
-    total_bytes: int,
-) -> int:
-    requested_disk_space_bytes = _resolve_requested_disk_space_bytes(service)
-    return max(
-        MIN_ROOTFS_BYTES,
-        int(total_bytes) + OVERHEAD_BYTES,
-        int(requested_disk_space_bytes or 0),
-    )
 
 
 def _read_built_rootfs_size_bytes(bundle_dir: Path) -> Optional[int]:
@@ -969,7 +935,7 @@ def _is_service_built_for_arch(
     if service is None:
         return True
 
-    requested_disk_space_bytes = _resolve_requested_disk_space_bytes(service)
+    requested_disk_space_bytes = limits.requested_disk_space_bytes(service)
     if not requested_disk_space_bytes:
         return True
 
@@ -991,6 +957,35 @@ def is_service_built(service_hash: str) -> bool:
         if rootfs_path.is_file() and (rootfs_path.parent / "bundle.json").is_file():
             return True
     return False
+
+
+def built_rootfs_size_bytes(service_hash: str) -> Optional[int]:
+    """Size of the rootfs image an already-built service would hand an instance.
+
+    This is the disk figure the maintenance tick will price the instance by (#262),
+    so a quote issued for a built service can be exact instead of a floor. None when
+    the service is not built here, which leaves the caller with the floor.
+
+    Takes the largest image across the built architectures rather than resolving
+    which one will run: pricing a client above what it will be charged refuses a
+    request, pricing it below gives the node's disk away, and only the first of those
+    is recoverable.
+    """
+    if not CACHE:
+        return None
+    base_dir = Path(CACHE) / "cloud_hypervisor" / service_hash
+    if not base_dir.is_dir():
+        return None
+
+    sizes = []
+    for rootfs_path in base_dir.rglob("rootfs.ext4"):
+        if not rootfs_path.is_file():
+            continue
+        size = _read_built_rootfs_size_bytes(rootfs_path.parent)
+        if size:
+            sizes.append(size)
+
+    return max(sizes) if sizes else None
 
 
 def build(
@@ -1059,8 +1054,8 @@ def build(
     )
 
     total_bytes = _dir_size_bytes(rootfs_dir)
-    requested_disk_space_bytes = _resolve_requested_disk_space_bytes(service)
-    initial_size_bytes = _resolve_initial_rootfs_size_bytes(
+    requested_disk_space_bytes = limits.requested_disk_space_bytes(service)
+    initial_size_bytes = limits.initial_rootfs_size_bytes(
         service=service,
         total_bytes=total_bytes,
     )

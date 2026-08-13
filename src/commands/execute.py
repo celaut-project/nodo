@@ -62,7 +62,8 @@ def generator(
     # config key that no longer exists, so it silently passed None down the chain.
     if initial_mu is None:
         initial_mu = default_initial_balance(
-            system_resources=celaut_pb2.Sysresources(mem_limit=mem_limit)
+            system_resources=celaut_pb2.Sysresources(mem_limit=mem_limit),
+            service_hash=_hash,
         )
 
     try:

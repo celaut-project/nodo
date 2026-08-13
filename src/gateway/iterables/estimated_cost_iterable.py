@@ -50,7 +50,10 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 # before the service is read.
                 if not self.configuration.HasField('initial_mu') or not self.configuration.initial_mu:
                     self.configuration.initial_mu.CopyFrom(
-                        to_amount(default_initial_balance(system_resources=resources.at_init))
+                        to_amount(default_initial_balance(
+                            system_resources=resources.at_init,
+                            service_hash=self.service_hash,
+                        ))
                     )
 
                 yield from bee.serialize_to_buffer(
