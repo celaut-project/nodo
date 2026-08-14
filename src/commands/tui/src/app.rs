@@ -117,6 +117,26 @@ fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
 pub enum PendingAction {
     DeleteService { id: String, label: String },
     KillInstance { id: String, label: String },
+    DisconnectPeer { id: String, label: String },
+}
+
+/// The `nodo` invocation a confirmed [`PendingAction`] turns into, plus the label its
+/// outcome is reported under. Every destructive action goes through the same CLI the
+/// operator would type, so the TUI can never do something `nodo` cannot.
+fn pending_command(action: PendingAction) -> (String, Vec<String>) {
+    match action {
+        PendingAction::DeleteService { id, label } => (
+            format!("Delete service {label}"),
+            vec!["remove".to_string(), id],
+        ),
+        PendingAction::KillInstance { id, label } => {
+            (format!("Kill instance {label}"), vec!["kill".to_string(), id])
+        }
+        PendingAction::DisconnectPeer { id, label } => (
+            format!("Forget peer {label}"),
+            vec!["disconnect".to_string(), id],
+        ),
+    }
 }
 
 /// What to do with a background command's output once it finishes.
@@ -922,12 +942,28 @@ impl App {
         self.tabs.page()
     }
 
-    pub fn on_right(&mut self) {
+    pub fn next_page(&mut self) {
         self.tabs.next();
     }
 
-    pub fn on_left(&mut self) {
+    pub fn previous_page(&mut self) {
         self.tabs.previous();
+    }
+
+    /// →: enter the selected configuration branch (page-local, not page navigation —
+    /// pages cycle with Tab/Shift+Tab). Ignored by every page that has no use for it.
+    pub fn on_right(&mut self) {
+        if self.page() == Page::Config {
+            self.config_tree_state.key_right();
+        }
+    }
+
+    /// ←: leave the current configuration branch — collapse it if it is open,
+    /// otherwise step up to its parent, which is what `key_left` does.
+    pub fn on_left(&mut self) {
+        if self.page() == Page::Config {
+            self.config_tree_state.key_left();
+        }
     }
 
     pub fn on_up(&mut self) {
@@ -1492,21 +1528,47 @@ impl App {
         });
     }
 
+    /// Ask for confirmation before dropping the selected peer.
+    ///
+    /// `nodo disconnect` does the work, which deletes the peer row along with its
+    /// addresses and contract instances — the same thing the operator would type. The
+    /// peer is *forgotten*, not banned: it can re-introduce itself, or be reconnected
+    /// with `c`. That is exactly what makes this useful — a peer whose addresses went
+    /// stale (say another node claimed one, see `claim_uri`) is cleared out here.
+    pub fn open_disconnect_peer_confirm(&mut self) {
+        if self.page() != Page::Network {
+            return;
+        }
+        if self.network_focus != 0 {
+            // Say so rather than silently doing nothing: there is no matching action
+            // for a client (they are ours, and expire on their own).
+            self.status = "Only peers can be forgotten (f focuses peers)".to_string();
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(peer) = self.peers.selected().cloned() else {
+            self.status = "Select a peer first (f focuses peers)".to_string();
+            return;
+        };
+        let label = shorten(&peer.id, 18);
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Forget peer {label}? (y/N)");
+        self.pending_action = Some(PendingAction::DisconnectPeer {
+            id: peer.id.clone(),
+            label,
+        });
+    }
+
     /// Run the pending destructive action (called on `y` in a Confirm modal).
     pub fn confirm_pending(&mut self) {
         let Some(action) = self.pending_action.take() else {
             self.close_input();
             return;
         };
-        let (label, args) = match action {
-            PendingAction::DeleteService { id, label } => (
-                format!("Delete service {label}"),
-                vec!["remove".to_string(), id],
-            ),
-            PendingAction::KillInstance { id, label } => {
-                (format!("Kill instance {label}"), vec!["kill".to_string(), id])
-            }
-        };
+        let (label, args) = pending_command(action);
         self.close_input();
         self.spawn_command(CommandKind::Generic, label, args);
     }
@@ -3606,6 +3668,141 @@ Cold Wallet: 9cold\n";
         assert_eq!(format_bytes(1_073_741_824), "1.0 GiB");
         assert_eq!(percent(25, 100), 25);
         assert_eq!(percent(1, 0), 0);
+    }
+
+    /// ←/→ walk the Config tree; pages are cycled with Tab/Shift+Tab only.
+    mod config_tree_navigation {
+        use super::*;
+
+        fn on_config_page() -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL.iter().position(|page| *page == Page::Config).unwrap();
+            app
+        }
+
+        #[test]
+        fn right_enters_a_branch_and_left_leaves_it() {
+            let mut app = on_config_page();
+            app.config_tree_state.select(vec!["network".to_string()]);
+
+            app.on_right();
+            assert!(
+                app.config_tree_state.opened().contains(&vec!["network".to_string()]),
+                "→ opens the selected branch"
+            );
+
+            app.on_left();
+            assert!(
+                !app.config_tree_state.opened().contains(&vec!["network".to_string()]),
+                "← closes the branch it is standing in"
+            );
+        }
+
+        #[test]
+        fn left_steps_out_to_the_parent_once_the_branch_is_closed() {
+            // The way out of a nested value: ← until there is nothing left to leave.
+            let mut app = on_config_page();
+            app.config_tree_state.select(vec![
+                "virtualizers".to_string(),
+                "ch".to_string(),
+                "MIN_MEM_MIB".to_string(),
+            ]);
+
+            app.on_left();
+            assert_eq!(
+                app.config_tree_state.selected(),
+                &["virtualizers".to_string(), "ch".to_string()]
+            );
+            app.on_left();
+            assert_eq!(app.config_tree_state.selected(), &["virtualizers".to_string()]);
+        }
+
+        #[test]
+        fn the_arrows_never_change_page() {
+            // They used to be page navigation; a stray ← on Config must no longer
+            // throw the operator onto another page mid-edit.
+            let mut app = on_config_page();
+            app.config_tree_state.select(vec!["network".to_string()]);
+            app.on_left();
+            app.on_right();
+            assert_eq!(app.page(), Page::Config);
+
+            // And on a page with no tree they do nothing at all.
+            app.tabs.index = Page::ALL.iter().position(|page| *page == Page::Logs).unwrap();
+            app.on_left();
+            app.on_right();
+            assert_eq!(app.page(), Page::Logs);
+        }
+    }
+
+    mod forgetting_a_peer {
+        use super::*;
+
+        fn peer(id: &str) -> Peer {
+            Peer {
+                id: id.to_string(),
+                uris: "10.0.0.1:8080".to_string(),
+                balance: "0".to_string(),
+                reputation: "—".to_string(),
+                reputation_score: "0".to_string(),
+                contracts: Vec::new(),
+            }
+        }
+
+        fn on_network_page(peers: Vec<Peer>) -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Network)
+                .unwrap();
+            app.peers = StatefulList::with_items(peers);
+            app.peers.next();
+            app
+        }
+
+        #[test]
+        fn it_asks_before_doing_anything() {
+            let mut app = on_network_page(vec![peer("peer-abc")]);
+            app.open_disconnect_peer_confirm();
+
+            assert_eq!(app.input_mode, InputMode::Confirm);
+            assert!(app.input_title.contains("peer-abc"), "{}", app.input_title);
+            assert!(matches!(
+                app.pending_action,
+                Some(PendingAction::DisconnectPeer { ref id, .. }) if id == "peer-abc"
+            ));
+        }
+
+        #[test]
+        fn confirming_runs_nodo_disconnect_on_the_selected_peer() {
+            // The whole point: the same command the operator would type, so the peer
+            // row, its addresses and its contract instances all go together.
+            let (label, args) = pending_command(PendingAction::DisconnectPeer {
+                id: "peer-abc".to_string(),
+                label: "peer-abc".to_string(),
+            });
+            assert_eq!(args, vec!["disconnect".to_string(), "peer-abc".to_string()]);
+            assert_eq!(label, "Forget peer peer-abc");
+        }
+
+        #[test]
+        fn with_nothing_selected_it_says_so_instead_of_asking() {
+            let mut app = on_network_page(Vec::new());
+            app.open_disconnect_peer_confirm();
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.pending_action.is_none());
+            assert!(app.status.contains("Select a peer"), "{}", app.status);
+        }
+
+        #[test]
+        fn the_clients_pane_has_no_such_action() {
+            let mut app = on_network_page(vec![peer("peer-abc")]);
+            app.network_focus = 1;
+            app.open_disconnect_peer_confirm();
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.pending_action.is_none());
+            assert!(app.status.contains("Only peers"), "{}", app.status);
+        }
     }
 }
 

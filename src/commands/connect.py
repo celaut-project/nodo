@@ -50,6 +50,16 @@ def connect(peer: str):
                 print("Failed to add a peer.")
         else:
             print(f'Added peer {peer} with id {peer_id}')
+            # We dialled this address and it answered with an identity we verified, so
+            # it is this peer's and nobody else's. Any other peer still holding it is
+            # stale (the usual cause: the same host regenerated its mnemonic, so its
+            # peer_id changed) and would otherwise keep being tried first.
+            for previous_id in sc.claim_uri(uri=peer, peer_id=peer_id):
+                print(
+                    f"Endpoint {peer} was registered under peer {previous_id}; removed it "
+                    "from that peer, which now answers at whatever other addresses it "
+                    "announced (`nodo disconnect` it if there are none)."
+                )
             if not peer_info.payment_contracts:
                 print(
                     f"Note: peer {peer} advertises no payment contract, so it cannot "

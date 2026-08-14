@@ -145,8 +145,8 @@ if __name__ == '__main__':
         print("""
         Getting started
 
-        nodo config
-            Configure your node and runtime.
+        nodo tui
+            Open the operations console (status, peers, and the config editor).
 
         nodo download <url>
             Download and import a published service.
@@ -198,7 +198,6 @@ if __name__ == '__main__':
                     "\n- connect <ip:port>"
                     "\n- disconnect <peer_id>"
                     "\n- pack <project directory>"
-                    "\n- config"
                     "\n- envs"
                     "\n- tui"
                     "\n- completion <bash|zsh|install>  (shell tab-completion for commands and ids)"
@@ -689,9 +688,6 @@ if __name__ == '__main__':
                 else:
                     print("Nodo service is already running in the background. Cannot start serve.", flush=True)
 
-            case 'config':
-                os.system("/bin/bash bash/reconfig.sh")
-
             case 'envs':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
 
@@ -860,7 +856,7 @@ if __name__ == '__main__':
                 print('Unknown command.', flush=True)
 
     # Hand the console back when a one-shot command finishes. The Ergo / reputation
-    # commands (sync_reputation_proof, submit_reputation, tx_history, config, …)
+    # commands (sync_reputation_proof, submit_reputation, tx_history, …)
     # start a JVM through jpype, whose non-daemon threads otherwise keep the
     # interpreter alive and hang the shell after the command has already done its
     # work. `serve` blocks in wait_for_termination() and never reaches here, and the

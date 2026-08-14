@@ -3,11 +3,9 @@
 Nodo reads a single `config.yaml`, created from
 [`config.example.yaml`](../config.example.yaml) at install time. It lives in the
 installation root (`TARGET_DIR`, default `/nodo`), i.e. `/nodo/config.yaml`. The
-`main.MAIN_DIR` value inside it is the same root. Edit it directly, or use
-`nodo config` (`bash/reconfig.sh` — edits in place with `yq -i`, preserving
-comments, but writes **no** backup) or the `nodo tui` Config page (which also
-preserves comments and additionally writes a `config.yaml.tui.bak` backup on each
-change).
+`main.MAIN_DIR` value inside it is the same root. Edit it directly, or use the
+`nodo tui` Config page, which edits in place with `yq -i` (preserving comments) and
+snapshots the previous file to `config-<YYYYMMDDHHMMSS>.yaml` beside it.
 
 > ⚠️ nodo **rewrites** `config.yaml` on its first load: `auto` values such as
 > `network.GATEWAY_PORT` and `ledgers.ergo.WALLET_MNEMONIC` are resolved to
