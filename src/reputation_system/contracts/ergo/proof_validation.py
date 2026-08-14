@@ -268,7 +268,7 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
 
     # Every box must declare the SAME R7 owner, and it must match the identity
     # public_key peer_id announced (and cryptographically proved, see
-    # manager._verified_peer_public_key) over GetPeerInfo -- a direct byte
+    # manager.verified_peer_public_key) over GetPeerInfo -- a direct byte
     # comparison, replacing the interactive SignPublicKey ownership challenge.
     # Identity no longer depends on holding a proof; a proof, when present, is
     # verified against the identity instead.

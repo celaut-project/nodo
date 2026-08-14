@@ -1,11 +1,20 @@
-"""Ergo's Schnorr signature over secp256k1, in pure Python.
+"""Schnorr signatures over secp256k1, in the encoding Ergo's ecosystem uses off-chain.
 
-This is the signature scheme Ergo itself uses for ``proveDlog`` (P2PK) proofs, and the
-one ChainCash/Basis reuse off-chain for their IOU notes. Nodo signs with it so that a
-signature it produces is the *same kind of object* the rest of the Ergo ecosystem
-produces -- verifiable by ErgoScript, by the Scala reference implementation
-(``basis-tracker``'s ``SigUtils``), and by chaincash-rs -- rather than an ad-hoc scheme
-that merely happens to use the same key.
+This is the Schnorr signature ChainCash/Basis use off-chain for their IOU notes: the
+same ``proveDlog`` sigma protocol Ergo's P2PK proofs are built on, in the encoding those
+projects sign and verify with. Nodo signs with it so that a signature it produces is the
+*same kind of object* the rest of that ecosystem produces -- verifiable by a reserve
+contract in ErgoScript, by the Scala reference implementation (``basis-tracker``'s
+``SigUtils``), and by chaincash-rs -- rather than an ad-hoc scheme that merely happens to
+use the same key.
+
+It is *not* an on-chain P2PK spending proof and cannot be handed to an Ergo node as one:
+sigmastate truncates the Fiat-Shamir challenge to ``CryptoConstants.soundnessBits``
+(192), and ``SigSerializer`` emits ``challenge (24 bytes) || z (32 bytes)`` with ``a``
+recomputed by the verifier rather than transmitted. The 65-byte, full-256-bit form below
+is what a contract verifies *explicitly*, recomputing the challenge from bytes it was
+handed (``basis.es``) -- which is the only kind of Schnorr verification an identity
+signature needs.
 
 Wire format, 65 bytes::
 
@@ -112,9 +121,12 @@ def sign(message: bytes, private_key: Union[int, bytes], public_key: bytes) -> b
     a scalar multiplication, and the caller always has it already).
 
     The nonce is redrawn until both ``e`` and ``z`` encode as positive 32-byte values --
-    see the module docstring for why. Each retry has probability ~1/4, so the loop is not
-    a practical concern, but it is unbounded on purpose: a bounded loop would have to
-    either emit a signature that fails on-chain or raise, and both are worse than looping.
+    see the module docstring for why. Each condition holds with probability ~1/2, so a
+    draw is *accepted* with probability ~1/4 and the loop averages ~4 iterations, i.e.
+    ~4 point multiplications and a couple of milliseconds. Every ``GetPeerInfo`` response
+    pays that (``gateway.utils._sign_peer``), which is still not a practical concern. The
+    loop is unbounded on purpose: a bounded one would have to either emit a signature
+    that fails on-chain or raise, and both are worse than looping.
     """
     if isinstance(private_key, bytes):
         private_key = int.from_bytes(private_key, "big")

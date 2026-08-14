@@ -89,9 +89,11 @@ the node's `peer_id` and the owner recorded in a reputation proof's R7
 (`0008cd` + public key). See `src/reputation_system/node_identity.py`.
 
 What that key signs — the `GetPeerInfo` response (`Peer.signature`) and the
-ownership challenge for a reputation proof — is signed with **Ergo's own Schnorr scheme
-over secp256k1**, the same one `proveDlog` (P2PK) proofs use and the one ChainCash/Basis
-reuse off-chain:
+ownership challenge for a reputation proof — is signed with the **Schnorr scheme over
+secp256k1 that ChainCash/Basis use off-chain**: the same `proveDlog` sigma protocol
+Ergo's P2PK proofs are built on, in the encoding a reserve contract verifies explicitly.
+It is not an on-chain P2PK spending proof — sigmastate truncates the challenge to 192
+bits and serialises 56 bytes with `a` recomputed rather than sent:
 
 ```
 signature = a || z            (65 bytes: 33-byte compressed point, 32-byte scalar)

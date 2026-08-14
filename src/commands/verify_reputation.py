@@ -11,7 +11,7 @@ is implemented here — to check, in order:
   3. the peer's identity public key (its ``peer_id``, since issue #236) matches
      the R7 owner ``propositionBytes`` -- a direct byte comparison, since the
      peer already proved control of that public key by signing its
-     ``GetPeerInfo`` response (see ``manager._verified_peer_public_key``).
+     ``GetPeerInfo`` response (see ``manager.verified_peer_public_key``).
 
 It is strictly read-only: only Ergo-explorer reads. No transaction is built or
 broadcast, and no RPC round-trip against the peer is needed anymore.
