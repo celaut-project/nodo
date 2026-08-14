@@ -410,8 +410,10 @@ message Peer {
     // (public_key, ts, uri, payment_contracts, mu_per_call) -- see
     // node_identity.canonical_peer_payload.
     // Verifying it proves the sender controls public_key without any interactive
-    // challenge, so GetPeerInfo alone is enough (SignPublicKey is removed). Absent on
-    // a peer that predates this or has no identity mnemonic configured yet.
+    // challenge, so GetPeerInfo alone is enough (SignPublicKey is removed). Both are
+    // required: a Peer carrying neither, or whose signature does not verify, is refused
+    // outright -- the public key IS the peer's id, so there is nothing else to register
+    // it under (see manager.add_peer_instance).
     string public_key = 5;
     string signature = 6;
     // Anti-replay: a verifier rejects a message whose ts is not strictly newer than
