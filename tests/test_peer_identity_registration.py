@@ -89,12 +89,12 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
     def test_swapped_payment_contract_is_rejected(self):
         peer = self._peer([("10.0.0.1", 9999)])
         peer.payment_contracts[0].contract.ledger.formal = b"ATTACKER"
-        self.assertIsNone(manager._verified_peer_public_key(peer))
+        self.assertIsNone(manager.verified_peer_public_key(peer))
 
     def test_injected_address_is_rejected(self):
         peer = self._peer([("10.0.0.1", 9999)])
         peer.uri.add(ip="6.6.6.6", port=9999)
-        self.assertIsNone(manager._verified_peer_public_key(peer))
+        self.assertIsNone(manager.verified_peer_public_key(peer))
 
     def test_downgraded_transport_is_rejected(self):
         # Flipping an address's transport would send a reader at it with the wrong
@@ -102,7 +102,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         peer = self._peer([("10.0.0.1", 9999)])
         del peer.uri[0].transport.tags[:]
         peer.uri[0].transport.tags.append("udp")
-        self.assertIsNone(manager._verified_peer_public_key(peer))
+        self.assertIsNone(manager.verified_peer_public_key(peer))
 
     def test_a_forged_message_cannot_hijack_an_identified_peer(self):
         # A peer's addresses are public (GetPeerInfo serves them, and they go

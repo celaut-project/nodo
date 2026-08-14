@@ -1,10 +1,12 @@
 """BIP-39/BIP-32 derivation and signing for node identity (#236) and the reputation proof.
 
-Signatures are Ergo's own Schnorr scheme over secp256k1 (``src.utils.ergo_schnorr``), not
-ECDSA. The key is derived on Ergo's path and denotes an Ergo P2PK proposition, so what it
-signs should be the kind of object Ergo itself verifies; the previous SHA-256 + ECDSA
-scheme used the right key on the right curve to produce a signature no Ergo contract could
-check, and no Ergo tool could have produced.
+Signatures are Schnorr over secp256k1 (``src.utils.ergo_schnorr``), not ECDSA -- the
+off-chain encoding ChainCash/Basis sign and an ErgoScript reserve contract verifies, not
+an on-chain P2PK spending proof (see that module). The key is derived on Ergo's path and
+denotes an Ergo P2PK proposition, so what it signs should be the kind of object that
+ecosystem can check; the previous SHA-256 + ECDSA scheme used the right key on the right
+curve to produce a signature no Ergo contract could check, and no Ergo tool could have
+produced.
 """
 from mnemonic import Mnemonic
 from bip32 import BIP32, HARDENED_INDEX

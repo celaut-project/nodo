@@ -238,7 +238,7 @@ def _peer_advertisement(peer: celaut_pb2.Peer) -> bytes:
     return peer.SerializeToString()
 
 
-def _verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
+def verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
     """The sender's public key, if ``peer`` carries a signature that verifies against it.
 
     Issue #236: a node's identity is its public key, proven by a signature over
@@ -247,9 +247,15 @@ def _verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
     slots, not just the addresses, so a relayed message cannot have its payment
     contract swapped out and still verify.
 
-    Returns None for a peer with no public_key/signature at all, and None for a
-    non-canonical public key. There is no fallback behind it: a peer that cannot be
-    identified this way is refused (see :func:`add_peer_instance`).
+    Returns None for a peer with no public_key/signature at all, None for a signature
+    that does not verify, and None for a non-canonical public key. There is no fallback
+    behind it: a peer that cannot be identified this way is refused (see
+    :func:`add_peer_instance`).
+
+    Public, not private, because that refusal is now an outcome callers have to report
+    on: :func:`add_peer_instance` returns None both for it and for a storage failure, so
+    ``commands.connect`` re-checks this to tell the two apart -- one is worth retrying
+    and the other never will be.
     """
     if not peer.public_key or not peer.signature:
         return None
@@ -306,7 +312,7 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     ConfigManager generates on first load, so signing is not an extra requirement on
     anyone -- it is what every current node already does.
     """
-    peer_id = _verified_peer_public_key(peer)
+    peer_id = verified_peer_public_key(peer)
     if not peer_id:
         log.LOGGER(
             "Refusing a peer announcement with no verifiable identity: a peer is "
@@ -426,7 +432,7 @@ def accept_peer_refresh(peer: celaut_pb2.Peer, peer_id: str) -> bool:
     key (``add_peer_instance`` registers no other kind), so there is no case left where
     there is no key to check the response against.
     """
-    if _verified_peer_public_key(peer) != peer_id:
+    if verified_peer_public_key(peer) != peer_id:
         log.LOGGER(
             f"Refusing refresh for peer {peer_id}: response was not signed by that identity."
         )
