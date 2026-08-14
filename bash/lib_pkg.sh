@@ -25,9 +25,9 @@ detect_pkg_mgr() {
         PKG_MGR="dnf"
     else
         fail "No supported package manager found (looked for apt-get and dnf).
-Install these tools by hand and re-run: a C compiler + make, clang, a *static*
-busybox, cpio, gzip, zip, curl, ca-certificates, git, procps, iproute, ping,
-iptables, e2fsprogs, and an en_US.UTF-8 locale. See docs/INSTALL.md."
+Install these tools by hand and re-run: a C compiler + make, clang, cpio, gzip,
+zip, curl, ca-certificates, git, procps, iproute, ping, iptables, e2fsprogs, and
+an en_US.UTF-8 locale. See docs/INSTALL.md."
     fi
 }
 
@@ -41,9 +41,6 @@ pkg_for() {
         # hardcodes CC=clang (see PYTHON_BUILD_TAG in the setup scripts).
         compiler)   case "$PKG_MGR" in apt) echo "build-essential" ;; dnf) echo "gcc make" ;; esac ;;
         clang)      echo "clang" ;;
-        # build_ch_initramfs.sh refuses a dynamically linked busybox. Debian splits
-        # the static build into its own package; Fedora's busybox is already static.
-        busybox)    case "$PKG_MGR" in apt) echo "busybox-static" ;; dnf) echo "busybox" ;; esac ;;
         procps)     case "$PKG_MGR" in apt) echo "procps" ;;        dnf) echo "procps-ng" ;; esac ;;
         iproute)    case "$PKG_MGR" in apt) echo "iproute2" ;;      dnf) echo "iproute" ;; esac ;;
         ping)       case "$PKG_MGR" in apt) echo "iputils-ping" ;;  dnf) echo "iputils" ;; esac ;;
@@ -56,14 +53,14 @@ pkg_for() {
 
 # What the node needs from the host, by role:
 #   compiler/clang            build psutil during `pip install`
-#   busybox/cpio/gzip         build the Cloud Hypervisor initramfs
+#   cpio/gzip                 pack the Cloud Hypervisor initramfs (busybox, its
+#                             only binary, comes from the Nodo release)
 #   curl/ca-certificates/git  fetch runtimes and sources
 #   procps/iproute/ping/iptables/e2fsprogs  execute preflight (src/virtualizers/ch/execute.py)
 #   zip                       packing
 NODO_HOST_PACKAGE_ALIASES=(
     compiler
     clang
-    busybox
     cpio
     gzip
     zip
@@ -136,15 +133,11 @@ verify_host_tools() {
     local tool
     local missing=()
 
-    for tool in busybox cpio gzip zip curl git ip ping iptables debugfs; do
+    for tool in cpio gzip zip curl git ip ping iptables debugfs; do
         command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
     done
 
     if [ "${#missing[@]}" -gt 0 ]; then
         fail "Missing host tools after dependency install: ${missing[*]}"
-    fi
-
-    if ldd "$(command -v busybox)" 2>&1 | grep -vq "not a dynamic executable"; then
-        fail "busybox is dynamically linked; build_ch_initramfs.sh needs a static one."
     fi
 }

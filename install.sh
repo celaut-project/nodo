@@ -20,9 +20,9 @@ USE_LOCAL_SOURCE=false
 BRANCH="stable"
 BRANCH_EXPLICIT=false
 CH_VERSION="v51.1"
-# Guest kernel published by .github/workflows/guest-kernel.yml; bumped independently
+# Guest kernel + busybox published by .github/workflows/guest-kernel.yml; bumped independently
 # of nodo releases so a kernel fix does not require cutting a node release.
-GUEST_KERNEL_VERSION="guest-kernel-v1"
+GUEST_KERNEL_VERSION="guest-kernel-v2"
 
 print_usage() {
   cat <<EOF

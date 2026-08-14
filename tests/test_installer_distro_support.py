@@ -38,7 +38,6 @@ class PackageManagerAbstractionTests(unittest.TestCase):
         aliases = content.split("NODO_HOST_PACKAGE_ALIASES=(")[1].split(")")[0].split()
         self.assertIn("compiler", aliases)
         self.assertIn("clang", aliases)
-        self.assertIn("busybox", aliases)
 
         mapping = content.split("pkg_for() {")[1].split("\n}")[0]
         for alias in aliases:
@@ -50,12 +49,18 @@ class PackageManagerAbstractionTests(unittest.TestCase):
         self.assertIn("No supported package manager found", content)
         self.assertIn("docs/INSTALL.md", content)
 
-    def test_busybox_must_be_static(self):
-        # build_ch_initramfs.sh rejects a dynamically linked busybox, and Debian
-        # ships that in a separate package while Fedora's is already static.
-        content = LIB_PKG.read_text(encoding="utf-8")
-        self.assertIn("busybox-static", content)
-        self.assertIn("not a dynamic executable", content)
+    def test_busybox_is_not_a_host_dependency(self):
+        # The guest's busybox comes from the Nodo release, so the host does not need
+        # one — that is the whole point of shipping it: distros compile different
+        # applet sets, and the guest userspace must not depend on which.
+        lib = LIB_PKG.read_text(encoding="utf-8")
+        aliases = lib.split("NODO_HOST_PACKAGE_ALIASES=(")[1].split(")")[0].split()
+        self.assertNotIn("busybox", aliases)
+
+        for script in (ARM_SETUP, X86_SETUP):
+            with self.subTest(script=str(script)):
+                content = script.read_text(encoding="utf-8")
+                self.assertIn('download_guest_asset "busybox-${CH_ARCH_TAG//\\//-}"', content)
 
 
 class ServiceUnitPortabilityTests(unittest.TestCase):

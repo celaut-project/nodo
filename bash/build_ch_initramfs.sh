@@ -25,9 +25,18 @@ case "$ARCH_TAG" in
         ;;
 esac
 
-BUSYBOX_BIN="$(command -v busybox || true)"
-if [ -z "$BUSYBOX_BIN" ]; then
-    fail "busybox binary not found in PATH. Install busybox-static."
+# busybox is the guest's entire userspace. Prefer the one provisioned from the
+# Nodo release (same binary, same applets on every node) and fall back to the
+# host's only for manual/dev builds, where the applet check below is the net.
+PROVISIONED_BUSYBOX="$TARGET_DIR/cloud_hypervisor/busybox/${ARCH_TAG}/busybox"
+if [ -x "$PROVISIONED_BUSYBOX" ]; then
+    BUSYBOX_BIN="$PROVISIONED_BUSYBOX"
+else
+    BUSYBOX_BIN="$(command -v busybox || true)"
+    if [ -z "$BUSYBOX_BIN" ]; then
+        fail "No busybox at ${PROVISIONED_BUSYBOX} and none in PATH. Re-run the installer to provision it."
+    fi
+    echo "Warning: using the host's busybox (${BUSYBOX_BIN}); the installer normally provisions one." >&2
 fi
 if ! command -v ldd >/dev/null 2>&1; then
     fail "ldd is required to validate that busybox is static."
@@ -43,7 +52,9 @@ fi
 # to guest boot ("applet not found"), where it looks like a nodo bug and only
 # happens on some distros. `ip` is the sharp edge: without it the guest never
 # configures its network from the ip= kernel argument.
-BUSYBOX_APPLETS=(sh mount switch_root sleep cat echo mkdir ln test chmod ip)
+APPLET_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/guest-kernel/applets.txt"
+[ -f "$APPLET_FILE" ] || fail "Missing applet list at ${APPLET_FILE}"
+mapfile -t BUSYBOX_APPLETS < <(grep -vE '^[[:space:]]*(#|$)' "$APPLET_FILE")
 BUSYBOX_APPLET_LIST="$("$BUSYBOX_BIN" --list 2>/dev/null || true)"
 if [ -z "$BUSYBOX_APPLET_LIST" ]; then
     fail "'$BUSYBOX_BIN --list' produced no output; cannot verify the applets /init needs."
