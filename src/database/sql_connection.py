@@ -1626,9 +1626,9 @@ class SQLConnection(metaclass=Singleton):
     def get_peer_last_ts(self, peer_id: str) -> Optional[int]:
         """The ``ts`` of the last signed Peer message accepted from ``peer_id``.
 
-        None when the peer has never presented one (a legacy/unsigned peer, or one
-        seen for the first time), so the caller's "strictly newer than last accepted"
-        anti-replay check has nothing to compare against and lets the message through.
+        None when the peer has never presented one (it is being seen for the first
+        time), so the caller's "strictly newer than last accepted" anti-replay check
+        has nothing to compare against and lets the message through.
         """
         row = self._execute(
             "SELECT last_ts FROM peer WHERE id = ?", (peer_id,)

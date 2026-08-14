@@ -111,8 +111,8 @@ def verify_reputation(peer_id: str) -> bool:
     if owner_proposition_hex != node_proposition_hex(peer_id):
         print(
             f"FAIL: peer {peer_id}'s identity public key does not match the R7 owner "
-            "(the peer never proved this key over a signed GetPeerInfo, or peer_id "
-            "is a legacy, address-identified id).",
+            "(the proof was published by a different key than the one this peer "
+            "signs its GetPeerInfo with).",
             flush=True,
         )
         return False

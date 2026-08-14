@@ -200,7 +200,6 @@ def create_tables(cursor):
     })
     retire_slot_table(cursor)
     ensure_peer_address_uniqueness(cursor)
-    drop_unidentified_peers(cursor)
 
 
 def retire_slot_table(cursor) -> None:
@@ -257,53 +256,6 @@ def ensure_peer_address_uniqueness(cursor) -> None:
         )
     except sqlite3.Error as e:
         print(f"Error enforcing peer address uniqueness: {e}")
-
-
-# normalize_public_key_hex's rule, in SQL: exactly 66 characters, all lowercase hex.
-# GLOB is case-sensitive, so an uppercase spelling matches [^0-9a-f] and counts as
-# unidentified too -- which is right, since it is not a spelling any peer id can have.
-_UNIDENTIFIED_PEER = "length(id) != 66 OR id GLOB '*[^0-9a-f]*'"
-
-# Every table that names a peer by its id. Their rows mean nothing without the peer.
-_PEER_DEPENDENTS = ("uri", "contract_instance", "delegated_instances", "forced_execution_peer")
-
-
-def drop_unidentified_peers(cursor) -> None:
-    """Delete peer rows whose id is not an identity public key, and what hangs off them.
-
-    A peer's id IS the 33-byte compressed public key (hex) that signed its announcement.
-    ``manager.add_peer_instance`` registers no other kind (issue #236), and
-    ``accept_peer_refresh`` can never match a row keyed by anything else, so the random
-    ``uuid4`` ids handed out before node identity existed are permanently unrefreshable.
-
-    Leaving them is not inert. ``maintain`` skips such a row on every pass, while
-    ``submit_to_ledger`` keeps republishing it on-chain and it keeps counting toward
-    ``total_peer_reputation()``; and when the same node re-handshakes it gets a *second*
-    row under its public key, stranding the old row's balance, remote client id,
-    contracts and deposits on a record nothing references again.
-
-    A one-time delete rather than a rekey: adopting the old row would need the
-    address-based lookup this release drops, and an address is not evidence of identity
-    -- a wrong guess would hand one node's balance to another. Nothing can authenticate
-    these rows, so they go.
-
-    Idempotent, and a no-op on a database that only ever held signed peers.
-    """
-    try:
-        cursor.execute(f"SELECT count(*) FROM peer WHERE {_UNIDENTIFIED_PEER}")
-        count = cursor.fetchone()[0]
-        if not count:
-            return
-        # Dependents first, while the peer rows they select from are still there.
-        for table in _PEER_DEPENDENTS:
-            cursor.execute(
-                f"DELETE FROM {table} WHERE peer_id IN "
-                f"(SELECT id FROM peer WHERE {_UNIDENTIFIED_PEER})"
-            )
-        cursor.execute(f"DELETE FROM peer WHERE {_UNIDENTIFIED_PEER}")
-        print(f"Dropped {count} peer(s) not keyed by an identity public key.")
-    except sqlite3.Error as e:
-        print(f"Error dropping peers without an identity: {e}")
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:
