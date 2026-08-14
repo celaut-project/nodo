@@ -1311,13 +1311,13 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             "tab/shift+tab cycle  •  ↑/↓ select  •  e execute  •  i details  •  d delete  •  q quit"
         }
         Page::Network => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  f peers/clients  •  +/- reputation  •  c connect  •  q quit"
+            "tab/shift+tab cycle  •  ↑/↓ select  •  f peers/clients  •  +/- reputation  •  c connect  •  d forget  •  q quit"
         }
         Page::Pricing => {
             "tab/shift+tab cycle  •  ↑/↓ select  •  +/- adjust 10%  •  e exact value  •  r refresh  •  q quit"
         }
         Page::Config => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  ⏎ expand/collapse  •  e edit  •  / filter  •  x clear  •  q quit"
+            "tab/shift+tab cycle  •  ↑/↓ select  •  →/← branch  •  ⏎ toggle  •  e edit  •  / filter  •  x clear  •  q quit"
         }
         Page::Logs => "tab/shift+tab cycle  •  r refresh  •  q quit",
     };

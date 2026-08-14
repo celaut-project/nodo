@@ -80,10 +80,12 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         // kitty keyboard protocol, so match both or the binding silently dies depending
         // on the terminal. ←/→ are no longer page navigation: they are page-local now
         // and ignored by pages that do not claim them.
-        (KeyModifiers::NONE, KeyCode::Tab) => app.on_right(),
-        (_, KeyCode::BackTab) | (KeyModifiers::SHIFT, KeyCode::Tab) => app.on_left(),
+        (KeyModifiers::NONE, KeyCode::Tab) => app.next_page(),
+        (_, KeyCode::BackTab) | (KeyModifiers::SHIFT, KeyCode::Tab) => app.previous_page(),
         (_, KeyCode::Up) => app.on_up(),
         (_, KeyCode::Down) => app.on_down(),
+        (_, KeyCode::Right) => app.on_right(),
+        (_, KeyCode::Left) => app.on_left(),
         // `f` toggles the peers/clients focus on Network (previously Tab).
         (KeyModifiers::NONE, KeyCode::Char('f')) if app.page() == Page::Network => {
             app.toggle_focus()
@@ -126,6 +128,10 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Services => {
             app.open_delete_service_confirm()
+        }
+        // Same key as Services' delete, on the page's other destructive target.
+        (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Network => {
+            app.open_disconnect_peer_confirm()
         }
         // Enter/Space expands or collapses the selected config section. `e` still
         // opens the value editor, so these never fight over the same key.

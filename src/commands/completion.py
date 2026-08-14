@@ -84,7 +84,6 @@ COMMANDS = sorted(
         "sync_reputation_proof",
         "refresh_ergo_nodes",
         "serve",
-        "config",
         "envs",
         "migrate",
         "storage:prune_blocks",

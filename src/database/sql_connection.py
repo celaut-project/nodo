@@ -1685,6 +1685,52 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Invalid URI format: {uri}. Expected format is "ip:port".')
             return False
 
+    def claim_uri(self, uri: str | celaut_pb2.Instance.Uri, peer_id: str) -> List[str]:
+        """Take ``uri`` (ip:port) away from every peer other than ``peer_id``.
+
+        An address reaches exactly one node, so two peers holding it means one of them
+        is stale -- typically the same host after it regenerated its wallet mnemonic,
+        which changes the identity key its peer_id *is*. The old row then keeps an
+        address that answers as somebody else, and ``generate_uris_by_peer_id`` hands it
+        out in insertion order, so the dead peer_id is the one picked first.
+
+        Only ever called for an address this node dialled itself and got a verified
+        identity back from, so the claim is one we checked rather than one a peer merely
+        asserted: a peer announcing an address it does not own cannot use this to strip
+        it from its rightful owner.
+
+        Returns the peer ids the address was removed from (empty when nobody else held
+        it), so the caller can say so out loud.
+        """
+        try:
+            if type(uri) is str:
+                ip, port = uri.rsplit(':', 1)
+            else:
+                ip, port = uri.ip, uri.port
+            port = int(port)
+        except ValueError:
+            logger.LOGGER(f'Invalid URI format: {uri}. Expected format is "ip:port".')
+            return []
+
+        previous = [
+            row['peer_id'] for row in self._execute(
+                "SELECT DISTINCT peer_id FROM uri WHERE ip = ? AND port = ? AND peer_id != ?",
+                (ip, port, peer_id),
+            ).fetchall()
+        ]
+        if not previous:
+            return []
+
+        self._execute(
+            "DELETE FROM uri WHERE ip = ? AND port = ? AND peer_id != ?",
+            (ip, port, peer_id),
+        )
+        logger.LOGGER(
+            f"Address {ip}:{port} now belongs to peer {peer_id}; removed it from "
+            f"{', '.join(previous)}."
+        )
+        return previous
+
     def add_external_client(self, peer_id: str, client_id: str) -> bool:
         """
         Associates an external client ID with an existing peer.
