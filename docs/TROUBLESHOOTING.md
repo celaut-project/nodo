@@ -56,8 +56,8 @@ virtualization (`/dev/kvm`). It is commonly unavailable when:
 
 ## Guest kernel missing or rejected by Cloud Hypervisor
 
-**Symptom:** the installer fails downloading the guest kernel, or CH refuses to
-boot it (`KernelLoad(Pe(...))`, `UefiLoad(UefiTooBig)`).
+**Symptom:** the installer fails downloading the guest kernel or busybox, or CH
+refuses to boot the kernel (`KernelLoad(Pe(...))`, `UefiLoad(UefiTooBig)`).
 
 **Why:** the guest kernel is a Nodo release asset (`vmlinuz-linux-arm64` /
 `vmlinuz-linux-amd64` under the `guest-kernel-vN` tag), built by
@@ -71,8 +71,13 @@ boot it (`KernelLoad(Pe(...))`, `UefiLoad(UefiTooBig)`).
   `SHA256SUMS`.
 - To pin a different kernel release, change `GUEST_KERNEL_VERSION` in
   `install.sh` and re-run it.
-- To build one locally: `bash bash/guest-kernel/build.sh <arm64|x86_64> <out-dir>`
-  (native builds only; needs ~15 GB of scratch space in `TMPDIR`).
+- To build them locally: `bash bash/guest-kernel/build.sh <arm64|x86_64> <out-dir>`
+  (native builds only; needs ~15 GB of scratch space in `TMPDIR`) and
+  `bash bash/guest-kernel/build-busybox.sh <arm64|x86_64> <out-dir>`.
+- The same release carries `busybox-linux-{arm64,amd64}`, the static binary that is
+  the guest's entire userspace. `build_ch_initramfs.sh` uses the provisioned one at
+  `<MAIN_DIR>/cloud_hypervisor/busybox/<arch>/busybox` and only falls back to the
+  host's if it is missing.
 
 ## KyA prompt blocks automation
 

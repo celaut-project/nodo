@@ -28,7 +28,7 @@ class CloudHypervisorInitramfsBuilderTests(unittest.TestCase):
         # the failure to guest boot ("applet not found"), on some distros only.
         content = Path("bash/build_ch_initramfs.sh").read_text(encoding="utf-8")
 
-        self.assertIn("BUSYBOX_APPLETS=(sh mount switch_root sleep cat echo mkdir ln test chmod ip)", content)
+        self.assertIn("guest-kernel/applets.txt", content)
         self.assertIn("lacks applets required by the guest init", content)
         self.assertLess(
             content.index("missing_applets"),
@@ -56,9 +56,9 @@ class CloudHypervisorInitramfsBuilderTests(unittest.TestCase):
             with self.subTest(script=script):
                 content = Path(script).read_text(encoding="utf-8")
 
-                self.assertIn("download_guest_kernel \"$ch_kernel_target\"", content)
+                self.assertIn('download_guest_asset "vmlinuz-${CH_ARCH_TAG//\\//-}"', content)
                 self.assertIn("${GUEST_KERNEL_VERSION}", content)
-                self.assertIn("Guest kernel SHA256 mismatch", content)
+                self.assertIn("SHA256 mismatch for", content)
                 self.assertNotIn("/boot/vmlinuz", content)
                 self.assertNotIn("resolve_boot_asset", content)
                 self.assertIn(
@@ -73,6 +73,37 @@ class CloudHypervisorInitramfsBuilderTests(unittest.TestCase):
         self.assertIn(
             '"$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION" "$GUEST_KERNEL_VERSION"',
             content,
+        )
+
+
+class GuestUserspaceTests(unittest.TestCase):
+    def test_applet_list_is_the_single_source_of_truth(self):
+        # The builder symlinks these into the initramfs and build-busybox.sh asserts
+        # the binary provides them. Two lists would drift, and the drift only shows
+        # up as a guest that boots without a working /init.
+        applets = Path("bash/guest-kernel/applets.txt").read_text(encoding="utf-8")
+        names = [l for l in applets.splitlines() if l and not l.startswith("#")]
+        self.assertIn("ip", names)
+        self.assertIn("switch_root", names)
+
+        for consumer in ("bash/build_ch_initramfs.sh", "bash/guest-kernel/build-busybox.sh"):
+            with self.subTest(consumer=consumer):
+                self.assertIn("applets.txt", Path(consumer).read_text(encoding="utf-8"))
+
+    def test_shipped_busybox_must_be_static(self):
+        # The initramfs has no libc and no loader: a dynamically linked busybox
+        # cannot start, and the guest dies before /init runs.
+        build = Path("bash/guest-kernel/build-busybox.sh").read_text(encoding="utf-8")
+        self.assertIn("CONFIG_STATIC=y", build)
+        self.assertIn("not a dynamic executable", build)
+        self.assertIn("cannot link statically", build)
+
+    def test_initramfs_prefers_the_provisioned_busybox(self):
+        content = Path("bash/build_ch_initramfs.sh").read_text(encoding="utf-8")
+        self.assertIn('PROVISIONED_BUSYBOX="$TARGET_DIR/cloud_hypervisor/busybox/${ARCH_TAG}/busybox"', content)
+        self.assertLess(
+            content.index("PROVISIONED_BUSYBOX"),
+            content.index('BUSYBOX_BIN="$(command -v busybox || true)"'),
         )
 
 

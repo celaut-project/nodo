@@ -144,24 +144,24 @@ verify_archive_sha256_from_checksums() {
     fi
 }
 
-download_guest_kernel() {
-    # The guest kernel is a Nodo release asset, not the host's /boot kernel: a
-    # distro kernel varies in format (Fedora/RHEL ship a CONFIG_EFI_ZBOOT PE that
-    # Cloud Hypervisor cannot load at all), in size, and in what it enables, so
-    # every node would boot services on a different kernel. Built by
-    # .github/workflows/guest-kernel.yml from bash/guest-kernel/.
-    local destination="$1"
-    local asset base_url tmp_file sums_file expected actual
+download_guest_asset() {
+    # Guest artifacts come from the Nodo release, never from the host: a distro
+    # kernel varies in format (Fedora/RHEL ship a CONFIG_EFI_ZBOOT PE that Cloud
+    # Hypervisor cannot load at all) and a distro busybox varies in which applets
+    # it was compiled with, so every node would run services on a different guest.
+    # Both are built by .github/workflows/guest-kernel.yml from bash/guest-kernel/.
+    local asset="$1"
+    local destination="$2"
+    local mode="$3"
+    local base_url tmp_file sums_file expected actual
 
-    # "linux/amd64" -> "vmlinuz-linux-amd64"
-    asset="vmlinuz-${CH_ARCH_TAG//\//-}"
     base_url="https://github.com/celaut-project/nodo/releases/download/${GUEST_KERNEL_VERSION}"
 
-    tmp_file="$(mktemp /tmp/nodo-guest-kernel.XXXXXX)"
-    sums_file="$(mktemp /tmp/nodo-guest-kernel-sha.XXXXXX)"
+    tmp_file="$(mktemp /tmp/nodo-guest-asset.XXXXXX)"
+    sums_file="$(mktemp /tmp/nodo-guest-asset-sha.XXXXXX)"
 
     download_file "${base_url}/${asset}" "$tmp_file" \
-        || fail "Unable to download guest kernel ${asset} from release ${GUEST_KERNEL_VERSION}."
+        || fail "Unable to download ${asset} from release ${GUEST_KERNEL_VERSION}."
     download_file "${base_url}/SHA256SUMS" "$sums_file" \
         || fail "Unable to download SHA256SUMS from release ${GUEST_KERNEL_VERSION}."
 
@@ -169,9 +169,9 @@ download_guest_kernel() {
     [ -n "$expected" ] || fail "No SHA256 entry for ${asset} in ${GUEST_KERNEL_VERSION} SHA256SUMS."
     actual="$(sha256sum "$tmp_file" | awk '{print $1}')"
     [ "$expected" = "$actual" ] \
-        || fail "Guest kernel SHA256 mismatch for ${asset}: expected ${expected}, got ${actual}."
+        || fail "SHA256 mismatch for ${asset}: expected ${expected}, got ${actual}."
 
-    install -m 0644 "$tmp_file" "$destination"
+    install -m "$mode" "$tmp_file" "$destination"
     rm -f "$tmp_file" "$sums_file"
 }
 
@@ -234,6 +234,7 @@ provision_cloud_hypervisor_assets() {
     local ch_binary_target="$TARGET_DIR/bin/cloud-hypervisor"
     local ch_kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
     local ch_initramfs_target="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
+    local ch_busybox_target="$TARGET_DIR/cloud_hypervisor/busybox/${CH_ARCH_TAG}/busybox"
     local ch_initramfs_builder="$TARGET_DIR/bash/build_ch_initramfs.sh"
 
     if [ ! -f "$CONFIG_FILE" ]; then
@@ -249,14 +250,16 @@ provision_cloud_hypervisor_assets() {
     mkdir -p "$(dirname "$ch_binary_target")"
     mkdir -p "$(dirname "$ch_kernel_target")"
     mkdir -p "$(dirname "$ch_initramfs_target")"
+    mkdir -p "$(dirname "$ch_busybox_target")"
 
     echo "Downloading Cloud Hypervisor ${CH_VERSION} static binary..."
     if ! download_ch_binary "$ch_binary_target"; then
         fail "Unable to download Cloud Hypervisor ${CH_VERSION} release asset for x86_64."
     fi
 
-    echo "Provisioning guest kernel ${GUEST_KERNEL_VERSION} for ${CH_ARCH_TAG}..."
-    download_guest_kernel "$ch_kernel_target"
+    echo "Provisioning guest kernel and busybox ${GUEST_KERNEL_VERSION} for ${CH_ARCH_TAG}..."
+    download_guest_asset "vmlinuz-${CH_ARCH_TAG//\//-}" "$ch_kernel_target" 0644
+    download_guest_asset "busybox-${CH_ARCH_TAG//\//-}" "$ch_busybox_target" 0755
 
     "$ch_initramfs_builder" "$TARGET_DIR" "$CH_ARCH_TAG" "$ch_initramfs_target"
 
@@ -272,6 +275,7 @@ provision_cloud_hypervisor_assets() {
 
     test -x "$ch_binary_target" || fail "Cloud Hypervisor binary is not executable at ${ch_binary_target}."
     test -f "$ch_kernel_target" || fail "Guest kernel download failed at ${ch_kernel_target}."
+    test -x "$ch_busybox_target" || fail "Guest busybox download failed at ${ch_busybox_target}."
     test -f "$ch_initramfs_target" || fail "Initramfs copy failed at ${ch_initramfs_target}."
 }
 

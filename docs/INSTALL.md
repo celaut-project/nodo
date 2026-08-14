@@ -35,7 +35,7 @@ These are the same packages `bash/lib_pkg.sh` installs for you when you run
 ```bash
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-  build-essential clang busybox-static cpio gzip zip \
+  build-essential clang cpio gzip zip \
   curl ca-certificates git procps iproute2 iputils-ping \
   iptables e2fsprogs locales
 ```
@@ -44,7 +44,7 @@ sudo apt-get install -y --no-install-recommends \
 
 ```bash
 sudo dnf install -y \
-  gcc make clang busybox cpio gzip zip \
+  gcc make clang cpio gzip zip \
   curl ca-certificates git procps-ng iproute iputils \
   iptables-nft e2fsprogs glibc-langpack-en
 ```
@@ -55,9 +55,9 @@ Why these:
   `psutil` has no `linux-aarch64` wheel, so pip compiles it from source. Without a
   compiler the install fails at `pip install -r requirements.txt`. (`gcc` works
   too if you `export CC=gcc CXX=g++`.)
-- `busybox` — must be **static**; `build_ch_initramfs.sh` rejects a dynamically
-  linked one. Debian splits that into `busybox-static`; Fedora's is already static.
-- `cpio`, `gzip` — pack the Cloud Hypervisor initramfs.
+- `cpio`, `gzip` — pack the Cloud Hypervisor initramfs. Its only binary, a static
+  busybox, is downloaded from the Nodo release in step 10, so no busybox package
+  is needed here.
 - `iproute2`/`iproute` and `zip` are load-bearing at runtime: `ip` is a hard
   preflight requirement for `execute` (CH networking), and `zip` is invoked when
   packing — without them the first `execute`/`pack` fails. `iptables` and
@@ -315,7 +315,7 @@ rm -f /tmp/cloud-hypervisor.bin
 # Guest kernel: a Nodo release asset, never the host's /boot kernel. It is built
 # by .github/workflows/guest-kernel.yml from bash/guest-kernel/ and pinned in
 # install.sh as GUEST_KERNEL_VERSION.
-GUEST_KERNEL_VERSION="guest-kernel-v1"
+GUEST_KERNEL_VERSION="guest-kernel-v2"
 GUEST_KERNEL_ASSET="vmlinuz-${CH_ARCH_TAG/\//-}"   # linux/arm64 -> vmlinuz-linux-arm64
 GUEST_KERNEL_BASE="https://github.com/celaut-project/nodo/releases/download/${GUEST_KERNEL_VERSION}"
 
@@ -323,13 +323,24 @@ CH_KERNEL_TARGET="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
 CH_INITRAMFS_TARGET="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
 mkdir -p "$(dirname "$CH_KERNEL_TARGET")" "$(dirname "$CH_INITRAMFS_TARGET")"
 
-curl -fsSL "${GUEST_KERNEL_BASE}/${GUEST_KERNEL_ASSET}" -o /tmp/nodo-guest-kernel
-curl -fsSL "${GUEST_KERNEL_BASE}/SHA256SUMS" -o /tmp/nodo-guest-kernel.sums
-EXPECTED="$(awk -v n="$GUEST_KERNEL_ASSET" '{f=$2; gsub(/^\*/,"",f); if (f==n) {print $1; exit}}' /tmp/nodo-guest-kernel.sums)"
-ACTUAL="$(sha256sum /tmp/nodo-guest-kernel | awk '{print $1}')"
-[ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo "Guest kernel checksum mismatch"; exit 1; }
-install -m 0644 /tmp/nodo-guest-kernel "$CH_KERNEL_TARGET"
-rm -f /tmp/nodo-guest-kernel /tmp/nodo-guest-kernel.sums
+CH_BUSYBOX_TARGET="$TARGET_DIR/cloud_hypervisor/busybox/${CH_ARCH_TAG}/busybox"
+mkdir -p "$(dirname "$CH_BUSYBOX_TARGET")"
+
+curl -fsSL "${GUEST_KERNEL_BASE}/SHA256SUMS" -o /tmp/nodo-guest.sums
+
+fetch_guest_asset() {  # <asset-name> <destination> <mode>
+  curl -fsSL "${GUEST_KERNEL_BASE}/$1" -o /tmp/nodo-guest-asset
+  EXPECTED="$(awk -v n="$1" '{f=$2; gsub(/^\*/,"",f); if (f==n) {print $1; exit}}' /tmp/nodo-guest.sums)"
+  ACTUAL="$(sha256sum /tmp/nodo-guest-asset | awk '{print $1}')"
+  [ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo "$1 checksum mismatch"; exit 1; }
+  install -m "$3" /tmp/nodo-guest-asset "$2"
+  rm -f /tmp/nodo-guest-asset
+}
+
+# The guest kernel, and the static busybox that is the guest's entire userspace.
+fetch_guest_asset "$GUEST_KERNEL_ASSET" "$CH_KERNEL_TARGET" 0644
+fetch_guest_asset "busybox-${CH_ARCH_TAG/\//-}" "$CH_BUSYBOX_TARGET" 0755
+rm -f /tmp/nodo-guest.sums
 
 bash "$TARGET_DIR/bash/build_ch_initramfs.sh" "$TARGET_DIR" "$CH_ARCH_TAG" "$CH_INITRAMFS_TARGET"
 
