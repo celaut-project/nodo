@@ -50,6 +50,30 @@ A node indexes an instance as a member of a network only if **both** of the foll
 
 ---
 
+## Authorization: the Ancestor Chain
+
+Declaring a `Network` is a request, not a grant. An instance launched by another
+local instance may only use the networks that **every** generation above it also
+declares: the requested set is intersected, by tag match, with the direct
+father's spec, then with its father's, up to the topmost local ancestor.
+
+* **Implementation:** `filter_networks_with_ancestors()` in `src/manager/networks.py`
+* **Consumer:** the virtualizer, while building `ConfigurationFile.NetworkResolution`
+
+The rule is "only the direct father authorizes" applied by induction: a father can
+only pass on the domain its own father passed to it, so "father yes, grandfather
+no" is not a reachable state. The walk re-derives that grant at launch time from
+each ancestor's *spec* — what it asked for — because the node does not persist
+what each instance was effectively granted.
+
+Because the grant is re-derived rather than stored, it depends on the ancestors'
+specs being readable from the local registry. When one is not — missing, or not
+loadable at that moment — nothing is granted and the launch is aborted; a spec
+this node cannot read is never read as a spec that declared no restrictions. A
+launch that requests no network needs no ancestor spec at all.
+
+---
+
 ## Use Cases
 
 ### 1. DNS
