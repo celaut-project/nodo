@@ -11,7 +11,7 @@ from mnemonic import Mnemonic
 
 from protos import celaut_pb2
 from src.reputation_system import node_identity as ni
-from src.reputation_system.bip_wallet_verification import bip_ecdsa_sign, derive_compressed_pubkey
+from src.reputation_system.bip_wallet_verification import bip_schnorr_sign, derive_compressed_pubkey
 
 MNEMONIC = Mnemonic("english").generate(strength=128)
 OTHER_MNEMONIC = Mnemonic("english").generate(strength=128)
@@ -117,7 +117,7 @@ class SignAndVerifyTests(unittest.TestCase):
         self.pubkey_hex = derive_compressed_pubkey(MNEMONIC).hex()
         self.digest = ni.canonical_peer_content_digest(_peer())
         self.payload = ni.canonical_peer_payload(self.pubkey_hex, 100, self.digest)
-        self.signature = bip_ecdsa_sign(MNEMONIC, self.payload)
+        self.signature = bip_schnorr_sign(MNEMONIC, self.payload)
 
     def test_valid_signature_verifies(self):
         self.assertTrue(ni.verify_peer_payload(self.pubkey_hex, self.payload, self.signature))
@@ -151,7 +151,7 @@ class SignAndVerifyTests(unittest.TestCase):
         tampered = ni.canonical_peer_payload(
             self.pubkey_hex, 100, ni.canonical_peer_content_digest(_peer(expiry=2 ** 40))
         )
-        signature = bip_ecdsa_sign(MNEMONIC, signed)
+        signature = bip_schnorr_sign(MNEMONIC, signed)
         self.assertTrue(ni.verify_peer_payload(self.pubkey_hex, signed, signature))
         self.assertFalse(ni.verify_peer_payload(self.pubkey_hex, tampered, signature))
 

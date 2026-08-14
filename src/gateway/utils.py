@@ -184,13 +184,18 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
 
 
 def _sign_peer(peer: celaut_pb2.Peer) -> None:
-    """Sign ``peer`` with this node's identity key, if one is configured yet.
+    """Sign ``peer`` with this node's identity key.
 
     Issue #236: this signature is what a verifier checks instead of the old
     interactive ``SignPublicKey`` ownership challenge -- GetPeerInfo alone now
-    proves the sender controls ``public_key``. A node with no identity mnemonic
-    configured (see node_identity.get_identity_mnemonic) is left unsigned, and
-    peers fall back to treating it as a legacy, address-identified peer.
+    proves the sender controls ``public_key``. There is no fallback behind it: a peer
+    refuses an announcement it cannot verify (``manager.add_peer_instance``), so an
+    unsigned node is invisible to the network rather than address-identified.
+
+    Both ways out without a signature should be unreachable -- every node derives an
+    identity key from the mnemonic ConfigManager generates on first load -- so each one
+    logs. The refusal itself is only ever logged by the *remote* peer, so staying quiet
+    here would leave an unreachable node with nothing locally to explain why.
     """
     from src.reputation_system.node_identity import (
         canonical_peer_content_digest,
@@ -201,6 +206,10 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
 
     public_key_hex = get_node_public_key_hex()
     if not public_key_hex:
+        log.LOGGER(
+            'No identity public key, so this node is announcing itself UNSIGNED and '
+            'every peer will refuse it. Check ledgers.ergo.WALLET_MNEMONIC.'
+        )
         return
 
     from src.utils.network import uri_expiry
@@ -213,6 +222,10 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
         canonical_peer_payload(public_key_hex, ts, canonical_peer_content_digest(peer))
     )
     if not signature:
+        log.LOGGER(
+            f'Could not sign this node\'s announcement as {public_key_hex}, so every '
+            'peer will refuse it. Check ledgers.ergo.WALLET_MNEMONIC.'
+        )
         return
 
     peer.public_key = public_key_hex

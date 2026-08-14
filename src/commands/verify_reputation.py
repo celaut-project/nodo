@@ -11,7 +11,7 @@ is implemented here — to check, in order:
   3. the peer's identity public key (its ``peer_id``, since issue #236) matches
      the R7 owner ``propositionBytes`` -- a direct byte comparison, since the
      peer already proved control of that public key by signing its
-     ``GetPeerInfo`` response (see ``manager._verified_peer_public_key``).
+     ``GetPeerInfo`` response (see ``manager.verified_peer_public_key``).
 
 It is strictly read-only: only Ergo-explorer reads. No transaction is built or
 broadcast, and no RPC round-trip against the peer is needed anymore.
@@ -111,8 +111,8 @@ def verify_reputation(peer_id: str) -> bool:
     if owner_proposition_hex != node_proposition_hex(peer_id):
         print(
             f"FAIL: peer {peer_id}'s identity public key does not match the R7 owner "
-            "(the peer never proved this key over a signed GetPeerInfo, or peer_id "
-            "is a legacy, address-identified id).",
+            "(the proof was published by a different key than the one this peer "
+            "signs its GetPeerInfo with).",
             flush=True,
         )
         return False
