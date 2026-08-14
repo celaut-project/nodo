@@ -37,6 +37,25 @@ if ldd "$BUSYBOX_BIN" 2>&1 | grep -vq "not a dynamic executable"; then
     fail "busybox must be static for initramfs usage. Install busybox-static."
 fi
 
+# Every applet /init calls. busybox is the one input to the initramfs that still
+# comes from the host, and distros compile different applet sets — Fedora's build
+# has all 394, a minimal one may not. Symlinking blindly would defer the failure
+# to guest boot ("applet not found"), where it looks like a nodo bug and only
+# happens on some distros. `ip` is the sharp edge: without it the guest never
+# configures its network from the ip= kernel argument.
+BUSYBOX_APPLETS=(sh mount switch_root sleep cat echo mkdir ln test chmod ip)
+BUSYBOX_APPLET_LIST="$("$BUSYBOX_BIN" --list 2>/dev/null || true)"
+if [ -z "$BUSYBOX_APPLET_LIST" ]; then
+    fail "'$BUSYBOX_BIN --list' produced no output; cannot verify the applets /init needs."
+fi
+missing_applets=()
+for applet in "${BUSYBOX_APPLETS[@]}"; do
+    printf '%s\n' "$BUSYBOX_APPLET_LIST" | grep -qx "$applet" || missing_applets+=("$applet")
+done
+if [ "${#missing_applets[@]}" -gt 0 ]; then
+    fail "busybox at ${BUSYBOX_BIN} lacks applets required by the guest init: ${missing_applets[*]}"
+fi
+
 if ! command -v cpio >/dev/null 2>&1; then
     fail "cpio is required to build initramfs."
 fi
@@ -53,7 +72,7 @@ trap cleanup EXIT
 mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/etc" "$ROOT/newroot" "$ROOT/proc" "$ROOT/sys"
 
 install -m 0755 "$BUSYBOX_BIN" "$ROOT/bin/busybox"
-for applet in sh mount switch_root sleep cat echo mkdir ln test chmod ip; do
+for applet in "${BUSYBOX_APPLETS[@]}"; do
     ln -sf /bin/busybox "$ROOT/bin/$applet"
 done
 

@@ -22,6 +22,19 @@ class CloudHypervisorInitramfsBuilderTests(unittest.TestCase):
         self.assertIn("fail \"Usage: $0 <TARGET_DIR> <ARCH_TAG> <OUTPUT_PATH>\"", content)
         self.assertNotIn("KERNEL_PATH", content)
 
+    def test_builder_verifies_the_applets_init_needs(self):
+        # busybox is the last input to the initramfs that comes from the host, and
+        # distros compile different applet sets. Symlinking without checking defers
+        # the failure to guest boot ("applet not found"), on some distros only.
+        content = Path("bash/build_ch_initramfs.sh").read_text(encoding="utf-8")
+
+        self.assertIn("BUSYBOX_APPLETS=(sh mount switch_root sleep cat echo mkdir ln test chmod ip)", content)
+        self.assertIn("lacks applets required by the guest init", content)
+        self.assertLess(
+            content.index("missing_applets"),
+            content.index('for applet in "${BUSYBOX_APPLETS[@]}"; do\n    ln -sf'),
+        )
+
     def test_builder_mounts_cgroup2_after_sys_move(self):
         # The guest has no init system (the entrypoint is PID 1 out of switch_root),
         # so the initramfs must mount the unified cgroup-v2 hierarchy itself; otherwise
