@@ -54,6 +54,26 @@ virtualization (`/dev/kvm`). It is commonly unavailable when:
 
 `doctor` also checks/repairs the `nodo.service` systemd unit; run it with `sudo`.
 
+## Guest kernel missing or rejected by Cloud Hypervisor
+
+**Symptom:** the installer fails downloading the guest kernel, or CH refuses to
+boot it (`KernelLoad(Pe(...))`, `UefiLoad(UefiTooBig)`).
+
+**Why:** the guest kernel is a Nodo release asset (`vmlinuz-linux-arm64` /
+`vmlinuz-linux-amd64` under the `guest-kernel-vN` tag), built by
+`.github/workflows/guest-kernel.yml`. It is deliberately **not** the host's
+`/boot` kernel: distro kernels differ in size and format, and Fedora/RHEL ship a
+`CONFIG_EFI_ZBOOT` image that CH's PE loader cannot read at all.
+
+**Fix:**
+- Re-run the installer, or download the asset by hand into
+  `virtualizers.ch.KERNEL_PATHS[<arch>]` and verify it against the release's
+  `SHA256SUMS`.
+- To pin a different kernel release, change `GUEST_KERNEL_VERSION` in
+  `install.sh` and re-run it.
+- To build one locally: `bash bash/guest-kernel/build.sh <arm64|x86_64> <out-dir>`
+  (native builds only; needs ~15 GB of scratch space in `TMPDIR`).
+
 ## KyA prompt blocks automation
 
 **Symptom:** a headless/agent run hangs or exits at the Know Your Assumptions

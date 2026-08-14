@@ -13,7 +13,8 @@ It follows the current runtime model:
 
 ## 1) Scope and assumptions
 
-- OS: Ubuntu 22.04 LTS (or compatible Debian-based distro).
+- OS: any Linux with `apt` or `dnf` (tested on Ubuntu 22.04/24.04 and Fedora 44,
+  x86_64 and aarch64 — including Fedora Asahi Remix on Apple Silicon).
 - Architecture: `x86_64` or `aarch64`.
 - You have `sudo` access.
 - Installation root: `TARGET_DIR` (default `/nodo`).
@@ -24,24 +25,48 @@ export TARGET_DIR=/nodo
 
 ## 2) Install base system packages
 
-These are host-level packages used by setup/build tools. Python/JRE runtimes for Nodo are installed locally in later steps.
+Host-level tools only. Nodo installs its own Python, JRE, yq, cloud-hypervisor and
+guest kernel in later steps, so nothing here is a build dependency of CPython.
+These are the same packages `bash/lib_pkg.sh` installs for you when you run
+`install.sh`.
+
+**Debian / Ubuntu:**
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y \
-  build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
-  libssl-dev libreadline-dev libffi-dev libsqlite3-dev \
-  wget libbz2-dev busybox-static cpio gzip initramfs-tools-core iputils-ping \
-  ca-certificates curl gnupg lsb-release git procps locales \
-  iproute2 zip iptables e2fsprogs
+sudo apt-get install -y --no-install-recommends \
+  build-essential clang busybox-static cpio gzip zip \
+  curl ca-certificates git procps iproute2 iputils-ping \
+  iptables e2fsprogs locales
 ```
 
-`iproute2` and `zip` are load-bearing at runtime: `ip` is a hard preflight
-requirement for `execute` (CH networking), and `zip` is invoked when packing —
-without them the first `execute`/`pack` fails. `iptables`/`e2fsprogs` provide
-the `iptables`/`debugfs` tools also checked by the execute preflight.
-`protobuf-compiler` is not installed by the setup script and is only needed for
-development (regenerating protobufs), so it is omitted here.
+**Fedora / RHEL:**
+
+```bash
+sudo dnf install -y \
+  gcc make clang busybox cpio gzip zip \
+  curl ca-certificates git procps-ng iproute iputils \
+  iptables-nft e2fsprogs glibc-langpack-en
+```
+
+Why these:
+
+- `clang` — the portable CPython records `CC=clang` in its `sysconfig`, and
+  `psutil` has no `linux-aarch64` wheel, so pip compiles it from source. Without a
+  compiler the install fails at `pip install -r requirements.txt`. (`gcc` works
+  too if you `export CC=gcc CXX=g++`.)
+- `busybox` — must be **static**; `build_ch_initramfs.sh` rejects a dynamically
+  linked one. Debian splits that into `busybox-static`; Fedora's is already static.
+- `cpio`, `gzip` — pack the Cloud Hypervisor initramfs.
+- `iproute2`/`iproute` and `zip` are load-bearing at runtime: `ip` is a hard
+  preflight requirement for `execute` (CH networking), and `zip` is invoked when
+  packing — without them the first `execute`/`pack` fails. `iptables` and
+  `e2fsprogs` provide the `iptables`/`debugfs` tools also checked by that preflight.
+- `protobuf-compiler` is not installed by the setup script and is only needed for
+  development (regenerating protobufs), so it is omitted here.
+
+If your distro uses neither `apt` nor `dnf`, install the equivalents by hand and
+add a branch to `pkg_for()` in `bash/lib_pkg.sh` so `install.sh` works there too.
 
 ## 3) Get source and create config
 
@@ -287,17 +312,24 @@ done
 [ -n "$CH_OK" ] || { echo "Unable to download cloud-hypervisor"; exit 1; }
 rm -f /tmp/cloud-hypervisor.bin
 
-KERNEL_SOURCE="$(readlink -f /boot/vmlinuz 2>/dev/null || true)"
-if [ -z "$KERNEL_SOURCE" ] || [ ! -f "$KERNEL_SOURCE" ]; then
-  KERNEL_SOURCE="$(find /boot -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
-fi
-[ -f "$KERNEL_SOURCE" ] || { echo "Kernel not found in /boot"; exit 1; }
+# Guest kernel: a Nodo release asset, never the host's /boot kernel. It is built
+# by .github/workflows/guest-kernel.yml from bash/guest-kernel/ and pinned in
+# install.sh as GUEST_KERNEL_VERSION.
+GUEST_KERNEL_VERSION="guest-kernel-v1"
+GUEST_KERNEL_ASSET="vmlinuz-${CH_ARCH_TAG/\//-}"   # linux/arm64 -> vmlinuz-linux-arm64
+GUEST_KERNEL_BASE="https://github.com/celaut-project/nodo/releases/download/${GUEST_KERNEL_VERSION}"
 
 CH_KERNEL_TARGET="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
 CH_INITRAMFS_TARGET="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
 mkdir -p "$(dirname "$CH_KERNEL_TARGET")" "$(dirname "$CH_INITRAMFS_TARGET")"
-cp -f "$KERNEL_SOURCE" "$CH_KERNEL_TARGET"
-chmod 0644 "$CH_KERNEL_TARGET"
+
+curl -fsSL "${GUEST_KERNEL_BASE}/${GUEST_KERNEL_ASSET}" -o /tmp/nodo-guest-kernel
+curl -fsSL "${GUEST_KERNEL_BASE}/SHA256SUMS" -o /tmp/nodo-guest-kernel.sums
+EXPECTED="$(awk -v n="$GUEST_KERNEL_ASSET" '{f=$2; gsub(/^\*/,"",f); if (f==n) {print $1; exit}}' /tmp/nodo-guest-kernel.sums)"
+ACTUAL="$(sha256sum /tmp/nodo-guest-kernel | awk '{print $1}')"
+[ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo "Guest kernel checksum mismatch"; exit 1; }
+install -m 0644 /tmp/nodo-guest-kernel "$CH_KERNEL_TARGET"
+rm -f /tmp/nodo-guest-kernel /tmp/nodo-guest-kernel.sums
 
 bash "$TARGET_DIR/bash/build_ch_initramfs.sh" "$TARGET_DIR" "$CH_ARCH_TAG" "$CH_INITRAMFS_TARGET"
 
@@ -338,11 +370,19 @@ Create the `systemd` unit from template:
 ```bash
 PY_RUNTIME_DIR="$(dirname "$PY_RUNTIME_BIN")"
 
+# The admin group is distro-specific (`sudo` on Debian, `wheel` on Fedora/RHEL) and
+# systemd refuses to start a unit whose Group does not resolve. install.sh and
+# `nodo doctor` pick it the same way, so keep this in sync or doctor will rewrite
+# the unit — and stop the service — on every run.
+ADMIN_GROUP=root
+for g in sudo wheel; do getent group "$g" >/dev/null 2>&1 && { ADMIN_GROUP="$g"; break; }; done
+
 sudo sed \
   -e "s|{{MAIN_DIR}}|$TARGET_DIR|g" \
   -e "s|{{JAVA_HOME}}|$JAVA_HOME_PATH|g" \
   -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|$PY_RUNTIME_DIR|g" \
   -e "s|{{PYTHON_VENV_BIN}}|$PY_VENV_BIN|g" \
+  -e "s|{{ADMIN_GROUP}}|$ADMIN_GROUP|g" \
   "$TARGET_DIR/bash/nodo.service.template" > /tmp/nodo.service
 
 sudo install -m 0644 /tmp/nodo.service /etc/systemd/system/nodo.service
