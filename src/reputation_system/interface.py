@@ -19,7 +19,25 @@ def update_peer_reputation(peer_id: str, amount: int) -> bool:
         return sc.update_reputation_peer(peer_id, amount)
 
 def update_vmachine_reputation(vmachine_id: str, amount: int) -> bool:
-    """Update reputation of the peer where the vmachine is been executed (if it's external) and the reputation of the container' service
+    """Score the service a vmachine runs. No peer is touched from here.
+
+    This used to read a peer id out of the vmachine id (`id##peer_id`) and move that
+    peer's score by the same amount. It was wrong twice over.
+
+    It was wrong about *who*: every caller is `maintain.maintain_vmachines`, which
+    iterates `get_all_internal_containers_ids` -- rows of `local_instances`, machines
+    running on this node. So the `##` branch never fired, and the event was dropped
+    rather than recorded anywhere. Nothing in the tree mints an id with `##` any
+    more either; a delegated instance is keyed by the token the peer handed back, and
+    the peer behind it is read from `delegated_instances.peer_id`, never by splitting
+    a string (see `metrics.get_metrics`).
+
+    And it was wrong about *what*: the outcomes that reach this function are an
+    instance pruned for running out of balance and a machine the virtualizer lost.
+    Neither is evidence about a peer. A peer is penalised where a peer actually
+    failed us -- a refused payment, an unanswerable `GetPeerInfo` -- and those call
+    `update_peer_reputation` directly.
+
     Args:
         vmachine_id (str): Vmachine's id
         amount (int): The amount to add to the reputation score.
@@ -30,10 +48,6 @@ def update_vmachine_reputation(vmachine_id: str, amount: int) -> bool:
 
     # TODO Add factors to allow different weights.
 
-    if "##" in vmachine_id:
-        peer_id: str = vmachine_id.split('##')[1]
-        update_peer_reputation(peer_id=peer_id, amount=amount)
-    
     # TODO update the service.
 
 def compute_reputation(peer_id) -> float:

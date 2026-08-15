@@ -226,7 +226,11 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
             _l.LOGGER(f"Payment of {amount} to {peer_id} communicated successfully.")
             return True
         except Exception as e:
-            _reputation_interface().update_vmachine_reputation(vmachine_id=peer_id, amount=-1)  # TODO On envs.
+            # A peer that will not take our `Payable` call is the peer failing us, so
+            # this is a peer penalty and is written as one. It used to be handed to
+            # `update_vmachine_reputation` with a peer id in the vmachine argument,
+            # which meant it landed nowhere at all.
+            _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=-1)  # TODO On envs.
             attempt += 1
             _l.LOGGER(f"Communication attempt {attempt} failed: {str(e)}")
             if attempt >= COMMUNICATION_ATTEMPTS:
