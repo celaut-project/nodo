@@ -42,6 +42,29 @@ CONSUMPTION_WINDOW_SECONDS = 3600
 CONSUMPTION_WINDOW_SAMPLES = max(1, CONSUMPTION_WINDOW_SECONDS // max(1, MANAGER_ITERATION_TIME))
 
 
+# Tables this node writes that a database created before them will not have.
+#
+# `migrate` runs from the setup scripts, and `nodo migrate` *deletes* the database
+# before recreating it -- so an operator who pulls new code and restarts the service
+# has no upgrade path at all. Without these, a peer's reputation update would fail and
+# roll its score back with the missing event, which is a worse outcome than the feature
+# simply not being there. Everything created here is `IF NOT EXISTS`.
+TRACEABILITY_TABLES = ("payments", "reputation_events", "service_reputation")
+
+
+def _ensure_traceability_tables(connection) -> None:
+    try:
+        from src.database.migrate import ensure_tables
+
+        cursor = connection.cursor()
+        ensure_tables(cursor, TRACEABILITY_TABLES)
+        connection.commit()
+    except Exception as e:
+        # A read-only or otherwise unusable database is the node's problem to report
+        # elsewhere; it must not stop this constructor, which runs at import time.
+        logger.LOGGER(f'Could not ensure the payment and reputation tables exist: {e}')
+
+
 class SQLConnection(metaclass=Singleton):
     _connection = None
     _lock = Lock()
@@ -59,6 +82,7 @@ class SQLConnection(metaclass=Singleton):
         if SQLConnection._connection is None:
             SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
             SQLConnection._connection.row_factory = sqlite3.Row
+            _ensure_traceability_tables(SQLConnection._connection)
 
     def _execute(self, query: str, params=()) -> sqlite3.Cursor:
         """
