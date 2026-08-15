@@ -92,6 +92,39 @@ virtualizers:
       ROOTFS_BUILD_SANDBOX: "none"
       # When true, if a VM fails to boot or encounters an error, its runtime directory will be preserved for debugging instead of being deleted.
 
+  # QEMU is the OPT-IN cross-architecture execution backend. Cloud Hypervisor
+  # boots a service as a microVM under KVM, which can only run a guest of the
+  # host's OWN architecture. When a request targets a FOREIGN arch (e.g. an
+  # arm64 service on an x86_64 node) there is no KVM path, so nodo boots the same
+  # rootfs/kernel/initramfs under qemu-system-<arch> with `-accel tcg` (software
+  # emulation). TCG is an order of magnitude slower than KVM, so this is disabled
+  # by default: native services always take the CH path above and never regress.
+  qemu:
+    # Master switch. When false (default), foreign-arch requests fail with
+    # UnsupportedArchitectureException exactly as before, and no emulated arch is
+    # advertised as executable.
+    ENABLE: false
+    # Per-arch qemu-system binary. Leave empty to resolve `qemu-system-x86_64` /
+    # `qemu-system-aarch64` from PATH.
+    BINARY_PATHS:
+      linux/amd64: ""
+      linux/arm64: ""
+    # Guest kernel/initramfs for the EMULATED arch. Leave empty to reuse the CH
+    # assets above (virtualizers.ch.KERNEL_PATHS / INITRAMFS_PATHS), which
+    # nodo#271 makes cross-arch-available. Override only to point QEMU at a
+    # different image than CH uses.
+    KERNEL_PATHS:
+      linux/amd64: ""
+      linux/arm64: ""
+    INITRAMFS_PATHS:
+      linux/amd64: ""
+      linux/arm64: ""
+    # QEMU -cpu model. "max" exposes the fullest feature set under TCG.
+    CPU_MODEL: "max"
+    # TCG reaches guest console much slower than KVM; allow more time than the CH
+    # readiness timeout before declaring the guest network dead.
+    GUEST_NETWORK_READY_TIMEOUT_S: 120
+
 builder:
   WAIT_FOR_CONTAINER: 60
   WAIT_FOR_UNLOCK_MEMORY: 60
