@@ -63,6 +63,33 @@ class AutomaticRefillFlagTests(unittest.TestCase):
         increase.assert_not_called()
         balance.assert_not_called()
 
+    def test_it_says_once_that_it_is_not_funding_anyone(self):
+        """Silence reads as broken: an operator who forgot the setting would just watch
+        deposits run down. Once, though -- the tick comes round every ten seconds."""
+        maintain_module._automatic_refill_announced = False
+        with mock.patch.object(maintain_module.log, "LOGGER") as logger:
+            self._run(automatic_refill=False)
+            self._run(automatic_refill=False)
+
+        announcements = [
+            call for call in logger.call_args_list
+            if "AUTOMATIC_REFILL is off" in str(call)
+        ]
+        self.assertEqual(len(announcements), 1, logger.call_args_list)
+
+    def test_turning_it_back_on_arms_the_announcement_again(self):
+        maintain_module._automatic_refill_announced = False
+        with mock.patch.object(maintain_module.log, "LOGGER") as logger:
+            self._run(automatic_refill=False)
+            self._run(automatic_refill=True)
+            self._run(automatic_refill=False)
+
+        announcements = [
+            call for call in logger.call_args_list
+            if "AUTOMATIC_REFILL is off" in str(call)
+        ]
+        self.assertEqual(len(announcements), 2, logger.call_args_list)
+
 
 if __name__ == "__main__":
     unittest.main()

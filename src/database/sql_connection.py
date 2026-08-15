@@ -753,6 +753,32 @@ class SQLConnection(metaclass=Singleton):
 
     # Peer Methods
 
+    # How many events are kept per subject. The history is bounded because the events
+    # arrive on a *timer*, not on incident: the maintenance tick scores every running
+    # instance and every unreachable peer once per MANAGER_ITERATION_TIME (10s by
+    # default), which is 8 640 rows a day each. Unbounded, the table would outgrow
+    # everything else in the database while saying nothing a reader wants.
+    #
+    # 200 is what the detail views can page through and enough to read a pattern; the
+    # running total on the peer/service row is the long-term memory, not this.
+    MAX_EVENTS_PER_SUBJECT = 200
+    # Pruning on every write would double the cost of the hot path for nothing, so it
+    # runs once every this many events per subject; the table stays within
+    # MAX_EVENTS_PER_SUBJECT + this.
+    PRUNE_EVENTS_EVERY = 50
+
+    @staticmethod
+    def _prune_events_statement(subject_kind: str, subject_id: str):
+        return ('''
+            DELETE FROM reputation_events
+            WHERE subject_kind = ? AND subject_id = ? AND id NOT IN (
+                SELECT id FROM reputation_events
+                WHERE subject_kind = ? AND subject_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT ?
+            )
+        ''', (subject_kind, subject_id, subject_kind, subject_id,
+              SQLConnection.MAX_EVENTS_PER_SUBJECT))
+
     def update_reputation_peer(self, peer_id: str, amount: int, reason: str) -> bool:
         """
         Updates the reputation of a peer by increasing the reputation score and index.
@@ -783,7 +809,7 @@ class SQLConnection(metaclass=Singleton):
                 new_score = current_score + amount
                 new_index = current_index + 1
 
-                self._execute2([
+                statements = [
                     ('''
                         UPDATE peer SET reputation_score = ?, reputation_index = ? WHERE id = ?
                     ''', (new_score, new_index, peer_id)),
@@ -792,7 +818,10 @@ class SQLConnection(metaclass=Singleton):
                             subject_kind, subject_id, amount, reason, score_after
                         ) VALUES ('peer', ?, ?, ?, ?)
                     ''', (peer_id, int(amount), reason, new_score)),
-                ])
+                ]
+                if new_index % SQLConnection.PRUNE_EVENTS_EVERY == 0:
+                    statements.append(self._prune_events_statement('peer', peer_id))
+                self._execute2(statements)
 
                 return True
             else:
@@ -821,7 +850,7 @@ class SQLConnection(metaclass=Singleton):
             new_score = (row['reputation_score'] if row else 0) + amount
             new_index = (row['reputation_index'] if row else 0) + 1
 
-            self._execute2([
+            statements = [
                 ('''
                     INSERT INTO service_reputation (service_id, reputation_score, reputation_index)
                     VALUES (?, ?, ?)
@@ -834,7 +863,10 @@ class SQLConnection(metaclass=Singleton):
                         subject_kind, subject_id, amount, reason, score_after
                     ) VALUES ('service', ?, ?, ?, ?)
                 ''', (service_id, int(amount), reason, new_score)),
-            ])
+            ]
+            if new_index % SQLConnection.PRUNE_EVENTS_EVERY == 0:
+                statements.append(self._prune_events_statement('service', service_id))
+            self._execute2(statements)
             return True
         except Exception as e:
             logger.LOGGER(f'Error updating reputation for service {service_id}: {e}')

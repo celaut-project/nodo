@@ -209,6 +209,36 @@ def maintain_clients(debug_mode: bool=False):
             SQLConnection().delete_client(client_id)
 
 
+# Whether this process has already said that automatic refills are off.
+_automatic_refill_announced = False
+
+
+def _automatic_refill_enabled() -> bool:
+    """May this tick fund a peer, and say so once when it may not.
+
+    Said at normal level rather than only under DEBUG_MODE, and once rather than per
+    peer per tick: an operator who forgot they set this would otherwise watch deposits
+    run down with the node saying nothing, which reads as broken. Ten seconds between
+    ticks is far too often to repeat it.
+
+    The config is re-read every tick (it can be edited from the TUI while the node
+    runs), so switching refills back on re-arms the announcement for the next time.
+    """
+    global _automatic_refill_announced
+    enabled = bool(env_manager.get("deposits.AUTOMATIC_REFILL", True))
+    if enabled:
+        _automatic_refill_announced = False
+        return True
+    if not _automatic_refill_announced:
+        _automatic_refill_announced = True
+        log.LOGGER(
+            "deposits.AUTOMATIC_REFILL is off: this node will not fund any peer on "
+            "its own. Deposits run down until `nodo pay` or `nodo increase_peer_deposit` "
+            "is run by hand."
+        )
+    return False
+
+
 def peer_deposits(debug_mode: bool = False):
     for peer_id in SQLConnection().get_peers_id():
         if debug_mode: log.LOGGER(f"Starting check for peer {peer_id}.")
@@ -278,7 +308,7 @@ def peer_deposits(debug_mode: bool = False):
         # the same thing at all. Gated here, before the balance query, so the tick makes
         # no request it cannot act on -- and `balance_on_other_peer` is not free: it is
         # an RPC that drops our client on the peer when it fails.
-        if not env_manager.get("deposits.AUTOMATIC_REFILL", True):
+        if not _automatic_refill_enabled():
             if debug_mode:
                 log.LOGGER(
                     f"deposits.AUTOMATIC_REFILL is off; leaving peer {peer_id} to be "
