@@ -9,6 +9,7 @@ from src.virtualizers.ch.maintain import maintain as ch_maintain
 from src.virtualizers.qemu.execute import execute as qemu_execute
 from src.virtualizers.qemu.kill import kill as qemu_kill
 from src.virtualizers.qemu.maintain import maintain as qemu_maintain
+from src.virtualizers.qemu.hotplug import hotplug as qemu_hotplug
 from src.virtualizers.selection import CH, QEMU, select_virtualizer
 from src.virtualizers.firewall import TransportProtocol, remove_rule as vm_remove_rule
 from typing import Optional, Callable, Dict, Tuple
@@ -112,10 +113,17 @@ def hotplug(
 ) -> bool:
     """Modify the system requirements of a running service.
 
-    Resource enforcement is cgroup-based and identical across backends (both
-    launchers place the hypervisor process in a per-VM cgroup), so QEMU guests
-    reuse the CH hotplug path.
+    CPU enforcement is cgroup-based and shared, but MEMORY is not: a QEMU guest
+    boots with a fixed ``-m`` and only a ``virtio-balloon`` resize (over QMP)
+    actually returns guest RAM, whereas tightening the process cgroup alone
+    swaps or OOM-kills qemu without resizing the guest. So QEMU instances route
+    to their own hotplug (balloon for memory, cgroup for CPU); CH is unchanged.
     """
+    if _resolve_instance_virtualizer(vmachine_id) == QEMU:
+        return qemu_hotplug(
+            vmachine_id=vmachine_id,
+            system_requeriments_range=system_requeriments_range,
+        )
     return ch_hotplug(
         vmachine_id=vmachine_id,
         system_requeriments_range=system_requeriments_range,

@@ -170,6 +170,7 @@ def build_qemu_command(
     serial_log_path: Path,
     virtiofs_args: Optional[List[str]] = None,
     has_shared_mem: bool = False,
+    qmp_socket_path: Optional[str] = None,
 ) -> List[str]:
     """Full ``qemu-system-<arch>`` argv for one emulated guest.
 
@@ -224,6 +225,14 @@ def build_qemu_command(
         ]
     )
 
+    # virtio-balloon + QMP control socket: the live memory-resize path. Memory
+    # hotplug drives the balloon over this socket (src/virtualizers/qemu/hotplug.py)
+    # so the guest actually returns pages, instead of the cgroup squeezing the
+    # qemu process into swap/OOM. Harmless when hotplug is never called.
+    command.extend(["-device", "virtio-balloon-pci"])
+    if qmp_socket_path:
+        command.extend(["-qmp", f"unix:{qmp_socket_path},server=on,wait=off"])
+
     if virtiofs_args:
         command.extend(virtiofs_args)
 
@@ -266,6 +275,7 @@ def execute(
     stdout_path = runtime_dir / "qemu.stdout.log"
     stderr_path = runtime_dir / "qemu.stderr.log"
     serial_log_path = runtime_dir / "qemu.serial.log"
+    qmp_socket_path = runtime_dir / "qmp.sock"
     resolved_entrypoint: Optional[str] = None
 
     try:
@@ -408,6 +418,7 @@ def execute(
             serial_log_path=serial_log_path,
             virtiofs_args=virtiofs_args,
             has_shared_mem=has_shared_mem,
+            qmp_socket_path=str(qmp_socket_path),
         )
         log.LOGGER(
             f"[QEMU][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib}, "
@@ -509,6 +520,8 @@ def execute(
                     {"domain": domain, "ip": ip} for domain, ip in domain_records
                 ],
                 "cgroup_path": vm_cgroup.as_posix(),
+                "qmp_socket": str(qmp_socket_path),
+                "boot_mem_bytes": mem_b,
                 "virtiofs": virtiofs_mounts,
                 "exported_shares": exported_share_ids,
                 "bridge": NETWORK_BRIDGE_NAME,
