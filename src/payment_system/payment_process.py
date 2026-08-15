@@ -79,6 +79,7 @@ def _address_of(script) -> Optional[str]:
         return script.hex() or None
     return script or None
 
+
 def generate_deposit_token(client_id: str) -> str:
     if not env_manager.get("client.ACCEPT_NEW_DEPOSITS", True):
         raise Exception("This node is not accepting new deposits.")
@@ -223,17 +224,18 @@ def __peer_payment_process(peer_id: str, amount: int, on_transaction_url=None) -
                 # does next, so both branches below write it down. The failing one is
                 # the row that matters most: money left this wallet and no balance
                 # arrived, and until now that left no trace an operator could read.
-                record = lambda status: sc.record_payment(
-                    direction='out',
-                    status=status,
-                    amount_mu=amount,
-                    tx_id=submitted_tx[-1] if submitted_tx else None,
-                    peer_id=peer_id,
-                    deposit_token=deposit_token,
-                    ledger=_ledger_tag(ledger),
-                    contract_hash=contract_hash,
-                    address=_address_of(script),
-                )
+                def record(status: str):
+                    sc.record_payment(
+                        direction='out',
+                        status=status,
+                        amount_mu=amount,
+                        tx_id=submitted_tx[-1] if submitted_tx else None,
+                        peer_id=peer_id,
+                        deposit_token=deposit_token,
+                        ledger=_ledger_tag(ledger),
+                        contract_hash=contract_hash,
+                        address=_address_of(script),
+                    )
 
                 # Handle communication attempts to peer
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
