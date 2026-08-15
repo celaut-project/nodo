@@ -212,6 +212,37 @@ def create_tables(cursor):
                 amount_mu TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
+        ''',
+        # Why each score moved. `peer.reputation_score` is a running total, so a peer
+        # sitting at -390 said nothing about whether that was one catastrophe or forty
+        # refused calls -- and the amounts are hard-coded at their call sites, which is
+        # exactly the kind of number that needs reviewing against what it punishes.
+        #
+        # `reason` is a stable string from `reputation_system.reasons.Reason`, not free
+        # text: the detail views group by it. `score_after` is the running total once
+        # this event was applied, so a history reads without replaying it, and stays
+        # readable when the totals are later recomputed differently.
+        "reputation_events": '''
+            CREATE TABLE IF NOT EXISTS reputation_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject_kind TEXT CHECK( subject_kind IN ('peer', 'service') ) NOT NULL,
+                subject_id TEXT NOT NULL,
+                amount INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                score_after INTEGER DEFAULT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''',
+        # A service's score, aggregated over every instance of it that ever ran here.
+        # Its own table rather than columns somewhere: a service outlives its instances
+        # (that is the point of scoring the service and not the vmachine), and it has no
+        # row of its own anywhere else -- services live in the registry, on disk.
+        "service_reputation": '''
+            CREATE TABLE IF NOT EXISTS service_reputation (
+                service_id TEXT PRIMARY KEY,
+                reputation_score INTEGER NOT NULL DEFAULT 0,
+                reputation_index INTEGER NOT NULL DEFAULT 0
+            )
         '''
     }
 
@@ -229,11 +260,14 @@ def create_tables(cursor):
         "CREATE INDEX IF NOT EXISTS idx_payments_peer ON payments (peer_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_payments_client ON payments (client_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_payments_tx ON payments (tx_id)",
+        # Reputation events are only ever read for one subject at a time, newest first.
+        "CREATE INDEX IF NOT EXISTS idx_reputation_events_subject "
+        "ON reputation_events (subject_kind, subject_id, created_at)",
     ):
         try:
             cursor.execute(index_sql)
         except sqlite3.Error as e:
-            print(f"Error creating payments index: {e}")
+            print(f"Error creating index: {e}")
 
     # Additive column migrations for databases created before a column existed.
     # `CREATE TABLE IF NOT EXISTS` never alters an existing table, so new columns
