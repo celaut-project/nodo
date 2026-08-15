@@ -180,15 +180,20 @@ def maintain_vmachines(debug_mode: bool=False):
                 log.LOGGER(f'Error purging {vmachine_id}: {str(e)}')
                 raise Exception(f'Error purging {vmachine_id}: {str(e)}')
         else:
-            _reputation_interface().update_vmachine_reputation(
-                vmachine_id=vmachine_id, amount=10, reason=Reason.INTERVAL_CHARGED
-            )
+            # No reputation for a charge that simply worked. This used to add +10 here,
+            # written when `update_vmachine_reputation` did nothing at all -- and now
+            # that it scores the service, a tick is the wrong thing to score by: at ten
+            # seconds a service running a month would earn +2.6M, drowning every
+            # penalty it ever took. A successful interval is the absence of a problem,
+            # not a judgement about the service; the judgements are the two penalties
+            # above (a machine lost, an instance that could not pay).
+            #
             # The charge just succeeded, so this interval is a real cost the operator
             # paid: sample it for the burn-rate figure. Sourced from charge_mu (not a
             # balance diff) so a top-up between ticks never reads as negative spend. The
             # dev-vmachine skip above means no sample is recorded when nothing is charged.
             sc.record_instance_consumption(id=vmachine_id, charge_mu=charge_mu, seconds=MANAGER_ITERATION_TIME)
-            if debug_mode: log.LOGGER(f"Updated reputation for {vmachine_id} due to successful maintenance.")
+            if debug_mode: log.LOGGER(f"Charged {vmachine_id} for the interval it just held.")
 
     # Cloud Hypervisor janitor: cleanup stale/orphan runtime resources not tracked by DB.
     try:
