@@ -17,6 +17,16 @@ from unittest import mock
 
 import src.commands.tx_history as tx_history
 
+# Only the wiring test needs the Ergo interface (for the ERG formatter), and it cannot
+# be imported without a JVM. The resolution tests below are pure and always run --
+# which is the point of keeping them free of it.
+IMPORT_ERROR = None
+try:
+    from src.payment_system.contracts.ergo import interface as ergo_interface
+except Exception as import_exc:  # pragma: no cover - environment-dependent
+    IMPORT_ERROR = import_exc
+    ergo_interface = None  # type: ignore[assignment]
+
 OURS = "9ourWALLETaddress"
 THEIRS = "9theirCONTRACTaddress"
 
@@ -110,6 +120,7 @@ class CounterpartyLineTests(unittest.TestCase):
         self.assertEqual(lines, ["From address: 9payerADDRESS"])
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DisplayWiringTests(unittest.TestCase):
     """The lookups have to reach the printer, which is where wiring like this dies."""
 
@@ -121,8 +132,8 @@ class DisplayWiringTests(unittest.TestCase):
                                   return_value={"tx-1": {"peer_id": "peer-1",
                                                          "status": "communicated"}}), \
                 mock.patch.object(tx_history, "_clients_by_deposit_token", return_value={}), \
-                mock.patch("src.payment_system.contracts.ergo.interface.__nanoerg_to_erg",
-                           create=True, side_effect=lambda value: value / 10 ** 9):
+                mock.patch.object(ergo_interface, "__nanoerg_to_erg",
+                                  create=True, side_effect=lambda value: value / 10 ** 9):
             output = io.StringIO()
             with redirect_stdout(output):
                 tx_history._display_wallet_transactions("Wallet", OURS)
