@@ -25,245 +25,268 @@ def connect_to_database(db_file):
         print(f"Error connecting to database: {e}")
         return None
 
-def create_tables(cursor):
-    """Create tables in the SQLite database."""
-    # Know that the advertisement on the peer table is a serialized celaut.Peer,
-    # carrying what a peer declares node-wide (payment contracts and rates). Its
-    # addresses live in the `uri` table, one row each, since they are queried by
-    # ip/port rather than read back as a whole.
-    tables = {
-        "peer": '''
-            CREATE TABLE IF NOT EXISTS peer (
-                id TEXT PRIMARY KEY,
-                advertisement BLOB,
-                remote_client_id TEXT,
-                balance_mu TEXT,
-                balance_last_update DATETIME DEFAULT NULL,
-                reputation_proof_id TEXT,
-                reputation_score INTEGER,
-                reputation_index INTEGER,
-                last_index_on_ledger INTEGER,
-                last_ts INTEGER DEFAULT NULL
-            )
-        ''',
-        "clients": '''
-            CREATE TABLE IF NOT EXISTS clients (
-                id TEXT PRIMARY KEY,
-                balance_mu TEXT,
-                last_usage FLOAT NULL,
-                unmetered INTEGER NOT NULL DEFAULT 0
-            )
-        ''',
-        "uri": '''
-            CREATE TABLE IF NOT EXISTS uri (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                peer_id TEXT,
-                ip TEXT,
-                port INTEGER,
-                expiry_unix_timestamp INTEGER DEFAULT NULL,
-                transport TEXT DEFAULT NULL,
-                protocol_stack BLOB DEFAULT NULL,
-                FOREIGN KEY (peer_id) REFERENCES peer (id)
-            )
-        ''',
-        "contract": '''
-            CREATE TABLE IF NOT EXISTS contract (
-                hash TEXT PRIMARY KEY,
-                content BLOB
-            )
-        ''',
-        "ledger": '''
-            CREATE TABLE IF NOT EXISTS ledger (
-                hash TEXT PRIMARY KEY,
-                content BLOB,
-                private_key TEXT NULL,
-                double_spending_retry_time DATETIME DEFAULT NULL
-            )
-        ''',
-        "contract_instance": '''
-            CREATE TABLE IF NOT EXISTS contract_instance (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                address TEXT,
-                ledger_hash TEXT,
-                contract_hash TEXT,
-                peer_id TEXT NOT NULL,
-                mu_per_unit TEXT,
-                FOREIGN KEY (ledger_hash) REFERENCES ledger (id),
-                FOREIGN KEY (contract_hash) REFERENCES contract (hash),
-                FOREIGN KEY (peer_id) REFERENCES peer (id),
-                UNIQUE (address, ledger_hash, contract_hash, peer_id)
-            )
-        ''',
-        # mem_limit, disk_space and the CFS pair (cpu_period/cpu_quota) are what the
-        # maintenance tick prices an instance by, so all four have to be here: the tick
-        # reads this row, not the service's manifest. Storing memory and disk but not
-        # CPU meant compute was never billed on the recurring path, whatever the price.
-        "local_instances": '''
-            CREATE TABLE IF NOT EXISTS local_instances (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                ip TEXT,
-                father_id TEXT,
-                balance_mu TEXT,
-                mem_limit INTEGER,
-                disk_space INTEGER,
-                cpu_period INTEGER,
-                cpu_quota INTEGER,
-                serialized_instance TEXT,
-                service_id TEXT,
-                virtualizer TEXT DEFAULT NULL,
-                envs TEXT DEFAULT NULL
-            )
-        ''',
-        "delegated_instances": '''
-            CREATE TABLE IF NOT EXISTS delegated_instances (
-                token_delegation TEXT PRIMARY KEY,
-                id TEXT,
-                peer_id TEXT,
-                father_id TEXT,
-                serialized_instance TEXT,
-                service_id TEXT
-            )
-        ''',
-        "deposit_tokens": '''
-            CREATE TABLE IF NOT EXISTS deposit_tokens (
-                id TEXT PRIMARY KEY,
-                client_id TEXT,
-                status TEXT CHECK( status IN ('pending', 'payed', 'rejected') ) NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (client_id) REFERENCES clients (id)
-            )
-        ''',
-        "energy_consumption": '''
-            CREATE TABLE IF NOT EXISTS energy_consumption (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME,
-                cpu_percent REAL,
-                memory_usage REAL,
-                power_consumption REAL,
-                cost REAL
-            )
-        ''',
-        "monitoring_config": '''
-            CREATE TABLE IF NOT EXISTS monitoring_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                max_power_limit REAL,
-                cost_per_kwh REAL,
-                last_updated DATETIME
-            )
-        ''',
-        "forced_execution_peer": '''
-            CREATE TABLE IF NOT EXISTS forced_execution_peer (
-                token TEXT PRIMARY KEY,
-                peer_id TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''',
-        # Per-instance MU burn rate. The maintenance tick already computes what each
-        # instance costs for the interval it just held its resources; that charge is
-        # sampled here (see SQLConnection.record_instance_consumption) so the TUI can
-        # show a spend rate next to the balance. Kept in its own table -- not columns on
-        # local_instances -- so it survives instance churn and keeps the hot row small.
-        # `mu_per_second` is the running average of the last ~hour of samples; the TUI
-        # derives per-minute / per-hour from it and renders in ui.DISPLAY_UNIT.
-        "instance_consumption": '''
-            CREATE TABLE IF NOT EXISTS instance_consumption (
-                instance_id TEXT PRIMARY KEY,
-                mu_per_second REAL,
-                sample_count INTEGER,
-                last_refresh DATETIME,
-                FOREIGN KEY (instance_id) REFERENCES local_instances (id)
-            )
-        ''',
-        # One row per payment this node took part in. Until this table existed a payment
-        # left no local trace at all: `add_balance_to_peer` moved a counter and the tx id
-        # reached a log line and nothing else, so "what did we send that peer, and when"
-        # was unanswerable -- and unanswerable *on purpose* is different from a chain
-        # nobody indexed, because the ledger cannot map an address back to a peer id.
-        #
-        # `status` is what happened, not what we hoped:
-        #   communicated  -- outgoing, the peer acknowledged our Payable call
-        #   unacknowledged-- outgoing, the transaction was broadcast and the call failed.
-        #                    Money left, credit never arrived. The row an operator needs.
-        #   accepted      -- incoming, the deposit was validated and credited
-        #   rejected      -- incoming, the deposit could not be validated
-        #
-        # `tx_id` is NULL on incoming rows: an incoming payment is proved by finding an
-        # unspent box carrying the deposit token in R4, and the id of the transaction
-        # that created the box is not part of that proof. The deposit token is the link
-        # (see `tx_history`), and it is stored here.
-        # `address` is the counterparty's, as hex propositionBytes -- the same form
-        # `contract_instance.address` holds, so the two join. It is NULL on incoming
-        # rows, where the only address involved is this node's own wallet.
-        # `amount_mu` is TEXT for the same reason every other balance in this schema is:
-        # MU exceeds what SQLite stores as an integer.
-        "payments": '''
-            CREATE TABLE IF NOT EXISTS payments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tx_id TEXT DEFAULT NULL,
-                direction TEXT CHECK( direction IN ('out', 'in') ) NOT NULL,
-                status TEXT CHECK( status IN ('communicated', 'unacknowledged', 'accepted', 'rejected') ) NOT NULL,
-                peer_id TEXT DEFAULT NULL,
-                client_id TEXT DEFAULT NULL,
-                deposit_token TEXT DEFAULT NULL,
-                ledger TEXT DEFAULT NULL,
-                contract_hash TEXT DEFAULT NULL,
-                address TEXT DEFAULT NULL,
-                amount_mu TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''',
-        # Why each score moved. `peer.reputation_score` is a running total, so a peer
-        # sitting at -390 said nothing about whether that was one catastrophe or forty
-        # refused calls -- and the amounts are hard-coded at their call sites, which is
-        # exactly the kind of number that needs reviewing against what it punishes.
-        #
-        # `reason` is a stable string from `reputation_system.reasons.Reason`, not free
-        # text: the detail views group by it. `score_after` is the running total once
-        # this event was applied, so a history reads without replaying it, and stays
-        # readable when the totals are later recomputed differently.
-        "reputation_events": '''
-            CREATE TABLE IF NOT EXISTS reputation_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                subject_kind TEXT CHECK( subject_kind IN ('peer', 'service') ) NOT NULL,
-                subject_id TEXT NOT NULL,
-                amount INTEGER NOT NULL,
-                reason TEXT NOT NULL,
-                score_after INTEGER DEFAULT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''',
-        # A service's score, aggregated over every instance of it that ever ran here.
-        # Its own table rather than columns somewhere: a service outlives its instances
-        # (that is the point of scoring the service and not the vmachine), and it has no
-        # row of its own anywhere else -- services live in the registry, on disk.
-        "service_reputation": '''
-            CREATE TABLE IF NOT EXISTS service_reputation (
-                service_id TEXT PRIMARY KEY,
-                reputation_score INTEGER NOT NULL DEFAULT 0,
-                reputation_index INTEGER NOT NULL DEFAULT 0
-            )
-        '''
-    }
 
-    for table_name, table_sql in tables.items():
+# Know that the advertisement on the peer table is a serialized celaut.Peer,
+# carrying what a peer declares node-wide (payment contracts and rates). Its
+# addresses live in the `uri` table, one row each, since they are queried by
+# ip/port rather than read back as a whole.
+TABLES = {
+    "peer": '''
+        CREATE TABLE IF NOT EXISTS peer (
+            id TEXT PRIMARY KEY,
+            advertisement BLOB,
+            remote_client_id TEXT,
+            balance_mu TEXT,
+            balance_last_update DATETIME DEFAULT NULL,
+            reputation_proof_id TEXT,
+            reputation_score INTEGER,
+            reputation_index INTEGER,
+            last_index_on_ledger INTEGER,
+            last_ts INTEGER DEFAULT NULL
+        )
+    ''',
+    "clients": '''
+        CREATE TABLE IF NOT EXISTS clients (
+            id TEXT PRIMARY KEY,
+            balance_mu TEXT,
+            last_usage FLOAT NULL,
+            unmetered INTEGER NOT NULL DEFAULT 0
+        )
+    ''',
+    "uri": '''
+        CREATE TABLE IF NOT EXISTS uri (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_id TEXT,
+            ip TEXT,
+            port INTEGER,
+            expiry_unix_timestamp INTEGER DEFAULT NULL,
+            transport TEXT DEFAULT NULL,
+            protocol_stack BLOB DEFAULT NULL,
+            FOREIGN KEY (peer_id) REFERENCES peer (id)
+        )
+    ''',
+    "contract": '''
+        CREATE TABLE IF NOT EXISTS contract (
+            hash TEXT PRIMARY KEY,
+            content BLOB
+        )
+    ''',
+    "ledger": '''
+        CREATE TABLE IF NOT EXISTS ledger (
+            hash TEXT PRIMARY KEY,
+            content BLOB,
+            private_key TEXT NULL,
+            double_spending_retry_time DATETIME DEFAULT NULL
+        )
+    ''',
+    "contract_instance": '''
+        CREATE TABLE IF NOT EXISTS contract_instance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            address TEXT,
+            ledger_hash TEXT,
+            contract_hash TEXT,
+            peer_id TEXT NOT NULL,
+            mu_per_unit TEXT,
+            FOREIGN KEY (ledger_hash) REFERENCES ledger (id),
+            FOREIGN KEY (contract_hash) REFERENCES contract (hash),
+            FOREIGN KEY (peer_id) REFERENCES peer (id),
+            UNIQUE (address, ledger_hash, contract_hash, peer_id)
+        )
+    ''',
+    # mem_limit, disk_space and the CFS pair (cpu_period/cpu_quota) are what the
+    # maintenance tick prices an instance by, so all four have to be here: the tick
+    # reads this row, not the service's manifest. Storing memory and disk but not
+    # CPU meant compute was never billed on the recurring path, whatever the price.
+    "local_instances": '''
+        CREATE TABLE IF NOT EXISTS local_instances (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            ip TEXT,
+            father_id TEXT,
+            balance_mu TEXT,
+            mem_limit INTEGER,
+            disk_space INTEGER,
+            cpu_period INTEGER,
+            cpu_quota INTEGER,
+            serialized_instance TEXT,
+            service_id TEXT,
+            virtualizer TEXT DEFAULT NULL,
+            envs TEXT DEFAULT NULL
+        )
+    ''',
+    "delegated_instances": '''
+        CREATE TABLE IF NOT EXISTS delegated_instances (
+            token_delegation TEXT PRIMARY KEY,
+            id TEXT,
+            peer_id TEXT,
+            father_id TEXT,
+            serialized_instance TEXT,
+            service_id TEXT
+        )
+    ''',
+    "deposit_tokens": '''
+        CREATE TABLE IF NOT EXISTS deposit_tokens (
+            id TEXT PRIMARY KEY,
+            client_id TEXT,
+            status TEXT CHECK( status IN ('pending', 'payed', 'rejected') ) NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients (id)
+        )
+    ''',
+    "energy_consumption": '''
+        CREATE TABLE IF NOT EXISTS energy_consumption (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME,
+            cpu_percent REAL,
+            memory_usage REAL,
+            power_consumption REAL,
+            cost REAL
+        )
+    ''',
+    "monitoring_config": '''
+        CREATE TABLE IF NOT EXISTS monitoring_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            max_power_limit REAL,
+            cost_per_kwh REAL,
+            last_updated DATETIME
+        )
+    ''',
+    "forced_execution_peer": '''
+        CREATE TABLE IF NOT EXISTS forced_execution_peer (
+            token TEXT PRIMARY KEY,
+            peer_id TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''',
+    # Per-instance MU burn rate. The maintenance tick already computes what each
+    # instance costs for the interval it just held its resources; that charge is
+    # sampled here (see SQLConnection.record_instance_consumption) so the TUI can
+    # show a spend rate next to the balance. Kept in its own table -- not columns on
+    # local_instances -- so it survives instance churn and keeps the hot row small.
+    # `mu_per_second` is the running average of the last ~hour of samples; the TUI
+    # derives per-minute / per-hour from it and renders in ui.DISPLAY_UNIT.
+    "instance_consumption": '''
+        CREATE TABLE IF NOT EXISTS instance_consumption (
+            instance_id TEXT PRIMARY KEY,
+            mu_per_second REAL,
+            sample_count INTEGER,
+            last_refresh DATETIME,
+            FOREIGN KEY (instance_id) REFERENCES local_instances (id)
+        )
+    ''',
+    # One row per payment this node took part in. Until this table existed a payment
+    # left no local trace at all: `add_balance_to_peer` moved a counter and the tx id
+    # reached a log line and nothing else, so "what did we send that peer, and when"
+    # was unanswerable -- and unanswerable *on purpose* is different from a chain
+    # nobody indexed, because the ledger cannot map an address back to a peer id.
+    #
+    # `status` is what happened, not what we hoped:
+    #   communicated  -- outgoing, the peer acknowledged our Payable call
+    #   unacknowledged-- outgoing, the transaction was broadcast and the call failed.
+    #                    Money left, credit never arrived. The row an operator needs.
+    #   accepted      -- incoming, the deposit was validated and credited
+    #   rejected      -- incoming, the deposit could not be validated
+    #
+    # `tx_id` is NULL on incoming rows: an incoming payment is proved by finding an
+    # unspent box carrying the deposit token in R4, and the id of the transaction
+    # that created the box is not part of that proof. The deposit token is the link
+    # (see `tx_history`), and it is stored here.
+    # `address` is the counterparty's, as hex propositionBytes -- the same form
+    # `contract_instance.address` holds, so the two join. It is NULL on incoming
+    # rows, where the only address involved is this node's own wallet.
+    # `amount_mu` is TEXT for the same reason every other balance in this schema is:
+    # MU exceeds what SQLite stores as an integer.
+    "payments": '''
+        CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tx_id TEXT DEFAULT NULL,
+            direction TEXT CHECK( direction IN ('out', 'in') ) NOT NULL,
+            status TEXT CHECK( status IN ('communicated', 'unacknowledged', 'accepted', 'rejected') ) NOT NULL,
+            peer_id TEXT DEFAULT NULL,
+            client_id TEXT DEFAULT NULL,
+            deposit_token TEXT DEFAULT NULL,
+            ledger TEXT DEFAULT NULL,
+            contract_hash TEXT DEFAULT NULL,
+            address TEXT DEFAULT NULL,
+            amount_mu TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''',
+    # Why each score moved. `peer.reputation_score` is a running total, so a peer
+    # sitting at -390 said nothing about whether that was one catastrophe or forty
+    # refused calls -- and the amounts are hard-coded at their call sites, which is
+    # exactly the kind of number that needs reviewing against what it punishes.
+    #
+    # `reason` is a stable string from `reputation_system.reasons.Reason`, not free
+    # text: the detail views group by it. `score_after` is the running total once
+    # this event was applied, so a history reads without replaying it, and stays
+    # readable when the totals are later recomputed differently.
+    "reputation_events": '''
+        CREATE TABLE IF NOT EXISTS reputation_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject_kind TEXT CHECK( subject_kind IN ('peer', 'service') ) NOT NULL,
+            subject_id TEXT NOT NULL,
+            amount INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            score_after INTEGER DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''',
+    # A service's score, aggregated over every instance of it that ever ran here.
+    # Its own table rather than columns somewhere: a service outlives its instances
+    # (that is the point of scoring the service and not the vmachine), and it has no
+    # row of its own anywhere else -- services live in the registry, on disk.
+    "service_reputation": '''
+        CREATE TABLE IF NOT EXISTS service_reputation (
+            service_id TEXT PRIMARY KEY,
+            reputation_score INTEGER NOT NULL DEFAULT 0,
+            reputation_index INTEGER NOT NULL DEFAULT 0
+        )
+    '''
+}
+
+# The three ways `payments` is ever read: one peer's history, one client's, and the
+# tx-id lookup `tx_history` does per explorer transaction. The TUI runs the first on
+# every redraw of a selected peer.
+INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_payments_peer ON payments (peer_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_payments_client ON payments (client_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_payments_tx ON payments (tx_id)",
+    # Reputation events are only ever read for one subject at a time, newest first.
+    "CREATE INDEX IF NOT EXISTS idx_reputation_events_subject "
+    "ON reputation_events (subject_kind, subject_id, created_at)",
+)
+
+
+def ensure_tables(cursor, names) -> None:
+    """Create the named tables (and their indexes) if they are absent. Silent.
+
+    For tables added after a node was installed. `migrate` only runs from the setup
+    scripts, and an upgrade that pulls code and restarts the service never reruns it --
+    so a node would be running new code against an older schema. Everything here is
+    `IF NOT EXISTS`, so this is a no-op on an up-to-date database.
+    """
+    for name in names:
+        table_sql = TABLES.get(name)
+        if not table_sql:
+            continue
+        cursor.execute(table_sql)
+    for index_sql in INDEXES:
+        # Only the indexes belonging to the tables asked for; the rest may not exist.
+        if any(f" ON {name} " in index_sql for name in names):
+            cursor.execute(index_sql)
+
+
+def create_tables(cursor):
+    """Create every table in the SQLite database."""
+    for table_name, table_sql in TABLES.items():
         try:
             cursor.execute(table_sql)
             print(f"Created or updated '{table_name}' table.")
         except sqlite3.Error as e:
             print(f"Error creating '{table_name}' table: {e}")
 
-    # The three ways `payments` is ever read: one peer's history, one client's, and the
-    # tx-id lookup `tx_history` does per explorer transaction. The TUI runs the first on
-    # every redraw of a selected peer.
-    for index_sql in (
-        "CREATE INDEX IF NOT EXISTS idx_payments_peer ON payments (peer_id, created_at)",
-        "CREATE INDEX IF NOT EXISTS idx_payments_client ON payments (client_id, created_at)",
-        "CREATE INDEX IF NOT EXISTS idx_payments_tx ON payments (tx_id)",
-        # Reputation events are only ever read for one subject at a time, newest first.
-        "CREATE INDEX IF NOT EXISTS idx_reputation_events_subject "
-        "ON reputation_events (subject_kind, subject_id, created_at)",
-    ):
+    for index_sql in INDEXES:
         try:
             cursor.execute(index_sql)
         except sqlite3.Error as e:
