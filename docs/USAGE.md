@@ -202,7 +202,7 @@ These are the most commonly used commands for daily tasks:
   still holding it** — an address reaches one node, and the usual reason two peers claim
   it is that the host reinstalled and came back under a new identity key (its peer_id).
   The old peer keeps whatever other addresses it announced; forget it with
-  `nodo disconnect` (or `d` on the TUI's Network page) if it has none left.  
+  `nodo disconnect` (or `d` on the TUI's Peers page) if it has none left.  
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
