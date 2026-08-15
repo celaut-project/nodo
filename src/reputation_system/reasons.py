@@ -32,8 +32,10 @@ class Reason:
     INSTANCE_OUT_OF_BALANCE = "instance_out_of_balance"
     """The instance could not pay for the interval it had just used."""
 
-    INTERVAL_CHARGED = "interval_charged"
-    """The instance paid for the interval it had just used."""
+    # There is deliberately no reason for "the interval was charged and nothing went
+    # wrong". The maintenance tick runs every ten seconds, so scoring a routine success
+    # would earn a service running for a month some +2.6M and drown every penalty it
+    # ever took. A successful interval is the absence of a problem, not a judgement.
 
     # Not written from Python.
     OPERATOR_ADJUSTMENT = "operator_adjustment"

@@ -4121,7 +4121,7 @@ Cold Wallet: 9cold\n";
                      INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
                         VALUES ('peer', 'peer-1', -100, 'payment_unacknowledged', -93, '2026-01-02 10:00:01');
                      INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
-                        VALUES ('service', 'peer-1', 10, 'interval_charged', 10, '2026-01-02 10:00:02');
+                        VALUES ('service', 'peer-1', -100, 'instance_lost', -100, '2026-01-02 10:00:02');
                      INSERT INTO deposit_tokens VALUES ('token-1', 'client-1', 'payed', '2026-01-03 09:59:00');
                      INSERT INTO local_instances VALUES ('instance-1', 'demo', 'client-1');
                      INSERT INTO local_instances VALUES ('instance-2', 'other', 'someone-else');",

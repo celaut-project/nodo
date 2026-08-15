@@ -94,11 +94,11 @@ class ReputationEventTests(unittest.TestCase):
 
     def test_a_service_accumulates_across_the_instances_that_ran_it(self):
         """The point of scoring the service: an instance is gone, its record is not."""
-        self.sc.update_reputation_service("service-1", 10, Reason.INTERVAL_CHARGED)
+        self.sc.update_reputation_service("service-1", -10, Reason.INSTANCE_OUT_OF_BALANCE)
         self.sc.update_reputation_service("service-1", -10, Reason.INSTANCE_OUT_OF_BALANCE)
         self.sc.update_reputation_service("service-1", -100, Reason.INSTANCE_LOST)
 
-        self.assertEqual(self.sc.get_service_reputation("service-1"), -100)
+        self.assertEqual(self.sc.get_service_reputation("service-1"), -120)
         events = self.sc.get_reputation_events("service", "service-1")
         self.assertEqual(len(events), 3)
         rows = self.connection.execute(
