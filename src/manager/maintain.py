@@ -117,11 +117,25 @@ def check_wanted_service(wanted: str):
             
 
 
+# Instance outcomes already scored, as (vmachine_id, reason). Both of them are meant to
+# end with the instance pruned, but pruning can fail -- a virtualizer that will not let
+# go leaves the row in place, and the next sweep would score the same loss again, every
+# ten seconds, for as long as it keeps failing. An instance can only be lost once.
+_instances_penalised = set()
+
+
+def _penalise_instance_once(vmachine_id: str, amount: int, reason: str):
+    if (vmachine_id, reason) in _instances_penalised:
+        return
+    _instances_penalised.add((vmachine_id, reason))
+    _reputation_interface().update_vmachine_reputation(
+        vmachine_id=vmachine_id, amount=amount, reason=reason
+    )
+
+
 def maintain_vmachines(debug_mode: bool=False):
     def remove_and_penalize_vmachine(vmachine_id: str):
-        _reputation_interface().update_vmachine_reputation(
-            vmachine_id=vmachine_id, amount=-100, reason=Reason.INSTANCE_LOST
-        )
+        _penalise_instance_once(vmachine_id, -100, Reason.INSTANCE_LOST)
         log.LOGGER(f"Prunning instance {vmachine_id} from the registry because the virtual machine does not exist.")
         try:
             stop_instance(token=vmachine_id)
@@ -132,7 +146,14 @@ def maintain_vmachines(debug_mode: bool=False):
     # priced against the same machine state, and psutil is read once instead of per VM.
     scarcity = system_scarcity(force_refresh=True)
 
-    for vmachine_id in sc.get_all_internal_containers_ids():
+    live_instances = sc.get_all_internal_containers_ids()
+    # An id is never reused, so once an instance is gone its entry can go too. Keeps the
+    # set the size of what is running rather than of everything that ever ran.
+    _instances_penalised.difference_update(
+        {key for key in _instances_penalised if key[0] not in set(live_instances)}
+    )
+
+    for vmachine_id in live_instances:
 
         # Skip development vmachines from the ggconf command
         if "rundev" in vmachine_id:
@@ -170,9 +191,8 @@ def maintain_vmachines(debug_mode: bool=False):
 
         if not spend_mu(id=vmachine_id, amount_mu=charge_mu, debug_mode=debug_mode):
             try:
-                _reputation_interface().update_vmachine_reputation(
-                    vmachine_id=vmachine_id, amount=-10,
-                    reason=Reason.INSTANCE_OUT_OF_BALANCE
+                _penalise_instance_once(
+                    vmachine_id, -10, Reason.INSTANCE_OUT_OF_BALANCE
                 )
                 log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
                 stop_instance(token=vmachine_id)
@@ -244,8 +264,40 @@ def _automatic_refill_enabled() -> bool:
     return False
 
 
+# Peers already penalised for being unreachable, so an outage costs one penalty and not
+# one per tick. In memory on purpose: a restart re-arms it, which costs a single extra
+# penalty for a peer that is still down, and keeps this out of the schema.
+_peers_penalised_for_refresh = set()
+
+
+def _penalise_unreachable_peer_once(peer_id: str):
+    """Score a peer that cannot be refreshed, but only on the way down.
+
+    This loop runs every MANAGER_ITERATION_TIME (10s by default) over every peer, so
+    penalising on each pass meant a peer that was merely switched off lost 100 points
+    every ten seconds -- some 864 000 a day. Reputation is meant to record that a peer
+    failed us, not to count how often we noticed.
+    """
+    if peer_id in _peers_penalised_for_refresh:
+        return
+    _peers_penalised_for_refresh.add(peer_id)
+    _reputation_interface().update_peer_reputation(
+        peer_id=peer_id, amount=-100, reason=Reason.PEER_REFRESH_FAILED
+    )
+
+
+def _peer_is_reachable_again(peer_id: str):
+    """Re-arm the penalty: the next outage is a new event, not the same one."""
+    _peers_penalised_for_refresh.discard(peer_id)
+
+
 def peer_deposits(debug_mode: bool = False):
-    for peer_id in SQLConnection().get_peers_id():
+    peer_ids = SQLConnection().get_peers_id()
+    # Peers that no longer exist cannot come back, so drop them rather than let the set
+    # grow with every peer this process ever failed to reach.
+    _peers_penalised_for_refresh.intersection_update(peer_ids)
+
+    for peer_id in peer_ids:
         if debug_mode: log.LOGGER(f"Starting check for peer {peer_id}.")
 
         # A peer that told us when its address expires is re-fetched once that moment
@@ -270,11 +322,10 @@ def peer_deposits(debug_mode: bool = False):
                     indices_parser=celaut_pb2.Peer,
                     partitions_message_mode_parser=True
                 ), None)
+                _peer_is_reachable_again(peer_id)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:
-                _reputation_interface().update_peer_reputation(
-                    peer_id=peer_id, amount=-100, reason=Reason.PEER_REFRESH_FAILED
-                )
+                _penalise_unreachable_peer_once(peer_id)
                 continue
 
             if not peer:
@@ -294,6 +345,7 @@ def peer_deposits(debug_mode: bool = False):
                 log.LOGGER(f"[ERROR] Exception updating peer {peer_id}: {str(update_exception)}")
                 continue
         else:
+            _peer_is_reachable_again(peer_id)
             if debug_mode: log.LOGGER(f"Peer {peer_id} is available. Skipping info fetch.")
 
         # A deposit on a peer buys execution there and nothing else, so a node that
