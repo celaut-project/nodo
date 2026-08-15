@@ -7,6 +7,7 @@ import netifaces as ni
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
+from src.virtualizers.selection import select_virtualizer
 from src.manager.manager import (
     default_initial_balance,
     is_external_execute_client,
@@ -270,6 +271,13 @@ def local_execution(
         f"Execution network mode: by_local={not expose_outside}, "
         f"assigment_ports={assigment_ports}"
     )
+
+    # The backend is chosen per service by architecture (native -> CH under KVM,
+    # foreign-arch -> QEMU/TCG when emulation is enabled). Resolve it here from the
+    # same `service` interface.execute() dispatches on, so the `virtualizer` column
+    # persisted below matches the backend that actually runs -- lifecycle calls
+    # (kill/maintain/firewall) route by that column.
+    configured_virtualizer = select_virtualizer(service=service, metadata=metadata)
 
     log.LOGGER(
         f"Invoking virtualizer execute: virtualizer={configured_virtualizer}, "
