@@ -22,6 +22,7 @@ try:
     from protos import celaut_pb2
     from src.payment_system import payment_process
     from src.reputation_system import interface as reputation_interface
+    from src.reputation_system.reasons import Reason
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     payment_process = None  # type: ignore[assignment]
@@ -33,20 +34,41 @@ class VmachineOutcomesTests(unittest.TestCase):
 
     def test_a_vmachine_id_carrying_a_peer_id_moves_no_peer_score(self):
         with mock.patch.object(reputation_interface, "sc") as sc:
+            sc.get_service_id_by_container_id.return_value = "service-1"
             reputation_interface.update_vmachine_reputation(
-                vmachine_id="instance-1##peer-9", amount=-10
+                vmachine_id="instance-1##peer-9", amount=-10,
+                reason=Reason.INSTANCE_OUT_OF_BALANCE,
             )
 
         sc.update_reputation_peer.assert_not_called()
         sc.peer_exists.assert_not_called()
+        # The service the instance ran is what carries the outcome.
+        sc.update_reputation_service.assert_called_once_with(
+            "service-1", -10, Reason.INSTANCE_OUT_OF_BALANCE
+        )
+
+    def test_an_instance_already_gone_scores_nothing_and_raises_nothing(self):
+        """The pruning paths call this while tearing the instance down."""
+        with mock.patch.object(reputation_interface, "sc") as sc:
+            sc.get_service_id_by_container_id.side_effect = Exception("no such instance")
+            scored = reputation_interface.update_vmachine_reputation(
+                vmachine_id="instance-1", amount=-100, reason=Reason.INSTANCE_LOST
+            )
+
+        self.assertFalse(scored)
+        sc.update_reputation_service.assert_not_called()
 
     def test_a_peer_failure_still_reaches_the_peer(self):
         """The direct path is untouched: this is a routing fix, not a removal."""
         with mock.patch.object(reputation_interface, "sc") as sc:
             sc.peer_exists.return_value = True
-            reputation_interface.update_peer_reputation(peer_id="peer-9", amount=-100)
+            reputation_interface.update_peer_reputation(
+                peer_id="peer-9", amount=-100, reason=Reason.PEER_REFRESH_FAILED
+            )
 
-        sc.update_reputation_peer.assert_called_once_with("peer-9", -100)
+        sc.update_reputation_peer.assert_called_once_with(
+            "peer-9", -100, Reason.PEER_REFRESH_FAILED
+        )
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -75,7 +97,7 @@ class PaymentCommunicationTests(unittest.TestCase):
 
         self.assertFalse(communicated)
         reputation.update_peer_reputation.assert_called_once_with(
-            peer_id="peer-1", amount=-1
+            peer_id="peer-1", amount=-1, reason=Reason.PAYMENT_CALL_FAILED
         )
         reputation.update_vmachine_reputation.assert_not_called()
 

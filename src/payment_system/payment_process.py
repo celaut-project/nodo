@@ -18,6 +18,10 @@ from src.utils import logger as _l
 from src.utils.utils import to_amount, generate_uris_by_peer_id
 from src.utils.monetary import format_mu
 from src.database.access_functions.ledgers import get_peer_contract_instances
+# Plain constants, no imports of its own, so this cannot be the edge that drags the
+# reputation stack (and the JVM behind it) into the payment path -- see
+# `_reputation_interface` above, which stays lazy for exactly that reason.
+from src.reputation_system.reasons import Reason
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
 
@@ -234,12 +238,18 @@ def __peer_payment_process(peer_id: str, amount: int, on_transaction_url=None) -
                 # Handle communication attempts to peer
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
                     record('communicated')
-                    _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=10)  # TODO On envs.
+                    _reputation_interface().update_peer_reputation(
+                        peer_id=peer_id, amount=10,  # TODO On envs.
+                        reason=Reason.PAYMENT_COMMUNICATED
+                    )
                     return True
                 else:
                     _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
                     record('unacknowledged')
-                    _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=-100)  # TODO On envs.
+                    _reputation_interface().update_peer_reputation(
+                        peer_id=peer_id, amount=-100,  # TODO On envs.
+                        reason=Reason.PAYMENT_UNACKNOWLEDGED
+                    )
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except JavaDependencyMissing:
@@ -279,7 +289,10 @@ def __attempt_payment_communication(peer_id: str, amount: int, deposit_token: st
             # this is a peer penalty and is written as one. It used to be handed to
             # `update_vmachine_reputation` with a peer id in the vmachine argument,
             # which meant it landed nowhere at all.
-            _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=-1)  # TODO On envs.
+            _reputation_interface().update_peer_reputation(
+                peer_id=peer_id, amount=-1,  # TODO On envs.
+                reason=Reason.PAYMENT_CALL_FAILED
+            )
             attempt += 1
             _l.LOGGER(f"Communication attempt {attempt} failed: {str(e)}")
             if attempt >= COMMUNICATION_ATTEMPTS:

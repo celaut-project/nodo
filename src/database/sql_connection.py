@@ -729,13 +729,19 @@ class SQLConnection(metaclass=Singleton):
 
     # Peer Methods
 
-    def update_reputation_peer(self, peer_id: str, amount: int) -> bool:
+    def update_reputation_peer(self, peer_id: str, amount: int, reason: str) -> bool:
         """
         Updates the reputation of a peer by increasing the reputation score and index.
+
+        The event and the new total are written together, in one transaction: a score
+        whose history does not add up to it is worse than either alone, since there is
+        then no way to tell which of the two is wrong.
 
         Args:
             peer_id (str): The ID of the peer whose reputation is to be updated.
             amount (int): The amount to add to the reputation score.
+            reason (str): Why, from `reputation_system.reasons.Reason`. Required --
+                an unattributed score change is what this table exists to end.
 
         Returns:
             bool: True if the update was successful, False otherwise.
@@ -753,9 +759,16 @@ class SQLConnection(metaclass=Singleton):
                 new_score = current_score + amount
                 new_index = current_index + 1
 
-                self._execute('''
-                    UPDATE peer SET reputation_score = ?, reputation_index = ? WHERE id = ?
-                ''', (new_score, new_index, peer_id))
+                self._execute2([
+                    ('''
+                        UPDATE peer SET reputation_score = ?, reputation_index = ? WHERE id = ?
+                    ''', (new_score, new_index, peer_id)),
+                    ('''
+                        INSERT INTO reputation_events (
+                            subject_kind, subject_id, amount, reason, score_after
+                        ) VALUES ('peer', ?, ?, ?, ?)
+                    ''', (peer_id, int(amount), reason, new_score)),
+                ])
 
                 return True
             else:
@@ -763,6 +776,76 @@ class SQLConnection(metaclass=Singleton):
         except Exception as e:
             logger.LOGGER(f'Error updating reputation for peer {peer_id}: {e}')
             return False
+
+    def update_reputation_service(self, service_id: str, amount: int, reason: str) -> bool:
+        """Move a service's score, and say why.
+
+        Scored by `service_id` rather than by instance: the instance that misbehaved is
+        gone minutes later, while the service is what gets run again -- and what a
+        balancer would eventually weigh. The event still names the instance through
+        `reason` plus its timestamp, so a history points at a run.
+
+        Upserts, because a service has no row anywhere until it first scores; services
+        themselves live in the registry, on disk.
+        """
+        try:
+            result = self._execute(
+                'SELECT reputation_score, reputation_index FROM service_reputation WHERE service_id = ?',
+                (service_id,)
+            )
+            row = result.fetchone()
+            new_score = (row['reputation_score'] if row else 0) + amount
+            new_index = (row['reputation_index'] if row else 0) + 1
+
+            self._execute2([
+                ('''
+                    INSERT INTO service_reputation (service_id, reputation_score, reputation_index)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(service_id) DO UPDATE SET
+                        reputation_score = excluded.reputation_score,
+                        reputation_index = excluded.reputation_index
+                ''', (service_id, new_score, new_index)),
+                ('''
+                    INSERT INTO reputation_events (
+                        subject_kind, subject_id, amount, reason, score_after
+                    ) VALUES ('service', ?, ?, ?, ?)
+                ''', (service_id, int(amount), reason, new_score)),
+            ])
+            return True
+        except Exception as e:
+            logger.LOGGER(f'Error updating reputation for service {service_id}: {e}')
+            return False
+
+    def get_service_reputation(self, service_id: str) -> Optional[int]:
+        """A service's running score, or None if it has never been scored."""
+        try:
+            result = self._execute(
+                'SELECT reputation_score FROM service_reputation WHERE service_id = ?',
+                (service_id,)
+            )
+            row = result.fetchone()
+            return row['reputation_score'] if row else None
+        except Exception as e:
+            logger.LOGGER(f'Error fetching reputation for service {service_id}: {e}')
+            return None
+
+    def get_reputation_events(self, subject_kind: str, subject_id: str,
+                              limit: int = 20) -> List[dict]:
+        """The last ``limit`` things that moved this subject's score, newest first."""
+        if subject_kind not in ('peer', 'service'):
+            logger.LOGGER(f'Unknown reputation subject kind {subject_kind!r}.')
+            return []
+        try:
+            result = self._execute('''
+                SELECT id, subject_kind, subject_id, amount, reason, score_after, created_at
+                FROM reputation_events
+                WHERE subject_kind = ? AND subject_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT ?
+            ''', (subject_kind, subject_id, int(limit)))
+            return [dict(row) for row in result.fetchall()]
+        except Exception as e:
+            logger.LOGGER(f'Error fetching reputation events for {subject_id}: {e}')
+            return []
 
     def get_reputation(self, peer_id: str) -> Optional[float]:
         """

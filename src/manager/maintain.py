@@ -13,6 +13,7 @@ from src.manager.manager import accept_peer_refresh, ensure_dev_client_pools, st
 from src.manager.metrics import balance_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
+from src.reputation_system.reasons import Reason
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.execution_cost import system_scarcity
@@ -118,7 +119,9 @@ def check_wanted_service(wanted: str):
 
 def maintain_vmachines(debug_mode: bool=False):
     def remove_and_penalize_vmachine(vmachine_id: str):
-        _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=-100)
+        _reputation_interface().update_vmachine_reputation(
+            vmachine_id=vmachine_id, amount=-100, reason=Reason.INSTANCE_LOST
+        )
         log.LOGGER(f"Prunning instance {vmachine_id} from the registry because the virtual machine does not exist.")
         try:
             stop_instance(token=vmachine_id)
@@ -167,14 +170,19 @@ def maintain_vmachines(debug_mode: bool=False):
 
         if not spend_mu(id=vmachine_id, amount_mu=charge_mu, debug_mode=debug_mode):
             try:
-                _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=-10)
+                _reputation_interface().update_vmachine_reputation(
+                    vmachine_id=vmachine_id, amount=-10,
+                    reason=Reason.INSTANCE_OUT_OF_BALANCE
+                )
                 log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
                 stop_instance(token=vmachine_id)
             except Exception as e:
                 log.LOGGER(f'Error purging {vmachine_id}: {str(e)}')
                 raise Exception(f'Error purging {vmachine_id}: {str(e)}')
         else:
-            _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=10)
+            _reputation_interface().update_vmachine_reputation(
+                vmachine_id=vmachine_id, amount=10, reason=Reason.INTERVAL_CHARGED
+            )
             # The charge just succeeded, so this interval is a real cost the operator
             # paid: sample it for the burn-rate figure. Sourced from charge_mu (not a
             # balance diff) so a top-up between ticks never reads as negative spend. The
@@ -229,7 +237,9 @@ def peer_deposits(debug_mode: bool = False):
                 ), None)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:
-                _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=-100)
+                _reputation_interface().update_peer_reputation(
+                    peer_id=peer_id, amount=-100, reason=Reason.PEER_REFRESH_FAILED
+                )
                 continue
 
             if not peer:
