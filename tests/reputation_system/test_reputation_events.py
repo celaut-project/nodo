@@ -117,6 +117,44 @@ class ReputationEventTests(unittest.TestCase):
         self.assertEqual(len(self.sc.get_reputation_events("peer", "same-id")), 1)
         self.assertEqual(len(self.sc.get_reputation_events("service", "same-id")), 1)
 
+    def test_the_history_stays_bounded_because_the_events_arrive_on_a_timer(self):
+        """The maintenance tick scores every instance and every unreachable peer once
+        per iteration -- 8 640 rows a day each at the default 10s. Unbounded, this
+        table would outgrow the rest of the database and still say nothing useful."""
+        self._peer()
+        writes = SQLConnection.MAX_EVENTS_PER_SUBJECT + SQLConnection.PRUNE_EVENTS_EVERY * 3
+        for _ in range(writes):
+            self.sc.update_reputation_peer("peer-1", -100, Reason.PEER_REFRESH_FAILED)
+
+        stored = self.connection.execute(
+            "SELECT COUNT(*) FROM reputation_events WHERE subject_id = 'peer-1'"
+        ).fetchone()[0]
+        self.assertLessEqual(
+            stored,
+            SQLConnection.MAX_EVENTS_PER_SUBJECT + SQLConnection.PRUNE_EVENTS_EVERY,
+        )
+
+        # The running total is the long-term memory, and it counts every event, pruned
+        # or not -- so bounding the history costs no history of the *score*.
+        row = self.connection.execute(
+            "SELECT reputation_score, reputation_index FROM peer WHERE id = 'peer-1'"
+        ).fetchone()
+        self.assertEqual(row["reputation_score"], -100 * writes)
+        self.assertEqual(row["reputation_index"], writes)
+
+        # And what survives is the newest, which is what a reader wants.
+        newest = self.sc.get_reputation_events("peer", "peer-1", limit=1)[0]
+        self.assertEqual(newest["score_after"], -100 * writes)
+
+    def test_pruning_one_subject_leaves_the_others_alone(self):
+        self._peer(peer_id="loud")
+        self._peer(peer_id="quiet")
+        self.sc.update_reputation_peer("quiet", -1, Reason.PAYMENT_CALL_FAILED)
+        for _ in range(SQLConnection.MAX_EVENTS_PER_SUBJECT + SQLConnection.PRUNE_EVENTS_EVERY):
+            self.sc.update_reputation_peer("loud", -1, Reason.PEER_REFRESH_FAILED)
+
+        self.assertEqual(len(self.sc.get_reputation_events("peer", "quiet")), 1)
+
     def test_an_unknown_subject_kind_reads_nothing(self):
         self.assertEqual(self.sc.get_reputation_events("wallet", "whatever"), [])
 
