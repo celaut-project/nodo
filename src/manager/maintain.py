@@ -262,6 +262,20 @@ def peer_deposits(debug_mode: bool = False):
                 log.LOGGER(f"network.DELEGATE_EXECUTION is off; not funding peer {peer_id}.")
             continue
 
+        # The switch for the node signing a payment on its own. Distinct from the one
+        # above on purpose: an operator who wants to keep delegating but approve every
+        # outgoing payment by hand had to turn delegation off to get it, which is not
+        # the same thing at all. Gated here, before the balance query, so the tick makes
+        # no request it cannot act on -- and `balance_on_other_peer` is not free: it is
+        # an RPC that drops our client on the peer when it fails.
+        if not env_manager.get("deposits.AUTOMATIC_REFILL", True):
+            if debug_mode:
+                log.LOGGER(
+                    f"deposits.AUTOMATIC_REFILL is off; leaving peer {peer_id} to be "
+                    "funded by hand."
+                )
+            continue
+
         peer_balance = balance_on_other_peer(peer_id=peer_id)
         if debug_mode:
             log.LOGGER(f"Peer {peer_id} balance: {format_mu(peer_balance)}")
