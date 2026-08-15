@@ -174,6 +174,44 @@ def create_tables(cursor):
                 last_refresh DATETIME,
                 FOREIGN KEY (instance_id) REFERENCES local_instances (id)
             )
+        ''',
+        # One row per payment this node took part in. Until this table existed a payment
+        # left no local trace at all: `add_balance_to_peer` moved a counter and the tx id
+        # reached a log line and nothing else, so "what did we send that peer, and when"
+        # was unanswerable -- and unanswerable *on purpose* is different from a chain
+        # nobody indexed, because the ledger cannot map an address back to a peer id.
+        #
+        # `status` is what happened, not what we hoped:
+        #   communicated  -- outgoing, the peer acknowledged our Payable call
+        #   unacknowledged-- outgoing, the transaction was broadcast and the call failed.
+        #                    Money left, credit never arrived. The row an operator needs.
+        #   accepted      -- incoming, the deposit was validated and credited
+        #   rejected      -- incoming, the deposit could not be validated
+        #
+        # `tx_id` is NULL on incoming rows: an incoming payment is proved by finding an
+        # unspent box carrying the deposit token in R4, and the id of the transaction
+        # that created the box is not part of that proof. The deposit token is the link
+        # (see `tx_history`), and it is stored here.
+        # `address` is the counterparty's, as hex propositionBytes -- the same form
+        # `contract_instance.address` holds, so the two join. It is NULL on incoming
+        # rows, where the only address involved is this node's own wallet.
+        # `amount_mu` is TEXT for the same reason every other balance in this schema is:
+        # MU exceeds what SQLite stores as an integer.
+        "payments": '''
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tx_id TEXT DEFAULT NULL,
+                direction TEXT CHECK( direction IN ('out', 'in') ) NOT NULL,
+                status TEXT CHECK( status IN ('communicated', 'unacknowledged', 'accepted', 'rejected') ) NOT NULL,
+                peer_id TEXT DEFAULT NULL,
+                client_id TEXT DEFAULT NULL,
+                deposit_token TEXT DEFAULT NULL,
+                ledger TEXT DEFAULT NULL,
+                contract_hash TEXT DEFAULT NULL,
+                address TEXT DEFAULT NULL,
+                amount_mu TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
         '''
     }
 
@@ -183,6 +221,19 @@ def create_tables(cursor):
             print(f"Created or updated '{table_name}' table.")
         except sqlite3.Error as e:
             print(f"Error creating '{table_name}' table: {e}")
+
+    # The three ways `payments` is ever read: one peer's history, one client's, and the
+    # tx-id lookup `tx_history` does per explorer transaction. The TUI runs the first on
+    # every redraw of a selected peer.
+    for index_sql in (
+        "CREATE INDEX IF NOT EXISTS idx_payments_peer ON payments (peer_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_payments_client ON payments (client_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_payments_tx ON payments (tx_id)",
+    ):
+        try:
+            cursor.execute(index_sql)
+        except sqlite3.Error as e:
+            print(f"Error creating payments index: {e}")
 
     # Additive column migrations for databases created before a column existed.
     # `CREATE TABLE IF NOT EXISTS` never alters an existing table, so new columns

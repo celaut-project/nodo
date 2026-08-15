@@ -56,6 +56,25 @@ def _manager_module():
     from src.manager import manager
     return manager
 
+
+def _ledger_tag(ledger) -> Optional[str]:
+    """The ledger's tag ("ergo"), for a row a person reads. Demo payments carry none."""
+    tags = getattr(ledger, "tags", None)
+    return tags[0] if tags else None
+
+
+def _address_of(script) -> Optional[str]:
+    """Where a payment went, in the form `contract_instance.address` stores it.
+
+    `get_peer_contract_instances` hands back the raw propositionBytes it decoded out of
+    that column's hex, so re-encoding is what keeps the two joinable. Deriving the
+    base58 address instead would need the JVM, on a path that already has the money out
+    the door and must not be able to fail.
+    """
+    if isinstance(script, bytes):
+        return script.hex() or None
+    return script or None
+
 def generate_deposit_token(client_id: str) -> str:
     if not env_manager.get("client.ACCEPT_NEW_DEPOSITS", True):
         raise Exception("This node is not accepting new deposits.")
@@ -141,6 +160,12 @@ def __peer_payment_process(peer_id: str, amount: int, on_transaction_url=None) -
                 _l.LOGGER(f"Processing payment: Deposit token: {deposit_token}. Ledger: {ledger}. Contract address: {script}")
 
                 # Process the payment
+                # Collects the id of the transaction the contract submits, so the payment
+                # can be written down as the thing that actually happened on a chain.
+                # A list because the hook is a callback and there is nothing else to
+                # carry the value back through the context manager.
+                submitted_tx: list = []
+
                 try:
                     report_url = getattr(payment_envs, "transaction_url_reporting", None)
                     reporting_context = (
@@ -148,7 +173,13 @@ def __peer_payment_process(peer_id: str, amount: int, on_transaction_url=None) -
                         if callable(report_url)
                         else nullcontext()
                     )
-                    with reporting_context:
+                    report_id = getattr(payment_envs, "transaction_id_reporting", None)
+                    id_context = (
+                        report_id(submitted_tx.append)
+                        if callable(report_id)
+                        else nullcontext()
+                    )
+                    with reporting_context, id_context:
                         contract_ledger = process_payment(
                             amount=amount,
                             deposit_token=deposit_token,
@@ -184,12 +215,30 @@ def __peer_payment_process(peer_id: str, amount: int, on_transaction_url=None) -
                     continue
 
 
+                # Past this point the payment exists on the ledger, whatever the peer
+                # does next, so both branches below write it down. The failing one is
+                # the row that matters most: money left this wallet and no balance
+                # arrived, and until now that left no trace an operator could read.
+                record = lambda status: sc.record_payment(
+                    direction='out',
+                    status=status,
+                    amount_mu=amount,
+                    tx_id=submitted_tx[-1] if submitted_tx else None,
+                    peer_id=peer_id,
+                    deposit_token=deposit_token,
+                    ledger=_ledger_tag(ledger),
+                    contract_hash=contract_hash,
+                    address=_address_of(script),
+                )
+
                 # Handle communication attempts to peer
                 if __attempt_payment_communication(peer_id, amount, deposit_token, contract_ledger):
+                    record('communicated')
                     _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=10)  # TODO On envs.
                     return True
                 else:
                     _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
+                    record('unacknowledged')
                     _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=-100)  # TODO On envs.
 
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
@@ -285,13 +334,32 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
 def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, contract: bytes, script: bytes, token: str) -> bool:
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         raise Exception(f"Deposit token {token} doesn't exists.")
+    # Resolved once, up front, because the payment record needs it whichever way the
+    # validation goes -- a deposit we refused is exactly the one a client will ask about.
     try:
-        _r = __check_payment_process(
+        client_id: Optional[str] = sc.client_id_from_deposit_token(token_id=token)
+    except Exception:
+        client_id = None
+
+    try:
+        _r = bool(client_id) and __check_payment_process(
             amount=amount, ledger=ledger, token=token,
             contract=contract, script=script
-        ) and _manager_module().increase_local_balance_for_client(client_id=sc.client_id_from_deposit_token(token_id=token), amount_mu=amount)  # TODO allow for containers too.
+        ) and _manager_module().increase_local_balance_for_client(client_id=client_id, amount_mu=amount)  # TODO allow for containers too.
     except: _r = False
     sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
+    # No tx id: an incoming payment is proved by an unspent box carrying the deposit
+    # token in R4, and the transaction that created that box is not part of the proof.
+    # The token is the link back to whoever paid, and it is on the row.
+    sc.record_payment(
+        direction='in',
+        status='accepted' if _r else 'rejected',
+        amount_mu=amount,
+        client_id=client_id,
+        deposit_token=token,
+        ledger=_ledger_tag(ledger),
+        contract_hash=sha3_256(contract).hexdigest() if contract else None,
+    )
     _l.LOGGER(f"Pending deposit tokens updated, there are still {len(sc.get_deposit_tokens(status='pending'))} tokens in the queue.")
     return _r
 

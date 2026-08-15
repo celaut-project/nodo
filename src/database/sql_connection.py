@@ -2054,6 +2054,86 @@ class SQLConnection(metaclass=Singleton):
 
         return token_id
 
+    # Payments
+
+    # What a payment row is allowed to say happened. See the `payments` table in
+    # migrate.py for what each one means.
+    PAYMENT_STATUSES = ('communicated', 'unacknowledged', 'accepted', 'rejected')
+
+    def record_payment(self, direction: str, status: str, amount_mu: int,
+                       tx_id: Optional[str] = None, peer_id: Optional[str] = None,
+                       client_id: Optional[str] = None, deposit_token: Optional[str] = None,
+                       ledger: Optional[str] = None, contract_hash: Optional[str] = None,
+                       address: Optional[str] = None) -> bool:
+        """Write down one payment. Returns whether the row landed.
+
+        This never raises. Every caller is on a path where the money has already moved:
+        a transaction is on-chain, or a client's deposit has just been credited. Losing
+        the *record* of that is bad; turning it into an exception that unwinds the
+        payment path would be worse, and the payment cannot be undone anyway.
+        """
+        if direction not in ('out', 'in'):
+            logger.LOGGER(f"Refusing to record a payment with direction {direction!r}.")
+            return False
+        if status not in SQLConnection.PAYMENT_STATUSES:
+            logger.LOGGER(f"Refusing to record a payment with status {status!r}.")
+            return False
+
+        try:
+            self._execute('''
+                INSERT INTO payments (
+                    tx_id, direction, status, peer_id, client_id, deposit_token,
+                    ledger, contract_hash, address, amount_mu
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (tx_id, direction, status, peer_id, client_id, deposit_token,
+                  ledger, contract_hash, address, str(int(amount_mu))))
+            return True
+        except Exception as e:
+            logger.LOGGER(f'Failed to record the {direction} payment of {amount_mu} MU: {e}')
+            return False
+
+    def _payments_where(self, clause: str, params: tuple, limit: int) -> List[dict]:
+        """Newest first, capped. Shared by the peer and client readers."""
+        try:
+            result = self._execute(f'''
+                SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
+                       ledger, contract_hash, address, amount_mu, created_at
+                FROM payments WHERE {clause} ORDER BY created_at DESC, id DESC LIMIT ?
+            ''', params + (int(limit),))
+            return [dict(row) for row in result.fetchall()]
+        except Exception as e:
+            logger.LOGGER(f'Failed to read payments: {e}')
+            return []
+
+    def get_payments_for_peer(self, peer_id: str, limit: int = 20) -> List[dict]:
+        """Every payment we made to ``peer_id``, newest first."""
+        return self._payments_where("peer_id = ?", (peer_id,), limit)
+
+    def get_payments_from_client(self, client_id: str, limit: int = 20) -> List[dict]:
+        """Every deposit ``client_id`` paid us, newest first, accepted or not."""
+        return self._payments_where("client_id = ?", (client_id,), limit)
+
+    def get_payments_by_tx_ids(self, tx_ids: List[str]) -> dict:
+        """Map ``tx_id`` -> payment row, for the ids given.
+
+        `tx_history` reads the chain and needs the counterparty, which the chain does
+        not know: an address is not a peer id. This is the join back.
+        """
+        ids = [tx_id for tx_id in tx_ids if tx_id]
+        if not ids:
+            return {}
+        placeholders = ','.join('?' * len(ids))
+        try:
+            result = self._execute(f'''
+                SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
+                       ledger, contract_hash, address, amount_mu, created_at
+                FROM payments WHERE tx_id IN ({placeholders})
+            ''', tuple(ids))
+            return {row['tx_id']: dict(row) for row in result.fetchall()}
+        except Exception as e:
+            logger.LOGGER(f'Failed to look up payments by transaction id: {e}')
+            return {}
+
     def get_deposit_tokens(self, status: Optional[str] = None) -> List[dict]:
         """
         Fetches all deposit tokens from the database, optionally filtering by status.
