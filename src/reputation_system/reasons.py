@@ -34,3 +34,9 @@ class Reason:
 
     INTERVAL_CHARGED = "interval_charged"
     """The instance paid for the interval it had just used."""
+
+    # Not written from Python.
+    OPERATOR_ADJUSTMENT = "operator_adjustment"
+    """Someone moved a peer's score by hand, with +/- in the TUI. Written there, in
+    Rust (`app.rs::adjust_peer_reputation`), against this same string -- so a hand
+    adjustment is not the one unexplained step in a peer's history."""
