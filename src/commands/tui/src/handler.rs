@@ -86,10 +86,6 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Down) => app.on_down(),
         (_, KeyCode::Right) => app.on_right(),
         (_, KeyCode::Left) => app.on_left(),
-        // `f` toggles the peers/clients focus on Network (previously Tab).
-        (KeyModifiers::NONE, KeyCode::Char('f')) if app.page() == Page::Network => {
-            app.toggle_focus()
-        }
         (KeyModifiers::NONE, KeyCode::Char('r')) => app.refresh(true).await,
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Instances => {
             app.toggle_instances_grouped()
@@ -97,16 +93,16 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('k')) if app.page() == Page::Instances => {
             app.open_kill_instance_confirm()
         }
-        (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Network => {
+        (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Peers => {
             app.open_connect()
         }
-        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Network => {
+        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Peers => {
             app.adjust_selected_peer_reputation(1)
         }
-        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Network => {
+        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Peers => {
             app.adjust_selected_peer_reputation(-1)
         }
-        // Pricing mirrors Network's +/- and Config's `e`: nudge in place, or open the
+        // Pricing mirrors the Peers page's +/- and Config's `e`: nudge in place, or open the
         // ordinary editor for an exact figure.
         (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Pricing => {
             app.adjust_selected_price(1).await
@@ -130,7 +126,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             app.open_delete_service_confirm()
         }
         // Same key as Services' delete, on the page's other destructive target.
-        (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Network => {
+        (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Peers => {
             app.open_disconnect_peer_confirm()
         }
         // Enter/Space expands or collapses the selected config section. `e` still

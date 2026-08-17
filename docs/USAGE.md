@@ -202,7 +202,7 @@ These are the most commonly used commands for daily tasks:
   still holding it** — an address reaches one node, and the usual reason two peers claim
   it is that the host reinstalled and came back under a new identity key (its peer_id).
   The old peer keeps whatever other addresses it announced; forget it with
-  `nodo disconnect` (or `d` on the TUI's Network page) if it has none left.  
+  `nodo disconnect` (or `d` on the TUI's Peers page) if it has none left.  
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
@@ -530,13 +530,16 @@ If `hashing.CHECK_INTEGRITY_ON_SERVE` is set to `true`, Nodo runs an automatic i
 ## Terminal User Interface (TUI)
 
 Run `nodo tui` to open the operations console. Its pages cover node/host statistics, current
-instance resource usage and reservations, local services, peers and clients, complete
+instance resource usage and reservations, local services, peers, clients, complete
 `config.yaml` editing, logs, storage, and Ergo wallet balances. The old tunnels page was
 removed because nodo does not use it.
 
 - `Tab`/`Shift+Tab` switches pages; Up/Down selects rows.
-- `r` refreshes, `f` switches peer/client focus.
-- On Network, `c` connects a peer and `d` forgets the selected one (`nodo disconnect`).
+- `r` refreshes.
+- On Peers, `c` connects a peer, `d` forgets the selected one (`nodo disconnect`), and `+`/`-` adjust its
+  reputation. The detail card shows what this node has paid that peer and the events behind its score.
+- On Clients, the detail card shows what a client has paid, its deposit tokens, and the instances it
+  started here.
 - On Services, `e` executes the selected service and `d` deletes it.
 - On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
