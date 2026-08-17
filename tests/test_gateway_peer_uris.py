@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
     import src.gateway.utils as gateway_utils
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -38,6 +40,13 @@ class UrisForAllInterfacesTests(unittest.TestCase):
 
         announced_ips = {uri.ip for uri in uris}
         self.assertEqual(announced_ips, {"192.168.1.47"})
+
+    def test_does_not_fall_back_to_loopback_when_no_address_is_usable(self):
+        with patch.object(gateway_utils, "_public_host", return_value=None), \
+             patch.object(gateway_utils.ni, "interfaces", return_value=[]):
+            uris = gateway_utils._uris_for_all_interfaces()
+
+        self.assertEqual(uris, [])
 
 
 if __name__ == "__main__":

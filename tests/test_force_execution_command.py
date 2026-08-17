@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
     from protos import celaut_pb2 as celaut
     from src.commands import force_execution as force_execution_cmd
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -70,6 +72,19 @@ class ForceExecutionCommandTests(unittest.TestCase):
         # The cleanup pop must use the exact same token the hint was stored under.
         self.assertEqual(recorded["pop"], recorded["set"][0])
         mock_print.assert_called_once_with(response)
+
+    def test_forced_generator_does_not_forward_local_funding_as_initial_mu(self):
+        with patch.object(force_execution_cmd, "get_execute_client", return_value="client-a") as mock_client:
+            messages = list(force_execution_cmd._forced_generator(
+                _hash="aa" * 32,
+                token="forced-token",
+                local_client_balance_mu=10**16,
+            ))
+
+        mock_client.assert_called_once_with(amount_mu=10**16, external=False)
+        configs = [message for message in messages if isinstance(message, celaut.Configuration)]
+        self.assertEqual(len(configs), 1)
+        self.assertFalse(configs[0].HasField("initial_mu"))
 
     def test_the_hint_is_cleaned_up_even_when_the_gateway_call_fails(self):
         with patch.object(force_execution_cmd.sc, "peer_exists", return_value=True), patch.object(

@@ -33,7 +33,6 @@ from src.manager.manager import get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.instance_names import inject_instance_name
-from src.utils.utils import to_amount
 
 env_manager = ConfigManager()
 
@@ -45,12 +44,12 @@ sc = SQLConnection()
 def _forced_generator(
     _hash: str,
     token: str,
-    initial_mu: int,
+    local_client_balance_mu: int,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
 ):
     try:
-        client_id = get_execute_client(amount_mu=initial_mu, external=False)
+        client_id = get_execute_client(amount_mu=local_client_balance_mu, external=False)
     except Exception:
         raise RuntimeError("No execute client available.")
 
@@ -61,9 +60,7 @@ def _forced_generator(
         # uses a caller-supplied token as-is rather than generating its own.
         yield celaut_pb2.RecursionGuard(token=token)
 
-        config = celaut_pb2.Configuration(
-            initial_mu=to_amount(initial_mu)
-        )
+        config = celaut_pb2.Configuration()
         if envs:
             config.environment_variables.update({
                 k: v.encode() for k, v in envs.items()
@@ -109,7 +106,7 @@ def force_execution(
             input_generator=_forced_generator(
                 _hash=service,
                 token=token,
-                initial_mu=10**16,
+                local_client_balance_mu=10**16,
                 envs=envs,
                 instance_name=instance_name,
             ),
