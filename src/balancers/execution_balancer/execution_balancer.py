@@ -19,6 +19,29 @@ env_manager = ConfigManager()
 
 SEND_ONLY_HASHES_ASKING_COST = env_manager.get("SEND_ONLY_HASHES_ASKING_COST")
 EXTERNAL_COST_TIMEOUT = env_manager.get("EXTERNAL_COST_TIMEOUT")
+START_SERVICE_ON_PEER_TIMEOUT = env_manager.get("START_SERVICE_ON_PEER_TIMEOUT")
+
+
+def _timeout_for_cost_request() -> Optional[int]:
+    """Use the cheap estimate timeout only when the request is hash-only."""
+    timeout = EXTERNAL_COST_TIMEOUT if SEND_ONLY_HASHES_ASKING_COST else START_SERVICE_ON_PEER_TIMEOUT
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        return None
+    return timeout if timeout > 0 else None
+
+
+def _log_cost_request_exception(peer_id: str, exc: Exception) -> None:
+    if isinstance(exc, grpc.RpcError):
+        code = exc.code()
+        if code == grpc.StatusCode.DEADLINE_EXCEEDED:
+            log.LOGGER(f"Timeout taking the cost for {peer_id}: {exc}")
+            return
+        if code == grpc.StatusCode.UNAVAILABLE:
+            log.LOGGER(f"Peer {peer_id} is unavailable while taking the cost: {exc}")
+            return
+    log.LOGGER(f"Exception taking the cost for {peer_id}: {exc} (maybe it doesn't have the service)")
 
 def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
     
@@ -76,7 +99,7 @@ def estimate_cost_on_peer(
                 )
             ).GetServiceEstimatedCost,
             indices_parser=celaut_pb2.EstimatedCost,
-            timeout=EXTERNAL_COST_TIMEOUT,
+            timeout=_timeout_for_cost_request(),
             partitions_message_mode_parser=True,
             indices_serializer=StartService_input_indices,
             input=service_extended(
@@ -88,7 +111,7 @@ def estimate_cost_on_peer(
             ),
         ))
     except Exception as e:
-        log.LOGGER(f"Exception taking the cost for {peer_id}: {e} (maybe it doesn't have the service)")
+        _log_cost_request_exception(peer_id=peer_id, exc=e)
         return None
 
 

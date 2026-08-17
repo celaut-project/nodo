@@ -13,7 +13,6 @@ from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.utils import (
     get_local_ip_from_network,
-    get_network_name,
     is_virtual_interface
 )
 
@@ -177,9 +176,9 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
         uris.extend(private)
 
     if not uris:
-        # Not even a private address (an isolated box): announce loopback rather than
-        # nothing at all, which would make this node unreachable by definition.
-        uris = [_uri_for_network(get_network_name(direction="0.0.0.0"))]
+        # Not even a private address. Loopback is only useful to this process and is
+        # actively wrong for any remote caller, so announce nothing instead.
+        log.LOGGER('No reachable address to announce; leaving GetPeerInfo uri list empty.')
     return uris
 
 
@@ -326,16 +325,16 @@ def save_service(
         log.LOGGER('Save service on disk')
         try:
             shutil.move(service_dir, REGISTRY + service_hash)
-            return True
         except Exception as e:
             log.LOGGER(f'Exception saving a service {service_hash}: ' + str(e))
             return False
-        finally:
-            if metadata:
-                try:
-                    with open(METADATA_REGISTRY + service_hash, "wb") as f:
-                        f.write(metadata.SerializeToString())
-                except Exception as e:
-                    log.LOGGER(f'Exception writing metadata of {service_hash}: ' + str(e))
+        if metadata:
+            try:
+                with open(METADATA_REGISTRY + service_hash, "wb") as f:
+                    f.write(metadata.SerializeToString())
+            except Exception as e:
+                log.LOGGER(f'Exception writing metadata of {service_hash}: ' + str(e))
+                return False
+        return True
 
-    return os.path.exists(os.path.join(METADATA_REGISTRY, service_hash)) or __save()
+    return os.path.exists(os.path.join(REGISTRY, service_hash)) or __save()
