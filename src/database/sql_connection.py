@@ -42,6 +42,29 @@ CONSUMPTION_WINDOW_SECONDS = 3600
 CONSUMPTION_WINDOW_SAMPLES = max(1, CONSUMPTION_WINDOW_SECONDS // max(1, MANAGER_ITERATION_TIME))
 
 
+# Tables this node writes that a database created before them will not have.
+#
+# `migrate` runs from the setup scripts, and `nodo migrate` *deletes* the database
+# before recreating it -- so an operator who pulls new code and restarts the service
+# has no upgrade path at all. Without these, a peer's reputation update would fail and
+# roll its score back with the missing event, which is a worse outcome than the feature
+# simply not being there. Everything created here is `IF NOT EXISTS`.
+TRACEABILITY_TABLES = ("payments", "reputation_events", "service_reputation")
+
+
+def _ensure_traceability_tables(connection) -> None:
+    try:
+        from src.database.migrate import ensure_tables
+
+        cursor = connection.cursor()
+        ensure_tables(cursor, TRACEABILITY_TABLES)
+        connection.commit()
+    except Exception as e:
+        # A read-only or otherwise unusable database is the node's problem to report
+        # elsewhere; it must not stop this constructor, which runs at import time.
+        logger.LOGGER(f'Could not ensure the payment and reputation tables exist: {e}')
+
+
 class SQLConnection(metaclass=Singleton):
     _connection = None
     _lock = Lock()
@@ -59,6 +82,7 @@ class SQLConnection(metaclass=Singleton):
         if SQLConnection._connection is None:
             SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
             SQLConnection._connection.row_factory = sqlite3.Row
+            _ensure_traceability_tables(SQLConnection._connection)
 
     def _execute(self, query: str, params=()) -> sqlite3.Cursor:
         """
@@ -729,13 +753,45 @@ class SQLConnection(metaclass=Singleton):
 
     # Peer Methods
 
-    def update_reputation_peer(self, peer_id: str, amount: int) -> bool:
+    # How many events are kept per subject. The history is bounded because the events
+    # arrive on a *timer*, not on incident: the maintenance tick scores every running
+    # instance and every unreachable peer once per MANAGER_ITERATION_TIME (10s by
+    # default), which is 8 640 rows a day each. Unbounded, the table would outgrow
+    # everything else in the database while saying nothing a reader wants.
+    #
+    # 200 is what the detail views can page through and enough to read a pattern; the
+    # running total on the peer/service row is the long-term memory, not this.
+    MAX_EVENTS_PER_SUBJECT = 200
+    # Pruning on every write would double the cost of the hot path for nothing, so it
+    # runs once every this many events per subject; the table stays within
+    # MAX_EVENTS_PER_SUBJECT + this.
+    PRUNE_EVENTS_EVERY = 50
+
+    @staticmethod
+    def _prune_events_statement(subject_kind: str, subject_id: str):
+        return ('''
+            DELETE FROM reputation_events
+            WHERE subject_kind = ? AND subject_id = ? AND id NOT IN (
+                SELECT id FROM reputation_events
+                WHERE subject_kind = ? AND subject_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT ?
+            )
+        ''', (subject_kind, subject_id, subject_kind, subject_id,
+              SQLConnection.MAX_EVENTS_PER_SUBJECT))
+
+    def update_reputation_peer(self, peer_id: str, amount: int, reason: str) -> bool:
         """
         Updates the reputation of a peer by increasing the reputation score and index.
+
+        The event and the new total are written together, in one transaction: a score
+        whose history does not add up to it is worse than either alone, since there is
+        then no way to tell which of the two is wrong.
 
         Args:
             peer_id (str): The ID of the peer whose reputation is to be updated.
             amount (int): The amount to add to the reputation score.
+            reason (str): Why, from `reputation_system.reasons.Reason`. Required --
+                an unattributed score change is what this table exists to end.
 
         Returns:
             bool: True if the update was successful, False otherwise.
@@ -753,9 +809,19 @@ class SQLConnection(metaclass=Singleton):
                 new_score = current_score + amount
                 new_index = current_index + 1
 
-                self._execute('''
-                    UPDATE peer SET reputation_score = ?, reputation_index = ? WHERE id = ?
-                ''', (new_score, new_index, peer_id))
+                statements = [
+                    ('''
+                        UPDATE peer SET reputation_score = ?, reputation_index = ? WHERE id = ?
+                    ''', (new_score, new_index, peer_id)),
+                    ('''
+                        INSERT INTO reputation_events (
+                            subject_kind, subject_id, amount, reason, score_after
+                        ) VALUES ('peer', ?, ?, ?, ?)
+                    ''', (peer_id, int(amount), reason, new_score)),
+                ]
+                if new_index % SQLConnection.PRUNE_EVENTS_EVERY == 0:
+                    statements.append(self._prune_events_statement('peer', peer_id))
+                self._execute2(statements)
 
                 return True
             else:
@@ -763,6 +829,79 @@ class SQLConnection(metaclass=Singleton):
         except Exception as e:
             logger.LOGGER(f'Error updating reputation for peer {peer_id}: {e}')
             return False
+
+    def update_reputation_service(self, service_id: str, amount: int, reason: str) -> bool:
+        """Move a service's score, and say why.
+
+        Scored by `service_id` rather than by instance: the instance that misbehaved is
+        gone minutes later, while the service is what gets run again -- and what a
+        balancer would eventually weigh. The event still names the instance through
+        `reason` plus its timestamp, so a history points at a run.
+
+        Upserts, because a service has no row anywhere until it first scores; services
+        themselves live in the registry, on disk.
+        """
+        try:
+            result = self._execute(
+                'SELECT reputation_score, reputation_index FROM service_reputation WHERE service_id = ?',
+                (service_id,)
+            )
+            row = result.fetchone()
+            new_score = (row['reputation_score'] if row else 0) + amount
+            new_index = (row['reputation_index'] if row else 0) + 1
+
+            statements = [
+                ('''
+                    INSERT INTO service_reputation (service_id, reputation_score, reputation_index)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(service_id) DO UPDATE SET
+                        reputation_score = excluded.reputation_score,
+                        reputation_index = excluded.reputation_index
+                ''', (service_id, new_score, new_index)),
+                ('''
+                    INSERT INTO reputation_events (
+                        subject_kind, subject_id, amount, reason, score_after
+                    ) VALUES ('service', ?, ?, ?, ?)
+                ''', (service_id, int(amount), reason, new_score)),
+            ]
+            if new_index % SQLConnection.PRUNE_EVENTS_EVERY == 0:
+                statements.append(self._prune_events_statement('service', service_id))
+            self._execute2(statements)
+            return True
+        except Exception as e:
+            logger.LOGGER(f'Error updating reputation for service {service_id}: {e}')
+            return False
+
+    def get_service_reputation(self, service_id: str) -> Optional[int]:
+        """A service's running score, or None if it has never been scored."""
+        try:
+            result = self._execute(
+                'SELECT reputation_score FROM service_reputation WHERE service_id = ?',
+                (service_id,)
+            )
+            row = result.fetchone()
+            return row['reputation_score'] if row else None
+        except Exception as e:
+            logger.LOGGER(f'Error fetching reputation for service {service_id}: {e}')
+            return None
+
+    def get_reputation_events(self, subject_kind: str, subject_id: str,
+                              limit: int = 20) -> List[dict]:
+        """The last ``limit`` things that moved this subject's score, newest first."""
+        if subject_kind not in ('peer', 'service'):
+            logger.LOGGER(f'Unknown reputation subject kind {subject_kind!r}.')
+            return []
+        try:
+            result = self._execute('''
+                SELECT id, subject_kind, subject_id, amount, reason, score_after, created_at
+                FROM reputation_events
+                WHERE subject_kind = ? AND subject_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT ?
+            ''', (subject_kind, subject_id, int(limit)))
+            return [dict(row) for row in result.fetchall()]
+        except Exception as e:
+            logger.LOGGER(f'Error fetching reputation events for {subject_id}: {e}')
+            return []
 
     def get_reputation(self, peer_id: str) -> Optional[float]:
         """
@@ -2053,6 +2192,86 @@ class SQLConnection(metaclass=Singleton):
         ''', (token_id, client_id, status))
 
         return token_id
+
+    # Payments
+
+    # What a payment row is allowed to say happened. See the `payments` table in
+    # migrate.py for what each one means.
+    PAYMENT_STATUSES = ('communicated', 'unacknowledged', 'accepted', 'rejected')
+
+    def record_payment(self, direction: str, status: str, amount_mu: int,
+                       tx_id: Optional[str] = None, peer_id: Optional[str] = None,
+                       client_id: Optional[str] = None, deposit_token: Optional[str] = None,
+                       ledger: Optional[str] = None, contract_hash: Optional[str] = None,
+                       address: Optional[str] = None) -> bool:
+        """Write down one payment. Returns whether the row landed.
+
+        This never raises. Every caller is on a path where the money has already moved:
+        a transaction is on-chain, or a client's deposit has just been credited. Losing
+        the *record* of that is bad; turning it into an exception that unwinds the
+        payment path would be worse, and the payment cannot be undone anyway.
+        """
+        if direction not in ('out', 'in'):
+            logger.LOGGER(f"Refusing to record a payment with direction {direction!r}.")
+            return False
+        if status not in SQLConnection.PAYMENT_STATUSES:
+            logger.LOGGER(f"Refusing to record a payment with status {status!r}.")
+            return False
+
+        try:
+            self._execute('''
+                INSERT INTO payments (
+                    tx_id, direction, status, peer_id, client_id, deposit_token,
+                    ledger, contract_hash, address, amount_mu
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (tx_id, direction, status, peer_id, client_id, deposit_token,
+                  ledger, contract_hash, address, str(int(amount_mu))))
+            return True
+        except Exception as e:
+            logger.LOGGER(f'Failed to record the {direction} payment of {amount_mu} MU: {e}')
+            return False
+
+    def _payments_where(self, clause: str, params: tuple, limit: int) -> List[dict]:
+        """Newest first, capped. Shared by the peer and client readers."""
+        try:
+            result = self._execute(f'''
+                SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
+                       ledger, contract_hash, address, amount_mu, created_at
+                FROM payments WHERE {clause} ORDER BY created_at DESC, id DESC LIMIT ?
+            ''', params + (int(limit),))
+            return [dict(row) for row in result.fetchall()]
+        except Exception as e:
+            logger.LOGGER(f'Failed to read payments: {e}')
+            return []
+
+    def get_payments_for_peer(self, peer_id: str, limit: int = 20) -> List[dict]:
+        """Every payment we made to ``peer_id``, newest first."""
+        return self._payments_where("peer_id = ?", (peer_id,), limit)
+
+    def get_payments_from_client(self, client_id: str, limit: int = 20) -> List[dict]:
+        """Every deposit ``client_id`` paid us, newest first, accepted or not."""
+        return self._payments_where("client_id = ?", (client_id,), limit)
+
+    def get_payments_by_tx_ids(self, tx_ids: List[str]) -> dict:
+        """Map ``tx_id`` -> payment row, for the ids given.
+
+        `tx_history` reads the chain and needs the counterparty, which the chain does
+        not know: an address is not a peer id. This is the join back.
+        """
+        ids = [tx_id for tx_id in tx_ids if tx_id]
+        if not ids:
+            return {}
+        placeholders = ','.join('?' * len(ids))
+        try:
+            result = self._execute(f'''
+                SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
+                       ledger, contract_hash, address, amount_mu, created_at
+                FROM payments WHERE tx_id IN ({placeholders})
+            ''', tuple(ids))
+            return {row['tx_id']: dict(row) for row in result.fetchall()}
+        except Exception as e:
+            logger.LOGGER(f'Failed to look up payments by transaction id: {e}')
+            return {}
 
     def get_deposit_tokens(self, status: Optional[str] = None) -> List[dict]:
         """
