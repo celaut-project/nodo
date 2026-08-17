@@ -49,6 +49,17 @@ def transaction_url_reporting(reporter):
     return _ergo_interface().transaction_url_reporting(reporter)
 
 
+def transaction_id_reporting(reporter):
+    """Provide the current payment flow with a transaction id reporter.
+
+    A simulated payment has no transaction and reports nothing, so the payment it
+    records carries no id -- which is the truth about it.
+    """
+    if SIMULATED:
+        return nullcontext()
+    return _ergo_interface().transaction_id_reporting(reporter)
+
+
 def check_sender_balances() -> Dict[contract_hash, Callable[[amount], bool]]:
     ergo = _ergo_interface()
     return {

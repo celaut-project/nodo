@@ -1,7 +1,7 @@
 use prost::Message;
 use ratatui::widgets::TableState;
 use regex::Regex;
-use rusqlite::{Connection, Result as SqlResult};
+use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde_yaml::Value;
 use sha1::{Digest, Sha1};
 use std::collections::{HashMap, VecDeque};
@@ -41,18 +41,22 @@ pub enum Page {
     Overview,
     Instances,
     Services,
-    Network,
+    /// Peers we talk to, and what we have paid them.
+    Peers,
+    /// Clients that talk to us, and what they have paid.
+    Clients,
     Pricing,
     Config,
     Logs,
 }
 
 impl Page {
-    pub const ALL: [Page; 7] = [
+    pub const ALL: [Page; 8] = [
         Page::Overview,
         Page::Instances,
         Page::Services,
-        Page::Network,
+        Page::Peers,
+        Page::Clients,
         Page::Pricing,
         Page::Config,
         Page::Logs,
@@ -63,7 +67,8 @@ impl Page {
             Page::Overview => "OVERVIEW",
             Page::Instances => "INSTANCES",
             Page::Services => "SERVICES",
-            Page::Network => "NETWORK",
+            Page::Peers => "PEERS",
+            Page::Clients => "CLIENTS",
             Page::Pricing => "PRICING",
             Page::Config => "CONFIG",
             Page::Logs => "LOGS",
@@ -209,12 +214,89 @@ pub struct Client {
     pub id: String,
     pub balance: String,
     pub last_usage: String,
+    /// A client this node never charges — its own dev clients. Stored on the row
+    /// since before this page existed, and shown nowhere until it did: an operator
+    /// wondering why a balance never moves is owed this word.
+    pub unmetered: bool,
 }
 
 impl Identifiable for Client {
     fn id(&self) -> &str {
         &self.id
     }
+}
+
+/// One `payments` row, as the detail cards show it. The amount stays in raw MU and is
+/// rendered in the operator's display unit at draw time, like every other balance here.
+#[derive(Debug, Clone)]
+pub struct PaymentRow {
+    pub created_at: String,
+    pub amount: String,
+    /// `communicated` / `unacknowledged` / `accepted` / `rejected` — see the
+    /// `payments` table. `unacknowledged` is the one worth reading: money left and
+    /// no balance arrived.
+    pub status: String,
+    pub tx_id: String,
+    pub deposit_token: String,
+}
+
+/// One `reputation_events` row: what moved a score, by how much, and why.
+#[derive(Debug, Clone)]
+pub struct ReputationEvent {
+    pub created_at: String,
+    pub amount: i64,
+    pub reason: String,
+    pub score_after: Option<i64>,
+}
+
+/// A deposit token issued to a client, with what became of it.
+#[derive(Debug, Clone)]
+pub struct DepositToken {
+    pub id: String,
+    pub status: String,
+    pub created_at: String,
+}
+
+/// An instance a client started on this node (`local_instances.father_id`).
+#[derive(Debug, Clone)]
+pub struct ClientInstance {
+    pub id: String,
+    pub name: String,
+}
+
+/// Everything the Peers page shows about the selected peer beyond its table row.
+///
+/// Loaded for the selection rather than for every peer: this is three queries, and
+/// the list refreshes every couple of seconds whether or not anyone is reading it.
+#[derive(Debug, Clone, Default)]
+pub struct PeerDetail {
+    pub peer_id: String,
+    pub payments: Vec<PaymentRow>,
+    pub events: Vec<ReputationEvent>,
+}
+
+/// A service's reputation: the score every instance of it contributed to, and the
+/// events that got it there.
+#[derive(Debug, Clone, Default)]
+pub struct ServiceDetail {
+    pub service_id: String,
+    /// None when the service has never been scored — different from a score of 0,
+    /// which is a service that earned and lost in equal measure.
+    pub score: Option<i64>,
+    pub events: Vec<ReputationEvent>,
+}
+
+/// Everything the Clients page shows about the selected client beyond its table row.
+///
+/// A client is not a peer and cannot be resolved to one: `peer.remote_client_id` is
+/// our client id *inside* a remote peer, not a key into our `clients` table (#178).
+/// So this shows what the client itself did here — nothing is inferred about who it is.
+#[derive(Debug, Clone, Default)]
+pub struct ClientDetail {
+    pub client_id: String,
+    pub deposits: Vec<DepositToken>,
+    pub instances: Vec<ClientInstance>,
+    pub payments: Vec<PaymentRow>,
 }
 
 #[derive(Debug, Clone)]
@@ -844,7 +926,11 @@ pub struct App {
     pub prices: StatefulList<PriceEntry>,
     pub scarcity: Scarcity,
     pub money: Money,
-    pub network_focus: usize,
+    /// Detail for the selected peer / client, reloaded when the selection moves or the
+    /// data refreshes — never per frame, since drawing must not touch the database.
+    pub peer_detail: Option<PeerDetail>,
+    pub client_detail: Option<ClientDetail>,
+    pub service_detail: Option<ServiceDetail>,
     pub instances_grouped: bool,
     pub app_logs: Vec<String>,
     pub node_logs: Vec<String>,
@@ -899,7 +985,9 @@ impl Default for App {
             prices: StatefulList::with_items(prices),
             scarcity,
             money: Money::load(&paths.config),
-            network_focus: 0,
+            peer_detail: None,
+            client_detail: None,
+            service_detail: None,
             instances_grouped: false,
             app_logs: vec!["TUI ready".to_string()],
             node_logs: read_last_lines(&paths.log, 250).unwrap_or_default(),
@@ -969,9 +1057,18 @@ impl App {
     pub fn on_up(&mut self) {
         match self.page() {
             Page::Instances => self.instances.previous(),
-            Page::Services => self.services.previous(),
-            Page::Network if self.network_focus == 0 => self.peers.previous(),
-            Page::Network => self.clients.previous(),
+            Page::Services => {
+                self.services.previous();
+                self.load_selection_details();
+            }
+            Page::Peers => {
+                self.peers.previous();
+                self.load_selection_details();
+            }
+            Page::Clients => {
+                self.clients.previous();
+                self.load_selection_details();
+            }
             Page::Pricing => self.prices.previous(),
             Page::Config => {
                 self.config_tree_state.key_up();
@@ -983,9 +1080,18 @@ impl App {
     pub fn on_down(&mut self) {
         match self.page() {
             Page::Instances => self.instances.next(),
-            Page::Services => self.services.next(),
-            Page::Network if self.network_focus == 0 => self.peers.next(),
-            Page::Network => self.clients.next(),
+            Page::Services => {
+                self.services.next();
+                self.load_selection_details();
+            }
+            Page::Peers => {
+                self.peers.next();
+                self.load_selection_details();
+            }
+            Page::Clients => {
+                self.clients.next();
+                self.load_selection_details();
+            }
             Page::Pricing => self.prices.next(),
             Page::Config => {
                 self.config_tree_state.key_down();
@@ -994,16 +1100,34 @@ impl App {
         }
     }
 
+    /// Reload the payment and reputation history behind the selected peer and client.
+    ///
+    /// Called when the selection moves and after each data refresh, never from the
+    /// draw path: a frame is redrawn on every keystroke and tick, and none of this
+    /// changes that often.
+    pub fn load_selection_details(&mut self) {
+        let database = self.paths.database.clone();
+        self.peer_detail = self
+            .peers
+            .selected()
+            .map(|peer| peer.id.clone())
+            .and_then(|peer_id| get_peer_detail(&database, &peer_id).ok());
+        self.client_detail = self
+            .clients
+            .selected()
+            .map(|client| client.id.clone())
+            .and_then(|client_id| get_client_detail(&database, &client_id).ok());
+        self.service_detail = self
+            .services
+            .selected()
+            .map(|service| service.id.clone())
+            .and_then(|service_id| get_service_detail(&database, &service_id).ok());
+    }
+
     /// Expand or collapse the selected configuration section (Enter/Space on the
     /// Config page). A no-op on a scalar leaf, which has nothing to expand.
     pub fn toggle_selected_config_node(&mut self) {
         self.config_tree_state.toggle_selected();
-    }
-
-    pub fn toggle_focus(&mut self) {
-        if self.page() == Page::Network {
-            self.network_focus = (self.network_focus + 1) % 2;
-        }
     }
 
     /// Toggle the Instances page between the flat table and the dependency
@@ -1021,11 +1145,11 @@ impl App {
 
     /// Increase or decrease the selected peer's local reputation score.
     pub fn adjust_selected_peer_reputation(&mut self, delta: i64) {
-        if self.page() != Page::Network || self.network_focus != 0 {
+        if self.page() != Page::Peers {
             return;
         }
         let Some(peer) = self.peers.selected().cloned() else {
-            self.status = "Select a peer first (f focuses peers)".to_string();
+            self.status = "Select a peer first".to_string();
             return;
         };
         match adjust_peer_reputation(&self.paths.database, &peer.id, delta) {
@@ -1037,6 +1161,9 @@ impl App {
                 );
                 self.peers
                     .refresh(get_peers(&self.paths.database).unwrap_or_default());
+                // The adjustment is an event like any other; show it without waiting
+                // for the next refresh.
+                self.load_selection_details();
             }
             Err(error) => self.status = format!("Reputation update failed: {error}"),
         }
@@ -1536,13 +1663,10 @@ impl App {
     /// with `c`. That is exactly what makes this useful — a peer whose addresses went
     /// stale (say another node claimed one, see `claim_uri`) is cleared out here.
     pub fn open_disconnect_peer_confirm(&mut self) {
-        if self.page() != Page::Network {
-            return;
-        }
-        if self.network_focus != 0 {
-            // Say so rather than silently doing nothing: there is no matching action
-            // for a client (they are ours, and expire on their own).
-            self.status = "Only peers can be forgotten (f focuses peers)".to_string();
+        // Peers only. A client is not forgotten by hand -- it is ours, and expires on
+        // its own -- and since the two now have a page each, `d` on Clients is simply
+        // not bound rather than answered with an explanation.
+        if self.page() != Page::Peers {
             return;
         }
         if self.command_running() {
@@ -1550,7 +1674,7 @@ impl App {
             return;
         }
         let Some(peer) = self.peers.selected().cloned() else {
-            self.status = "Select a peer first (f focuses peers)".to_string();
+            self.status = "Select a peer first".to_string();
             return;
         };
         let label = shorten(&peer.id, 18);
@@ -1685,6 +1809,8 @@ impl App {
             .refresh(get_peers(&self.paths.database).unwrap_or_default());
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        // After the lists, since a selection that vanished takes its detail with it.
+        self.load_selection_details();
         self.node_logs = read_last_lines(&self.paths.log, 250).unwrap_or_default();
 
         // Prices and the display unit come from config.yaml, which the operator may be
@@ -1980,27 +2106,40 @@ fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<P
 }
 
 /// Adjust a peer's local reputation score by `delta`, mirroring
-/// `sql_connection.update_reputation_peer`: add `delta` to the score and
-/// increment the index. Works when `reputation_proof_id` is NULL (score-only),
-/// so no on-chain proof is required.
+/// `sql_connection.update_reputation_peer`: add `delta` to the score, increment the
+/// index, and record the event that explains it. Works when `reputation_proof_id` is
+/// NULL (score-only), so no on-chain proof is required.
+///
+/// The event matters as much as the score here. Every other mover of a score writes
+/// one, so a hand adjustment that did not would be the single unexplained step in a
+/// peer's history — and the one an operator is most likely to have to justify later.
 fn adjust_peer_reputation(database: &Path, peer_id: &str, delta: i64) -> SqlResult<()> {
-    let connection = Connection::open(database)?;
-    let (score, index): (i64, i64) = connection.query_row(
+    let mut connection = Connection::open(database)?;
+    let transaction = connection.transaction()?;
+    let (score, index): (i64, i64) = transaction.query_row(
         "SELECT COALESCE(reputation_score, 0), COALESCE(reputation_index, 0)
          FROM peer WHERE id = ?1",
         [peer_id],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    connection.execute(
+    transaction.execute(
         "UPDATE peer SET reputation_score = ?1, reputation_index = ?2 WHERE id = ?3",
         rusqlite::params![score + delta, index + 1, peer_id],
     )?;
+    // Same string as `reasons.Reason.OPERATOR_ADJUSTMENT` on the Python side.
+    transaction.execute(
+        "INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after)
+         VALUES ('peer', ?1, ?2, 'operator_adjustment', ?3)",
+        rusqlite::params![peer_id, delta, score + delta],
+    )?;
+    transaction.commit()?;
     Ok(())
 }
 
 fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
     let connection = Connection::open(database)?;
-    let mut statement = connection.prepare("SELECT id, balance_mu, last_usage FROM clients")?;
+    let mut statement =
+        connection.prepare("SELECT id, balance_mu, last_usage, unmetered FROM clients")?;
     let clients = statement
         .query_map([], |row| {
             let last_usage = row
@@ -2011,10 +2150,141 @@ fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
                 id: row.get(0)?,
                 balance: row.get::<_, String>(1)?,
                 last_usage,
+                unmetered: row.get::<_, Option<i64>>(3)?.unwrap_or(0) != 0,
             })
         })?
         .collect();
     clients
+}
+
+/// How many rows of history a detail card asks for. Enough to read a pattern, few
+/// enough that the card cannot push the table it belongs to off a short terminal.
+const DETAIL_ROWS: usize = 8;
+
+/// What we paid a peer and why its score is where it is.
+fn get_peer_detail(database: &Path, peer_id: &str) -> SqlResult<PeerDetail> {
+    let connection = Connection::open(database)?;
+    Ok(PeerDetail {
+        peer_id: peer_id.to_string(),
+        payments: get_payments(&connection, "peer_id", peer_id)?,
+        events: get_reputation_events(&connection, "peer", peer_id)?,
+    })
+}
+
+/// A service's score and the events behind it. Scored by `service_id`, so this is the
+/// history of every instance of it that ever ran here, not of the one running now.
+fn get_service_detail(database: &Path, service_id: &str) -> SqlResult<ServiceDetail> {
+    let connection = Connection::open(database)?;
+    let score = connection
+        .query_row(
+            "SELECT reputation_score FROM service_reputation WHERE service_id = ?1",
+            [service_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    Ok(ServiceDetail {
+        service_id: service_id.to_string(),
+        score,
+        events: get_reputation_events(&connection, "service", service_id)?,
+    })
+}
+
+/// What a client paid us, what it was given a token for, and what it is running here.
+fn get_client_detail(database: &Path, client_id: &str) -> SqlResult<ClientDetail> {
+    let connection = Connection::open(database)?;
+    Ok(ClientDetail {
+        client_id: client_id.to_string(),
+        deposits: get_deposit_tokens(&connection, client_id)?,
+        instances: get_client_instances(&connection, client_id)?,
+        payments: get_payments(&connection, "client_id", client_id)?,
+    })
+}
+
+/// Payment rows for one counterparty, newest first.
+///
+/// `column` is the caller's choice of `peer_id` or `client_id` and is interpolated,
+/// which is safe only because both are literals in this file — the *value* is bound.
+fn get_payments(connection: &Connection, column: &str, id: &str) -> SqlResult<Vec<PaymentRow>> {
+    let mut statement = connection.prepare(&format!(
+        "SELECT created_at, amount_mu, status, COALESCE(tx_id, ''), COALESCE(deposit_token, '')
+         FROM payments WHERE {column} = ?1 ORDER BY created_at DESC, id DESC LIMIT {DETAIL_ROWS}"
+    ))?;
+    let payments = statement
+        .query_map([id], |row| {
+            Ok(PaymentRow {
+                created_at: row.get(0)?,
+                amount: row.get::<_, String>(1)?,
+                status: row.get(2)?,
+                tx_id: row.get(3)?,
+                deposit_token: row.get(4)?,
+            })
+        })?
+        .collect();
+    payments
+}
+
+/// Reputation events for one subject, newest first.
+fn get_reputation_events(
+    connection: &Connection,
+    kind: &str,
+    id: &str,
+) -> SqlResult<Vec<ReputationEvent>> {
+    let mut statement = connection.prepare(
+        "SELECT created_at, amount, reason, score_after
+         FROM reputation_events
+         WHERE subject_kind = ?1 AND subject_id = ?2
+         ORDER BY created_at DESC, id DESC LIMIT ?3",
+    )?;
+    let events = statement
+        .query_map(rusqlite::params![kind, id, DETAIL_ROWS as i64], |row| {
+            Ok(ReputationEvent {
+                created_at: row.get(0)?,
+                amount: row.get(1)?,
+                reason: row.get(2)?,
+                score_after: row.get(3)?,
+            })
+        })?
+        .collect();
+    events
+}
+
+fn get_deposit_tokens(connection: &Connection, client_id: &str) -> SqlResult<Vec<DepositToken>> {
+    let mut statement = connection.prepare(
+        "SELECT id, status, created_at FROM deposit_tokens
+         WHERE client_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+    )?;
+    let tokens = statement
+        .query_map(rusqlite::params![client_id, DETAIL_ROWS as i64], |row| {
+            Ok(DepositToken {
+                id: row.get(0)?,
+                status: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })?
+        .collect();
+    tokens
+}
+
+/// The instances a client started here. `local_instances.father_id` holds the client
+/// id for a top-level instance (see `start_service_iterable`), which is the only link
+/// between a client and anything it runs.
+fn get_client_instances(
+    connection: &Connection,
+    client_id: &str,
+) -> SqlResult<Vec<ClientInstance>> {
+    let mut statement = connection.prepare(
+        "SELECT id, COALESCE(name, '') FROM local_instances
+         WHERE father_id = ?1 ORDER BY name LIMIT ?2",
+    )?;
+    let instances = statement
+        .query_map(rusqlite::params![client_id, DETAIL_ROWS as i64], |row| {
+            Ok(ClientInstance {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })?
+        .collect();
+    instances
 }
 
 fn get_instances(
@@ -3749,11 +4019,11 @@ Cold Wallet: 9cold\n";
             }
         }
 
-        fn on_network_page(peers: Vec<Peer>) -> App {
+        fn on_peers_page(peers: Vec<Peer>) -> App {
             let mut app = App::default();
             app.tabs.index = Page::ALL
                 .iter()
-                .position(|page| *page == Page::Network)
+                .position(|page| *page == Page::Peers)
                 .unwrap();
             app.peers = StatefulList::with_items(peers);
             app.peers.next();
@@ -3762,7 +4032,7 @@ Cold Wallet: 9cold\n";
 
         #[test]
         fn it_asks_before_doing_anything() {
-            let mut app = on_network_page(vec![peer("peer-abc")]);
+            let mut app = on_peers_page(vec![peer("peer-abc")]);
             app.open_disconnect_peer_confirm();
 
             assert_eq!(app.input_mode, InputMode::Confirm);
@@ -3787,7 +4057,7 @@ Cold Wallet: 9cold\n";
 
         #[test]
         fn with_nothing_selected_it_says_so_instead_of_asking() {
-            let mut app = on_network_page(Vec::new());
+            let mut app = on_peers_page(Vec::new());
             app.open_disconnect_peer_confirm();
             assert_eq!(app.input_mode, InputMode::Normal);
             assert!(app.pending_action.is_none());
@@ -3795,14 +4065,174 @@ Cold Wallet: 9cold\n";
         }
 
         #[test]
-        fn the_clients_pane_has_no_such_action() {
-            let mut app = on_network_page(vec![peer("peer-abc")]);
-            app.network_focus = 1;
+        fn clients_have_no_such_action() {
+            // A client is ours and expires on its own; there is nothing to forget.
+            // The page split is what enforces it now -- `d` is not bound on Clients --
+            // so the guard here is the second line of defence, not the first.
+            let mut app = on_peers_page(vec![peer("peer-abc")]);
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Clients)
+                .unwrap();
             app.open_disconnect_peer_confirm();
             assert_eq!(app.input_mode, InputMode::Normal);
             assert!(app.pending_action.is_none());
-            assert!(app.status.contains("Only peers"), "{}", app.status);
+        }
+    }
+
+    /// The history behind a peer and a client, read straight out of SQLite.
+    ///
+    /// These queries are the whole point of the two detail cards, and a card that
+    /// silently renders nothing looks exactly like a peer with no history -- the same
+    /// confusion issue #231 was about, one table over. So they are exercised against a
+    /// real database rather than through the widgets.
+    mod payment_and_reputation_history {
+        use super::*;
+
+        fn history_database(dir: &Path) -> PathBuf {
+            let path = dir.join("history.sqlite");
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT,
+                                        reputation_proof_id TEXT, reputation_score INTEGER,
+                                        reputation_index INTEGER);
+                     CREATE TABLE clients (id TEXT PRIMARY KEY, balance_mu TEXT,
+                                        last_usage FLOAT, unmetered INTEGER NOT NULL DEFAULT 0);
+                     CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_id TEXT,
+                                        direction TEXT, status TEXT, peer_id TEXT, client_id TEXT,
+                                        deposit_token TEXT, ledger TEXT, contract_hash TEXT,
+                                        address TEXT, amount_mu TEXT NOT NULL,
+                                        created_at DATETIME);
+                     CREATE TABLE reputation_events (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                        subject_kind TEXT, subject_id TEXT, amount INTEGER,
+                                        reason TEXT, score_after INTEGER, created_at DATETIME);
+                     CREATE TABLE deposit_tokens (id TEXT PRIMARY KEY, client_id TEXT,
+                                        status TEXT, created_at DATETIME);
+                     CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, father_id TEXT);
+                     INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7, 3);
+                     INSERT INTO clients VALUES ('client-1', '500', NULL, 1);
+                     INSERT INTO payments (tx_id, direction, status, peer_id, amount_mu, created_at)
+                        VALUES ('tx-old', 'out', 'communicated', 'peer-1', '1000', '2026-01-01 10:00:00');
+                     INSERT INTO payments (tx_id, direction, status, peer_id, amount_mu, created_at)
+                        VALUES ('tx-new', 'out', 'unacknowledged', 'peer-1', '2000', '2026-01-02 10:00:00');
+                     INSERT INTO payments (direction, status, client_id, deposit_token, amount_mu, created_at)
+                        VALUES ('in', 'accepted', 'client-1', 'token-1', '750', '2026-01-03 10:00:00');
+                     INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
+                        VALUES ('peer', 'peer-1', -100, 'payment_unacknowledged', -93, '2026-01-02 10:00:01');
+                     INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
+                        VALUES ('service', 'peer-1', -100, 'instance_lost', -100, '2026-01-02 10:00:02');
+                     INSERT INTO deposit_tokens VALUES ('token-1', 'client-1', 'payed', '2026-01-03 09:59:00');
+                     INSERT INTO local_instances VALUES ('instance-1', 'demo', 'client-1');
+                     INSERT INTO local_instances VALUES ('instance-2', 'other', 'someone-else');",
+                )
+                .unwrap();
+            path
+        }
+
+        fn temp_dir(name: &str) -> PathBuf {
+            let dir = std::env::temp_dir()
+                .join(format!("nodo-tui-history-{name}-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        #[test]
+        fn a_peer_carries_its_payments_and_the_events_behind_its_score() {
+            let dir = temp_dir("peer");
+            let database = history_database(&dir);
+
+            let detail = get_peer_detail(&database, "peer-1").unwrap();
+
+            // Newest first: the payment an operator is looking for is the last one.
+            assert_eq!(detail.payments.len(), 2);
+            assert_eq!(detail.payments[0].tx_id, "tx-new");
+            assert_eq!(detail.payments[0].status, "unacknowledged");
+            assert_eq!(detail.payments[0].amount, "2000");
+            // A service event that happens to share the id is not this peer's history.
+            assert_eq!(detail.events.len(), 1);
+            assert_eq!(detail.events[0].reason, "payment_unacknowledged");
+            assert_eq!(detail.events[0].score_after, Some(-93));
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_client_carries_what_it_paid_what_it_was_given_and_what_it_runs() {
+            let dir = temp_dir("client");
+            let database = history_database(&dir);
+
+            let detail = get_client_detail(&database, "client-1").unwrap();
+
+            assert_eq!(detail.payments.len(), 1);
+            assert_eq!(detail.payments[0].deposit_token, "token-1");
+            assert_eq!(detail.deposits.len(), 1);
+            assert_eq!(detail.deposits[0].status, "payed");
+            // Only its own instances: father_id is the client that started them.
+            assert_eq!(detail.instances.len(), 1);
+            assert_eq!(detail.instances[0].name, "demo");
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn the_unmetered_flag_reaches_the_table() {
+            let dir = temp_dir("unmetered");
+            let database = history_database(&dir);
+
+            let clients = get_clients(&database).unwrap();
+
+            assert_eq!(clients.len(), 1);
+            assert!(clients[0].unmetered, "a dev client is never charged");
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn adjusting_a_score_by_hand_records_why() {
+            // Every other mover of a score writes an event. One that did not would be
+            // the single unexplained step in a peer's history.
+            let dir = temp_dir("adjust");
+            let database = history_database(&dir);
+
+            adjust_peer_reputation(&database, "peer-1", -3).unwrap();
+
+            let connection = Connection::open(&database).unwrap();
+            let (score, index): (i64, i64) = connection
+                .query_row(
+                    "SELECT reputation_score, reputation_index FROM peer WHERE id = 'peer-1'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!((score, index), (4, 4));
+
+            let (amount, reason, after): (i64, String, i64) = connection
+                .query_row(
+                    "SELECT amount, reason, score_after FROM reputation_events
+                     WHERE subject_id = 'peer-1' ORDER BY id DESC LIMIT 1",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(amount, -3);
+            assert_eq!(reason, "operator_adjustment");
+            assert_eq!(after, 4);
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_peer_that_has_done_nothing_yet_has_an_empty_history_not_an_error() {
+            let dir = temp_dir("empty");
+            let database = history_database(&dir);
+
+            let detail = get_peer_detail(&database, "peer-unknown").unwrap();
+
+            assert!(detail.payments.is_empty());
+            assert!(detail.events.is_empty());
+
+            let _ = fs::remove_dir_all(&dir);
         }
     }
 }
-
