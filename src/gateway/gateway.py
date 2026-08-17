@@ -24,6 +24,8 @@ env_manager = ConfigManager()
 class Gateway(celaut_pb2_grpc.Gateway):
 
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
+        print("DEBUG. GET SERVICE ESTIMATED COST")
+        log.LOGGER("DEBUG. GET SERVICE ESTIMATED COST")
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
 
     def StartService(self, request_iterator, context, **kwargs):
