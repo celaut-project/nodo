@@ -1,4 +1,3 @@
-import grpc
 from bee_rpc import client as bee
 
 from protos import celaut_pb2, celaut_pb2_grpc
@@ -7,6 +6,7 @@ from protos.gateway_bee import StartService_input_indices
 from src.commands.execute import resolve_service_hash
 from src.manager.manager import get_dev_clients
 from src.utils.config import ConfigManager
+from src.utils.grpc_transport import local_channel
 from src.utils.monetary import format_mu
 from src.utils.utils import (
     from_amount,
@@ -46,7 +46,7 @@ def estimate(service: str) -> None:
         initial_mu=to_amount(ESTIMATION_BALANCE_MU)
     )
 
-    channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
+    channel = local_channel(GATEWAY_PORT)
     g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
     print(f"Estimate {service}")

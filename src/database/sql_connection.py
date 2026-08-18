@@ -19,6 +19,7 @@ from src.utils import logger as log, logger
 from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
+from src.utils.grpc_transport import peer_channel
 from src.utils.utils import from_amount, generate_uris_by_peer_id
 from src.utils.monetary import format_mu
 
@@ -2140,9 +2141,7 @@ class SQLConnection(metaclass=Singleton):
         try:
             refund = from_amount(next(bee.client_grpc(
                 method=celaut_pb2_grpc.GatewayStub(
-                    grpc.insecure_channel(
-                        next(generate_uris_by_peer_id(peer_id=peer_id))
-                    )
+                    peer_channel(peer_id=peer_id)
                 ).StopService,
                 input=celaut_pb2.TokenMessage(
                     token=hashed_token

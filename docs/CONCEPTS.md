@@ -130,6 +130,24 @@ request services from their peers, so a node can run a workload locally or hand 
 to a peer. **Clients** are the entities (nodes or external callers) that have
 registered with this node and pay it. `nodo peers` / `nodo clients` list them.
 
+## Transport security
+
+Every gRPC hop is TLS. A node's certificate is self-signed and carries the node's
+identity public key — its `peer_id` — in an X.509 extension, signed with the identity
+key over the certificate's own public key. There is no CA, no PKI and no system trust
+store: a caller reads the certificate first, checks that signature, and then pins that
+exact certificate for the channel. So dialling a bare `ip:port` either reaches the node
+whose `peer_id` you meant, or fails.
+
+This covers the whole gRPC surface, the local CLI included — there is one listener and
+one policy. Two things it does not cover: the node→service leg of a tunnel (TLS
+terminates at the node, see [`TUNNELING.md`](TUNNELING.md)) and the raw TCP proxy of the
+delegation path, which is not gRPC.
+
+Practical consequences: a node with no identity keypair cannot serve, and a peer running
+a version from before this cannot be dialled at all — there is no plaintext fallback.
+See `src/utils/tls_identity.py` and `src/utils/grpc_transport.py`.
+
 ## Service composition (dependencies)
 
 Services can depend on other services. In `pack_config.json` you declare

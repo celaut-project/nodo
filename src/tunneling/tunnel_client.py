@@ -25,6 +25,7 @@ import grpc
 
 from bee_rpc.client import client_grpc
 from protos import celaut_pb2, celaut_pb2_grpc
+from src.utils.grpc_transport import verified_channel
 
 # Read size for the local socket -> node direction, matching the relay's own
 # buffer and staying well under bee_rpc's 1 MiB chunk threshold.
@@ -46,6 +47,7 @@ def open_stream(
     slot: int,
     outbound: Generator,
     channel: Optional[grpc.Channel] = None,
+    expected_peer_id: Optional[str] = None,
 ):
     """Open a ServiceTunnel stream: handshake first, then ``outbound``'s payload."""
 
@@ -53,7 +55,9 @@ def open_stream(
         yield celaut_pb2.TokenMessage(token=token, slot=str(slot))
         yield from outbound
 
-    stub = celaut_pb2_grpc.GatewayStub(channel or grpc.insecure_channel(gateway))
+    stub = celaut_pb2_grpc.GatewayStub(
+        channel or verified_channel(gateway, expected_peer_id)
+    )
     return client_grpc(
         method=stub.ServiceTunnel,
         input=with_handshake(),
@@ -70,6 +74,7 @@ def bridge_tcp_connection(
     gateway: str,
     label: str,
     log: Callable[[str], None],
+    expected_peer_id: Optional[str] = None,
 ) -> None:
     """Bridge one accepted TCP connection to a stream until either end closes."""
     closing = threading.Event()
@@ -84,7 +89,7 @@ def bridge_tcp_connection(
         except OSError:
             pass  # Socket torn down while we were reading; the stream ends here.
 
-    channel = grpc.insecure_channel(gateway)
+    channel = verified_channel(gateway, expected_peer_id)
     try:
         for chunk in open_stream(gateway, token, slot, outbound(), channel=channel):
             if isinstance(chunk, bytes):
@@ -123,6 +128,7 @@ class UdpFlow:
         gateway: str,
         idle_timeout: float,
         log: Callable[[str], None],
+        expected_peer_id: Optional[str] = None,
     ) -> None:
         self.listener = listener
         self.source = source
@@ -133,6 +139,7 @@ class UdpFlow:
         self._token = token
         self._slot = slot
         self._gateway = gateway
+        self._expected_peer_id = expected_peer_id
         self._idle_timeout = idle_timeout
         self._log = log
         self._thread = threading.Thread(
@@ -161,7 +168,7 @@ class UdpFlow:
                     return  # Ends the stream; the node's relay closes its side.
 
     def _run(self) -> None:
-        channel = grpc.insecure_channel(self._gateway)
+        channel = verified_channel(self._gateway, self._expected_peer_id)
         try:
             for chunk in open_stream(
                 self._gateway, self._token, self._slot, self._outbound(), channel=channel
@@ -190,6 +197,7 @@ def serve_udp(
     idle_timeout: float = DEFAULT_UDP_IDLE_TIMEOUT_S,
     log: Callable[[str], None] = lambda message: None,
     should_stop: Optional[threading.Event] = None,
+    expected_peer_id: Optional[str] = None,
 ) -> None:
     """Route datagrams to a per-source flow, reaping flows that go quiet."""
     flows: Dict[Tuple[str, int], UdpFlow] = {}
@@ -222,6 +230,7 @@ def serve_udp(
                 gateway=gateway,
                 idle_timeout=idle_timeout,
                 log=log,
+                expected_peer_id=expected_peer_id,
             )
             flows[source] = flow
             log(f"[{flow.label}] flow opened")
@@ -240,6 +249,7 @@ def serve_tcp(
     gateway: str,
     log: Callable[[str], None] = lambda message: None,
     should_stop: Optional[threading.Event] = None,
+    expected_peer_id: Optional[str] = None,
 ) -> None:
     """One accepted connection, one stream."""
     listener.settimeout(POLL_INTERVAL_S)
@@ -263,6 +273,7 @@ def serve_tcp(
                 "gateway": gateway,
                 "label": label,
                 "log": log,
+                "expected_peer_id": expected_peer_id,
             },
             name=f"tunnel-{label}",
             daemon=True,

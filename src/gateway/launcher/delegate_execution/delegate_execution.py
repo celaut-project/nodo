@@ -1,7 +1,6 @@
 from hashlib import sha256
 from typing import Callable, List
 
-import grpc
 from bee_rpc import client as bee
 
 from src.utils.config import ConfigManager
@@ -13,6 +12,7 @@ from src.manager.metrics import balance_on_other_peer
 from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
 from src.utils import utils, logger as log
+from src.utils.grpc_transport import peer_channel
 from src.utils.monetary import format_mu
 from src.payment_system.mu_conversion import (
     configuration_for_peer,
@@ -54,6 +54,7 @@ def _publish_locally_if_needed(
         peer_gateway=peer_gateway,
         instance=instance,
         bind_ip=advertise_ip,
+        peer_id=peer,
     )
 
 def delegate_execution(
@@ -86,9 +87,7 @@ def delegate_execution(
         log.LOGGER('Go to launch the service on ' + str(peer))
         service_instance = next(bee.client_grpc(
             method=celaut_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(
-                    next(utils.generate_uris_by_peer_id(peer))
-                )
+                peer_channel(peer)
             ).StartService,
             timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
             partitions_message_mode_parser=True,

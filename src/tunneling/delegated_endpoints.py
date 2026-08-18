@@ -306,6 +306,7 @@ def _open_endpoint(
     peer_gateway: str,
     bind_ip: str,
     local_port: Optional[int] = None,
+    peer_id: Optional[str] = None,
 ) -> Optional[_Endpoint]:
     """Bind one local listener that tunnels to ``internal_port`` on the peer."""
     if ":" in bind_ip:
@@ -345,6 +346,10 @@ def _open_endpoint(
         "gateway": peer_gateway,
         "log": logger,
         "should_stop": stop,
+        # Whose gateway peer_gateway is supposed to be, so the relay's TLS channel is
+        # pinned to that node (issue #257) rather than to whoever holds the address:
+        # this stream carries the delegated token, which is a capability.
+        "expected_peer_id": peer_id,
     }
     thread = threading.Thread(
         target=serve,
@@ -373,6 +378,7 @@ def publish(
     instance: celaut_pb2.Instance,
     bind_ip: str,
     port_by_slot: Optional[Dict[int, int]] = None,
+    peer_id: Optional[str] = None,
 ) -> celaut_pb2.Instance:
     """Stand in for ``instance``'s slots locally and return the rewritten instance.
 
@@ -381,7 +387,9 @@ def publish(
     endpoints that a client already knows about.
     """
     with _publish_lock(token):
-        return _publish_locked(token, peer_gateway, instance, bind_ip, port_by_slot)
+        return _publish_locked(
+            token, peer_gateway, instance, bind_ip, port_by_slot, peer_id
+        )
 
 
 def _publish_locked(
@@ -390,6 +398,7 @@ def _publish_locked(
     instance: celaut_pb2.Instance,
     bind_ip: str,
     port_by_slot: Optional[Dict[int, int]] = None,
+    peer_id: Optional[str] = None,
 ) -> celaut_pb2.Instance:
     # Replace any previous generation of endpoints for this token so a retried
     # restore() or a re-delegation cannot orphan the earlier listeners.
@@ -424,6 +433,7 @@ def _publish_locked(
             peer_gateway=peer_gateway,
             bind_ip=bind_ip,
             local_port=(port_by_slot or {}).get(internal_port),
+            peer_id=peer_id,
         )
         if endpoint is None:
             # Better to advertise the peer's own address, if it gave one, than nothing at all.
@@ -509,6 +519,7 @@ def restore() -> int:
             instance=instance,
             bind_ip=bind_ip,
             port_by_slot=port_by_slot,
+            peer_id=peer_id,
         )
 
         # Count what actually came up, not rows processed: a pinned port can fail
