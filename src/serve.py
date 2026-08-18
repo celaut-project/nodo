@@ -9,6 +9,7 @@ from src.manager.maintain import manager_thread
 from src.tunneling import delegated_endpoints
 from src.utils import logger as log
 from src.utils.config import ConfigManager
+from src.utils.grpc_transport import server_credentials
 
 env_manager = ConfigManager()
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
@@ -39,7 +40,11 @@ def serve():
         celaut_pb2.DESCRIPTOR.services_by_name['Gateway'].full_name,
     )
 
-    server.add_insecure_port('[::]:' + str(GATEWAY_PORT))
+    # TLS on the single listener that serves peers and the local CLI alike (issue
+    # #257): the certificate proves this node's identity key, so a caller can tell
+    # it reached us and not whoever holds the address now. No plaintext port is
+    # opened -- a node with no identity keypair cannot serve, by design.
+    server.add_secure_port('[::]:' + str(GATEWAY_PORT), server_credentials())
 
     server.start()
     server.wait_for_termination()

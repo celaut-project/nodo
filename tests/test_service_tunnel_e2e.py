@@ -22,9 +22,13 @@ try:
     from bee_rpc.client import client_grpc
     from protos import celaut_pb2 as celaut
     from protos import celaut_pb2_grpc
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+    from src.reputation_system.node_identity import get_node_public_key_hex
     from src.tunneling import tunnel_client
     from src.gateway.gateway import Gateway
     from src.tunneling import rpc_tunnel
+    from src.utils.grpc_transport import node_channel, server_credentials
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     grpc = None  # type: ignore[assignment]
@@ -104,11 +108,16 @@ class ServiceTunnelEndToEndTests(unittest.TestCase):
 
         self.grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
         celaut_pb2_grpc.add_GatewayServicer_to_server(Gateway(), self.grpc_server)
-        gateway_port = self.grpc_server.add_insecure_port("127.0.0.1:0")
+        # TLS, as the node actually serves (issue #257): the client legs below then
+        # exercise the pre-flight and the pinning against a real gateway, not a mock.
+        gateway_port = self.grpc_server.add_secure_port(
+            "127.0.0.1:0", server_credentials()
+        )
         self.grpc_server.start()
         self.gateway = f"127.0.0.1:{gateway_port}"
+        self.peer_id = get_node_public_key_hex()
 
-        self.channel = grpc.insecure_channel(self.gateway)
+        self.channel = node_channel(self.gateway, expected_peer_id=self.peer_id)
         self.stub = celaut_pb2_grpc.GatewayStub(self.channel)
 
         # Everything except the instance catalogue and balance accounting is real.
@@ -202,6 +211,7 @@ class ServiceTunnelEndToEndTests(unittest.TestCase):
                     "slot": udp_service_port,
                     "gateway": self.gateway,
                     "idle_timeout": 0.5,
+                    "expected_peer_id": self.peer_id,
                 },
                 daemon=True,
             ).start()
@@ -234,6 +244,7 @@ class ServiceTunnelEndToEndTests(unittest.TestCase):
                 "slot": self.service_port,
                 "gateway": self.gateway,
                 "log": lambda message: None,
+                "expected_peer_id": self.peer_id,
             },
             daemon=True,
         )

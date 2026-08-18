@@ -242,6 +242,11 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     for uri in uris:
         announced = peer.uri.add(ip=uri.ip, port=uri.port)
         announced.transport.tags.append("tcp")
+        # What the endpoint actually speaks. Since issue #257 there is no plaintext
+        # gateway, so saying so is now the truth rather than a hint -- and it is covered
+        # by the signature below, so a relay cannot strip the "tls" tag to make a peer
+        # look dialable in the clear.
+        announced.protocol_stack.add(tags=["tls", "grpc"])
 
     # Advertise what this node charges on a recurring basis, so a peer knows the
     # rate before negotiating anything. The price of a *specific service* is not

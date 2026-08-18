@@ -42,7 +42,7 @@ class DelegateExecutionMuConversionTests(unittest.TestCase):
             delegate_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
         ), patch.object(
             delegate_mod.utils, "generate_uris_by_peer_id", return_value=iter(["peer:5000"])
-        ), patch.object(delegate_mod.grpc, "insecure_channel"), patch.object(
+        ), patch.object(delegate_mod, "peer_channel"), patch.object(
             delegate_mod.celaut_pb2_grpc, "GatewayStub"
         ), patch.object(
             delegate_mod.bee, "client_grpc", return_value=iter([instance])
