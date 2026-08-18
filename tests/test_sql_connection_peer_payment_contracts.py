@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
     from protos import celaut_pb2
     from src.database.sql_connection import SQLConnection
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -112,6 +114,37 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
             result = self.conn.get_peer_payment_contracts("peer-1")
 
         self.assertEqual([c["contract_hash"] for c in result], ["c1", "c2"])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ContractInstanceRateIsUpsertedTests(unittest.TestCase):
+    """A peer re-advertises its rate on every refresh; the row has to follow it.
+
+    `add_contract` used INSERT OR IGNORE, which froze `mu_per_unit` at whatever a
+    peer announced the first time we saw it. Converting MU with a stale rate
+    misprices delegation and, on the payment path, gets a deposit rejected with
+    the money already on-chain.
+    """
+
+    STATEMENT = (
+        "INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit) "
+        "VALUES (?,?,?,?,?) "
+        "ON CONFLICT (address, ledger_hash, contract_hash, peer_id) "
+        "DO UPDATE SET mu_per_unit = excluded.mu_per_unit"
+    )
+
+    def test_re_registering_a_peer_updates_its_rate(self):
+        import sqlite3
+        from src.database.migrate import TABLES
+
+        db = sqlite3.connect(":memory:")
+        db.execute(TABLES["contract_instance"])
+        row = ("addr", "ledger", "contract", "peer-1")
+        db.execute(self.STATEMENT, (*row, "1000000000"))
+        db.execute(self.STATEMENT, (*row, "2000000000"))
+
+        stored = db.execute("SELECT mu_per_unit FROM contract_instance").fetchall()
+        self.assertEqual(stored, [("2000000000",)])
 
 
 if __name__ == "__main__":
