@@ -15,8 +15,12 @@ from typing import Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
-from src.gateway.utils import GATEWAY_PORT
-from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
+from src.gateway.utils import (
+    GATEWAY_PLAINTEXT_PORT,
+    GATEWAY_PORT,
+    generate_node_peer_info,
+    peer_gateway_instance,
+)
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
 from src.utils.config import ConfigManager
@@ -793,20 +797,27 @@ def _configure_guest_firewall_policy(
             f"Failed to apply default deny firewall policy for VM {vmachine_id} ({vm_ip})."
         )
 
-    if not vm_allow_connection(
-        vmachine_id=vmachine_id,
-        ip=NETWORK_GATEWAY_IP,
-        port=GATEWAY_PORT,
-        protocol=TransportProtocol.TCP,
-        source_ip=vm_ip,
+    # Both gateway ports: the plaintext one is what this guest's __config__ names
+    # (a service speaks plain gRPC), and the TLS one stays reachable so a service that
+    # wants to pin the node's certificate can (issue #257).
+    for gateway_port in dict.fromkeys(
+        port for port in (GATEWAY_PLAINTEXT_PORT, GATEWAY_PORT) if port
     ):
-        raise CHExecuteError(
-            f"Failed to allow gateway egress for VM {vmachine_id}: "
-            f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{GATEWAY_PORT}/tcp"
+        if not vm_allow_connection(
+            vmachine_id=vmachine_id,
+            ip=NETWORK_GATEWAY_IP,
+            port=gateway_port,
+            protocol=TransportProtocol.TCP,
+            source_ip=vm_ip,
+        ):
+            raise CHExecuteError(
+                f"Failed to allow gateway egress for VM {vmachine_id}: "
+                f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
+            )
+        log.LOGGER(
+            f"[CH][{vmachine_id}] firewall allow gateway: "
+            f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
         )
-    log.LOGGER(
-        f"[CH][{vmachine_id}] firewall allow gateway: {vm_ip} -> {NETWORK_GATEWAY_IP}:{GATEWAY_PORT}/tcp"
-    )
 
     for dns_protocol in (TransportProtocol.UDP, TransportProtocol.TCP):
         if not vm_allow_connection(

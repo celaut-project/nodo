@@ -134,7 +134,11 @@ closed ("Service not allowed.").
 
 ## `network`
 
-Controls exposure and remote execution. Key entries: `GATEWAY_PORT` (`auto`),
+Controls exposure and remote execution. Key entries: `GATEWAY_PORT` (`auto`, TLS —
+authenticated against this node's identity key, and the only port announced to peers),
+`GATEWAY_PLAINTEXT_PORT` (`auto` = `GATEWAY_PORT + 1`; the same gateway in plain gRPC,
+for the services this node runs and for external callers that do not want TLS — `0`
+disables it, see [`CONCEPTS.md`](CONCEPTS.md)),
 `PUBLIC_IP` / `EXTERNAL_INTERFACE` (what `nodo execute --remote` advertises),
 `PUBLIC_TCP_PORT` / `PUBLIC_UDP_PORT` (the external port a router forwards, when it
 differs from the internal one — empty means "same as internal"; only

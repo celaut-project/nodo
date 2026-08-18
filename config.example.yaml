@@ -151,6 +151,15 @@ packer:
 
 network:
   GATEWAY_PORT: auto
+  # Second gateway port, in plain gRPC (no TLS). GATEWAY_PORT itself is TLS,
+  # authenticated against this node's identity key, and that is what peers and the CLI
+  # use -- always, with no exception. This one exists for the services this node runs,
+  # which speak plain gRPC and are handed this port in their `__config__.gateway`, and
+  # for external callers that do not want TLS. `auto` means GATEWAY_PORT + 1; `0`
+  # disables it, and then a service must speak TLS too. It is NOT announced to peers
+  # and no firewall rule is opened for it, so reaching it from outside this host takes
+  # a port-forward you set up yourself.
+  GATEWAY_PLAINTEXT_PORT: auto
   LOCAL_NETWORK: "lo"
   # How long (seconds) this node expects to keep its current address -- typically the
   # ISP's DHCP lease for a dynamic public IP. Published (signed) alongside the

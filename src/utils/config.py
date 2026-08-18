@@ -304,6 +304,24 @@ class ConfigManager(metaclass=Singleton):
                 self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
                 self.log(f"Dynamically assigned Gateway Port: {port}")
 
+            # The plaintext gateway port, for the services this node runs (they get it
+            # in __config__.gateway) and for any external caller that does not want TLS.
+            # Peers and the CLI always use the TLS port instead -- see
+            # src/utils/grpc_transport.py. Resolved as GATEWAY_PORT + 1 rather than by
+            # picking a free port, because it is deterministic: a node restart does not
+            # move the address a long-lived service was handed. `0` (or empty) disables
+            # it, leaving TLS as the only way in.
+            plaintext_port = self._get_nested(
+                self._config, ["network", "GATEWAY_PLAINTEXT_PORT"]
+            )
+            if plaintext_port == "auto":
+                gateway_port = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
+                plaintext_port = int(gateway_port) + 1
+                self._set_nested(
+                    self._config, ["network", "GATEWAY_PLAINTEXT_PORT"], plaintext_port
+                )
+                self.log(f"Plaintext Gateway Port: {plaintext_port}")
+
             # Each ledger owns exactly ONE wallet (WALLET_MNEMONIC) -- there is no
             # auxiliary/receiver wallet -- and that same key is the node's identity
             # (src/reputation_system/node_identity.py): the peer_id it presents and the

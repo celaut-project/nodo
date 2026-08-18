@@ -19,6 +19,10 @@ from src.utils.utils import (
 env_manager = ConfigManager()
 
 GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
+# The plain-gRPC port, when the node serves one (see src/serve.py). Services get
+# this one rather than the TLS port: they speak plain gRPC over a hop that never
+# leaves the host.
+GATEWAY_PLAINTEXT_PORT = env_manager.get("network.GATEWAY_PLAINTEXT_PORT", 0)
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
@@ -281,22 +285,30 @@ def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     expects.
 
     ``Instance`` still groups addresses under an ``internal_port``, so all of
-    ``peer.uri`` is folded into one slot at ``GATEWAY_PORT`` -- the only port a
-    self-generated ``Peer`` ever serves. The rates ride in that slot because an
+    ``peer.uri`` is folded into one slot. The rates ride in that slot because an
     ``Instance`` has nowhere else to carry them.
+
+    The port is the *plaintext* one when this node serves it (issue #257): this is what
+    a service we execute is told to talk to, and a service speaks plain gRPC. Since the
+    service learns the address from this message rather than by convention, there is
+    nothing for it to guess -- and nothing to pin. With the plaintext port disabled it
+    falls back to the TLS port, and then a service does have to speak TLS.
     """
+    port = GATEWAY_PLAINTEXT_PORT or GATEWAY_PORT
     instance = celaut.Instance()
 
     slot = instance.api.slot.add()
-    slot.port = GATEWAY_PORT
+    slot.port = port
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
     for rate, amount in peer.mu_per_call.items():
         slot.mu_per_call[rate].n = amount.n
     instance.api.payment_contracts.extend(peer.payment_contracts)
 
     uri_slot = instance.uri_slot.add()
-    uri_slot.internal_port = GATEWAY_PORT
-    uri_slot.uri.extend(celaut.Instance.Uri(ip=u.ip, port=u.port) for u in peer.uri)
+    uri_slot.internal_port = port
+    # The peer's addresses, but at the port a service is meant to use: peer.uri carries
+    # the announced (TLS) port, which is not the one being handed over here.
+    uri_slot.uri.extend(celaut.Instance.Uri(ip=u.ip, port=port) for u in peer.uri)
     return instance
 
 
