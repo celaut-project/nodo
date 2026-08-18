@@ -139,13 +139,29 @@ store: a caller reads the certificate first, checks that signature, and then pin
 exact certificate for the channel. So dialling a bare `ip:port` either reaches the node
 whose `peer_id` you meant, or fails.
 
-This covers the whole gRPC surface, the local CLI included — there is one listener and
-one policy. Two things it does not cover: the node→service leg of a tunnel (TLS
-terminates at the node, see [`TUNNELING.md`](TUNNELING.md)) and the raw TCP proxy of the
-delegation path, which is not gRPC.
+**Peers and the CLI always use TLS, with no exception**, and the TLS port
+(`network.GATEWAY_PORT`) is the only one announced to peers. This node's own client code
+has no way to open a plaintext channel.
+
+Alongside it the gateway serves the **same** `Gateway` on a second, plain-gRPC port
+(`network.GATEWAY_PLAINTEXT_PORT`, `auto` = `GATEWAY_PORT + 1`) for two callers that are
+not peers:
+
+* **The services this node executes.** A service speaks plain gRPC and reaches the node
+  over a hop that never leaves the host; it is handed this address as data, in
+  `__config__.gateway`, so there is nothing for it to guess. Requiring TLS here would
+  mean shipping certificate pinning into every service SDK for a local hop.
+* **External callers that do not want TLS.** TLS is what the node *offers*; a caller
+  that declines it is that caller's own risk. The plaintext port is not announced to
+  peers and no firewall rule is opened for it, so reaching it from another host takes a
+  port-forward set up on purpose. `0` disables it, and then a service must speak TLS too.
+
+Also outside TLS: the node→service leg of a tunnel (TLS terminates at the node, see
+[`TUNNELING.md`](TUNNELING.md)) and the raw TCP proxy of the delegation path, which is
+not gRPC.
 
 Practical consequences: a node with no identity keypair cannot serve, and a peer running
-a version from before this cannot be dialled at all — there is no plaintext fallback.
+a version from before this cannot be dialled — peer channels have no plaintext fallback.
 See `src/utils/tls_identity.py` and `src/utils/grpc_transport.py`.
 
 ## Service composition (dependencies)

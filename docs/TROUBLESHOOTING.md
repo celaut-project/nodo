@@ -110,6 +110,11 @@ certificate", or "is held by <key>, not by the expected peer <key>".
 start with "no identity keypair", set `ledgers.ergo.WALLET_MNEMONIC` (or let the config
 generate one) — see [`CONFIG.md`](CONFIG.md).
 
+Note this is about *peer* channels. A service this node executes talks to the plain-gRPC
+port instead (`network.GATEWAY_PLAINTEXT_PORT`); if the log says that port could not be
+bound, every service launched afterwards was handed an address that answers nothing —
+free the port or point the setting at another one.
+
 ## Uninstalling
 
 There is a full uninstall path — automatic (`uninstall.sh`) and manual. See

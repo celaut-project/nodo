@@ -1,4 +1,4 @@
-"""TLS on every gRPC hop, pinned to the node's identity key (issue #257).
+"""The node's TLS identity, and the two ports the gateway serves (issue #257).
 
 What these pin, in order of what would hurt most if it broke:
 
@@ -10,11 +10,15 @@ What these pin, in order of what would hurt most if it broke:
 * the server the node actually serves with, and the channels the node actually dials
   with, talk to each other end to end -- the spike in the issue was a deduction, and
   the parts it deduced (a stdlib pre-flight against a gRPC server, a `CA:TRUE`
-  self-signed certificate accepted as its own trust anchor) are exercised here.
+  self-signed certificate accepted as its own trust anchor) are exercised here;
+* the plaintext port stays plaintext, and is the one a service is handed -- peers and
+  the CLI get TLS with no exception, but a service we execute speaks plain gRPC over a
+  hop that never leaves the host.
 """
 import datetime
 import ssl
 import unittest
+import unittest.mock
 from concurrent import futures
 
 IMPORT_ERROR = None
@@ -27,6 +31,8 @@ try:
 
     from tests.config_bootstrap import load_example_config
     load_example_config()
+    from protos import celaut_pb2
+    from src.gateway import utils as gateway_utils
     from src.reputation_system.node_identity import get_node_public_key_hex
     from src.utils import grpc_transport
     from src.utils.tls_identity import (
@@ -40,8 +46,8 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
 
-def _serve(credentials=None):
-    """A one-method gRPC server, TLS unless ``credentials`` is None. Returns (server, target)."""
+def _serve(credentials=None, plaintext_too=False):
+    """A one-method gRPC server. Returns (server, target[, plaintext_target])."""
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
     server.add_generic_rpc_handlers((
         grpc.method_handlers_generic_handler("Echo", {
@@ -56,7 +62,10 @@ def _serve(credentials=None):
         port = server.add_insecure_port("127.0.0.1:0")
     else:
         port = server.add_secure_port("127.0.0.1:0", credentials)
+    plaintext_port = server.add_insecure_port("127.0.0.1:0") if plaintext_too else None
     server.start()
+    if plaintext_too:
+        return server, f"127.0.0.1:{port}", f"127.0.0.1:{plaintext_port}"
     return server, f"127.0.0.1:{port}"
 
 
@@ -181,3 +190,69 @@ class TargetParsingTests(unittest.TestCase):
         for target in ("1.2.3.4", "", "1.2.3.4:", "1.2.3.4:http"):
             with self.assertRaises(ValueError):
                 grpc_transport.split_target(target)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class DualPortTests(unittest.TestCase):
+    """One servicer on two ports: TLS for peers and the CLI, plain gRPC for services."""
+
+    def setUp(self):
+        self.server, self.tls_target, self.plain_target = _serve(
+            grpc_transport.server_credentials(), plaintext_too=True
+        )
+        self.addCleanup(self.server.stop, 0)
+
+    def test_both_ports_reach_the_same_servicer(self):
+        verified = grpc_transport.node_channel(
+            self.tls_target, expected_peer_id=get_node_public_key_hex()
+        )
+        self.addCleanup(verified.close)
+        plain = grpc.insecure_channel(self.plain_target)
+        self.addCleanup(plain.close)
+
+        self.assertEqual(_echo(verified, b"over-tls"), b"over-tls")
+        self.assertEqual(_echo(plain, b"in-the-clear"), b"in-the-clear")
+
+    def test_the_tls_port_is_not_reachable_in_the_clear(self):
+        # The offer is symmetric only from the caller's side: a plaintext client on the
+        # TLS port must still fail, or "peers always get TLS" would not hold.
+        channel = grpc.insecure_channel(self.tls_target)
+        self.addCleanup(channel.close)
+        with self.assertRaises(grpc.RpcError):
+            _echo(channel, timeout=5)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ServiceFacingGatewayTests(unittest.TestCase):
+    """What `__config__.gateway` hands a service we execute."""
+
+    def _peer(self):
+        peer = celaut_pb2.Peer()
+        peer.uri.add(ip="192.168.200.1", port=gateway_utils.GATEWAY_PORT)
+        return peer
+
+    def test_a_service_is_given_the_plaintext_port(self):
+        # A service speaks plain gRPC and learns this address as data, so there is
+        # nothing for it to guess and nothing to pin.
+        with unittest.mock.patch.object(gateway_utils, "GATEWAY_PLAINTEXT_PORT", 6001), \
+             unittest.mock.patch.object(gateway_utils, "GATEWAY_PORT", 6000):
+            instance = gateway_utils.peer_gateway_instance(self._peer())
+
+        self.assertEqual([slot.port for slot in instance.api.slot], [6001])
+        self.assertEqual(
+            [(u.ip, u.port) for s in instance.uri_slot for u in s.uri],
+            [("192.168.200.1", 6001)],
+        )
+
+    def test_falls_back_to_the_tls_port_when_plaintext_is_disabled(self):
+        # Then a service does have to speak TLS -- but nothing is left pointing at a
+        # port the node does not serve.
+        with unittest.mock.patch.object(gateway_utils, "GATEWAY_PLAINTEXT_PORT", 0), \
+             unittest.mock.patch.object(gateway_utils, "GATEWAY_PORT", 6000):
+            instance = gateway_utils.peer_gateway_instance(self._peer())
+
+        self.assertEqual([slot.port for slot in instance.api.slot], [6000])
+        self.assertEqual(
+            [(u.ip, u.port) for s in instance.uri_slot for u in s.uri],
+            [("192.168.200.1", 6000)],
+        )
