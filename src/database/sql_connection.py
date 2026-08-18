@@ -1335,9 +1335,14 @@ class SQLConnection(metaclass=Singleton):
         """
         Adds the specified amount of balance_mu to the existing balance_mu value of a peer.
 
+        **``balance_mu`` is in the PEER's MU**, for the same reason and on the same
+        column as ``refresh_balance_for_peer``: a deposit credits the peer's own
+        accounting, so what we add has to be the figure the peer was told (see
+        ``payment_process.__deposit_amounts``), not the one that left our wallet.
+
         Parameters:
         - peer_id (str): The unique identifier of the peer.
-        - balance_mu (int): The amount of balance_mu to be added to the peer's existing balance_mu.
+        - balance_mu (int): The amount to add, in the peer's own MU.
 
         Returns:
         - bool: True if the operation was successful, False otherwise.
@@ -1372,9 +1377,18 @@ class SQLConnection(metaclass=Singleton):
         """
         Sets the balance_mu value of a peer to a specified amount, replacing any existing value.
 
+        **``balance_mu`` is in the PEER's MU, not ours.** MU is an internal unit and
+        two nodes do not share a scale; this column stores the peer's own accounting
+        of what we hold there, exactly as its ``Metrics`` reported it. Storing a
+        converted figure would bake a rate into the row and go stale the moment
+        either node changed it. The conversion into our MU happens on read, in
+        ``manager.metrics.balance_on_other_peer``, which is the only thing callers
+        should use to compare this against a local cost.
+
         Parameters:
         - peer_id (str): The unique identifier of the peer.
-        - balance_mu (int): The new balance_mu amount to set for the peer.
+        - balance_mu (int): The new balance_mu amount to set for the peer, in the
+          peer's own MU.
 
         Returns:
         - bool: True if the operation was successful, False otherwise.
@@ -1572,8 +1586,16 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT OR IGNORE INTO ledger (hash, content) VALUES (?,?)",
                     (ledger_hash, ledger_str))
 
-        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit) "
-                    "VALUES (?,?,?,?,?)", (instance_value, ledger_hash, contract_hash, peer_id, gas_str))
+        # Upsert, not INSERT OR IGNORE: a peer re-advertises its rate on every
+        # refresh (`manager.update_peer_instance`), and ignoring the row froze
+        # `mu_per_unit` at whatever it announced the first time we ever saw it.
+        # Converting MU with a stale rate misprices delegation and, on the
+        # payment path, gets a deposit rejected with the money already on-chain.
+        self._execute("INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit) "
+                    "VALUES (?,?,?,?,?) "
+                    "ON CONFLICT (address, ledger_hash, contract_hash, peer_id) "
+                    "DO UPDATE SET mu_per_unit = excluded.mu_per_unit",
+                    (instance_value, ledger_hash, contract_hash, peer_id, gas_str))
 
     def get_peer_contract_instances(self, contract_hash: str, peer_id: str = "LOCAL") -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger], None, None]:
         """

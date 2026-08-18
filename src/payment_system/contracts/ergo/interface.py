@@ -426,9 +426,15 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
                 r4_value = box_dict["additionalRegisters"]["R4"]["renderedValue"]
                 decoded_r4 = bytes.fromhex(r4_value).decode("utf-8")
                 if decoded_r4 == token:
-                    if "value" in box_dict and box_dict["value"] == expected:
+                    # At least, not exactly: the payer converts our MU figure from
+                    # its own scale and has to round down to a whole MU of ours,
+                    # so a correct payment routinely carries a few nanoERG more
+                    # than the credit it asks for. Demanding equality rejected
+                    # those with the money already on-chain. More than asked for
+                    # is never a problem -- the credit is what `expected` covers.
+                    if "value" in box_dict and box_dict["value"] >= expected:
                         return True
-                    LOGGER(f"Incorrect amount for token {token}. Was {box_dict.get('value')} expected {expected}")
+                    LOGGER(f"Insufficient amount for token {token}. Was {box_dict.get('value')} expected at least {expected}")
                     return False
 
         LOGGER(f"Token {token} not found in R4.")

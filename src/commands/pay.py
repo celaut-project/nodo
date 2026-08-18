@@ -88,7 +88,10 @@ def pay(peer_id: str, amount_erg: str) -> bool:
         CONTRACT_HASH,
         check_sender_balance,
     )
-    from src.payment_system.payment_process import increase_deposit_on_peer
+    from src.payment_system.payment_process import (
+        deposit_refusal_reason,
+        increase_deposit_on_peer,
+    )
     from src.database.access_functions.ledgers import get_peer_contract_instances
 
     try:
@@ -104,6 +107,16 @@ def pay(peer_id: str, amount_erg: str) -> bool:
         f"Paying {amount_erg} ERG to peer {peer_id} ...",
         flush=True,
     )
+
+    # Guard 0 — the amount can be settled at all. Clean stop before the wallet is
+    # touched: below the ledger's minimum output no transaction can be built, and
+    # an operator's figure is refused rather than quietly raised (see
+    # `increase_deposit_on_peer`). Also catches a peer we share no payment system
+    # with, which is the same kind of "nothing was broadcast" answer.
+    refusal = deposit_refusal_reason(peer_id, amount_mu)
+    if refusal:
+        print(f"STOP: {refusal}.", flush=True)
+        return False
 
     # Guard 1 — funded wallet. Clean stop at the no-funds boundary; nothing sent.
     if not check_sender_balance(amount_mu):

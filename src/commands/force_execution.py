@@ -23,6 +23,7 @@ import uuid
 from protos import celaut_pb2
 
 from src.commands.execute import (
+    DEV_CLIENT_FUNDING_MU,
     launch_via_gateway,
     acquire_service,
     print_endpoints,
@@ -33,12 +34,14 @@ from src.manager.manager import get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.instance_names import inject_instance_name
+from src.payment_system.mu_conversion import matching_payment_system
 
 env_manager = ConfigManager()
 
 CONFIGURED_HASH_ID = get_configured_hash_id(env_manager)
 
 sc = SQLConnection()
+
 
 
 def _forced_generator(
@@ -60,6 +63,10 @@ def _forced_generator(
         # uses a caller-supplied token as-is rather than generating its own.
         yield celaut_pb2.RecursionGuard(token=token)
 
+        # No initial_mu: `launch_service` fills it from the requested resources,
+        # and `delegate_execution` converts that figure to the executor's MU. The
+        # client's funding above is a local matter and must not travel as the
+        # instance's balance -- charging the client is what it is for.
         config = celaut_pb2.Configuration()
         if envs:
             config.environment_variables.update({
@@ -98,6 +105,12 @@ def force_execution(
 
     service = resolved
 
+    try:
+        matching_payment_system(peer_id, connection=sc)
+    except ValueError as exc:
+        print(f"❌ Cannot force execution onto peer '{peer_id}': {exc}.")
+        return
+
     token = uuid.uuid4().hex
     sc.set_forced_execution_peer(token=token, peer_id=peer_id)
     try:
@@ -106,7 +119,7 @@ def force_execution(
             input_generator=_forced_generator(
                 _hash=service,
                 token=token,
-                local_client_balance_mu=10**16,
+                local_client_balance_mu=DEV_CLIENT_FUNDING_MU,
                 envs=envs,
                 instance_name=instance_name,
             ),

@@ -24,6 +24,25 @@ class EstimateCostOnPeerTests(unittest.TestCase):
         self.resources = celaut.Service.Container.Resources()
         self.metadata = celaut.Metadata()
         self.configuration = celaut.Configuration()
+        self.matching_payment_system = patch.object(
+            balancer_mod, "matching_payment_system", return_value=object()
+        )
+        self.configuration_for_peer = patch.object(
+            balancer_mod,
+            "configuration_for_peer",
+            side_effect=lambda config, **_: config,
+        )
+        self.estimated_cost_for_local = patch.object(
+            balancer_mod,
+            "estimated_cost_for_local",
+            side_effect=lambda estimate, **_: estimate,
+        )
+        self.payment_system = self.matching_payment_system.start().return_value
+        self.for_peer = self.configuration_for_peer.start()
+        self.for_local = self.estimated_cost_for_local.start()
+        self.addCleanup(self.matching_payment_system.stop)
+        self.addCleanup(self.configuration_for_peer.stop)
+        self.addCleanup(self.estimated_cost_for_local.stop)
 
     def test_returns_the_peers_estimate_on_success(self):
         expected = celaut.EstimatedCost()
@@ -46,6 +65,12 @@ class EstimateCostOnPeerTests(unittest.TestCase):
             )
 
         self.assertIs(result, expected)
+        self.for_peer.assert_called_once_with(
+            self.configuration, payment_system=self.payment_system
+        )
+        self.for_local.assert_called_once_with(
+            expected, payment_system=self.payment_system
+        )
 
     def test_returns_none_instead_of_raising_when_the_peer_is_unreachable(self):
         with patch.object(

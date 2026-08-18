@@ -2,7 +2,7 @@ import os
 import sys
 import threading
 import time
-from typing import Any, Generator, Optional
+from typing import Any, Generator
 import contextlib
 import io
 
@@ -14,11 +14,10 @@ from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
 from src.commands.inspect import inspect as inspect_service
 from src.commands.__by_tag import get_id
 from src.core_services.source_application import acquire_service
-from src.manager.manager import default_initial_balance, get_execute_client
+from src.manager.manager import get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.instance_names import inject_instance_name
-from src.utils.utils import to_amount
 
 env_manager = ConfigManager()
 
@@ -49,34 +48,40 @@ def resolve_service_hash(service: str) -> str:
     return ""
 
 
+# What the throwaway local dev client is funded with, in *our* MU.
+#
+# Not a price, and deliberately not an ERG figure: no real money moves for a dev
+# client, so this only has to sit comfortably above whatever the node quotes
+# (`build + default_initial_balance`), which the `pricing` config puts in the
+# millions of MU per hour.
+#
+# It is emphatically *not* the instance's balance. The node derives that from the
+# resources actually requested (`manager.default_initial_balance`) and, when the
+# service is delegated, `configuration_for_peer` converts it to the executor's own
+# MU scale. Passing one figure for both -- as this did -- made the quote come out
+# above the very balance meant to pay it, and shipped a local MU figure to a peer
+# that reads MU on a different scale.
+DEV_CLIENT_FUNDING_MU = 10**12
+
+
 def generator(
     _hash: str,
-    mem_limit: int = 50 * pow(10, 4),
-    initial_mu: Optional[int] = None,
+    client_funding_mu: int = DEV_CLIENT_FUNDING_MU,
     external: bool = False,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
 ) -> Generator[Any, None, None]:
-    # No amount asked for: let the node fund the instance for what it requested,
-    # priced for deposits.INITIAL_RUNTIME_HOURS. The flat default this replaces read a
-    # config key that no longer exists, so it silently passed None down the chain.
-    if initial_mu is None:
-        initial_mu = default_initial_balance(
-            system_resources=celaut_pb2.Sysresources(mem_limit=mem_limit),
-            service_hash=_hash,
-        )
-
     try:
-        client_id = get_execute_client(amount_mu=initial_mu, external=external)
+        client_id = get_execute_client(amount_mu=client_funding_mu, external=external)
     except Exception:
         raise RuntimeError("No execute client available.")
 
     try:
         yield celaut_pb2.Client(client_id=client_id)
 
-        config = celaut_pb2.Configuration(
-            initial_mu=to_amount(initial_mu)
-        )
+        # No initial_mu: the node fills it from the requested resources, priced for
+        # deposits.INITIAL_RUNTIME_HOURS, in its own MU.
+        config = celaut_pb2.Configuration()
         if envs:
             config.environment_variables.update({
                 k: v.encode() for k, v in envs.items()
@@ -249,8 +254,6 @@ def execute(
             service=service,
             input_generator=generator(
                 _hash=service,
-                initial_mu=10**16,
-                mem_limit=10**9,
                 external=external,
                 envs=envs,
                 instance_name=instance_name,
