@@ -40,9 +40,10 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         InputMode::Normal => {}
         InputMode::Confirm => draw_confirm_popup(frame, app),
         InputMode::Details => draw_details_popup(frame, app),
-        InputMode::Connect | InputMode::EditConfig | InputMode::FilterConfig => {
-            draw_input_popup(frame, app)
-        }
+        InputMode::Connect
+        | InputMode::EditConfig
+        | InputMode::FilterConfig
+        | InputMode::CreditClient => draw_input_popup(frame, app),
     }
 }
 
@@ -1617,7 +1618,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Page::Peers => {
             "tab/shift+tab cycle  •  ↑/↓ select  •  +/- reputation  •  c connect  •  d forget  •  q quit"
         }
-        Page::Clients => "tab/shift+tab cycle  •  ↑/↓ select  •  r refresh  •  q quit",
+        Page::Clients => {
+            "tab/shift+tab cycle  •  ↑/↓ select  •  + credit  •  - debit  •  r refresh  •  q quit"
+        }
         Page::Pricing => {
             "tab/shift+tab cycle  •  ↑/↓ select  •  +/- adjust 10%  •  e exact value  •  r refresh  •  q quit"
         }
