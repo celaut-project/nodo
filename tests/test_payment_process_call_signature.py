@@ -77,10 +77,10 @@ class ProcessPaymentSignatureTests(unittest.TestCase):
                                   side_effect=lambda ledger_generator: ledger_generator), \
                 mock.patch.object(payment_process, "__obtain_deposit_token",
                                   return_value="deposit-token-1", create=True):
-            peer_payment_process(peer_id="peer-1", amount=1000)
+            peer_payment_process(peer_id="peer-1", amount=1000, peer_amount=2000)
 
         # Only the call into the ledger implementation is under test here; what the
-        # orchestrator does afterwards (peer round-trips, gas bookkeeping) is not.
+        # orchestrator does afterwards (peer round-trips, balance bookkeeping) is not.
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["deposit_token"], "deposit-token-1")
         self.assertEqual(calls[0]["amount"], 1000)

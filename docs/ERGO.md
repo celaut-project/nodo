@@ -29,15 +29,15 @@ The payment system between nodes is also implemented on **Ergo**. Here's how it 
 - Each node shares its **wallet** payment address with its clients.
 - Clients (other nodes or external entities) register with the node and receive a **private key** to authenticate themselves.
 
-#### 2. ERG Deposits (Gas)
+#### 2. ERG Deposits
 
-- To increase their gas amount, the client generates a **deposit token** — a **local identifier (UUID)** created and stored in the client's SQLite database, **not** an on-chain EIP-4 asset — and creates a normal **Ergo transaction** transferring a certain amount of native ERG, embedding that identifier in register **R4** of the transaction.
+- To increase their balance, the client generates a **deposit token** — a **local identifier (UUID)** created and stored in the client's SQLite database, **not** an on-chain EIP-4 asset — and creates a normal **Ergo transaction** transferring a certain amount of native ERG, embedding that identifier in register **R4** of the transaction.
 - The client then notifies the node once the transaction carrying the deposit token has been transferred.
 
 #### 3. Deposit Verification
 
 - The node verifies that the **deposit token** (the R4 identifier) belongs to the client.
-- If valid and the funds have been transferred to the node's **wallet**, the client’s gas is increased according to the amount of ERGs received.
+- If valid and the funds have been transferred to the node's **wallet**, the client's balance is increased according to the amount of ERGs received. The node's unit of account is pegged at 1 MU = 1 nanoERG, so the credit is exact (see [`PRICING.md`](PRICING.md)).
 - The deposit token is then marked `payed` (the legal states are `pending` / `payed` / `rejected`).
 
 #### 4. Wallet Management in the Nodo
@@ -80,6 +80,45 @@ with `Decimal` into nanoERG; all subsequent arithmetic is integer nanoERG.
 
 The node operator can manually provide the mnemonic for the single wallet if the node
 has been reinstalled. This same wallet is used to add reputation proofs to the network.
+
+### Node identity signatures
+
+A node's identity keypair is derived from `ledgers.ergo.WALLET_MNEMONIC` on Ergo's
+derivation path (`m/44'/429'/0'/0/0`), and its 33-byte SEC-compressed public key is both
+the node's `peer_id` and the owner recorded in a reputation proof's R7
+(`0008cd` + public key). See `src/reputation_system/node_identity.py`.
+
+What that key signs — the `GetPeerInfo` response (`Peer.signature`) and the
+ownership challenge for a reputation proof — is signed with the **Schnorr scheme over
+secp256k1 that ChainCash/Basis use off-chain**: the same `proveDlog` sigma protocol
+Ergo's P2PK proofs are built on, in the encoding a reserve contract verifies explicitly.
+It is not an on-chain P2PK spending proof — sigmastate truncates the challenge to 192
+bits and serialises 56 bytes with `a` recomputed rather than sent:
+
+```
+signature = a || z            (65 bytes: 33-byte compressed point, 32-byte scalar)
+a = compress(k*G)             k random per signature
+e = blake2b256(a || message || public_key)      read as a SIGNED big-endian integer
+z = (k + e*s) mod n
+```
+
+Verification is the group identity `z*G == A + e*P`. Two encoding rules are not optional,
+because they are what the on-chain verifier does — ErgoScript's `byteArrayToBigInt` reads a
+32-byte value as two's-complement:
+
+* `e` is interpreted **signed**, matching the reserve contract's
+  `g.exp(z) == a.multiply(pk.exp(e))`.
+* When signing, the nonce is redrawn until the top byte of both `e` and `z` is `< 0x80`, so
+  neither is read as negative and the signature verifies under the unsigned convention too.
+
+The implementation is pure Python (`src/utils/ergo_schnorr.py`) — no JVM and no Ergo node,
+so a node can sign from first boot. It is checked against the Scala reference
+implementation's cross-validation vectors in `tests/test_ergo_schnorr.py`.
+
+**An identity is mandatory.** A `Peer` that carries no public key, or whose signature does
+not verify against it, is refused: `add_peer_instance` returns nothing and stores nothing,
+and `accept_peer_refresh` rejects a `GetPeerInfo` response not signed by the peer whose
+address it was fetched from. Every peer id in the database is therefore a public key.
 
 ### Sharing Information Between Celaut Nodes
 

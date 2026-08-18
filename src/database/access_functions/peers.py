@@ -8,27 +8,14 @@ def get_peer_ids() -> Generator[str, None, None]:
         yield str(row[0])
 
 
-def get_peer_id_by_ip(ip: str) -> str:
-    return next(fetch_query(
-        query="SELECT id FROM peer "
-              "WHERE id IN ("
-              "   SELECT peer_id FROM slot "
-              "   WHERE id IN ("
-              "       SELECT slot_id FROM uri "
-              "       WHERE ip = ?"
-              "   )"
-              ")",
-        params=(ip,)
-    ))[0]
+def get_peer_directions(peer_id) -> Generator[Tuple[str, int, str], None, None]:
+    """Every address announced by ``peer_id``, as ``(ip, port, transport)``.
 
-
-def get_peer_directions(peer_id) -> Generator[Tuple[str, int], None, None]:
-    for ip, port in fetch_query(
-            query="SELECT ip, port FROM uri "
-                  "WHERE slot_id IN ("
-                  "   SELECT id FROM slot "
-                  "   WHERE peer_id = ?"
-                  ")",
+    ``transport`` is the tag the peer declared for that address ("tcp"/"udp"), or an
+    empty string for a legacy row that predates per-address transports.
+    """
+    for ip, port, transport in fetch_query(
+            query="SELECT ip, port, transport FROM uri WHERE peer_id = ?",
             params=(peer_id,)
     ):
-        yield ip, port
+        yield ip, port, transport or ""

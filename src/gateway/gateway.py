@@ -7,23 +7,25 @@ from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type
-from src.tunneling.rpc_tunnel import service_tunnel
-from src.gateway.utils import generate_node_peer_info
-from src.manager.manager import add_peer_instance, modify_gas_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_gas, \
+from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
+from src.gateway.utils import generate_full_node_peer_info
+from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
-from src.utils.utils import from_gas_amount, get_only_the_ip_from_context, to_gas_amount, get_network_name
+from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 from src.utils.config import ConfigManager
+from src.utils.monetary import prices
 
 env_manager = ConfigManager()
-MODIFY_RESOURCES_COST = env_manager.get("MODIFY_RESOURCES_COST")
 
 
 class Gateway(celaut_pb2_grpc.Gateway):
 
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
+        print("DEBUG. GET SERVICE ESTIMATED COST")
+        log.LOGGER("DEBUG. GET SERVICE ESTIMATED COST")
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
 
     def StartService(self, request_iterator, context, **kwargs):
@@ -44,31 +46,31 @@ class Gateway(celaut_pb2_grpc.Gateway):
             log.LOGGER(f'Stopped instance {token}.')
             yield from bee.serialize_to_buffer(
                     message_iterator=celaut_pb2.Refund(
-                        amount=to_gas_amount(refunded_amount)
+                        amount=to_amount(refunded_amount)
                     )
             )
         except Exception as e:
             raise Exception('Was imposible stop the service. ' + str(e))
 
-    def ModifyGasDeposit(self, request_iterator, context, **kwargs):
+    def ModifyDeposit(self, request_iterator, context, **kwargs):
         try:
-            log.LOGGER('Modifying gas deposit on service.')
+            log.LOGGER('Modifying deposit on service.')
 
             _input = next(bee.parse_from_buffer(
                                 request_iterator=request_iterator,
-                                indices=celaut_pb2.ModifyGasDepositInput,
+                                indices=celaut_pb2.ModifyDepositInput,
                                 partitions_message_mode=True
                             ), 0)
 
-            success, message = modify_gas_deposit(
-                        gas_amount=from_gas_amount(_input.gas_difference),
+            success, message = modify_deposit(
+                        amount_mu=from_amount(_input.difference),
                         service_token=_input.service_token
                     )
 
-            log.LOGGER(f"Message on modify gas deposit: {message}")
+            log.LOGGER(f"Message on modify deposit: {message}")
 
             yield from bee.serialize_to_buffer(
-                    message_iterator=celaut_pb2.ModifyGasDepositOutput(
+                    message_iterator=celaut_pb2.ModifyDepositOutput(
                         success=success,
                         message=message
                     )
@@ -78,16 +80,13 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def GetPeerInfo(self, request_iterator, context, **kwargs):
         log.LOGGER(f'Request for instance by {context.peer()}')
-        ip = get_only_the_ip_from_context(context_peer=context.peer())
-        gateway_instance = generate_node_peer_info(
-                network=get_network_name(direction=ip)
-            )
+        gateway_instance = generate_full_node_peer_info()
         yield from bee.serialize_to_buffer(gateway_instance)
 
     def IntroducePeer(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
         log.LOGGER('Introduce peer method.')
-        add_peer_instance(
+        peer_id = add_peer_instance(
                 peer=next(bee.parse_from_buffer(
                 request_iterator=request_iterator,
                 indices=celaut_pb2.Peer,
@@ -95,7 +94,13 @@ class Gateway(celaut_pb2_grpc.Gateway):
             ), None)
         )
 
-        yield from bee.serialize_to_buffer(celaut_pb2.RecursionGuard(token="OK"))  # Recursion guard shouldn't be used here, another message should be used. TODO
+        # Answer with the id the peer was stored under, or REFUSED when it was not.
+        # Refusal is a normal outcome now that an unverifiable announcement is turned
+        # down (issue #236) -- it used to be impossible, since the uuid4 fallback always
+        # succeeded, which is why "OK" was unconditional. A blanket "OK" would now tell a
+        # node self-announcing through connect's SELF_ANNOUNCE_TO_CONNECTING_PEERS that it
+        # is registered here while nothing was stored.
+        yield from bee.serialize_to_buffer(celaut_pb2.RecursionGuard(token=peer_id or "REFUSED"))  # Recursion guard shouldn't be used here, another message should be used. TODO
 
     def GenerateClient(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
@@ -119,12 +124,12 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for modify service system resources.')
         token = get_internal_service_id_by_uri(uri=get_only_the_ip_from_context(context_peer=context.peer()))
-        refund_gas = []
-        if not spend_gas(
+        refund_container = []
+        if not spend_mu(
                 id=token,
-                gas_to_spend=MODIFY_RESOURCES_COST,
-                refund_gas_function_container=refund_gas
-        ): raise Exception('Launch service error spending gas for ' + context.peer())
+                amount_mu=prices().modify_resources_mu,
+                refund_function_container=refund_container
+        ): raise Exception('Error charging for the resource change of ' + context.peer())
         if not hotplug(
                 vmachine_id=token,
                 system_requeriments_range=next(bee.parse_from_buffer(
@@ -134,7 +139,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 ), None)
         ):
             try:
-                refund_gas.pop()()
+                refund_container.pop()()
             except IndexError:
                 pass
             raise Exception('Exception on service modify method.')
@@ -158,7 +163,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # raw ErgoTree/propositionBytes travels as ``script`` (never a textual address).
         contract_type = get_contract_type(payment.contract) or raw_script
         if not validate_payment_process(
-                amount=from_gas_amount(payment.gas_amount),
+                amount=from_amount(payment.amount),
                 ledger=payment.contract.ledger,
                 contract=contract_type,
                 script=raw_script,
@@ -181,83 +186,43 @@ class Gateway(celaut_pb2_grpc.Gateway):
         )
 
     def ServiceTunnel(self, request_iterator, context, **kwargs):
-        yield from bee.serialize_to_buffer(
-                message_iterator=service_tunnel(
-                    iterator=bee.parse_from_buffer(
-                        request_iterator=request_iterator,
-                        indices={0: bytes},
-                        partitions_message_mode={0: False}
-                    )
+        try:
+            # The stream carries two message types: the leading TokenMessage
+            # handshake (index 1) and the raw payload (index 0). Both are parsed
+            # in memory — `partitions_message_mode=False` would spill every
+            # payload chunk to a temporary file, which no byte pipe can afford.
+            conn, relay = service_tunnel(
+                iterator=bee.parse_from_buffer(
+                    request_iterator=request_iterator,
+                    indices={1: celaut_pb2.TokenMessage, 0: bytes},
+                    partitions_message_mode={1: True, 0: True}
                 ),
-                indices=celaut_pb2.Metrics,
-        )
+                is_active=context.is_active,
+            )
+        except TunnelError as e:
+            log.LOGGER(f'Tunnel refused: {e}')
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+            return
+
+        try:
+            yield from bee.serialize_to_buffer(
+                    message_iterator=relay,
+                    # Mirrors the input map. Declaring a second index also keeps
+                    # bee_rpc from inferring the index off the first message, which
+                    # it does by calling next() unguarded — a service that closes
+                    # without replying would surface as a RuntimeError instead of an
+                    # empty stream.
+                    indices={1: celaut_pb2.TokenMessage, 0: bytes},
+            )
+        finally:
+            # The socket is opened eagerly inside service_tunnel; guarantee it is
+            # released even if serialize_to_buffer bails before the relay
+            # generator is ever iterated (its own finally would not run then).
+            relay.close()
+            try:
+                conn.close()
+            except OSError:
+                pass
 
     def Observe(self, request_iterator, context, **kwargs):
         yield from ObserveIterable(request_iterator, context)
-
-    # Ownership-challenge counterpart: a peer proves it controls the raw propositionBytes
-    # (R7 owner) of a reputation proof by signing our random challenge. This is NOT a
-    # generic "sign an arbitrary public key" operation.
-    _MAX_PROPOSITION_BYTES = 4096
-    _MAX_CHALLENGE_BYTES = 4096
-
-    def SignPublicKey(self, request_iterator, context, **kwargs):
-        try:
-            log.LOGGER('Ownership challenge: SignPublicKey request.')
-
-            sign_request = next(bee.parse_from_buffer(
-                request_iterator=request_iterator,
-                indices=celaut_pb2.SignRequest,
-                partitions_message_mode=True
-            ), None)
-
-            if sign_request is None:
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("Empty SignPublicKey request.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-
-            proposition_hex = (sign_request.public_key or "").strip()
-            try:
-                proposition_bytes = bytes.fromhex(proposition_hex)
-            except (ValueError, TypeError):
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("public_key is not valid hex propositionBytes.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-            challenge = sign_request.to_sign or ""
-
-            if not proposition_bytes or len(proposition_bytes) > self._MAX_PROPOSITION_BYTES:
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("proposition_bytes missing or too large.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-            if not challenge or len(challenge) > self._MAX_CHALLENGE_BYTES:
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("challenge (to_sign) missing or too large.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-
-            from src.reputation_system.contracts.ergo.proof_validation import sign_message
-
-            signed_hex = sign_message(
-                proposition_bytes=proposition_bytes,
-                message=challenge,
-            )
-
-            if not signed_hex:
-                # We do not control those proposition bytes: controlled refusal, not a crash.
-                context.set_code(grpc.StatusCode.PERMISSION_DENIED)
-                context.set_details("Challenged proposition bytes are not owned by this node.")
-                yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))
-                return
-
-            yield from bee.serialize_to_buffer(
-                celaut_pb2.SignResponse(signed=signed_hex)
-            )
-
-        except Exception as e:
-            log.LOGGER(f'Error in SignPublicKey method: {e}')
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details('SignPublicKey failed.')
-            yield from bee.serialize_to_buffer(celaut_pb2.SignResponse(signed=""))

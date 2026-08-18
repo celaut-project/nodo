@@ -238,7 +238,7 @@ it — services run as **Cloud Hypervisor** microVMs. Docker is only relevant to
   delegates the build to a **packer-service** (it runs Docker/buildx inside its
   own sealed microVM). Set the packer-service's published service id under
   `core_services` in `config.yaml` — the single source of truth:
-  `core_services: [{ name: "packer", id: "<id>" }]` — and `nodo execute` it so a
+  `core_services: { packer: "<id>" }` — and `nodo execute` it so a
   running instance exists; nodo resolves that instance's `ip:port` automatically.
   When nodo needs to download the packer, it fetches it directly from
   `packer.PACKER_SOURCE_URL` if set, otherwise via the source-application core

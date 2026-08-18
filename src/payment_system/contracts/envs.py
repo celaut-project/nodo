@@ -1,5 +1,6 @@
 from textwrap import dedent
-from typing import Callable, Dict
+from typing import Any, Callable, Dict, Tuple
+from contextlib import nullcontext
 from protos import celaut_pb2
 
 from src.payment_system.contracts.simulator import interface as simulated
@@ -41,11 +42,68 @@ def available_payment_process() -> Dict[contract_hash, Callable[[amount, token, 
     }
 
 
+def transaction_url_reporting(reporter):
+    """Provide the current payment flow with an Ergo transaction URL reporter."""
+    if SIMULATED:
+        return nullcontext()
+    return _ergo_interface().transaction_url_reporting(reporter)
+
+
+def transaction_id_reporting(reporter):
+    """Provide the current payment flow with a transaction id reporter.
+
+    A simulated payment has no transaction and reports nothing, so the payment it
+    records carries no id -- which is the truth about it.
+    """
+    if SIMULATED:
+        return nullcontext()
+    return _ergo_interface().transaction_id_reporting(reporter)
+
+
 def check_sender_balances() -> Dict[contract_hash, Callable[[amount], bool]]:
     ergo = _ergo_interface()
     return {
         **({simulated.CONTRACT_HASH: simulated.check_sender_balance} if SIMULATED else {}),
         ergo.CONTRACT_HASH: ergo.check_sender_balance
+    }
+
+
+def display_units() -> Dict[str, Dict[str, Any]]:
+    """Display units the payment contracts contribute, keyed by unit name.
+
+    Lets `monetary.display_unit` offer the operator the unit their payment system settles
+    in without the accounting core naming a ledger. Each entry has the shape of a
+    hand-declared `ui.UNITS.<name>` block, except that its rate is derived from the ledger
+    and so cannot go stale.
+
+    Only the *light* rate module is imported, never `ergo.interface`: this is reached from
+    `format_mu`, which runs on log lines all over the node.
+
+    A payment stack that will not import contributes nothing rather than raising -- money
+    still gets rendered, in raw MU. A rate that is present but *malformed* does raise: that
+    is a configuration error, and quietly falling back to MU would hide it.
+    """
+    units: Dict[str, Dict[str, Any]] = {}
+    try:
+        from src.payment_system.contracts.ergo import rate as ergo_rate
+    except (ImportError, ModuleNotFoundError, OSError):
+        return units
+    units.update(ergo_rate.display_units())
+    return units
+
+
+def settlement_floors() -> Dict[contract_hash, Callable[[], Tuple[amount, amount]]]:
+    """Per contract: ``(fee, smallest payable output)`` in MU.
+
+    What a deposit has to clear before it can be settled at all. Kept here with the rest
+    of the per-contract dispatch so `deposits.py` can size a deposit without naming a
+    ledger -- it used to import Ergo's `DEFAULT_FEE` and `SAFE_MIN_BOX_VALUE` directly,
+    which put a chain-specific floor on every payment system, including the simulated one.
+    """
+    ergo = _ergo_interface()
+    return {
+        **({simulated.CONTRACT_HASH: simulated.settlement_floors_mu} if SIMULATED else {}),
+        ergo.CONTRACT_HASH: ergo.settlement_floors_mu
     }
 
 

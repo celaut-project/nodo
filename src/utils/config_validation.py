@@ -8,17 +8,54 @@ those keys is rejected outright — there is no migration or fallback.
 """
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
 
 from src.utils.ergo_units import erg_to_nanoerg, is_valid_ergo_address
 
-# Keys that were removed in the single-wallet refactor. Their presence anywhere in the
-# config means the file predates this change and must be updated by hand.
+# Keys that were removed. Their presence anywhere in the config means the file predates
+# a breaking change and must be updated by hand.
 REMOVED_KEYS = (
+    # Single-wallet refactor.
     "AUXILIARY_MNEMONIC",
     "AUXILIAR_MNEMONIC",
     "PAYMENTS_RECEIVER_WALLET",
     "PAYMENTS_RECIVER_WALLET",
+    # ERG-native pricing (docs/PRICING.md). The gas model is gone: prices are now per
+    # resource, in ERG, under `pricing:`. Leaving a stale key silently in place would
+    # keep a node quoting a price nobody charges, so they are rejected outright.
+    "GAS_PER_ERG",
+    "EXECUTION_COST",
+    "EXECUTION_BENEFIT",
+    "BUILD_COST",
+    "MODIFY_RESOURCES_COST",
+    "FREE_GAS_THRESHOLD",
+    "FREE_TRIAL_GAS_AMOUNT",
+    "DEFAULT_INITIAL_GAS_AMOUNT",
+    "DEFAULT_INITIAL_GAS_AMOUNT_FACTOR",
+    "USE_DEFAULT_INITIAL_GAS_AMOUNT_FACTOR",
+    "TOTAL_REFILLED_DEPOSIT",
+    "MIN_DEPOSIT_PEER",
+    "INITIAL_PEER_DEPOSIT_FACTOR",
+    "DEV_CLIENT_GAS_AMOUNT",
+    "INIT_COST_CONFIGURATION_FACTOR",
+    "MAINTENANCE_COST_CONFIGURATION_FACTOR",
+    "TUNNEL_OPEN_COST",
+    "TUNNEL_COST_PER_KB",
+    "TUNNEL_GAS_CHARGE_INTERVAL_KB",
+    "ALLOW_GAS_DEBT",
+    "CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME",
+    # Prices moved from ERG strings to whole MU, and the ERG rate to
+    # ledgers.ergo.payments.MU_PER_NANOERG.
+    "RAM_ERG_PER_GIB_HOUR",
+    "CPU_ERG_PER_VCPU_HOUR",
+    "DISK_ERG_PER_GIB_HOUR",
+    "NET_ERG_PER_GIB",
+    "BUILD_ERG",
+    "TUNNEL_OPEN_ERG",
+    "MODIFY_RESOURCES_ERG",
+    "CREDIT_ERG_PER_NEW_CLIENT",
+    "CLIENT_MIN_BALANCE_ERG_TO_RESET_EXPIRATION",
 )
 
 
@@ -66,6 +103,200 @@ def _require_positive_int(block: Dict[str, Any], section: str, key: str) -> None
     if as_int <= 0:
         raise ConfigValidationError(
             f"ledgers.ergo.{section}.{key} must be positive, got {as_int}"
+        )
+
+
+def _require_whole_mu(block: Dict[str, Any], section: str, key: str) -> None:
+    """A price is a whole, non-negative number of MU. Absent means 0 (free)."""
+    if key not in block:
+        return
+    raw = block[key]
+    try:
+        value = Decimal(str(raw if raw not in (None, "") else 0).strip())
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ConfigValidationError(f"{section}.{key} must be a number, got {raw!r}") from exc
+    if value < 0:
+        raise ConfigValidationError(f"{section}.{key} must not be negative, got {value}")
+    if value != value.to_integral_value():
+        raise ConfigValidationError(
+            f"{section}.{key} must be a whole number of MU, got {value}. Prices are in "
+            "MU, the node's unit of account; there is nothing smaller to express."
+        )
+
+
+def _require_share(block: Dict[str, Any], section: str, key: str, *, strictly_positive: bool = False) -> None:
+    """A share is a fraction in [0, 1] -- or (0, 1] when it divides something."""
+    if key not in block:
+        return
+    try:
+        value = float(block[key])
+    except (TypeError, ValueError) as exc:
+        raise ConfigValidationError(f"{section}.{key} must be a number, got {block[key]!r}") from exc
+    low_ok = value > 0 if strictly_positive else value >= 0
+    if not low_ok or value > 1:
+        bound = "(0, 1]" if strictly_positive else "[0, 1]"
+        raise ConfigValidationError(f"{section}.{key} must be a share in {bound}, got {value}")
+
+
+PRICE_KEYS = (
+    "RAM_MU_PER_GIB_HOUR",
+    "CPU_MU_PER_VCPU_HOUR",
+    "DISK_MU_PER_GIB_HOUR",
+    "NET_MU_PER_GIB",
+    "BUILD_MU",
+    "TUNNEL_OPEN_MU",
+    "MODIFY_RESOURCES_MU",
+)
+
+
+def validate_pricing_config(config: Dict[str, Any], *, warn=None) -> None:
+    """Validate the pricing / free-tier / display / deposit blocks (docs/PRICING.md).
+
+    Prices are money: a malformed one must stop the node rather than be coerced into
+    something plausible. A node that silently reads a broken price as 0 gives its
+    resources away, and one that reads it as huge refuses every client.
+
+    ``warn`` receives non-fatal findings (a callable taking one string).
+    """
+    pricing = config.get("pricing") or {}
+    if not isinstance(pricing, dict):
+        raise ConfigValidationError("Malformed 'pricing' mapping.")
+    for key in PRICE_KEYS:
+        _require_whole_mu(pricing, "pricing", key)
+
+    if "SCARCITY_MAX_MULTIPLIER" in pricing:
+        try:
+            multiplier = int(pricing["SCARCITY_MAX_MULTIPLIER"])
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError(
+                f"pricing.SCARCITY_MAX_MULTIPLIER must be an integer, got {pricing['SCARCITY_MAX_MULTIPLIER']!r}"
+            ) from exc
+        if multiplier < 1:
+            raise ConfigValidationError(
+                f"pricing.SCARCITY_MAX_MULTIPLIER must be at least 1 (1 = no surcharge), got {multiplier}"
+            )
+    if "SCARCITY_CURVE" in pricing:
+        try:
+            curve = float(pricing["SCARCITY_CURVE"])
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError(
+                f"pricing.SCARCITY_CURVE must be a number, got {pricing['SCARCITY_CURVE']!r}"
+            ) from exc
+        if curve <= 0:
+            raise ConfigValidationError(f"pricing.SCARCITY_CURVE must be positive, got {curve}")
+
+    free = config.get("free_tier") or {}
+    if not isinstance(free, dict):
+        raise ConfigValidationError("Malformed 'free_tier' mapping.")
+    _require_whole_mu(free, "free_tier", "CREDIT_MU_PER_NEW_CLIENT")
+    _require_share(free, "free_tier", "FREE_WHILE_SCARCITY_BELOW")
+
+    deposits = config.get("deposits") or {}
+    if not isinstance(deposits, dict):
+        raise ConfigValidationError("Malformed 'deposits' mapping.")
+    # Both divide a deposit, so neither may be zero.
+    _require_share(deposits, "deposits", "MAX_FEE_OVERHEAD", strictly_positive=True)
+    _require_share(deposits, "deposits", "REFILL_BELOW", strictly_positive=True)
+    if "INITIAL_RUNTIME_HOURS" in deposits:
+        try:
+            hours = float(deposits["INITIAL_RUNTIME_HOURS"])
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError(
+                f"deposits.INITIAL_RUNTIME_HOURS must be a number, got {deposits['INITIAL_RUNTIME_HOURS']!r}"
+            ) from exc
+        if hours < 0:
+            raise ConfigValidationError(
+                f"deposits.INITIAL_RUNTIME_HOURS must not be negative, got {hours}"
+            )
+
+    rate = _validate_payment_rate(config)
+    _validate_display_unit(config, rate)
+    _warn_if_charges_cannot_settle(pricing, rate, warn)
+
+
+def _validate_payment_rate(config: Dict[str, Any]) -> Decimal:
+    """``MU_PER_NANOERG``: what the node's unit of account is worth on this ledger."""
+    payments = (((config.get("ledgers") or {}).get("ergo") or {}).get("payments") or {})
+    raw = payments.get("MU_PER_NANOERG", 1)
+    try:
+        rate = Decimal(str(raw if raw not in (None, "") else 1).strip())
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ConfigValidationError(
+            f"ledgers.ergo.payments.MU_PER_NANOERG must be a number, got {raw!r}"
+        ) from exc
+    if rate <= 0:
+        raise ConfigValidationError(
+            f"ledgers.ergo.payments.MU_PER_NANOERG must be positive, got {rate}"
+        )
+    per_erg = rate * 1_000_000_000
+    if per_erg != per_erg.to_integral_value():
+        raise ConfigValidationError(
+            f"ledgers.ergo.payments.MU_PER_NANOERG={rate} makes one ERG {per_erg} MU, "
+            "which is not a whole number of MU."
+        )
+    return rate
+
+
+def _validate_display_unit(config: Dict[str, Any], rate: Decimal) -> None:
+    """``ui.DISPLAY_UNIT`` is presentational, but a broken one breaks every command."""
+    ui = config.get("ui") or {}
+    if not isinstance(ui, dict):
+        raise ConfigValidationError("Malformed 'ui' mapping.")
+    name = str(ui.get("DISPLAY_UNIT", "erg") or "erg").strip().lower()
+    if name in ("erg", "mu"):
+        return
+
+    declared = (ui.get("UNITS") or {}).get(name)
+    if not isinstance(declared, dict) or not declared:
+        raise ConfigValidationError(
+            f"ui.DISPLAY_UNIT is {name!r}, which is neither built in ('erg', 'mu') nor "
+            f"declared under ui.UNITS.{name}."
+        )
+    try:
+        unit_rate = Decimal(str(declared.get("MU_PER_UNIT", 0)).strip())
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ConfigValidationError(
+            f"ui.UNITS.{name}.MU_PER_UNIT must be a number, got {declared.get('MU_PER_UNIT')!r}"
+        ) from exc
+    if unit_rate <= 0:
+        raise ConfigValidationError(f"ui.UNITS.{name}.MU_PER_UNIT must be positive, got {unit_rate}")
+    if "DECIMALS" in declared:
+        try:
+            decimals = int(declared["DECIMALS"])
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError(
+                f"ui.UNITS.{name}.DECIMALS must be an integer, got {declared['DECIMALS']!r}"
+            ) from exc
+        if decimals < 0:
+            raise ConfigValidationError(f"ui.UNITS.{name}.DECIMALS must not be negative, got {decimals}")
+
+
+def _warn_if_charges_cannot_settle(pricing: Dict[str, Any], rate: Decimal, warn) -> None:
+    """Do prices and the payment rate still live on the same scale?
+
+    This is the failure the gas model actually shipped with: charges of order 1e2 and a
+    conversion factor of 1e58, so every real charge became zero on-chain and nothing
+    could ever be settled. Configuring prices (MU) and the rate (MU per nanoERG)
+    separately makes it reachable again, so it is checked rather than assumed.
+
+    A warning, not an error: a node may legitimately price everything at zero, and an
+    operator mid-edit should not be locked out of their own config.
+    """
+    if warn is None:
+        return
+    reference = pricing.get("RAM_MU_PER_GIB_HOUR", 0)
+    try:
+        reference_mu = Decimal(str(reference if reference not in (None, "") else 0))
+    except (InvalidOperation, ValueError, TypeError):
+        return
+    if reference_mu <= 0:
+        return
+    if reference_mu / rate < 1:
+        warn(
+            f"pricing.RAM_MU_PER_GIB_HOUR={reference_mu} MU is worth less than one "
+            f"nanoERG at ledgers.ergo.payments.MU_PER_NANOERG={rate}, so an hour of a "
+            "GiB of memory settles as nothing on-chain. Raise the prices or lower the "
+            "rate; see docs/PRICING.md."
         )
 
 

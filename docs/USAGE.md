@@ -50,7 +50,7 @@ These are the most commonly used commands for daily tasks:
   Prints:
   - execution feasibility (`YES/NO`)
   - reason when execution is not possible
-  - estimated gas costs (initial and maintenance)
+  - estimated costs (to start, and maintenance per hour)
   
   **Examples:**  
   `nodo estimate 1234567890abcdef`  
@@ -152,15 +152,44 @@ These are the most commonly used commands for daily tasks:
   - Full AF_PACKET capture needs a Linux host with `CAP_NET_RAW`; elsewhere the
     RPC degrades to the conntrack fallback exactly like the CLI.
 
-- **increase_gas `<instance id> <gas amount>`**  
-  Increases the allocated gas for a service instance.  
-  **Example:**  
-  `nodo increase_gas abcdef1234567890 100`
+- **tunnel `<instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]`**  
+  Binds a local port and forwards its traffic to `<slot>` of the instance through
+  the node's `Gateway.ServiceTunnel` stream, so a service can be reached without
+  publishing a port of its own. `<slot>` must be a port the service **declares**
+  in its API (see `nodo instances` / the instance's `uri_slot`); undeclared ports
+  are refused. With `--peer` the tunnel goes through a remote node and
+  `<instance id>` must be the token as **that** node knows it, since only it can
+  resolve the token. The listener binds to `127.0.0.1` unless `--host` says
+  otherwise, and `--listen` is optional (an ephemeral port is picked and
+  printed). Press `Ctrl-C` to stop.  
 
-- **decrease_gas `<instance id> <gas amount>`**  
-  Decreases the allocated gas for a service instance.  
+  `--udp` makes the local socket a datagram socket, for slots that declare UDP;
+  the node picks the node-to-service transport from the slot's own declaration,
+  so the two must match. TCP gives each connection its own stream. UDP has no
+  connections, so traffic is keyed by source address and a flow is dropped after
+  `--idle` seconds of silence (30 by default). Datagram boundaries are preserved,
+  but a tunnelled datagram is reliable and ordered rather than lossy — see
+  [TUNNELING.md](TUNNELING.md) for that and the rest of the wire protocol.  
+  **Examples:**  
+  `nodo tunnel my-instance 8080` → then `curl http://127.0.0.1:<printed port>/`  
+  `nodo tunnel abcdef1234567890 8080 --listen 9000`  
+  `nodo tunnel abcdef1234567890 5353 --udp --listen 5353`  
+  `nodo tunnel abcdef1234567890 8080 --peer 192.168.1.10:4040`  
+
+  The node also opens these tunnels for itself: when a service is delegated to a
+  peer whose advertised addresses this node cannot reach, it stands in for the
+  service locally and hands our client an endpoint of its own. That is controlled
+  by `network.DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`).
+
+- **increase_deposit `<instance id> <amount>`**  
+  Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
   **Example:**  
-  `nodo decrease_gas abcdef1234567890 50`
+  `nodo increase_deposit abcdef1234567890 0.01`
+
+- **decrease_deposit `<instance id> <amount>`**  
+  Takes back part of a service instance's deposit.  
+  **Example:**  
+  `nodo decrease_deposit abcdef1234567890 0.005`
 
 - **services**  
   Lists all available services on the node.  
@@ -168,7 +197,12 @@ These are the most commonly used commands for daily tasks:
   `nodo services`
 
 - **connect `<ip:port>`**  
-  Manually connects to a peer node.  
+  Manually connects to a peer node. The address is dialled and the identity that answers
+  is verified, so it is registered under that peer and **taken away from any other peer
+  still holding it** — an address reaches one node, and the usual reason two peers claim
+  it is that the host reinstalled and came back under a new identity key (its peer_id).
+  The old peer keeps whatever other addresses it announced; forget it with
+  `nodo disconnect` (or `d` on the TUI's Peers page) if it has none left.  
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
@@ -182,7 +216,7 @@ These are the most commonly used commands for daily tasks:
   and imports the returned `.celaut.bee`. Configure the packer by its published
   service id first, then `nodo execute` it so a running instance exists:  
   set the packer id under `core_services` in `config.yaml` — the single source of
-  truth: `core_services: [{ name: "packer", id: "<packer-service id>" }]`  
+  truth: `core_services: { packer: "<packer-service id>" }`  
   nodo resolves the running instance's `ip:port` automatically. When nodo needs to
   download the packer it uses `packer.PACKER_SOURCE_URL` if set, otherwise the
   source-application core service. To override with an out-of-band packer instead,
@@ -204,13 +238,9 @@ These are the most commonly used commands for daily tasks:
   > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint
   > is declared in `service.json → init.entry_path`). Do not guess the format.
 
-- **config**  
-  Opens environment and runtime configuration options.  
-  **Example:**  
-  `nodo config`
-
 - **tui**  
-  Launches the terminal user interface for monitoring and managing the node.  
+  Launches the terminal user interface for monitoring and managing the node. Its
+  Config page is also where environment and runtime settings are edite ([`CONFIG.md`](CONFIG.md)).  
   **Example:**  
   `nodo tui`
 
@@ -303,13 +333,23 @@ These commands offer extended management and exploration features:
   **Example:**  
   `nodo peers`
 
+- **credit_client `<client id> <amount>`**  
+  Adds to a client's balance. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
+  **Example:**  
+  `nodo credit_client abcdef1234567890 0.01`
+
+- **debit_client `<client id> <amount>`**  
+  Takes back part of a client's balance.  
+  **Example:**  
+  `nodo debit_client abcdef1234567890 0.005`
+
 ---
 
 ## Estimate Resource Calculation Notes (internal)
 
 These are the **internal** server-side calculations `nodo estimate` performs to
 decide feasibility; they are **not** printed by the command (its output is the
-feasibility verdict and the gas figures only). `nodo estimate` uses the same
+feasibility verdict and the price figures only). `nodo estimate` uses the same
 internal checks as runtime cost estimation:
 
 - **Execution feasibility check**
@@ -362,14 +402,41 @@ These are intended for development or advanced maintenance environments:
   - Host kernel version (warns about bleeding-edge kernels with KVM incompatibilities)
   - Guest kernel (`vmlinuz`) presence and size validation
   - Custom initramfs presence and required entry validation
-  - **KVM smoke test**: launches a minimal VM to verify that the Cloud Hypervisor binary can actually execute vCPUs on the host kernel  
+  - **KVM smoke test**: launches a minimal VM to verify that the Cloud Hypervisor binary can actually execute vCPUs on the host kernel
+  - **Inbound reachability**: gateway port resolvable and listening, and DDNS resolution — deferring the router steps to `nodo nat-guide`  
   **Example:**  
   `sudo nodo doctor`
+
+- **nat-guide**  
+  Prints how to make this node reachable from the Internet: which port to forward on
+  your router (with this machine's own address, port and detected router filled in),
+  how DDNS fits, how to test it from outside, and what to check when it still fails
+  (CGNAT, a second router, the host firewall). Does **not** require superuser.  
+
+  Only the **gateway port** needs forwarding: service tunneling carries every service
+  through it, so `FREE_PORTS_RANGE` only matters if you also want direct exposure.
+  Nothing here verifies the forwarding from outside — that cannot be done from this
+  host, since a connection from inside your own network succeeds either way.  
+  **Example:**  
+  `nodo nat-guide`
 
 - **migrate**  
   Updates the database schema.  
   **Example:**  
   `nodo migrate`
+
+- **force_execution `<peer_id>` `<service id|tag|'.celaut' path>` `[-e key value]` `[--name instance-name]`**  
+  Testing/dev only. `execute` always picks the peer through `execution_balancer`
+  (cheapest local-or-connected-peer candidate, tried in cost order). This command
+  skips that entirely and delegates straight to `peer_id` — no comparison against
+  `local` or any other peer, and no fallback if it fails. It still goes through the
+  normal cost accounting for the delegated instance (the peer's own cost
+  estimate, `spend_mu`, `balance_on_other_peer`) — only peer *selection* is
+  skipped. Fails immediately if `peer_id` isn't currently connected (see `nodo peers`).
+  Useful for exercising peer-to-peer delegation and tunneling deterministically
+  without disconnecting every other peer first.  
+  **Example:**  
+  `nodo force_execution a1b2c3d4-... my-service`
 
 - **storage:prune_blocks**  
   Cleans up storage by removing unnecessary blocks.  
@@ -397,8 +464,8 @@ These are intended for development or advanced maintenance environments:
   every step. It (1) validates the currently configured proof, (2) removes it from the
   config if it is not owned by the configured wallet, (3) if a mnemonic is configured,
   looks up an on-chain reputation proof owned by that wallet and stores its id in the
-  config when one exists. This runs automatically after `nodo config`, so a freshly set
-  mnemonic immediately picks up its associated reputation proof (if any).  
+  config when one exists. Run it by hand after changing the mnemonic, so the new wallet
+  picks up its associated reputation proof (if any).  
   **Example:**  
   `nodo sync_reputation_proof`
 
@@ -436,7 +503,7 @@ To pack with the default external backend, point nodo at a packer service and ru
 
 ```bash
 # set the packer id under core_services in config.yaml (single source of truth):
-#   core_services: [{ name: "packer", id: "<packer-service id>" }]
+#   core_services: { packer: "<packer-service id>" }
 # download source (optional): packer.PACKER_SOURCE_URL: "<manifest url>"
 #   when empty, nodo resolves the packer via the source-application core service.
 nodo execute <packer-service id>               # start a running instance nodo resolves by id
@@ -473,15 +540,21 @@ If `hashing.CHECK_INTEGRITY_ON_SERVE` is set to `true`, Nodo runs an automatic i
 ## Terminal User Interface (TUI)
 
 Run `nodo tui` to open the operations console. Its pages cover node/host statistics, current
-instance resource usage and reservations, local services, peers and clients, complete
+instance resource usage and reservations, local services, peers, clients, complete
 `config.yaml` editing, logs, storage, and Ergo wallet balances. The old tunnels page was
 removed because nodo does not use it.
 
-- Left/Right switches pages; Up/Down selects rows.
-- `r` refreshes, `Tab` switches peer/client focus, and `c` connects a peer.
-- On Services, `e` executes the selected service.
-- On Config, `e` edits any selected YAML value, `/` filters values, and `x` clears the filter.
-  Secrets are masked, comments are preserved, and each write creates `config.yaml.tui.bak`.
+- `Tab`/`Shift+Tab` switches pages; Up/Down selects rows.
+- `r` refreshes.
+- On Peers, `c` connects a peer, `d` forgets the selected one (`nodo disconnect`), and `+`/`-` adjust its
+  reputation. The detail card shows what this node has paid that peer and the events behind its score.
+- On Clients, `+`/`-` credit/debit the selected client's balance (`nodo credit_client`/`debit_client`),
+  and the detail card shows what a client has paid, its deposit tokens, and the instances it
+  started here.
+- On Services, `e` executes the selected service and `d` deletes it.
+- On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
+  value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
+  preserved, and each write snapshots the previous file to `config-<timestamp>.yaml`.
 - `q`, Escape, or Ctrl+C exits.
 
 See [the TUI reference](../src/commands/tui/README.md) for page details, refresh behavior, and
@@ -496,8 +569,9 @@ commands that take one, the identifier of the relevant object:
 
 - **Service id or tag** — `execute`, `estimate`, `inspect`, `remove`, `publish`, `tag`,
   `export`, `integrity`
-- **Instance id or name** — `kill`, `observe`, `increase_gas`, `decrease_gas`
+- **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_deposit`, `decrease_deposit`
 - **Peer id** — `disconnect`, `increase_peer_deposit`
+- **Client id** — `credit_client`, `debit_client`
 - **Subcommands** — `daemon start|status|stop|restart`
 
 The installer sets this up automatically. To (re)install it yourself:

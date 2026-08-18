@@ -49,18 +49,63 @@ the *packing* step (and only in the opt-in `packer.local` mode); it never runs a
 service. Do not use `docker ps` to inspect a running instance — use
 `nodo instances` / `nodo observe`.
 
-## Gas
+## Balances and prices
 
-The unit of compute a client pays for. A client tops up its gas balance on a node
-by generating a **deposit token** — a locally-generated identifier, not an
-on-chain asset — and submitting an Ergo transaction that carries that identifier
-(in register R4) plus some ERG; the node verifies the deposit belongs to the
-client and that the funds reached its wallet, then credits gas. Nodes run a
-single hot wallet (`ledgers.ergo.WALLET_MNEMONIC`); clients pay its derived P2PK
-address, and excess is swept to an optional cold address. `nodo estimate` reports
-a service's gas cost before you run it;
-`nodo increase_gas` / `nodo decrease_gas` adjust a running instance. Full model:
-[`ERGO.md`](ERGO.md).
+A node prices each resource on its own — memory, CPU, disk, relayed traffic — and
+nothing collapses them into a single number, so a node short on memory but rich in
+disk can charge accordingly. Prices rise with contention, up to a ceiling the node
+advertises alongside them.
+
+Three things are kept apart, and conflating them is what the previous "gas" model got
+wrong:
+
+| | What it is |
+|---|---|
+| **MU** (monetary unit) | What the node *counts in*. An integer, so no balance goes through a float. It is the node's own unit of account and has **no intrinsic value**. |
+| The **contract rate** | What one MU is *worth*. A property of the payment system, not of MU: each payment contract declares how many MU one of its units buys, and that declaration travels to peers with every price. |
+| `ui.DISPLAY_UNIT` | What *you* read and type. Purely presentational; changing it never changes what anybody is charged. |
+
+### Where ERG fits
+
+Ergo is the **default** payment system and ERG the default representation. Neither is
+fixed, and neither is part of the definition of anything. A payment system is just a
+contract that declares its own rate; Ergo is simply the first one implemented
+(`src/payment_system/contracts/ergo/`), and it sits beside a simulated contract used
+for testing. The accounting core names no ledger — MU is not pegged to ERG, and code
+reading a price is expected to read the rate rather than assume one.
+
+Two consequences worth stating plainly:
+
+* **Another node need not accept ERG.** Every node advertises the payment contracts it
+  accepts (`Peer.payment_contracts`). Paying a peer means finding a contract you both
+  hold; a peer that shares none with you will show you its prices and be unpayable by
+  you. Sharing at least one is what makes two nodes able to trade at all.
+* **A node may accept several at once**, ERG among them or not. What a node advertises
+  is a list, not a choice, and which contract settles a given payment is decided per
+  payment by matching against what the payer can actually pay with.
+
+Because the rate is declared per contract instead of assumed, a price quoted in MU
+stays meaningful to a node that settles in something else entirely.
+
+### Topping up
+
+The flow below is Ergo's, being the payment system currently implemented; another
+contract would define its own equivalent.
+
+A client tops up its balance on a node by generating a **deposit token** — a
+locally-generated identifier, not an on-chain asset — and submitting an Ergo
+transaction that carries that identifier (in register R4) plus some ERG; the node
+verifies the deposit belongs to the client and that the funds reached its wallet,
+then credits the balance. Nodes run a single hot wallet
+(`ledgers.ergo.WALLET_MNEMONIC`); clients pay its derived P2PK address, and excess
+is swept to an optional cold address.
+
+`nodo estimate` reports what a service costs before you run it, and
+`nodo increase_deposit` / `nodo decrease_deposit` adjust a running instance — all in
+your display unit, ERG unless you changed it. `nodo pay` is the exception and always
+takes ERG: what it moves is an on-chain ERG transfer, denominated by the ledger rather
+than by a display preference. Full model: [`PRICING.md`](PRICING.md) for what things
+cost, [`ERGO.md`](ERGO.md) for how they settle.
 
 ## Address and token provisioning
 
@@ -68,7 +113,7 @@ To talk to a running instance you need its **communication address** (`ip:port`,
 from the ports the service declares in `service.json → api`) and an
 **authentication token**. Providing these is a core node responsibility
 (project [`README.md`](../README.md)); the API's transport, `protocol` (e.g.
-`grpc`) and `gas_amount_per_call` come from the service's own `service.json → api`
+`grpc`) and `mu_per_call` come from the service's own `service.json → api`
 block (see [`PACKING.md`](PACKING.md)).
 
 ## Block
@@ -83,7 +128,7 @@ their content hash, which deduplicates identical large files across services. Se
 **Peers** are other nodes this node has connected to; nodes reciprocally offer and
 request services from their peers, so a node can run a workload locally or hand it
 to a peer. **Clients** are the entities (nodes or external callers) that have
-registered with this node and pay it gas. `nodo peers` / `nodo clients` list them.
+registered with this node and pay it. `nodo peers` / `nodo clients` list them.
 
 ## Service composition (dependencies)
 

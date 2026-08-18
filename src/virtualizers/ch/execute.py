@@ -16,13 +16,16 @@ from typing import Dict, List, Optional, Tuple
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.gateway.utils import GATEWAY_PORT
-from src.gateway.utils import generate_node_peer_info
+from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_bytes
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.virtualizers.ch.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
+# The guest floors live in `limits`: the pricing side applies the same ones to quote an
+# instance before it exists, so both sides read one definition.
+from src.virtualizers.ch import limits
 from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.ch.virtiofs import (
     attach_virtiofs_backends,
@@ -64,20 +67,6 @@ GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     8,
 )
 CONSERVE_RUNTIME_DIR_ON_FAILURE = env_manager.get("virtualizers.ch.CONSERVE_RUNTIME_DIR_ON_FAILURE", False)
-
-def _env_int(key: str, default: int) -> int:
-    try:
-        return int(env_manager.get(key, default))
-    except Exception:
-        return int(default)
-
-
-DEFAULT_VCPUS = 1
-DEFAULT_MEM_MIB = max(16, _env_int("virtualizers.ch.DEFAULT_MEM_MIB", 256))
-MIN_MEM_MIB = max(16, _env_int("virtualizers.ch.MIN_MEM_MIB", 128))
-if DEFAULT_MEM_MIB < MIN_MEM_MIB:
-    DEFAULT_MEM_MIB = MIN_MEM_MIB
-
 
 class CHExecuteError(RuntimeError):
     pass
@@ -397,37 +386,25 @@ def _delete_tap(tap_name: str) -> None:
     _run(["ip", "link", "del", tap_name], check=False)
 
 
-def _resolve_initial_resources(resources: celaut.Sysresources) -> Tuple[int, int, int, int]:
-    vcpus = DEFAULT_VCPUS
-    mem_b = DEFAULT_MEM_MIB * (1024 * 1024)  # Convert MiB to bytes
+def _runtime_disk_bytes(vmachine_id: str, rootfs_path: Path) -> int:
+    """Bytes of disk this instance actually holds: the size of its own rootfs image.
 
-    # Default values: 1 vCPU
-    cpu_period = 100000
-    cpu_quota = 100000
+    Each instance gets a private copy of the service's rootfs (``shutil.copy2`` into
+    its runtime dir), so the image's size is what the node has committed on its
+    behalf, whatever the manifest asked for.
 
+    Returns 0 if the image cannot be stat'd, which the launcher reads as "the
+    virtualizer did not resolve disk" and falls back to the manifest for -- never
+    persisting a zero, since that would bill the instance no disk at all.
+    """
     try:
-        if resources:
-            if resources.HasField("cpu_period") and resources.cpu_period > 0:
-                cpu_period = resources.cpu_period
-
-            if resources.HasField("cpu_quota") and resources.cpu_quota > 0:
-                cpu_quota = resources.cpu_quota
-
-            if cpu_period > 0 and cpu_quota > 0:
-                vcpus = max(1, int(math.ceil(cpu_quota / cpu_period)))
-
-            if resources.HasField("mem_limit") and resources.mem_limit > 0:
-                # mem_b is in bytes; MIN_MEM_MIB is a MiB floor, so convert it to
-                # bytes before comparing. Without the conversion the floor is a
-                # no-op (128 < any real byte count) and a service declaring e.g.
-                # mem_limit=50MB boots with ~48 MiB of guest RAM — too little for
-                # the kernel+initramfs to reach console, so the guest never brings
-                # up eth0 and launch fails with "Guest network did not become ready".
-                mem_b = max(MIN_MEM_MIB * 1024 * 1024, int(resources.mem_limit))
-    except Exception:
-        pass
-
-    return vcpus, mem_b, cpu_quota, cpu_period
+        return int(rootfs_path.stat().st_size)
+    except OSError as e:
+        log.LOGGER(
+            f"[CH][{vmachine_id}] could not stat runtime rootfs {rootfs_path} ({e}); "
+            "leaving disk_space unresolved."
+        )
+        return 0
 
 
 def _build_network_resolution(
@@ -460,7 +437,7 @@ def _build_configuration_file(
 ) -> celaut.ConfigurationFile:
     cfg = celaut.ConfigurationFile()
     local_peer = generate_node_peer_info(network=NETWORK_BRIDGE_NAME)
-    cfg.gateway.CopyFrom(local_peer.instance)
+    cfg.gateway.CopyFrom(peer_gateway_instance(local_peer))
 
     if config:
         cfg.config.CopyFrom(config)
@@ -924,7 +901,7 @@ def execute(
     config: Optional[celaut.Configuration],
     initial_system_resources: celaut.Sysresources,
     father_id: str,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, celaut.Sysresources]:
     vmachine_id = _generate_vmachine_id()
     runtime_dir = _runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []
@@ -1092,7 +1069,26 @@ def execute(
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
-        vcpus, mem_b, cpu_quota, cpu_period = _resolve_initial_resources(initial_system_resources)
+        vcpus, mem_b, cpu_quota, cpu_period = limits.resolve_initial_resources(initial_system_resources)
+        # The row must record what was resolved here -- the values actually enforced
+        # on the guest (cgroup cpu.max + VM memory size) below -- not what the
+        # manifest requested. Persisting the manifest is what billed instances for
+        # what they asked rather than for what they hold (#249).
+        #
+        # Disk is the size of the rootfs image this instance was just given, which is
+        # the manifest's `disk_space` only when that figure happened to be the largest
+        # of the three inputs to `limits.initial_rootfs_size_bytes` -- the build also
+        # floors it at MIN_ROOTFS_BYTES, at the populated tree plus overhead, and grows
+        # it further whenever mkfs.ext4 ran out of space. Every one of those makes the
+        # instance hold more disk than it asked for, and the manifest figure would bill
+        # it for the smaller number.
+        disk_b = _runtime_disk_bytes(vmachine_id=vmachine_id, rootfs_path=rootfs_path)
+        resolved_resources = celaut.Sysresources(
+            cpu_period=cpu_period,
+            cpu_quota=cpu_quota,
+            mem_limit=mem_b,
+            disk_space=disk_b,
+        )
         mem_mib = math.ceil(mem_b / (1024 * 1024))
         netmask = str(network.netmask)
         kernel_cmdline = _kernel_cmdline(vm_ip=vm_ip, netmask=netmask)
@@ -1266,7 +1262,7 @@ def execute(
         log.LOGGER(
             f"Cloud Hypervisor VM started: {vmachine_id} ({vm_ip}), runtime_dir={runtime_dir}"
         )
-        return vmachine_id, vm_ip
+        return vmachine_id, vm_ip, resolved_resources
 
     except Exception as e:
         log.LOGGER(f"[CH][{vmachine_id}] execute failed: {type(e).__name__}: {e}")

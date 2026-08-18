@@ -68,13 +68,28 @@ class SingleWalletConfigTests(unittest.TestCase):
         # No cold wallet, features on -> mnemonic present so it validates.
         mgr.validate_ergo(payments_enabled=True, reputation_enabled=True)
 
-    def test_missing_mnemonic_rejected_when_enabled(self):
+    def test_empty_mnemonic_is_generated_rather_than_rejected(self):
+        # The single mnemonic is also the node's identity (issue #236), so it must
+        # always exist: loading a config without one fills it in instead of leaving
+        # the node with no peer_id. Validation therefore passes.
         body = BASE.replace(f'WALLET_MNEMONIC: "{VALID_MNEMONIC}"', 'WALLET_MNEMONIC: ""')
         mgr = _fresh(self._write(body))
+        generated = mgr.get("ledgers.ergo.WALLET_MNEMONIC")
+        self.assertTrue(generated)
+        self.assertEqual(len(generated.split()), 12)
+        mgr.validate_ergo(payments_enabled=True, reputation_enabled=True)
+
+    def test_validator_still_rejects_a_config_with_no_mnemonic_at_all(self):
+        # The guard stays meaningful for a raw config dict that never went through
+        # ConfigManager's auto-generation (validating a file directly, say).
+        from src.utils.config_validation import validate_ergo_config
+
         with self.assertRaises(ConfigValidationError):
-            mgr.validate_ergo(payments_enabled=True, reputation_enabled=True)
-        # ...but fine when both features are disabled.
-        mgr.validate_ergo(payments_enabled=False, reputation_enabled=False)
+            validate_ergo_config(
+                {"ledgers": {"ergo": {"WALLET_MNEMONIC": ""}}},
+                payments_enabled=True,
+                reputation_enabled=True,
+            )
 
     def test_invalid_cold_wallet_rejected(self):
         body = BASE.replace('COLD_WALLET: ""', 'COLD_WALLET: "not-a-valid-address"')

@@ -4,7 +4,7 @@ from typing import Optional
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.utils.hashing import SHA3_256_ID
 from src.utils.config import ConfigManager
-from src.utils.utils import to_gas_amount
+from src.utils.utils import to_amount
 
 env_manager = ConfigManager()
 
@@ -29,18 +29,18 @@ from bee_rpc.client import Dir
 GATEWAY: str = next(
         f"{ip}:{port}"
         for peer_id in get_peer_ids()
-        for ip, port in get_peer_directions(peer_id=peer_id)
+        for ip, port, _transport in get_peer_directions(peer_id=peer_id)
     ) or f"localhost:{GATEWAY_PORT}"
 
 SHA3_256 = SHA3_256_ID.hex()
 
 
-def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_gas_amount: Optional[int] = None):
+def generator(_hash: str, mem_limit: int = 50 * pow(10, 6), initial_mu: Optional[int] = None):
     try:
         yield celaut_pb2.Client(client_id='dev')
 
         yield celaut_pb2.Configuration(
-            initial_gas_amount=to_gas_amount(initial_gas_amount) if initial_gas_amount else None
+            initial_mu=to_amount(initial_mu) if initial_mu else None
         )
 
         yield celaut_pb2.Metadata.HashTag.Hash(

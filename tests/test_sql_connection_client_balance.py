@@ -18,16 +18,16 @@ class _FakeCursor:
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class SQLConnectionClientGasTests(unittest.TestCase):
-    def test_get_client_gas_accepts_scientific_notation(self):
+class SQLConnectionClientBalanceTests(unittest.TestCase):
+    def test_get_client_balance_accepts_scientific_notation(self):
         conn = SQLConnection()
 
         with patch.object(
             conn,
             "_execute",
-            return_value=_FakeCursor({"gas": "1e+6", "last_usage": None}),
+            return_value=_FakeCursor({"balance_mu": "1e+6", "last_usage": None}),
         ):
-            gas_data = conn.get_client_gas("dev-external-1")
+            gas_data = conn.get_client_balance("dev-external-1")
 
         self.assertIsNotNone(gas_data)
         self.assertEqual(gas_data[0], 10**6)

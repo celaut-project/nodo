@@ -1,7 +1,11 @@
+import collections
 import os
 import socket
+import threading
+import time
 import typing
 import ipaddress
+from decimal import Decimal
 from typing import Generator, Optional
 
 import netifaces as ni
@@ -13,6 +17,11 @@ from protos import celaut_pb2
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.manager.resources import mem_manager
 from src.utils import logger as log
+from src.utils.registry_errors import (
+    ServiceNotInRegistry,
+    ServiceRegistryError,
+    ServiceSpecUnavailable,
+)
 from src.utils.verify import get_service_hex_main_hash
 from src.utils.config import ConfigManager
 
@@ -48,11 +57,23 @@ def service_hashes(
         yield _hash
 
 
-def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
+def load_service_from_disk(service_hash: str) -> celaut.Service:
+    """Read a service spec from the local registry, or raise saying why not.
+
+    :class:`ServiceNotInRegistry` when this node does not store the spec,
+    :class:`ServiceSpecUnavailable` when it does but could not load it right now
+    (memory-lock timeout, I/O). Callers that authorize on what a spec declares
+    must use this one rather than :func:`read_service_from_disk`, which cannot
+    tell them apart -- see #269 and :mod:`src.utils.registry_errors`.
+
+    A file that disappears between the existence check and the read surfaces as
+    ``ServiceSpecUnavailable``, not as absence: it is a race with whoever is
+    mutating the registry, and the safe reading of a race is "cannot tell yet".
+    """
     log.LOGGER('Getting ' + service_hash + ' service from the local registry.')
     filename: str = os.path.join(REGISTRY, service_hash)
     if not os.path.exists(filename):
-        return None
+        raise ServiceNotInRegistry(f"Service {service_hash} is not on the local registry.")
 
     if os.path.isdir(filename):
         filename = filename + '/' + WITHOUT_BLOCKS_FILE_NAME
@@ -64,13 +85,32 @@ def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
             service.ParseFromString(read_file(filename=filename))
             log.LOGGER(f"Service {service_hash} loaded.")
             return service
-    except TimeoutError:
+    except TimeoutError as e:
         log.LOGGER(
             f"Timed out after {WAIT_FOR_UNLOCK_MEMORY}s waiting to unlock memory for service {service_hash}."
         )
-        return None
-    except (IOError, FileNotFoundError):
-        log.LOGGER('The service was not on registry.')
+        raise ServiceSpecUnavailable(
+            f"Timed out after {WAIT_FOR_UNLOCK_MEMORY}s waiting to unlock memory for "
+            f"service {service_hash}."
+        ) from e
+    except (IOError, FileNotFoundError) as e:
+        log.LOGGER(f'The service {service_hash} is on the registry but could not be read: {e}')
+        raise ServiceSpecUnavailable(
+            f"Service {service_hash} is on the registry but could not be read: {e}"
+        ) from e
+
+
+def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
+    """The spec, or ``None`` for any reason it could not be produced.
+
+    Kept for the callers that only report a miss (inspect, cost estimation): to
+    them "we do not have it" and "we could not load it" are the same answer. Do
+    not use it to decide what an instance is allowed to do -- use
+    :func:`load_service_from_disk` and handle the two failures apart.
+    """
+    try:
+        return load_service_from_disk(service_hash=service_hash)
+    except ServiceRegistryError:
         return None
 
 
@@ -164,6 +204,32 @@ def _is_link_local_ip(ip: str) -> bool:
         return False
 
 
+_VIRTUAL_INTERFACE_PREFIXES = (
+    "docker",
+    "br-",
+    "veth",
+    "virbr",
+    "zt",
+    "tailscale",
+    "tun",
+    "tap",
+    "wg",
+    "vmnet",
+    "vboxnet",
+)
+
+
+def is_virtual_interface(interface: str) -> bool:
+    """True for container/VPN/VM interfaces (docker0, br-*, veth*, tailscale0, ...).
+
+    Their addresses are real on the host but not a way anyone else reaches this
+    node through, so callers enumerating interfaces to advertise or prioritise a
+    LAN address should skip them -- otherwise a Docker bridge IP (e.g.
+    172.17.0.1) gets treated the same as the actual LAN interface.
+    """
+    return (interface or "").strip().lower().startswith(_VIRTUAL_INTERFACE_PREFIXES)
+
+
 def get_local_ip_from_network(network: str, *, allow_link_local: bool = True) -> str:
     addresses = ni.ifaddresses(network)
 
@@ -216,22 +282,26 @@ def __address_in_network(ip_or_uri, net) -> bool:
         ni.ifaddresses(net)[ni.AF_INET6][0]['addr'] == ip_or_uri
 
 
-def get_network_name(direction: str) -> str:
+def get_network_name(direction: str) -> Optional[str]:
     """
     Get the network name for a given direction. If the direction contains a port, it will be removed.
-    If the direction is localhost, it will return 'localhost'.
-    
+
     Args:
         direction (str): The direction to get the network name for.
-        
+
     Returns:
-        str: The network name. Returns 'localhost' if no matching network is found.
-        
+        Optional[str]: The name of one of our own interfaces whose subnet contains
+        ``direction``. ``"localhost"`` specifically means ``direction`` is our own
+        loopback (``0.0.0.0``/``::1``). ``None`` means ``direction`` is not on any
+        network we are on -- e.g. a real peer reached over the internet -- which is
+        a different situation from loopback and must not be treated as if it were
+        one (there is no interface actually named "localhost" to resolve an IP from).
+
     Raises:
         Exception: If there's an error processing the network interfaces
     """
     direction = _extract_direction_host(direction)
-    
+
     # If is localhost
     if "::1" in direction or '0.0.0.0' == direction:
         return "localhost"
@@ -244,37 +314,23 @@ def get_network_name(direction: str) -> str:
                     return network
             except KeyError:
                 continue
-        
-        # If no network is found, return localhost
-        return "localhost"
-     
+
+        # direction does not belong to any network we are on.
+        return None
+
     except Exception as e:
         raise Exception('Error getting the network name: ' + str(e))
 
 
-"""
-Gas Amount implementation using float and exponent.  (Currently it's using string)
-
-def to_gas_amount(gas_amount: int) -> celaut_pb2.GasAmount:
-    if gas_amount is None: return None
-    s: str =  "{:e}".format(gas_amount)
-    return celaut_pb2.GasAmount(
-        gas_amount = float(s.split('e+')[0]),
-        exponent = int(s.split('e+')[1])
-    )
-
-def from_gas_amount(gas_amount: celaut_pb2.GasAmount) -> int:
-    i: int = str(gas_amount.gas_amount)[::-1].find('.')
-    return int(gas_amount.gas_amount * pow(10, i) * pow(10, gas_amount.exponent-i))
-"""
+def to_amount(amount_mu) -> celaut_pb2.Amount:
+    # Normalize through Decimal before stringifying: a float (or a config value read
+    # as one) stringifies to "1e+64", which is not a decimal integer literal and makes
+    # `from_amount` raise on the other side of the wire.
+    return celaut_pb2.Amount(n=str(int(Decimal(str(amount_mu)))))
 
 
-def to_gas_amount(gas_amount: int) -> celaut_pb2.GasAmount:
-    return celaut_pb2.GasAmount(n=str(gas_amount))
-
-
-def from_gas_amount(gas_amount: celaut_pb2.GasAmount) -> int:
-    return int(gas_amount.n)
+def from_amount(amount: celaut_pb2.Amount) -> int:
+    return int(amount.n)
 
 
 def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
@@ -293,20 +349,101 @@ def peers_id_iterator(ignore_network: str = None) -> Generator[str, None, None]:
     )
 
 
+def format_uri(ip: str, port: int) -> str:
+    """``ip:port`` as a gRPC target, bracketing IPv6 literals.
+
+    A bare ``2001:db8::1:8080`` is not a parseable target -- the host has to be
+    ``[2001:db8::1]:8080``. Announcing IPv6 became possible once a node advertises
+    every interface (issue #236), so the formatting can no longer assume IPv4.
+    """
+    try:
+        if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address):
+            return f"[{ip}]:{port}"
+    except ValueError:
+        pass  # A DNS name: no brackets.
+    return f"{ip}:{port}"
+
+
 def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
+    """Every address of ``peer_id`` that this node can open a gRPC channel to.
+
+    Non-TCP addresses are skipped, not merely left unprobed: every consumer of this
+    feeds the result straight to ``grpc.insecure_channel``, so yielding a UDP endpoint
+    would hand them an address that can never answer -- and, since callers take the
+    *first* result, it would shadow the peer's working TCP address indefinitely.
+    An empty transport is a row from before addresses declared one; those were all TCP
+    gateways.
+    """
     yield from (
-        ip + ':' + str(port) for ip, port in get_peer_directions(
+        format_uri(ip, port) for ip, port, transport in get_peer_directions(
         peer_id=peer_id
-    ) if is_open(ip=ip, port=port)
+    ) if (not transport or transport.strip().lower() == "tcp")
+        and is_open(ip=ip, port=port, transport=transport)
     )
 
 
-def is_open(ip: str, port: int) -> bool:
+_IS_OPEN_CACHE_TTL_SECONDS = 30
+_IS_OPEN_CACHE_MAX_ENTRIES = 4096
+_is_open_cache: "collections.OrderedDict[typing.Tuple[str, int], typing.Tuple[bool, float]]" = (
+    collections.OrderedDict()
+)
+_is_open_cache_lock = threading.Lock()
+
+
+def is_open(ip: str, port: int, transport: str = "tcp") -> bool:
+    """Whether ``ip:port`` accepts a TCP connection, cached for a short while.
+
+    Each check is a 1s-timeout connect, and generate_uris_by_peer_id (and the ~15
+    call sites that take its first result) run it on every call -- accumulating
+    several addresses per peer (issue #236) multiplies how often that timeout gets
+    paid. A short TTL trades a little staleness for not re-paying it on every call
+    within the same handful of seconds.
+
+    ``transport`` is what the peer declared for this address. Only TCP can be probed
+    this way: a ``connect()`` on a datagram socket sends nothing and always succeeds
+    locally, so it would answer "open" for every UDP address, reachable or not. A
+    non-TCP address is therefore reported as usable without probing -- claiming it is
+    open on no evidence is no worse than the meaningless probe, and dropping it would
+    hide an address that may be perfectly reachable.
+
+    Bounded: the keys come from peer-announced addresses and ``IntroducePeer`` accepts
+    an unbounded URI list from anyone, so an unbounded dict would be a memory sink.
+    Expired entries are swept and the oldest are evicted past the cap.
+    """
+    # Empty transport = a legacy row from before addresses declared one; those were
+    # all TCP gateways, so probing them as TCP keeps the old behaviour.
+    if transport and transport.strip().lower() != "tcp":
+        return True
+
+    key = (ip, port)
+    now = time.monotonic()
+
+    with _is_open_cache_lock:
+        cached = _is_open_cache.get(key)
+        if cached is not None and cached[1] > now:
+            _is_open_cache.move_to_end(key)
+            return cached[0]
+
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        family = socket.AF_INET
+        try:
+            if isinstance(ipaddress.ip_address(ip), ipaddress.IPv6Address):
+                family = socket.AF_INET6
+        except ValueError:
+            pass  # A DNS name: let getaddrinfo pick via AF_INET.
+        sock = socket.socket(family, socket.SOCK_STREAM)
         sock.settimeout(1)
         sock.connect((ip, port))
         sock.close()
-        return True
+        result = True
     except Exception:
-        return False
+        result = False
+
+    with _is_open_cache_lock:
+        for stale_key in [k for k, (_, expiry) in _is_open_cache.items() if expiry <= now]:
+            _is_open_cache.pop(stale_key, None)
+        _is_open_cache[key] = (result, now + _IS_OPEN_CACHE_TTL_SECONDS)
+        _is_open_cache.move_to_end(key)
+        while len(_is_open_cache) > _IS_OPEN_CACHE_MAX_ENTRIES:
+            _is_open_cache.popitem(last=False)
+    return result

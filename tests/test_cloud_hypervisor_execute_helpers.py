@@ -1,5 +1,7 @@
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 import string
 
@@ -134,6 +136,27 @@ class CloudHypervisorExecuteHelpersTests(unittest.TestCase):
 
         records = ch_execute._resolve_domain_allowlist_records([net_res])
         self.assertEqual(records, [("google.com", "8.8.8.8")])
+
+    def test_runtime_disk_bytes_reports_the_image_size_the_instance_got(self):
+        # The instance holds its own copy of the rootfs, so its size -- not the
+        # manifest's disk_space -- is what the node committed on its behalf.
+        with tempfile.TemporaryDirectory() as tmp:
+            rootfs = Path(tmp) / "rootfs.ext4"
+            rootfs.write_bytes(b"\0" * 4096)
+            self.assertEqual(
+                ch_execute._runtime_disk_bytes(vmachine_id="vm-1", rootfs_path=rootfs),
+                4096,
+            )
+
+    def test_runtime_disk_bytes_returns_zero_when_the_image_cannot_be_stat(self):
+        # Zero means "unresolved" and sends the launcher back to the manifest; it
+        # must never be persisted as the instance's disk, which would bill no disk.
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "absent.ext4"
+            self.assertEqual(
+                ch_execute._runtime_disk_bytes(vmachine_id="vm-1", rootfs_path=missing),
+                0,
+            )
 
 
 if __name__ == "__main__":

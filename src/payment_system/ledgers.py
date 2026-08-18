@@ -2,16 +2,49 @@ from hashlib import sha3_256
 from typing import Generator
 from protos import celaut_pb2 as celaut
 from src.database.access_functions.ledgers import get_peer_contract_instances
-from src.utils.config import ConfigManager
-from src.utils.utils import to_gas_amount
+from src.utils.utils import to_amount
 from src.utils.logger import LOGGER
+from src.payment_system.contracts.ergo.rate import mu_per_erg
 from src.utils.contract_xattrs import set_contract_type, set_script, set_token_id
 
-GAS_PER_ERG = int(ConfigManager().get("ledgers.ergo.GAS_PER_ERG"))
 CONTRACT = "proveDlog(decodePoint())"
 CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
- 
-def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
+
+
+def register_local_contracts() -> None:
+    """Re-run the ledger interfaces' ``init()`` so the LOCAL contract rows exist.
+
+    ``init()`` normally runs once at daemon boot (see
+    ``payment_process.init_interfaces``), but it is *skipped* when its runtime
+    dependency is unavailable at that instant — e.g. Java installed after the
+    daemon started. The row it writes is the only source for what this node
+    advertises, so without a retry the node keeps announcing zero payment methods
+    until someone happens to restart it, and no peer can ever pay it.
+
+    ``add_contract`` is INSERT OR IGNORE, so calling this again is a no-op.
+    """
+    from src.payment_system.contracts import envs
+    from src.utils.java_dependency import (
+        JavaDependencyMissing,
+        log_java_dependency_warning,
+    )
+
+    try:
+        interfaces = envs.init_interfaces()
+    except JavaDependencyMissing:
+        log_java_dependency_warning(LOGGER, feature="Ergo payments or reputation")
+        return
+
+    for contract_hash, _init in interfaces.items():
+        try:
+            _init()
+        except JavaDependencyMissing:
+            log_java_dependency_warning(LOGGER, feature="Ergo payments or reputation")
+        except Exception as e:
+            LOGGER(f"Could not register the local contract {contract_hash[:6]}: {e}")
+
+
+def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
     """Advertise this node's payment contracts, in the form peers must receive.
 
     ``get_peer_contract_instances`` yields the stored instance value as raw bytes:
@@ -26,11 +59,12 @@ def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
     ``contract_type`` carries the stable, wallet-independent identity instead, so
     the receiving peer's ``add_contract`` derives the same ``contract_hash`` this
     node looks the instance up by.
+
+    This is a plain read of what is registered; recovering a missing registration is
+    the caller's job (see ``src.gateway.utils``), so answering GetPeerInfo never
+    depends on the ledger runtime being reachable.
     """
     for script, ledger in get_peer_contract_instances(CONTRACT_HASH):
-
-        ledger_tag = ledger.tags[0] if ledger.tags else "unknown"
-        LOGGER(f"Using ledger {ledger_tag} with script {script.hex()} for contract {CONTRACT_HASH}")
 
         contract_ledger = celaut.Contract()
         contract_ledger.ledger.CopyFrom(ledger)
@@ -38,9 +72,10 @@ def local_payment_methods() -> Generator[celaut.GasPrice, None, None]:
         set_contract_type(contract_ledger, CONTRACT.encode("utf-8"))
         set_token_id(contract_ledger, "ERG")
 
-        gas_price = celaut.GasPrice(
+        # What one unit of this contract is worth, in this node's MU. This is the only
+        # thing that makes a price quoted in MU actionable to whoever reads it, so it
+        # travels with every advertisement.
+        yield celaut.ContractRate(
             contract=contract_ledger,
-            gas_amount=to_gas_amount(GAS_PER_ERG)
+            mu_per_unit=to_amount(mu_per_erg()),
         )
-
-        yield gas_price

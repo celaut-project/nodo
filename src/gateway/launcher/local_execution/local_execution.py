@@ -8,13 +8,13 @@ from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
 from src.manager.manager import (
-    default_initial_cost,
+    default_initial_balance,
     is_external_execute_client,
     reserve_instance_name,
 )
 from src.utils import utils, logger as log
 from src.utils.instance_names import extract_instance_name
-from src.utils.utils import from_gas_amount
+from src.utils.utils import from_amount
 from src.utils.network import get_free_port
 from src.utils.config import ConfigManager
 from src.virtualizers.firewall import resolve_slot_transport_protocols
@@ -49,26 +49,12 @@ _INTERFACE_PREFIX_PRIORITY = (
     "eth",
 )
 
-_VIRTUAL_INTERFACE_PREFIXES = (
-    "docker",
-    "br-",
-    "veth",
-    "virbr",
-    "zt",
-    "tailscale",
-    "tun",
-    "tap",
-    "wg",
-    "vmnet",
-    "vboxnet",
-)
-
 
 def _interface_priority(interface: str) -> tuple[int, int, str]:
     normalized = (interface or "").strip().lower()
     if normalized in {"lo", "localhost"}:
         return (3, len(normalized), normalized)
-    if normalized.startswith(_VIRTUAL_INTERFACE_PREFIXES):
+    if utils.is_virtual_interface(normalized):
         return (2, len(normalized), normalized)
     if normalized.startswith(_INTERFACE_PREFIX_PRIORITY):
         return (0, len(normalized), normalized)
@@ -150,7 +136,7 @@ def local_execution(
         metadata: celaut.Metadata,
         service: celaut.Service,
         service_id: Optional[str],
-        refund_gas: List[Callable]
+        refund_container: List[Callable]
 ) -> celaut_pb2.ServiceInstance:
     requested_instance_name, sanitized_config = extract_instance_name(config)
     config = sanitized_config or celaut_pb2.Configuration()
@@ -165,8 +151,9 @@ def local_execution(
     father_id = father_id if father_id else ""
     father_ip = father_ip if father_ip else ""
 
-    initial_gas_amount: int = from_gas_amount(config.initial_gas_amount) \
-        if config.HasField("initial_gas_amount") else default_initial_cost(father_id=father_id)
+    initial_mu: int = from_amount(config.initial_mu) \
+        if config.HasField("initial_mu") \
+        else default_initial_balance(system_resources=resources.at_init, service_hash=service_id)
 
     initial_system_resources: celaut.Sysresources = resources.at_init
 
@@ -180,9 +167,9 @@ def local_execution(
         try:
             log.LOGGER('Error building the service: ' + str(e))
             log.LOGGER(traceback.format_exc())
-            refund_gas.pop()()  # Refund the gas.
+            refund_container.pop()()  # Give the charge back.
         except IndexError:
-            log.LOGGER('Error refunding the gas.')
+            log.LOGGER('Error refunding the charge.')
         finally:
             log.LOGGER(str(e))
             raise e
@@ -192,23 +179,38 @@ def local_execution(
     isolate_internal_children = env_manager.get("network.ISOLATE_INTERNAL_CHILDREN", True)
     is_dev_client = "dev" in father_id and env_manager.get("network.CONSIDER_DEV_AS_INTERNAL", True)
     disabled_outside = env_manager.get("network.DISABLE_EXPOSE_OUTSIDE", False)
-    force_external_exposure = is_external_execute_client(father_id)
+    # `dev-external-` client ids are a synthetic pool used to exercise the
+    # "exposed outside" code paths locally for testing, without a real remote
+    # peer -- not a signal that the actual father is on another network (that
+    # is what cross_network, below, is for).
+    is_dev_forced_external = is_external_execute_client(father_id)
     # In case of dev instances, we consider them as internal.
     # If the father is internal, but isolate internal children is disabled, the child should be exposed outside.
     expose_outside: bool = not disabled_outside and (
-        force_external_exposure
+        is_dev_forced_external
         or (not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children))
     )
-    if force_external_exposure and disabled_outside:
+    if is_dev_forced_external and disabled_outside:
         log.LOGGER(
             "External exposure requested by configuration, but network.DISABLE_EXPOSE_OUTSIDE is enabled."
         )
+
+    # Which of our own networks (if any) father_ip belongs to. None means father_ip
+    # shares no subnet with any of our interfaces -- e.g. a real peer reached over
+    # the internet -- which is a different situation from "not exposed" and must
+    # not be resolved as if it were our own loopback (see get_network_name).
+    resolved_network: Optional[str] = None
+    if expose_outside and not is_dev_forced_external:
+        resolved_network = utils.get_network_name(direction=father_ip)
+    same_network = resolved_network is not None
+    cross_network = expose_outside and not is_dev_forced_external and not same_network
+
     log.LOGGER(
         "Internal child isolation is "
         + ("enabled" if isolate_internal_children else "disabled")
         + (
             f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside}, "
-            f"force_external_exposure={force_external_exposure})"
+            f"is_dev_forced_external={is_dev_forced_external}, cross_network={cross_network})"
         )
     )
 
@@ -232,14 +234,38 @@ def local_execution(
         )
 
     free_port_ranges = env_manager.get("network.FREE_PORTS_RANGE", [])
-    assigment_ports = {
-        port: (
-            get_free_port(free_port_ranges=free_port_ranges)
-            if expose_outside
-            else port
-        )
-        for port in supported_slot_ports
-    }
+    # father_ip is on a network of its own: the only address we could ever give it
+    # is our own PUBLIC_IP, and that is only worth pairing with a port we believe
+    # the operator's router forwards (network.FREE_PORTS_RANGE) -- an OS-assigned
+    # ephemeral port is exactly as unreachable to father_ip as our LAN address
+    # would be. Neither is auto-detected: the operator states both explicitly.
+    configured_public_ip = ""
+    if cross_network:
+        configured_public_ip = str(env_manager.get("network.PUBLIC_IP", "") or "").strip()
+
+    # Only allocate (and later DNAT) the slots we can actually route to from
+    # outside. same_network and the dev-forced-external test path behave as
+    # before: an OS ephemeral port when FREE_PORTS_RANGE is exhausted or unset is
+    # still fine there, since it stays reachable on this node's own network.
+    # cross_network with no PUBLIC_IP configured, or with every configured range
+    # already taken, leaves the slot out entirely instead of failing the whole
+    # launch: a tunnelled request reaches the container directly on its internal
+    # address (src/tunneling/rpc_tunnel.py), bypassing this mapping, so nothing
+    # needs to be opened on this host for a slot nobody will be told about.
+    assigment_ports: Dict[int, int] = {}
+    for port in supported_slot_ports:
+        if not expose_outside:
+            assigment_ports[port] = port
+        elif cross_network:
+            if not configured_public_ip or not free_port_ranges:
+                continue
+            try:
+                assigment_ports[port] = get_free_port(free_port_ranges=free_port_ranges)
+            except RuntimeError as e:
+                log.LOGGER(f"[LOCAL_EXEC] {e} (slot {port}); leaving it unadvertised.")
+        else:
+            assigment_ports[port] = get_free_port(free_port_ranges=free_port_ranges)
+
     log.LOGGER(
         f"Execution network mode: by_local={not expose_outside}, "
         f"assigment_ports={assigment_ports}"
@@ -251,53 +277,67 @@ def local_execution(
     )
 
     # Execute virtualizer process.
-    vmachine_id, vmachine_ip = execute(
-        assigment_ports=assigment_ports, 
-        by_local=not expose_outside, 
-        service_id=service_id, 
-        service=service, 
-        config=config, 
-        initial_system_resources=initial_system_resources, 
+    vmachine_id, vmachine_ip, resolved_resources = execute(
+        assigment_ports=assigment_ports,
+        by_local=not expose_outside,
+        service_id=service_id,
+        service=service,
+        config=config,
+        initial_system_resources=initial_system_resources,
         father_id=father_id
     )
     log.LOGGER(f"Virtualizer execute returned: vmachine_id={vmachine_id}, vmachine_ip={vmachine_ip}")
 
     # Resolve slots
     uri_slots: List[celaut.Instance.Uri_Slot] = []
-    resolved_network = ""
     try:
-        if expose_outside and not force_external_exposure:
-            resolved_network = utils.get_network_name(direction=father_ip)
-
-        log.LOGGER(f"Preparing published URI slots: resolved_network={resolved_network} and father IP={father_ip if father_ip else 'N/A'}")
-
         # get the host ip to be published for this instance. If the instance doesn't require to be exposed, publish the vmachine_ip, otherwise publish the local IP of this node.:
         if not expose_outside:
             _ip = vmachine_ip
-        elif force_external_exposure:
+        elif is_dev_forced_external:
             _ip = _get_external_advertised_host_ip(father_ip=father_ip)
-        else:
+        elif same_network:
             _ip = utils.get_local_ip_from_network(
                 network=resolved_network,
                 allow_link_local=False,
             )
+        elif configured_public_ip:
+            _ip = configured_public_ip
+        else:
+            _ip = None
+            log.LOGGER(
+                "[LOCAL_EXEC] father is on a different network and network.PUBLIC_IP is not "
+                "configured; no address will be advertised -- the caller must use the service tunnel."
+            )
 
-        for internal, external in assigment_ports.items():
+        log.LOGGER(
+            f"Preparing published URI slots: resolved_network={resolved_network}, "
+            f"cross_network={cross_network}, advertised_ip={_ip or 'none'}, "
+            f"father IP={father_ip if father_ip else 'N/A'}"
+        )
+
+        for internal in supported_slot_ports:
             uri_slot = celaut.Instance.Uri_Slot()
             uri_slot.internal_port = internal
 
-            uri_slot.uri.append(
-                celaut.Instance.Uri(
-                    ip=_ip,
-                    port=external
+            external = assigment_ports.get(internal)
+            if _ip is not None and external is not None:
+                uri_slot.uri.append(
+                    celaut.Instance.Uri(
+                        ip=_ip,
+                        port=external
+                    )
                 )
-            )
-            log.LOGGER(
-                f"Published URI mapping: internal_port={internal}, advertised={_ip}:{external}, "
-                f"vmachine_ip={vmachine_ip}, by_local={not expose_outside}"
-            )
+                log.LOGGER(
+                    f"Published URI mapping: internal_port={internal}, advertised={_ip}:{external}, "
+                    f"vmachine_ip={vmachine_ip}, by_local={not expose_outside}"
+                )
+            else:
+                log.LOGGER(
+                    f"[LOCAL_EXEC] Slot {internal} has no advertisable address; the caller must tunnel it."
+                )
             uri_slots.append(uri_slot)
-            
+
     except Exception as e:
         log.LOGGER(f"Exception setting uri_slot: {str(e)}")
         log.LOGGER(traceback.format_exc())
@@ -308,30 +348,45 @@ def local_execution(
             uri_slot=uri_slots
         )
 
-    # Store the instance in the database, including the disk space from the system requirements range.
-    system_requirements_range=celaut_pb2.ModifyServiceSystemResourcesInput(
-                min_sysreq=initial_system_resources,
-                max_sysreq=initial_system_resources
-            )
-    disk_space = None
-    if system_requirements_range and system_requirements_range.max_sysreq:
-        sysreq = system_requirements_range.max_sysreq
-        if sysreq.HasField("disk_space"):
-            disk_space = int(sysreq.disk_space)
-    if not disk_space:
+    # Store the instance in the database with every resource it holds, not just its
+    # disk: these columns are what the maintenance tick prices it by, so a field left
+    # unrecorded is a resource billed as zero for the instance's whole life.
+    # The compute/memory figures come from ``resolved_resources`` -- the values the
+    # virtualizer actually reserved (defaults and the MIN_MEM_MIB floor already
+    # applied) -- never from a second, defaults-free re-read of the manifest. That
+    # divergence is exactly what billed instances for what they asked rather than
+    # what they hold (#249).
+    #
+    # Disk follows the same rule: the manifest still has to declare it (a service that
+    # names no disk is rejected), but what gets persisted is the size of the image the
+    # virtualizer actually handed the instance, which is >= the declared figure once
+    # the build's floors and mkfs growth are applied. The manifest is only the fallback
+    # for a virtualizer that does not report disk back.
+    declared_disk_space = int(initial_system_resources.disk_space) \
+        if initial_system_resources.HasField("disk_space") else 0
+    if not declared_disk_space:
         raise Exception("Disk space is not specified in the system requirements range.")
+    disk_space = int(resolved_resources.disk_space) or declared_disk_space
+    if disk_space != declared_disk_space:
+        log.LOGGER(
+            f"Instance {vmachine_id} holds {disk_space} bytes of disk against a declared "
+            f"{declared_disk_space}; billing the resolved figure."
+        )
 
     sc.add_local_instance(
         father_id=father_id,
         container_id=vmachine_id,
         name=instance_name,
         container_ip=vmachine_ip,
-        gas=initial_gas_amount,
+        balance_mu=initial_mu,
         serialized_instance=instance.SerializeToString(),
         service_id=service_id,
         virtualizer=configured_virtualizer,
         disk_space=disk_space,
         envs=_serialize_envs(config),
+        mem_limit=int(resolved_resources.mem_limit),
+        cpu_period=int(resolved_resources.cpu_period),
+        cpu_quota=int(resolved_resources.cpu_quota),
     )
     log.LOGGER(
         f"Instance provisioned in DB: vmachine_id={vmachine_id}, virtualizer={configured_virtualizer}, "

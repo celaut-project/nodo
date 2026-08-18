@@ -232,7 +232,14 @@ def get_vm_runtime_snapshot(
     cgroup_memory = _cgroup_memory_snapshot(vmachine_id=vmachine_id, runtime_state=runtime_state)
     cgroup_io = _cgroup_io_snapshot(
         _guess_cgroup_path(vmachine_id=vmachine_id, runtime_state=runtime_state))
-    proc_io = _process_io_snapshot(pid)
+    # Only while the process is the one we started: ``/proc/<pid>/io`` of a recycled pid
+    # belongs to whatever now holds it, and would be reported as this instance's disk
+    # I/O -- for an instance that is not even running. ``_process_snapshot`` already
+    # rejects the reused pid (it checks ``pid_alive``), so its verdict is the guard.
+    proc_io = _process_io_snapshot(pid) if proc["alive"] else {
+        "disk_read_bytes": None,
+        "disk_write_bytes": None,
+    }
     disk_read_bytes = (cgroup_io["disk_read_bytes"]
                        if cgroup_io["disk_read_bytes"] is not None
                        else proc_io["disk_read_bytes"])

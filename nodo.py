@@ -145,8 +145,8 @@ if __name__ == '__main__':
         print("""
         Getting started
 
-        nodo config
-            Configure your node and runtime.
+        nodo tui
+            Open the operations console (status, peers, and the config editor).
 
         nodo download <url>
             Download and import a published service.
@@ -186,8 +186,9 @@ if __name__ == '__main__':
                     "\n- remove <service id> | <service tag>"
                     "\n- kill <instance id>"
                     "\n- observe <instance id> [--save <path>]"
-                    "\n- increase_gas <instance id> <gas to add>"
-                    "\n- decrease_gas <instance id> <gas to retire>"
+                    "\n- tunnel <instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]"
+                    "\n- increase_deposit <instance id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
+                    "\n- decrease_deposit <instance id> <amount>"
                     "\n- services"
                     "\n- tag <service id|tag> <new tag>"
                     "\n- clients"
@@ -197,7 +198,6 @@ if __name__ == '__main__':
                     "\n- connect <ip:port>"
                     "\n- disconnect <peer_id>"
                     "\n- pack <project directory>"
-                    "\n- config"
                     "\n- envs"
                     "\n- tui"
                     "\n- completion <bash|zsh|install>  (shell tab-completion for commands and ids)"
@@ -223,12 +223,16 @@ if __name__ == '__main__':
                     "\n- prune_containers"
                     "\n- refresh_clients"
                     "\n- tx_history"
-                    "\n- increase_peer_deposit <peer id> <gas to add>"
+                    "\n- force_execution <peer_id> [--name instance-name] [-e key value] <service id> | <service tag> | <'.celaut' file path>  (bypasses the execution balancer; delegates straight to peer_id, no fallback -- testing/dev only)"
+                    "\n- increase_peer_deposit <peer id> <amount>"
+                    "\n- credit_client <client id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
+                    "\n- debit_client <client id> <amount>"
                     "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
-                    "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your gas balance on that peer afterward)"
+                    "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your balance on that peer afterward)"
                     "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
+                    "\n- nat-guide  (how to forward the gateway port on your router so this node is reachable)"
                     "\n\n",
                     flush=True)
                 try:
@@ -247,6 +251,33 @@ if __name__ == '__main__':
                 print(f"Nodo version: {get_git_commit()}", flush=True)
 
                 print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
+
+                try:
+                    from src.manager.ddns import status as ddns_status
+                    ddns_info = ddns_status()
+                    if ddns_info["enabled"]:
+                        resolves = ddns_info["resolves_to"] or "does not resolve"
+                        print(
+                            f"DDNS: {ddns_info['hostname'] or 'no domain set'} "
+                            f"({ddns_info['provider']}) -> {resolves}",
+                            flush=True
+                        )
+                        if ddns_info["resolves_to"]:
+                            from src.utils.network import resolve_public_port
+                            public_port = resolve_public_port(
+                                env_manager.get("network.PUBLIC_TCP_PORT", ""), GATEWAY_PORT
+                            )
+                            print(
+                                f"  Reachable from outside only if your router forwards "
+                                f"{ddns_info['resolves_to']}:{public_port} to this host's "
+                                f"port {GATEWAY_PORT}.",
+                                flush=True
+                            )
+                        print("  Run 'nodo nat-guide' for the router steps.", flush=True)
+                    else:
+                        print("DDNS: disabled (see ddns.ENABLED)", flush=True)
+                except Exception as e:
+                    log.LOGGER(f"Error getting DDNS status: {e}.")
 
                 reputation_proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
                 
@@ -414,6 +445,54 @@ if __name__ == '__main__':
 
                 execute(service=arg, external=external, envs=envs, instance_name=instance_name)
 
+            case "force_execution":
+                # Testing/dev only: bypasses execution_balancer and delegates
+                # straight to <peer_id>, no cost comparison, no fallback. See
+                # `nodo help` -- this is deliberately separate from `execute`.
+                from src.commands.force_execution import force_execution
+                import sys
+
+                args = sys.argv[2:]
+
+                envs = {}
+                if "-e" in args:
+                    while "-e" in args:
+                        try:
+                            e_index = args.index("-e")
+                            key = args[e_index + 1]
+                            value = args[e_index + 2]
+                            envs[key] = value
+                            args = args[:e_index] + args[e_index + 3:]
+                        except IndexError:
+                            print("Error: -e requires a key and a value", flush=True)
+                            sys.exit(1)
+
+                instance_name = None
+                if "--name" in args:
+                    try:
+                        name_index = args.index("--name")
+                        instance_name = args[name_index + 1]
+                        args = args[:name_index] + args[name_index + 2:]
+                    except IndexError:
+                        print("Error: --name requires a value", flush=True)
+                        sys.exit(1)
+
+                if len(args) != 2:
+                    print(
+                        "Usage: nodo force_execution <peer_id> [--name instance-name] [-e key value] "
+                        "<service id|service tag|'.celaut' file path>",
+                        flush=True,
+                    )
+                    sys.exit(1)
+
+                try:
+                    service_arg = resolve_service_input(args[1])
+                except FileNotFoundError as e:
+                    print(f"Error: {str(e)}")
+                    sys.exit(1)
+
+                force_execution(peer_id=args[0], service=service_arg, envs=envs, instance_name=instance_name)
+
             case "estimate":
                 from src.commands.estimate import estimate
                 import sys
@@ -464,14 +543,68 @@ if __name__ == '__main__':
                     sys.exit(1)
 
                 observe(instance_id=instance_id, save_path=save_path)
-                
-            case "increase_gas":
-                from src.commands.modify_gas import modify_gas
-                modify_gas(instance=sys.argv[2], gas=int(sys.argv[3]), decrement=False)
-                
-            case "decrease_gas":
-                from src.commands.modify_gas import modify_gas
-                modify_gas(instance=sys.argv[2], gas=int(sys.argv[3]), decrement=True)
+
+            case "tunnel":
+                from src.commands.tunnel import tunnel
+
+                args = sys.argv[2:]
+                usage = (
+                    "Usage: nodo tunnel <instance id> <slot> [--udp] "
+                    "[--listen <port>] [--host <addr>] [--peer <host:port>] "
+                    "[--idle <seconds>]"
+                )
+
+                udp = "--udp" in args
+                if udp:
+                    args.remove("--udp")
+
+                valued_flags = {"--listen": None, "--host": None, "--peer": None, "--idle": None}
+                try:
+                    for flag in valued_flags:
+                        if flag not in args:
+                            continue
+                        index = args.index(flag)
+                        valued_flags[flag] = args[index + 1]
+                        args = args[:index] + args[index + 2:]
+                except IndexError:
+                    print(f"Error: missing value for a flag.\n{usage}", flush=True)
+                    sys.exit(1)
+
+                if len(args) != 2:
+                    print(usage, flush=True)
+                    sys.exit(1)
+
+                try:
+                    slot = int(args[1])
+                    listen_port = int(valued_flags["--listen"]) if valued_flags["--listen"] else None
+                    idle_timeout = float(valued_flags["--idle"]) if valued_flags["--idle"] else None
+                except ValueError:
+                    print(
+                        "Error: <slot> and --listen take a port number, --idle takes seconds.",
+                        flush=True,
+                    )
+                    sys.exit(1)
+
+                tunnel_kwargs = {
+                    "instance": args[0],
+                    "slot": slot,
+                    "listen_port": listen_port,
+                    "listen_host": valued_flags["--host"] or "127.0.0.1",
+                    "peer": valued_flags["--peer"],
+                    "udp": udp,
+                }
+                if idle_timeout is not None:
+                    tunnel_kwargs["idle_timeout"] = idle_timeout
+
+                tunnel(**tunnel_kwargs)
+
+            case "increase_deposit":
+                from src.commands.modify_deposit import modify_instance_deposit
+                modify_instance_deposit(instance=sys.argv[2], amount=sys.argv[3], decrement=False)
+
+            case "decrease_deposit":
+                from src.commands.modify_deposit import modify_instance_deposit
+                modify_instance_deposit(instance=sys.argv[2], amount=sys.argv[3], decrement=True)
 
             case "remove":
                 from src.commands.remove import remove
@@ -556,9 +689,6 @@ if __name__ == '__main__':
                     serve()
                 else:
                     print("Nodo service is already running in the background. Cannot start serve.", flush=True)
-
-            case 'config':
-                os.system("/bin/bash bash/reconfig.sh")
 
             case 'envs':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
@@ -655,7 +785,15 @@ if __name__ == '__main__':
 
             case "increase_peer_deposit":
                 from src.commands.increase_peer_deposit import increase_peer_deposit
-                increase_peer_deposit(peer_id=sys.argv[2], gas=int(sys.argv[3]))
+                increase_peer_deposit(peer_id=sys.argv[2], amount=sys.argv[3])
+
+            case "credit_client":
+                from src.commands.credit_client import credit_client
+                credit_client(client_id=sys.argv[2], amount=sys.argv[3], decrement=False)
+
+            case "debit_client":
+                from src.commands.credit_client import credit_client
+                credit_client(client_id=sys.argv[2], amount=sys.argv[3], decrement=True)
 
             case "verify_reputation":
                 if len(sys.argv) < 3:
@@ -713,6 +851,10 @@ if __name__ == '__main__':
                 from src.commands.doctor import doctor_command
                 doctor_command(main_dir=MAIN_DIR)
 
+            case "nat-guide":
+                from src.commands.nat_guide import nat_guide
+                nat_guide()
+
             case "completion":
                 # Shell tab-completion for commands and service/instance/peer ids.
                 from src.commands.completion import main as completion_main
@@ -724,7 +866,7 @@ if __name__ == '__main__':
                 print('Unknown command.', flush=True)
 
     # Hand the console back when a one-shot command finishes. The Ergo / reputation
-    # commands (sync_reputation_proof, submit_reputation, tx_history, config, …)
+    # commands (sync_reputation_proof, submit_reputation, tx_history, …)
     # start a JVM through jpype, whose non-daemon threads otherwise keep the
     # interpreter alive and hang the shell after the command has already done its
     # work. `serve` blocks in wait_for_termination() and never reaches here, and the

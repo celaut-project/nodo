@@ -1,4 +1,3 @@
-import ipaddress
 import json
 from typing import List, Optional, Tuple, TypedDict
 
@@ -8,6 +7,7 @@ from src.reputation_system.envs import REPUTATION_PROOF_ADDRESS
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from src.utils.logger import LOGGER
+from src.utils.network import resolve_public_port
 
 
 # Constants
@@ -156,39 +156,41 @@ def __build_proof_box(
 NO_NETWORK_ADDRESS = "No IP available."
 
 
-def resolve_public_host(configured: str, outbound_ip: Optional[str]) -> Optional[str]:
-    """Which host this node advertises about itself in its own proof object.
-
-    ``configured`` is ``network.PUBLIC_IP`` (a public IP or a DNS name); when it is
-    empty the outbound-interface IP is used instead, which is the right answer on a
-    node with a directly routable address (a VPS) and the wrong one behind NAT.
-    Hence the filter: a private, loopback or link-local address is never published,
-    since a LAN address is meaningless to whoever reads the proof from the ledger.
-    A non-IP string is taken as a DNS name and advertised as-is.
-    """
-    host = (configured or "").strip() or (outbound_ip or "").strip()
-    if not host:
-        return None
-    try:
-        return host if ipaddress.ip_address(host).is_global else None
-    except ValueError:
-        return host
-
-
 def _self_network_data() -> str:
-    """Instance JSON describing how to reach this node, for its self-pointing object.
+    """Signed ``Peer`` JSON describing how to reach this node, for its self-pointing object.
 
-    Same shape as the data published for the other peers (``MessageToJson`` of a
-    ``celaut.Instance``), so a reader parses every object of the proof alike. Only
-    the gateway URI is included; the rest of the node info is served by GetPeerInfo.
+    A ``Peer``, not a bare ``Instance``: the envelope carries the node's identity
+    (``public_key``), the ``signature`` over its addresses, the anti-replay ``ts``
+    and the address-expiry estimate -- so a reader gets from the ledger the same
+    self-verifying claim GetPeerInfo serves, rather than an unattributed list of
+    addresses (issue #236).
+
+    It is verifiable *against this very box*: R7 holds the owner propositionBytes,
+    which are ``0008cd`` + the same public key (there is one mnemonic per node), so a
+    reader can check the R9 signature against R7 without contacting the node at all.
+    That is what makes the published expiry trustworthy -- otherwise whoever relays
+    the data could stretch or strip it.
+
+    Deliberately minimal: only the gateway URI. The payment contracts, rates and
+    reputation proofs are served by GetPeerInfo (and the proof is this box), and an
+    Ergo register is not the place to grow unbounded. The signature covers exactly
+    this minimal object, so it verifies as published.
     """
     if not SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF():
         return NO_NETWORK_ADDRESS
 
+    import time
+
     from google.protobuf.json_format import MessageToJson
 
     from protos import celaut_pb2
-    from src.utils.network import get_local_ip
+    from src.reputation_system.node_identity import (
+        canonical_peer_content_digest,
+        canonical_peer_payload,
+        get_node_public_key_hex,
+        sign_peer_payload,
+    )
+    from src.utils.network import get_local_ip, resolve_public_host, uri_expiry
 
     try:
         outbound_ip = get_local_ip()
@@ -204,15 +206,32 @@ def _self_network_data() -> str:
         LOGGER("No public address to advertise (set network.PUBLIC_IP if the node is behind NAT).")
         return NO_NETWORK_ADDRESS
 
-    port = int(env_manager.get("GATEWAY_PORT"))
-    instance = celaut_pb2.Instance()
-    uri_slot = instance.uri_slot.add()
-    uri_slot.internal_port = port
-    uri = uri_slot.uri.add()
+    internal_port = int(env_manager.get("GATEWAY_PORT"))
+    public_port = resolve_public_port(env_manager.get("network.PUBLIC_TCP_PORT", ""), internal_port)
+    peer = celaut_pb2.Peer()
+    uri = peer.uri.add()
     uri.ip = host
-    uri.port = port
-    LOGGER(f"Advertising {host}:{port} on the reputation proof.")
-    return MessageToJson(instance)
+    uri.port = public_port
+    uri.transport.tags.append("tcp")
+
+    public_key_hex = get_node_public_key_hex()
+    if public_key_hex:
+        ts = int(time.time())
+        uri.expiry_unix_timestamp = uri_expiry(ts)
+        signature = sign_peer_payload(
+            canonical_peer_payload(
+                public_key_hex, ts, canonical_peer_content_digest(peer),
+            )
+        )
+        if signature:
+            peer.public_key = public_key_hex
+            peer.signature = signature
+            peer.ts = ts
+    else:
+        LOGGER("No node identity available; publishing the address unsigned.")
+
+    LOGGER(f"Advertising {host}:{public_port} on the reputation proof.")
+    return MessageToJson(peer)
 
 
 def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: Optional[str], objects: List[Tuple[Optional[str], int, Optional[str]]]):

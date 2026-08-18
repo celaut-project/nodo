@@ -3,11 +3,9 @@
 Nodo reads a single `config.yaml`, created from
 [`config.example.yaml`](../config.example.yaml) at install time. It lives in the
 installation root (`TARGET_DIR`, default `/nodo`), i.e. `/nodo/config.yaml`. The
-`main.MAIN_DIR` value inside it is the same root. Edit it directly, or use
-`nodo config` (`bash/reconfig.sh` — edits in place with `yq -i`, preserving
-comments, but writes **no** backup) or the `nodo tui` Config page (which also
-preserves comments and additionally writes a `config.yaml.tui.bak` backup on each
-change).
+`main.MAIN_DIR` value inside it is the same root. Edit it directly, or use the
+`nodo tui` Config page, which edits in place with `yq -i` (preserving comments) and
+snapshots the previous file to `config-<YYYYMMDDHHMMSS>.yaml` beside it.
 
 > ⚠️ nodo **rewrites** `config.yaml` on its first load: `auto` values such as
 > `network.GATEWAY_PORT` and `ledgers.ergo.WALLET_MNEMONIC` are resolved to
@@ -110,18 +108,18 @@ The most important choice for anyone packing services. Full authoring format:
 | `packer.docker.BUILDX_NETWORK` / `BUILDX_BUILDER` | `host` / `nodo-hostnet` | Local-packer buildx settings. |
 
 The **default-mode** packer is *not* configured here by URL — it is referenced by
-its published content hash (service id) in the `core_services` list (below), which
+its published content hash (service id) in the `core_services` mapping (below), which
 is the single source of truth. nodo resolves a running instance of that id and
 packs against its `ip:port`.
 
 ## `core_services` — bootstrap services (by id)
 
-An array of `{name, id}` entries mapping a well-known role to a published service
-hash. The node will only auto-resolve/run a missing service if it is reachable
-through one of these configured core services; an empty list or a `"<SET_ME>"`
-placeholder fails closed ("Service not allowed.").
+A mapping of well-known role → published service hash. The node will only
+auto-resolve/run a missing service if it is reachable through one of these
+configured core services; an empty mapping or a `"<SET_ME>"` placeholder fails
+closed ("Service not allowed.").
 
-| `name` | Role |
+| Role (key) | Meaning |
 |---|---|
 | `source-application` | Maps a service id → its downloadable sources (manifest URLs). |
 | `packer` | The packer-service used by `nodo pack` (default mode). |
@@ -138,15 +136,101 @@ placeholder fails closed ("Service not allowed.").
 
 Controls exposure and remote execution. Key entries: `GATEWAY_PORT` (`auto`),
 `PUBLIC_IP` / `EXTERNAL_INTERFACE` (what `nodo execute --remote` advertises),
+`PUBLIC_TCP_PORT` / `PUBLIC_UDP_PORT` (the external port a router forwards, when it
+differs from the internal one — empty means "same as internal"; only
+`PUBLIC_TCP_PORT` is used today, since the gateway is TCP-only),
 `FREE_PORTS_RANGE` (ports used to expose services — match your router forwarding),
 `DISABLE_EXPOSE_OUTSIDE`, `ISOLATE_INTERNAL_CHILDREN`, and `DEFAULT_EXECUTE_REMOTE`
 (default remote for NAT/WSL2 nodes). See also [`NETWORKS.md`](NETWORKS.md).
 
+Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) and
+`TUNNEL_UDP_IDLE_TIMEOUT_S` — see [`TUNNELING.md`](TUNNELING.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `network.DELEGATE_EXECUTION` | `true` | Set `false` and this node never asks a peer to run a service for it: the balancer stops polling peers for prices and only ever selects `local`, so a service it cannot run itself fails rather than being delegated. The automatic peer-deposit refill stops too — a deposit buys execution on that peer and nothing else. `nodo pay`, `nodo increase_peer_deposit` and `nodo force_execution` still work, since an operator typing the command overrides the default on purpose. |
+
+The two directions are separate settings, and neither implies the other:
+
+| Want | Set |
+|---|---|
+| Don't run services **for** other peers (client-only) | `client.ACCEPT_NEW_DEPOSITS: false` |
+| Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
+| Keep delegating, but approve every outgoing payment yourself | `deposits.AUTOMATIC_REFILL: false` |
+
+## `ddns`
+
+Keeps a hostname pointing at this node's public IP, so peers can find it by name
+when the address changes. The manager publishes once at startup and then every
+`INTERVAL_SECONDS`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `ddns.ENABLED` | `false` | Whether to publish at all. |
+| `ddns.PROVIDER` | `desec` | Only `desec` is implemented (`update.dedyn.io`, dyndns2). An unknown value falls back to it. |
+| `ddns.DOMAIN` | `""` | Hostname to keep updated, e.g. `my-node.dedyn.io`. |
+| `ddns.TOKEN` | `""` | Provider API token. A secret; it never appears in logs or `nodo info`. |
+| `ddns.INTERVAL_SECONDS` | `600` | Republish cadence. Invalid values fall back to the default. |
+
+By default **no address is sent** and the provider records the request's source
+address — behind NAT that is the only value guaranteed to be right. Set
+`network.PUBLIC_IP` to override it (static address, or ingress ≠ egress).
+
+Publishing a name is not the same as being reachable: the router must still
+forward the gateway port to this host. Run **`nodo nat-guide`** for the steps with
+this machine's addresses filled in; `nodo info` and `sudo nodo doctor` report what
+resolves and whether the port is listening. Nothing verifies the forwarding from
+*outside* yet — that needs a peer to connect back.
+
+## `pricing`, `free_tier`, `ui`, `deposits`
+
+What this node charges, in **MU** — its own unit of account. What an MU is worth is set
+per payment system (`ledgers.ergo.payments.MU_PER_NANOERG`, below) and what you read is
+set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `pricing.RAM_MU_PER_GIB_HOUR` | `1000000` | Memory held, per GiB-hour. |
+| `pricing.CPU_MU_PER_VCPU_HOUR` | `4000000` | Compute held, per vCPU-hour. |
+| `pricing.DISK_MU_PER_GIB_HOUR` | `100000` | Disk held, per GiB-hour. |
+| `pricing.NET_MU_PER_GIB` | `2000000` | Tunnelled traffic, both directions (see [`TUNNELING.md`](TUNNELING.md)). |
+| `pricing.BUILD_MU` | `10000000` | Building a service container, charged once. |
+| `pricing.TUNNEL_OPEN_MU` | `10000` | Opening a tunnel, charged once. |
+| `pricing.MODIFY_RESOURCES_MU` | `10000` | Changing a running instance's resources. |
+| `pricing.SCARCITY_MAX_MULTIPLIER` | `10` | Ceiling of the surcharge when a resource runs out. `1` prices purely by consumption. |
+| `pricing.SCARCITY_CURVE` | `1.0` | How fast the surcharge arrives. `1.0` is linear; higher stays near 1x until the resource is genuinely scarce. |
+| `free_tier.CREDIT_MU_PER_NEW_CLIENT` | `0` | Starting balance given to every new client. |
+| `free_tier.FREE_WHILE_SCARCITY_BELOW` | `0.0` | Charge nothing while *every* resource is below this share of capacity. `0.0` disables it. |
+| `ui.DISPLAY_UNIT` | `erg` | What you read and type. `erg`, `mu`, or a name declared under `ui.UNITS`. Purely presentational. |
+| `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
+| `deposits.MAX_FEE_OVERHEAD` | `0.02` | Largest share of a peer deposit that may go to the transaction fee. Sizes the deposit. |
+| `deposits.REFILL_BELOW` | `0.2` | Refill a peer once its balance drops below this share of a full deposit. |
+| `deposits.INITIAL_RUNTIME_HOURS` | `1.0` | How long a new instance is funded for when the client asks for no specific balance. |
+
+Prices are whole MU: there is nothing smaller to express, so a fractional one is refused
+rather than rounded. Set any price to `0` to give that resource away.
+
+A display unit other than `erg`/`mu` is declared explicitly — the hook for showing a
+fiat figure later. Its rate is static and nothing refreshes it, so it goes stale; it
+never affects what is charged:
+
+```yaml
+ui:
+  DISPLAY_UNIT: usd
+  UNITS:
+    usd: { MU_PER_UNIT: 500000000, SYMBOL: "USD", DECIMALS: 2 }
+```
+
 ## `costs`, `timing`, `client`
 
-Gas/cost economics (`EXECUTION_COST`, `BUILD_COST`, deposit factors, gas
-thresholds), maintenance-loop timing, and client slot/expiration policy. Defaults
-are sensible for a single dev node; change only with the economics in mind.
+What is left after pricing moved out: `SOCIALIZATION_FACTOR` and
+`COST_AVERAGE_VARIATION` (peer selection, not pricing), `TUNNEL_CHARGE_INTERVAL_KB`
+(how much traffic accumulates before it is billed) and `ALLOW_DEBT`; plus
+maintenance-loop timing and client slot/expiration policy.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `client.ACCEPT_NEW_DEPOSITS` | `true` | Set `false` to stop `GenerateDepositToken` for every client (local or peer): no one can open a new deposit, so no one can acquire MU beyond what they already hold. Existing balances keep spending normally -- this only closes the door on new top-ups. Use to stop onboarding new demand, or to cap growth even while demand exists. |
 
 ## `ledgers.ergo` — payments & reputation
 
@@ -158,7 +242,7 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 |---|---|---|
 | `ledgers.ergo.WALLET_MNEMONIC` | `""` | The one wallet the node controls. Empty disables payments/reputation; `"auto"` generates a fresh mnemonic on first load. **Secret.** |
 | `ledgers.ergo.NODE_URL` | `https://node.sigmaspace.io` | Ergo node used for chain access. |
-| `ledgers.ergo.GAS_PER_ERG` | `1.0e+58` | Gas-to-ERG conversion. |
+| `ledgers.ergo.payments.MU_PER_NANOERG` | `1` | What one nanoERG buys in MU — the one place the node's unit of account meets real money, and what peers are told as `ContractRate.mu_per_unit`. ERG↔nanoERG is fixed in code, not here. |
 | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | `""` | This node's reputation proof id (reconciled by `nodo sync_reputation_proof`). |
 | `ledgers.ergo.payments.HOT_WALLET_LIMITS` | `100` | Max ERG kept in the operational wallet before sweeping. |
 | `ledgers.ergo.payments.COLD_WALLET` | `""` | Public address to sweep excess to. Empty disables sweeping. Never a mnemonic. |

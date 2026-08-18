@@ -1,5 +1,7 @@
 from src.virtualizers.ch.build import is_service_built as ch_is_service_built
 from src.virtualizers.ch.build import build as ch_build
+from src.virtualizers.ch.build import built_rootfs_size_bytes as ch_built_rootfs_size_bytes
+from src.virtualizers.ch.limits import billable_resources as ch_billable_resources
 from src.virtualizers.ch.execute import execute as ch_execute
 from src.virtualizers.ch.hotplug import hotplug as ch_hotplug
 from src.virtualizers.ch.kill import kill as ch_kill
@@ -30,6 +32,29 @@ def get_configured_virtualizer() -> str:
 def is_built(service_hash: str) -> bool:
     """Check if a service with the given hash is already built."""
     return ch_is_service_built(service_hash)
+
+def resolve_billable_resources(
+        resources: celaut_pb2.Sysresources,
+        service_hash: Optional[str] = None,
+) -> celaut_pb2.Sysresources:
+    """What an instance requesting `resources` will actually be billed for.
+
+    The counterpart to ``execute``'s ``resolved_resources``, for callers that have to
+    put a price on a manifest before any instance exists: quotes
+    (``GetServiceEstimatedCost``) and the balance a new instance is funded with
+    (``manager.default_initial_balance``). Both resolve the manifest the way
+    ``execute`` resolves a guest, so what is quoted is what the maintenance tick then
+    charges the row -- including for a service that asks for less than a floor: no CPU
+    at all, sub-MIN_MEM_MIB RAM, a rootfs under MIN_ROOTFS_BYTES.
+
+    Pass ``service_hash`` when it is known: a service already built here reports the
+    exact image its instances receive, so the quote is that figure rather than the
+    floor.
+    """
+    return ch_billable_resources(
+        resources,
+        built_rootfs_size_bytes=ch_built_rootfs_size_bytes(service_hash) if service_hash else None,
+    )
 
 def build(
         service: celaut_pb2.Service,
@@ -77,9 +102,14 @@ def execute(
         config: Optional[celaut_pb2.Configuration],
         initial_system_resources: celaut_pb2.Sysresources,
         father_id: str,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, celaut_pb2.Sysresources]:
     """
-    Execute a built service and return (vmachine_id, vmachine_ip).
+    Execute a built service and return (vmachine_id, vmachine_ip, resolved_resources).
+
+    ``resolved_resources`` is what the virtualizer actually reserved for the guest --
+    defaults and floors already applied -- so the launcher persists what the instance
+    holds rather than what its manifest requested (#249). A field left at 0 means the
+    virtualizer does not resolve it, and the launcher falls back to the manifest.
     """
     return ch_execute(
         assigment_ports=assigment_ports,

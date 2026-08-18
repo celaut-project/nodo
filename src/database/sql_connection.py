@@ -4,10 +4,11 @@ import math
 import uuid
 import sqlite3
 import time
+from collections import deque
 from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
-from typing import Any, Callable, Dict, Generator, List, Tuple, Optional
+from typing import Any, Callable, Dict, Generator, Iterable, List, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
 import grpc
@@ -18,21 +19,61 @@ from src.utils import logger as log, logger
 from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
-from src.utils.utils import from_gas_amount, generate_uris_by_peer_id
+from src.utils.utils import from_amount, generate_uris_by_peer_id
+from src.utils.monetary import format_mu
 
 env_manager = ConfigManager()
 
-CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME = env_manager.get("CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME")
+CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION = int(
+    env_manager.get("client.CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION", 0) or 0
+)
 TOTAL_REPUTATION_TOKEN_AMOUNT = int(env_manager.get("ledgers.ergo.reputation.TOTAL_REPUTATION_TOKEN_AMOUNT"))
 CLIENT_EXPIRATION_TIME = env_manager.get("CLIENT_EXPIRATION_TIME")
 STORAGE = env_manager.get("STORAGE")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
-DEFAULT_INITIAL_GAS_AMOUNT = env_manager.get("DEFAULT_INITIAL_GAS_AMOUNT")
+MANAGER_ITERATION_TIME = int(env_manager.get("MANAGER_ITERATION_TIME"))
+
+# The burn-rate average covers roughly the last hour of maintenance ticks, so the
+# figure an operator reads reflects recent cost rather than an instance's whole
+# lifetime. One sample is recorded per tick (MANAGER_ITERATION_TIME seconds apart),
+# so the ring holds ~3600 / MANAGER_ITERATION_TIME samples; at least one so a slow
+# tick never yields an empty window.
+CONSUMPTION_WINDOW_SECONDS = 3600
+CONSUMPTION_WINDOW_SAMPLES = max(1, CONSUMPTION_WINDOW_SECONDS // max(1, MANAGER_ITERATION_TIME))
+
+
+# Tables this node writes that a database created before them will not have.
+#
+# `migrate` runs from the setup scripts, and `nodo migrate` *deletes* the database
+# before recreating it -- so an operator who pulls new code and restarts the service
+# has no upgrade path at all. Without these, a peer's reputation update would fail and
+# roll its score back with the missing event, which is a worse outcome than the feature
+# simply not being there. Everything created here is `IF NOT EXISTS`.
+TRACEABILITY_TABLES = ("payments", "reputation_events", "service_reputation")
+
+
+def _ensure_traceability_tables(connection) -> None:
+    try:
+        from src.database.migrate import ensure_tables
+
+        cursor = connection.cursor()
+        ensure_tables(cursor, TRACEABILITY_TABLES)
+        connection.commit()
+    except Exception as e:
+        # A read-only or otherwise unusable database is the node's problem to report
+        # elsewhere; it must not stop this constructor, which runs at import time.
+        logger.LOGGER(f'Could not ensure the payment and reputation tables exist: {e}')
 
 
 class SQLConnection(metaclass=Singleton):
     _connection = None
     _lock = Lock()
+    # Per-instance ring of the last CONSUMPTION_WINDOW_SAMPLES burn-rate samples (MU
+    # per second). Only the running average is persisted; this in-memory window is what
+    # that average is computed over. Guarded by its own lock so recording a sample
+    # never contends with a database write holding _lock.
+    _consumption_lock = Lock()
+    _consumption_windows: Dict[str, deque] = {}
 
     def __init__(self):
         """Initializes the SQLConnection, ensuring storage directory and establishing a database connection."""
@@ -41,6 +82,7 @@ class SQLConnection(metaclass=Singleton):
         if SQLConnection._connection is None:
             SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
             SQLConnection._connection.row_factory = sqlite3.Row
+            _ensure_traceability_tables(SQLConnection._connection)
 
     def _execute(self, query: str, params=()) -> sqlite3.Cursor:
         """
@@ -110,20 +152,30 @@ class SQLConnection(metaclass=Singleton):
 
     # Client Methods
 
-    def add_client(self, client_id: str, gas: int, last_usage: Optional[float]):
+    def add_client(self, client_id: str, balance_mu: int, last_usage: Optional[float],
+                   unmetered: bool = False):
         """
         Adds a client to the database, updating if a conflict occurs.
 
         Args:
             client_id (str): The ID of the client.
-            gas (int): The gas amount.
+            balance_mu (int): Its starting balance, in MU.
             last_usage (Optional[float]): The last usage time.
+            unmetered (bool): Never charge this client. Set for the node's own dev
+                clients, which used to express the same thing by holding a balance of
+                1e256 -- a flag written as a number.
         """
-        gas = str(gas)
         self._execute('''
-            INSERT INTO clients (id, gas, last_usage)
-            VALUES (?, ?, ?)
-        ''', (client_id, gas, last_usage))
+            INSERT INTO clients (id, balance_mu, last_usage, unmetered)
+            VALUES (?, ?, ?, ?)
+        ''', (client_id, str(balance_mu), last_usage, int(bool(unmetered))))
+
+    def client_is_unmetered(self, client_id: str) -> bool:
+        """True for a client the node never charges (its own dev clients)."""
+        row = self._execute(
+            'SELECT unmetered FROM clients WHERE id = ?', (client_id,)
+        ).fetchone()
+        return bool(row['unmetered']) if row else False
 
     def get_clients(self) -> List[dict]:
         """
@@ -133,8 +185,8 @@ class SQLConnection(metaclass=Singleton):
             List[dict]: A list of dictionaries containing client details.
         """
         try:
-            result = self._execute("SELECT id, gas, last_usage FROM clients")
-            clients = [{'id': row[0], 'gas': row[1], 'last_usage': row[2]} for row in result.fetchall()]
+            result = self._execute("SELECT id, balance_mu, last_usage FROM clients")
+            clients = [{'id': row[0], 'balance_mu': row[1], 'last_usage': row[2]} for row in result.fetchall()]
             return clients
         except sqlite3.Error as e:
             logger.LOGGER(f'Error fetching clients: {e}')
@@ -177,30 +229,32 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('SELECT id FROM clients WHERE id LIKE ?', ('dev-%',))
         return [row['id'] for row in result.fetchall()]
 
-    def get_client_gas(self, client_id: str) -> Optional[Tuple[int, float, str]]:
+    def get_client_balance(self, client_id: str) -> Optional[Tuple[int, float, str]]:
         """
-        Retrieves the gas and last usage time for a client.
+        Retrieves the balance_mu and last usage time for a client.
 
         Args:
             client_id (str): The ID of the client.
 
         Returns:
-            Tuple[int, float, str]: The gas amount, last usage time and gas in scientific notation.
+            Tuple[int, float, str]: The balance_mu amount, last usage time and balance_mu in scientific notation.
         """
         result = self._execute('''
-            SELECT gas, last_usage FROM clients WHERE id = ?
+            SELECT balance_mu, last_usage FROM clients WHERE id = ?
         ''', (client_id,))
         row = result.fetchone()
         if row:
             try:
-                gas = int(Decimal(str(row['gas'])))
+                balance_mu = int(Decimal(str(row['balance_mu'])))
             except (ValueError, InvalidOperation):
-                logger.LOGGER(f'Invalid gas value for client {client_id}: {row["gas"]}')
+                logger.LOGGER(f'Invalid balance_mu value for client {client_id}: {row["balance_mu"]}')
                 return None
             return (
-                gas,
+                balance_mu,
                 row['last_usage'],
-                f"{gas:e}"
+                # Third element is the human-readable form, in the operator's
+                # display unit: whoever prints this shows it to a person.
+                format_mu(balance_mu),
             )
                 
         log.LOGGER(f'Client not found: {client_id}')
@@ -212,30 +266,32 @@ class SQLConnection(metaclass=Singleton):
             DELETE FROM clients WHERE id = ?
         ''', (client_id,))
 
-    def add_gas(self, client_id: str, gas: int = 0):
+    def add_balance(self, client_id: str, balance_mu: int = 0):
         """
-        Adds gas to a client's balance.
+        Adds balance_mu to a client's balance.
 
         Args:
             client_id (str): The ID of the client.
-            gas (int): The amount of gas to add.
+            balance_mu (int): The amount of balance_mu to add.
         """
-        _gas, _last_usage, _ = self.get_client_gas(client_id)
-        total_gas = _gas + gas
-        if _last_usage and total_gas >= CLIENT_MIN_GAS_AMOUNT_TO_RESET_EXPIRATION_TIME:
+        current, _last_usage, _ = self.get_client_balance(client_id)
+        total = current + balance_mu
+        # A funded client is an active one: topping up past the threshold clears the
+        # expiry clock.
+        if _last_usage and total >= CLIENT_MIN_BALANCE_MU_TO_RESET_EXPIRATION:
             _last_usage = None
-        self.__update_client(client_id, total_gas, _last_usage)
+        self.__update_client(client_id, total, _last_usage)
 
-    def reduce_gas(self, client_id: str, gas: int):
+    def reduce_balance(self, client_id: str, balance_mu: int):
         """
-        Reduces gas from a client's balance.
+        Reduces balance_mu from a client's balance.
 
         Args:
             client_id (str): The ID of the client.
-            gas (int): The amount of gas to reduce.
+            balance_mu (int): The amount of balance_mu to reduce.
         """
-        _gas, _last_usage, _ = self.get_client_gas(client_id)
-        total_gas = _gas - gas
+        _gas, _last_usage, _ = self.get_client_balance(client_id)
+        total_gas = _gas - balance_mu
         if total_gas == 0 and _last_usage is None:
             _last_usage = time.time()
         self.__update_client(client_id, total_gas, _last_usage)
@@ -250,33 +306,33 @@ class SQLConnection(metaclass=Singleton):
         Returns:
             bool: True if the client has expired, False otherwise.
         """
-        _gas, _last_usage, _ = self.get_client_gas(client_id)
+        _gas, _last_usage, _ = self.get_client_balance(client_id)
         return _last_usage is not None and ((time.time() - _last_usage) >= CLIENT_EXPIRATION_TIME)
 
-    def __update_client(self, client_id: str, gas: int, last_usage: float):
-        """Updates the gas and last usage time for a client."""
-        gas = str(gas)
+    def __update_client(self, client_id: str, balance_mu: int, last_usage: float):
+        """Updates the balance_mu and last usage time for a client."""
+        balance_mu = str(balance_mu)
         self._execute('''
-            UPDATE clients SET gas = ?, last_usage = ? WHERE id = ?
-        ''', (gas, last_usage, client_id))
+            UPDATE clients SET balance_mu = ?, last_usage = ? WHERE id = ?
+        ''', (balance_mu, last_usage, client_id))
 
-    def get_gas_amount_by_client_id(self, id: str) -> int:
+    def get_balance_by_client_id(self, id: str) -> int:
         """
-        Retrieves the gas amount for a client ID.
+        Retrieves the balance_mu amount for a client ID.
 
         Args:
             id (str): The client ID.
 
         Returns:
-            int: The gas amount.
+            int: The balance_mu amount.
         """
         result = self._execute('''
-            SELECT gas FROM clients WHERE id = ?
+            SELECT balance_mu FROM clients WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
-            return int(row['gas'])
-        raise Exception(f'Gas amount not found for ID: {id}')
+            return int(row['balance_mu'])
+        raise Exception(f'Balance not found for ID: {id}')
 
     # Local instance Methods
 
@@ -286,22 +342,32 @@ class SQLConnection(metaclass=Singleton):
         container_ip: str,
         container_id: str,
         name: str,
-        gas: int,
+        balance_mu: int,
         serialized_instance: str,
         service_id: str,
         virtualizer: str,
         disk_space: int,
         envs: str,
+        mem_limit: int = 0,
+        cpu_period: int = 0,
+        cpu_quota: int = 0,
     ):
         """
         Adds an internal container to the database.
+
+        The four resource columns are what the maintenance tick prices this instance by
+        (``src/manager/maintain.py`` reads them back through :meth:`get_sys_req`), so
+        they must record what the instance actually holds. ``mem_limit`` used to be
+        written as a literal 0 here and only ever corrected by a later
+        ``modify_resources``, which meant every instance was billed no memory at all for
+        as long as nobody resized it.
 
         Args:
             father_id (str): The father ID.
             container_ip (str): The IP address of the container.
             container_id (str): The container ID.
             name (str): Friendly instance name.
-            gas (int): The gas amount.
+            balance_mu (int): The balance_mu amount.
             serialized_instance (str): Serialized celaut instance
             service_id (str): Service id
             virtualizer (Optional[str]): Virtualizer backend name
@@ -309,11 +375,16 @@ class SQLConnection(metaclass=Singleton):
             envs (Optional[str]): JSON object of the environment variables the
                 instance was launched with (e.g. signer mode/seed for a
                 source-application), so the node can later tell how it was configured.
+            mem_limit (int): Memory the instance holds, in bytes.
+            cpu_period (int): CFS period, as the hypervisor expresses vCPUs.
+            cpu_quota (int): CFS quota; quota/period is the vCPU count.
         """
         self._execute('''
-            INSERT INTO local_instances (id, name, ip, father_id, gas, mem_limit, disk_space, serialized_instance, service_id, virtualizer, envs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (container_id, name, container_ip, father_id, str(gas), 0, disk_space, serialized_instance, service_id, virtualizer, envs))
+            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
+              disk_space, int(cpu_period or 0), int(cpu_quota or 0),
+              serialized_instance, service_id, virtualizer, envs))
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
     def get_local_instance_envs(self, id: str) -> Optional[str]:
@@ -339,22 +410,48 @@ class SQLConnection(metaclass=Singleton):
         id: str,
         mem_limit: Optional[int],
         disk_space: Optional[int] = None,
+        cpu_period: Optional[int] = None,
+        cpu_quota: Optional[int] = None,
     ) -> bool:
         """
         Updates system requirements for an internal container.
 
+        Only the columns whose values are provided (non-``None``) are written. The
+        CFS pair is included so a CPU hotplug actually persists: previously this
+        method had no CPU parameters, so a resize enforced ``cpu.max`` on the guest
+        and was reported as persisted while the row kept its stale value (#249).
+
         Args:
             id (str): The id of the internal container.
-            mem_limit (Optional[int]): The new memory limit.
-            disk_space (Optional[int]): The new disk limit.
+            mem_limit (Optional[int]): The new memory limit, in bytes.
+            disk_space (Optional[int]): The new disk limit, in bytes.
+            cpu_period (Optional[int]): The new CFS period, in microseconds.
+            cpu_quota (Optional[int]): The new CFS quota, in microseconds.
 
         Returns:
             bool: True if update was successful, False otherwise.
         """
+        assignments = []
+        params: list = []
+        for column, value in (
+            ("mem_limit", mem_limit),
+            ("disk_space", disk_space),
+            ("cpu_period", cpu_period),
+            ("cpu_quota", cpu_quota),
+        ):
+            if value is not None:
+                assignments.append(f"{column} = ?")
+                params.append(value)
+
+        if not assignments:
+            return True
+
+        params.append(id)
         try:
-            self._execute('''
-                UPDATE local_instances SET mem_limit = ?, disk_space = ? WHERE id = ?
-            ''', (mem_limit, disk_space, id))
+            self._execute(
+                f"UPDATE local_instances SET {', '.join(assignments)} WHERE id = ?",
+                tuple(params),
+            )
             return True
         except:
             return False
@@ -426,6 +523,10 @@ class SQLConnection(metaclass=Singleton):
         """
         Retrieves system requirements for an internal container.
 
+        All four resource columns, because this is what the maintenance tick prices the
+        instance by: memory and disk in bytes, plus the CFS pair from which the vCPU
+        count is derived. Returning only memory and disk is what left compute unbilled.
+
         Args:
             id (str): The id of the internal container.
 
@@ -433,29 +534,29 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space FROM local_instances WHERE id = ?
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
             return row
         raise Exception(f'Internal service {id}')
 
-    def get_container_gas(self, id: str) -> int:
+    def get_instance_balance(self, id: str) -> int:
         """
-        Retrieves the gas amount for an internal container.
+        Retrieves the balance_mu amount for an internal container.
 
         Args:
             id (str): The id of the internal container.
 
         Returns:
-            int: The gas amount.
+            int: The balance_mu amount.
         """
         result = self._execute('''
-            SELECT gas FROM local_instances WHERE id = ?
+            SELECT balance_mu FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
-            return int(row['gas'])
+            return int(row['balance_mu'])
         raise Exception(f'Internal service {id}')
     
     def get_service_id_by_container_id(self, id: str) -> str:
@@ -515,19 +616,88 @@ class SQLConnection(metaclass=Singleton):
         ''', (name,))
         return result.fetchone()[0] > 0
 
-    def update_gas_to_container(self, id: str, gas: int):
+    def record_instance_consumption(self, id: str, charge_mu: int, seconds: int) -> None:
+        """Record one maintenance-tick charge as a burn-rate sample for an instance.
+
+        The sample is the charge the tick just applied (``charge_mu`` over
+        ``seconds``), *not* a balance delta: a top-up moves ``balance_mu`` but never
+        the charge, so the rate stays honest across refills. A bounded in-memory ring
+        keeps roughly the last hour of samples per instance; only the running average
+        is persisted, in ``instance_consumption``, so the TUI can read a per-second
+        rate and derive per-minute / per-hour figures from it.
+
+        Callers must record a sample only when the charge actually happened: if the
+        tick skips charging (e.g. dev vmachines) it must skip recording too, so the
+        stored rate never diverges from what was billed.
         """
-        Updates the gas amount for a container.
+        if seconds <= 0:
+            return
+        mu_per_second = float(charge_mu) / float(seconds)
+        with SQLConnection._consumption_lock:
+            window = SQLConnection._consumption_windows.get(id)
+            if window is None:
+                window = deque(maxlen=CONSUMPTION_WINDOW_SAMPLES)
+                SQLConnection._consumption_windows[id] = window
+            window.append(mu_per_second)
+            average = sum(window) / len(window)
+            sample_count = len(window)
+        self._execute('''
+            INSERT INTO instance_consumption (instance_id, mu_per_second, sample_count, last_refresh)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(instance_id) DO UPDATE SET
+                mu_per_second = excluded.mu_per_second,
+                sample_count = excluded.sample_count,
+                last_refresh = excluded.last_refresh
+        ''', (id, average, sample_count))
+
+    def update_instance_balance(self, id: str, balance_mu: int):
+        """
+        Updates the balance_mu amount for a container.
 
         Args:
             id (str): The id of the container.
-            gas (int): The new gas amount.
+            balance_mu (int): The new balance_mu amount.
         """
         
-        gas = str(gas)
+        balance_mu = str(balance_mu)
         self._execute('''
-            UPDATE local_instances SET gas = ? WHERE id = ?
-        ''', (gas, id))
+            UPDATE local_instances SET balance_mu = ? WHERE id = ?
+        ''', (balance_mu, id))
+
+    def spend_instance_balance(self, id: str, amount_mu: int, allow_debt: bool) -> Optional[bool]:
+        """Atomically deduct ``amount_mu`` from a container's balance.
+
+        The read, the sufficiency check and the write happen under a single hold
+        of the connection lock, so two threads billing the same instance (e.g.
+        the two directions of a service tunnel) can never both read the same
+        balance and clobber each other's deduction — the lost-update race that a
+        separate ``get_instance_balance`` + ``update_instance_balance`` allows.
+
+        Returns True when the balance_mu was spent, False when the balance is
+        insufficient and debt is not allowed, and None when the container does
+        not exist. ``balance_mu`` is stored as TEXT, so the arithmetic is done in
+        Python (``int``) rather than in SQL to avoid affinity surprises.
+        """
+        amount_mu = int(amount_mu)
+        with SQLConnection._lock:
+            try:
+                cursor = SQLConnection._connection.cursor()
+                cursor.execute('SELECT balance_mu FROM local_instances WHERE id = ?', (id,))
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                current = int(row['balance_mu'])
+                if current < amount_mu and not allow_debt:
+                    return False
+                cursor.execute(
+                    'UPDATE local_instances SET balance_mu = ? WHERE id = ?',
+                    (str(current - amount_mu), id),
+                )
+                SQLConnection._connection.commit()
+                return True
+            except sqlite3.Error as e:
+                SQLConnection._connection.rollback()
+                raise e
 
     def internal_instance_exists(self, id: str) -> bool:
         """
@@ -573,16 +743,55 @@ class SQLConnection(metaclass=Singleton):
         self._execute('''
             DELETE FROM local_instances WHERE id = ?
         ''', (id,))
+        # Drop the burn-rate row and its in-memory window together with the instance,
+        # so a later instance that reuses this id never inherits a stale rate.
+        self._execute('''
+            DELETE FROM instance_consumption WHERE instance_id = ?
+        ''', (id,))
+        with SQLConnection._consumption_lock:
+            SQLConnection._consumption_windows.pop(id, None)
 
     # Peer Methods
 
-    def update_reputation_peer(self, peer_id: str, amount: int) -> bool:
+    # How many events are kept per subject. The history is bounded because the events
+    # arrive on a *timer*, not on incident: the maintenance tick scores every running
+    # instance and every unreachable peer once per MANAGER_ITERATION_TIME (10s by
+    # default), which is 8 640 rows a day each. Unbounded, the table would outgrow
+    # everything else in the database while saying nothing a reader wants.
+    #
+    # 200 is what the detail views can page through and enough to read a pattern; the
+    # running total on the peer/service row is the long-term memory, not this.
+    MAX_EVENTS_PER_SUBJECT = 200
+    # Pruning on every write would double the cost of the hot path for nothing, so it
+    # runs once every this many events per subject; the table stays within
+    # MAX_EVENTS_PER_SUBJECT + this.
+    PRUNE_EVENTS_EVERY = 50
+
+    @staticmethod
+    def _prune_events_statement(subject_kind: str, subject_id: str):
+        return ('''
+            DELETE FROM reputation_events
+            WHERE subject_kind = ? AND subject_id = ? AND id NOT IN (
+                SELECT id FROM reputation_events
+                WHERE subject_kind = ? AND subject_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT ?
+            )
+        ''', (subject_kind, subject_id, subject_kind, subject_id,
+              SQLConnection.MAX_EVENTS_PER_SUBJECT))
+
+    def update_reputation_peer(self, peer_id: str, amount: int, reason: str) -> bool:
         """
         Updates the reputation of a peer by increasing the reputation score and index.
+
+        The event and the new total are written together, in one transaction: a score
+        whose history does not add up to it is worse than either alone, since there is
+        then no way to tell which of the two is wrong.
 
         Args:
             peer_id (str): The ID of the peer whose reputation is to be updated.
             amount (int): The amount to add to the reputation score.
+            reason (str): Why, from `reputation_system.reasons.Reason`. Required --
+                an unattributed score change is what this table exists to end.
 
         Returns:
             bool: True if the update was successful, False otherwise.
@@ -600,9 +809,19 @@ class SQLConnection(metaclass=Singleton):
                 new_score = current_score + amount
                 new_index = current_index + 1
 
-                self._execute('''
-                    UPDATE peer SET reputation_score = ?, reputation_index = ? WHERE id = ?
-                ''', (new_score, new_index, peer_id))
+                statements = [
+                    ('''
+                        UPDATE peer SET reputation_score = ?, reputation_index = ? WHERE id = ?
+                    ''', (new_score, new_index, peer_id)),
+                    ('''
+                        INSERT INTO reputation_events (
+                            subject_kind, subject_id, amount, reason, score_after
+                        ) VALUES ('peer', ?, ?, ?, ?)
+                    ''', (peer_id, int(amount), reason, new_score)),
+                ]
+                if new_index % SQLConnection.PRUNE_EVENTS_EVERY == 0:
+                    statements.append(self._prune_events_statement('peer', peer_id))
+                self._execute2(statements)
 
                 return True
             else:
@@ -610,6 +829,79 @@ class SQLConnection(metaclass=Singleton):
         except Exception as e:
             logger.LOGGER(f'Error updating reputation for peer {peer_id}: {e}')
             return False
+
+    def update_reputation_service(self, service_id: str, amount: int, reason: str) -> bool:
+        """Move a service's score, and say why.
+
+        Scored by `service_id` rather than by instance: the instance that misbehaved is
+        gone minutes later, while the service is what gets run again -- and what a
+        balancer would eventually weigh. The event still names the instance through
+        `reason` plus its timestamp, so a history points at a run.
+
+        Upserts, because a service has no row anywhere until it first scores; services
+        themselves live in the registry, on disk.
+        """
+        try:
+            result = self._execute(
+                'SELECT reputation_score, reputation_index FROM service_reputation WHERE service_id = ?',
+                (service_id,)
+            )
+            row = result.fetchone()
+            new_score = (row['reputation_score'] if row else 0) + amount
+            new_index = (row['reputation_index'] if row else 0) + 1
+
+            statements = [
+                ('''
+                    INSERT INTO service_reputation (service_id, reputation_score, reputation_index)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(service_id) DO UPDATE SET
+                        reputation_score = excluded.reputation_score,
+                        reputation_index = excluded.reputation_index
+                ''', (service_id, new_score, new_index)),
+                ('''
+                    INSERT INTO reputation_events (
+                        subject_kind, subject_id, amount, reason, score_after
+                    ) VALUES ('service', ?, ?, ?, ?)
+                ''', (service_id, int(amount), reason, new_score)),
+            ]
+            if new_index % SQLConnection.PRUNE_EVENTS_EVERY == 0:
+                statements.append(self._prune_events_statement('service', service_id))
+            self._execute2(statements)
+            return True
+        except Exception as e:
+            logger.LOGGER(f'Error updating reputation for service {service_id}: {e}')
+            return False
+
+    def get_service_reputation(self, service_id: str) -> Optional[int]:
+        """A service's running score, or None if it has never been scored."""
+        try:
+            result = self._execute(
+                'SELECT reputation_score FROM service_reputation WHERE service_id = ?',
+                (service_id,)
+            )
+            row = result.fetchone()
+            return row['reputation_score'] if row else None
+        except Exception as e:
+            logger.LOGGER(f'Error fetching reputation for service {service_id}: {e}')
+            return None
+
+    def get_reputation_events(self, subject_kind: str, subject_id: str,
+                              limit: int = 20) -> List[dict]:
+        """The last ``limit`` things that moved this subject's score, newest first."""
+        if subject_kind not in ('peer', 'service'):
+            logger.LOGGER(f'Unknown reputation subject kind {subject_kind!r}.')
+            return []
+        try:
+            result = self._execute('''
+                SELECT id, subject_kind, subject_id, amount, reason, score_after, created_at
+                FROM reputation_events
+                WHERE subject_kind = ? AND subject_id = ?
+                ORDER BY created_at DESC, id DESC LIMIT ?
+            ''', (subject_kind, subject_id, int(limit)))
+            return [dict(row) for row in result.fetchall()]
+        except Exception as e:
+            logger.LOGGER(f'Error fetching reputation events for {subject_id}: {e}')
+            return []
 
     def get_reputation(self, peer_id: str) -> Optional[float]:
         """
@@ -664,7 +956,7 @@ class SQLConnection(metaclass=Singleton):
         """
 
         try:
-            # Fetch all peers' data along with slots, URIs, and contracts in one query
+            # Fetch all peers' data along with their URIs in one query
             result = self._execute('''
                 SELECT
                     p.id,
@@ -672,15 +964,12 @@ class SQLConnection(metaclass=Singleton):
                     p.reputation_score,
                     p.reputation_index,
                     p.last_index_on_ledger,
-                    p.protocol_stack,
-                    s.internal_port,
+                    p.advertisement,
                     u.ip,
                     u.port
                 FROM peer p
-                -- Joining slot table to get information about ports
-                LEFT JOIN slot s ON s.peer_id = p.id
-                -- Joining uri table to get IP and port details for each slot
-                LEFT JOIN uri u ON u.slot_id = s.id
+                -- Joining uri table to get the addresses this peer announced
+                LEFT JOIN uri u ON u.peer_id = p.id
             ''')
 
             rows = result.fetchall()
@@ -691,37 +980,49 @@ class SQLConnection(metaclass=Singleton):
             # Fetch the total sum of all reputation amounts from the table
             total_amount = self.total_peer_reputation()
 
-            # Dictionary to store instance data (for peers with multiple slots or contracts)
+            # Dictionary to store the object published for each peer
             peers_dict = {}
             for row in rows:
                 peer_id = row['id']
                 if peer_id not in peers_dict:
-                    # Initialize the instance for this peer
-                    instance = celaut_pb2.Instance()
+                    # A peer that handshaked with an identity gave us a signed Peer.
+                    # Publishing it verbatim keeps that signature verifiable straight
+                    # off the ledger, so a reader can check the claim without ever
+                    # contacting the peer -- the same property the node's own R9 has.
+                    peer_msg = celaut_pb2.Peer()
+                    stored = False
+                    if row['advertisement']:
+                        try:
+                            peer_msg.ParseFromString(row['advertisement'])
+                            stored = True
+                        except Exception as e:
+                            logger.LOGGER(f'Peer {peer_id} has an unreadable advertisement: {e}')
+                            peer_msg = celaut_pb2.Peer()
 
-                    # Set protocol stack if available
-                    if row['protocol_stack']:
-                        slot = celaut_pb2.Service.Api.Slot()
-                        slot.ParseFromString(row['protocol_stack'])
-                        instance.api.slot.append(slot)
+                    # Republish only a signature we ourselves verified. The stored blob
+                    # is whatever the peer last sent, and a message that failed
+                    # verification can still carry a non-empty `signature` field --
+                    # trusting that field alone would publish a forgery on-chain under
+                    # the "verifiable against the peer's key" promise.
+                    if peer_msg.signature and peer_msg.public_key != peer_id:
+                        peer_msg.ClearField('signature')
+                        peer_msg.ClearField('public_key')
 
-                    # Store in the dict
                     peers_dict[peer_id] = {
-                        'instance': instance,
+                        'peer': peer_msg,
+                        # An address list rebuilt from our own rows would not match what
+                        # the peer signed, so only fill it in when we have no stored
+                        # message at all (a peer migrated from before advertisements).
+                        'needs_addresses': not stored,
                         'reputation_proof_id': row['reputation_proof_id'],
                         'reputation_score': row['reputation_score'] or 0,
                         'reputation_index': row['reputation_index'] or 0,
                         'last_index_on_ledger': row['last_index_on_ledger'] or 0
                     }
 
-                # Add slots and URIs to the instance
-                if row['internal_port']:
-                    slot = peers_dict[peer_id]['instance'].uri_slot.add()
-                    slot.internal_port = row['internal_port']
-                    if row['ip'] and row['port']:
-                        uri = slot.uri.add()
-                        uri.ip = row['ip']
-                        uri.port = row['port']
+                entry = peers_dict[peer_id]
+                if entry['needs_addresses'] and row['ip'] and row['port']:
+                    entry['peer'].uri.add(ip=row['ip'], port=row['port'])
 
             # List to hold data for peers that need to be submitted to the ledger
             needs_submit = force_submit
@@ -738,8 +1039,8 @@ class SQLConnection(metaclass=Singleton):
                     last_index_on_ledger = data['last_index_on_ledger']
 
                     if reputation_proof_id:
-                        # Convert instance to JSON string
-                        instance_json = MessageToJson(data['instance'])
+                        # Convert the peer object to JSON string
+                        instance_json = MessageToJson(data['peer'])
 
                         # Calculate the percentage of the total reputation token amount
                         if reputation_index - last_index_on_ledger >= env_manager.get("ledgers.ergo.reputation.LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
@@ -793,6 +1094,34 @@ class SQLConnection(metaclass=Singleton):
         if isinstance(ledger, str):
             return ledger
         return sha3_256(ledger.SerializeToString()).hexdigest()
+
+    def ledger_hashes(self, ledger: Any) -> List[str]:
+        """Stored ``ledger.hash`` values a ledger identifier resolves to.
+
+        The ``ledger`` table is keyed by the sha3 of the serialized
+        ``Contract.Ledger`` message, but payment-path callers only hold the ledger
+        *tag* (``"ergo"``) — that is all a peer's advertisement carries as a stable
+        name. Accept either: an exact stored hash, or a tag to resolve against the
+        deserialized rows.
+        """
+        key = self.ledger_key(ledger)
+        rows = self._execute("SELECT hash, content FROM ledger").fetchall()
+
+        exact = [row['hash'] for row in rows if row['hash'] == key]
+        if exact:
+            return exact
+
+        by_tag: List[str] = []
+        for row in rows:
+            parsed = celaut_pb2.Contract.Ledger()
+            try:
+                parsed.ParseFromString(row['content'])
+            except Exception as e:
+                logger.LOGGER(f'Could not parse stored ledger {row["hash"]}: {e}')
+                continue
+            if key in parsed.tags:
+                by_tag.append(row['hash'])
+        return by_tag
 
     def update_double_attempt_retry_time_on_ledger(self, ledger: Any):
         """
@@ -851,13 +1180,13 @@ class SQLConnection(metaclass=Singleton):
             List[dict]: A list of dictionaries containing peer details.
         """
         result = self._execute('''
-            SELECT id, token, remote_client_id, gas FROM peer
+            SELECT id, token, remote_client_id, balance_mu FROM peer
         ''')
 
         peers = []
         for row in result.fetchall():
             peer = dict(row)
-            peer['gas'] = int(peer.pop('gas'))
+            peer['balance_mu'] = int(peer.pop('balance_mu'))
             peers.append(peer)
 
         return peers
@@ -880,7 +1209,10 @@ class SQLConnection(metaclass=Singleton):
             if row:
                 # Convert the row to a dictionary
                 peer_info = dict(row)
-                peer_info['gas'] = float(peer_info.pop('gas'))
+                # The balance is stored as TEXT and is an integer everywhere else (Python ints
+                # are unbounded; a float both loses precision and re-serializes as
+                # "1e+64", which `from_amount` cannot parse back).
+                peer_info['balance_mu'] = int(Decimal(str(peer_info.pop('balance_mu') or 0)))
                 return peer_info
             else:
                 return {}  # Return empty dict if peer not found
@@ -888,50 +1220,101 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching peer details for ID {peer_id}: {e}')
             return {}
         
-    def get_peer_gas_price(self, peer_id: str, contract_hash: str, ledger_hash: str) -> Optional[int]:
+    def get_peer_contract_rate(self, peer_id: str, contract_hash: str, ledger_hash: str) -> Optional[int]:
         """
-        Fetches the gas price for a specific contract instance, identified by
+        Fetches the balance_mu price for a specific contract instance, identified by
         peer, contract hash, and ledger ID.
 
         Parameters:
         - peer_id (str): The unique identifier of the peer.
         - contract_hash (str): The hash of the contract.
-        - ledger_hash (str): The unique identifier of the ledger.
+        - ledger_hash (str): The ledger, either as its stored ``ledger.hash`` or as
+          a ledger tag such as ``"ergo"`` (see ``ledger_hashes``). Callers on the
+          payment path only hold the tag, so matching the column verbatim would
+          never find the row the peer's advertisement created.
 
         Returns:
-        - int: The gas price as an integer if the specific contract instance is found.
+        - int: The balance_mu price as an integer if the specific contract instance is found.
         - None: If the specific contract instance is not found or an error occurs.
         """
         try:
-            # Corrected SQL query with AND conditions
-            result = self._execute('''
-                SELECT gas_price
-                FROM contract_instance
-                WHERE peer_id = ? AND contract_hash = ? AND ledger_hash = ?
-            ''', (peer_id, contract_hash, ledger_hash))
+            for stored_hash in self.ledger_hashes(ledger_hash):
+                result = self._execute('''
+                    SELECT mu_per_unit
+                    FROM contract_instance
+                    WHERE peer_id = ? AND contract_hash = ? AND ledger_hash = ?
+                ''', (peer_id, contract_hash, stored_hash))
 
-            # Fetch one row (we expect at most one for this combination)
-            row = result.fetchone()
+                # Fetch one row (we expect at most one for this combination)
+                row = result.fetchone()
+                if not row:
+                    continue
 
-            # Check if a row was found
-            if row:
-                gas_price_str = row['gas_price']
+                gas_price_str = row['mu_per_unit']
                 try:
-                    # Convert the string gas_price to an integer
-                    gas_price = int(gas_price_str)
-                    return gas_price
+                    # Convert the string mu_per_unit to an integer
+                    return int(gas_price_str)
                 except (ValueError, TypeError) as ve:
-                    logger.LOGGER(f'Error converting stored gas_price "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {ve}')
+                    logger.LOGGER(f'Error converting stored mu_per_unit "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {ve}')
                     return None # Return None if conversion fails
 
-            else:
-                # No row found for the given criteria
-                return None # Indicate that the specific instance was not found
+            # No row found for the given criteria
+            return None # Indicate that the specific instance was not found
 
         except Exception as e:
             # Catch potential database errors during execution
-            logger.LOGGER(f'Database error fetching gas price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {e}')
+            logger.LOGGER(f'Database error fetching balance_mu price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {e}')
             return None # Return None on database error
+
+    def get_peer_payment_contracts(self, peer_id: str) -> List[dict]:
+        """
+        Lists every payment contract instance registered for a peer, resolving
+        each row's ledger to its tag (e.g. ``"ergo"``) instead of the opaque
+        stored hash.
+
+        Args:
+            peer_id (str): The peer id (``"LOCAL"`` for our own contracts).
+
+        Returns:
+            List[dict]: One entry per ``contract_instance`` row, each with
+            ``contract_hash``, ``ledger_tag`` (falling back to the raw
+            ``ledger_hash`` if the ledger content can't be resolved to a tag),
+            ``address``, and ``mu_per_unit`` (int, or None if unset/invalid).
+        """
+        rows = self._execute(
+            "SELECT contract_hash, ledger_hash, address, mu_per_unit "
+            "FROM contract_instance WHERE peer_id = ?",
+            (peer_id,)
+        ).fetchall()
+
+        contracts = []
+        for row in rows:
+            ledger_tag = row['ledger_hash']
+            ledger_row = self._execute(
+                "SELECT content FROM ledger WHERE hash = ?", (row['ledger_hash'],)
+            ).fetchone()
+            if ledger_row:
+                ledger = celaut_pb2.Contract.Ledger()
+                try:
+                    ledger.ParseFromString(ledger_row['content'])
+                    if ledger.tags:
+                        ledger_tag = ledger.tags[0]
+                except Exception as e:
+                    logger.LOGGER(f'Could not parse stored ledger {row["ledger_hash"]}: {e}')
+
+            try:
+                mu_per_unit = int(row['mu_per_unit'])
+            except (TypeError, ValueError):
+                mu_per_unit = None
+
+            contracts.append({
+                'contract_hash': row['contract_hash'],
+                'ledger_tag': ledger_tag,
+                'address': row['address'],
+                'mu_per_unit': mu_per_unit,
+            })
+
+        return contracts
 
     def get_peers_id(self) -> List[str]:
         """
@@ -948,76 +1331,93 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching peer IDs: {e}')
             return []
 
-    def add_gas_to_peer(self, peer_id: str, gas: int) -> bool:
+    def add_balance_to_peer(self, peer_id: str, balance_mu: int) -> bool:
         """
-        Adds the specified amount of gas to the existing gas value of a peer.
+        Adds the specified amount of balance_mu to the existing balance_mu value of a peer.
+
+        **``balance_mu`` is in the PEER's MU**, for the same reason and on the same
+        column as ``refresh_balance_for_peer``: a deposit credits the peer's own
+        accounting, so what we add has to be the figure the peer was told (see
+        ``payment_process.__deposit_amounts``), not the one that left our wallet.
 
         Parameters:
         - peer_id (str): The unique identifier of the peer.
-        - gas (int): The amount of gas to be added to the peer's existing gas.
+        - balance_mu (int): The amount to add, in the peer's own MU.
 
         Returns:
         - bool: True if the operation was successful, False otherwise.
         """
         try:
-            # Retrieve the current gas values from the database.
-            result = self._execute('SELECT gas FROM peer WHERE id = ?', (peer_id,))
+            # Retrieve the current balance_mu values from the database.
+            result = self._execute('SELECT balance_mu FROM peer WHERE id = ?', (peer_id,))
             row = result.fetchone()
 
             if row:
-                current_gas = int(row['gas'])
+                current_gas = int(row['balance_mu'])
 
-                # Add the specified gas to the current amount.
-                total_gas = str(current_gas + gas)
+                # Add the specified balance_mu to the current amount.
+                total_gas = str(current_gas + balance_mu)
 
-                # Get the current timestamp for gas_last_update.
+                # Get the current timestamp for balance_last_update.
                 current_time = datetime.datetime.now().isoformat()
 
-                # Update the peer's gas values and gas_last_update in the database.
+                # Update the peer's balance_mu values and balance_last_update in the database.
                 self._execute('''
-                    UPDATE peer SET gas = ?, gas_last_update = ? WHERE id = ?
+                    UPDATE peer SET balance_mu = ?, balance_last_update = ? WHERE id = ?
                 ''', (total_gas, current_time, peer_id))
 
                 return True
             else:
                 raise Exception(f'Peer not found: {peer_id}')
         except Exception as e:
-            logger.LOGGER(f'Error adding gas to peer {peer_id}: {e}')
+            logger.LOGGER(f'Error adding balance_mu to peer {peer_id}: {e}')
             return False
 
-    def refresh_gas_for_peer(self, peer_id: str, gas: int) -> bool:
+    def refresh_balance_for_peer(self, peer_id: str, balance_mu: int) -> bool:
         """
-        Sets the gas value of a peer to a specified amount, replacing any existing value.
+        Sets the balance_mu value of a peer to a specified amount, replacing any existing value.
+
+        **``balance_mu`` is in the PEER's MU, not ours.** MU is an internal unit and
+        two nodes do not share a scale; this column stores the peer's own accounting
+        of what we hold there, exactly as its ``Metrics`` reported it. Storing a
+        converted figure would bake a rate into the row and go stale the moment
+        either node changed it. The conversion into our MU happens on read, in
+        ``manager.metrics.balance_on_other_peer``, which is the only thing callers
+        should use to compare this against a local cost.
 
         Parameters:
         - peer_id (str): The unique identifier of the peer.
-        - gas (int): The new gas amount to set for the peer.
+        - balance_mu (int): The new balance_mu amount to set for the peer, in the
+          peer's own MU.
 
         Returns:
         - bool: True if the operation was successful, False otherwise.
         """
         try:
-            gas = str(gas)
+            balance_mu = str(balance_mu)
 
-            # Get the current timestamp for gas_last_update.
+            # Get the current timestamp for balance_last_update.
             current_time = datetime.datetime.now().isoformat()
 
-            # Update the peer's gas and gas_last_update directly in the database.
+            # Update the peer's balance_mu and balance_last_update directly in the database.
             self._execute('''
-                UPDATE peer SET gas = ?, gas_last_update = ? WHERE id = ?
-            ''', (gas, current_time, peer_id))
+                UPDATE peer SET balance_mu = ?, balance_last_update = ? WHERE id = ?
+            ''', (balance_mu, current_time, peer_id))
 
             return True
         except Exception as e:
-            logger.LOGGER(f'Error refreshing gas for peer {peer_id}: {e}')
+            logger.LOGGER(f'Error refreshing balance_mu for peer {peer_id}: {e}')
             return False
 
-    def add_peer(self, peer_id: str, protocol_stack: bytes) -> bool:
+    def add_peer(self, peer_id: str, advertisement: bytes) -> bool:
         """
         Adds a peer to the database.
 
         Args:
             peer_id (str): The ID of the peer to add.
+            advertisement (bytes): Serialized ``celaut.Peer`` holding what the peer
+                declares node-wide (payment contracts and rates). Its addresses are
+                stored separately, one ``uri`` row each.
 
         Returns:
             bool: True if the peer was successfully added, False otherwise.
@@ -1027,9 +1427,9 @@ class SQLConnection(metaclass=Singleton):
         if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    INSERT INTO peer (id, protocol_stack, remote_client_id, gas)
-                    VALUES (?, ?, '', '0')  -- Initialize with empty remote_client_id and 0 gas
-                ''', (peer_id, protocol_stack))
+                    INSERT INTO peer (id, advertisement, remote_client_id, balance_mu)
+                    VALUES (?, ?, '', '0')  -- Initialize with empty remote_client_id and 0 balance_mu
+                ''', (peer_id, advertisement))
                 logger.LOGGER(f'Peer {peer_id} added')
                 return True
             except sqlite3.Error as e:
@@ -1039,28 +1439,56 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Peer {peer_id} already exists')
             return False
 
-    def add_slot(
-        self,
-        slot: celaut_pb2.Instance.Uri_Slot,
-        peer_id: str,
-        transport_protocol: bytes,
-    ):
+    def set_peer_advertisement(self, peer_id: str, advertisement: bytes) -> None:
+        """Refresh what a known peer declares node-wide (payment contracts, rates)."""
+        self._execute(
+            "UPDATE peer SET advertisement = ? WHERE id = ?", (advertisement, peer_id)
+        )
+
+    def get_peer_advertisement(self, peer_id: str) -> Optional[bytes]:
+        """The peer's last stored node-wide declaration, or None if it has none."""
+        row = self._execute(
+            "SELECT advertisement FROM peer WHERE id = ?", (peer_id,)
+        ).fetchone()
+        return bytes(row[0]) if row and row[0] else None
+
+    def add_peer_uri(self, uri: celaut_pb2.Peer.Uri, peer_id: str, transport: str):
         """
-        Adds a slot to the database.
+        Adds or merges one of a peer's addresses into the database.
+
+        Upserts on (peer_id, ip, port): inserted if new, refreshed otherwise, instead
+        of always inserting a fresh row. This makes re-registering an already-known
+        peer (a reconnect, a pay-time refresh, a re-introduction) idempotent by
+        construction, and lets a peer accumulate several reachable addresses over time
+        instead of losing every one but the last it happened to advertise (issue #236).
 
         Args:
-            slot (celaut_pb2.Instance.Uri_Slot): The slot to add.
-            peer_id (str): The ID of the peer.
-            transport_protocol (bytes): Serialized transport tags for this slot.
+            uri (celaut_pb2.Peer.Uri): The address to add.
+            peer_id (str): The ID of the peer that announced it.
+            transport (str): Host-supported transport this address speaks ("tcp"/"udp"),
+                resolved from ``uri.transport`` by the caller.
         """
-        internal_port: int = slot.internal_port
-        cursor = self._execute("INSERT INTO slot (internal_port, transport_protocol, peer_id) VALUES (?, ?, ?)",
-                            (internal_port, transport_protocol, peer_id))
-        slot_id = cursor.lastrowid
-        if slot_id:
-            slot_id = str(slot_id)
-            for uri in slot.uri:
-                self.add_uri(uri, slot_id=slot_id)
+        # Single atomic upsert against idx_uri_peer_ip_port. A SELECT-then-INSERT would
+        # race: _execute commits per statement, so the lock is released in between and
+        # two concurrent IntroducePeer threads would both insert.
+        protocol_stack = celaut_pb2.Peer.Uri()
+        protocol_stack.protocol_stack.extend(uri.protocol_stack)
+        self._execute(
+            "INSERT INTO uri (peer_id, ip, port, expiry_unix_timestamp, transport, protocol_stack) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (peer_id, ip, port) DO UPDATE SET "
+            "expiry_unix_timestamp = excluded.expiry_unix_timestamp, "
+            "transport = excluded.transport, "
+            "protocol_stack = excluded.protocol_stack",
+            (
+                peer_id,
+                uri.ip,
+                uri.port,
+                int(uri.expiry_unix_timestamp) or None,
+                transport,
+                protocol_stack.SerializeToString(),
+            ),
+        )
 
     def check_if_ledger_exists(self, ledger_to_check: celaut_pb2.Contract.Ledger) -> celaut_pb2.Contract.Ledger:
         """
@@ -1126,14 +1554,14 @@ class SQLConnection(metaclass=Singleton):
         # If the loop finishes without finding a match, return the same.
         return ledger_to_check
 
-    def add_contract(self, contract: celaut_pb2.Contract, peer_id: str = "LOCAL", gas_price: int = 0):
+    def add_contract(self, contract: celaut_pb2.Contract, peer_id: str = "LOCAL", mu_per_unit: int = 0):
         """
         Adds a contract to the database.
 
         Args:
             contract (celaut_pb2.Contract): The contract to add.
             peer_id (Optional[str]): The ID of the peer or None for a self contract (to be send to clients.)
-            gas_price (Int): Gas per unit of the token if the contract represents one, or gas per contract spend/execution/usage.
+            mu_per_unit (Int): MU that one unit of this contract is worth.
         """
         # The per-instance value is the raw ErgoTree/propositionBytes (script xattr). It is
         # stored as hex so it round-trips as binary, never as a textual address. The
@@ -1150,7 +1578,7 @@ class SQLConnection(metaclass=Singleton):
         contract_hash: str = sha3_256(type_bytes).hexdigest()
         ledger_hash: str = sha3_256(ledger_str).hexdigest()
 
-        gas_str = str(gas_price)
+        gas_str = str(mu_per_unit)
 
         self._execute("INSERT OR IGNORE INTO contract (hash, content) VALUES (?,?)",
                     (contract_hash, type_bytes))
@@ -1158,8 +1586,16 @@ class SQLConnection(metaclass=Singleton):
         self._execute("INSERT OR IGNORE INTO ledger (hash, content) VALUES (?,?)",
                     (ledger_hash, ledger_str))
 
-        self._execute("INSERT OR IGNORE INTO contract_instance (address, ledger_hash, contract_hash, peer_id, gas_price) "
-                    "VALUES (?,?,?,?,?)", (instance_value, ledger_hash, contract_hash, peer_id, gas_str))
+        # Upsert, not INSERT OR IGNORE: a peer re-advertises its rate on every
+        # refresh (`manager.update_peer_instance`), and ignoring the row froze
+        # `mu_per_unit` at whatever it announced the first time we ever saw it.
+        # Converting MU with a stale rate misprices delegation and, on the
+        # payment path, gets a deposit rejected with the money already on-chain.
+        self._execute("INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit) "
+                    "VALUES (?,?,?,?,?) "
+                    "ON CONFLICT (address, ledger_hash, contract_hash, peer_id) "
+                    "DO UPDATE SET mu_per_unit = excluded.mu_per_unit",
+                    (instance_value, ledger_hash, contract_hash, peer_id, gas_str))
 
     def get_peer_contract_instances(self, contract_hash: str, peer_id: str = "LOCAL") -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger], None, None]:
         """
@@ -1243,10 +1679,54 @@ class SQLConnection(metaclass=Singleton):
         ''', (peer_id,))
         return result.fetchone()[0] > 0
 
+    def set_forced_execution_peer(self, token: str, peer_id: str) -> None:
+        """
+        Records that the `StartService` call correlated with ``token`` (its
+        ``recursion_guard_token``, set by `nodo force_execution` before opening
+        the call) must be delegated straight to ``peer_id``, bypassing
+        ``execution_balancer``.
+
+        Keyed by a fresh, single-use token rather than the client id: dev
+        client ids are drawn from a small reusable pool (see
+        `manager.get_execute_client`), so keying on the client id could leak a
+        stale forced-peer hint onto a later, unrelated `nodo execute` call that
+        happens to draw the same recycled id.
+
+        Args:
+            token (str): The one-time correlation token for this call.
+            peer_id (str): The peer to force delegation to.
+        """
+        self._execute(
+            "INSERT OR REPLACE INTO forced_execution_peer (token, peer_id) VALUES (?, ?)",
+            (token, peer_id)
+        )
+
+    def pop_forced_execution_peer(self, token: str) -> Optional[str]:
+        """
+        Reads and deletes the forced-peer hint for ``token``, if any.
+
+        Consuming it (rather than just reading it) means the hint can only ever
+        apply to the single `launch_service` call it was created for.
+
+        Args:
+            token (str): The one-time correlation token to look up.
+
+        Returns:
+            Optional[str]: The peer id to force delegation to, or None if no
+            hint is recorded for this token.
+        """
+        row = self._execute(
+            "SELECT peer_id FROM forced_execution_peer WHERE token = ?", (token,)
+        ).fetchone()
+        if not row:
+            return None
+        self._execute("DELETE FROM forced_execution_peer WHERE token = ?", (token,))
+        return row['peer_id']
+
     def remove_peer(self, peer_id: str) -> bool:
         """
         Removes a peer from the database along with all related records.
-        This includes contract_instances, slots, and URIs associated with the peer.
+        This includes contract_instances and URIs associated with the peer.
 
         Args:
             peer_id (str): The ID of the peer to remove.
@@ -1257,15 +1737,9 @@ class SQLConnection(metaclass=Singleton):
         try:
             # Define all deletion queries in proper order
             deletion_queries = [
-                # Delete URIs related to slots that belong to this peer
-                ('''DELETE FROM uri 
-                    WHERE slot_id IN (
-                        SELECT id FROM slot WHERE peer_id = ?
-                    )''', (peer_id,)),
-                
-                # Delete slots related to this peer
-                ('DELETE FROM slot WHERE peer_id = ?', (peer_id,)),
-                
+                # Delete URIs announced by this peer
+                ('DELETE FROM uri WHERE peer_id = ?', (peer_id,)),
+
                 # Delete contract instances related to this peer
                 ('DELETE FROM contract_instance WHERE peer_id = ?', (peer_id,)),
                 
@@ -1283,29 +1757,60 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to remove peer {peer_id}: {e}')
             return False
 
-    def instance_exists(self, instance: celaut_pb2.Instance) -> bool:
-        """
-        Checks if any URI within an instance exists in the database.
+    def prune_peer_uris(self, peer_id: str, keep: Iterable[Tuple[str, int]]) -> int:
+        """Drop every URI of ``peer_id`` that is not in ``keep``; return how many went.
 
-        Args:
-            instance (celaut_pb2.Instance): The instance containing URI slots to be checked.
-
-        Returns:
-            bool: 
-                - True if at least one URI from the instance exists in the database.
-                - True in case of an unexpected error (failsafe behavior).
-                - False if no URIs exist in the database or the instance is empty.
+        Merging alone would let a peer's addresses grow without bound and, worse, keep
+        a superseded one forever: ``generate_uris_by_peer_id`` yields in insertion
+        order, so the *stale* address is the one every ``next(...)`` call site picks
+        while anything still answers on it -- exactly the downgrade the signed ``ts``
+        anti-replay check exists to prevent, arriving through the back door. Only ever
+        driven by a verified, strictly-newer announcement, so an unsigned or replayed
+        message can never prune a peer's real addresses.
         """
-        try:
-            # Iterate through URI slots and URIs to check existence
-            for slot in instance.uri_slot:
-                for uri in slot.uri:
-                    if self.uri_exists(uri=uri):
-                        return True
-        except Exception as e:
-            logger.LOGGER(f"Error while checking instance existence: {e}")
-            return True  # Failsafe: Return True to prevent disruption in case of error
-        return False
+        kept = {(str(ip), int(port)) for ip, port in keep}
+        current = self._execute(
+            "SELECT u.id, u.ip, u.port FROM uri u "
+            "WHERE u.peer_id = ?",
+            (peer_id,),
+        ).fetchall()
+
+        stale = [row[0] for row in current if (str(row[1]), int(row[2])) not in kept]
+        if not stale:
+            return 0
+        self._execute2([
+            (f"DELETE FROM uri WHERE id IN ({','.join('?' * len(stale))})", tuple(stale)),
+        ])
+        logger.LOGGER(f'Pruned {len(stale)} superseded URI(s) from peer {peer_id}.')
+        return len(stale)
+
+    def get_peer_last_ts(self, peer_id: str) -> Optional[int]:
+        """The ``ts`` of the last signed Peer message accepted from ``peer_id``.
+
+        None when the peer has never presented one (it is being seen for the first
+        time), so the caller's "strictly newer than last accepted" anti-replay check
+        has nothing to compare against and lets the message through.
+        """
+        row = self._execute(
+            "SELECT last_ts FROM peer WHERE id = ?", (peer_id,)
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    def set_peer_last_ts(self, peer_id: str, ts: int) -> None:
+        """Record the ``ts`` of the last signed Peer message accepted from ``peer_id``."""
+        self._execute(
+            "UPDATE peer SET last_ts = ? WHERE id = ?",
+            (int(ts), peer_id),
+        )
+
+    def get_peer_expiry_unix_timestamp(self, peer_id: str) -> Optional[int]:
+        """When the soonest of ``peer_id``'s announced addresses may stop being valid, or None."""
+        row = self._execute(
+            "SELECT MIN(expiry_unix_timestamp) FROM uri "
+            "WHERE peer_id = ? AND expiry_unix_timestamp > 0",
+            (peer_id,),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
 
     def uri_exists(self, uri: str|celaut_pb2.Instance.Uri) -> bool:
         """
@@ -1341,6 +1846,52 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Invalid URI format: {uri}. Expected format is "ip:port".')
             return False
 
+    def claim_uri(self, uri: str | celaut_pb2.Instance.Uri, peer_id: str) -> List[str]:
+        """Take ``uri`` (ip:port) away from every peer other than ``peer_id``.
+
+        An address reaches exactly one node, so two peers holding it means one of them
+        is stale -- typically the same host after it regenerated its wallet mnemonic,
+        which changes the identity key its peer_id *is*. The old row then keeps an
+        address that answers as somebody else, and ``generate_uris_by_peer_id`` hands it
+        out in insertion order, so the dead peer_id is the one picked first.
+
+        Only ever called for an address this node dialled itself and got a verified
+        identity back from, so the claim is one we checked rather than one a peer merely
+        asserted: a peer announcing an address it does not own cannot use this to strip
+        it from its rightful owner.
+
+        Returns the peer ids the address was removed from (empty when nobody else held
+        it), so the caller can say so out loud.
+        """
+        try:
+            if type(uri) is str:
+                ip, port = uri.rsplit(':', 1)
+            else:
+                ip, port = uri.ip, uri.port
+            port = int(port)
+        except ValueError:
+            logger.LOGGER(f'Invalid URI format: {uri}. Expected format is "ip:port".')
+            return []
+
+        previous = [
+            row['peer_id'] for row in self._execute(
+                "SELECT DISTINCT peer_id FROM uri WHERE ip = ? AND port = ? AND peer_id != ?",
+                (ip, port, peer_id),
+            ).fetchall()
+        ]
+        if not previous:
+            return []
+
+        self._execute(
+            "DELETE FROM uri WHERE ip = ? AND port = ? AND peer_id != ?",
+            (ip, port, peer_id),
+        )
+        logger.LOGGER(
+            f"Address {ip}:{port} now belongs to peer {peer_id}; removed it from "
+            f"{', '.join(previous)}."
+        )
+        return previous
+
     def add_external_client(self, peer_id: str, client_id: str) -> bool:
         """
         Associates an external client ID with an existing peer.
@@ -1368,6 +1919,10 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to associate external client {client_id} with peer {peer_id}: {e}')
             return False
 
+    # The delegated_instances key column is `token_delegation` (the token as the
+    # remote peer knows it); `id` holds our hashed alias of it. There is no
+    # `token` column, and the payload column is `serialized_instance`.
+
     def get_external_father_id(self, token: str) -> str:
         """
         Retrieves the father_id of an delegated instance based on the token.
@@ -1381,29 +1936,52 @@ class SQLConnection(metaclass=Singleton):
         cursor = self._execute('''
             SELECT father_id
             FROM delegated_instances
-            WHERE token = ?
+            WHERE token_delegation = ?
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else ""
 
     def get_delegated_instance(self, token: str) -> Optional[str]:
         """
-        Retrieves the serialized_service of an external container based on the token.
+        Retrieves the serialized instance of an external container based on the token.
 
         Args:
             token (str): The token of the external container.
 
         Returns:
-            str: The serialized_service of the external container, or None if not found.
+            str: The serialized instance of the external container, or None if not found.
         """
         cursor = self._execute('''
-            SELECT serialized_service
+            SELECT serialized_instance
             FROM delegated_instances
-            WHERE token = ?
+            WHERE token_delegation = ?
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else None
-    
+
+    def get_delegated_instances(self) -> List[dict]:
+        """
+        Fetches every delegated instance, for restoring state on startup.
+
+        Returns:
+            List[dict]: token (as the peer knows it), id (our hashed alias),
+                peer_id, father_id and the serialized instance.
+        """
+        result = self._execute('''
+            SELECT token_delegation, id, peer_id, father_id, serialized_instance
+            FROM delegated_instances
+        ''')
+        return [
+            {
+                'token': row[0],
+                'id': row[1],
+                'peer_id': row[2],
+                'father_id': row[3],
+                'serialized_instance': row[4],
+            }
+            for row in result.fetchall()
+        ]
+
     def purgue_delegated(self, token: str):
         """
         Purges an external container
@@ -1413,7 +1991,7 @@ class SQLConnection(metaclass=Singleton):
 
         """
         self._execute('''
-            DELETE FROM delegated_instances WHERE token = ?
+            DELETE FROM delegated_instances WHERE token_delegation = ?
         ''', (token,))
 
     def peer_has_client(self, peer_id: str) -> bool:
@@ -1476,19 +2054,6 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
             pass
 
-    def add_uri(self, uri: celaut_pb2.Instance.Uri, slot_id: str):
-        """
-        Adds a URI to the database.
-
-        Args:
-            uri (celaut_pb2.Instance.Uri): The URI to add.
-            slot_id (str): The ID of the slot.
-        """
-        ip: str = uri.ip
-        port: int = uri.port
-        self._execute("INSERT INTO uri (ip, port, slot_id) VALUES (?, ?, ?)",
-                    (ip, port, slot_id))
-
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str, service_id: str):
         """
         Adds an external container to the database.
@@ -1522,7 +2087,7 @@ class SQLConnection(metaclass=Singleton):
             ''', (id,))
             row = result.fetchone()
             if row:
-                return row['token']
+                return row['token_delegation']
             return None
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to retrieve token for hashed external container token {id}: {e}')
@@ -1540,7 +2105,7 @@ class SQLConnection(metaclass=Singleton):
         """
         try:
             result = self._execute('''
-                SELECT peer_id FROM delegated_instances WHERE token = ?
+                SELECT peer_id FROM delegated_instances WHERE token_delegation = ?
             ''', (token,))
             row = result.fetchone()
             if row:
@@ -1552,7 +2117,7 @@ class SQLConnection(metaclass=Singleton):
 
     def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:  # TODO delete?
         """
-        Purges an external container and refunds gas.
+        Purges an external container and refunds balance_mu.
 
         Args:
             agent_id (str): The agent ID.
@@ -1560,20 +2125,20 @@ class SQLConnection(metaclass=Singleton):
             his_token (str): The token of the external container.
 
         Returns:
-            int: The gas amount refunded.
+            int: The balance_mu amount refunded.
         """
         refund = 0
 
         hashed_token = self._execute('''
-            SELECT id FROM delegated_instances WHERE token = ?
+            SELECT id FROM delegated_instances WHERE token_delegation = ?
         ''', (his_token,)).fetchone()["id"]
 
         self._execute('''
-            DELETE FROM delegated_instances WHERE token = ?
+            DELETE FROM delegated_instances WHERE token_delegation = ?
         ''', (his_token,))
 
         try:
-            refund = from_gas_amount(next(bee.client_grpc(
+            refund = from_amount(next(bee.client_grpc(
                 method=celaut_pb2_grpc.GatewayStub(
                     grpc.insecure_channel(
                         next(generate_uris_by_peer_id(peer_id=peer_id))
@@ -1611,95 +2176,24 @@ class SQLConnection(metaclass=Singleton):
         
         log.LOGGER(f'Container not found for URI: {uri}')
 
-    def get_gas_amount_by_father_id(self, id: str) -> int:
+    def get_balance_by_father_id(self, id: str) -> int:
         """
-        Retrieves the gas amount for a father ID, checking both clients and internal containers.
+        Retrieves the balance_mu amount for a father ID, checking both clients and internal containers.
 
         Args:
             id (str): The father ID.
 
         Returns:
-            int: The gas amount.
+            int: The balance_mu amount.
         """
         if self.client_exists(client_id=id):
-            return self.get_gas_amount_by_client_id(id=id)
+            return self.get_balance_by_client_id(id=id)
         elif self.internal_instance_exists(id=id):
-            return self.get_container_gas(id=id)
-        else:
-            return int(DEFAULT_INITIAL_GAS_AMOUNT)
-
-    # Tunnel system
-
-    def add_tunnel(self, uri: str, service: str, live: bool):
-        """
-        Adds a tunnel to the database.
-
-        Args:
-            tunnel_id (str): The ID of the tunnel.
-            uri (str): The URI of the tunnel.
-            service (str): The service associated with the tunnel.
-            live (bool): Whether the tunnel is live or not.
-        """
-        tunnel_id = str(uuid.uuid4())
-        self._execute('''
-            INSERT INTO tunnels (id, uri, service, live)
-            VALUES (?, ?, ?, ?)
-        ''', (tunnel_id, uri, service, live))
-
-    def get_tunnels(self) -> List[dict]:
-        """
-        Fetches all tunnels from the database.
-
-        Returns:
-            List[dict]: A list of dictionaries containing tunnel details.
-        """
-        result = self._execute("SELECT id, uri, service, live FROM tunnels")
-        tunnels = [{'id': row['id'], 'uri': row['uri'], 'service': row['service'], 'live': row['live']} for row in result.fetchall()]
-        logger.LOGGER(f'Found tunnels: {tunnels}')
-        return tunnels
-
-    def update_tunnel(self, tunnel_id: str, uri: Optional[str] = None, service: Optional[str] = None, live: Optional[bool] = None):
-        """
-        Updates a tunnel in the database.
-
-        Args:
-            tunnel_id (str): The ID of the tunnel to update.
-            uri (Optional[str]): The new URI of the tunnel (if provided).
-            service (Optional[str]): The new service of the tunnel (if provided).
-            live (Optional[bool]): The new live status of the tunnel (if provided).
-        """
-        updates = []
-        params = []
-
-        if uri is not None:
-            updates.append("uri = ?")
-            params.append(uri)
-
-        if service is not None:
-            updates.append("service = ?")
-            params.append(service)
-
-        if live is not None:
-            updates.append("live = ?")
-            params.append(live)
-
-        if not updates:
-            raise ValueError("No values to update.")
-
-        params.append(tunnel_id)
-        query = f"UPDATE tunnels SET {', '.join(updates)} WHERE id = ?"
-        self._execute(query, tuple(params))
-
-    def delete_tunnel(self, tunnel_id: str):
-        """
-        Deletes a tunnel from the database.
-
-        Args:
-            tunnel_id (str): The ID of the tunnel to delete.
-        """
-        self._execute('''
-            DELETE FROM tunnels WHERE id = ?
-        ''', (tunnel_id,))
+            return self.get_instance_balance(id=id)
+        # An unknown father has no balance. It used to report a flat default here, which
+        # invented funds nobody had paid for.
+        log.LOGGER(f'No client or instance found for father id {id}; reporting zero balance.')
+        return 0
 
     # Payment system
     def add_deposit_token(self, client_id: str, status: str) -> str:
@@ -1720,6 +2214,86 @@ class SQLConnection(metaclass=Singleton):
         ''', (token_id, client_id, status))
 
         return token_id
+
+    # Payments
+
+    # What a payment row is allowed to say happened. See the `payments` table in
+    # migrate.py for what each one means.
+    PAYMENT_STATUSES = ('communicated', 'unacknowledged', 'accepted', 'rejected')
+
+    def record_payment(self, direction: str, status: str, amount_mu: int,
+                       tx_id: Optional[str] = None, peer_id: Optional[str] = None,
+                       client_id: Optional[str] = None, deposit_token: Optional[str] = None,
+                       ledger: Optional[str] = None, contract_hash: Optional[str] = None,
+                       address: Optional[str] = None) -> bool:
+        """Write down one payment. Returns whether the row landed.
+
+        This never raises. Every caller is on a path where the money has already moved:
+        a transaction is on-chain, or a client's deposit has just been credited. Losing
+        the *record* of that is bad; turning it into an exception that unwinds the
+        payment path would be worse, and the payment cannot be undone anyway.
+        """
+        if direction not in ('out', 'in'):
+            logger.LOGGER(f"Refusing to record a payment with direction {direction!r}.")
+            return False
+        if status not in SQLConnection.PAYMENT_STATUSES:
+            logger.LOGGER(f"Refusing to record a payment with status {status!r}.")
+            return False
+
+        try:
+            self._execute('''
+                INSERT INTO payments (
+                    tx_id, direction, status, peer_id, client_id, deposit_token,
+                    ledger, contract_hash, address, amount_mu
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (tx_id, direction, status, peer_id, client_id, deposit_token,
+                  ledger, contract_hash, address, str(int(amount_mu))))
+            return True
+        except Exception as e:
+            logger.LOGGER(f'Failed to record the {direction} payment of {amount_mu} MU: {e}')
+            return False
+
+    def _payments_where(self, clause: str, params: tuple, limit: int) -> List[dict]:
+        """Newest first, capped. Shared by the peer and client readers."""
+        try:
+            result = self._execute(f'''
+                SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
+                       ledger, contract_hash, address, amount_mu, created_at
+                FROM payments WHERE {clause} ORDER BY created_at DESC, id DESC LIMIT ?
+            ''', params + (int(limit),))
+            return [dict(row) for row in result.fetchall()]
+        except Exception as e:
+            logger.LOGGER(f'Failed to read payments: {e}')
+            return []
+
+    def get_payments_for_peer(self, peer_id: str, limit: int = 20) -> List[dict]:
+        """Every payment we made to ``peer_id``, newest first."""
+        return self._payments_where("peer_id = ?", (peer_id,), limit)
+
+    def get_payments_from_client(self, client_id: str, limit: int = 20) -> List[dict]:
+        """Every deposit ``client_id`` paid us, newest first, accepted or not."""
+        return self._payments_where("client_id = ?", (client_id,), limit)
+
+    def get_payments_by_tx_ids(self, tx_ids: List[str]) -> dict:
+        """Map ``tx_id`` -> payment row, for the ids given.
+
+        `tx_history` reads the chain and needs the counterparty, which the chain does
+        not know: an address is not a peer id. This is the join back.
+        """
+        ids = [tx_id for tx_id in tx_ids if tx_id]
+        if not ids:
+            return {}
+        placeholders = ','.join('?' * len(ids))
+        try:
+            result = self._execute(f'''
+                SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
+                       ledger, contract_hash, address, amount_mu, created_at
+                FROM payments WHERE tx_id IN ({placeholders})
+            ''', tuple(ids))
+            return {row['tx_id']: dict(row) for row in result.fetchall()}
+        except Exception as e:
+            logger.LOGGER(f'Failed to look up payments by transaction id: {e}')
+            return {}
 
     def get_deposit_tokens(self, status: Optional[str] = None) -> List[dict]:
         """
@@ -1744,6 +2318,26 @@ class SQLConnection(metaclass=Singleton):
         tokens = [{'id': row['id'], 'client_id': row['client_id'], 'status': row['status']} for row in result.fetchall()]
 
         return tokens
+
+    def expire_pending_deposit_tokens(self, ttl_seconds: int) -> int:
+        """Reject deposit tokens left 'pending' for longer than ``ttl_seconds``.
+
+        A token only leaves 'pending' when the client calls ``Payable``
+        (``validate_payment_process``); one that is never paid would otherwise stay
+        pending forever, and the cold-wallet sweep waits on pending tokens before it
+        may spend the wallet's boxes. Returns how many were expired.
+
+        ``created_at`` defaults to CURRENT_TIMESTAMP, and both sides are UTC
+        ('YYYY-MM-DD HH:MM:SS'), so the string comparison is a chronological one. A
+        payment that lands after its token expired is refused, so the TTL is sized
+        well above what a payment actually takes.
+        """
+        result = self._execute('''
+            UPDATE deposit_tokens SET status = 'rejected'
+            WHERE status = 'pending' AND created_at <= datetime('now', ?)
+        ''', (f'-{int(ttl_seconds)} seconds',))
+
+        return result.rowcount
 
     def client_id_from_deposit_token(self, token_id: str) -> str:
         """
@@ -1862,7 +2456,11 @@ def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     """
     SQLConnection().peer_exists(peer_id=peer_id)
     try:
-        return any(list(generate_uris_by_peer_id(peer_id))) if min_slots_open == 1 else \
-            len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
+        if min_slots_open == 1:
+            # Short-circuit on the first reachable address. Materialising the whole
+            # list would probe every address the peer ever announced, each up to the
+            # 1s is_open timeout, just to answer "is at least one open?".
+            return next(generate_uris_by_peer_id(peer_id), None) is not None
+        return len(list(generate_uris_by_peer_id(peer_id))) >= min_slots_open
     except Exception:
         return False

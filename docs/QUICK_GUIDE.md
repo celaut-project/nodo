@@ -1,7 +1,7 @@
 # NODO QUICK START
 
 1. Setup
-   nodo config
+   nodo tui        (Config page — edits config.yaml, backup included)
 
 2. Get a service
    nodo download <url>
