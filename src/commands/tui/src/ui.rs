@@ -23,6 +23,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     ])
     .split(frame.size());
 
+    // Remembered for the mouse: a click has only the coordinates, so the hit test needs
+    // where things ended up this frame. Cleared here so a page without a table (or the
+    // instances tree) cannot inherit the previous page's rows.
+    app.tabs_area = layout[0];
+    app.list_area = Rect::ZERO;
+
     draw_tabs(frame, app, layout[0]);
     match app.page() {
         Page::Overview => draw_overview(frame, app, layout[1]),
@@ -398,6 +404,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
+    app.list_area = layout[0];
     frame.render_stateful_widget(table, layout[0], &mut app.instances.state);
 
     let money = &app.money;
@@ -601,10 +608,30 @@ fn draw_instances_tree(frame: &mut Frame, app: &App, area: Rect) {
         .filter(|id| !has_parent.contains(id))
         .collect();
 
+    // A root is only a root because its father is not another instance here. When that
+    // father is one of our clients, say so: without it an instance a client started is
+    // indistinguishable from one with no parent at all. Reuses the already-loaded
+    // clients list (refreshed every sweep), so this costs no query.
+    let client_ids: HashSet<&str> = app
+        .clients
+        .items
+        .iter()
+        .map(|client| client.id.as_str())
+        .collect();
+
     let mut lines: Vec<Line> = Vec::new();
     let mut printed: HashSet<&str> = HashSet::new();
     for root in &roots {
-        build_tree_lines(&app.money, root, 0, &inst_map, &children, &mut printed, &mut lines);
+        build_tree_lines(
+            &app.money,
+            root,
+            0,
+            &inst_map,
+            &children,
+            &client_ids,
+            &mut printed,
+            &mut lines,
+        );
     }
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -627,12 +654,16 @@ fn draw_instances_tree(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
+// Eight, counting the recursion's own bookkeeping (`printed`, `lines`). A context
+// struct to carry them would be more code than the function it serves.
+#[allow(clippy::too_many_arguments)]
 fn build_tree_lines<'a>(
     money: &Money,
     node_id: &'a str,
     depth: usize,
     inst_map: &HashMap<&'a str, &'a Instance>,
     children: &HashMap<&'a str, Vec<&'a str>>,
+    client_ids: &HashSet<&str>,
     printed: &mut HashSet<&'a str>,
     lines: &mut Vec<Line<'static>>,
 ) {
@@ -656,7 +687,7 @@ fn build_tree_lines<'a>(
     } else {
         format!("peer {}", shorten(&instance.location, 12))
     };
-    lines.push(Line::from(vec![
+    let mut spans = vec![
         Span::raw(format!("{indent}{marker}")),
         Span::styled(label, Style::default().fg(Color::White).bold()),
         Span::styled(format!("  [{}]", instance.service), Style::default().fg(MUTED)),
@@ -668,13 +699,56 @@ fn build_tree_lines<'a>(
             format!("  balance {}", money.format_raw(&instance.balance)),
             Style::default().fg(ACCENT),
         ),
-    ]));
+    ];
+    // Only roots can have a father this tree does not already show: a child is nested
+    // here precisely because its father is another instance above it.
+    if depth == 0 {
+        if let Some(parent) = external_parent_label(instance, client_ids) {
+            spans.push(parent);
+        }
+    }
+    lines.push(Line::from(spans));
 
     if let Some(kids) = children.get(node_id) {
         for kid in kids {
-            build_tree_lines(money, kid, depth + 1, inst_map, children, printed, lines);
+            build_tree_lines(
+                money,
+                kid,
+                depth + 1,
+                inst_map,
+                children,
+                client_ids,
+                printed,
+                lines,
+            );
         }
     }
+}
+
+/// Who started an instance whose father is not another instance on this node: one of
+/// our clients, or a father we cannot resolve at all. `None` when the instance has no
+/// father, or when it has one that this node runs (the tree already nests those).
+///
+/// Mirrors the `internal_service` / `client` / `unknown` split `list_instances` does in
+/// `src/commands/instances.py`.
+fn external_parent_label(instance: &Instance, client_ids: &HashSet<&str>) -> Option<Span<'static>> {
+    let father = instance.father_id.as_str();
+    if father.is_empty() || father == "None" {
+        return None;
+    }
+    Some(if client_ids.contains(father) {
+        Span::styled(
+            format!("  ← client {}", shorten(father, 20)),
+            Style::default().fg(Color::Magenta),
+        )
+    } else {
+        // A father that is neither a local instance nor a known client: the row still
+        // says where it came from, rather than reading as "started by nobody".
+        Span::styled(
+            format!("  ← {} (unknown)", shorten(father, 20)),
+            Style::default().fg(MUTED),
+        )
+    })
 }
 
 fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -709,6 +783,7 @@ fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
+    app.list_area = layout[0];
     frame.render_stateful_widget(table, layout[0], &mut app.services.state);
 
     frame.render_widget(
@@ -831,6 +906,7 @@ fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
+    app.list_area = split[0];
     frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
 
     draw_card(frame, split[1], "SELECTED PEER", detail, ACCENT);
@@ -886,6 +962,7 @@ fn draw_clients(frame: &mut Frame, app: &mut App, area: Rect) {
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
+    app.list_area = split[0];
     frame.render_stateful_widget(client_table, split[0], &mut app.clients.state);
 
     draw_card(frame, split[1], "SELECTED CLIENT", detail, ACCENT);
@@ -1121,6 +1198,12 @@ fn peer_detail_lines(
             nonempty(&peer.uris, "—").to_string(),
         ));
         lines.push(metric_line("Our balance", money.format_raw(&peer.balance)));
+        // Our id inside *their* node, which is what an operator needs when reading
+        // the other side's logs. Not a client of ours -- see the doc on the field.
+        lines.push(metric_line(
+            "Our client id there",
+            nonempty(&peer.remote_client_id, "not registered").to_string(),
+        ));
         lines.push(metric_line(
             "Reputation",
             format!(
@@ -1408,6 +1491,7 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
     .block(section_block(" PRICES • +/- adjust, e exact ", Color::Yellow))
     .highlight_style(selected_style())
     .highlight_symbol("> ");
+    app.list_area = area;
     frame.render_stateful_widget(table, area, &mut app.prices.state);
 }
 
@@ -2132,6 +2216,7 @@ mod tests {
             uris: "10.0.0.4:8080".to_string(),
             // Raw MU, as the catalogue stores it; formatting happens at draw time.
             balance: "1000".to_string(),
+            remote_client_id: "cli-9f2a".to_string(),
             reputation: String::new(),
             reputation_score: "7".to_string(),
             contracts,
@@ -2559,6 +2644,204 @@ mod tests {
         assert!(screen.contains("rep-proof-xyz"));
         assert_eq!(screen.matches("rep-proof-xyz").count(), 1);
     }
+
+    /// Who started an instance whose parent this node does not run itself. The tree
+    /// nests instance-under-instance already; a client parent had nowhere to show, so
+    /// an instance a client started read as one with no parent at all (issue #277).
+    mod external_parents {
+        use crate::app::{App, Client, Instance, InstanceUsage};
+        use ratatui::{backend::TestBackend, Terminal};
+
+        fn instance(id: &str, father: &str) -> Instance {
+            Instance {
+                id: id.to_string(),
+                name: format!("inst-{id}"),
+                ip: "10.0.0.7:4040".to_string(),
+                service: "builder".to_string(),
+                balance: "1000".to_string(),
+                virtualizer: "ch".to_string(),
+                memory_limit: 1 << 30,
+                disk_limit: 10 << 30,
+                vcpus: Some(1.0),
+                usage: InstanceUsage::default(),
+                location: "local".to_string(),
+                father_id: father.to_string(),
+                mu_per_minute: None,
+                mu_per_hour: None,
+                consumption_samples: None,
+                consumption_age_secs: None,
+            }
+        }
+
+        fn tree_text(instances: Vec<Instance>, clients: Vec<&str>) -> String {
+            let mut app = App::new();
+            app.instances_grouped = true;
+            app.instances.refresh(instances);
+            app.clients.refresh(
+                clients
+                    .into_iter()
+                    .map(|id| Client {
+                        id: id.to_string(),
+                        balance: "0".to_string(),
+                        last_usage: String::new(),
+                        unmetered: false,
+                    })
+                    .collect(),
+            );
+            let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
+            terminal
+                .draw(|frame| super::super::draw_instances_tree(frame, &app, frame.size()))
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect()
+        }
+
+        #[test]
+        fn a_root_started_by_a_client_names_the_client() {
+            let text = tree_text(vec![instance("aaa", "client-42")], vec!["client-42"]);
+            assert!(text.contains("client client-42"), "{text}");
+        }
+
+        #[test]
+        fn a_father_this_node_cannot_resolve_is_flagged_rather_than_hidden() {
+            let text = tree_text(vec![instance("aaa", "ghost-7")], vec!["client-42"]);
+            assert!(text.contains("ghost-7"), "{text}");
+            assert!(text.contains("unknown"), "{text}");
+        }
+
+        /// The nesting already says who the parent is, so repeating it on the child
+        /// would both duplicate it and mislabel a perfectly ordinary parent "unknown".
+        #[test]
+        fn a_child_nested_under_its_parent_carries_no_parent_label() {
+            let text = tree_text(
+                vec![instance("aaa", ""), instance("bbb", "aaa")],
+                vec!["client-42"],
+            );
+            assert!(text.contains("inst-bbb"), "{text}");
+            assert!(!text.contains("unknown"), "{text}");
+        }
+    }
+
+    /// Our id inside a remote peer, which is what the other side's logs call us. The
+    /// CLI has always printed it; the TUI never carried the column at all (issue #277).
+    #[test]
+    fn the_peer_card_shows_our_client_id_on_that_peer() {
+        let peer = peer_with(vec![]);
+        let lines = peer_detail_lines(&Money::default(), Some(&peer), None, false);
+        let text: String = lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
+            .collect();
+        assert!(text.contains("cli-9f2a"), "{text}");
+
+        let unregistered = Peer {
+            remote_client_id: String::new(),
+            ..peer
+        };
+        let text: String = peer_detail_lines(&Money::default(), Some(&unregistered), None, false)
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
+            .collect();
+        assert!(text.contains("not registered"), "{text}");
+    }
+
+    /// The mouse hit tests read off a *real* frame: the row arithmetic in `app.rs`
+    /// retraces widget internals (border, header, the header's bottom margin, the tab
+    /// padding and dividers), and nothing but a render can confirm it still matches.
+    mod mouse_clicks {
+        use super::*;
+
+        fn app_with_peers() -> App {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Peers).unwrap();
+            app.peers.refresh(
+                ["peer-aaa", "peer-bbb", "peer-ccc"]
+                    .into_iter()
+                    .map(|id| Peer {
+                        id: id.to_string(),
+                        uris: "10.0.0.4:8080".to_string(),
+                        balance: "1000".to_string(),
+                        remote_client_id: String::new(),
+                        reputation: String::new(),
+                        reputation_score: "0".to_string(),
+                        contracts: Vec::new(),
+                    })
+                    .collect(),
+            );
+            app
+        }
+
+        /// Renders a frame and returns the screen as one string per terminal row.
+        fn draw(app: &mut App) -> Vec<String> {
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer.get(x, y).symbol())
+                        .collect()
+                })
+                .collect()
+        }
+
+        #[test]
+        fn a_click_lands_on_the_row_under_the_pointer() {
+            let mut app = app_with_peers();
+            let screen = draw(&mut app);
+            // Whatever row the third peer actually printed on -- not where the
+            // arithmetic thinks it should be.
+            let y = screen
+                .iter()
+                .position(|row| row.contains("peer-ccc"))
+                .expect("the peers table should have rendered every peer") as u16;
+
+            app.click_at(4, y);
+            assert_eq!(
+                app.peers.selected().map(|peer| peer.id.as_str()),
+                Some("peer-ccc"),
+                "clicked row {y} of:\n{}",
+                screen.join("\n")
+            );
+        }
+
+        #[test]
+        fn a_click_on_the_header_or_the_border_selects_nothing() {
+            let mut app = app_with_peers();
+            let screen = draw(&mut app);
+            let header = screen
+                .iter()
+                .position(|row| row.contains("Peer ID"))
+                .expect("header") as u16;
+            app.click_at(4, header);
+            assert!(app.peers.selected().is_none(), "header click selected a row");
+        }
+
+        #[test]
+        fn a_click_on_a_tab_opens_that_page() {
+            let mut app = app_with_peers();
+            let screen = draw(&mut app);
+            // The tab bar is the first rows of the frame; find CLIENTS in it.
+            let (y, x) = screen
+                .iter()
+                .enumerate()
+                .find_map(|(y, row)| {
+                    // Byte offset -> terminal column: the dividers between tabs are
+                    // multi-byte boxdrawing characters, so the two are not the same.
+                    row.find("CLIENTS")
+                        .map(|byte| (y as u16, row[..byte].chars().count() as u16))
+                })
+                .expect("the tab bar should list every page");
+
+            app.click_at(x, y);
+            assert_eq!(app.page(), Page::Clients);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2749,4 +3032,5 @@ mod config_tree {
             println!("{row}");
         }
     }
+
 }

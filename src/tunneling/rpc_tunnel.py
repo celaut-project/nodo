@@ -77,9 +77,9 @@ from typing import Callable, Generator, Iterator, List, Optional, Tuple
 
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
+from src.tunneling import logger
 from src.utils.config import ConfigManager
 from src.utils.cost_functions.execution_cost import traffic_charge_mu
-from src.utils.logger import LOGGER as logger
 from src.utils.monetary import format_mu, prices
 from src.virtualizers.firewall import TransportProtocol, resolve_slot_transport_protocols
 

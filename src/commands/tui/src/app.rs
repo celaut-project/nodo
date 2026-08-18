@@ -1,4 +1,5 @@
 use prost::Message;
+use ratatui::layout::{Position, Rect};
 use ratatui::widgets::TableState;
 use regex::Regex;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
@@ -74,6 +75,39 @@ impl Page {
             Page::Logs => "LOGS",
         }
     }
+}
+
+/// Which tab covers column `x`, given the bordered block the tab bar was drawn in.
+///
+/// Retraces what `Tabs` lays out rather than asking it: the widget keeps no hit map.
+/// Each title sits in `padding_left + title + padding_right` (one space each side, the
+/// default this TUI keeps) and tabs are joined by a 3-cell `" │ "` divider.
+fn tab_at(x: u16, area: Rect) -> Option<usize> {
+    const DIVIDER_WIDTH: u16 = 3;
+    let mut cursor = area.x + 1; // the block's left border
+    for (index, page) in Page::ALL.iter().enumerate() {
+        let width = page.title().chars().count() as u16 + 2; // one space of padding each side
+        if x >= cursor && x < cursor + width {
+            return Some(index);
+        }
+        cursor += width + DIVIDER_WIDTH;
+    }
+    None
+}
+
+/// How many rows below the first visible one a click at terminal row `y` lands, for a
+/// table drawn in `area`. `None` when the click was on the border, the header, or
+/// outside the table entirely.
+///
+/// The three-row lead-in is the block's top border, the header, and the blank line
+/// `header_row` puts under it (`bottom_margin(1)`) — pinned by
+/// `mouse_clicks::a_click_lands_on_the_row_under_the_pointer`, which reads it off a
+/// real render rather than trusting this arithmetic.
+fn visible_row_at(y: u16, area: Rect) -> Option<usize> {
+    const HEADER_ROWS: u16 = 3;
+    let first_row = area.y + HEADER_ROWS;
+    let last_row = area.y + area.height.checked_sub(1)?; // bottom border
+    (area.height > HEADER_ROWS && y >= first_row && y < last_row).then(|| (y - first_row) as usize)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,6 +218,10 @@ pub struct Peer {
     /// identifies our client *inside the remote peer*, so it can never be joined
     /// against our local `clients` table (see issue #178).
     pub balance: String,
+    /// Our client id *inside this peer*, as it assigned it to us — what `nodo peers`
+    /// prints as "Remote Client ID". Empty when we have never registered there.
+    /// Never a key into our own `clients` table (see the balance note above).
+    pub remote_client_id: String,
     pub reputation: String,
     /// Local reputation score (nodo-managed, independent of the on-chain proof).
     pub reputation_score: String,
@@ -884,6 +922,17 @@ impl<T: Identifiable> StatefulList<T> {
             .and_then(|index| self.items.get(index))
     }
 
+    /// Select the row `visible` places down from the first one on screen — what a
+    /// click lands on, since a scrolled table's first visible row is `offset`, not 0.
+    /// Ignores a click past the last row, so empty space below the table selects nothing.
+    pub fn select_visible(&mut self, visible: usize) {
+        let index = self.state.offset() + visible;
+        if let Some(item) = self.items.get(index) {
+            self.state_id = Some(item.id().to_string());
+            self.state.select(Some(index));
+        }
+    }
+
     pub fn next(&mut self) {
         if self.items.is_empty() {
             return;
@@ -957,6 +1006,12 @@ pub struct App {
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
+    /// Where the tab bar and the current page's selectable table were last drawn, so a
+    /// click can be mapped back to a tab or a row. Written by the draw path each frame;
+    /// `list_area` stays empty on pages with no table (Overview, Logs, Config — the
+    /// config tree tracks its own rendered area).
+    pub tabs_area: Rect,
+    pub list_area: Rect,
     pub sys: System,
     /// Previous sweep's per-instance counters, keyed by instance id, so CPU and
     /// network *rates* can be derived across refresh ticks. Rebuilt every sweep, so
@@ -1015,6 +1070,8 @@ impl Default for App {
             credit_client_decrement: false,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
+            tabs_area: Rect::ZERO,
+            list_area: Rect::ZERO,
             sys: System::new_all(),
             instance_counters: HashMap::new(),
             last_data_refresh: now.checked_sub(DATA_REFRESH_INTERVAL).unwrap_or(now),
@@ -1103,6 +1160,50 @@ impl App {
             Page::Config => {
                 self.config_tree_state.key_down();
             }
+            _ => {}
+        }
+    }
+
+    /// Route a left click to whatever was drawn under it: a tab, a config tree node, or
+    /// a table row. Geometry comes from the last frame (`tabs_area` / `list_area`), which
+    /// is always the frame the user was looking at when they clicked.
+    pub fn click_at(&mut self, column: u16, row: u16) {
+        let position = Position::new(column, row);
+        if self.tabs_area.contains(position) {
+            if let Some(index) = tab_at(column, self.tabs_area) {
+                self.tabs.index = index;
+            }
+            return;
+        }
+        // The config tree remembers where it drew each node, so it can resolve the
+        // click itself — including collapsing a section that was already selected.
+        if self.page() == Page::Config {
+            self.config_tree_state.click_at(position);
+            return;
+        }
+        if let Some(visible) = visible_row_at(row, self.list_area) {
+            self.select_visible_row(visible);
+        }
+    }
+
+    /// Select the row `visible` places below the top of the visible table, on whichever
+    /// page owns a table. Mirrors `on_up`/`on_down`, detail reload included.
+    fn select_visible_row(&mut self, visible: usize) {
+        match self.page() {
+            Page::Instances => self.instances.select_visible(visible),
+            Page::Services => {
+                self.services.select_visible(visible);
+                self.load_selection_details();
+            }
+            Page::Peers => {
+                self.peers.select_visible(visible);
+                self.load_selection_details();
+            }
+            Page::Clients => {
+                self.clients.select_visible(visible);
+                self.load_selection_details();
+            }
+            Page::Pricing => self.prices.select_visible(visible),
             _ => {}
         }
     }
@@ -2110,10 +2211,12 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
                 p.balance_mu,
                 COALESCE(p.reputation_proof_id, ''),
-                p.reputation_score
+                p.reputation_score,
+                COALESCE(p.remote_client_id, '')
          FROM peer p
          LEFT JOIN uri u ON p.id = u.peer_id
-         GROUP BY p.id, p.balance_mu, p.reputation_proof_id, p.reputation_score",
+         GROUP BY p.id, p.balance_mu, p.reputation_proof_id, p.reputation_score,
+                  p.remote_client_id",
     )?;
     let peers = statement
         .query_map([], |row| {
@@ -2127,6 +2230,7 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 balance: row.get::<_, String>(2)?,
                 reputation: row.get(3)?,
                 reputation_score,
+                remote_client_id: row.get(5)?,
                 // `contract_instance` isn't touched by the join above (it isn't
                 // keyed by uri), so its rows are fetched per peer below.
                 contracts: Vec::new(),
@@ -3052,6 +3156,74 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
 
+    /// Mouse hit tests. Both retrace geometry the widgets do not expose, so they are
+    /// pinned here: a wrong offset silently selects the neighbouring tab or row.
+    mod mouse_geometry {
+        use super::super::{tab_at, visible_row_at, Page, Rect};
+
+        const BAR: Rect = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 3,
+        };
+
+        #[test]
+        fn every_tab_title_maps_to_its_own_page() {
+            // Walk the bar cell by cell and collect which tab each column resolves to;
+            // every page must claim its title, in order, with gaps only on dividers.
+            let claimed: Vec<usize> = (BAR.x..BAR.x + BAR.width)
+                .filter_map(|x| tab_at(x, BAR))
+                .collect();
+            let mut seen: Vec<usize> = claimed.clone();
+            seen.dedup();
+            assert_eq!(seen, (0..Page::ALL.len()).collect::<Vec<_>>());
+            for (index, page) in Page::ALL.iter().enumerate() {
+                let width = claimed.iter().filter(|claim| **claim == index).count();
+                assert_eq!(width, page.title().chars().count() + 2, "{page:?}");
+            }
+        }
+
+        #[test]
+        fn clicks_outside_any_tab_select_nothing() {
+            assert_eq!(tab_at(BAR.x, BAR), None, "left border");
+            assert_eq!(
+                tab_at(BAR.x + BAR.width - 1, BAR),
+                None,
+                "past the last tab"
+            );
+        }
+
+        #[test]
+        fn rows_start_below_the_border_header_and_its_margin() {
+            let table = Rect {
+                x: 0,
+                y: 4,
+                width: 80,
+                height: 10,
+            };
+            assert_eq!(visible_row_at(4, table), None, "top border");
+            assert_eq!(visible_row_at(5, table), None, "header");
+            assert_eq!(visible_row_at(6, table), None, "the header's bottom margin");
+            assert_eq!(visible_row_at(7, table), Some(0), "first row");
+            assert_eq!(visible_row_at(12, table), Some(5), "last row");
+            assert_eq!(visible_row_at(13, table), None, "bottom border");
+            assert_eq!(visible_row_at(99, table), None, "below the table");
+        }
+
+        #[test]
+        fn a_table_with_no_room_for_rows_has_none() {
+            let squeezed = Rect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 3,
+            };
+            assert_eq!(visible_row_at(2, squeezed), None);
+            assert_eq!(visible_row_at(0, Rect::ZERO), None, "unrendered page");
+        }
+    }
+
     /// Timestamped config.yaml backups + retention (issue #255). The prune is
     /// pinned on hand-made filenames rather than real writes so nothing here has to
     /// sleep a second per backup to get distinct UTC stamps.
@@ -3657,13 +3829,13 @@ mod tests {
         connection
             .execute_batch(
                 "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT, reputation_proof_id TEXT,
-                                    reputation_score INTEGER);
+                                    reputation_score INTEGER, remote_client_id TEXT);
                  CREATE TABLE uri (id INTEGER PRIMARY KEY, peer_id TEXT, ip TEXT, port INTEGER);
                  CREATE TABLE ledger (hash TEXT PRIMARY KEY, content BLOB);
                  CREATE TABLE contract_instance (id INTEGER PRIMARY KEY, address TEXT,
                                     ledger_hash TEXT, contract_hash TEXT, peer_id TEXT,
                                     mu_per_unit TEXT);
-                 INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7);",
+                 INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7, 'cli-7f3a');",
             )
             .unwrap();
         for (contract_hash, ledger_hash, address, ledger_content) in instances {
@@ -3766,6 +3938,9 @@ mod tests {
         let peers = get_peers(&database).unwrap();
         assert_eq!(peers.len(), 1);
         assert!(peers[0].contracts.is_empty());
+        // Read off the `peer` row itself, never joined against our own `clients`
+        // table -- that join is the bug #178 fixed.
+        assert_eq!(peers[0].remote_client_id, "cli-7f3a");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -4085,6 +4260,7 @@ Cold Wallet: 9cold\n";
                 id: id.to_string(),
                 uris: "10.0.0.1:8080".to_string(),
                 balance: "0".to_string(),
+                remote_client_id: String::new(),
                 reputation: "—".to_string(),
                 reputation_score: "0".to_string(),
                 contracts: Vec::new(),
