@@ -1,5 +1,28 @@
 use crate::app::{App, AppResult, EditKind, InputMode, Page};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+/// Handle mouse input: the wheel moves the selection, a left click picks the tab, config
+/// node or table row it landed on.
+///
+/// Only the Normal and Details modes react. While a modal owns the screen, a click on
+/// the page behind it would act on something the user cannot see.
+pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
+    match app.input_mode {
+        InputMode::Normal => match mouse.kind {
+            MouseEventKind::ScrollUp => app.on_up(),
+            MouseEventKind::ScrollDown => app.on_down(),
+            MouseEventKind::Down(MouseButton::Left) => app.click_at(mouse.column, mouse.row),
+            _ => {}
+        },
+        // The scrollable overlay is the one modal with anything to scroll.
+        InputMode::Details => match mouse.kind {
+            MouseEventKind::ScrollUp => app.scroll_details(-1),
+            MouseEventKind::ScrollDown => app.scroll_details(1),
+            _ => {}
+        },
+        _ => {}
+    }
+}
 
 /// Handle keyboard input without allowing page shortcuts to leak into modal input.
 pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
