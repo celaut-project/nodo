@@ -12,16 +12,22 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
   - `config_declaration`
 - `Service.Api.Slot`
   - `transport`
-  - `gas_amount_per_call`
+  - `mu_per_call`
 - `Service.Network`
   - `protocol_stack`
 - `Resources.start_time_ms` removed.
 
-## Synchronized files
+## Schema files
 
 - `protos/celaut.proto`
 - `protos/pack.proto`
-- `src/commands/tui/protos/celaut.proto` (identical to the main proto)
+- `protos/buffer.proto`
+
+These are the only copies. The Rust TUI used to vendor its own `celaut.proto` and
+`buffer.proto` under `src/commands/tui/protos/`; that copy drifted until
+`Service.Api.slot` was field 4 there and field 1 here — incompatible on the wire,
+while this file claimed they were identical. `src/commands/tui/build.rs` now compiles
+this directory directly, so there is nothing left to keep in sync.
 
 ## Codegen
 

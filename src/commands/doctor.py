@@ -568,6 +568,76 @@ def _doctor_cloud_hypervisor(main_dir: str):
     _doctor_ch_smoke_test(ch_binary, guest_kernel, initramfs)
 
 
+def _doctor_network_checks():
+    """Report what can be checked about inbound reachability, from here.
+
+    Deliberately modest: nothing this host can do proves the gateway port is
+    reachable from the Internet — a connect from inside succeeds whether or not the
+    router forwards anything. So this reports the facts it can establish and defers
+    the instructions to ``nodo nat-guide`` instead of duplicating them.
+    """
+    print("\nInbound reachability:", flush=True)
+
+    try:
+        from src.commands.nat_guide import collect_facts
+
+        facts = collect_facts()
+    except Exception as e:
+        print(f"[WARN] Could not gather network facts: {e}", flush=True)
+        return
+
+    port = facts.get("gateway_port")
+    if port:
+        print(f"[OK] Gateway port resolves to {port}.", flush=True)
+    else:
+        print("[FAIL] network.GATEWAY_PORT is not resolvable; configure it first.", flush=True)
+
+    public_port = facts.get("public_tcp_port")
+    if port and public_port and public_port != port:
+        print(
+            f"[OK] network.PUBLIC_TCP_PORT is set: router should forward external "
+            f"port {public_port} to this host's port {port}.",
+            flush=True
+        )
+
+    listening = facts.get("listening")
+    if listening is True:
+        print(f"[OK] Something is listening on 127.0.0.1:{port}.", flush=True)
+    elif listening is False:
+        print(
+            f"[WARN] Nothing is listening on 127.0.0.1:{port}. Start the node with "
+            "'nodo daemon start' before testing from outside.",
+            flush=True
+        )
+
+    if facts.get("ddns_enabled"):
+        hostname = facts.get("ddns_hostname") or "(no domain set)"
+        resolves = facts.get("ddns_resolves_to")
+        if resolves:
+            print(f"[OK] DDNS {hostname} resolves to {resolves}.", flush=True)
+            if resolves == facts.get("local_ip"):
+                print(
+                    "[WARN] It resolves to this machine's own LAN address, so peers "
+                    "outside your network cannot use it. That usually means the "
+                    "provider recorded a private source address.",
+                    flush=True
+                )
+        else:
+            print(
+                f"[WARN] DDNS is enabled but {hostname} does not resolve. Check "
+                "ddns.DOMAIN / ddns.TOKEN and the [DDNS] lines in the node log.",
+                flush=True
+            )
+    else:
+        print("[WARN] DDNS is disabled; peers must reach a bare IP (see ddns.*).", flush=True)
+
+    print(
+        "  Whether the router forwards the port cannot be verified from this host. "
+        "Run 'nodo nat-guide' for the steps, then test from outside your network.",
+        flush=True
+    )
+
+
 def doctor_command(main_dir):
     if os.geteuid() != 0:
         print("This script requires superuser privileges. Please run with sudo.")
@@ -627,3 +697,4 @@ def doctor_command(main_dir):
     print(f"Service runtime user for checks: {current_service_user}", flush=True)
     _doctor_kvm_checks(current_service_user)
     _doctor_cloud_hypervisor(main_dir)
+    _doctor_network_checks()

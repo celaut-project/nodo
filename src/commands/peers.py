@@ -1,15 +1,32 @@
 import sqlite3
-from hashlib import sha3_256
 
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
+from src.utils.monetary import format_mu
 from src.database.sql_connection import SQLConnection
+
+
+def _balance_in_local_mu(peer_id: str, balance_str) -> "int | None":
+    """The stored peer-MU balance expressed in ours, or None if it cannot be.
+
+    `None` rather than 0, because this is a display: an operator has to be able to
+    tell "you have nothing there" apart from "we cannot say what their MU is worth".
+    """
+    from src.payment_system.mu_conversion import convert_mu, matching_payment_system
+
+    try:
+        payment_system = matching_payment_system(peer_id)
+        return convert_mu(
+            int(balance_str),
+            from_mu_per_unit=payment_system.peer_mu_per_unit,
+            to_mu_per_unit=payment_system.local_mu_per_unit,
+        )
+    except (ValueError, TypeError):
+        return None
 
 env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
-ERGO_LEDGER = "ergo"
-ERGO_CONTRACT_HASH = sha3_256("proveDlog(decodePoint())".encode("utf-8")).hexdigest()
 
 sq = SQLConnection()
 
@@ -17,8 +34,9 @@ def list_peers():
     """
     Lists all peers stored in the database, showing grouped information in sections:
       1. General
-      2. Client & Gas
-      3. Reputation
+      2. Client & Balance
+      3. Rates advertised by the peer
+      4. Reputation
     If the table does not exist, it prints a warning message.
     """
     # Connect to the SQLite database
@@ -38,8 +56,8 @@ def list_peers():
         cursor.execute(
             '''
             SELECT
-                id, protocol_stack, remote_client_id,
-                gas, gas_last_update,
+                id, advertisement, remote_client_id,
+                balance_mu, balance_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
             FROM peer
@@ -53,22 +71,43 @@ def list_peers():
 
         for peer in peers:
             (
-                peer_id, protocol_stack, remote_client_id,
-                gas_str, gas_last_update,
+                peer_id, advertisement, remote_client_id,
+                balance_str, balance_last_update,
                 reputation_proof_id, reputation_score,
                 reputation_index, last_index_on_ledger
             ) = peer
 
-            if protocol_stack:
-                slot = celaut.Service.Api.Slot()
-                slot.ParseFromString(protocol_stack)
-                protocol_stack_tags = " ".join([p.tags[0] for p in slot.protocol_stack if p.tags])
-            else:
-                protocol_stack_tags = "N/A"
+            advertised_rates = {}
+            protocol_stack_tags = "N/A"
+            if advertisement:
+                announced = celaut.Peer()
+                try:
+                    announced.ParseFromString(advertisement)
+                except Exception as e:
+                    print(f"  (unreadable advertisement for {peer_id}: {e})")
+                    announced = celaut.Peer()
+                # The stack is per-address now, so show the union across the peer's
+                # addresses rather than a single gateway slot's.
+                tags = {
+                    protocol.tags[0]
+                    for uri in announced.uri
+                    for protocol in uri.protocol_stack
+                    if protocol.tags
+                }
+                if tags:
+                    protocol_stack_tags = " ".join(sorted(tags))
+                # Rates the peer advertised. Absent for peers running a version from
+                # before nodes published them.
+                advertised_rates = {
+                    rate: amount.n for rate, amount in announced.mu_per_call.items()
+                }
 
-            gas = int(gas_str)
-            gas_price = sq.get_peer_gas_price(peer_id=peer_id, contract_hash=ERGO_CONTRACT_HASH, ledger_hash=ERGO_LEDGER)
-            gas_on_ergs = (gas/gas_price) if gas_price else 0
+            # The column holds the peer's own MU (see
+            # `SQLConnection.refresh_balance_for_peer`), and `format_mu` renders in
+            # *our* display unit -- so it has to be converted before it is shown, or
+            # the figure is a number in one currency labelled with another.
+            balance = _balance_in_local_mu(peer_id, balance_str)
+            contracts = sq.get_peer_payment_contracts(peer_id)
 
             # Section: General
             print(f"ID: {peer_id}")
@@ -76,13 +115,42 @@ def list_peers():
             print(f"  Protocol stack: {protocol_stack_tags}")
             print()
 
-            # Section: Client & Gas
-            print("[Client & Gas]")
+            # Section: Client & Balance
+            print("[Client & Balance]")
             print(f"  Remote Client ID: {remote_client_id}")
-            print(f"  Gas/ERG: {ssformat(gas_price)}")
-            print(f"  Gas: {ssformat(gas)}")
-            print(f"       {ssformat(gas_on_ergs)} nanoERG")
-            print(f"  Gas Last Update: {gas_last_update or 'None'}")
+            print(
+                f"  Our balance there: {format_mu(balance)}" if balance is not None
+                else f"  Our balance there: {balance_str} (the peer's own MU; no "
+                     "common payment system to convert it)"
+            )
+            print(f"  Balance last update: {balance_last_update or 'None'}")
+            print()
+
+            # Section: Payment contracts
+            # Every payment contract instance this peer has registered, across
+            # every ledger and contract type -- not just a single hardcoded one.
+            print("[Payment Contracts]")
+            if contracts:
+                for contract in contracts:
+                    print(f"  Ledger: {contract['ledger_tag']}")
+                    print(f"    Contract hash: {contract['contract_hash']}")
+                    print(f"    Address:       {contract['address'] or 'N/A'}")
+                    mu_per_unit = contract['mu_per_unit']
+                    print(f"    MU per unit:   {mu_per_unit if mu_per_unit is not None else 'N/A'}")
+            else:
+                print("  No payment contract registered for this peer.")
+            print()
+
+            # Section: Advertised rates
+            # What this peer charges on a recurring basis, as it advertised. These
+            # are ceilings, not quotes -- the price of a specific service still
+            # comes from GetServiceEstimatedCost.
+            print("[Rates] (base prices in MU; see [Contracts] for what an MU is worth)")
+            if advertised_rates:
+                for rate, value in sorted(advertised_rates.items()):
+                    print(f"  {rate}: {value}")
+            else:
+                print("  Not advertised by this peer.")
             print()
 
             # Section: Reputation

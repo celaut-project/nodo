@@ -1,5 +1,28 @@
-use crate::app::{App, AppResult, InputMode, Page};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::app::{App, AppResult, EditKind, InputMode, Page};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+/// Handle mouse input: the wheel moves the selection, a left click picks the tab, config
+/// node or table row it landed on.
+///
+/// Only the Normal and Details modes react. While a modal owns the screen, a click on
+/// the page behind it would act on something the user cannot see.
+pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
+    match app.input_mode {
+        InputMode::Normal => match mouse.kind {
+            MouseEventKind::ScrollUp => app.on_up(),
+            MouseEventKind::ScrollDown => app.on_down(),
+            MouseEventKind::Down(MouseButton::Left) => app.click_at(mouse.column, mouse.row),
+            _ => {}
+        },
+        // The scrollable overlay is the one modal with anything to scroll.
+        InputMode::Details => match mouse.kind {
+            MouseEventKind::ScrollUp => app.scroll_details(-1),
+            MouseEventKind::ScrollDown => app.scroll_details(1),
+            _ => {}
+        },
+        _ => {}
+    }
+}
 
 /// Handle keyboard input without allowing page shortcuts to leak into modal input.
 pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
@@ -32,15 +55,39 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         InputMode::Normal => {}
         // Text-entry modals: Connect, EditConfig, FilterConfig.
         _ => {
+            let is_bool_editor =
+                app.input_mode == InputMode::EditConfig && app.edit_kind == EditKind::Bool;
             match (key.modifiers, key.code) {
                 (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
                 (_, KeyCode::Enter) => app.submit_input().await,
                 (_, KeyCode::Esc) => app.close_input(),
-                (KeyModifiers::CONTROL, KeyCode::Char('u')) => app.input.clear(),
+                // ↑/↓ step a number, cycle an enum, or (with ←/→/Space) flip a
+                // checkbox — additive on top of typing for number/enum, the only
+                // way to change a checkbox (see the char/backspace guard below).
+                (_, KeyCode::Up) if app.input_mode == InputMode::EditConfig => {
+                    app.adjust_edit_value(1)
+                }
+                (_, KeyCode::Down) if app.input_mode == InputMode::EditConfig => {
+                    app.adjust_edit_value(-1)
+                }
+                (_, KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')) if is_bool_editor => {
+                    app.adjust_edit_value(1)
+                }
+                (KeyModifiers::CONTROL, KeyCode::Char('u')) if !is_bool_editor => {
+                    app.input.clear();
+                    app.on_input_changed();
+                }
+                // A checkbox has exactly two states, both reachable above; free
+                // text entry would just let you type something that isn't a bool.
+                (_, KeyCode::Backspace | KeyCode::Char(_)) if is_bool_editor => {}
                 (_, KeyCode::Backspace) => {
                     app.input.pop();
+                    app.on_input_changed();
                 }
-                (_, KeyCode::Char(character)) => app.input.push(character),
+                (_, KeyCode::Char(character)) => {
+                    app.input.push(character);
+                    app.on_input_changed();
+                }
                 _ => {}
             }
             return Ok(());
@@ -51,11 +98,17 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::CONTROL, KeyCode::Char('c'))
         | (KeyModifiers::NONE, KeyCode::Esc)
         | (KeyModifiers::NONE, KeyCode::Char('q')) => app.quit(),
-        (_, KeyCode::Left) => app.on_left(),
-        (_, KeyCode::Right) => app.on_right(),
+        // Tab cycles pages forward, Shift+Tab backward; both wrap. crossterm reports
+        // Shift+Tab as BackTab under the legacy encoding and as Tab + SHIFT under the
+        // kitty keyboard protocol, so match both or the binding silently dies depending
+        // on the terminal. ←/→ are no longer page navigation: they are page-local now
+        // and ignored by pages that do not claim them.
+        (KeyModifiers::NONE, KeyCode::Tab) => app.next_page(),
+        (_, KeyCode::BackTab) | (KeyModifiers::SHIFT, KeyCode::Tab) => app.previous_page(),
         (_, KeyCode::Up) => app.on_up(),
         (_, KeyCode::Down) => app.on_down(),
-        (_, KeyCode::Tab) => app.toggle_focus(),
+        (_, KeyCode::Right) => app.on_right(),
+        (_, KeyCode::Left) => app.on_left(),
         (KeyModifiers::NONE, KeyCode::Char('r')) => app.refresh(true).await,
         (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Instances => {
             app.toggle_instances_grouped()
@@ -63,14 +116,33 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('k')) if app.page() == Page::Instances => {
             app.open_kill_instance_confirm()
         }
-        (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Network => {
+        (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Peers => {
             app.open_connect()
         }
-        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Network => {
+        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Peers => {
             app.adjust_selected_peer_reputation(1)
         }
-        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Network => {
+        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Peers => {
             app.adjust_selected_peer_reputation(-1)
+        }
+        // Pricing mirrors the Peers page's +/- and Config's `e`: nudge in place, or open the
+        // ordinary editor for an exact figure.
+        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Pricing => {
+            app.adjust_selected_price(1).await
+        }
+        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Pricing => {
+            app.adjust_selected_price(-1).await
+        }
+        (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Pricing => {
+            app.open_price_editor()
+        }
+        // Clients' +/- open an amount modal rather than nudging in place, unlike
+        // Peers/Pricing: a balance has no natural step size to nudge by.
+        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Clients => {
+            app.open_credit_client(false)
+        }
+        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Clients => {
+            app.open_credit_client(true)
         }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Config => {
             app.open_config_editor()
@@ -83,6 +155,15 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Services => {
             app.open_delete_service_confirm()
+        }
+        // Same key as Services' delete, on the page's other destructive target.
+        (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Peers => {
+            app.open_disconnect_peer_confirm()
+        }
+        // Enter/Space expands or collapses the selected config section. `e` still
+        // opens the value editor, so these never fight over the same key.
+        (_, KeyCode::Enter | KeyCode::Char(' ')) if app.page() == Page::Config => {
+            app.toggle_selected_config_node()
         }
         (KeyModifiers::NONE, KeyCode::Char('/')) if app.page() == Page::Config => {
             app.open_config_filter()

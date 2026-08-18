@@ -1,5 +1,7 @@
 import copy
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -86,6 +88,46 @@ _TolerantLoader.add_multi_constructor(
 # it on the next `set()`. Re-stat the file at most once every
 # _RELOAD_CHECK_INTERVAL seconds and reload when it changed on disk.
 _RELOAD_CHECK_INTERVAL = 5.0
+
+
+# --- config.yaml backups (issue #255) ---------------------------------------
+# Keep the newest N timestamped backups. The Rust TUI (src/commands/tui/src/app.rs)
+# uses the same constant, filename pattern and retention so a node's backup
+# directory looks identical however the last write happened.
+CONFIG_BACKUP_RETENTION = 10
+
+_CONFIG_BACKUP_RE = re.compile(r"^config-\d{14}\.yaml$")
+
+
+def _prune_config_backups(directory: str, retention: int) -> None:
+    """Delete all but the newest `retention` config-<stamp>.yaml files. Names sort
+    chronologically because the stamp is zero-padded UTC, so a lexical sort is a
+    time sort."""
+    try:
+        names = sorted(n for n in os.listdir(directory) if _CONFIG_BACKUP_RE.match(n))
+    except OSError:
+        return
+    stale = names[:-retention] if retention > 0 else names
+    for name in stale:
+        try:
+            os.remove(os.path.join(directory, name))
+        except OSError:
+            pass
+
+
+def backup_config_file(config_path: str, retention: int = CONFIG_BACKUP_RETENTION) -> Optional[str]:
+    """Snapshot config_path to config-<YYYYMMDDHHMMSS>.yaml beside it, then prune to
+    the newest `retention`. Timestamps are UTC so the filename sorts the same
+    whatever the machine's timezone and matches the Rust TUI byte for byte. Returns
+    the backup path, or None when there's nothing to back up yet."""
+    if not os.path.isfile(config_path):
+        return None
+    directory = os.path.dirname(config_path) or "."
+    stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
+    backup_path = os.path.join(directory, f"config-{stamp}.yaml")
+    shutil.copy2(config_path, backup_path)
+    _prune_config_backups(directory, retention)
+    return backup_path
 
 
 class ConfigManager(metaclass=Singleton):
@@ -233,7 +275,11 @@ class ConfigManager(metaclass=Singleton):
 
             # Fail fast on removed keys from the pre-single-wallet layout. There is no
             # migration: a stale config must be updated by hand.
-            from src.utils.config_validation import _find_removed_keys, ConfigValidationError
+            from src.utils.config_validation import (
+                _find_removed_keys,
+                ConfigValidationError,
+                validate_pricing_config,
+            )
             _removed = _find_removed_keys(self._config)
             if _removed:
                 raise ConfigValidationError(
@@ -241,6 +287,12 @@ class ConfigManager(metaclass=Singleton):
                     "provided; update the config manually): "
                     + ", ".join(sorted(_removed))
                 )
+
+            # Prices are money: a malformed one stops the node rather than being coerced
+            # into something plausible (docs/PRICING.md). Non-fatal findings -- notably
+            # prices and the payment rate drifting onto different scales, which is the
+            # failure the gas model shipped with -- are logged instead.
+            validate_pricing_config(self._config, warn=lambda message: self.log(f"[PRICING] {message}"))
 
             # Process dynamic values.
             gateway_port = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
@@ -252,18 +304,22 @@ class ConfigManager(metaclass=Singleton):
                 self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
                 self.log(f"Dynamically assigned Gateway Port: {port}")
 
-            # Handle auto mnemonic for the single wallet of each ledger.
-            # ``ledgers`` is a mapping keyed by ledger name (e.g. ``ledgers.ergo``);
-            # each ledger owns exactly ONE wallet (WALLET_MNEMONIC). There is no
-            # auxiliary/receiver wallet.
+            # Each ledger owns exactly ONE wallet (WALLET_MNEMONIC) -- there is no
+            # auxiliary/receiver wallet -- and that same key is the node's identity
+            # (src/reputation_system/node_identity.py): the peer_id it presents and the
+            # key it signs GetPeerInfo with. So there is exactly one mnemonic in the
+            # whole node, and it must always exist: an unset or "auto" value is
+            # generated here on first load rather than left empty, or the node would
+            # have no identity at all. Generating one is free and commits to nothing --
+            # the wallet holds no funds until someone sends some.
             ledgers = self._config.get("ledgers")
             if isinstance(ledgers, dict):
                 for name, ledger in ledgers.items():
                     if not isinstance(ledger, dict):
                         continue
-                    if ledger.get("WALLET_MNEMONIC") == "auto":
-                        mnemonic = Mnemonic("english").generate(strength=128)
-                        ledger["WALLET_MNEMONIC"] = mnemonic
+                    configured = str(ledger.get("WALLET_MNEMONIC") or "").strip()
+                    if not configured or configured == "auto":
+                        ledger["WALLET_MNEMONIC"] = Mnemonic("english").generate(strength=128)
                         self.log(f"Generated new mnemonic for ledger '{name}'")
 
             config_changed = self._config != original_config
@@ -282,6 +338,15 @@ class ConfigManager(metaclass=Singleton):
 
     def _save_config_unlocked(self):
         """Internal save method without locking (assumes caller holds lock)."""
+        # Before overwriting, snapshot the current file to a timestamped backup and
+        # prune to the newest CONFIG_BACKUP_RETENTION, so every write -- a .set() or
+        # the dirty-config-on-load path -- is recoverable (issue #255). Beside the
+        # real file, matching where the atomic replace lands. Best-effort: a node
+        # must still be able to persist its config if the backup copy fails.
+        try:
+            backup_config_file(os.path.realpath(self.config_path))
+        except OSError as error:
+            self.log(f"Could not create config backup: {error}")
         # Coerce to native types first, then use safe_dump so a foreign object can
         # never again be persisted as a `!!python/object:...` tag.
         safe_config = to_yaml_safe(self._config)

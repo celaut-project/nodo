@@ -16,7 +16,7 @@ up otherwise-wasted capacity. Two hard rules:
    is stopped).
 
 Like the other core services, the fallback is referenced by service id in the
-top-level ``core_services`` list (role name :data:`LOW_DEMAND_FALLBACK`) and
+top-level ``core_services`` mapping (role name :data:`LOW_DEMAND_FALLBACK`) and
 launched through :func:`src.core_services.runtime.ensure_core_service_running`,
 reusing the exact framework from PR #120.
 

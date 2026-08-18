@@ -13,10 +13,12 @@ IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
     ch_build = importlib.import_module("src.virtualizers.ch.build")
+    ch_limits = importlib.import_module("src.virtualizers.ch.limits")
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]
     ch_build = None  # type: ignore[assignment]
+    ch_limits = None  # type: ignore[assignment]
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -307,7 +309,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             )
         )
 
-        size_bytes = ch_build._resolve_initial_rootfs_size_bytes(
+        size_bytes = ch_limits.initial_rootfs_size_bytes(
             service=service,
             total_bytes=1024,
         )
@@ -324,12 +326,12 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
         )
 
         total_bytes = 10 * 1024 * 1024
-        size_bytes = ch_build._resolve_initial_rootfs_size_bytes(
+        size_bytes = ch_limits.initial_rootfs_size_bytes(
             service=service,
             total_bytes=total_bytes,
         )
 
-        self.assertEqual(size_bytes, total_bytes + ch_build.OVERHEAD_BYTES)
+        self.assertEqual(size_bytes, total_bytes + ch_limits.OVERHEAD_BYTES)
 
     def test_is_service_built_for_arch_rejects_bundle_smaller_than_requested_disk(self):
         service = celaut.Service(

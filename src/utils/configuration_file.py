@@ -9,7 +9,7 @@ used by the `ggconf` dev command, so they live in a neutral util module.
 from typing import List, Optional
 
 from protos import celaut_pb2 as celaut
-from src.gateway.utils import generate_node_peer_info
+from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 
@@ -29,7 +29,7 @@ def get_config(
 
     local_peer = generate_node_peer_info(network=GATEWAY_NETWORK)
     log.LOGGER(f"Local peer generated: \n {local_peer}")
-    __config__.gateway.CopyFrom(local_peer.instance)
+    __config__.gateway.CopyFrom(peer_gateway_instance(local_peer))
 
     if config:
         __config__.config.CopyFrom(config)

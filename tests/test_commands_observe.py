@@ -392,6 +392,98 @@ class CaptureAvailabilityTests(unittest.TestCase):
             observe.interface_exists = original_exists
 
 
+class ConntrackDiagnosisTests(unittest.TestCase):
+    """A missing /proc/net/nf_conntrack has three causes; only one is "wrong host"."""
+
+    def _reason(self, *, procfs, count, linux=True):
+        present = set()
+        if procfs:
+            present.add(observe.CONNTRACK_PATH)
+        if count:
+            present.add(observe.CONNTRACK_COUNT_PATH)
+        original_exists = observe.os.path.exists
+        original_avail = observe.capture_available
+        try:
+            observe.os.path.exists = lambda path: path in present
+            observe.capture_available = lambda: linux
+            return observe.conntrack_unavailable_reason()
+        finally:
+            observe.os.path.exists = original_exists
+            observe.capture_available = original_avail
+
+    def test_readable_table_is_not_a_problem(self):
+        self.assertIsNone(self._reason(procfs=True, count=True))
+
+    def test_ubuntu_kernel_blames_the_build_option_not_the_host(self):
+        # nf_conntrack loaded (count file present), procfs interface not compiled in.
+        reason = self._reason(procfs=False, count=True)
+        self.assertIn("CONFIG_NF_CONNTRACK_PROCFS", reason)
+        self.assertNotIn("run this on the node", reason)
+
+    def test_module_not_loaded_says_so(self):
+        self.assertIn("not loaded", self._reason(procfs=False, count=False))
+
+    def test_non_linux_still_points_at_the_node(self):
+        self.assertIn(
+            "not a Linux host",
+            self._reason(procfs=False, count=False, linux=False),
+        )
+
+    def test_reason_reaches_the_event_reader(self):
+        original_exists = observe.os.path.exists
+        try:
+            observe.os.path.exists = lambda path: path == observe.CONNTRACK_COUNT_PATH
+            events, reason = observe.read_conntrack_events("10.0.0.2")
+            self.assertEqual(events, [])
+            self.assertIn("CONFIG_NF_CONNTRACK_PROCFS", reason)
+        finally:
+            observe.os.path.exists = original_exists
+
+
+class RenderNetworkVolumeTests(unittest.TestCase):
+    def test_tap_counters_are_shown_even_in_degraded_mode(self):
+        import io
+        from contextlib import redirect_stdout
+
+        metrics = observe.SessionMetrics()
+        metrics.update_io({"net_rx_bytes": 2 * 1024 ** 2, "net_tx_bytes": 4096,
+                           "net_rx_packets": 1234, "net_tx_packets": 7})
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            observe._render(
+                header="inst",
+                metrics=metrics,
+                balance="N/A",
+                events=[],
+                save_dir=None,
+                net_notice="per-flow table unavailable",
+                capture_mode="conntrack",
+            )
+        out = buf.getvalue()
+        self.assertIn("Network volume", out)
+        self.assertIn("2 MB", out)
+        self.assertIn("1,234 pkts", out)
+
+    def test_missing_counters_read_as_unknown_not_zero(self):
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            observe._render(
+                header="inst",
+                metrics=observe.SessionMetrics(),
+                balance="N/A",
+                events=[],
+                save_dir=None,
+                net_notice=None,
+                capture_mode="pcap",
+            )
+        out = buf.getvalue()
+        self.assertIn("N/A", out)
+        self.assertNotIn("0 B", out)
+
+
 class HumanBytes1dpTests(unittest.TestCase):
     def test_one_decimal_scaling(self):
         self.assertEqual(observe.human_bytes_1dp(None), "N/A")
@@ -633,25 +725,26 @@ class CaptureUnavailableNoteTests(unittest.TestCase):
             self.assertIn("CAP_NET_RAW", body)
 
 
-class FormatGasTests(unittest.TestCase):
+class FormatBalanceTests(unittest.TestCase):
     def test_missing_or_empty_is_na(self):
-        self.assertEqual(observe.format_gas(None), "N/A")
-        self.assertEqual(observe.format_gas(""), "N/A")
+        self.assertEqual(observe.format_balance(None), "N/A")
+        self.assertEqual(observe.format_balance(""), "N/A")
 
     def test_non_numeric_is_flagged(self):
-        self.assertEqual(observe.format_gas("not-a-number"), "Invalid Gas Data")
+        self.assertEqual(observe.format_balance("not-a-number"), "Invalid balance")
 
     def test_numeric_matches_node_formatter(self):
-        # Gas is rendered exactly like `nodo instances` (ssformat), whether the
+        # A balance is rendered exactly like `nodo instances` does, whether the
         # catalogue hands us an int or the numeric string it actually stores.
         from src.utils.logger import ssformat
 
-        self.assertEqual(observe.format_gas(1000), ssformat(1000))
-        self.assertEqual(observe.format_gas("1000"), ssformat(1000))
+        # 1000 MU is 1000 nanoERG, rendered as ERG for whoever is reading the panel.
+        self.assertEqual(observe.format_balance(1000), "0.000001 ERG")
+        self.assertEqual(observe.format_balance("1000"), "0.000001 ERG")
 
 
-class InstanceGasCatalogueTests(unittest.TestCase):
-    """resolve_instance / read_instance_gas against a real sqlite catalogue."""
+class InstanceBalanceCatalogueTests(unittest.TestCase):
+    """resolve_instance / read_instance_balance against a real sqlite catalogue."""
 
     def setUp(self):
         import sqlite3
@@ -664,7 +757,7 @@ class InstanceGasCatalogueTests(unittest.TestCase):
         conn.execute(
             "CREATE TABLE local_instances ("
             "id TEXT, ip TEXT, father_id TEXT, service_id TEXT, "
-            "virtualizer TEXT, name TEXT, gas TEXT)"
+            "virtualizer TEXT, name TEXT, balance_mu TEXT)"
         )
         conn.execute(
             "INSERT INTO local_instances VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -677,27 +770,27 @@ class InstanceGasCatalogueTests(unittest.TestCase):
         observe.DATABASE_FILE = self._orig_db
         os.unlink(self._tmp.name)
 
-    def test_resolve_instance_includes_gas(self):
+    def test_resolve_instance_includes_balance(self):
         row = observe.resolve_instance("abc123")
         self.assertIsNotNone(row)
-        self.assertEqual(row["gas"], "5000")
+        self.assertEqual(row["balance_mu"], "5000")
 
     def test_read_instance_gas_reflects_updates(self):
         import sqlite3
 
-        self.assertEqual(observe.read_instance_gas("abc123"), "5000")
+        self.assertEqual(observe.read_instance_balance("abc123"), "5000")
         conn = sqlite3.connect(self._tmp.name)
-        conn.execute("UPDATE local_instances SET gas = ? WHERE id = ?",
+        conn.execute("UPDATE local_instances SET balance_mu = ? WHERE id = ?",
                      ("4200", "abc123"))
         conn.commit()
         conn.close()
-        self.assertEqual(observe.read_instance_gas("abc123"), "4200")
+        self.assertEqual(observe.read_instance_balance("abc123"), "4200")
 
     def test_read_instance_gas_unknown_id_is_none(self):
-        self.assertIsNone(observe.read_instance_gas("nope"))
+        self.assertIsNone(observe.read_instance_balance("nope"))
 
 
-class RenderGasPanelTests(unittest.TestCase):
+class RenderBalancePanelTests(unittest.TestCase):
     def test_render_shows_gas_balance(self):
         import io
         from contextlib import redirect_stdout
@@ -707,15 +800,15 @@ class RenderGasPanelTests(unittest.TestCase):
             observe._render(
                 header="inst",
                 metrics=observe.SessionMetrics(),
-                gas="1.20e+3",
+                balance="0.0000012 ERG",
                 events=[],
                 save_dir=None,
                 net_notice=None,
                 capture_mode="conntrack",
             )
         out = buf.getvalue()
-        self.assertIn("Gas", out)
-        self.assertIn("Balance: 1.20e+3", out)
+        self.assertIn("Balance", out)
+        self.assertIn("Current: 0.0000012 ERG", out)
 
 
 if __name__ == "__main__":

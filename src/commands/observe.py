@@ -41,11 +41,20 @@ link-type is auto-detected from the interface (``/sys/class/net/<if>/type``):
 ARPHRD_ETHER → ``LINKTYPE_ETHERNET``, a tun/ARPHRD_NONE device → ``LINKTYPE_RAW``.
 
 If AF_PACKET is unavailable (non-root, non-Linux, or the tap can't be found)
-the command degrades to the legacy ``conntrack`` table scan for the on-screen
-feed and clearly labels the degraded mode. It never fabricates events, and in
-degraded mode no ``.pcap`` is written — when ``--save`` is set a
-``capture_unavailable.txt`` note is written into the save dir explaining why, so
-the artifact folder is self-explanatory.
+the command degrades: it tries the legacy ``conntrack`` table scan for the
+on-screen feed and clearly labels the degraded mode. That scan reads
+``/proc/net/nf_conntrack``, which **current Ubuntu kernels do not expose**
+(``CONFIG_NF_CONNTRACK_PROCFS`` is unset), so on those hosts there is no per-flow
+fallback at all — see ``conntrack_unavailable_reason``, which reports that as the
+kernel build option it is rather than as "you are not on the node".
+
+What survives every degradation is the **network volume** panel: the host tap's
+cumulative byte/packet counters from ``/sys/class/net/<tap>/statistics``, which
+need neither ``CAP_NET_RAW`` nor conntrack. Per-flow detail needs the capture.
+
+It never fabricates events, and in degraded mode no ``.pcap`` is written — when
+``--save`` is set a ``capture_unavailable.txt`` note is written into the save dir
+explaining why, so the artifact folder is self-explanatory.
 """
 
 import json
@@ -66,6 +75,10 @@ DATABASE_FILE = env_manager.get("DATABASE_FILE")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
 CONNTRACK_PATH = "/proc/net/nf_conntrack"
+# Present whenever nf_conntrack is loaded, regardless of CONFIG_NF_CONNTRACK_PROCFS.
+# Ubuntu ships that (deprecated) procfs interface disabled, so CONNTRACK_PATH being
+# absent says nothing about whether the kernel is tracking flows — this does.
+CONNTRACK_COUNT_PATH = "/proc/sys/net/netfilter/nf_conntrack_count"
 REFRESH_INTERVAL_S = 1.0
 # Min wall-time between renders triggered by network bursts, so a chatty flow
 # doesn't flicker the screen faster than the eye can read. Metrics still sample
@@ -155,26 +168,25 @@ def short_id(instance_id: Optional[str], length: int = 8) -> str:
     return str(instance_id)[:length]
 
 
-def format_gas(gas: Any) -> str:
-    """Render an instance's gas balance the way ``nodo instances`` does.
+def format_balance(balance: Any) -> str:
+    """Render an instance's balance in ERG, the way ``nodo instances`` does.
 
-    Gas is stored in the catalogue as a numeric string (celaut ``GasAmount``).
-    We reuse the node's smart-scientific formatter (:func:`ssformat`) when it is
-    importable and degrade gracefully otherwise, so this stays unit-testable
-    without the nodo runtime.
+    A balance is stored in the catalogue as a numeric string of MU (celaut ``Amount``).
+    We render it through the node's ERG formatter when it is importable and degrade
+    gracefully otherwise, so this stays unit-testable without the nodo runtime.
     """
-    if gas is None or gas == "":
+    if balance is None or balance == "":
         return "N/A"
     try:
-        gas_int = int(gas)
+        balance_mu = int(balance)
     except (ValueError, TypeError):
-        return "Invalid Gas Data"
+        return "Invalid balance"
     try:
-        from src.utils.logger import ssformat
+        from src.utils.monetary import format_mu
 
-        return ssformat(gas_int)
+        return f"{format_mu(balance_mu)}"
     except Exception:
-        return str(gas_int)
+        return str(balance_mu)
 
 
 def compute_cpu_percent(
@@ -851,7 +863,7 @@ def _local_instances_table_exists(conn: sqlite3.Connection) -> bool:
 def resolve_instance(instance_id: str) -> Optional[Dict[str, Any]]:
     """Find a local instance by exact instance id.
 
-    Returns the row (id, ip, father_id, service_id, virtualizer, name, gas) or
+    Returns the row (id, ip, father_id, service_id, virtualizer, name, balance_mu) or
     ``None``. Matching is exact (``WHERE id = ?``); no prefix resolution.
     """
     conn = _connect()
@@ -859,7 +871,7 @@ def resolve_instance(instance_id: str) -> Optional[Dict[str, Any]]:
         if not _local_instances_table_exists(conn):
             return None
         cur = conn.execute(
-            "SELECT id, ip, father_id, service_id, virtualizer, name, gas "
+            "SELECT id, ip, father_id, service_id, virtualizer, name, balance_mu "
             "FROM local_instances WHERE id = ?",
             (instance_id,),
         )
@@ -892,21 +904,21 @@ def build_instance_index() -> Dict[str, Dict[str, str]]:
     return index
 
 
-def read_instance_gas(instance_id: str) -> Optional[str]:
-    """Best-effort read of an instance's current gas balance from the catalogue.
+def read_instance_balance(instance_id: str) -> Optional[str]:
+    """Best-effort read of an instance's current balance from the catalogue.
 
     Returns the raw numeric-string value (or ``None`` when unknown) so the live
-    panel can reflect gas being spent while the instance runs. Never raises.
+    panel can reflect the balance being spent while the instance runs. Never raises.
     """
     conn = _connect()
     try:
         if not _local_instances_table_exists(conn):
             return None
         cur = conn.execute(
-            "SELECT gas FROM local_instances WHERE id = ?", (instance_id,)
+            "SELECT balance_mu FROM local_instances WHERE id = ?", (instance_id,)
         )
         row = cur.fetchone()
-        return row["gas"] if row is not None else None
+        return row["balance_mu"] if row is not None else None
     except sqlite3.Error:
         return None
     finally:
@@ -1013,6 +1025,26 @@ def resolve_capture_source(instance_id: str, vm_ip: str) -> Tuple[Optional[str],
     return tap, None
 
 
+def conntrack_unavailable_reason() -> Optional[str]:
+    """Why the per-flow conntrack table can't be read here, or ``None`` if it can.
+
+    ``/proc/net/nf_conntrack`` missing has three different causes and only one of
+    them is "you're not on the node": Ubuntu builds its kernels with
+    ``CONFIG_NF_CONNTRACK_PROCFS`` unset, so conntrack can be loaded and tracking
+    hundreds of flows while the file does not exist. Reporting that as "run on the
+    Linux node" sends the operator after a fix that cannot work.
+    """
+    if os.path.exists(CONNTRACK_PATH):
+        return None
+    if not capture_available():
+        return "conntrack unavailable: not a Linux host (run this on the node)"
+    if os.path.exists(CONNTRACK_COUNT_PATH):
+        return ("per-flow table unavailable: kernel built without "
+                "CONFIG_NF_CONNTRACK_PROCFS (normal on Ubuntu) — the network "
+                "volume panel is still live")
+    return "per-flow table unavailable: nf_conntrack not loaded on this host"
+
+
 def read_conntrack_events(vm_ip: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """Scan the conntrack table for flows involving ``vm_ip`` (fallback source).
 
@@ -1020,8 +1052,9 @@ def read_conntrack_events(vm_ip: str) -> Tuple[List[Dict[str, Any]], Optional[st
     label when the source can't be read (so the UI can say so honestly);
     ``None`` means conntrack was read successfully (the list may still be empty).
     """
-    if not os.path.exists(CONNTRACK_PATH):
-        return [], "conntrack not available (no /proc/net/nf_conntrack; run on the Linux node)"
+    missing = conntrack_unavailable_reason()
+    if missing:
+        return [], missing
     if not vm_ip:
         return [], "instance has no known IP; cannot correlate network flows"
     try:
@@ -1050,7 +1083,7 @@ def _clear_screen() -> None:
 def _render(
     header: str,
     metrics: SessionMetrics,
-    gas: str,
+    balance: str,
     events: List[str],
     save_dir: Optional[str],
     net_notice: Optional[str],
@@ -1066,17 +1099,27 @@ def _render(
     lines.append(f" Current: {bytes_to_human(metrics.mem_current)}")
     lines.append(f" Peak:    {bytes_to_human(metrics.mem_peak)}")
     lines.append("")
-    lines.append("Gas")
-    lines.append(f" Balance: {gas}")
+    # Cumulative tap counters. Already sampled every tick for metrics.jsonl and
+    # previously never shown: this is the one network reading that needs neither
+    # CAP_NET_RAW nor conntrack, so it is what the operator has left in degraded mode.
+    rx_pkts = "N/A" if metrics.net_rx_packets is None else f"{metrics.net_rx_packets:,}"
+    tx_pkts = "N/A" if metrics.net_tx_packets is None else f"{metrics.net_tx_packets:,}"
+    lines.append("Network volume (host tap, cumulative since the VM started)")
+    lines.append(f" From VM: {bytes_to_human(metrics.net_rx_bytes):>9}  {rx_pkts:>12} pkts")
+    lines.append(f" To VM:   {bytes_to_human(metrics.net_tx_bytes):>9}  {tx_pkts:>12} pkts")
+    lines.append("")
+    lines.append("Balance")
+    lines.append(f" Current: {balance}")
     lines.append("")
     if save_dir:
         lines.append(f"\033[31m●\033[0m Recording to {save_dir}/")
         lines.append(f"    ├─ {METRICS_FILENAME}   (cpu+memory samples)")
         pcap_note = CAPTURE_FILENAME if capture_mode == "pcap" else \
-            f"{CAPTURE_FILENAME} — not written (degraded: conntrack mode)"
+            f"{CAPTURE_FILENAME} — not written (no packet capture)"
         lines.append(f"    └─ {pcap_note}")
     lines.append("─" * 72)
-    source = "AF_PACKET live capture" if capture_mode == "pcap" else "conntrack (degraded)"
+    source = ("AF_PACKET live capture" if capture_mode == "pcap"
+              else "degraded — conntrack table, when the kernel exposes it")
     lines.append(f"Network — live flows [{source}]   (newest first, updates live)")
     if net_notice:
         lines.append(f"  ⚠ {net_notice}")
@@ -1149,7 +1192,7 @@ def observe_event_stream(
     service_id = instance.get("service_id") or ""
     service_tag = _resolve_service_tag(service_id=service_id) or ""
     instance_name = instance.get("name")
-    gas_display = format_gas(instance.get("gas"))
+    balance_display = format_balance(instance.get("balance_mu"))
 
     short_id = f"{full_id[:3]}..." if len(full_id) > 3 else full_id
     header = f"{instance_name} · {short_id}" if instance_name else short_id
@@ -1187,9 +1230,13 @@ def observe_event_stream(
             capture_mode = "pcap"
             link_type, is_ethernet = detect_link_type(tap_ifname)
         except OSError as exc:
+            # The overwhelmingly common cause is missing CAP_NET_RAW, and `sudo` is
+            # the fix — say so instead of leaving the operator with an errno.
+            cause = ("needs CAP_NET_RAW — re-run as `sudo nodo observe`"
+                     if isinstance(exc, PermissionError) else str(exc))
             degraded_reason = (
-                f"AF_PACKET bind to '{tap_ifname}' failed ({exc}); "
-                "falling back to conntrack, no pcap will be written"
+                f"no packet capture on '{tap_ifname}' ({cause}); "
+                "no pcap will be written"
             )
             pcap_sock = None
 
@@ -1262,8 +1309,8 @@ def observe_event_stream(
         "father_id": father_id,
         "vm_ip": vm_ip,
         "tag": service_tag,
-        "gas": instance.get("gas"),
-        "gas_display": gas_display,
+        "balance_mu": instance.get("balance_mu"),
+        "balance_display": balance_display,
         "header": header,
         "capture_mode": capture_mode,
         "degraded_reason": degraded_reason,
@@ -1275,6 +1322,7 @@ def observe_event_stream(
 
     try:
         next_sample = time.monotonic()
+        last_conntrack_notice: Optional[str] = None
         while should_stop is None or not should_stop():
             now = time.monotonic()
             timeout = max(0.0, next_sample - now)
@@ -1339,15 +1387,22 @@ def observe_event_stream(
                 scan_ts = time.time()
                 for raw in raw_events:
                     yield _packet_event(raw, None, None, scan_ts, "conntrack")
-                if conntrack_notice:
-                    yield _notice(conntrack_notice, degraded=True)
+                # Carry *both* reasons: on its own the conntrack complaint hides the
+                # fact that capture was one `sudo` away. Yielded only when it changes —
+                # the scan runs every tick but the reason almost never moves.
+                if conntrack_notice and conntrack_notice != last_conntrack_notice:
+                    last_conntrack_notice = conntrack_notice
+                    yield _notice(
+                        " · ".join(filter(None, (degraded_reason, conntrack_notice))),
+                        degraded=True,
+                    )
 
-            # Re-read gas each tick so the panel reflects it being spent live.
-            gas_raw = read_instance_gas(full_id)
+            # Re-read the balance each tick so the panel reflects it being spent live.
+            balance_raw = read_instance_balance(full_id)
             yield {
                 "kind": "metrics",
-                "gas": gas_raw,
-                "gas_display": format_gas(gas_raw),
+                "balance_mu": balance_raw,
+                "balance_display": format_balance(balance_raw),
                 **metrics_record(metrics, alive=True),
             }
     finally:
@@ -1385,11 +1440,11 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
     capture_mode = "conntrack"
     base_notice: Optional[str] = None
     full_id = instance_id
-    last_gas = {"v": "N/A"}
+    last_balance = {"v": "N/A"}
 
     def _do_render(notice: Optional[str]) -> None:
         flow_lines = [format_flow_line(r) for r in flow_table.active_rows()]
-        _render(header, metrics, last_gas["v"], flow_lines, save_dir, notice,
+        _render(header, metrics, last_balance["v"], flow_lines, save_dir, notice,
                 capture_mode)
         last_render["t"] = time.monotonic()
 
@@ -1405,7 +1460,7 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
                 capture_mode = event["capture_mode"]
                 base_notice = event.get("degraded_reason")
                 full_id = event["instance_id"]
-                last_gas["v"] = event.get("gas_display", last_gas["v"])
+                last_balance["v"] = event.get("balance_display", last_balance["v"])
                 if save_path:
                     save_dir = build_save_dir(save_path, event.get("tag"), full_id)
                     os.makedirs(save_dir, exist_ok=True)
@@ -1427,7 +1482,8 @@ def observe(instance_id: str, save_path: Optional[str] = None) -> None:
                 metrics.cpu_peak = event["cpu_peak_percent"]
                 metrics.mem_current = event["mem_bytes"]
                 metrics.mem_peak = event["mem_peak_bytes"]
-                last_gas["v"] = event.get("gas_display", last_gas["v"])
+                metrics.update_io(event)  # event keys match the counter attrs.
+                last_balance["v"] = event.get("balance_display", last_balance["v"])
                 if metrics_writer:
                     metrics_writer.write(metrics_record(metrics, alive=event["alive"]))
                 _do_render(base_notice)

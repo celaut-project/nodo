@@ -169,16 +169,21 @@ def generate_gateway_config_dev(path: str, envs: Dict[str, str]):
 
     # Add local instance into the DB
 
-    gas_amount = 10**30
+    # Unmetered dev client for the ggconf sandbox; the balance only has to clear
+    # whatever the node quotes. Same figure `nodo execute` funds its dev client
+    # with, and for the same reason -- see `execute.DEV_CLIENT_FUNDING_MU`.
+    from src.commands.execute import DEV_CLIENT_FUNDING_MU
 
-    client_id = next(get_dev_clients(gas_amount=gas_amount))
+    balance_mu = DEV_CLIENT_FUNDING_MU
+
+    client_id = next(get_dev_clients(amount_mu=balance_mu))
 
     sc.add_local_instance(
         name="rundev::" + path,
         father_id=client_id,
         container_id="rundev::" + path + "::" + str(os.getpid()),
         container_ip=get_local_ip(),  # localhost
-        gas=gas_amount,
+        balance_mu=balance_mu,
         serialized_instance="",
         service_id="rundev::" + path,
         virtualizer="ch",

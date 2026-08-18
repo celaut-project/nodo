@@ -13,7 +13,7 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 class ManagerExecuteClientTests(unittest.TestCase):
     def test_get_execute_client_uses_shared_acquire_path_for_standard_clients(self):
         with patch.object(manager, "_acquire_dev_client", return_value="dev-1") as mock_acquire:
-            client_id = manager.get_execute_client(gas_amount=10**16, external=False)
+            client_id = manager.get_execute_client(amount_mu=10**16, external=False)
 
         self.assertEqual(client_id, "dev-1")
         mock_acquire.assert_called_once_with(
@@ -24,7 +24,7 @@ class ManagerExecuteClientTests(unittest.TestCase):
 
     def test_get_execute_client_uses_shared_acquire_path_for_external_clients(self):
         with patch.object(manager, "_acquire_dev_client", return_value="dev-external-1") as mock_acquire:
-            client_id = manager.get_execute_client(gas_amount=10**16, external=True)
+            client_id = manager.get_execute_client(amount_mu=10**16, external=True)
 
         self.assertEqual(client_id, "dev-external-1")
         mock_acquire.assert_called_once_with(
