@@ -308,7 +308,16 @@ a socket to the service. They differ only in who runs the listener:
   decrypts, meters the bytes, checks the declared slot and relays to the service,
   which speaks its own protocol and knows nothing about TLS. The relay operator can
   therefore read the tunnelled traffic — already implied by per-byte metering.
-  End-to-end pass-through would need per-service identity, not just node identity.
+* **End to end, if you need it: the caller's business, and possible today.** A slot is
+  raw TCP or UDP, so whatever security the service and its client speak *above* that
+  transport rides inside the tunnel untouched — TLS, Noise, DTLS, anything. The relay
+  carries a faithful byte stream (TCP as a stream; UDP with datagram boundaries
+  preserved), so it does not have to understand it, and then it only ever sees the
+  volume, which is what it meters. Nothing in the node has to change for that, and no
+  per-service key has to exist.
+* **What that does *not* give you** is proof that the instance is running the binary
+  its hash claims. That is attestation, not transport: no amount of encryption at
+  either layer establishes it.
 * **Validated target:** the node checks the instance exists and the slot is
   declared before connecting anywhere.
 * **No direct routing:** callers never address the instance's internal IP; they
