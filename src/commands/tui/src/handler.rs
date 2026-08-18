@@ -113,6 +113,14 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Pricing => {
             app.open_price_editor()
         }
+        // Clients' +/- open an amount modal rather than nudging in place, unlike
+        // Peers/Pricing: a balance has no natural step size to nudge by.
+        (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Clients => {
+            app.open_credit_client(false)
+        }
+        (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Clients => {
+            app.open_credit_client(true)
+        }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Config => {
             app.open_config_editor()
         }

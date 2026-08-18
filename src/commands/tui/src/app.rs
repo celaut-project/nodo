@@ -82,6 +82,8 @@ pub enum InputMode {
     Connect,
     EditConfig,
     FilterConfig,
+    /// Amount entry for crediting/debiting the selected client's balance.
+    CreditClient,
     /// Yes/no confirmation before a destructive action (delete service, kill instance).
     Confirm,
     /// Read-only, scrollable overlay (e.g. `nodo inspect` output).
@@ -949,6 +951,9 @@ pub struct App {
     pub edit_kind: EditKind,
     /// Destructive action awaiting a y/N confirmation.
     pub pending_action: Option<PendingAction>,
+    /// Client id and direction (true = debit) for the open `CreditClient` amount modal.
+    pub credit_client_id: Option<String>,
+    pub credit_client_decrement: bool,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
@@ -1006,6 +1011,8 @@ impl Default for App {
             edit_config_secret: false,
             edit_kind: EditKind::Text,
             pending_action: None,
+            credit_client_id: None,
+            credit_client_decrement: false,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             sys: System::new_all(),
@@ -1181,6 +1188,7 @@ impl App {
         self.edit_config_secret = false;
         self.edit_kind = EditKind::Text;
         self.pending_action = None;
+        self.credit_client_id = None;
     }
 
     /// True while a background `nodo` command is still running.
@@ -1355,6 +1363,7 @@ impl App {
     pub async fn submit_input(&mut self) {
         match self.input_mode {
             InputMode::Connect => self.connect(),
+            InputMode::CreditClient => self.submit_credit_client(),
             InputMode::EditConfig => self.save_config_edit().await,
             InputMode::FilterConfig => {
                 self.config_filter = self.input.trim().to_string();
@@ -1387,6 +1396,69 @@ impl App {
             CommandKind::Generic,
             "Connect peer".to_string(),
             vec!["connect".to_string(), target],
+        );
+    }
+
+    // --- Clients ------------------------------------------------------------
+
+    /// Open an amount-entry modal to credit or debit the selected client's balance.
+    ///
+    /// The amount is typed in `ui.DISPLAY_UNIT` -- the same unit the balance column
+    /// already shows -- and, on submit, handed to `nodo credit_client`/`debit_client`
+    /// (see `src/commands/credit_client.py`). Delegating to the CLI rather than
+    /// writing `balance_mu` directly means the same MU conversion and client-existence
+    /// check the operator gets from a shell apply here too, with one code path to keep
+    /// correct instead of two.
+    pub fn open_credit_client(&mut self, decrement: bool) {
+        if self.page() != Page::Clients {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(client) = self.clients.selected().cloned() else {
+            self.status = "Select a client first".to_string();
+            return;
+        };
+        self.input_mode = InputMode::CreditClient;
+        self.input.clear();
+        self.input_title = format!(
+            "{} client {} (amount, {})",
+            if decrement { "Debit" } else { "Credit" },
+            shorten(&client.id, 18),
+            self.money.symbol
+        );
+        self.credit_client_id = Some(client.id);
+        self.credit_client_decrement = decrement;
+        self.edit_kind = EditKind::Text;
+    }
+
+    /// Validate the typed amount and run the credit/debit as a background `nodo`
+    /// command, the same way a confirmed [`PendingAction`] does.
+    fn submit_credit_client(&mut self) {
+        let Some(client_id) = self.credit_client_id.clone() else {
+            self.close_input();
+            return;
+        };
+        let decrement = self.credit_client_decrement;
+        let amount = self.input.trim().to_string();
+        let valid = amount.parse::<f64>().map(|value| value > 0.0).unwrap_or(false);
+        if !valid {
+            self.status = "Amount must be a positive number".to_string();
+            return;
+        }
+        self.close_input();
+        let label = format!(
+            "{} client {}",
+            if decrement { "Debit" } else { "Credit" },
+            shorten(&client_id, 18)
+        );
+        let command = if decrement { "debit_client" } else { "credit_client" };
+        self.spawn_command(
+            CommandKind::Generic,
+            label,
+            vec![command.to_string(), client_id, amount],
         );
     }
 

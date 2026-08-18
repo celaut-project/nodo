@@ -333,6 +333,16 @@ These commands offer extended management and exploration features:
   **Example:**  
   `nodo peers`
 
+- **credit_client `<client id> <amount>`**  
+  Adds to a client's balance. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
+  **Example:**  
+  `nodo credit_client abcdef1234567890 0.01`
+
+- **debit_client `<client id> <amount>`**  
+  Takes back part of a client's balance.  
+  **Example:**  
+  `nodo debit_client abcdef1234567890 0.005`
+
 ---
 
 ## Estimate Resource Calculation Notes (internal)
@@ -538,7 +548,8 @@ removed because nodo does not use it.
 - `r` refreshes.
 - On Peers, `c` connects a peer, `d` forgets the selected one (`nodo disconnect`), and `+`/`-` adjust its
   reputation. The detail card shows what this node has paid that peer and the events behind its score.
-- On Clients, the detail card shows what a client has paid, its deposit tokens, and the instances it
+- On Clients, `+`/`-` credit/debit the selected client's balance (`nodo credit_client`/`debit_client`),
+  and the detail card shows what a client has paid, its deposit tokens, and the instances it
   started here.
 - On Services, `e` executes the selected service and `d` deletes it.
 - On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
@@ -560,6 +571,7 @@ commands that take one, the identifier of the relevant object:
   `export`, `integrity`
 - **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_deposit`, `decrease_deposit`
 - **Peer id** — `disconnect`, `increase_peer_deposit`
+- **Client id** — `credit_client`, `debit_client`
 - **Subcommands** — `daemon start|status|stop|restart`
 
 The installer sets this up automatically. To (re)install it yourself:

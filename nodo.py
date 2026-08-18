@@ -225,6 +225,8 @@ if __name__ == '__main__':
                     "\n- tx_history"
                     "\n- force_execution <peer_id> [--name instance-name] [-e key value] <service id> | <service tag> | <'.celaut' file path>  (bypasses the execution balancer; delegates straight to peer_id, no fallback -- testing/dev only)"
                     "\n- increase_peer_deposit <peer id> <amount>"
+                    "\n- credit_client <client id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
+                    "\n- debit_client <client id> <amount>"
                     "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
                     "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your balance on that peer afterward)"
                     "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
@@ -784,6 +786,14 @@ if __name__ == '__main__':
             case "increase_peer_deposit":
                 from src.commands.increase_peer_deposit import increase_peer_deposit
                 increase_peer_deposit(peer_id=sys.argv[2], amount=sys.argv[3])
+
+            case "credit_client":
+                from src.commands.credit_client import credit_client
+                credit_client(client_id=sys.argv[2], amount=sys.argv[3], decrement=False)
+
+            case "debit_client":
+                from src.commands.credit_client import credit_client
+                credit_client(client_id=sys.argv[2], amount=sys.argv[3], decrement=True)
 
             case "verify_reputation":
                 if len(sys.argv) < 3:
