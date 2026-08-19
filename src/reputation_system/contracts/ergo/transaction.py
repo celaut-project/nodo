@@ -316,6 +316,22 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     outputs = []
 
+    # An opinion is about a node, and a node *is* its public key (issue #236), so R5
+    # carries the target's key. It used to carry a reputation proof's token id, which
+    # made every opinion an opinion about one of that node's proofs rather than about
+    # the node -- a single key can hold several proofs, and minting a fresh one shed
+    # the accumulated on-chain reputation (issue #281). Our own key comes from the same
+    # identity keypair the R7 owner does, so a self-opinion is addressed exactly like
+    # any peer's.
+    from src.reputation_system.node_identity import get_node_public_key_hex
+
+    node_public_key = get_node_public_key_hex()
+    if not node_public_key:
+        raise Exception(
+            "No node identity public key available (ledgers.ergo.WALLET_MNEMONIC); "
+            "cannot address a reputation opinion."
+        )
+
     for obj in objects:
         self_info = not obj[0]
         if self_info:
@@ -329,7 +345,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             sender_address=sender_address,
             assigned_object=ProofObject(
                 type=CELAUT_NODE_TYPE_NFT_ID,
-                value=obj[0] if not self_info and obj[0] else proof_id
+                value=node_public_key if self_info else obj[0]
             ),
             token_amount=int(obj[1]),
             data=data or ""

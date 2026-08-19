@@ -38,7 +38,6 @@ TABLES = {
             remote_client_id TEXT,
             balance_mu TEXT,
             balance_last_update DATETIME DEFAULT NULL,
-            reputation_proof_id TEXT,
             reputation_score INTEGER,
             reputation_index INTEGER,
             last_index_on_ledger INTEGER,

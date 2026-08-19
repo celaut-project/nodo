@@ -222,7 +222,11 @@ pub struct Peer {
     /// prints as "Remote Client ID". Empty when we have never registered there.
     /// Never a key into our own `clients` table (see the balance note above).
     pub remote_client_id: String,
-    pub reputation: String,
+    /// Every reputation proof this peer announced. These are the peer's *own*
+    /// opinions about other nodes, published on-chain — not a credential we hold on
+    /// it, and not one value: a single identity key can hold several proofs, so the
+    /// list comes from its signed advertisement rather than a column (issue #281).
+    pub proof_ids: Vec<String>,
     /// Local reputation score (nodo-managed, independent of the on-chain proof).
     pub reputation_score: String,
     /// Every payment contract this peer has registered. Rendered in the peer
@@ -2210,13 +2214,12 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
         "SELECT p.id,
                 COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
                 p.balance_mu,
-                COALESCE(p.reputation_proof_id, ''),
+                p.advertisement,
                 p.reputation_score,
                 COALESCE(p.remote_client_id, '')
          FROM peer p
          LEFT JOIN uri u ON p.id = u.peer_id
-         GROUP BY p.id, p.balance_mu, p.reputation_proof_id, p.reputation_score,
-                  p.remote_client_id",
+         GROUP BY p.id",
     )?;
     let peers = statement
         .query_map([], |row| {
@@ -2224,11 +2227,31 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 .get::<_, Option<i64>>(4)?
                 .map(|score| score.to_string())
                 .unwrap_or_else(|| "0".to_string());
+            // Straight out of the advertisement the peer signed, which we store
+            // verbatim: it carries every proof the peer holds, where a column of our
+            // own could only ever keep the last one announced (issue #281).
+            let proof_ids = row
+                .get::<_, Option<Vec<u8>>>(3)?
+                .and_then(|bytes| protos::Peer::decode(&*bytes).ok())
+                .map(|announced| {
+                    announced
+                        .reputation_proofs
+                        .into_iter()
+                        .filter_map(|contract| {
+                            contract
+                                .xattrs
+                                .get("token_id")
+                                .and_then(|value| String::from_utf8(value.clone()).ok())
+                        })
+                        .filter(|token_id| !token_id.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
             let id: String = row.get(0)?;
             Ok(Peer {
                 uris: row.get(1)?,
                 balance: row.get::<_, String>(2)?,
-                reputation: row.get(3)?,
+                proof_ids,
                 reputation_score,
                 remote_client_id: row.get(5)?,
                 // `contract_instance` isn't touched by the join above (it isn't
@@ -3828,7 +3851,7 @@ mod tests {
         let connection = Connection::open(&path).unwrap();
         connection
             .execute_batch(
-                "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT, reputation_proof_id TEXT,
+                "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT, advertisement BLOB,
                                     reputation_score INTEGER, remote_client_id TEXT);
                  CREATE TABLE uri (id INTEGER PRIMARY KEY, peer_id TEXT, ip TEXT, port INTEGER);
                  CREATE TABLE ledger (hash TEXT PRIMARY KEY, content BLOB);
@@ -4261,7 +4284,7 @@ Cold Wallet: 9cold\n";
                 uris: "10.0.0.1:8080".to_string(),
                 balance: "0".to_string(),
                 remote_client_id: String::new(),
-                reputation: "—".to_string(),
+                proof_ids: Vec::new(),
                 reputation_score: "0".to_string(),
                 contracts: Vec::new(),
             }
@@ -4343,7 +4366,7 @@ Cold Wallet: 9cold\n";
             connection
                 .execute_batch(
                     "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT,
-                                        reputation_proof_id TEXT, reputation_score INTEGER,
+                                        advertisement BLOB, reputation_score INTEGER,
                                         reputation_index INTEGER);
                      CREATE TABLE clients (id TEXT PRIMARY KEY, balance_mu TEXT,
                                         last_usage FLOAT, unmetered INTEGER NOT NULL DEFAULT 0);
