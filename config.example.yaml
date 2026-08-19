@@ -189,7 +189,6 @@ network:
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
-  TUNNEL_LOGS: false  # Log every tunnel handshake, relay close and billing tick under "[TUNNEL]". Off by default: it is one line per connection and per billed MiB, which buries the rest of the node log on a busy tunnel. Turn on to debug tunneling.
 
 # Dynamic DNS: keep a hostname pointing at this node's public IP, so peers can
 # find it by name when the address changes. Tunneling means only the gateway port
@@ -208,6 +207,7 @@ ddns:
 logs:
   MEMORY_LOGS: false
   DEBUG_MODE: false
+  TUNNEL_LOGS: false  # Log every tunnel handshake, relay close and billing tick under "[TUNNEL]". Off by default: it is one line per connection and per billed MiB, which buries the rest of the node log on a busy tunnel. Turn on to debug tunneling.
 
 # What this node charges, in MU (monetary unit) -- the node's own unit of account.
 # Full model and worked examples: docs/PRICING.md.

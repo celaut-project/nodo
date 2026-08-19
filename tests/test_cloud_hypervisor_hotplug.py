@@ -1,4 +1,5 @@
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -115,6 +116,86 @@ class CloudHypervisorHotplugTests(unittest.TestCase):
         report = persisted["payload"]["last_hotplug_report"]["results"]
         self.assertEqual(report["mem_limit"]["status"], "failed")
         self.assertEqual(report["db"]["status"], "ignored")
+
+    def _run(self, req, vmachine_id="vm-r", pid=999):
+        """Runs hotplug with every host effect stubbed; returns (result, report, mocks)."""
+        persisted = {}
+
+        def _capture_state(_vmachine_id, payload):
+            persisted["payload"] = payload
+
+        with ExitStack() as stack:
+            def _patch(name, **kwargs):
+                return stack.enter_context(patch.object(ch_hotplug, name, **kwargs))
+
+            _patch("load_runtime_state", return_value={"vmachine_id": vmachine_id, "pid": pid})
+            _patch("save_runtime_state", side_effect=_capture_state)
+            _patch("cgroup_v2_available", return_value=True)
+            _patch("ensure_vm_cgroup", return_value=Path(f"/sys/fs/cgroup/nodo-ch/{vmachine_id}"))
+            mocks = {
+                "apply_memory_limit": _patch("apply_memory_limit"),
+                "apply_cpu_limit": _patch("apply_cpu_limit"),
+                "modify_sysreq": _patch("modify_sysreq", return_value=True),
+            }
+            result = ch_hotplug.hotplug(vmachine_id=vmachine_id, system_requeriments_range=req)
+
+        return result, persisted["payload"]["last_hotplug_report"]["results"], mocks
+
+    def test_hotplug_persists_only_the_fields_it_applied(self):
+        # disk_space is reported unsupported and nothing here resizes an image, so it
+        # must not reach the row -- the tick would then bill an instance for a disk
+        # change that never happened.
+        req = self._base_request()
+        req.max_sysreq.disk_space = 1024
+
+        result, report, mocks = self._run(req, vmachine_id="vm-applied")
+
+        self.assertTrue(result)
+        self.assertEqual(report["disk_space"]["status"], "unsupported")
+        persisted_sysreq = mocks["modify_sysreq"].call_args.kwargs["sys_req"]
+        self.assertFalse(persisted_sysreq.HasField("disk_space"))
+        self.assertEqual(persisted_sysreq.mem_limit, req.max_sysreq.mem_limit)
+        self.assertEqual(persisted_sysreq.cpu_period, req.max_sysreq.cpu_period)
+        self.assertEqual(persisted_sysreq.cpu_quota, req.max_sysreq.cpu_quota)
+
+    def test_a_disk_only_resize_does_not_touch_the_row_at_all(self):
+        # Nothing is applied to the guest, so nothing may be written: a request the
+        # virtualizer declines in full leaves the row exactly as it was, and with it the
+        # price of an instance still holding its whole image.
+        req = celaut.ModifyServiceSystemResourcesInput()
+        req.max_sysreq.disk_space = 1
+
+        result, report, mocks = self._run(req, vmachine_id="vm-disk-only")
+
+        mocks["modify_sysreq"].assert_not_called()
+        self.assertEqual(report["db"]["status"], "ignored")
+        self.assertEqual(report["disk_space"]["status"], "unsupported")
+        self.assertTrue(result)  # nothing failed; nothing was asked that could be done
+
+    def test_hotplug_refuses_an_unlimited_memory_request(self):
+        # mem_limit=0 would write memory.max=max and store 0, which prices as no memory:
+        # unbounded RAM for free.
+        req = celaut.ModifyServiceSystemResourcesInput()
+        req.max_sysreq.mem_limit = 0
+
+        result, report, mocks = self._run(req, vmachine_id="vm-unlimited-mem")
+
+        self.assertFalse(result)
+        self.assertEqual(report["mem_limit"]["status"], "unsupported")
+        mocks["apply_memory_limit"].assert_not_called()
+        mocks["modify_sysreq"].assert_not_called()
+
+    def test_hotplug_refuses_an_unlimited_cpu_request(self):
+        req = celaut.ModifyServiceSystemResourcesInput()
+        req.max_sysreq.cpu_period = 100000
+        req.max_sysreq.cpu_quota = 0
+
+        result, report, mocks = self._run(req, vmachine_id="vm-unlimited-cpu")
+
+        self.assertFalse(result)
+        self.assertEqual(report["cpu"]["status"], "unsupported")
+        mocks["apply_cpu_limit"].assert_not_called()
+        mocks["modify_sysreq"].assert_not_called()
 
     def test_hotplug_requires_valid_pid_for_supported_fields(self):
         req = self._base_request()
