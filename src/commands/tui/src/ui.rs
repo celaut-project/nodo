@@ -880,7 +880,11 @@ fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
             Cell::from(peer.uris.clone()),
             Cell::from(app.money.format_raw(&peer.balance)),
             Cell::from(peer.reputation_score.clone()).style(Style::default().fg(GOOD).bold()),
-            Cell::from(peer.reputation.clone()),
+            Cell::from(match peer.proof_ids.len() {
+                0 => "none".to_string(),
+                1 => shorten(&peer.proof_ids[0], 18),
+                n => format!("{n} announced"),
+            }),
         ])
     });
     let peer_table = Table::new(
@@ -898,7 +902,7 @@ fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
         "Endpoints",
         "Our balance",
         "Rep",
-        "Reputation proof",
+        "Reputation proofs",
     ]))
     .block(section_block(
         format!(" PEERS • {} connected ", app.peers.items.len()),
@@ -1204,14 +1208,26 @@ fn peer_detail_lines(
             "Our client id there",
             nonempty(&peer.remote_client_id, "not registered").to_string(),
         ));
+        // The score is ours, first-hand, keyed by this peer's public key. The proofs
+        // below are the peer's own published opinions about other nodes, as it
+        // announced them -- unverified here (issue #281).
         lines.push(metric_line(
             "Reputation",
             format!(
-                "{}  •  proof {}",
+                "{}  •  {}",
                 peer.reputation_score,
-                nonempty(&peer.reputation, "none")
+                match peer.proof_ids.len() {
+                    0 => "no proof announced".to_string(),
+                    n => format!("{n} proof(s) announced"),
+                }
             ),
         ));
+        for proof_id in &peer.proof_ids {
+            lines.push(Line::from(vec![
+                Span::styled("      proof  ", Style::default().fg(MUTED)),
+                Span::styled(shorten(proof_id, 46), Style::default().fg(Color::White)),
+            ]));
+        }
         lines.push(Line::from(""));
     }
 
@@ -2217,7 +2233,7 @@ mod tests {
             // Raw MU, as the catalogue stores it; formatting happens at draw time.
             balance: "1000".to_string(),
             remote_client_id: "cli-9f2a".to_string(),
-            reputation: String::new(),
+            proof_ids: Vec::new(),
             reputation_score: "7".to_string(),
             contracts,
         }
@@ -2767,7 +2783,7 @@ mod tests {
                         uris: "10.0.0.4:8080".to_string(),
                         balance: "1000".to_string(),
                         remote_client_id: String::new(),
-                        reputation: String::new(),
+                        proof_ids: Vec::new(),
                         reputation_score: "0".to_string(),
                         contracts: Vec::new(),
                     })

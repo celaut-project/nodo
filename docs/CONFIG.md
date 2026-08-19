@@ -260,6 +260,9 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
   smaller ones inline.
 - `misc.VALIDATE_ON_IMPORT` (`true`), `misc.CONFIGURATION_REQUIRED`.
 - `logs.DEBUG_MODE`, `logs.MEMORY_LOGS`.
+- `logs.TUNNEL_LOGS` — log every tunnel handshake, relay close and billing tick
+  under `[TUNNEL]`. Off by default: one line per connection and per billed MiB
+  buries the rest of the node log on a busy tunnel. See [`TUNNELING.md`](TUNNELING.md).
 - `low_demand.*` — opportunistic idle scheduler (off by default; WIP).
 - `publisher.*` — how `nodo publish` uploads a service and how a freshly-published
   source gets registered (GitHub repo, chunking, auto-publish-tx settings).

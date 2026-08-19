@@ -183,16 +183,26 @@ def get_execute_client(amount_mu: int, external: bool = False) -> str:
     pool_size = DEV_EXTERNAL_CLIENT_POOL_SIZE if external else STANDARD_DEV_CLIENT_POOL_SIZE
     return _acquire_dev_client(prefix, pool_size, amount_mu)
             
-def add_reputation_proof(contract_ledger, peer_id) -> bool:
+def validate_reputation_proof(contract_ledger, peer_id) -> bool:
+    """Check that ``peer_id`` really controls a reputation proof it announced.
+
+    Nothing is stored: the proof ids themselves live in the peer's signed
+    advertisement, which is kept verbatim (see :func:`_peer_advertisement`), and a
+    peer holds as many proofs as it likes -- there is no single one to record
+    (issue #281). What this call is for is the check itself: a peer announcing a
+    proof whose on-chain R7 owner is a different key is either misconfigured or
+    claiming someone else's reputation, and that is worth a log line even though
+    the peer is still accepted (its identity rests on the signature it sent, see
+    :func:`verified_peer_public_key`, not on any proof).
+    """
     from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_ergo_reputation
 
     # Verify contract and ledger compatibility and ownership
     if not validate_ergo_reputation(contract_ledger, peer_id):
         log.LOGGER(f"Not supported reputation contract.")
         return False
-    
-    # Stores on DB
-    return sc.add_reputation_proof(contract=contract_ledger, peer_id=peer_id)
+
+    return True
 
 
 def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int]]:
@@ -348,14 +358,15 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
         except Exception as e:
             log.LOGGER(f"Error adding contract {rate.contract} for peer {peer_id}: {e}")
 
+    # The proofs a peer announces are its own opinions about other nodes, not a
+    # credential we hold on file (issue #281). They travel in the advertisement stored
+    # above; all that is left to do here is flag one the peer does not actually own.
     for contract in peer.reputation_proofs:
-        log.LOGGER(f"Adding reputation proof {contract} for peer {peer_id}")
         try:
-            if not add_reputation_proof(contract_ledger=contract, peer_id=peer_id):
-                log.LOGGER(f"Controlled error to add reputation proof {contract} for peer {peer_id}")
-                continue
+            if not validate_reputation_proof(contract_ledger=contract, peer_id=peer_id):
+                log.LOGGER(f"Peer {peer_id} announced a reputation proof it does not own.")
         except Exception as e:
-            log.LOGGER(f"Uncontrolled error adding reputation proof {contract} for peer {peer_id}: {e}")
+            log.LOGGER(f"Uncontrolled error validating reputation proof for peer {peer_id}: {e}")
 
     return peer_id
 
@@ -383,8 +394,11 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
             log.LOGGER(f"Error adding contract {rate.contract} for peer {peer_id}: {e}")
 
     for contract_ledger in peer.reputation_proofs:
-        if not add_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
-            continue
+        try:
+            if not validate_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
+                log.LOGGER(f"Peer {peer_id} announced a reputation proof it does not own.")
+        except Exception as e:
+            log.LOGGER(f"Uncontrolled error validating reputation proof for peer {peer_id}: {e}")
 
     log.LOGGER(f"Peer {peer_id} updated.")
     return stored

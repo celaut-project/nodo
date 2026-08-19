@@ -4,6 +4,7 @@ from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
 from src.utils.monetary import format_mu
+from src.utils.contract_xattrs import get_token_id
 from src.database.sql_connection import SQLConnection
 
 
@@ -58,7 +59,7 @@ def list_peers():
             SELECT
                 id, advertisement, remote_client_id,
                 balance_mu, balance_last_update,
-                reputation_proof_id, reputation_score,
+                reputation_score,
                 reputation_index, last_index_on_ledger
             FROM peer
             '''
@@ -73,11 +74,12 @@ def list_peers():
             (
                 peer_id, advertisement, remote_client_id,
                 balance_str, balance_last_update,
-                reputation_proof_id, reputation_score,
+                reputation_score,
                 reputation_index, last_index_on_ledger
             ) = peer
 
             advertised_rates = {}
+            proof_ids = []
             protocol_stack_tags = "N/A"
             if advertisement:
                 announced = celaut.Peer()
@@ -101,6 +103,13 @@ def list_peers():
                 advertised_rates = {
                     rate: amount.n for rate, amount in announced.mu_per_call.items()
                 }
+                # Every proof the peer announced, not just one: a node can hold
+                # several, and each is an opinion set it published (issue #281).
+                proof_ids = [
+                    token_id for token_id in (
+                        get_token_id(contract) for contract in announced.reputation_proofs
+                    ) if token_id
+                ]
 
             # The column holds the peer's own MU (see
             # `SQLConnection.refresh_balance_for_peer`), and `format_mu` renders in
@@ -154,8 +163,16 @@ def list_peers():
             print()
 
             # Section: Reputation
+            # Score/index are our own first-hand opinion of this peer, keyed by its
+            # public key. The proof ids are the peer's opinions about others -- what
+            # it announced, unverified here (run `nodo verify_reputation <peer>`).
             print("[Reputation]")
-            print(f"  Proof ID: {reputation_proof_id or 'None'}")
+            if proof_ids:
+                print(f"  Announced proof IDs ({len(proof_ids)}):")
+                for token_id in proof_ids:
+                    print(f"    {token_id}")
+            else:
+                print("  Announced proof IDs: None")
             print(f"  Score: {reputation_score or 'None'}")
             print(f"  Index: {reputation_index or 'None'}")
             print(f"  Last Index on Ledger: {last_index_on_ledger or 'None'}")
