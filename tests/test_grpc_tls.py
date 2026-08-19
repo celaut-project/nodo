@@ -13,7 +13,10 @@ What these pin, in order of what would hurt most if it broke:
   self-signed certificate accepted as its own trust anchor) are exercised here;
 * the plaintext port stays plaintext, and is the one a service is handed -- peers and
   the CLI get TLS with no exception, but a service we execute speaks plain gRPC over a
-  hop that never leaves the host.
+  hop that never leaves the host;
+* that plaintext port binds one address and not every interface -- it serves the same
+  unauthenticated `Gateway`, so a wildcard bind would hand the whole API to any host
+  that can route here, which is what the TLS port exists to prevent.
 """
 import datetime
 import ssl
@@ -256,3 +259,45 @@ class ServiceFacingGatewayTests(unittest.TestCase):
             [(u.ip, u.port) for s in instance.uri_slot for u in s.uri],
             [("192.168.200.1", 6000)],
         )
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class PlaintextGatewayBindTests(unittest.TestCase):
+    """Where the plain-gRPC port listens.
+
+    The same `Gateway` is behind it, with nothing authenticating the caller, so the
+    address it binds *is* the security boundary: everything the TLS port is for would be
+    handed away by a listener on every interface.
+    """
+
+    def test_binds_the_gateway_address_from_the_config_file(self):
+        # The proto contract decides: the same setting that fills __config__.gateway,
+        # so a service reaches the port exactly where it was told to look.
+        with unittest.mock.patch.object(
+            gateway_utils, "_uri_for_network",
+            return_value=celaut_pb2.Instance.Uri(ip="192.168.200.1", port=6000),
+        ) as resolved:
+            self.assertEqual(gateway_utils.plaintext_gateway_host(), "192.168.200.1")
+
+        self.assertEqual(resolved.call_args.args, ("br-ch",))
+
+    def test_never_binds_every_interface(self):
+        # Neither branch out of here may widen into a wildcard: an interface that
+        # somehow reports one is refused rather than served.
+        for reported in ("0.0.0.0", "::", ""):
+            with self.subTest(reported=reported):
+                with unittest.mock.patch.object(
+                    gateway_utils, "_uri_for_network",
+                    return_value=celaut_pb2.Instance.Uri(ip=reported, port=6000),
+                ):
+                    self.assertEqual(
+                        gateway_utils.plaintext_gateway_host(), "127.0.0.1"
+                    )
+
+    def test_falls_back_to_loopback_when_the_bridge_is_not_up(self):
+        # A fresh install has no bridge yet. The local hop still works and the kernel,
+        # not an ACL nobody wrote, refuses everyone else.
+        with unittest.mock.patch.object(
+            gateway_utils, "_uri_for_network", side_effect=Exception("no such interface")
+        ):
+            self.assertEqual(gateway_utils.plaintext_gateway_host(), "127.0.0.1")

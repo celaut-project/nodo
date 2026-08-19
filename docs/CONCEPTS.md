@@ -153,7 +153,11 @@ not peers:
   mean shipping certificate pinning into every service SDK for a local hop.
 * **External callers that do not want TLS.** TLS is what the node *offers*; a caller
   that declines it is that caller's own risk. The plaintext port is not announced to
-  peers and no firewall rule is opened for it, so reaching it from another host takes a
+  peers, no firewall rule is opened for it, and it listens on one address only — the
+  gateway address the config file already names (`virtualizers.ch.NETWORK_BRIDGE_NAME`,
+  the same one written into `__config__.gateway`; loopback if that bridge is not up),
+  never `[::]`. Serving the unauthenticated `Gateway` on every interface would give away
+  exactly what the TLS port protects. So reaching it from another host takes a
   port-forward set up on purpose. `0` disables it, and then a service must speak TLS too.
 
 Also outside TLS: the node→service leg of a tunnel (TLS terminates at the node, see

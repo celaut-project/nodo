@@ -156,9 +156,11 @@ network:
   # use -- always, with no exception. This one exists for the services this node runs,
   # which speak plain gRPC and are handed this port in their `__config__.gateway`, and
   # for external callers that do not want TLS. `auto` means GATEWAY_PORT + 1; `0`
-  # disables it, and then a service must speak TLS too. It is NOT announced to peers
-  # and no firewall rule is opened for it, so reaching it from outside this host takes
-  # a port-forward you set up yourself.
+  # disables it, and then a service must speak TLS too. It is NOT announced to peers,
+  # no firewall rule is opened for it, and it binds only the gateway address itself
+  # (virtualizers.ch.NETWORK_BRIDGE_NAME, or loopback if that bridge is down) rather
+  # than every interface -- so reaching it from outside this host takes a port-forward
+  # you set up yourself.
   GATEWAY_PLAINTEXT_PORT: auto
   LOCAL_NETWORK: "lo"
   # How long (seconds) this node expects to keep its current address -- typically the
