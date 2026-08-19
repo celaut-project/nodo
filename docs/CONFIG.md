@@ -3,11 +3,9 @@
 Nodo reads a single `config.yaml`, created from
 [`config.example.yaml`](../config.example.yaml) at install time. It lives in the
 installation root (`TARGET_DIR`, default `/nodo`), i.e. `/nodo/config.yaml`. The
-`main.MAIN_DIR` value inside it is the same root. Edit it directly, or use
-`nodo config` (`bash/reconfig.sh` — edits in place with `yq -i`, preserving
-comments, but writes **no** backup) or the `nodo tui` Config page (which also
-preserves comments and additionally writes a `config.yaml.tui.bak` backup on each
-change).
+`main.MAIN_DIR` value inside it is the same root. Edit it directly, or use the
+`nodo tui` Config page, which edits in place with `yq -i` (preserving comments) and
+snapshots the previous file to `config-<YYYYMMDDHHMMSS>.yaml` beside it.
 
 > ⚠️ nodo **rewrites** `config.yaml` on its first load: `auto` values such as
 > `network.GATEWAY_PORT` and `ledgers.ergo.WALLET_MNEMONIC` are resolved to
@@ -158,6 +156,7 @@ The two directions are separate settings, and neither implies the other:
 |---|---|
 | Don't run services **for** other peers (client-only) | `client.ACCEPT_NEW_DEPOSITS: false` |
 | Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
+| Keep delegating, but approve every outgoing payment yourself | `deposits.AUTOMATIC_REFILL: false` |
 
 ## `ddns`
 
@@ -203,6 +202,7 @@ set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING
 | `free_tier.CREDIT_MU_PER_NEW_CLIENT` | `0` | Starting balance given to every new client. |
 | `free_tier.FREE_WHILE_SCARCITY_BELOW` | `0.0` | Charge nothing while *every* resource is below this share of capacity. `0.0` disables it. |
 | `ui.DISPLAY_UNIT` | `erg` | What you read and type. `erg`, `mu`, or a name declared under `ui.UNITS`. Purely presentational. |
+| `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
 | `deposits.MAX_FEE_OVERHEAD` | `0.02` | Largest share of a peer deposit that may go to the transaction fee. Sizes the deposit. |
 | `deposits.REFILL_BELOW` | `0.2` | Refill a peer once its balance drops below this share of a full deposit. |
 | `deposits.INITIAL_RUNTIME_HOURS` | `1.0` | How long a new instance is funded for when the client asks for no specific balance. |

@@ -170,8 +170,11 @@ def generate_gateway_config_dev(path: str, envs: Dict[str, str]):
     # Add local instance into the DB
 
     # Unmetered dev client for the ggconf sandbox; the balance only has to clear
-    # whatever the node quotes.
-    balance_mu = 10**16
+    # whatever the node quotes. Same figure `nodo execute` funds its dev client
+    # with, and for the same reason -- see `execute.DEV_CLIENT_FUNDING_MU`.
+    from src.commands.execute import DEV_CLIENT_FUNDING_MU
+
+    balance_mu = DEV_CLIENT_FUNDING_MU
 
     client_id = next(get_dev_clients(amount_mu=balance_mu))
 

@@ -47,10 +47,10 @@ import netifaces as ni
 
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
+from src.tunneling import logger
+from src.tunneling.tunnel_client import serve_tcp, serve_udp
 from src.utils import utils
 from src.utils.config import ConfigManager
-from src.utils.logger import LOGGER as logger
-from src.tunneling.tunnel_client import serve_tcp, serve_udp
 from src.virtualizers.firewall import TransportProtocol, resolve_slot_transport_protocols
 
 sc = SQLConnection()

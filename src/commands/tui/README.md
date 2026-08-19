@@ -11,8 +11,9 @@ particular installation directory.
 |---|---|
 | **Overview** | Node status/version/address, host CPU and RAM, current and reserved instance resources, disk usage, nodo storage size, peer/client counts, service count, reputation proof, and Ergo wallet balances. |
 | **Instances** | Running instances with service, endpoint, virtualizer, balance, and what each one is *using* rather than only what it was allocated: live CPU%, memory used against its limit, and network rates. The detail card adds the vCPU allowance the CPU% is measured against, cumulative disk and network totals, and the disk allocation. |
-| **Services** | Locally available services, metadata tag, content ID, stored size, and execution action. |
-| **Network** | Connected peers/endpoints/reputation and known clients, with each peer's payment contracts and the rate it declares. The obsolete tunnels page was removed. |
+| **Services** | Locally available services, metadata tag, content ID, stored size, and execution action. The detail card carries the service's reputation — accumulated over every instance of it that has run here, since an instance is gone minutes after it misbehaves — and the events behind it. |
+| **Peers** | Who we talk to: endpoints, our balance with each, reputation, and the payment contracts and rates a peer declares. The detail card adds every payment we have made to the selected peer — including one broadcast that the peer never acknowledged — and the reputation events behind its score, each with the reason that produced it. Peers can be connected (`c`) and forgotten (`d`) from here. |
+| **Clients** | Who pays us: balance, last usage, and whether the client is metered at all. The detail card lists what it has paid, the deposit tokens it holds and what became of them, and the instances it started here. A client cannot be resolved to a peer and the page does not pretend otherwise (see issue #178). Balance can be credited/debited with `+`/`-`. |
 | **Pricing** | What this node charges, per resource, as vertical bars you can nudge. Recurring and one-off prices are charted apart because their magnitudes are unrelated. Beside them: the display unit, what one MU is worth on the ledger, the scarcity ceiling, and a worked hourly example. |
 | **Config** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited. |
 | **Logs** | Tail of `storage/app.log` beside commands/actions launched from the TUI. |
@@ -62,30 +63,50 @@ common case.
 
 | Key | Action |
 |---|---|
-| `←` / `→` | Previous/next page |
-| `↑` / `↓` | Select table row |
+| `Tab` / `Shift+Tab` | Next/previous page (both wrap) |
+| `↑` / `↓` | Select table row, or move through the Config tree |
+| `→` / `←` | Enter/leave a Config branch (see below); ignored by the other pages |
 | `r` | Force a refresh |
-| `Tab` | Switch peer/client focus on Network |
-| `c` | Connect a peer from Network |
+| `c` | Connect a peer, from Peers |
+| `d` | Delete the selected service, or forget the selected peer on Peers |
+| `k` | Kill the selected instance |
+| `g` | Instances: dependency tree / flat list |
+| `i` | Service details |
 | `e` | Execute the selected service, or edit the selected Config or Pricing value |
-| `+` / `-` | Adjust peer reputation on Network, or the selected price by 10 % on Pricing |
+| `+` / `-` | Adjust peer reputation on Peers, the selected price by 10 % on Pricing, or open a credit/debit amount modal on Clients |
 | `/` | Filter Config paths/values |
 | `x` | Clear the Config filter |
+| `Enter` / `Space` | Expand/collapse the selected Config section |
 | `Enter` / `Esc` | Save/cancel a modal |
 | `Ctrl+U` | Clear modal input |
 | `q` or `Ctrl+C` | Exit |
+
+`d` on Peers runs `nodo disconnect <peer id>`, which drops the peer row together with
+its addresses and contract instances. The peer is **forgotten, not banned**: it can
+re-introduce itself, or be reconnected with `c`. Use it on a peer whose addresses went
+stale — notably one that reinstalled and came back under a new identity key, since
+`nodo connect` moves the address to the new peer_id and leaves the old row behind.
+
+`+`/`-` on Clients opens an amount modal (typed in `ui.DISPLAY_UNIT`, same as the balance
+column) and, on `Enter`, runs `nodo credit_client <client id> <amount>` or
+`nodo debit_client <client id> <amount>` in the background.
 
 ## Configuration editor
 
 The Config page operates on the full YAML tree instead of a small hard-coded allowlist. For
 example, list values appear as `core_services[1].id` and nested values as
-`virtualizers.ch.MIN_MEM_MIB`.
+`virtualizers.ch.MIN_MEM_MIB`. It is the node's only configuration editor — the
+`nodo config` wizard it replaced has been removed ([`docs/CONFIG.md`](../../../docs/CONFIG.md)).
 
+- `→` enters the selected branch, `←` collapses it or steps out to its parent, so a
+  nested key is reachable (and escapable) with the arrows alone. `↑`/`↓` move through
+  whatever is currently visible.
 - Input is parsed as YAML, so `true`, `5000`, `1.5`, `null`, `[]`, and quoted strings retain
   the expected type.
 - The update is performed with nodo's configured `yq` binary, preserving comments and the
   rest of the file layout.
-- Before every write, the previous file is copied to `config.yaml.tui.bak`.
+- Before every write, the previous file is snapshotted to `config-<YYYYMMDDHHMMSS>.yaml`
+  beside it; the ten most recent are kept.
 - Paths containing `mnemonic`, `password`, `secret`, `private_key`, `token`, or `api_key` are
   masked in tables and modal input. Leaving a secret editor blank keeps the existing value;
   enter `""` explicitly to clear it.

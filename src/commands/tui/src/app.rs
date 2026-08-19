@@ -1,7 +1,8 @@
 use prost::Message;
+use ratatui::layout::{Position, Rect};
 use ratatui::widgets::TableState;
 use regex::Regex;
-use rusqlite::{Connection, Result as SqlResult};
+use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde_yaml::Value;
 use sha1::{Digest, Sha1};
 use std::collections::{HashMap, VecDeque};
@@ -41,18 +42,22 @@ pub enum Page {
     Overview,
     Instances,
     Services,
-    Network,
+    /// Peers we talk to, and what we have paid them.
+    Peers,
+    /// Clients that talk to us, and what they have paid.
+    Clients,
     Pricing,
     Config,
     Logs,
 }
 
 impl Page {
-    pub const ALL: [Page; 7] = [
+    pub const ALL: [Page; 8] = [
         Page::Overview,
         Page::Instances,
         Page::Services,
-        Page::Network,
+        Page::Peers,
+        Page::Clients,
         Page::Pricing,
         Page::Config,
         Page::Logs,
@@ -63,12 +68,46 @@ impl Page {
             Page::Overview => "OVERVIEW",
             Page::Instances => "INSTANCES",
             Page::Services => "SERVICES",
-            Page::Network => "NETWORK",
+            Page::Peers => "PEERS",
+            Page::Clients => "CLIENTS",
             Page::Pricing => "PRICING",
             Page::Config => "CONFIG",
             Page::Logs => "LOGS",
         }
     }
+}
+
+/// Which tab covers column `x`, given the bordered block the tab bar was drawn in.
+///
+/// Retraces what `Tabs` lays out rather than asking it: the widget keeps no hit map.
+/// Each title sits in `padding_left + title + padding_right` (one space each side, the
+/// default this TUI keeps) and tabs are joined by a 3-cell `" │ "` divider.
+fn tab_at(x: u16, area: Rect) -> Option<usize> {
+    const DIVIDER_WIDTH: u16 = 3;
+    let mut cursor = area.x + 1; // the block's left border
+    for (index, page) in Page::ALL.iter().enumerate() {
+        let width = page.title().chars().count() as u16 + 2; // one space of padding each side
+        if x >= cursor && x < cursor + width {
+            return Some(index);
+        }
+        cursor += width + DIVIDER_WIDTH;
+    }
+    None
+}
+
+/// How many rows below the first visible one a click at terminal row `y` lands, for a
+/// table drawn in `area`. `None` when the click was on the border, the header, or
+/// outside the table entirely.
+///
+/// The three-row lead-in is the block's top border, the header, and the blank line
+/// `header_row` puts under it (`bottom_margin(1)`) — pinned by
+/// `mouse_clicks::a_click_lands_on_the_row_under_the_pointer`, which reads it off a
+/// real render rather than trusting this arithmetic.
+fn visible_row_at(y: u16, area: Rect) -> Option<usize> {
+    const HEADER_ROWS: u16 = 3;
+    let first_row = area.y + HEADER_ROWS;
+    let last_row = area.y + area.height.checked_sub(1)?; // bottom border
+    (area.height > HEADER_ROWS && y >= first_row && y < last_row).then(|| (y - first_row) as usize)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +116,8 @@ pub enum InputMode {
     Connect,
     EditConfig,
     FilterConfig,
+    /// Amount entry for crediting/debiting the selected client's balance.
+    CreditClient,
     /// Yes/no confirmation before a destructive action (delete service, kill instance).
     Confirm,
     /// Read-only, scrollable overlay (e.g. `nodo inspect` output).
@@ -117,6 +158,26 @@ fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
 pub enum PendingAction {
     DeleteService { id: String, label: String },
     KillInstance { id: String, label: String },
+    DisconnectPeer { id: String, label: String },
+}
+
+/// The `nodo` invocation a confirmed [`PendingAction`] turns into, plus the label its
+/// outcome is reported under. Every destructive action goes through the same CLI the
+/// operator would type, so the TUI can never do something `nodo` cannot.
+fn pending_command(action: PendingAction) -> (String, Vec<String>) {
+    match action {
+        PendingAction::DeleteService { id, label } => (
+            format!("Delete service {label}"),
+            vec!["remove".to_string(), id],
+        ),
+        PendingAction::KillInstance { id, label } => {
+            (format!("Kill instance {label}"), vec!["kill".to_string(), id])
+        }
+        PendingAction::DisconnectPeer { id, label } => (
+            format!("Forget peer {label}"),
+            vec!["disconnect".to_string(), id],
+        ),
+    }
 }
 
 /// What to do with a background command's output once it finishes.
@@ -157,6 +218,10 @@ pub struct Peer {
     /// identifies our client *inside the remote peer*, so it can never be joined
     /// against our local `clients` table (see issue #178).
     pub balance: String,
+    /// Our client id *inside this peer*, as it assigned it to us — what `nodo peers`
+    /// prints as "Remote Client ID". Empty when we have never registered there.
+    /// Never a key into our own `clients` table (see the balance note above).
+    pub remote_client_id: String,
     pub reputation: String,
     /// Local reputation score (nodo-managed, independent of the on-chain proof).
     pub reputation_score: String,
@@ -189,12 +254,89 @@ pub struct Client {
     pub id: String,
     pub balance: String,
     pub last_usage: String,
+    /// A client this node never charges — its own dev clients. Stored on the row
+    /// since before this page existed, and shown nowhere until it did: an operator
+    /// wondering why a balance never moves is owed this word.
+    pub unmetered: bool,
 }
 
 impl Identifiable for Client {
     fn id(&self) -> &str {
         &self.id
     }
+}
+
+/// One `payments` row, as the detail cards show it. The amount stays in raw MU and is
+/// rendered in the operator's display unit at draw time, like every other balance here.
+#[derive(Debug, Clone)]
+pub struct PaymentRow {
+    pub created_at: String,
+    pub amount: String,
+    /// `communicated` / `unacknowledged` / `accepted` / `rejected` — see the
+    /// `payments` table. `unacknowledged` is the one worth reading: money left and
+    /// no balance arrived.
+    pub status: String,
+    pub tx_id: String,
+    pub deposit_token: String,
+}
+
+/// One `reputation_events` row: what moved a score, by how much, and why.
+#[derive(Debug, Clone)]
+pub struct ReputationEvent {
+    pub created_at: String,
+    pub amount: i64,
+    pub reason: String,
+    pub score_after: Option<i64>,
+}
+
+/// A deposit token issued to a client, with what became of it.
+#[derive(Debug, Clone)]
+pub struct DepositToken {
+    pub id: String,
+    pub status: String,
+    pub created_at: String,
+}
+
+/// An instance a client started on this node (`local_instances.father_id`).
+#[derive(Debug, Clone)]
+pub struct ClientInstance {
+    pub id: String,
+    pub name: String,
+}
+
+/// Everything the Peers page shows about the selected peer beyond its table row.
+///
+/// Loaded for the selection rather than for every peer: this is three queries, and
+/// the list refreshes every couple of seconds whether or not anyone is reading it.
+#[derive(Debug, Clone, Default)]
+pub struct PeerDetail {
+    pub peer_id: String,
+    pub payments: Vec<PaymentRow>,
+    pub events: Vec<ReputationEvent>,
+}
+
+/// A service's reputation: the score every instance of it contributed to, and the
+/// events that got it there.
+#[derive(Debug, Clone, Default)]
+pub struct ServiceDetail {
+    pub service_id: String,
+    /// None when the service has never been scored — different from a score of 0,
+    /// which is a service that earned and lost in equal measure.
+    pub score: Option<i64>,
+    pub events: Vec<ReputationEvent>,
+}
+
+/// Everything the Clients page shows about the selected client beyond its table row.
+///
+/// A client is not a peer and cannot be resolved to one: `peer.remote_client_id` is
+/// our client id *inside* a remote peer, not a key into our `clients` table (#178).
+/// So this shows what the client itself did here — nothing is inferred about who it is.
+#[derive(Debug, Clone, Default)]
+pub struct ClientDetail {
+    pub client_id: String,
+    pub deposits: Vec<DepositToken>,
+    pub instances: Vec<ClientInstance>,
+    pub payments: Vec<PaymentRow>,
 }
 
 #[derive(Debug, Clone)]
@@ -780,6 +922,17 @@ impl<T: Identifiable> StatefulList<T> {
             .and_then(|index| self.items.get(index))
     }
 
+    /// Select the row `visible` places down from the first one on screen — what a
+    /// click lands on, since a scrolled table's first visible row is `offset`, not 0.
+    /// Ignores a click past the last row, so empty space below the table selects nothing.
+    pub fn select_visible(&mut self, visible: usize) {
+        let index = self.state.offset() + visible;
+        if let Some(item) = self.items.get(index) {
+            self.state_id = Some(item.id().to_string());
+            self.state.select(Some(index));
+        }
+    }
+
     pub fn next(&mut self) {
         if self.items.is_empty() {
             return;
@@ -824,7 +977,11 @@ pub struct App {
     pub prices: StatefulList<PriceEntry>,
     pub scarcity: Scarcity,
     pub money: Money,
-    pub network_focus: usize,
+    /// Detail for the selected peer / client, reloaded when the selection moves or the
+    /// data refreshes — never per frame, since drawing must not touch the database.
+    pub peer_detail: Option<PeerDetail>,
+    pub client_detail: Option<ClientDetail>,
+    pub service_detail: Option<ServiceDetail>,
     pub instances_grouped: bool,
     pub app_logs: Vec<String>,
     pub node_logs: Vec<String>,
@@ -843,9 +1000,18 @@ pub struct App {
     pub edit_kind: EditKind,
     /// Destructive action awaiting a y/N confirmation.
     pub pending_action: Option<PendingAction>,
+    /// Client id and direction (true = debit) for the open `CreditClient` amount modal.
+    pub credit_client_id: Option<String>,
+    pub credit_client_decrement: bool,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
+    /// Where the tab bar and the current page's selectable table were last drawn, so a
+    /// click can be mapped back to a tab or a row. Written by the draw path each frame;
+    /// `list_area` stays empty on pages with no table (Overview, Logs, Config — the
+    /// config tree tracks its own rendered area).
+    pub tabs_area: Rect,
+    pub list_area: Rect,
     pub sys: System,
     /// Previous sweep's per-instance counters, keyed by instance id, so CPU and
     /// network *rates* can be derived across refresh ticks. Rebuilt every sweep, so
@@ -879,7 +1045,9 @@ impl Default for App {
             prices: StatefulList::with_items(prices),
             scarcity,
             money: Money::load(&paths.config),
-            network_focus: 0,
+            peer_detail: None,
+            client_detail: None,
+            service_detail: None,
             instances_grouped: false,
             app_logs: vec!["TUI ready".to_string()],
             node_logs: read_last_lines(&paths.log, 250).unwrap_or_default(),
@@ -898,8 +1066,12 @@ impl Default for App {
             edit_config_secret: false,
             edit_kind: EditKind::Text,
             pending_action: None,
+            credit_client_id: None,
+            credit_client_decrement: false,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
+            tabs_area: Rect::ZERO,
+            list_area: Rect::ZERO,
             sys: System::new_all(),
             instance_counters: HashMap::new(),
             last_data_refresh: now.checked_sub(DATA_REFRESH_INTERVAL).unwrap_or(now),
@@ -922,20 +1094,45 @@ impl App {
         self.tabs.page()
     }
 
-    pub fn on_right(&mut self) {
+    pub fn next_page(&mut self) {
         self.tabs.next();
     }
 
-    pub fn on_left(&mut self) {
+    pub fn previous_page(&mut self) {
         self.tabs.previous();
+    }
+
+    /// →: enter the selected configuration branch (page-local, not page navigation —
+    /// pages cycle with Tab/Shift+Tab). Ignored by every page that has no use for it.
+    pub fn on_right(&mut self) {
+        if self.page() == Page::Config {
+            self.config_tree_state.key_right();
+        }
+    }
+
+    /// ←: leave the current configuration branch — collapse it if it is open,
+    /// otherwise step up to its parent, which is what `key_left` does.
+    pub fn on_left(&mut self) {
+        if self.page() == Page::Config {
+            self.config_tree_state.key_left();
+        }
     }
 
     pub fn on_up(&mut self) {
         match self.page() {
             Page::Instances => self.instances.previous(),
-            Page::Services => self.services.previous(),
-            Page::Network if self.network_focus == 0 => self.peers.previous(),
-            Page::Network => self.clients.previous(),
+            Page::Services => {
+                self.services.previous();
+                self.load_selection_details();
+            }
+            Page::Peers => {
+                self.peers.previous();
+                self.load_selection_details();
+            }
+            Page::Clients => {
+                self.clients.previous();
+                self.load_selection_details();
+            }
             Page::Pricing => self.prices.previous(),
             Page::Config => {
                 self.config_tree_state.key_up();
@@ -947,9 +1144,18 @@ impl App {
     pub fn on_down(&mut self) {
         match self.page() {
             Page::Instances => self.instances.next(),
-            Page::Services => self.services.next(),
-            Page::Network if self.network_focus == 0 => self.peers.next(),
-            Page::Network => self.clients.next(),
+            Page::Services => {
+                self.services.next();
+                self.load_selection_details();
+            }
+            Page::Peers => {
+                self.peers.next();
+                self.load_selection_details();
+            }
+            Page::Clients => {
+                self.clients.next();
+                self.load_selection_details();
+            }
             Page::Pricing => self.prices.next(),
             Page::Config => {
                 self.config_tree_state.key_down();
@@ -958,16 +1164,78 @@ impl App {
         }
     }
 
+    /// Route a left click to whatever was drawn under it: a tab, a config tree node, or
+    /// a table row. Geometry comes from the last frame (`tabs_area` / `list_area`), which
+    /// is always the frame the user was looking at when they clicked.
+    pub fn click_at(&mut self, column: u16, row: u16) {
+        let position = Position::new(column, row);
+        if self.tabs_area.contains(position) {
+            if let Some(index) = tab_at(column, self.tabs_area) {
+                self.tabs.index = index;
+            }
+            return;
+        }
+        // The config tree remembers where it drew each node, so it can resolve the
+        // click itself — including collapsing a section that was already selected.
+        if self.page() == Page::Config {
+            self.config_tree_state.click_at(position);
+            return;
+        }
+        if let Some(visible) = visible_row_at(row, self.list_area) {
+            self.select_visible_row(visible);
+        }
+    }
+
+    /// Select the row `visible` places below the top of the visible table, on whichever
+    /// page owns a table. Mirrors `on_up`/`on_down`, detail reload included.
+    fn select_visible_row(&mut self, visible: usize) {
+        match self.page() {
+            Page::Instances => self.instances.select_visible(visible),
+            Page::Services => {
+                self.services.select_visible(visible);
+                self.load_selection_details();
+            }
+            Page::Peers => {
+                self.peers.select_visible(visible);
+                self.load_selection_details();
+            }
+            Page::Clients => {
+                self.clients.select_visible(visible);
+                self.load_selection_details();
+            }
+            Page::Pricing => self.prices.select_visible(visible),
+            _ => {}
+        }
+    }
+
+    /// Reload the payment and reputation history behind the selected peer and client.
+    ///
+    /// Called when the selection moves and after each data refresh, never from the
+    /// draw path: a frame is redrawn on every keystroke and tick, and none of this
+    /// changes that often.
+    pub fn load_selection_details(&mut self) {
+        let database = self.paths.database.clone();
+        self.peer_detail = self
+            .peers
+            .selected()
+            .map(|peer| peer.id.clone())
+            .and_then(|peer_id| get_peer_detail(&database, &peer_id).ok());
+        self.client_detail = self
+            .clients
+            .selected()
+            .map(|client| client.id.clone())
+            .and_then(|client_id| get_client_detail(&database, &client_id).ok());
+        self.service_detail = self
+            .services
+            .selected()
+            .map(|service| service.id.clone())
+            .and_then(|service_id| get_service_detail(&database, &service_id).ok());
+    }
+
     /// Expand or collapse the selected configuration section (Enter/Space on the
     /// Config page). A no-op on a scalar leaf, which has nothing to expand.
     pub fn toggle_selected_config_node(&mut self) {
         self.config_tree_state.toggle_selected();
-    }
-
-    pub fn toggle_focus(&mut self) {
-        if self.page() == Page::Network {
-            self.network_focus = (self.network_focus + 1) % 2;
-        }
     }
 
     /// Toggle the Instances page between the flat table and the dependency
@@ -985,11 +1253,11 @@ impl App {
 
     /// Increase or decrease the selected peer's local reputation score.
     pub fn adjust_selected_peer_reputation(&mut self, delta: i64) {
-        if self.page() != Page::Network || self.network_focus != 0 {
+        if self.page() != Page::Peers {
             return;
         }
         let Some(peer) = self.peers.selected().cloned() else {
-            self.status = "Select a peer first (f focuses peers)".to_string();
+            self.status = "Select a peer first".to_string();
             return;
         };
         match adjust_peer_reputation(&self.paths.database, &peer.id, delta) {
@@ -1001,6 +1269,9 @@ impl App {
                 );
                 self.peers
                     .refresh(get_peers(&self.paths.database).unwrap_or_default());
+                // The adjustment is an event like any other; show it without waiting
+                // for the next refresh.
+                self.load_selection_details();
             }
             Err(error) => self.status = format!("Reputation update failed: {error}"),
         }
@@ -1018,6 +1289,7 @@ impl App {
         self.edit_config_secret = false;
         self.edit_kind = EditKind::Text;
         self.pending_action = None;
+        self.credit_client_id = None;
     }
 
     /// True while a background `nodo` command is still running.
@@ -1192,6 +1464,7 @@ impl App {
     pub async fn submit_input(&mut self) {
         match self.input_mode {
             InputMode::Connect => self.connect(),
+            InputMode::CreditClient => self.submit_credit_client(),
             InputMode::EditConfig => self.save_config_edit().await,
             InputMode::FilterConfig => {
                 self.config_filter = self.input.trim().to_string();
@@ -1224,6 +1497,69 @@ impl App {
             CommandKind::Generic,
             "Connect peer".to_string(),
             vec!["connect".to_string(), target],
+        );
+    }
+
+    // --- Clients ------------------------------------------------------------
+
+    /// Open an amount-entry modal to credit or debit the selected client's balance.
+    ///
+    /// The amount is typed in `ui.DISPLAY_UNIT` -- the same unit the balance column
+    /// already shows -- and, on submit, handed to `nodo credit_client`/`debit_client`
+    /// (see `src/commands/credit_client.py`). Delegating to the CLI rather than
+    /// writing `balance_mu` directly means the same MU conversion and client-existence
+    /// check the operator gets from a shell apply here too, with one code path to keep
+    /// correct instead of two.
+    pub fn open_credit_client(&mut self, decrement: bool) {
+        if self.page() != Page::Clients {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(client) = self.clients.selected().cloned() else {
+            self.status = "Select a client first".to_string();
+            return;
+        };
+        self.input_mode = InputMode::CreditClient;
+        self.input.clear();
+        self.input_title = format!(
+            "{} client {} (amount, {})",
+            if decrement { "Debit" } else { "Credit" },
+            shorten(&client.id, 18),
+            self.money.symbol
+        );
+        self.credit_client_id = Some(client.id);
+        self.credit_client_decrement = decrement;
+        self.edit_kind = EditKind::Text;
+    }
+
+    /// Validate the typed amount and run the credit/debit as a background `nodo`
+    /// command, the same way a confirmed [`PendingAction`] does.
+    fn submit_credit_client(&mut self) {
+        let Some(client_id) = self.credit_client_id.clone() else {
+            self.close_input();
+            return;
+        };
+        let decrement = self.credit_client_decrement;
+        let amount = self.input.trim().to_string();
+        let valid = amount.parse::<f64>().map(|value| value > 0.0).unwrap_or(false);
+        if !valid {
+            self.status = "Amount must be a positive number".to_string();
+            return;
+        }
+        self.close_input();
+        let label = format!(
+            "{} client {}",
+            if decrement { "Debit" } else { "Credit" },
+            shorten(&client_id, 18)
+        );
+        let command = if decrement { "debit_client" } else { "credit_client" };
+        self.spawn_command(
+            CommandKind::Generic,
+            label,
+            vec![command.to_string(), client_id, amount],
         );
     }
 
@@ -1492,21 +1828,44 @@ impl App {
         });
     }
 
+    /// Ask for confirmation before dropping the selected peer.
+    ///
+    /// `nodo disconnect` does the work, which deletes the peer row along with its
+    /// addresses and contract instances — the same thing the operator would type. The
+    /// peer is *forgotten*, not banned: it can re-introduce itself, or be reconnected
+    /// with `c`. That is exactly what makes this useful — a peer whose addresses went
+    /// stale (say another node claimed one, see `claim_uri`) is cleared out here.
+    pub fn open_disconnect_peer_confirm(&mut self) {
+        // Peers only. A client is not forgotten by hand -- it is ours, and expires on
+        // its own -- and since the two now have a page each, `d` on Clients is simply
+        // not bound rather than answered with an explanation.
+        if self.page() != Page::Peers {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(peer) = self.peers.selected().cloned() else {
+            self.status = "Select a peer first".to_string();
+            return;
+        };
+        let label = shorten(&peer.id, 18);
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Forget peer {label}? (y/N)");
+        self.pending_action = Some(PendingAction::DisconnectPeer {
+            id: peer.id.clone(),
+            label,
+        });
+    }
+
     /// Run the pending destructive action (called on `y` in a Confirm modal).
     pub fn confirm_pending(&mut self) {
         let Some(action) = self.pending_action.take() else {
             self.close_input();
             return;
         };
-        let (label, args) = match action {
-            PendingAction::DeleteService { id, label } => (
-                format!("Delete service {label}"),
-                vec!["remove".to_string(), id],
-            ),
-            PendingAction::KillInstance { id, label } => {
-                (format!("Kill instance {label}"), vec!["kill".to_string(), id])
-            }
-        };
+        let (label, args) = pending_command(action);
         self.close_input();
         self.spawn_command(CommandKind::Generic, label, args);
     }
@@ -1623,6 +1982,8 @@ impl App {
             .refresh(get_peers(&self.paths.database).unwrap_or_default());
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        // After the lists, since a selection that vanished takes its detail with it.
+        self.load_selection_details();
         self.node_logs = read_last_lines(&self.paths.log, 250).unwrap_or_default();
 
         // Prices and the display unit come from config.yaml, which the operator may be
@@ -1850,10 +2211,12 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
                 p.balance_mu,
                 COALESCE(p.reputation_proof_id, ''),
-                p.reputation_score
+                p.reputation_score,
+                COALESCE(p.remote_client_id, '')
          FROM peer p
          LEFT JOIN uri u ON p.id = u.peer_id
-         GROUP BY p.id, p.balance_mu, p.reputation_proof_id, p.reputation_score",
+         GROUP BY p.id, p.balance_mu, p.reputation_proof_id, p.reputation_score,
+                  p.remote_client_id",
     )?;
     let peers = statement
         .query_map([], |row| {
@@ -1867,6 +2230,7 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 balance: row.get::<_, String>(2)?,
                 reputation: row.get(3)?,
                 reputation_score,
+                remote_client_id: row.get(5)?,
                 // `contract_instance` isn't touched by the join above (it isn't
                 // keyed by uri), so its rows are fetched per peer below.
                 contracts: Vec::new(),
@@ -1918,27 +2282,40 @@ fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<P
 }
 
 /// Adjust a peer's local reputation score by `delta`, mirroring
-/// `sql_connection.update_reputation_peer`: add `delta` to the score and
-/// increment the index. Works when `reputation_proof_id` is NULL (score-only),
-/// so no on-chain proof is required.
+/// `sql_connection.update_reputation_peer`: add `delta` to the score, increment the
+/// index, and record the event that explains it. Works when `reputation_proof_id` is
+/// NULL (score-only), so no on-chain proof is required.
+///
+/// The event matters as much as the score here. Every other mover of a score writes
+/// one, so a hand adjustment that did not would be the single unexplained step in a
+/// peer's history — and the one an operator is most likely to have to justify later.
 fn adjust_peer_reputation(database: &Path, peer_id: &str, delta: i64) -> SqlResult<()> {
-    let connection = Connection::open(database)?;
-    let (score, index): (i64, i64) = connection.query_row(
+    let mut connection = Connection::open(database)?;
+    let transaction = connection.transaction()?;
+    let (score, index): (i64, i64) = transaction.query_row(
         "SELECT COALESCE(reputation_score, 0), COALESCE(reputation_index, 0)
          FROM peer WHERE id = ?1",
         [peer_id],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    connection.execute(
+    transaction.execute(
         "UPDATE peer SET reputation_score = ?1, reputation_index = ?2 WHERE id = ?3",
         rusqlite::params![score + delta, index + 1, peer_id],
     )?;
+    // Same string as `reasons.Reason.OPERATOR_ADJUSTMENT` on the Python side.
+    transaction.execute(
+        "INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after)
+         VALUES ('peer', ?1, ?2, 'operator_adjustment', ?3)",
+        rusqlite::params![peer_id, delta, score + delta],
+    )?;
+    transaction.commit()?;
     Ok(())
 }
 
 fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
     let connection = Connection::open(database)?;
-    let mut statement = connection.prepare("SELECT id, balance_mu, last_usage FROM clients")?;
+    let mut statement =
+        connection.prepare("SELECT id, balance_mu, last_usage, unmetered FROM clients")?;
     let clients = statement
         .query_map([], |row| {
             let last_usage = row
@@ -1949,10 +2326,141 @@ fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
                 id: row.get(0)?,
                 balance: row.get::<_, String>(1)?,
                 last_usage,
+                unmetered: row.get::<_, Option<i64>>(3)?.unwrap_or(0) != 0,
             })
         })?
         .collect();
     clients
+}
+
+/// How many rows of history a detail card asks for. Enough to read a pattern, few
+/// enough that the card cannot push the table it belongs to off a short terminal.
+const DETAIL_ROWS: usize = 8;
+
+/// What we paid a peer and why its score is where it is.
+fn get_peer_detail(database: &Path, peer_id: &str) -> SqlResult<PeerDetail> {
+    let connection = Connection::open(database)?;
+    Ok(PeerDetail {
+        peer_id: peer_id.to_string(),
+        payments: get_payments(&connection, "peer_id", peer_id)?,
+        events: get_reputation_events(&connection, "peer", peer_id)?,
+    })
+}
+
+/// A service's score and the events behind it. Scored by `service_id`, so this is the
+/// history of every instance of it that ever ran here, not of the one running now.
+fn get_service_detail(database: &Path, service_id: &str) -> SqlResult<ServiceDetail> {
+    let connection = Connection::open(database)?;
+    let score = connection
+        .query_row(
+            "SELECT reputation_score FROM service_reputation WHERE service_id = ?1",
+            [service_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    Ok(ServiceDetail {
+        service_id: service_id.to_string(),
+        score,
+        events: get_reputation_events(&connection, "service", service_id)?,
+    })
+}
+
+/// What a client paid us, what it was given a token for, and what it is running here.
+fn get_client_detail(database: &Path, client_id: &str) -> SqlResult<ClientDetail> {
+    let connection = Connection::open(database)?;
+    Ok(ClientDetail {
+        client_id: client_id.to_string(),
+        deposits: get_deposit_tokens(&connection, client_id)?,
+        instances: get_client_instances(&connection, client_id)?,
+        payments: get_payments(&connection, "client_id", client_id)?,
+    })
+}
+
+/// Payment rows for one counterparty, newest first.
+///
+/// `column` is the caller's choice of `peer_id` or `client_id` and is interpolated,
+/// which is safe only because both are literals in this file — the *value* is bound.
+fn get_payments(connection: &Connection, column: &str, id: &str) -> SqlResult<Vec<PaymentRow>> {
+    let mut statement = connection.prepare(&format!(
+        "SELECT created_at, amount_mu, status, COALESCE(tx_id, ''), COALESCE(deposit_token, '')
+         FROM payments WHERE {column} = ?1 ORDER BY created_at DESC, id DESC LIMIT {DETAIL_ROWS}"
+    ))?;
+    let payments = statement
+        .query_map([id], |row| {
+            Ok(PaymentRow {
+                created_at: row.get(0)?,
+                amount: row.get::<_, String>(1)?,
+                status: row.get(2)?,
+                tx_id: row.get(3)?,
+                deposit_token: row.get(4)?,
+            })
+        })?
+        .collect();
+    payments
+}
+
+/// Reputation events for one subject, newest first.
+fn get_reputation_events(
+    connection: &Connection,
+    kind: &str,
+    id: &str,
+) -> SqlResult<Vec<ReputationEvent>> {
+    let mut statement = connection.prepare(
+        "SELECT created_at, amount, reason, score_after
+         FROM reputation_events
+         WHERE subject_kind = ?1 AND subject_id = ?2
+         ORDER BY created_at DESC, id DESC LIMIT ?3",
+    )?;
+    let events = statement
+        .query_map(rusqlite::params![kind, id, DETAIL_ROWS as i64], |row| {
+            Ok(ReputationEvent {
+                created_at: row.get(0)?,
+                amount: row.get(1)?,
+                reason: row.get(2)?,
+                score_after: row.get(3)?,
+            })
+        })?
+        .collect();
+    events
+}
+
+fn get_deposit_tokens(connection: &Connection, client_id: &str) -> SqlResult<Vec<DepositToken>> {
+    let mut statement = connection.prepare(
+        "SELECT id, status, created_at FROM deposit_tokens
+         WHERE client_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+    )?;
+    let tokens = statement
+        .query_map(rusqlite::params![client_id, DETAIL_ROWS as i64], |row| {
+            Ok(DepositToken {
+                id: row.get(0)?,
+                status: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })?
+        .collect();
+    tokens
+}
+
+/// The instances a client started here. `local_instances.father_id` holds the client
+/// id for a top-level instance (see `start_service_iterable`), which is the only link
+/// between a client and anything it runs.
+fn get_client_instances(
+    connection: &Connection,
+    client_id: &str,
+) -> SqlResult<Vec<ClientInstance>> {
+    let mut statement = connection.prepare(
+        "SELECT id, COALESCE(name, '') FROM local_instances
+         WHERE father_id = ?1 ORDER BY name LIMIT ?2",
+    )?;
+    let instances = statement
+        .query_map(rusqlite::params![client_id, DETAIL_ROWS as i64], |row| {
+            Ok(ClientInstance {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })?
+        .collect();
+    instances
 }
 
 fn get_instances(
@@ -2648,6 +3156,74 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
 
+    /// Mouse hit tests. Both retrace geometry the widgets do not expose, so they are
+    /// pinned here: a wrong offset silently selects the neighbouring tab or row.
+    mod mouse_geometry {
+        use super::super::{tab_at, visible_row_at, Page, Rect};
+
+        const BAR: Rect = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 3,
+        };
+
+        #[test]
+        fn every_tab_title_maps_to_its_own_page() {
+            // Walk the bar cell by cell and collect which tab each column resolves to;
+            // every page must claim its title, in order, with gaps only on dividers.
+            let claimed: Vec<usize> = (BAR.x..BAR.x + BAR.width)
+                .filter_map(|x| tab_at(x, BAR))
+                .collect();
+            let mut seen: Vec<usize> = claimed.clone();
+            seen.dedup();
+            assert_eq!(seen, (0..Page::ALL.len()).collect::<Vec<_>>());
+            for (index, page) in Page::ALL.iter().enumerate() {
+                let width = claimed.iter().filter(|claim| **claim == index).count();
+                assert_eq!(width, page.title().chars().count() + 2, "{page:?}");
+            }
+        }
+
+        #[test]
+        fn clicks_outside_any_tab_select_nothing() {
+            assert_eq!(tab_at(BAR.x, BAR), None, "left border");
+            assert_eq!(
+                tab_at(BAR.x + BAR.width - 1, BAR),
+                None,
+                "past the last tab"
+            );
+        }
+
+        #[test]
+        fn rows_start_below_the_border_header_and_its_margin() {
+            let table = Rect {
+                x: 0,
+                y: 4,
+                width: 80,
+                height: 10,
+            };
+            assert_eq!(visible_row_at(4, table), None, "top border");
+            assert_eq!(visible_row_at(5, table), None, "header");
+            assert_eq!(visible_row_at(6, table), None, "the header's bottom margin");
+            assert_eq!(visible_row_at(7, table), Some(0), "first row");
+            assert_eq!(visible_row_at(12, table), Some(5), "last row");
+            assert_eq!(visible_row_at(13, table), None, "bottom border");
+            assert_eq!(visible_row_at(99, table), None, "below the table");
+        }
+
+        #[test]
+        fn a_table_with_no_room_for_rows_has_none() {
+            let squeezed = Rect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 3,
+            };
+            assert_eq!(visible_row_at(2, squeezed), None);
+            assert_eq!(visible_row_at(0, Rect::ZERO), None, "unrendered page");
+        }
+    }
+
     /// Timestamped config.yaml backups + retention (issue #255). The prune is
     /// pinned on hand-made filenames rather than real writes so nothing here has to
     /// sleep a second per backup to get distinct UTC stamps.
@@ -3253,13 +3829,13 @@ mod tests {
         connection
             .execute_batch(
                 "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT, reputation_proof_id TEXT,
-                                    reputation_score INTEGER);
+                                    reputation_score INTEGER, remote_client_id TEXT);
                  CREATE TABLE uri (id INTEGER PRIMARY KEY, peer_id TEXT, ip TEXT, port INTEGER);
                  CREATE TABLE ledger (hash TEXT PRIMARY KEY, content BLOB);
                  CREATE TABLE contract_instance (id INTEGER PRIMARY KEY, address TEXT,
                                     ledger_hash TEXT, contract_hash TEXT, peer_id TEXT,
                                     mu_per_unit TEXT);
-                 INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7);",
+                 INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7, 'cli-7f3a');",
             )
             .unwrap();
         for (contract_hash, ledger_hash, address, ledger_content) in instances {
@@ -3362,6 +3938,9 @@ mod tests {
         let peers = get_peers(&database).unwrap();
         assert_eq!(peers.len(), 1);
         assert!(peers[0].contracts.is_empty());
+        // Read off the `peer` row itself, never joined against our own `clients`
+        // table -- that join is the bug #178 fixed.
+        assert_eq!(peers[0].remote_client_id, "cli-7f3a");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -3607,5 +4186,301 @@ Cold Wallet: 9cold\n";
         assert_eq!(percent(25, 100), 25);
         assert_eq!(percent(1, 0), 0);
     }
-}
 
+    /// ←/→ walk the Config tree; pages are cycled with Tab/Shift+Tab only.
+    mod config_tree_navigation {
+        use super::*;
+
+        fn on_config_page() -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL.iter().position(|page| *page == Page::Config).unwrap();
+            app
+        }
+
+        #[test]
+        fn right_enters_a_branch_and_left_leaves_it() {
+            let mut app = on_config_page();
+            app.config_tree_state.select(vec!["network".to_string()]);
+
+            app.on_right();
+            assert!(
+                app.config_tree_state.opened().contains(&vec!["network".to_string()]),
+                "→ opens the selected branch"
+            );
+
+            app.on_left();
+            assert!(
+                !app.config_tree_state.opened().contains(&vec!["network".to_string()]),
+                "← closes the branch it is standing in"
+            );
+        }
+
+        #[test]
+        fn left_steps_out_to_the_parent_once_the_branch_is_closed() {
+            // The way out of a nested value: ← until there is nothing left to leave.
+            let mut app = on_config_page();
+            app.config_tree_state.select(vec![
+                "virtualizers".to_string(),
+                "ch".to_string(),
+                "MIN_MEM_MIB".to_string(),
+            ]);
+
+            app.on_left();
+            assert_eq!(
+                app.config_tree_state.selected(),
+                &["virtualizers".to_string(), "ch".to_string()]
+            );
+            app.on_left();
+            assert_eq!(app.config_tree_state.selected(), &["virtualizers".to_string()]);
+        }
+
+        #[test]
+        fn the_arrows_never_change_page() {
+            // They used to be page navigation; a stray ← on Config must no longer
+            // throw the operator onto another page mid-edit.
+            let mut app = on_config_page();
+            app.config_tree_state.select(vec!["network".to_string()]);
+            app.on_left();
+            app.on_right();
+            assert_eq!(app.page(), Page::Config);
+
+            // And on a page with no tree they do nothing at all.
+            app.tabs.index = Page::ALL.iter().position(|page| *page == Page::Logs).unwrap();
+            app.on_left();
+            app.on_right();
+            assert_eq!(app.page(), Page::Logs);
+        }
+    }
+
+    mod forgetting_a_peer {
+        use super::*;
+
+        fn peer(id: &str) -> Peer {
+            Peer {
+                id: id.to_string(),
+                uris: "10.0.0.1:8080".to_string(),
+                balance: "0".to_string(),
+                remote_client_id: String::new(),
+                reputation: "—".to_string(),
+                reputation_score: "0".to_string(),
+                contracts: Vec::new(),
+            }
+        }
+
+        fn on_peers_page(peers: Vec<Peer>) -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Peers)
+                .unwrap();
+            app.peers = StatefulList::with_items(peers);
+            app.peers.next();
+            app
+        }
+
+        #[test]
+        fn it_asks_before_doing_anything() {
+            let mut app = on_peers_page(vec![peer("peer-abc")]);
+            app.open_disconnect_peer_confirm();
+
+            assert_eq!(app.input_mode, InputMode::Confirm);
+            assert!(app.input_title.contains("peer-abc"), "{}", app.input_title);
+            assert!(matches!(
+                app.pending_action,
+                Some(PendingAction::DisconnectPeer { ref id, .. }) if id == "peer-abc"
+            ));
+        }
+
+        #[test]
+        fn confirming_runs_nodo_disconnect_on_the_selected_peer() {
+            // The whole point: the same command the operator would type, so the peer
+            // row, its addresses and its contract instances all go together.
+            let (label, args) = pending_command(PendingAction::DisconnectPeer {
+                id: "peer-abc".to_string(),
+                label: "peer-abc".to_string(),
+            });
+            assert_eq!(args, vec!["disconnect".to_string(), "peer-abc".to_string()]);
+            assert_eq!(label, "Forget peer peer-abc");
+        }
+
+        #[test]
+        fn with_nothing_selected_it_says_so_instead_of_asking() {
+            let mut app = on_peers_page(Vec::new());
+            app.open_disconnect_peer_confirm();
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.pending_action.is_none());
+            assert!(app.status.contains("Select a peer"), "{}", app.status);
+        }
+
+        #[test]
+        fn clients_have_no_such_action() {
+            // A client is ours and expires on its own; there is nothing to forget.
+            // The page split is what enforces it now -- `d` is not bound on Clients --
+            // so the guard here is the second line of defence, not the first.
+            let mut app = on_peers_page(vec![peer("peer-abc")]);
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Clients)
+                .unwrap();
+            app.open_disconnect_peer_confirm();
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.pending_action.is_none());
+        }
+    }
+
+    /// The history behind a peer and a client, read straight out of SQLite.
+    ///
+    /// These queries are the whole point of the two detail cards, and a card that
+    /// silently renders nothing looks exactly like a peer with no history -- the same
+    /// confusion issue #231 was about, one table over. So they are exercised against a
+    /// real database rather than through the widgets.
+    mod payment_and_reputation_history {
+        use super::*;
+
+        fn history_database(dir: &Path) -> PathBuf {
+            let path = dir.join("history.sqlite");
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT,
+                                        reputation_proof_id TEXT, reputation_score INTEGER,
+                                        reputation_index INTEGER);
+                     CREATE TABLE clients (id TEXT PRIMARY KEY, balance_mu TEXT,
+                                        last_usage FLOAT, unmetered INTEGER NOT NULL DEFAULT 0);
+                     CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_id TEXT,
+                                        direction TEXT, status TEXT, peer_id TEXT, client_id TEXT,
+                                        deposit_token TEXT, ledger TEXT, contract_hash TEXT,
+                                        address TEXT, amount_mu TEXT NOT NULL,
+                                        created_at DATETIME);
+                     CREATE TABLE reputation_events (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                        subject_kind TEXT, subject_id TEXT, amount INTEGER,
+                                        reason TEXT, score_after INTEGER, created_at DATETIME);
+                     CREATE TABLE deposit_tokens (id TEXT PRIMARY KEY, client_id TEXT,
+                                        status TEXT, created_at DATETIME);
+                     CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, father_id TEXT);
+                     INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7, 3);
+                     INSERT INTO clients VALUES ('client-1', '500', NULL, 1);
+                     INSERT INTO payments (tx_id, direction, status, peer_id, amount_mu, created_at)
+                        VALUES ('tx-old', 'out', 'communicated', 'peer-1', '1000', '2026-01-01 10:00:00');
+                     INSERT INTO payments (tx_id, direction, status, peer_id, amount_mu, created_at)
+                        VALUES ('tx-new', 'out', 'unacknowledged', 'peer-1', '2000', '2026-01-02 10:00:00');
+                     INSERT INTO payments (direction, status, client_id, deposit_token, amount_mu, created_at)
+                        VALUES ('in', 'accepted', 'client-1', 'token-1', '750', '2026-01-03 10:00:00');
+                     INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
+                        VALUES ('peer', 'peer-1', -100, 'payment_unacknowledged', -93, '2026-01-02 10:00:01');
+                     INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
+                        VALUES ('service', 'peer-1', -100, 'instance_lost', -100, '2026-01-02 10:00:02');
+                     INSERT INTO deposit_tokens VALUES ('token-1', 'client-1', 'payed', '2026-01-03 09:59:00');
+                     INSERT INTO local_instances VALUES ('instance-1', 'demo', 'client-1');
+                     INSERT INTO local_instances VALUES ('instance-2', 'other', 'someone-else');",
+                )
+                .unwrap();
+            path
+        }
+
+        fn temp_dir(name: &str) -> PathBuf {
+            let dir = std::env::temp_dir()
+                .join(format!("nodo-tui-history-{name}-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        #[test]
+        fn a_peer_carries_its_payments_and_the_events_behind_its_score() {
+            let dir = temp_dir("peer");
+            let database = history_database(&dir);
+
+            let detail = get_peer_detail(&database, "peer-1").unwrap();
+
+            // Newest first: the payment an operator is looking for is the last one.
+            assert_eq!(detail.payments.len(), 2);
+            assert_eq!(detail.payments[0].tx_id, "tx-new");
+            assert_eq!(detail.payments[0].status, "unacknowledged");
+            assert_eq!(detail.payments[0].amount, "2000");
+            // A service event that happens to share the id is not this peer's history.
+            assert_eq!(detail.events.len(), 1);
+            assert_eq!(detail.events[0].reason, "payment_unacknowledged");
+            assert_eq!(detail.events[0].score_after, Some(-93));
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_client_carries_what_it_paid_what_it_was_given_and_what_it_runs() {
+            let dir = temp_dir("client");
+            let database = history_database(&dir);
+
+            let detail = get_client_detail(&database, "client-1").unwrap();
+
+            assert_eq!(detail.payments.len(), 1);
+            assert_eq!(detail.payments[0].deposit_token, "token-1");
+            assert_eq!(detail.deposits.len(), 1);
+            assert_eq!(detail.deposits[0].status, "payed");
+            // Only its own instances: father_id is the client that started them.
+            assert_eq!(detail.instances.len(), 1);
+            assert_eq!(detail.instances[0].name, "demo");
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn the_unmetered_flag_reaches_the_table() {
+            let dir = temp_dir("unmetered");
+            let database = history_database(&dir);
+
+            let clients = get_clients(&database).unwrap();
+
+            assert_eq!(clients.len(), 1);
+            assert!(clients[0].unmetered, "a dev client is never charged");
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn adjusting_a_score_by_hand_records_why() {
+            // Every other mover of a score writes an event. One that did not would be
+            // the single unexplained step in a peer's history.
+            let dir = temp_dir("adjust");
+            let database = history_database(&dir);
+
+            adjust_peer_reputation(&database, "peer-1", -3).unwrap();
+
+            let connection = Connection::open(&database).unwrap();
+            let (score, index): (i64, i64) = connection
+                .query_row(
+                    "SELECT reputation_score, reputation_index FROM peer WHERE id = 'peer-1'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!((score, index), (4, 4));
+
+            let (amount, reason, after): (i64, String, i64) = connection
+                .query_row(
+                    "SELECT amount, reason, score_after FROM reputation_events
+                     WHERE subject_id = 'peer-1' ORDER BY id DESC LIMIT 1",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(amount, -3);
+            assert_eq!(reason, "operator_adjustment");
+            assert_eq!(after, 4);
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_peer_that_has_done_nothing_yet_has_an_empty_history_not_an_error() {
+            let dir = temp_dir("empty");
+            let database = history_database(&dir);
+
+            let detail = get_peer_detail(&database, "peer-unknown").unwrap();
+
+            assert!(detail.payments.is_empty());
+            assert!(detail.events.is_empty());
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+}

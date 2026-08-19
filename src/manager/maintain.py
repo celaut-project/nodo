@@ -13,6 +13,7 @@ from src.manager.manager import accept_peer_refresh, ensure_dev_client_pools, st
 from src.manager.metrics import balance_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
+from src.reputation_system.reasons import Reason
 from src.utils import logger as log
 from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
 from src.utils.cost_functions.execution_cost import system_scarcity
@@ -116,9 +117,25 @@ def check_wanted_service(wanted: str):
             
 
 
+# Instance outcomes already scored, as (vmachine_id, reason). Both of them are meant to
+# end with the instance pruned, but pruning can fail -- a virtualizer that will not let
+# go leaves the row in place, and the next sweep would score the same loss again, every
+# ten seconds, for as long as it keeps failing. An instance can only be lost once.
+_instances_penalised = set()
+
+
+def _penalise_instance_once(vmachine_id: str, amount: int, reason: str):
+    if (vmachine_id, reason) in _instances_penalised:
+        return
+    _instances_penalised.add((vmachine_id, reason))
+    _reputation_interface().update_vmachine_reputation(
+        vmachine_id=vmachine_id, amount=amount, reason=reason
+    )
+
+
 def maintain_vmachines(debug_mode: bool=False):
     def remove_and_penalize_vmachine(vmachine_id: str):
-        _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=-100)
+        _penalise_instance_once(vmachine_id, -100, Reason.INSTANCE_LOST)
         log.LOGGER(f"Prunning instance {vmachine_id} from the registry because the virtual machine does not exist.")
         try:
             stop_instance(token=vmachine_id)
@@ -129,7 +146,14 @@ def maintain_vmachines(debug_mode: bool=False):
     # priced against the same machine state, and psutil is read once instead of per VM.
     scarcity = system_scarcity(force_refresh=True)
 
-    for vmachine_id in sc.get_all_internal_containers_ids():
+    live_instances = sc.get_all_internal_containers_ids()
+    # An id is never reused, so once an instance is gone its entry can go too. Keeps the
+    # set the size of what is running rather than of everything that ever ran.
+    _instances_penalised.difference_update(
+        {key for key in _instances_penalised if key[0] not in set(live_instances)}
+    )
+
+    for vmachine_id in live_instances:
 
         # Skip development vmachines from the ggconf command
         if "rundev" in vmachine_id:
@@ -167,20 +191,29 @@ def maintain_vmachines(debug_mode: bool=False):
 
         if not spend_mu(id=vmachine_id, amount_mu=charge_mu, debug_mode=debug_mode):
             try:
-                _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=-10)
+                _penalise_instance_once(
+                    vmachine_id, -10, Reason.INSTANCE_OUT_OF_BALANCE
+                )
                 log.LOGGER(f"Pruning container {vmachine_id} due to insufficient balance.")
                 stop_instance(token=vmachine_id)
             except Exception as e:
                 log.LOGGER(f'Error purging {vmachine_id}: {str(e)}')
                 raise Exception(f'Error purging {vmachine_id}: {str(e)}')
         else:
-            _reputation_interface().update_vmachine_reputation(vmachine_id=vmachine_id, amount=10)
+            # No reputation for a charge that simply worked. This used to add +10 here,
+            # written when `update_vmachine_reputation` did nothing at all -- and now
+            # that it scores the service, a tick is the wrong thing to score by: at ten
+            # seconds a service running a month would earn +2.6M, drowning every
+            # penalty it ever took. A successful interval is the absence of a problem,
+            # not a judgement about the service; the judgements are the two penalties
+            # above (a machine lost, an instance that could not pay).
+            #
             # The charge just succeeded, so this interval is a real cost the operator
             # paid: sample it for the burn-rate figure. Sourced from charge_mu (not a
             # balance diff) so a top-up between ticks never reads as negative spend. The
             # dev-vmachine skip above means no sample is recorded when nothing is charged.
             sc.record_instance_consumption(id=vmachine_id, charge_mu=charge_mu, seconds=MANAGER_ITERATION_TIME)
-            if debug_mode: log.LOGGER(f"Updated reputation for {vmachine_id} due to successful maintenance.")
+            if debug_mode: log.LOGGER(f"Charged {vmachine_id} for the interval it just held.")
 
     # Cloud Hypervisor janitor: cleanup stale/orphan runtime resources not tracked by DB.
     try:
@@ -201,8 +234,70 @@ def maintain_clients(debug_mode: bool=False):
             SQLConnection().delete_client(client_id)
 
 
+# Whether this process has already said that automatic refills are off.
+_automatic_refill_announced = False
+
+
+def _automatic_refill_enabled() -> bool:
+    """May this tick fund a peer, and say so once when it may not.
+
+    Said at normal level rather than only under DEBUG_MODE, and once rather than per
+    peer per tick: an operator who forgot they set this would otherwise watch deposits
+    run down with the node saying nothing, which reads as broken. Ten seconds between
+    ticks is far too often to repeat it.
+
+    The config is re-read every tick (it can be edited from the TUI while the node
+    runs), so switching refills back on re-arms the announcement for the next time.
+    """
+    global _automatic_refill_announced
+    enabled = bool(env_manager.get("deposits.AUTOMATIC_REFILL", True))
+    if enabled:
+        _automatic_refill_announced = False
+        return True
+    if not _automatic_refill_announced:
+        _automatic_refill_announced = True
+        log.LOGGER(
+            "deposits.AUTOMATIC_REFILL is off: this node will not fund any peer on "
+            "its own. Deposits run down until `nodo pay` or `nodo increase_peer_deposit` "
+            "is run by hand."
+        )
+    return False
+
+
+# Peers already penalised for being unreachable, so an outage costs one penalty and not
+# one per tick. In memory on purpose: a restart re-arms it, which costs a single extra
+# penalty for a peer that is still down, and keeps this out of the schema.
+_peers_penalised_for_refresh = set()
+
+
+def _penalise_unreachable_peer_once(peer_id: str):
+    """Score a peer that cannot be refreshed, but only on the way down.
+
+    This loop runs every MANAGER_ITERATION_TIME (10s by default) over every peer, so
+    penalising on each pass meant a peer that was merely switched off lost 100 points
+    every ten seconds -- some 864 000 a day. Reputation is meant to record that a peer
+    failed us, not to count how often we noticed.
+    """
+    if peer_id in _peers_penalised_for_refresh:
+        return
+    _peers_penalised_for_refresh.add(peer_id)
+    _reputation_interface().update_peer_reputation(
+        peer_id=peer_id, amount=-100, reason=Reason.PEER_REFRESH_FAILED
+    )
+
+
+def _peer_is_reachable_again(peer_id: str):
+    """Re-arm the penalty: the next outage is a new event, not the same one."""
+    _peers_penalised_for_refresh.discard(peer_id)
+
+
 def peer_deposits(debug_mode: bool = False):
-    for peer_id in SQLConnection().get_peers_id():
+    peer_ids = SQLConnection().get_peers_id()
+    # Peers that no longer exist cannot come back, so drop them rather than let the set
+    # grow with every peer this process ever failed to reach.
+    _peers_penalised_for_refresh.intersection_update(peer_ids)
+
+    for peer_id in peer_ids:
         if debug_mode: log.LOGGER(f"Starting check for peer {peer_id}.")
 
         # A peer that told us when its address expires is re-fetched once that moment
@@ -227,9 +322,10 @@ def peer_deposits(debug_mode: bool = False):
                     indices_parser=celaut_pb2.Peer,
                     partitions_message_mode_parser=True
                 ), None)
+                _peer_is_reachable_again(peer_id)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:
-                _reputation_interface().update_peer_reputation(peer_id=peer_id, amount=-100)
+                _penalise_unreachable_peer_once(peer_id)
                 continue
 
             if not peer:
@@ -249,6 +345,7 @@ def peer_deposits(debug_mode: bool = False):
                 log.LOGGER(f"[ERROR] Exception updating peer {peer_id}: {str(update_exception)}")
                 continue
         else:
+            _peer_is_reachable_again(peer_id)
             if debug_mode: log.LOGGER(f"Peer {peer_id} is available. Skipping info fetch.")
 
         # A deposit on a peer buys execution there and nothing else, so a node that
@@ -260,6 +357,20 @@ def peer_deposits(debug_mode: bool = False):
         if not env_manager.get("network.DELEGATE_EXECUTION", True):
             if debug_mode:
                 log.LOGGER(f"network.DELEGATE_EXECUTION is off; not funding peer {peer_id}.")
+            continue
+
+        # The switch for the node signing a payment on its own. Distinct from the one
+        # above on purpose: an operator who wants to keep delegating but approve every
+        # outgoing payment by hand had to turn delegation off to get it, which is not
+        # the same thing at all. Gated here, before the balance query, so the tick makes
+        # no request it cannot act on -- and `balance_on_other_peer` is not free: it is
+        # an RPC that drops our client on the peer when it fails.
+        if not _automatic_refill_enabled():
+            if debug_mode:
+                log.LOGGER(
+                    f"deposits.AUTOMATIC_REFILL is off; leaving peer {peer_id} to be "
+                    "funded by hand."
+                )
             continue
 
         peer_balance = balance_on_other_peer(peer_id=peer_id)

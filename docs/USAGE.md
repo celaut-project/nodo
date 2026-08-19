@@ -197,7 +197,12 @@ These are the most commonly used commands for daily tasks:
   `nodo services`
 
 - **connect `<ip:port>`**  
-  Manually connects to a peer node.  
+  Manually connects to a peer node. The address is dialled and the identity that answers
+  is verified, so it is registered under that peer and **taken away from any other peer
+  still holding it** — an address reaches one node, and the usual reason two peers claim
+  it is that the host reinstalled and came back under a new identity key (its peer_id).
+  The old peer keeps whatever other addresses it announced; forget it with
+  `nodo disconnect` (or `d` on the TUI's Peers page) if it has none left.  
   **Example:**  
   `nodo connect 192.168.1.10:4040`
 
@@ -233,13 +238,9 @@ These are the most commonly used commands for daily tasks:
   > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint
   > is declared in `service.json → init.entry_path`). Do not guess the format.
 
-- **config**  
-  Opens environment and runtime configuration options.  
-  **Example:**  
-  `nodo config`
-
 - **tui**  
-  Launches the terminal user interface for monitoring and managing the node.  
+  Launches the terminal user interface for monitoring and managing the node. Its
+  Config page is also where environment and runtime settings are edite ([`CONFIG.md`](CONFIG.md)).  
   **Example:**  
   `nodo tui`
 
@@ -331,6 +332,16 @@ These commands offer extended management and exploration features:
   Displays the list of connected peer nodes.  
   **Example:**  
   `nodo peers`
+
+- **credit_client `<client id> <amount>`**  
+  Adds to a client's balance. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
+  **Example:**  
+  `nodo credit_client abcdef1234567890 0.01`
+
+- **debit_client `<client id> <amount>`**  
+  Takes back part of a client's balance.  
+  **Example:**  
+  `nodo debit_client abcdef1234567890 0.005`
 
 ---
 
@@ -453,8 +464,8 @@ These are intended for development or advanced maintenance environments:
   every step. It (1) validates the currently configured proof, (2) removes it from the
   config if it is not owned by the configured wallet, (3) if a mnemonic is configured,
   looks up an on-chain reputation proof owned by that wallet and stores its id in the
-  config when one exists. This runs automatically after `nodo config`, so a freshly set
-  mnemonic immediately picks up its associated reputation proof (if any).  
+  config when one exists. Run it by hand after changing the mnemonic, so the new wallet
+  picks up its associated reputation proof (if any).  
   **Example:**  
   `nodo sync_reputation_proof`
 
@@ -529,15 +540,21 @@ If `hashing.CHECK_INTEGRITY_ON_SERVE` is set to `true`, Nodo runs an automatic i
 ## Terminal User Interface (TUI)
 
 Run `nodo tui` to open the operations console. Its pages cover node/host statistics, current
-instance resource usage and reservations, local services, peers and clients, complete
+instance resource usage and reservations, local services, peers, clients, complete
 `config.yaml` editing, logs, storage, and Ergo wallet balances. The old tunnels page was
 removed because nodo does not use it.
 
-- Left/Right switches pages; Up/Down selects rows.
-- `r` refreshes, `Tab` switches peer/client focus, and `c` connects a peer.
-- On Services, `e` executes the selected service.
-- On Config, `e` edits any selected YAML value, `/` filters values, and `x` clears the filter.
-  Secrets are masked, comments are preserved, and each write creates `config.yaml.tui.bak`.
+- `Tab`/`Shift+Tab` switches pages; Up/Down selects rows.
+- `r` refreshes.
+- On Peers, `c` connects a peer, `d` forgets the selected one (`nodo disconnect`), and `+`/`-` adjust its
+  reputation. The detail card shows what this node has paid that peer and the events behind its score.
+- On Clients, `+`/`-` credit/debit the selected client's balance (`nodo credit_client`/`debit_client`),
+  and the detail card shows what a client has paid, its deposit tokens, and the instances it
+  started here.
+- On Services, `e` executes the selected service and `d` deletes it.
+- On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
+  value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
+  preserved, and each write snapshots the previous file to `config-<timestamp>.yaml`.
 - `q`, Escape, or Ctrl+C exits.
 
 See [the TUI reference](../src/commands/tui/README.md) for page details, refresh behavior, and
@@ -554,6 +571,7 @@ commands that take one, the identifier of the relevant object:
   `export`, `integrity`
 - **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_deposit`, `decrease_deposit`
 - **Peer id** — `disconnect`, `increase_peer_deposit`
+- **Client id** — `credit_client`, `debit_client`
 - **Subcommands** — `daemon start|status|stop|restart`
 
 The installer sets this up automatically. To (re)install it yourself:
