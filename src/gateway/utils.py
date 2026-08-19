@@ -312,6 +312,48 @@ def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     return instance
 
 
+def plaintext_gateway_host() -> str:
+    """The single address the plain-gRPC gateway listens on (issue #257).
+
+    Deliberately *not* ``[::]``. That port serves the same, unauthenticated ``Gateway``
+    as the TLS one, so every interface it answers on is one more network that reaches
+    the full API with nothing to prove who is calling -- which is what the TLS port was
+    introduced to stop.
+
+    So it binds where the config file already says this node's gateway is:
+    ``virtualizers.ch.NETWORK_BRIDGE_NAME``, the same setting
+    :mod:`src.utils.configuration_file` resolves to fill ``__config__.gateway``. The
+    listening address and the advertised one come out of one call, so they cannot drift
+    apart, and a service finds the port exactly where its ``__config__`` told it to look
+    -- the proto contract, rather than a separate env var, decides.
+
+    Loopback is the fallback when the bridge is not up yet (a fresh install, or a
+    virtualizer that never created it): the local hop still works, and a caller off-host
+    is refused by the kernel rather than by an ACL nobody wrote.
+    """
+    network = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")
+    try:
+        host = _uri_for_network(network).ip
+    except Exception as e:
+        log.LOGGER(
+            f'No address on the gateway network {network} ({e}); binding the plaintext '
+            'gateway to loopback. Services on another interface will not reach it until '
+            'that network exists.'
+        )
+        return "127.0.0.1"
+
+    # An interface can hold a wildcard-ish address; refuse it rather than quietly
+    # serving the whole host.
+    if host in ("0.0.0.0", "::", ""):
+        log.LOGGER(
+            f'The gateway network {network} resolves to {host!r}, which is every '
+            'interface; binding the plaintext gateway to loopback instead.'
+        )
+        return "127.0.0.1"
+
+    return host
+
+
 def generate_node_peer_info(network: str) -> celaut_pb2.Peer:
     """A Peer advertising a single, specific network's address.
 
