@@ -399,14 +399,16 @@ sudo nodo update
 * `nodo integrity [<service id|tag>] [--fix]`: Verifies registry/metadata integrity (optionally for one service) and repairs with `--fix`.
 * `nodo tag <service id|tag> <new tag>`: Assigns/updates a human-readable tag.
 * `nodo peers` / `nodo clients`: Displays connected peer nodes and clients.
-* `nodo connect <ip:port>`: Manually connects to a peer node.
-* `nodo config`: Opens the runtime configuration ([`../CONFIG.md`](../CONFIG.md)).
+* `nodo connect <ip:port>`: Manually connects to a peer node. The address is registered
+  under the identity that answers there and removed from any other peer still holding it.
+* `nodo tui`: Operations console; its Config page edits the runtime configuration
+  ([`../CONFIG.md`](../CONFIG.md)).
 * `nodo info`: Shows runtime versions, node address, and identity.
 * `nodo logs`: Streams the application daemon logs.
 
 > **Scope note.** This skill documents the commands an agent needs to install,
 > pack, distribute, execute, observe, and discover. Node-operator / maintenance
-> and development commands (`serve`, `tui`, `migrate`, `storage:prune_blocks`,
+> and development commands (`serve`, `migrate`, `storage:prune_blocks`,
 > `prune_containers`, `submit_reputation`, `sync_reputation_proof`,
 > `refresh_ergo_nodes`, `refresh_clients`, `tx_history`, `increase_peer_deposit`,
 > `disconnect`, `envs`, `test`, `ggconf`, `pay`, `verify_reputation`,

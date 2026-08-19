@@ -24,6 +24,8 @@ env_manager = ConfigManager()
 class Gateway(celaut_pb2_grpc.Gateway):
 
     def GetServiceEstimatedCost(self, request_iterator, context, **kwargs):
+        print("DEBUG. GET SERVICE ESTIMATED COST")
+        log.LOGGER("DEBUG. GET SERVICE ESTIMATED COST")
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
 
     def StartService(self, request_iterator, context, **kwargs):
@@ -84,7 +86,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
     def IntroducePeer(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?
         log.LOGGER('Introduce peer method.')
-        add_peer_instance(
+        peer_id = add_peer_instance(
                 peer=next(bee.parse_from_buffer(
                 request_iterator=request_iterator,
                 indices=celaut_pb2.Peer,
@@ -92,7 +94,13 @@ class Gateway(celaut_pb2_grpc.Gateway):
             ), None)
         )
 
-        yield from bee.serialize_to_buffer(celaut_pb2.RecursionGuard(token="OK"))  # Recursion guard shouldn't be used here, another message should be used. TODO
+        # Answer with the id the peer was stored under, or REFUSED when it was not.
+        # Refusal is a normal outcome now that an unverifiable announcement is turned
+        # down (issue #236) -- it used to be impossible, since the uuid4 fallback always
+        # succeeded, which is why "OK" was unconditional. A blanket "OK" would now tell a
+        # node self-announcing through connect's SELF_ANNOUNCE_TO_CONNECTING_PEERS that it
+        # is registered here while nothing was stored.
+        yield from bee.serialize_to_buffer(celaut_pb2.RecursionGuard(token=peer_id or "REFUSED"))  # Recursion guard shouldn't be used here, another message should be used. TODO
 
     def GenerateClient(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?

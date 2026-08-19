@@ -3,7 +3,7 @@ use ratatui::Terminal;
 use std::io;
 use tui::app::{App, AppResult};
 use tui::event::{Event, EventHandler};
-use tui::handler::handle_key_events;
+use tui::handler::{handle_key_events, handle_mouse_events};
 use tui::tui::Tui;
 
 #[tokio::main]
@@ -26,7 +26,7 @@ async fn main() -> AppResult<()> {
         match tui.events.next().await? {
             Event::Tick => app.refresh(false).await,
             Event::Key(key_event) => handle_key_events(key_event, &mut app).await?,
-            Event::Mouse(_) => {}
+            Event::Mouse(mouse_event) => handle_mouse_events(mouse_event, &mut app),
             Event::Resize(_, _) => {}
         }
     }

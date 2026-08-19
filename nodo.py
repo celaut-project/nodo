@@ -145,8 +145,8 @@ if __name__ == '__main__':
         print("""
         Getting started
 
-        nodo config
-            Configure your node and runtime.
+        nodo tui
+            Open the operations console (status, peers, and the config editor).
 
         nodo download <url>
             Download and import a published service.
@@ -198,7 +198,6 @@ if __name__ == '__main__':
                     "\n- connect <ip:port>"
                     "\n- disconnect <peer_id>"
                     "\n- pack <project directory>"
-                    "\n- config"
                     "\n- envs"
                     "\n- tui"
                     "\n- completion <bash|zsh|install>  (shell tab-completion for commands and ids)"
@@ -226,6 +225,8 @@ if __name__ == '__main__':
                     "\n- tx_history"
                     "\n- force_execution <peer_id> [--name instance-name] [-e key value] <service id> | <service tag> | <'.celaut' file path>  (bypasses the execution balancer; delegates straight to peer_id, no fallback -- testing/dev only)"
                     "\n- increase_peer_deposit <peer id> <amount>"
+                    "\n- credit_client <client id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
+                    "\n- debit_client <client id> <amount>"
                     "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
                     "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your balance on that peer afterward)"
                     "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
@@ -689,9 +690,6 @@ if __name__ == '__main__':
                 else:
                     print("Nodo service is already running in the background. Cannot start serve.", flush=True)
 
-            case 'config':
-                os.system("/bin/bash bash/reconfig.sh")
-
             case 'envs':
                 os.system(f"yq . {MAIN_DIR}/config.yaml")
 
@@ -789,6 +787,14 @@ if __name__ == '__main__':
                 from src.commands.increase_peer_deposit import increase_peer_deposit
                 increase_peer_deposit(peer_id=sys.argv[2], amount=sys.argv[3])
 
+            case "credit_client":
+                from src.commands.credit_client import credit_client
+                credit_client(client_id=sys.argv[2], amount=sys.argv[3], decrement=False)
+
+            case "debit_client":
+                from src.commands.credit_client import credit_client
+                credit_client(client_id=sys.argv[2], amount=sys.argv[3], decrement=True)
+
             case "verify_reputation":
                 if len(sys.argv) < 3:
                     print("Usage: nodo verify_reputation <peer_id>", flush=True)
@@ -860,7 +866,7 @@ if __name__ == '__main__':
                 print('Unknown command.', flush=True)
 
     # Hand the console back when a one-shot command finishes. The Ergo / reputation
-    # commands (sync_reputation_proof, submit_reputation, tx_history, config, …)
+    # commands (sync_reputation_proof, submit_reputation, tx_history, …)
     # start a JVM through jpype, whose non-daemon threads otherwise keep the
     # interpreter alive and hang the shell after the command has already done its
     # work. `serve` blocks in wait_for_termination() and never reaches here, and the

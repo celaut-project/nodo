@@ -17,6 +17,11 @@ from protos import celaut_pb2
 from src.database.access_functions.peers import get_peer_ids, get_peer_directions
 from src.manager.resources import mem_manager
 from src.utils import logger as log
+from src.utils.registry_errors import (
+    ServiceNotInRegistry,
+    ServiceRegistryError,
+    ServiceSpecUnavailable,
+)
 from src.utils.verify import get_service_hex_main_hash
 from src.utils.config import ConfigManager
 
@@ -52,11 +57,23 @@ def service_hashes(
         yield _hash
 
 
-def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
+def load_service_from_disk(service_hash: str) -> celaut.Service:
+    """Read a service spec from the local registry, or raise saying why not.
+
+    :class:`ServiceNotInRegistry` when this node does not store the spec,
+    :class:`ServiceSpecUnavailable` when it does but could not load it right now
+    (memory-lock timeout, I/O). Callers that authorize on what a spec declares
+    must use this one rather than :func:`read_service_from_disk`, which cannot
+    tell them apart -- see #269 and :mod:`src.utils.registry_errors`.
+
+    A file that disappears between the existence check and the read surfaces as
+    ``ServiceSpecUnavailable``, not as absence: it is a race with whoever is
+    mutating the registry, and the safe reading of a race is "cannot tell yet".
+    """
     log.LOGGER('Getting ' + service_hash + ' service from the local registry.')
     filename: str = os.path.join(REGISTRY, service_hash)
     if not os.path.exists(filename):
-        return None
+        raise ServiceNotInRegistry(f"Service {service_hash} is not on the local registry.")
 
     if os.path.isdir(filename):
         filename = filename + '/' + WITHOUT_BLOCKS_FILE_NAME
@@ -68,13 +85,32 @@ def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
             service.ParseFromString(read_file(filename=filename))
             log.LOGGER(f"Service {service_hash} loaded.")
             return service
-    except TimeoutError:
+    except TimeoutError as e:
         log.LOGGER(
             f"Timed out after {WAIT_FOR_UNLOCK_MEMORY}s waiting to unlock memory for service {service_hash}."
         )
-        return None
-    except (IOError, FileNotFoundError):
-        log.LOGGER('The service was not on registry.')
+        raise ServiceSpecUnavailable(
+            f"Timed out after {WAIT_FOR_UNLOCK_MEMORY}s waiting to unlock memory for "
+            f"service {service_hash}."
+        ) from e
+    except (IOError, FileNotFoundError) as e:
+        log.LOGGER(f'The service {service_hash} is on the registry but could not be read: {e}')
+        raise ServiceSpecUnavailable(
+            f"Service {service_hash} is on the registry but could not be read: {e}"
+        ) from e
+
+
+def read_service_from_disk(service_hash: str) -> Optional[celaut.Service]:
+    """The spec, or ``None`` for any reason it could not be produced.
+
+    Kept for the callers that only report a miss (inspect, cost estimation): to
+    them "we do not have it" and "we could not load it" are the same answer. Do
+    not use it to decide what an instance is allowed to do -- use
+    :func:`load_service_from_disk` and handle the two failures apart.
+    """
+    try:
+        return load_service_from_disk(service_hash=service_hash)
+    except ServiceRegistryError:
         return None
 
 

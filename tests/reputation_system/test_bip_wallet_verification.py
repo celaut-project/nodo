@@ -1,4 +1,4 @@
-"""BIP32/ECDSA primitives shared by node identity (#236) and the reputation proof."""
+"""BIP32 derivation and Ergo Schnorr signing shared by node identity (#236) and the proof."""
 # Some sibling test modules install a stub `mnemonic` in sys.modules (to prove lazy
 # imports). Restore the real package here so this module's real BIP39/BIP32 crypto works
 # regardless of collection order.
@@ -14,8 +14,8 @@ from bip32 import BIP32, HARDENED_INDEX
 from mnemonic import Mnemonic
 
 from src.reputation_system.bip_wallet_verification import (
-    bip_ecdsa_sign,
-    bip_ecdsa_verify_proposition,
+    bip_schnorr_sign,
+    bip_schnorr_verify_proposition,
     derive_compressed_pubkey,
     public_key_from_proposition_bytes,
 )
@@ -35,15 +35,15 @@ PROP = _proposition_for(MNEMONIC)
 
 class OwnershipVerificationCryptoTests(unittest.TestCase):
     def test_verify_accepts_owner_signature(self):
-        sig = bip_ecdsa_sign(MNEMONIC, "challenge-123")
-        self.assertTrue(bip_ecdsa_verify_proposition(PROP, "challenge-123", sig))
+        sig = bip_schnorr_sign(MNEMONIC, "challenge-123")
+        self.assertTrue(bip_schnorr_verify_proposition(PROP, "challenge-123", sig))
 
     def test_verify_rejects_wrong_message_key_and_garbage(self):
-        sig = bip_ecdsa_sign(MNEMONIC, "challenge-123")
-        self.assertFalse(bip_ecdsa_verify_proposition(PROP, "other", sig))
-        self.assertFalse(bip_ecdsa_verify_proposition(_proposition_for(OTHER), "challenge-123", sig))
-        self.assertFalse(bip_ecdsa_verify_proposition(b"\x00", "challenge-123", sig))
-        self.assertFalse(bip_ecdsa_verify_proposition(PROP, "challenge-123", "zz"))
+        sig = bip_schnorr_sign(MNEMONIC, "challenge-123")
+        self.assertFalse(bip_schnorr_verify_proposition(PROP, "other", sig))
+        self.assertFalse(bip_schnorr_verify_proposition(_proposition_for(OTHER), "challenge-123", sig))
+        self.assertFalse(bip_schnorr_verify_proposition(b"\x00", "challenge-123", sig))
+        self.assertFalse(bip_schnorr_verify_proposition(PROP, "challenge-123", "zz"))
 
     def test_public_key_extraction(self):
         self.assertEqual(public_key_from_proposition_bytes(PROP), PROP[3:])
@@ -53,7 +53,7 @@ class OwnershipVerificationCryptoTests(unittest.TestCase):
 
 class DeriveCompressedPubkeyTests(unittest.TestCase):
     def test_matches_the_ergo_derivation_path(self):
-        # Same derivation as sign_message/bip_ecdsa_sign's proposition bytes,
+        # Same derivation as sign_message/bip_schnorr_sign's proposition bytes,
         # computed independently in pure Python (no JVM) -- see node_identity.py.
         self.assertEqual(bytes.fromhex("0008cd") + derive_compressed_pubkey(MNEMONIC), PROP)
 

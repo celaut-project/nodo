@@ -14,11 +14,39 @@ from src.utils.cost_functions.generate_estimated_cost import generate_estimated_
 from src.utils.utils import service_extended, peers_id_iterator, \
     generate_uris_by_peer_id
 from src.utils.config import ConfigManager
+from src.payment_system.mu_conversion import (
+    configuration_for_peer,
+    estimated_cost_for_local,
+    matching_payment_system,
+)
 
 env_manager = ConfigManager()
 
 SEND_ONLY_HASHES_ASKING_COST = env_manager.get("SEND_ONLY_HASHES_ASKING_COST")
 EXTERNAL_COST_TIMEOUT = env_manager.get("EXTERNAL_COST_TIMEOUT")
+START_SERVICE_ON_PEER_TIMEOUT = env_manager.get("START_SERVICE_ON_PEER_TIMEOUT")
+
+
+def _timeout_for_cost_request() -> Optional[int]:
+    """Use the cheap estimate timeout only when the request is hash-only."""
+    timeout = EXTERNAL_COST_TIMEOUT if SEND_ONLY_HASHES_ASKING_COST else START_SERVICE_ON_PEER_TIMEOUT
+    try:
+        timeout = int(timeout)
+    except (TypeError, ValueError):
+        return None
+    return timeout if timeout > 0 else None
+
+
+def _log_cost_request_exception(peer_id: str, exc: Exception) -> None:
+    if isinstance(exc, grpc.RpcError):
+        code = exc.code()
+        if code == grpc.StatusCode.DEADLINE_EXCEEDED:
+            log.LOGGER(f"Timeout taking the cost for {peer_id}: {exc}")
+            return
+        if code == grpc.StatusCode.UNAVAILABLE:
+            log.LOGGER(f"Peer {peer_id} is unavailable while taking the cost: {exc}")
+            return
+    log.LOGGER(f"Exception taking the cost for {peer_id}: {exc} (maybe it doesn't have the service)")
 
 def __pretty_format_peers(peers: dict[str, celaut_pb2.EstimatedCost]) -> str:
     
@@ -61,34 +89,36 @@ def estimate_cost_on_peer(
 ) -> Optional[celaut_pb2.EstimatedCost]:
     """Ask exactly one peer for its `GetServiceEstimatedCost` on this service.
 
-    The single-peer half of what `execution_balancer` does for every connected
-    peer in its comparison loop below. Also used by `launch_service`'s
-    `force_execution` bypass, which still needs the peer's own cost estimate
-    (for `spend_mu`/`balance_on_other_peer`) without comparing it to anyone
-    else's. Returns None (logging why) instead of raising, matching how the
-    balancer's loop already treats an unreachable/incompatible peer.
+    The configuration is converted to the target peer's MU before asking for a
+    quote, and the returned quote is converted back to local MU.  This leaves
+    the balancer and the caller with one comparable/accountable scale.
     """
     try:
-        return next(bee.client_grpc(
+        payment_system = matching_payment_system(peer_id)
+        peer_configuration = configuration_for_peer(
+            configuration, payment_system=payment_system
+        )
+        peer_cost = next(bee.client_grpc(
             method=celaut_pb2_grpc.GatewayStub(
                 grpc.insecure_channel(
                     next(generate_uris_by_peer_id(peer_id))
                 )
             ).GetServiceEstimatedCost,
             indices_parser=celaut_pb2.EstimatedCost,
-            timeout=EXTERNAL_COST_TIMEOUT,
+            timeout=_timeout_for_cost_request(),
             partitions_message_mode_parser=True,
             indices_serializer=StartService_input_indices,
             input=service_extended(
-                config=configuration,
+                config=peer_configuration,  # MUlocal -> MUpeer
                 metadata=metadata,
                 send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,
                 client_id=get_client_id_on_other_peer(peer_id=peer_id),
                 recursion_guard_token=recursion_guard_token
             ),
         ))
+        return estimated_cost_for_local(peer_cost, payment_system=payment_system)  # MUpeer -> MUlocal
     except Exception as e:
-        log.LOGGER(f"Exception taking the cost for {peer_id}: {e} (maybe it doesn't have the service)")
+        _log_cost_request_exception(peer_id=peer_id, exc=e)
         return None
 
 

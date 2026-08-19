@@ -189,6 +189,7 @@ network:
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
+  TUNNEL_LOGS: false  # Log every tunnel handshake, relay close and billing tick under "[TUNNEL]". Off by default: it is one line per connection and per billed MiB, which buries the rest of the node log on a busy tunnel. Turn on to debug tunneling.
 
 # Dynamic DNS: keep a hostname pointing at this node's public IP, so peers can
 # find it by name when the address changes. Tunneling means only the gateway port
@@ -268,6 +269,15 @@ ui:
 # ledger's own floor (an Ergo transaction costs a fee and cannot create an output below
 # the minimum box value), so a deposit is never quietly eaten by its own fee.
 deposits:
+  # Whether the node may pay a peer on its own. With this false the manager never
+  # broadcasts a refill: a peer whose deposit runs low simply stays low until an
+  # operator runs `nodo pay` or `nodo increase_peer_deposit`, since a command someone
+  # typed overrides the default policy. Everything else the manager does for a peer
+  # (refreshing its address, keeping it in `nodo peers`) is unaffected, and so is the
+  # cold-wallet sweep below -- that moves this node's funds between its own wallets and
+  # pays nobody. Delegation keeps working with this off; the peer just has to be funded
+  # by hand, which is the point.
+  AUTOMATIC_REFILL: true
   # Largest share of a peer deposit that may be lost to the transaction fee. 0.02 caps
   # the fee at 2 % of the deposit. Lower it for cheaper transfers, at the cost of
   # locking up more per peer.

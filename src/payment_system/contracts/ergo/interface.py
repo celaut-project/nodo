@@ -81,6 +81,11 @@ _transaction_url_reporter: ContextVar = ContextVar(
 )
 
 
+_transaction_id_reporter: ContextVar = ContextVar(
+    "ergo_transaction_id_reporter", default=None
+)
+
+
 @contextmanager
 def transaction_url_reporting(reporter):
     """Temporarily report a submitted Ergo transaction URL to the caller."""
@@ -89,6 +94,24 @@ def transaction_url_reporting(reporter):
         yield
     finally:
         _transaction_url_reporter.reset(token)
+
+
+@contextmanager
+def transaction_id_reporting(reporter):
+    """Temporarily report a submitted transaction's *id* to the caller.
+
+    Kept separate from the URL hook above rather than folded into it. The URL is
+    presentation -- `nodo pay` prints a sigmaspace link for a human to click -- while
+    the id is the record: it is what `payments.tx_id` stores and what `tx_history`
+    joins an explorer transaction back to a peer with. Recovering the id by parsing
+    the URL would put explorer-link formatting in the accounting path, where a
+    changed link would silently become a missing payment record.
+    """
+    token = _transaction_id_reporter.set(reporter)
+    try:
+        yield
+    finally:
+        _transaction_id_reporter.reset(token)
 
 
 def __mu_to_nanoerg(amount: int) -> int:
@@ -346,6 +369,9 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
                 reporter = _transaction_url_reporter.get()
                 if reporter:
                     reporter(f"https://sigmaspace.io/en/transaction/{tx_id}")
+                id_reporter = _transaction_id_reporter.get()
+                if id_reporter:
+                    id_reporter(tx_id)
             except Exception as e:
                 if "Double spending attempt" in str(e):
                     raise DoubleSpendingAttempt(LEDGER)
@@ -400,9 +426,15 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
                 r4_value = box_dict["additionalRegisters"]["R4"]["renderedValue"]
                 decoded_r4 = bytes.fromhex(r4_value).decode("utf-8")
                 if decoded_r4 == token:
-                    if "value" in box_dict and box_dict["value"] == expected:
+                    # At least, not exactly: the payer converts our MU figure from
+                    # its own scale and has to round down to a whole MU of ours,
+                    # so a correct payment routinely carries a few nanoERG more
+                    # than the credit it asks for. Demanding equality rejected
+                    # those with the money already on-chain. More than asked for
+                    # is never a problem -- the credit is what `expected` covers.
+                    if "value" in box_dict and box_dict["value"] >= expected:
                         return True
-                    LOGGER(f"Incorrect amount for token {token}. Was {box_dict.get('value')} expected {expected}")
+                    LOGGER(f"Insufficient amount for token {token}. Was {box_dict.get('value')} expected at least {expected}")
                     return False
 
         LOGGER(f"Token {token} not found in R4.")

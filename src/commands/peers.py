@@ -6,6 +6,25 @@ from src.utils.logger import ssformat
 from src.utils.monetary import format_mu
 from src.database.sql_connection import SQLConnection
 
+
+def _balance_in_local_mu(peer_id: str, balance_str) -> "int | None":
+    """The stored peer-MU balance expressed in ours, or None if it cannot be.
+
+    `None` rather than 0, because this is a display: an operator has to be able to
+    tell "you have nothing there" apart from "we cannot say what their MU is worth".
+    """
+    from src.payment_system.mu_conversion import convert_mu, matching_payment_system
+
+    try:
+        payment_system = matching_payment_system(peer_id)
+        return convert_mu(
+            int(balance_str),
+            from_mu_per_unit=payment_system.peer_mu_per_unit,
+            to_mu_per_unit=payment_system.local_mu_per_unit,
+        )
+    except (ValueError, TypeError):
+        return None
+
 env_manager = ConfigManager()
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 
@@ -83,7 +102,11 @@ def list_peers():
                     rate: amount.n for rate, amount in announced.mu_per_call.items()
                 }
 
-            balance = int(balance_str)
+            # The column holds the peer's own MU (see
+            # `SQLConnection.refresh_balance_for_peer`), and `format_mu` renders in
+            # *our* display unit -- so it has to be converted before it is shown, or
+            # the figure is a number in one currency labelled with another.
+            balance = _balance_in_local_mu(peer_id, balance_str)
             contracts = sq.get_peer_payment_contracts(peer_id)
 
             # Section: General
@@ -95,7 +118,11 @@ def list_peers():
             # Section: Client & Balance
             print("[Client & Balance]")
             print(f"  Remote Client ID: {remote_client_id}")
-            print(f"  Our balance there: {format_mu(balance)}")
+            print(
+                f"  Our balance there: {format_mu(balance)}" if balance is not None
+                else f"  Our balance there: {balance_str} (the peer's own MU; no "
+                     "common payment system to convert it)"
+            )
             print(f"  Balance last update: {balance_last_update or 'None'}")
             print()
 

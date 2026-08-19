@@ -17,7 +17,17 @@ def increase_peer_deposit(peer_id, amount):
         return
 
     try:
-        from src.payment_system.payment_process import increase_deposit_on_peer
+        from src.payment_system.payment_process import (
+            deposit_refusal_reason,
+            increase_deposit_on_peer,
+        )
+
+        # Why it cannot be sent is more use than that it was not: below the
+        # ledger's minimum output, or no payment system shared with this peer.
+        refusal = deposit_refusal_reason(peer_id, amount_mu)
+        if refusal:
+            print(f"Cannot deposit on peer {peer_id}: {refusal}.")
+            return
 
         result = increase_deposit_on_peer(peer_id=peer_id, amount=amount_mu)
         if result:

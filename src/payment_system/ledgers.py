@@ -66,9 +66,6 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
     """
     for script, ledger in get_peer_contract_instances(CONTRACT_HASH):
 
-        ledger_tag = ledger.tags[0] if ledger.tags else "unknown"
-        LOGGER(f"Using ledger {ledger_tag} with script {script.hex()} for contract {CONTRACT_HASH}")
-
         contract_ledger = celaut.Contract()
         contract_ledger.ledger.CopyFrom(ledger)
         set_script(contract_ledger, script)

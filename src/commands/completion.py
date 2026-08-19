@@ -42,6 +42,9 @@ INSTANCE_COMMANDS = ["kill", "observe", "increase_deposit", "decrease_deposit", 
 # Commands whose first positional argument is a peer id.
 PEER_COMMANDS = ["disconnect", "increase_peer_deposit", "verify_reputation", "pay"]
 
+# Commands whose first positional argument is a client id.
+CLIENT_COMMANDS = ["credit_client", "debit_client"]
+
 # Commands whose first positional argument is a filesystem path (a project dir,
 # a .bee file, a config dir, …). These get file/dir completion, not an id list.
 PATH_COMMANDS = ["import", "pack", "ggconf"]
@@ -84,7 +87,6 @@ COMMANDS = sorted(
         "sync_reputation_proof",
         "refresh_ergo_nodes",
         "serve",
-        "config",
         "envs",
         "migrate",
         "storage:prune_blocks",
@@ -99,6 +101,8 @@ COMMANDS = sorted(
         "increase_peer_deposit",
         "verify_reputation",
         "pay",
+        "credit_client",
+        "debit_client",
         "local_docker_packer",
         "daemon",
         "doctor",
@@ -210,6 +214,11 @@ def peer_candidates(database: Optional[str]) -> List[str]:
     return _sqlite_column(database, "SELECT id FROM peer")
 
 
+def client_candidates(database: Optional[str]) -> List[str]:
+    """Known client ids."""
+    return _sqlite_column(database, "SELECT id FROM clients")
+
+
 def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> List[str]:
     """Return completion candidates for a ``kind`` requested by the shell."""
     if kind == "commands":
@@ -227,6 +236,8 @@ def candidates(kind: str, paths: Optional[Dict[str, Optional[str]]] = None) -> L
         return instance_candidates(paths.get("database"))
     if kind == "peers":
         return peer_candidates(paths.get("database"))
+    if kind == "clients":
+        return client_candidates(paths.get("database"))
     if kind == "refs":
         return (
             service_candidates(paths.get("registry"), paths.get("metadata"))
@@ -278,6 +289,7 @@ _nodo_completion() {{
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
+            {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
             {"|".join(PATH_COMMANDS)}) _nodo_paths; return 0 ;;
             daemon)
                 COMPREPLY=( $(compgen -W "{_quote_words(DAEMON_SUBCOMMANDS)}" -- "$cur") )
@@ -335,6 +347,7 @@ _nodo() {{
             {"|".join(SERVICE_COMMANDS)}) kind="services" ;;
             {"|".join(INSTANCE_COMMANDS)}) kind="instances" ;;
             {"|".join(PEER_COMMANDS)}) kind="peers" ;;
+            {"|".join(CLIENT_COMMANDS)}) kind="clients" ;;
             {"|".join(PATH_COMMANDS)}) _files; return ;;
             daemon)
                 items=({_quote_words(DAEMON_SUBCOMMANDS)})

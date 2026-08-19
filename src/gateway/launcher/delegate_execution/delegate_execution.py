@@ -14,6 +14,10 @@ from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
 from src.utils import utils, logger as log
 from src.utils.monetary import format_mu
+from src.payment_system.mu_conversion import (
+    configuration_for_peer,
+    matching_payment_system,
+)
 
 
 env_manager = ConfigManager()
@@ -64,6 +68,15 @@ def delegate_execution(
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
 
+        # The configuration travels to the peer's Gateway, which reads MU on its
+        # own scale, so it is translated here. The cost is not: `cost` and
+        # `balance_on_other_peer` are both already in our MU (the balance is
+        # converted where it enters the node, in `manager.metrics`), and
+        # converting one side of a comparison whose other side is local was how
+        # this check came to compare two different scales.
+        payment_system = matching_payment_system(peer)
+        peer_config = configuration_for_peer(config, payment_system=payment_system)
+
         if balance_on_other_peer(peer_id=peer) <= cost:
             raise Exception(
                 'Launch service error: not enough balance on ' + peer + '. '
@@ -83,7 +96,7 @@ def delegate_execution(
             indices_parser=celaut_pb2.ServiceInstance,
             input=utils.service_extended(
                 metadata=metadata,
-                config=config,
+                config=peer_config,
                 # TODO: Could pass only the previously selected configuration with the estimate cost
                 #  request, now is allowing to select another (that could be reasonable).
                 client_id=get_client_id_on_other_peer(peer_id=peer),

@@ -6,10 +6,13 @@ there, so these tests focus on what's specific to `force_execution` -- the
 fail-fast peer check, and the token-based hint lifecycle around the call.
 """
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
     from protos import celaut_pb2 as celaut
     from src.commands import force_execution as force_execution_cmd
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -20,6 +23,13 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ForceExecutionCommandTests(unittest.TestCase):
+    @staticmethod
+    def _payment_system():
+        return SimpleNamespace(
+            local_mu_per_unit=1_000_000_000,
+            peer_mu_per_unit=2_000_000_000,
+        )
+
     def test_refuses_when_the_peer_is_not_connected(self):
         with patch.object(force_execution_cmd.sc, "peer_exists", return_value=False), patch.object(
             force_execution_cmd, "resolve_service_hash"
@@ -55,6 +65,8 @@ class ForceExecutionCommandTests(unittest.TestCase):
         with patch.object(force_execution_cmd.sc, "peer_exists", return_value=True), patch.object(
             force_execution_cmd, "resolve_service_hash", return_value="svc-resolved"
         ), patch.object(
+            force_execution_cmd, "matching_payment_system", return_value=self._payment_system()
+        ), patch.object(
             force_execution_cmd.sc, "set_forced_execution_peer", side_effect=fake_set
         ), patch.object(
             force_execution_cmd.sc, "pop_forced_execution_peer", side_effect=fake_pop
@@ -71,9 +83,30 @@ class ForceExecutionCommandTests(unittest.TestCase):
         self.assertEqual(recorded["pop"], recorded["set"][0])
         mock_print.assert_called_once_with(response)
 
+    def test_forced_generator_does_not_forward_local_funding_as_initial_mu(self):
+        # The dev client's funding is a local matter: it has to cover what the
+        # node quotes (build + initial balance). Forwarding it as the instance's
+        # `initial_mu` both overrode `default_initial_balance` and guaranteed the
+        # quote came out above the very balance meant to pay it.
+        with patch.object(force_execution_cmd, "get_execute_client", return_value="client-a") as mock_client:
+            messages = list(force_execution_cmd._forced_generator(
+                _hash="aa" * 32,
+                token="forced-token",
+                local_client_balance_mu=force_execution_cmd.DEV_CLIENT_FUNDING_MU,
+            ))
+
+        mock_client.assert_called_once_with(
+            amount_mu=force_execution_cmd.DEV_CLIENT_FUNDING_MU, external=False
+        )
+        configs = [message for message in messages if isinstance(message, celaut.Configuration)]
+        self.assertEqual(len(configs), 1)
+        self.assertFalse(configs[0].HasField("initial_mu"))
+
     def test_the_hint_is_cleaned_up_even_when_the_gateway_call_fails(self):
         with patch.object(force_execution_cmd.sc, "peer_exists", return_value=True), patch.object(
             force_execution_cmd, "resolve_service_hash", return_value="svc-resolved"
+        ), patch.object(
+            force_execution_cmd, "matching_payment_system", return_value=self._payment_system()
         ), patch.object(force_execution_cmd.sc, "set_forced_execution_peer"), patch.object(
             force_execution_cmd.sc, "pop_forced_execution_peer"
         ) as mock_pop, patch.object(
