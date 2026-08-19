@@ -149,11 +149,20 @@ WIP). See [`CONFIG.md`](CONFIG.md).
 
 ## Reputation proof
 
-An on-chain record (an Ergo token held in a "reputation box") that carries a
-node's opinions about other nodes' reputation proofs. It lets peers assign each
-other trust in a decentralized, transparent way. Nodes generate and submit these
-proofs; publishing skill/coverage/benchmark/result entities uses the same
-reputation-box machinery. Model: [`ERGO.md`](ERGO.md).
+An on-chain record (an Ergo token held in "reputation boxes") through which a node
+publishes **its own opinions about other nodes**. Each box is one opinion: register
+R5 names the node it is about — by that node's **identity public key**, the same key
+that is its `peer_id` — and the token amount in the box is the weight behind it.
+
+Read the direction carefully: a proof belongs to its *author*. `Peer.reputation_proofs`
+in an announcement is what that peer thinks of others, never a rating of the peer
+itself, and a single identity key may hold several proofs at once (issue #281). What
+we think of a peer is separate and local: `peer.reputation_score` plus the
+`reputation_events` that explain it, keyed by the peer's public key.
+
+It lets peers assign each other trust in a decentralized, transparent way. Nodes
+generate and submit these proofs; publishing celaut-node/service entities
+uses the same reputation-box machinery. Model: [`ERGO.md`](ERGO.md).
 
 ## Coverage / Benchmark / Result / Skill
 

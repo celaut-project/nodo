@@ -16,9 +16,23 @@ For this reason, Ergo is considered the path forward.
 
 The reputation system in the Nodo allows nodes to share their opinion about other nodes in the network. This system leverages the **Ergo** blockchain to manage **reputation proofs**. Here's how it works:
 
-- Each node has a **reputation proof**, represented by a **token in Ergo**.
-- The boxes containing this token record the node's opinions about other reputation proofs in the network.
+- A node publishes its opinions through a **reputation proof**, represented by a **token in Ergo**.
+- Each box holding that token is **one opinion**: whom it is about (register **R5**), how much of the token backs it (its weight), and what kind of thing the target is (register **R4**). The boxes are the opinions; the token is what carries their weight.
+- An opinion is **about a node**, so R5 holds that node's **identity public key** — the same key that is its `peer_id` and the R7 owner of its own proofs (see [Node identity signatures](#node-identity-signatures)). One box per peer rated, plus one addressed to the publishing node's own key.
 - In this way, each node assigns a different reputation to its peers, enabling a decentralized and transparent evaluation system.
+
+**A proof is the author's opinions, not a score awarded to its holder.** This is the
+part that reads backwards at first: when a peer announces a proof to us
+(`Peer.reputation_proofs`), it is showing us *what it thinks of others*, not a
+credential we granted it or a rating we should read off it. That also means one
+identity key may hold **several** proofs at once, so nothing on our side records
+"the" proof of a peer — the proofs a peer announced live in the signed
+advertisement we store verbatim.
+
+R5 used to hold the target's *reputation proof token id* instead of its public key.
+That made every opinion an opinion about one of the target's proofs rather than about
+the target: reputation did not survive the target minting a new proof, and a node
+could shed its accumulated on-chain standing by doing exactly that (issue #281).
 
 ### Payment System implementation
 
@@ -156,6 +170,21 @@ The reputation system utilizes the following fields:
 - `contract`: Contains the sigma script of the box that holds each proof
 - `ledger`: Specifies the ledger system in use, which is set to `"ergo"`
 - `token_id`: Maps to the reputation proof ID, corresponding to the `token_id` in Ergo
+
+A `Peer` carries these as `repeated Contract reputation_proofs` — repeated because the
+peer may hold several proofs, and each entry is one of the peer's own published
+opinion sets rather than a rating of the peer (see [Reputation system
+implementation](#reputation-system-implementation)). `nodo peers` lists every proof id
+a peer announced; `nodo verify_reputation <peer_id>` checks, for each of them, that
+the peer actually controls it on-chain.
+
+The registers of an opinion box itself:
+- **R4** — `typeNftTokenId`: what kind of object R5 names. A node is `CELAUT_NODE_TYPE_NFT_ID`.
+- **R5** — `uniqueObjectData`: the target of the opinion. For a node, its **identity public key**.
+- **R6** — `isLocked`
+- **R7** — the owner's `propositionBytes` (`0008cd` + the *author's* public key)
+- **R8** — `customFlag`, carrying the sign of the amount
+- **R9** — free-form content; for a self-opinion, the node's signed `Peer` message
 
 ##### Payment System
 The payment system implements these fields:
