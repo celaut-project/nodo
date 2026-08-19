@@ -218,6 +218,30 @@ The floors live in one module, `virtualizers/ch/limits.py`, imported both by the
 that creates a guest (`execute`, `build`) and by the code that prices one. A floor
 defined anywhere else would be a price the node charges without quoting.
 
+### Resizing an instance
+
+`ModifyServiceSystemResources` charges the flat `MODIFY_RESOURCES_MU` and asks the
+virtualizer to change what the guest holds. What reaches `local_instances` — and therefore
+what the next tick charges — is the subset the virtualizer confirms it applied, field by
+field (`hotplug._applied_sysreq`, driven by the same per-field report the caller reads
+back). A field it declines keeps the value the row already holds, so a resize the guest
+never received cannot move the instance's price.
+
+Cloud Hypervisor applies `mem_limit` and the CFS pair, through the instance's cgroup. It
+declines `disk_space`: a live rootfs image cannot be resized, so the disk an instance
+holds is fixed when it is created.
+
+It also declines the two unbounded forms, `mem_limit=0` and `cpu_quota=0`, which ask for
+`memory.max=max` and `cpu.max="max <period>"`. The row stores an amount, and `0` reads as
+*no memory* and *no CPU* rather than "unlimited", so a node that granted them would hand
+out an unbounded cgroup and charge nothing for it: a resource this model cannot price is
+one it cannot promise. `hotplug` fails the call, and the gateway refunds
+`MODIFY_RESOURCES_MU` — as it does for any resize that fails.
+
+A shrink is applied as asked, with no floor of the node's own. Booting needs
+`MIN_MEM_MIB`, but a running service asking for less memory than that is making a
+decision about its own guest, and the row records what it holds either way.
+
 ### Worked example
 
 At the defaults above, an instance with 256 MiB RAM, 1 vCPU and 10 GiB disk, on an
