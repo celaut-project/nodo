@@ -22,7 +22,7 @@ BRANCH_EXPLICIT=false
 CH_VERSION="v51.1"
 # Guest kernel + busybox published by .github/workflows/guest-kernel.yml; bumped independently
 # of nodo releases so a kernel fix does not require cutting a node release.
-GUEST_KERNEL_VERSION="guest-kernel-v2"
+GUEST_KERNEL_VERSION="guest-kernel"
 
 print_usage() {
   cat <<EOF

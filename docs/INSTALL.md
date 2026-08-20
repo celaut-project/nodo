@@ -315,7 +315,7 @@ rm -f /tmp/cloud-hypervisor.bin
 # Guest kernel: a Nodo release asset, never the host's /boot kernel. It is built
 # by .github/workflows/guest-kernel.yml from bash/guest-kernel/ and pinned in
 # install.sh as GUEST_KERNEL_VERSION.
-GUEST_KERNEL_VERSION="guest-kernel-v2"
+GUEST_KERNEL_VERSION="guest-kernel"
 GUEST_KERNEL_ASSET="vmlinuz-${CH_ARCH_TAG/\//-}"   # linux/arm64 -> vmlinuz-linux-arm64
 GUEST_KERNEL_BASE="https://github.com/celaut-project/nodo/releases/download/${GUEST_KERNEL_VERSION}"
 
