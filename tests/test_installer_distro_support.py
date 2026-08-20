@@ -63,24 +63,82 @@ class PackageManagerAbstractionTests(unittest.TestCase):
                 self.assertIn('download_guest_asset "busybox-${CH_ARCH_TAG//\\//-}"', content)
 
 
+SERVICE_TEMPLATE = Path("bash/nodo.service.template")
+
+
+def _shell_renderers_of_the_service_template():
+    """Every shell script that renders bash/nodo.service.template.
+
+    Discovered rather than listed: the bug this guards against was adding a
+    placeholder to the template and updating only some of the renderers, and a
+    hardcoded list has exactly the same blind spot.
+    """
+    candidates = [Path("install.sh")] + sorted(Path("bash").glob("*.sh"))
+    renderers = []
+    for path in candidates:
+        text = path.read_text(encoding="utf-8")
+        # Naming the template is not enough — lib_pkg.sh only mentions it in a
+        # comment. A renderer is a script that actually substitutes into it.
+        if "nodo.service.template" in text and "s|{{" in text:
+            renderers.append(path)
+    return renderers
+
+
 class ServiceUnitPortabilityTests(unittest.TestCase):
     def test_unit_group_is_not_hardcoded(self):
         # `sudo` exists on Debian, `wheel` on Fedora/RHEL; systemd fails to start a
         # unit whose Group cannot be resolved.
-        template = Path("bash/nodo.service.template").read_text(encoding="utf-8")
+        template = SERVICE_TEMPLATE.read_text(encoding="utf-8")
         self.assertIn("Group={{ADMIN_GROUP}}", template)
         self.assertNotIn("Group=sudo", template)
 
-    def test_installer_and_doctor_resolve_the_group_the_same_way(self):
+    def test_every_shell_renderer_substitutes_every_placeholder(self):
+        # setup_linux_x86.sh once rendered the unit without {{ADMIN_GROUP}}, wrote
+        # `Group={{ADMIN_GROUP}}` to /etc/systemd/system/nodo.service and aborted the
+        # install on its own placeholder check — leaving a unit systemd refused to
+        # load. Assert the whole placeholder set against every renderer, so adding a
+        # placeholder cannot half-land again.
+        placeholders = set(re.findall(r"\{\{[A-Z_]+\}\}", SERVICE_TEMPLATE.read_text(encoding="utf-8")))
+        self.assertIn("{{ADMIN_GROUP}}", placeholders)
+
+        renderers = _shell_renderers_of_the_service_template()
+        self.assertIn(Path("install.sh"), renderers)
+        self.assertIn(Path("bash/setup_linux_x86.sh"), renderers)
+
+        for path in renderers:
+            content = path.read_text(encoding="utf-8")
+            for placeholder in sorted(placeholders):
+                with self.subTest(script=str(path), placeholder=placeholder):
+                    self.assertIn(f"s|{placeholder}|", content)
+
+    def test_renderers_share_one_admin_group_resolver(self):
         # doctor rewrites the unit whenever its rendering differs from the installed
         # one, so a mismatch here silently stops the service on every `nodo doctor`.
-        installer = Path("install.sh").read_text(encoding="utf-8")
+        # The shell side must not carry its own copy of the lookup.
+        lib = LIB_PKG.read_text(encoding="utf-8")
         doctor = Path("src/commands/doctor.py").read_text(encoding="utf-8")
 
-        self.assertIn("for group in sudo wheel; do", installer)
-        self.assertIn('-e "s|{{ADMIN_GROUP}}|$ADMIN_GROUP|g"', installer)
+        self.assertIn("resolve_admin_group() {", lib)
+        self.assertIn("for group in sudo wheel; do", lib)
         self.assertIn('for name in ("sudo", "wheel"):', doctor)
         self.assertIn('"{{ADMIN_GROUP}}": _resolve_admin_group()', doctor)
+
+        for path in _shell_renderers_of_the_service_template():
+            with self.subTest(script=str(path)):
+                content = path.read_text(encoding="utf-8")
+                self.assertIn("resolve_admin_group", content)
+                self.assertNotIn("for group in sudo wheel; do", content)
+
+    def test_a_failed_render_leaves_the_installed_unit_alone(self):
+        # A half-rendered unit must never reach /etc: an install that aborts should
+        # leave the previous working service running, not an unloadable one.
+        content = Path("bash/setup_linux_x86.sh").read_text(encoding="utf-8")
+        self.assertIn('unit_tmp="$(mktemp)"', content)
+        self.assertIn('install -m 0644 "$unit_tmp" "$unit_dst"', content)
+        self.assertLess(
+            content.index("Unresolved placeholders in rendered unit"),
+            content.index('install -m 0644 "$unit_tmp" "$unit_dst"'),
+        )
 
     def test_doctor_renders_the_template_without_placeholders(self):
         import sys
@@ -119,6 +177,72 @@ class SourceBuildToolchainTests(unittest.TestCase):
                 content = script.read_text(encoding="utf-8")
                 self.assertIn('if ! command -v clang >/dev/null 2>&1; then', content)
                 self.assertIn('export CC="${CC:-gcc}" CXX="${CXX:-g++}"', content)
+
+
+class PinnedGuestAssetTests(unittest.TestCase):
+    """The guest kernel is the most privileged thing nodo downloads."""
+
+    PIN = Path("bash/guest-kernel/SHA256SUMS.pinned")
+    ASSETS = (
+        "busybox-linux-amd64",
+        "busybox-linux-arm64",
+        "vmlinuz-linux-amd64",
+        "vmlinuz-linux-arm64",
+    )
+
+    def _pin(self):
+        return self.PIN.read_text(encoding="utf-8")
+
+    def test_pin_covers_every_asset_with_a_full_digest(self):
+        digests = dict(
+            (parts[1], parts[0])
+            for parts in (
+                line.split()
+                for line in self._pin().splitlines()
+                if line and not line.startswith("#") and not line.startswith("TAG")
+            )
+            if len(parts) == 2
+        )
+        self.assertEqual(sorted(digests), sorted(self.ASSETS))
+        for asset, digest in digests.items():
+            with self.subTest(asset=asset):
+                self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
+    def test_pin_matches_the_release_the_installer_asks_for(self):
+        # A bumped GUEST_KERNEL_VERSION with stale digests must fail loudly at
+        # install time rather than silently verify against the old kernel.
+        installer = Path("install.sh").read_text(encoding="utf-8")
+        wanted = re.search(r'GUEST_KERNEL_VERSION="([^"]+)"', installer).group(1)
+        pinned = re.search(r"^TAG (\S+)$", self._pin(), re.MULTILINE).group(1)
+        self.assertEqual(pinned, wanted)
+
+    def test_setup_verifies_against_the_pin_and_not_the_release(self):
+        # SHA256SUMS published next to the artifact proves only that the download was
+        # not truncated: whoever can edit the release swaps both at once.
+        for script in (ARM_SETUP, X86_SETUP):
+            with self.subTest(script=str(script)):
+                content = script.read_text(encoding="utf-8")
+                self.assertIn("pinned_guest_digest", content)
+                self.assertIn("SHA256SUMS.pinned", content)
+                self.assertNotIn('download_file "${base_url}/SHA256SUMS"', content)
+
+    def test_the_pinned_tag_is_checked_before_downloading(self):
+        for script in (ARM_SETUP, X86_SETUP):
+            with self.subTest(script=str(script)):
+                content = script.read_text(encoding="utf-8")
+                self.assertIn('[ "$pinned_tag" = "$GUEST_KERNEL_VERSION" ]', content)
+
+
+class DownloadErrorPropagationTests(unittest.TestCase):
+    def test_download_file_reports_transfer_failures(self):
+        # download_file used to `return 0` unconditionally, which made every
+        # `download_file ... || fail` guard in these scripts dead code.
+        for script in (ARM_SETUP, X86_SETUP):
+            with self.subTest(script=str(script)):
+                content = script.read_text(encoding="utf-8")
+                body = content.split("download_file() {")[1].split("\n}")[0]
+                self.assertIn('curl -fsSL "$url" -o "$destination" || return 1', body)
+                self.assertIn('wget -qO "$destination" "$url" || return 1', body)
 
 
 if __name__ == "__main__":

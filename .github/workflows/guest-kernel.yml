@@ -20,8 +20,11 @@ on:
     tags:
       - "guest-kernel-v*"
 
+# Least privilege per job: `build` compiles third-party sources (kernel.org,
+# busybox.net tarballs) for ~30 minutes, so it must not have a token that can write
+# to this repo. Only the release job publishes.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -68,6 +71,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
