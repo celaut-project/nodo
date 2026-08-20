@@ -42,7 +42,9 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 - **Requirements**: `git`, `curl`, `sudo`, `iptables`, `bc`.
 
-- **Supported distributions**: Nodo has only been tested on Debian-based distributions so far.
+- **Supported distributions**: any Linux with `apt` or `dnf`. Tested on Ubuntu 22.04/24.04 and
+  Fedora (including Fedora Asahi Remix on Apple Silicon). Other package managers need one entry
+  added to `bash/lib_pkg.sh`.
 
 - **Sudo Usage**: The installation script requires `sudo` privileges for system-level setup. Python, Java, and `yq` runtimes are installed locally under `MAIN_DIR`.
 

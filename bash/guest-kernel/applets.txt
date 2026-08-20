@@ -1,0 +1,17 @@
+# busybox applets the guest /init calls. Single source of truth, read by both
+# bash/guest-kernel/build-busybox.sh (which asserts the built binary provides
+# them) and bash/build_ch_initramfs.sh (which symlinks them into the initramfs).
+#
+# Adding a command to /init means adding it here, or the initramfs ships a
+# symlink to an applet that does not exist and the guest fails at boot.
+sh
+mount
+switch_root
+sleep
+cat
+echo
+mkdir
+ln
+test
+chmod
+ip

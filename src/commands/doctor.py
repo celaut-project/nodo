@@ -174,6 +174,25 @@ def _expand_main_dir_placeholder(value, main_dir: str):
     return value.replace("${main.MAIN_DIR}", main_dir)
 
 
+def _resolve_admin_group() -> str:
+    """Pick the unit's Group the same way install.sh does.
+
+    The admin group is distro-specific — `sudo` on Debian, `wheel` on Fedora/RHEL —
+    and systemd refuses to start a unit whose Group cannot be resolved. Must stay in
+    sync with create_service_file() in install.sh, or doctor rewrites the unit on
+    every run (and leaves the service stopped).
+    """
+    import grp
+
+    for name in ("sudo", "wheel"):
+        try:
+            grp.getgrnam(name)
+            return name
+        except KeyError:
+            continue
+    return "root"
+
+
 def _render_service_template(template_content: str, main_dir: str) -> str:
     """Render nodo.service.template using the same config keys as install.sh."""
     import yaml
@@ -214,6 +233,7 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
         "{{JAVA_HOME}}": java_home,
         "{{PYTHON_RUNTIME_BIN_DIR}}": os.path.dirname(python_runtime_bin),
         "{{PYTHON_VENV_BIN}}": python_venv_bin,
+        "{{ADMIN_GROUP}}": _resolve_admin_group(),
     }
 
     rendered = template_content

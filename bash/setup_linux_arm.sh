@@ -1,32 +1,37 @@
 #!/bin/bash
-
 set -euo pipefail
 
-# Keep apt non-interactive: systemd/systemd-sysv (installed below for the WSL
-# runtime) otherwise prompt to confirm replacing the init system.
-export DEBIAN_FRONTEND=noninteractive
-
-if [ -z "${1:-}" ]; then
-  echo "Error: TARGET_DIR is not provided."
-  exit 1
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Please run this script as root or with sudo."
+    exit 1
 fi
 
-TARGET_DIR="$1"
+TARGET_DIR="${1:-}"
+if [ -z "$TARGET_DIR" ]; then
+    echo "Error: You must pass the project root directory as the first argument."
+    exit 1
+fi
+
 CH_VERSION="${2:-v51.1}"
+GUEST_KERNEL_VERSION="${3:-guest-kernel-v1}"
 CONFIG_FILE="$TARGET_DIR/config.yaml"
-CH_ARCH_TAG="linux/amd64"
+
+# Package names differ per distro; everything distro-specific lives here.
+# shellcheck source=bash/lib_pkg.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_pkg.sh"
+CH_ARCH_TAG="linux/arm64"
 
 # Pinned portable runtimes.
 PYTHON_VERSION="3.11.15"
 PYTHON_BUILD_TAG="20260325"
-PYTHON_ARCH="x86_64-unknown-linux-gnu"
+PYTHON_ARCH="aarch64-unknown-linux-gnu"
 PYTHON_DIST="cpython-${PYTHON_VERSION}+${PYTHON_BUILD_TAG}-${PYTHON_ARCH}-install_only_stripped.tar.gz"
 PYTHON_BASE_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD_TAG}"
 PYTHON_URL="${PYTHON_BASE_URL}/${PYTHON_DIST}"
 PYTHON_CHECKSUMS_URL="${PYTHON_BASE_URL}/SHA256SUMS"
 
 YQ_VERSION="v4.44.3"
-YQ_URL="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+YQ_URL="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_arm64"
 YQ_BIN_DEFAULT="$TARGET_DIR/bin/yq"
 YQ_BIN="$YQ_BIN_DEFAULT"
 
@@ -139,37 +144,35 @@ verify_archive_sha256_from_checksums() {
     fi
 }
 
-is_wsl() {
-    grep -qi microsoft /proc/version 2>/dev/null
-}
+download_guest_asset() {
+    # Guest artifacts come from the Nodo release, never from the host: a distro
+    # kernel varies in format (Fedora/RHEL ship a CONFIG_EFI_ZBOOT PE that Cloud
+    # Hypervisor cannot load at all) and a distro busybox varies in which applets
+    # it was compiled with, so every node would run services on a different guest.
+    # Both are built by .github/workflows/guest-kernel.yml from bash/guest-kernel/.
+    local asset="$1"
+    local destination="$2"
+    local mode="$3"
+    local base_url tmp_file sums_file expected actual
 
-resolve_boot_asset() {
-    local preferred_path="$1"
-    local fallback_pattern="$2"
-    local resolved_path=""
+    base_url="https://github.com/celaut-project/nodo/releases/download/${GUEST_KERNEL_VERSION}"
 
-    if [ -L "$preferred_path" ] || [ -f "$preferred_path" ]; then
-        resolved_path="$(readlink -f "$preferred_path")"
-        if [ -n "$resolved_path" ] && [ -f "$resolved_path" ]; then
-            printf '%s\n' "$resolved_path"
-            return 0
-        fi
-    fi
+    tmp_file="$(mktemp /tmp/nodo-guest-asset.XXXXXX)"
+    sums_file="$(mktemp /tmp/nodo-guest-asset-sha.XXXXXX)"
 
-    if [ -d /boot ]; then
-        resolved_path="$(
-            find /boot -maxdepth 1 -type f -name "$fallback_pattern" -printf '%T@ %p\n' \
-                | sort -nr \
-                | head -n1 \
-                | cut -d' ' -f2-
-        )"
-        if [ -n "$resolved_path" ] && [ -f "$resolved_path" ]; then
-            printf '%s\n' "$resolved_path"
-            return 0
-        fi
-    fi
+    download_file "${base_url}/${asset}" "$tmp_file" \
+        || fail "Unable to download ${asset} from release ${GUEST_KERNEL_VERSION}."
+    download_file "${base_url}/SHA256SUMS" "$sums_file" \
+        || fail "Unable to download SHA256SUMS from release ${GUEST_KERNEL_VERSION}."
 
-    return 1
+    expected="$(awk -v name="$asset" '{f=$2; gsub(/^\*/,"",f); if (f==name) {print $1; exit}}' "$sums_file")"
+    [ -n "$expected" ] || fail "No SHA256 entry for ${asset} in ${GUEST_KERNEL_VERSION} SHA256SUMS."
+    actual="$(sha256sum "$tmp_file" | awk '{print $1}')"
+    [ "$expected" = "$actual" ] \
+        || fail "SHA256 mismatch for ${asset}: expected ${expected}, got ${actual}."
+
+    install -m "$mode" "$tmp_file" "$destination"
+    rm -f "$tmp_file" "$sums_file"
 }
 
 download_ch_binary() {
@@ -177,8 +180,8 @@ download_ch_binary() {
     local base_url="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${CH_VERSION}"
     local tmp_file
     local assets=(
-        "cloud-hypervisor-static"
-        "cloud-hypervisor-static-x86_64"
+        "cloud-hypervisor-static-aarch64"
+        "cloud-hypervisor-static-arm64"
     )
 
     tmp_file="$(mktemp /tmp/cloud-hypervisor.XXXXXX)"
@@ -231,8 +234,8 @@ provision_cloud_hypervisor_assets() {
     local ch_binary_target="$TARGET_DIR/bin/cloud-hypervisor"
     local ch_kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
     local ch_initramfs_target="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
+    local ch_busybox_target="$TARGET_DIR/cloud_hypervisor/busybox/${CH_ARCH_TAG}/busybox"
     local ch_initramfs_builder="$TARGET_DIR/bash/build_ch_initramfs.sh"
-    local kernel_source
 
     if [ ! -f "$CONFIG_FILE" ]; then
         fail "config.yaml not found at ${CONFIG_FILE}."
@@ -247,28 +250,18 @@ provision_cloud_hypervisor_assets() {
     mkdir -p "$(dirname "$ch_binary_target")"
     mkdir -p "$(dirname "$ch_kernel_target")"
     mkdir -p "$(dirname "$ch_initramfs_target")"
+    mkdir -p "$(dirname "$ch_busybox_target")"
 
-    echo "Downloading Cloud Hypervisor ${CH_VERSION} static binary..."
+    echo "Provisioning Cloud Hypervisor assets..."
     if ! download_ch_binary "$ch_binary_target"; then
-        fail "Unable to download Cloud Hypervisor ${CH_VERSION} release asset for x86_64."
+        fail "Unable to download Cloud Hypervisor ${CH_VERSION} release asset for arm64."
     fi
 
-    kernel_source="$(resolve_boot_asset "/boot/vmlinuz" "vmlinuz-*")" || {
-        if is_wsl; then
-            echo "WSL detected: no kernel in /boot. Installing linux-image-virtual for CH guest kernel..."
-            apt-get install -y --no-install-recommends linux-image-virtual > /dev/null 2>&1 \
-                || fail "Failed to install linux-image-virtual. Install a kernel package manually: apt-get install linux-image-virtual"
-            kernel_source="$(resolve_boot_asset "/boot/vmlinuz" "vmlinuz-*")" \
-                || fail "Still unable to locate kernel in /boot after installing linux-image-virtual."
-        else
-            fail "Unable to locate kernel in /boot (checked /boot/vmlinuz and vmlinuz-*)."
-        fi
-    }
+    echo "Provisioning guest kernel and busybox ${GUEST_KERNEL_VERSION} for ${CH_ARCH_TAG}..."
+    download_guest_asset "vmlinuz-${CH_ARCH_TAG//\//-}" "$ch_kernel_target" 0644
+    download_guest_asset "busybox-${CH_ARCH_TAG//\//-}" "$ch_busybox_target" 0755
 
-    cp -f "$kernel_source" "$ch_kernel_target"
-    chmod 0644 "$ch_kernel_target"
-
-    "$ch_initramfs_builder" "$TARGET_DIR" "$CH_ARCH_TAG" "$ch_initramfs_target" "$kernel_source"
+    "$ch_initramfs_builder" "$TARGET_DIR" "$CH_ARCH_TAG" "$ch_initramfs_target"
 
     CH_BINARY_TARGET="$ch_binary_target" "$YQ_BIN" -i \
         '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
@@ -281,161 +274,64 @@ provision_cloud_hypervisor_assets() {
         "$CONFIG_FILE"
 
     test -x "$ch_binary_target" || fail "Cloud Hypervisor binary is not executable at ${ch_binary_target}."
-    test -f "$ch_kernel_target" || fail "Kernel copy failed at ${ch_kernel_target}."
+    test -f "$ch_kernel_target" || fail "Guest kernel download failed at ${ch_kernel_target}."
+    test -x "$ch_busybox_target" || fail "Guest busybox download failed at ${ch_busybox_target}."
     test -f "$ch_initramfs_target" || fail "Initramfs copy failed at ${ch_initramfs_target}."
 }
 
-handle_update_errors() {
-    exit_code=$1
-    echo "Failed to update package lists. Exit code: $exit_code"
-
-    case $exit_code in
-        100)
-            echo "Lock file exists, maybe another package manager is running. Attempting to remove lock file and retrying..."
-            rm -f /var/lib/apt/lists/lock
-            ;;
-        200)
-            echo "Authentication error. Verify if GPG keys are properly added."
-            ;;
-        *)
-            echo "Unknown error occurred during package update."
-            ;;
-    esac
-}
-
-resolve_apt_package() {
-    local preferred="$1"
-    local fallback="${2:-}"
-
-    if apt-cache policy "$preferred" 2>/dev/null | grep -q "Candidate: (none)"; then
-        if [ -n "$fallback" ]; then
-            echo "$fallback"
-            return 0
-        fi
-        fail "APT package '${preferred}' is unavailable on this system."
-    fi
-
-    echo "$preferred"
-}
-
-install_build_dependencies() {
-    local ncurses_pkg
-    local packages
-
-    ncurses_pkg="$(resolve_apt_package "libncurses5-dev" "libncurses-dev")"
-    packages=(
-        build-essential
-        zlib1g-dev
-        "$ncurses_pkg"
-        libgdbm-dev
-        libnss3-dev
-        libssl-dev
-        libreadline-dev
-        libffi-dev
-        libsqlite3-dev
-        wget
-        libbz2-dev
-        busybox-static
-        cpio
-        gzip
-        initramfs-tools-core
-        iputils-ping
-        # WSL runtime deps: iproute2 provides `ip` (nodo networking); systemd +
-        # systemd-sysv provide `systemctl` so `nodo daemon` and the nodo.service
-        # unit work once the imported distro boots systemd (see /etc/wsl.conf below).
-        iproute2
-        systemd
-        systemd-sysv
-        ca-certificates
-        curl
-        gnupg
-        lsb-release
-        git
-        procps
-        locales
-        zip
-    )
-
-    echo "Installing required build dependencies: ${packages[*]}"
-    if ! apt-get install -y --no-install-recommends "${packages[@]}"; then
-        fail "Failed to install required build dependencies. See apt output above."
-    fi
-}
+echo "Detecting package manager..."
+detect_pkg_mgr
 
 echo "Updating package lists..."
-apt-get -o Acquire::AllowInsecureRepositories=true -o Acquire::Check-Valid-Until=false update > /dev/null 2>&1 || {
-    handle_update_errors $?
-    apt-get update > /dev/null 2>&1
-}
+pkg_update
 
-echo "Installing required build dependencies..."
-install_build_dependencies
+pkg_install_host_dependencies
+ensure_utf8_locale
+verify_host_tools
 
 echo "Installing local yq runtime..."
 install_local_yq
 apply_configured_dependency_paths
 
-echo "Provisioning Cloud Hypervisor assets..."
+echo "Restricting executable architectures to this host (arm64)..."
+"$YQ_BIN" -i '.builder.X86_SUPPORT = false | .packer.X86_PACKER_SUPPORT = false' "$CONFIG_FILE"
+
+echo "Provisioning Cloud Hypervisor..."
 provision_cloud_hypervisor_assets
 
 install_portable_python
 
-echo "Creating Python virtual environment in ${TARGET_DIR}/venv..."
+echo "Creating and preparing Python virtualenv..."
 "${PYTHON_RUNTIME_ROOT}/current/bin/python3" -m venv "$TARGET_DIR/venv"
 
 REQ_FILE="$TARGET_DIR/bash/requirements.txt"
 if [ ! -f "$REQ_FILE" ]; then
-    fail "requirements.txt not found at ${REQ_FILE}"
+    fail "requirements.txt not found at $REQ_FILE"
 fi
 
-"$TARGET_DIR/venv/bin/python" -m pip install --upgrade pip > /dev/null
-"$TARGET_DIR/venv/bin/python" -m pip install -r "$REQ_FILE" > /dev/null
+if ! command -v clang >/dev/null 2>&1; then
+    # The portable CPython records CC=clang in sysconfig; without it, source
+    # builds (psutil on aarch64) fail with "No such file or directory: clang".
+    export CC="${CC:-gcc}" CXX="${CXX:-g++}"
+fi
+
+"$TARGET_DIR/venv/bin/python" -m pip install --upgrade pip >/dev/null
+if ! "$TARGET_DIR/venv/bin/python" -m pip install -r "$REQ_FILE" >/dev/null; then
+    fail "Failed to install Python packages."
+fi
 
 # No Docker install: nodo runs services under Cloud Hypervisor and delegates
 # packing to the external packer-service. Docker is never installed on this host.
 
-echo "Running migrations with local Python runtime..."
-"$TARGET_DIR/venv/bin/python" "$TARGET_DIR/nodo.py" migrate > /dev/null
+echo "Installing Rust (cargo)..."
+if ! command -v cargo >/dev/null; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    source "$HOME/.cargo/env"
+fi
 
-configure_systemd_service() {
-    # The release rootfs is imported and run directly (the end user does not
-    # re-run install.sh), so the systemd unit and WSL systemd-boot config must be
-    # baked in here — otherwise `nodo daemon ...` fails with `systemctl: not
-    # found` on a fresh import. Render the same unit install.sh does.
-    local unit_src="$TARGET_DIR/bash/nodo.service.template"
-    local unit_dst="/etc/systemd/system/nodo.service"
-    [ -f "$unit_src" ] || fail "nodo.service.template not found at $unit_src"
-
-    echo "Rendering systemd unit ${unit_dst}..."
-    sed \
-        -e "s|{{MAIN_DIR}}|${TARGET_DIR}|g" \
-        -e "s|{{JAVA_HOME}}|${JAVA_RUNTIME_ROOT_DEFAULT}/current|g" \
-        -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|${PYTHON_RUNTIME_ROOT}/current/bin|g" \
-        -e "s|{{PYTHON_VENV_BIN}}|python|g" \
-        "$unit_src" > "$unit_dst"
-    chmod 644 "$unit_dst"
-    if grep -q '{{[A-Z_][A-Z_]*}}' "$unit_dst"; then
-        fail "Unresolved placeholders remain in ${unit_dst}."
-    fi
-
-    # Enable the unit. systemd is not PID1 in this build container, so
-    # `systemctl enable` is unavailable — create the wants symlink by hand.
-    mkdir -p /etc/systemd/system/multi-user.target.wants
-    ln -sf "$unit_dst" /etc/systemd/system/multi-user.target.wants/nodo.service
-
-    # Boot systemd as PID1 under WSL (so `systemctl` works) and default the distro
-    # to root — nodo needs root for Cloud Hypervisor networking/microVMs.
-    echo "Writing /etc/wsl.conf (systemd boot + default root user)..."
-    cat > /etc/wsl.conf <<'WSLCONF'
-[boot]
-systemd=true
-
-[user]
-default=root
-WSLCONF
+echo "Running Python database migrations..."
+"$TARGET_DIR/venv/bin/python" "$TARGET_DIR/nodo.py" migrate >/dev/null || {
+    fail "Migration failed."
 }
 
-echo "Configuring systemd service and WSL boot..."
-configure_systemd_service
-
-echo "All steps completed."
+echo "ARM setup completed successfully!"

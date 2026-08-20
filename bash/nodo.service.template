@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-Group=sudo
+Group={{ADMIN_GROUP}}
 WorkingDirectory={{MAIN_DIR}}
 Environment=JAVA_HOME={{JAVA_HOME}}
 Environment=PATH={{JAVA_HOME}}/bin:{{PYTHON_RUNTIME_BIN_DIR}}:{{MAIN_DIR}}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
