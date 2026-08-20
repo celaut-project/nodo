@@ -74,10 +74,10 @@ and the user-delegated path already works (see above). Near-zero cost to change.
 
 ### 3. Installation — genuinely privileged, but relocatable
 
-`install.sh` and `bash/setup_ubuntu_x86.sh` need root for:
+`install.sh` and `bash/setup_linux_x86.sh` need root for:
 
-- `apt-get install` of build dependencies and the guest kernel
-  (`linux-image-virtual`, `setup_ubuntu_x86.sh:259`);
+- `apt-get install` of build dependencies (the guest kernel is downloaded from
+  the `guest-kernel-vN` release and needs no package);
 - the unit file at `/etc/systemd/system/nodo.service` plus
   `systemctl enable/start`;
 - the wrapper script at `/usr/local/bin/nodo`;

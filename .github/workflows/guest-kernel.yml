@@ -1,0 +1,99 @@
+name: guest-kernel
+
+# Builds the kernel every Nodo service microVM boots, for both architectures, and
+# publishes it under its own tag (guest-kernel-vN). Deliberately decoupled from
+# nodo releases: a kernel CVE should be shippable without cutting a node release,
+# and install.sh pins GUEST_KERNEL_VERSION the same way it pins CH_VERSION.
+#
+# Run it with:
+#   gh workflow run guest-kernel -f tag=guest-kernel-v1
+# or by pushing a guest-kernel-v* tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish the kernels under (e.g. guest-kernel-v1)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "guest-kernel-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners only — build.sh refuses to cross-build, so the kernel
+          # is always compiled by the toolchain of the architecture it targets.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            tag: linux-arm64
+          - arch: x86_64
+            runner: ubuntu-24.04
+            tag: linux-amd64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc libelf-dev libssl-dev dwarves \
+            xz-utils bzip2 curl ca-certificates
+
+      - name: Build guest kernel
+        run: bash bash/guest-kernel/build.sh ${{ matrix.arch }} "$GITHUB_WORKSPACE/out"
+
+      # The guest's userspace. Shipping it removes the last host-provided input to
+      # the initramfs: distros compile different busybox applet sets, so the guest
+      # used to differ per node. The initramfs itself is still built at install
+      # time — its /init is part of the contract with src/virtualizers/ch/execute.py
+      # and has to travel with the code, not with a pinned release.
+      - name: Build guest busybox
+        run: bash bash/guest-kernel/build-busybox.sh ${{ matrix.arch }} "$GITHUB_WORKSPACE/out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-assets-${{ matrix.tag }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Assemble SHA256SUMS
+        run: |
+          cd artifacts
+          cat ./*.sha256 | sort -k2 > SHA256SUMS
+          rm -f ./*.sha256
+          cat SHA256SUMS
+          # Four assets, or something silently did not build.
+          test "$(wc -l < SHA256SUMS)" -eq 4
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "Nodo guest kernel $TAG" \
+            --notes "Guest kernel and busybox userspace for Cloud Hypervisor microVMs, built from bash/guest-kernel/. Pin them in install.sh via GUEST_KERNEL_VERSION." \
+            artifacts/vmlinuz-linux-arm64 \
+            artifacts/vmlinuz-linux-amd64 \
+            artifacts/busybox-linux-arm64 \
+            artifacts/busybox-linux-amd64 \
+            artifacts/SHA256SUMS

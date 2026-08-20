@@ -85,8 +85,8 @@ Understand these before running anything. Full glossary:
 ## 1. Celaut Node Installation & Management
 
 The Celaut node (`nodo`) orchestrates service execution across decentralized peer
-networks. **Supported platform:** Ubuntu 22.04 LTS (or a compatible Debian-based
-distro) on **x86_64 or aarch64**. Installation root is `TARGET_DIR` (default
+networks. **Supported platform:** any Linux with `apt` or `dnf` (tested on Ubuntu
+22.04/24.04 and Fedora 44) on **x86_64 or aarch64**. Installation root is `TARGET_DIR` (default
 `/nodo`), where `config.yaml` and local runtimes live.
 
 Before installing, check whether nodo is already present (see §6, rule 2):

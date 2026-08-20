@@ -66,7 +66,7 @@ removed, so the node needs no local Docker install to *run* services.
 |---|---|---|
 | `virtualizers.DEFAULT_VIRTUALIZER` | `ch` | Only `ch` is supported. |
 | `virtualizers.ch.BINARY_PATH` | (set at install) | Cloud Hypervisor binary. |
-| `virtualizers.ch.KERNEL_PATHS` / `INITRAMFS_PATHS` | per-arch | Guest kernel/initramfs per `linux/amd64` \| `linux/arm64`. |
+| `virtualizers.ch.KERNEL_PATHS` / `INITRAMFS_PATHS` | per-arch | Guest kernel/initramfs per `linux/amd64` \| `linux/arm64`. The kernel is downloaded at install time from the `guest-kernel-vN` release (pinned as `GUEST_KERNEL_VERSION` in `install.sh`), not taken from the host's `/boot`; the initramfs is built locally by `bash/build_ch_initramfs.sh`. |
 | `virtualizers.ch.NETWORK_MODE` | `tap_bridge` | Guest networking mode. |
 | `virtualizers.ch.MIN_MEM_MIB` / `DEFAULT_MEM_MIB` | `128` / `256` | Boot memory floor / default. |
 | `virtualizers.ch.SECURITY.*` | — | rootfs path confinement, device-node policy, trusted-service allowlists. |

@@ -20,6 +20,9 @@ USE_LOCAL_SOURCE=false
 BRANCH="stable"
 BRANCH_EXPLICIT=false
 CH_VERSION="v51.1"
+# Guest kernel + busybox published by .github/workflows/guest-kernel.yml; bumped independently
+# of nodo releases so a kernel fix does not require cutting a node release.
+GUEST_KERNEL_VERSION="guest-kernel-v2"
 
 print_usage() {
   cat <<EOF
@@ -237,8 +240,8 @@ sync_config_main_paths
 
 # Apply custom architecture-specific setup
 case "$(uname -m)" in
-  aarch64|arm64)  SETUP_SCRIPT="bash/setup_ubuntu_arm.sh" ;;
-  x86_64|amd64)   SETUP_SCRIPT="bash/setup_ubuntu_x86.sh" ;;
+  aarch64|arm64)  SETUP_SCRIPT="bash/setup_linux_arm.sh" ;;
+  x86_64|amd64)   SETUP_SCRIPT="bash/setup_linux_x86.sh" ;;
   *)
     printf "Error: unsupported architecture '%s'. Supported: x86_64/amd64, aarch64/arm64.\n" "$(uname -m)" >&2
     exit 1
@@ -246,7 +249,7 @@ case "$(uname -m)" in
 esac
 
 printf "Running setup script $SETUP_SCRIPT...\n"
-if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION"; then
+if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION" "$GUEST_KERNEL_VERSION"; then
   printf "Error: The setup script %s failed to execute.\nPlease try running it at least once more. If the issue persists, contact the developers.\n" "$SETUP_SCRIPT" >&2
   exit 1
 fi
@@ -286,6 +289,22 @@ PYTHON_RUNTIME_BIN_PATH="$(read_config_path_or_default '.dependencies.python.RUN
 PYTHON_VENV_BIN_PATH="$(read_config_path_or_default '.dependencies.python.VENV_BIN' "$TARGET_DIR/venv/bin/python")"
 PYTHON_RUNTIME_BIN_DIR_PATH="$(dirname "$PYTHON_RUNTIME_BIN_PATH")"
 
+# The admin group is distro-specific: `sudo` on Debian/Ubuntu, `wheel` on
+# Fedora/RHEL. systemd refuses to start a unit whose Group does not resolve, so
+# never hardcode it. Kept in sync with _resolve_admin_group() in doctor.py.
+resolve_admin_group() {
+  local group
+  for group in sudo wheel; do
+    if getent group "$group" >/dev/null 2>&1; then
+      printf '%s\n' "$group"
+      return 0
+    fi
+  done
+  printf 'root\n'
+}
+
+ADMIN_GROUP="$(resolve_admin_group)"
+
 create_service_file() {
   local expected_file
   local escaped_target
@@ -304,6 +323,7 @@ create_service_file() {
     -e "s|{{JAVA_HOME}}|$escaped_java_home|g" \
     -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|$escaped_python_runtime_bin_dir|g" \
     -e "s|{{PYTHON_VENV_BIN}}|$escaped_python_venv_bin|g" \
+    -e "s|{{ADMIN_GROUP}}|$ADMIN_GROUP|g" \
     "$TARGET_DIR/bash/nodo.service.template" > "$expected_file"
   if grep -q '{{[A-Z_][A-Z_]*}}' "$expected_file"; then
     printf "Error: Unresolved placeholders remain in generated service file:\n" >&2
