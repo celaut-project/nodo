@@ -1,0 +1,20 @@
+# Digests of the guest kernel and busybox that nodo installs, pinned in-tree.
+#
+# install.sh names a release TAG (GUEST_KERNEL_VERSION), and a tag is mutable.
+# Verifying a download against a SHA256SUMS fetched from that same release only
+# proves the bytes arrived intact: whoever can edit the release swaps the artifact
+# and its checksum together, and every new node boots a different guest kernel
+# without a word. Verifying against these committed digests turns the tag into an
+# immutable content reference, so bumping the kernel is a reviewable diff -- the
+# same reason bash/guest-kernel/build.sh pins KERNEL_SHA256 for the upstream
+# tarball instead of trusting cdn.kernel.org.
+#
+# When bumping GUEST_KERNEL_VERSION in install.sh, update TAG and all four digests
+# here, and check them against the CI artifacts of the run that built them
+# (`gh run download <run-id>`) and not only against the release assets -- the
+# artifact store and the release are two independent copies of the same build.
+TAG guest-kernel-v2
+219c226db4e9a6e580845af61adf398fc52e5e40f27b95cd3e091b58f41fa3ea  busybox-linux-amd64
+4520dbcf7ee36bc4de616a8f0b001660ffaef9c682cbb8f3e3bdec6879443863  busybox-linux-arm64
+75f06d965398657331f67a1e60a2b33496bdc62346526c877f97c75308751896  vmlinuz-linux-amd64
+47ba56ef366c843ceafd595d487e330598447e21d6068d63eefc549980d0d908  vmlinuz-linux-arm64
