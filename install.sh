@@ -289,19 +289,13 @@ PYTHON_RUNTIME_BIN_PATH="$(read_config_path_or_default '.dependencies.python.RUN
 PYTHON_VENV_BIN_PATH="$(read_config_path_or_default '.dependencies.python.VENV_BIN' "$TARGET_DIR/venv/bin/python")"
 PYTHON_RUNTIME_BIN_DIR_PATH="$(dirname "$PYTHON_RUNTIME_BIN_PATH")"
 
-# The admin group is distro-specific: `sudo` on Debian/Ubuntu, `wheel` on
-# Fedora/RHEL. systemd refuses to start a unit whose Group does not resolve, so
-# never hardcode it. Kept in sync with _resolve_admin_group() in doctor.py.
-resolve_admin_group() {
-  local group
-  for group in sudo wheel; do
-    if getent group "$group" >/dev/null 2>&1; then
-      printf '%s\n' "$group"
-      return 0
-    fi
-  done
-  printf 'root\n'
-}
+# resolve_admin_group() lives in bash/lib_pkg.sh so that install.sh and the setup
+# scripts cannot disagree about it -- they both render nodo.service.template, and
+# when only two of the three renderers knew about {{ADMIN_GROUP}} the third shipped
+# a unit systemd could not load. Sourced here rather than at the top of the file:
+# the repo only exists under TARGET_DIR after the checkout above.
+# shellcheck source=bash/lib_pkg.sh
+. "$TARGET_DIR/bash/lib_pkg.sh"
 
 ADMIN_GROUP="$(resolve_admin_group)"
 
