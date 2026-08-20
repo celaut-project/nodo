@@ -326,13 +326,20 @@ mkdir -p "$(dirname "$CH_KERNEL_TARGET")" "$(dirname "$CH_INITRAMFS_TARGET")"
 CH_BUSYBOX_TARGET="$TARGET_DIR/cloud_hypervisor/busybox/${CH_ARCH_TAG}/busybox"
 mkdir -p "$(dirname "$CH_BUSYBOX_TARGET")"
 
-curl -fsSL "${GUEST_KERNEL_BASE}/SHA256SUMS" -o /tmp/nodo-guest.sums
+# Expected digests come from bash/guest-kernel/SHA256SUMS.pinned in this checkout,
+# NOT from the SHA256SUMS published next to the artifact: that one lives in the same
+# mutable release, so it would only prove the download was not truncated.
+GUEST_SUMS="$TARGET_DIR/bash/guest-kernel/SHA256SUMS.pinned"
+PINNED_TAG="$(awk '$1 == "TAG" { print $2; exit }' "$GUEST_SUMS")"
+[ "$PINNED_TAG" = "$GUEST_KERNEL_VERSION" ] \
+  || { echo "Pin is for $PINNED_TAG, not $GUEST_KERNEL_VERSION"; exit 1; }
 
 fetch_guest_asset() {  # <asset-name> <destination> <mode>
+  EXPECTED="$(awk -v n="$1" '$2 == n { print $1; exit }' "$GUEST_SUMS")"
+  [ -n "$EXPECTED" ] || { echo "no pinned digest for $1"; exit 1; }
   curl -fsSL "${GUEST_KERNEL_BASE}/$1" -o /tmp/nodo-guest-asset
-  EXPECTED="$(awk -v n="$1" '{f=$2; gsub(/^\*/,"",f); if (f==n) {print $1; exit}}' /tmp/nodo-guest.sums)"
   ACTUAL="$(sha256sum /tmp/nodo-guest-asset | awk '{print $1}')"
-  [ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] || { echo "$1 checksum mismatch"; exit 1; }
+  [ "$EXPECTED" = "$ACTUAL" ] || { echo "$1 does not match the pinned digest"; exit 1; }
   install -m "$3" /tmp/nodo-guest-asset "$2"
   rm -f /tmp/nodo-guest-asset
 }
@@ -340,7 +347,6 @@ fetch_guest_asset() {  # <asset-name> <destination> <mode>
 # The guest kernel, and the static busybox that is the guest's entire userspace.
 fetch_guest_asset "$GUEST_KERNEL_ASSET" "$CH_KERNEL_TARGET" 0644
 fetch_guest_asset "busybox-${CH_ARCH_TAG/\//-}" "$CH_BUSYBOX_TARGET" 0755
-rm -f /tmp/nodo-guest.sums
 
 bash "$TARGET_DIR/bash/build_ch_initramfs.sh" "$TARGET_DIR" "$CH_ARCH_TAG" "$CH_INITRAMFS_TARGET"
 

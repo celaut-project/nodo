@@ -67,10 +67,15 @@ refuses to boot the kernel (`KernelLoad(Pe(...))`, `UefiLoad(UefiTooBig)`).
 
 **Fix:**
 - Re-run the installer, or download the asset by hand into
-  `virtualizers.ch.KERNEL_PATHS[<arch>]` and verify it against the release's
-  `SHA256SUMS`.
-- To pin a different kernel release, change `GUEST_KERNEL_VERSION` in
-  `install.sh` and re-run it.
+  `virtualizers.ch.KERNEL_PATHS[<arch>]` and verify it against
+  `bash/guest-kernel/SHA256SUMS.pinned` in this checkout — not against the
+  `SHA256SUMS` published in the release, which sits in the same mutable place as the
+  artifact it vouches for.
+- To pin a different kernel release, change `GUEST_KERNEL_VERSION` in `install.sh`
+  **and** update `TAG` plus all four digests in
+  `bash/guest-kernel/SHA256SUMS.pinned`; the installer refuses to run when the two
+  disagree. Cross-check the digests against the CI artifacts of the run that built
+  them (`gh run download <run-id>`), which is a copy independent of the release.
 - To build them locally: `bash bash/guest-kernel/build.sh <arm64|x86_64> <out-dir>`
   (native builds only; needs ~15 GB of scratch space in `TMPDIR`) and
   `bash bash/guest-kernel/build-busybox.sh <arm64|x86_64> <out-dir>`.

@@ -83,12 +83,14 @@ download_file() {
     local url="$1"
     local destination="$2"
 
+    # Return curl/wget's own status: callers guard these with `|| fail`, and an
+    # unconditional `return 0` turned every one of those guards into dead code.
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$url" -o "$destination"
+        curl -fsSL "$url" -o "$destination" || return 1
         return 0
     fi
     if command -v wget >/dev/null 2>&1; then
-        wget -qO "$destination" "$url"
+        wget -qO "$destination" "$url" || return 1
         return 0
     fi
     fail "Neither curl nor wget is available to download ${url}"
@@ -144,6 +146,30 @@ verify_archive_sha256_from_checksums() {
     fi
 }
 
+PINNED_GUEST_SUMS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/guest-kernel/SHA256SUMS.pinned"
+
+pinned_guest_digest() {
+    # Expected digest for one guest asset, read from the in-tree pin.
+    #
+    # Deliberately NOT the SHA256SUMS published next to the artifact: that lives in
+    # the same mutable release, so it proves the download was not truncated and
+    # nothing else. Anyone able to edit the release replaces artifact and checksum
+    # in one go. The pin is what makes GUEST_KERNEL_VERSION a content reference.
+    local asset="$1"
+    local pinned_tag digest
+
+    [ -f "$PINNED_GUEST_SUMS" ] || fail "Missing pinned guest digests at ${PINNED_GUEST_SUMS}."
+
+    pinned_tag="$(awk '$1 == "TAG" { print $2; exit }' "$PINNED_GUEST_SUMS")"
+    [ -n "$pinned_tag" ] || fail "No TAG line in ${PINNED_GUEST_SUMS}."
+    [ "$pinned_tag" = "$GUEST_KERNEL_VERSION" ] \
+        || fail "Guest asset pin is for ${pinned_tag}, but this install wants ${GUEST_KERNEL_VERSION}. Update ${PINNED_GUEST_SUMS}."
+
+    digest="$(awk -v name="$asset" '$2 == name { print $1; exit }' "$PINNED_GUEST_SUMS")"
+    [ -n "$digest" ] || fail "No pinned digest for ${asset} in ${PINNED_GUEST_SUMS}."
+    printf '%s\n' "$digest"
+}
+
 download_guest_asset() {
     # Guest artifacts come from the Nodo release, never from the host: a distro
     # kernel varies in format (Fedora/RHEL ship a CONFIG_EFI_ZBOOT PE that Cloud
@@ -153,26 +179,30 @@ download_guest_asset() {
     local asset="$1"
     local destination="$2"
     local mode="$3"
-    local base_url tmp_file sums_file expected actual
+    local base_url tmp_file expected actual
 
     base_url="https://github.com/celaut-project/nodo/releases/download/${GUEST_KERNEL_VERSION}"
 
+    # `fail` inside a command substitution only exits the subshell, so the guard has
+    # to be here: without it a bad pin left `expected` empty and the install limped
+    # on to report a confusing checksum mismatch instead of the real problem.
+    if ! expected="$(pinned_guest_digest "$asset")" || [ -z "$expected" ]; then
+        fail "Refusing to install ${asset}: no usable pinned digest (see above)."
+    fi
+
     tmp_file="$(mktemp /tmp/nodo-guest-asset.XXXXXX)"
-    sums_file="$(mktemp /tmp/nodo-guest-asset-sha.XXXXXX)"
 
     download_file "${base_url}/${asset}" "$tmp_file" \
         || fail "Unable to download ${asset} from release ${GUEST_KERNEL_VERSION}."
-    download_file "${base_url}/SHA256SUMS" "$sums_file" \
-        || fail "Unable to download SHA256SUMS from release ${GUEST_KERNEL_VERSION}."
 
-    expected="$(awk -v name="$asset" '{f=$2; gsub(/^\*/,"",f); if (f==name) {print $1; exit}}' "$sums_file")"
-    [ -n "$expected" ] || fail "No SHA256 entry for ${asset} in ${GUEST_KERNEL_VERSION} SHA256SUMS."
     actual="$(sha256sum "$tmp_file" | awk '{print $1}')"
-    [ "$expected" = "$actual" ] \
-        || fail "SHA256 mismatch for ${asset}: expected ${expected}, got ${actual}."
+    if [ "$expected" != "$actual" ]; then
+        rm -f "$tmp_file"
+        fail "SHA256 mismatch for ${asset}: expected ${expected} (pinned in ${PINNED_GUEST_SUMS}), got ${actual}. The release asset does not match this commit -- do not install it."
+    fi
 
     install -m "$mode" "$tmp_file" "$destination"
-    rm -f "$tmp_file" "$sums_file"
+    rm -f "$tmp_file"
 }
 
 download_ch_binary() {
@@ -339,19 +369,30 @@ configure_systemd_service() {
     # found` on a fresh import. Render the same unit install.sh does.
     local unit_src="$TARGET_DIR/bash/nodo.service.template"
     local unit_dst="/etc/systemd/system/nodo.service"
+    local unit_tmp
     [ -f "$unit_src" ] || fail "nodo.service.template not found at $unit_src"
 
     echo "Rendering systemd unit ${unit_dst}..."
+    # Render to a temporary file and only publish it once every placeholder is
+    # resolved. Writing straight to unit_dst left an unloadable unit installed
+    # ("Group={{ADMIN_GROUP}}") when the check below tripped, so a failed install
+    # broke the service the previous install had left working.
+    unit_tmp="$(mktemp)"
     sed \
         -e "s|{{MAIN_DIR}}|${TARGET_DIR}|g" \
         -e "s|{{JAVA_HOME}}|${JAVA_RUNTIME_ROOT_DEFAULT}/current|g" \
         -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|${PYTHON_RUNTIME_ROOT}/current/bin|g" \
         -e "s|{{PYTHON_VENV_BIN}}|python|g" \
-        "$unit_src" > "$unit_dst"
-    chmod 644 "$unit_dst"
-    if grep -q '{{[A-Z_][A-Z_]*}}' "$unit_dst"; then
-        fail "Unresolved placeholders remain in ${unit_dst}."
+        -e "s|{{ADMIN_GROUP}}|$(resolve_admin_group)|g" \
+        "$unit_src" > "$unit_tmp"
+    if grep -q '{{[A-Z_][A-Z_]*}}' "$unit_tmp"; then
+        local unresolved
+        unresolved="$(grep -o '{{[A-Z_][A-Z_]*}}' "$unit_tmp" | sort -u | tr '\n' ' ')"
+        rm -f "$unit_tmp"
+        fail "Unresolved placeholders in rendered unit: ${unresolved}(${unit_dst} left untouched)."
     fi
+    install -m 0644 "$unit_tmp" "$unit_dst"
+    rm -f "$unit_tmp"
 
     # Enable the unit. systemd is not PID1 in this build container, so
     # `systemctl enable` is unavailable — create the wants symlink by hand.

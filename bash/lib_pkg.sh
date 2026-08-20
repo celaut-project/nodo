@@ -141,3 +141,20 @@ verify_host_tools() {
         fail "Missing host tools after dependency install: ${missing[*]}"
     fi
 }
+
+# The unit's Group is distro-specific: `sudo` on Debian/Ubuntu, `wheel` on
+# Fedora/RHEL. systemd refuses to load a unit whose Group does not resolve, so it
+# can never be hardcoded. Lives here because install.sh and the setup scripts both
+# render bash/nodo.service.template and both need the same answer; the third
+# renderer is _resolve_admin_group() in src/commands/doctor.py, kept in sync by
+# tests/test_installer_distro_support.py.
+resolve_admin_group() {
+    local group
+    for group in sudo wheel; do
+        if getent group "$group" >/dev/null 2>&1; then
+            printf '%s\n' "$group"
+            return 0
+        fi
+    done
+    printf 'root\n'
+}
