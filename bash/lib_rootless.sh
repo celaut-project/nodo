@@ -26,10 +26,19 @@ buildkitd_pids() {
 # more than a single uid inside the user namespace — without them most
 # Dockerfiles fail on `apt-get install`/`chown`. rootlesskit is what actually
 # creates the namespace (and, on AppArmor distros, what is allowed to).
+#
+# Takes the builder's bin dir, because rootlesskit is NOT required to be on PATH:
+# on distros that carry no rootlesskit package (Arch, Alpine) the installer drops
+# the upstream static binary in MAIN_DIR/bin, which is only on PATH when nodo is
+# invoked through its wrapper. Asking `command -v` there reported the dependency
+# missing immediately after installing it, so the installer failed its own
+# post-provision recheck and `start` refused to launch. Resolve it the same way
+# the caller will actually invoke it instead.
 rootless_prereqs_missing() {
+    local bin_dir="${1:-}"
     command -v newuidmap >/dev/null 2>&1 || echo "newuidmap"
     command -v newgidmap >/dev/null 2>&1 || echo "newgidmap"
-    command -v rootlesskit >/dev/null 2>&1 || echo "rootlesskit"
+    [ -x "$(resolve_rootlesskit "$bin_dir")" ] || echo "rootlesskit"
     grep -q "^$(id -un):" /etc/subuid 2>/dev/null || echo "subuid"
     grep -q "^$(id -un):" /etc/subgid 2>/dev/null || echo "subgid"
 }
@@ -41,10 +50,14 @@ rootless_prereqs_missing() {
 # /etc/apparmor.d/rootlesskit profile grants the exemption BY PATH — a copy
 # under MAIN_DIR/bin would be denied.
 resolve_rootlesskit() {
-    local bin_dir="$1"
+    local bin_dir="${1:-}"
     if [ -x /usr/bin/rootlesskit ]; then
         printf '%s' /usr/bin/rootlesskit
         return 0
     fi
-    command -v rootlesskit 2>/dev/null || printf '%s' "${bin_dir}/rootlesskit"
+    command -v rootlesskit 2>/dev/null && return 0
+    # No bin dir to fall back on: report a path that cannot exist rather than a
+    # bare "/rootlesskit", so callers testing -x get a clean "missing".
+    [ -n "$bin_dir" ] || { printf '%s' "rootlesskit"; return 0; }
+    printf '%s' "${bin_dir}/rootlesskit"
 }

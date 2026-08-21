@@ -10,6 +10,9 @@ The fix is structural — the builder runs as the invoking user — so what is w
 pinning is the structure: no privileged call anywhere in the pack path.
 """
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -60,6 +63,139 @@ class RootlessBuilderScriptsTests(unittest.TestCase):
         guard = stop.index("REMAINING=")
         removal = stop.index('rm -f "${BUILDKIT_PID_FILE}" "${BUILDKIT_SOCKET}"')
         self.assertLess(guard, removal, "the socket must only be removed after the liveness guard")
+
+
+class RootlessPrereqResolutionTests(unittest.TestCase):
+    """rootlesskit is not required to be on PATH.
+
+    On distros with no rootlesskit package (Arch, Alpine) the installer drops the
+    upstream static binary in MAIN_DIR/bin, which is only on PATH when nodo is
+    invoked through its wrapper. A `command -v` probe therefore reported the
+    dependency missing right after installing it, so install_buildkit.sh failed
+    its own post-provision recheck and start_buildkit_daemon.sh refused to launch.
+    """
+
+    def _missing(self, bin_dir):
+        script = (
+            f'. "{BASH_DIR.resolve()}/lib_rootless.sh"; '
+            f'rootless_prereqs_missing "{bin_dir}"'
+        )
+        out = subprocess.run(
+            ["bash", "-c", script], capture_output=True, text=True, check=False
+        )
+        return out.stdout.split()
+
+    @unittest.skipIf(shutil.which("bash") is None, "bash required")
+    def test_rootlesskit_in_bin_dir_counts_as_present(self):
+        if Path("/usr/bin/rootlesskit").exists() or shutil.which("rootlesskit"):
+            self.skipTest("host provides rootlesskit; the fallback path is not exercised")
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp) / "rootlesskit"
+            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.chmod(0o755)
+            self.assertNotIn(
+                "rootlesskit",
+                self._missing(tmp),
+                "a rootlesskit installed under MAIN_DIR/bin must not be reported missing",
+            )
+
+    @unittest.skipIf(shutil.which("bash") is None, "bash required")
+    def test_absent_rootlesskit_is_still_reported(self):
+        if Path("/usr/bin/rootlesskit").exists() or shutil.which("rootlesskit"):
+            self.skipTest("host provides rootlesskit; absence cannot be simulated")
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIn("rootlesskit", self._missing(tmp))
+
+    def test_prereq_check_does_not_rely_on_path_lookup_for_rootlesskit(self):
+        lib = (BASH_DIR / "lib_rootless.sh").read_text(encoding="utf-8")
+        body = lib[lib.index("rootless_prereqs_missing()"):]
+        body = body[: body.index("\n}")]
+        self.assertNotIn(
+            "command -v rootlesskit",
+            body,
+            "rootlesskit must be resolved via resolve_rootlesskit, not a bare PATH probe",
+        )
+
+    def test_callers_pass_the_bin_dir(self):
+        for name in ("install_buildkit.sh", "start_buildkit_daemon.sh"):
+            content = (BASH_DIR / name).read_text(encoding="utf-8")
+            for call in re.findall(r"rootless_prereqs_missing[^\n]*", content):
+                if call.strip().startswith("#"):
+                    continue
+                self.assertRegex(
+                    call,
+                    r"rootless_prereqs_missing\s+\"?\$",
+                    f"{name}: rootless_prereqs_missing must be given the bin dir: {call}",
+                )
+
+
+class SubordinateIdRangeTests(unittest.TestCase):
+    """usermod does not deduplicate subordinate ranges across users, so a fixed
+    100000 base silently collides with an existing rootless Docker/Podman
+    allocation and two users end up sharing a namespace id range."""
+
+    def _pick(self, contents):
+        installer = (BASH_DIR / "install_buildkit.sh").read_text(encoding="utf-8")
+        start = installer.index("next_free_subid_start()")
+        fn = installer[start : installer.index("\n}", start) + 2]
+        with tempfile.NamedTemporaryFile("w", suffix=".subid", delete=False) as fh:
+            fh.write(contents)
+            path = fh.name
+        try:
+            out = subprocess.run(
+                ["bash", "-c", f'{fn}\nnext_free_subid_start "{path}"'],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return out.stdout.strip()
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    @unittest.skipIf(shutil.which("bash") is None, "bash required")
+    def test_unallocated_host_uses_the_conventional_base(self):
+        self.assertEqual(self._pick(""), "100000")
+
+    @unittest.skipIf(shutil.which("bash") is None, "bash required")
+    def test_steps_past_an_existing_allocation(self):
+        self.assertEqual(self._pick("dockeruser:100000:65536\n"), "165536")
+
+    @unittest.skipIf(shutil.which("bash") is None, "bash required")
+    def test_steps_past_several_including_unsorted_input(self):
+        self.assertEqual(self._pick("b:165536:65536\na:100000:65536\n"), "231072")
+
+    @unittest.skipIf(shutil.which("bash") is None, "bash required")
+    def test_reuses_a_free_low_range(self):
+        self.assertEqual(self._pick("b:900000:65536\n"), "100000")
+
+    @unittest.skipIf(shutil.which("bash") is None, "bash required")
+    def test_ignores_malformed_lines(self):
+        self.assertEqual(self._pick("#comment\nbad:line\na:100000:65536\n"), "165536")
+
+
+class DownloadIntegrityTests(unittest.TestCase):
+    def test_pinned_releases_have_pinned_digests(self):
+        # verify_sha256 is a no-op when the expected digest is empty, so relying on
+        # NODO_*_SHA256 being set means the default install verifies nothing.
+        installer = (BASH_DIR / "install_buildkit.sh").read_text(encoding="utf-8")
+        for name in (
+            "BUILDKIT_SHA256_linux_amd64",
+            "BUILDKIT_SHA256_linux_arm64",
+            "ROOTLESSKIT_SHA256_x86_64",
+            "ROOTLESSKIT_SHA256_aarch64",
+        ):
+            match = re.search(rf'{name}="([0-9a-f]*)"', installer)
+            self.assertIsNotNone(match, f"{name} is not defined")
+            self.assertEqual(len(match.group(1)), 64, f"{name} is not a sha256 digest")
+
+    def test_downloads_verify_by_default(self):
+        installer = (BASH_DIR / "install_buildkit.sh").read_text(encoding="utf-8")
+        for var in ("NODO_BUILDKIT_SHA256", "NODO_ROOTLESSKIT_SHA256"):
+            self.assertIn(
+                f"${{{var}:-$",
+                installer,
+                f"{var} must fall back to the pinned digest, not to an empty string",
+            )
 
 
 class RootlessBuilderConfigTests(unittest.TestCase):

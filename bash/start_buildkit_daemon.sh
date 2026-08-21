@@ -63,7 +63,7 @@ fi
 
 # The build sandbox needs a multi-uid user namespace. Fail here with the exact
 # missing pieces rather than letting a Dockerfile die confusingly on `apt-get`.
-MISSING="$(rootless_prereqs_missing || true)"
+MISSING="$(rootless_prereqs_missing "${BIN_DIR}" || true)"
 if [ -n "${MISSING}" ]; then
     echo "Error: the rootless builder is missing host prerequisites: $(echo ${MISSING} | tr '\n' ' ')"
     echo "Run the installer to provision them (it needs sudo once, and never again):"
