@@ -222,14 +222,14 @@ These are the most commonly used commands for daily tasks:
   source-application core service. To override with an out-of-band packer instead,
   set `packer.PACKER_SERVICE_URL: http://<ip>:8080` in `config.yaml`  
 
-  **Optional (`packer.local: true`) — local Docker packer:** nodo builds the
-  service on this host with its **own isolated Docker toolchain**. Docker is
-  **not** installed at node-install time — the first local pack provisions it on
-  demand via `bash/install_docker.sh` (isolated to the node, independent of any
-  Docker already on the host, mirroring `install_java.sh`). nodo starts its
-  isolated Docker daemon right before the build and stops it right after, and
-  only one `nodo pack` may run at a time. Tune it with `packer.docker.*` and
-  `dependencies.docker.*` in `config.yaml`.  
+  **Optional (`packer.local: true`) — local rootless packer:** nodo builds the
+  service on this host with its **own rootless BuildKit toolchain**. Nothing is
+  installed at node-install time — the first local pack provisions it on demand
+  via `bash/install_buildkit.sh` (node-local, independent of any Docker already on
+  the host, mirroring `install_java.sh`). nodo starts the builder right before the
+  build and stops it right after, and only one `nodo pack` may run at a time.
+  The builder runs as your own user, so packing never asks for sudo. Tune it with
+  `packer.buildkit.*` and `dependencies.buildkit.*` in `config.yaml`.  
 
   **Example:**  
   `nodo pack /path/to/project`
@@ -490,13 +490,13 @@ inside its own sealed microVM). In this default mode there is no Docker daemon
 for nodo to manage.
 
 With **`packer.local: true`**, nodo instead builds services on this host with its
-**own isolated Docker toolchain** (see the **pack** command above). Docker is
-provisioned on demand under `MAIN_DIR` via `bash/install_docker.sh`, kept
-independent of any Docker already on the host; nodo starts its isolated daemon
-right before a build and stops it right after. That isolated daemon is managed
-with `nodo local_docker_packer <docker args>` (requires root) — its own usage
-string reads `nodo docker <docker command>`, and it is listed in `nodo help`.
-It runs `docker` against nodo's isolated daemon rather than any host Docker.
+**own rootless BuildKit toolchain** (see the **pack** command above). It is
+provisioned on demand under `MAIN_DIR` via `bash/install_buildkit.sh`, kept
+independent of any Docker already on the host; nodo starts the builder right
+before a build and stops it right after. `docker buildx` is not involved: buildx
+is only a front end for BuildKit, and driving BuildKit directly is what lets the
+builder run unprivileged. That builder is queried with
+`nodo local_builder <buildctl args>` (no root needed), listed in `nodo help`.
 
 To pack with the default external backend, point nodo at a packer service and run
 `nodo pack` (see the **pack** command above):

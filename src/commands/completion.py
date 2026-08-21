@@ -103,7 +103,7 @@ COMMANDS = sorted(
         "pay",
         "credit_client",
         "debit_client",
-        "local_docker_packer",
+        "local_builder",
         "daemon",
         "doctor",
         "completion",

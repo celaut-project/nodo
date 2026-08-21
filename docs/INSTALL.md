@@ -270,13 +270,15 @@ it — services run as **Cloud Hypervisor** microVMs. Docker is only relevant to
   service. To point at an out-of-band packer instead, set
   `packer.PACKER_SERVICE_URL` to its `ip:8080` as an override.
 
-- **Opt-in (`packer.local: true`) — isolated local Docker toolchain.** If you set
+- **Opt-in (`packer.local: true`) — rootless local builder.** If you set
   `packer.local: true`, `nodo pack` builds on this host instead. Docker is still
-  not installed by the node installer; the first local pack provisions an
-  **isolated** toolchain on demand via `bash/install_docker.sh` (independent of
-  any Docker already on the host, mirroring `install_java.sh`) and drives its own
-  daemon under `MAIN_DIR` — never the host's Docker. See `dependencies.docker.*`
-  and `packer.docker.*` in `config.yaml`. Full packing reference:
+  never installed; the first local pack provisions a **rootless BuildKit**
+  toolchain on demand via `bash/install_buildkit.sh` (mirroring `install_java.sh`)
+  and drives its own builder under `MAIN_DIR`. The builder runs as the invoking
+  user, so packing needs no privileges; provisioning the host prerequisites for
+  rootless builds (`uidmap`, `rootlesskit`, subordinate id ranges) may ask for
+  sudo once, on that first install. See `dependencies.buildkit.*` and
+  `packer.buildkit.*` in `config.yaml`. Full packing reference:
   [`PACKING.md`](PACKING.md).
 
 ## 10) Install Cloud Hypervisor assets
@@ -359,20 +361,21 @@ CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$CH_INITRAMFS_TARGET" "$YQ_BIN" 
   "$TARGET_DIR/config.yaml"
 ```
 
-## 11) Isolated local Docker daemon directories
+## 11) Rootless local builder directories
 
-Nodo does not use the host Docker daemon. When packing with `packer.local: true`,
-the first local pack lazily starts a private, isolated Docker daemon and creates
-its state under `$TARGET_DIR/docker`:
+Nodo never uses the host Docker daemon. When packing with `packer.local: true`,
+the first local pack lazily starts a private, rootless BuildKit builder and
+creates its state under `$TARGET_DIR/buildkit`:
 
-- `$TARGET_DIR/docker/data` — data-root
-- `$TARGET_DIR/docker/config` — daemon config
-- `$TARGET_DIR/docker/exec` — exec root
-- `$TARGET_DIR/docker/docker.sock` — the daemon's private socket
+- `$TARGET_DIR/buildkit/data` — builder state (`--root`)
+- `$TARGET_DIR/buildkit/run` — the worker's `XDG_RUNTIME_DIR`
+- `$TARGET_DIR/buildkit/buildkitd.sock` — the builder's private socket
+- `$TARGET_DIR/buildkit/buildkitd.log` — daemon log, dumped on a failed start
 
 These are created automatically on the first local pack (nothing to do here at
-install time) and the daemon is stopped again after each pack. `uninstall.sh`
-removes this tree during teardown.
+install time) and the builder is stopped again after each pack. Because it runs
+as the invoking user, nodo can always stop it — no privileged signal involved.
+`uninstall.sh` removes this tree during teardown.
 
 ## 12) Run DB migration
 

@@ -14,12 +14,12 @@ from src.utils.config import ConfigManager
 from src.packers.service_json import populate_possible_environment_workloads
 from src.utils.hashing import SHA3_256_ID, get_configured_hash_spec, hash_stream
 from src.utils.arch_guard import ensure_native_arch
-# PACKER_SUPPORTED_ARCHITECTURES lives in the Docker-free architectures module.
-# DOCKER_COMMAND/DOCKER_ENV point this worker at nodo's isolated Docker daemon and
-# come from the Docker-free docker_env helper (no docker-py import), so importing
-# this worker never drags Docker into the CH-only runtime.
+# PACKER_SUPPORTED_ARCHITECTURES lives in the container-free architectures module.
+# BUILDCTL_COMMAND/BUILDKIT_ENV point this worker at nodo's own rootless BuildKit
+# builder and come from the buildkit_env helper (no container library import), so
+# importing this worker never drags a builder into the CH-only runtime.
 from src.utils.architectures import PACKER_SUPPORTED_ARCHITECTURES
-from src.utils.docker_env import DOCKER_COMMAND, DOCKER_ENV
+from src.utils.buildkit_env import BUILDCTL_COMMAND, BUILDKIT_ENV
 from src.utils.filesystem_xattrs import (
     describe_mode_type,
     encode_filesystem_metadata_xattrs,
@@ -40,8 +40,9 @@ BLOCKDIR = env_manager.get("BLOCKDIR")
 PACKER_MEMORY_SIZE_FACTOR = env_manager.get("PACKER_MEMORY_SIZE_FACTOR", 2.0) or 2.0
 SAVE_ALL = env_manager.get("SAVE_ALL", False)
 MIN_BUFFER_BLOCK_SIZE = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
-BUILDX_NETWORK = env_manager.get("packer.docker.BUILDX_NETWORK", "host")
-BUILDX_BUILDER = env_manager.get("packer.docker.BUILDX_BUILDER", "nodo-hostnet")
+# Name of the Dockerfile inside the project directory. BuildKit's dockerfile
+# frontend defaults to "Dockerfile" too; this only exists to make it overridable.
+DOCKERFILE_NAME = env_manager.get("packer.buildkit.DOCKERFILE_NAME", "Dockerfile") or "Dockerfile"
 
 # Ensure bee_rpc uses the configured cache and block directories.
 if CACHE:
@@ -79,57 +80,22 @@ class ZipContainerPacker:
         tar_path = os.path.join(CACHE, self.aux_id, "filesystem.tar")
 
         # 3. Construct secure command
-        # Ensure a buildx builder with host network is available when requested.
-        if BUILDX_BUILDER and str(BUILDX_NETWORK).lower() == "host":
-            try:
-                inspect_cmd = DOCKER_COMMAND + ["buildx", "inspect", BUILDX_BUILDER]
-                inspect = subprocess.run(
-                    inspect_cmd,
-                    cwd=self.path,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    env=DOCKER_ENV,
-                    check=False
-                )
-                if inspect.returncode != 0:
-                    create_cmd = DOCKER_COMMAND + [
-                        "buildx", "create",
-                        "--name", BUILDX_BUILDER,
-                        "--driver", "docker-container",
-                        "--driver-opt", "network=host"
-                    ]
-                    subprocess.run(
-                        create_cmd,
-                        cwd=self.path,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        env=DOCKER_ENV,
-                        check=False
-                    )
-                bootstrap_cmd = DOCKER_COMMAND + ["buildx", "inspect", BUILDX_BUILDER, "--bootstrap"]
-                subprocess.run(
-                    bootstrap_cmd,
-                    cwd=self.path,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    env=DOCKER_ENV,
-                    check=False
-                )
-            except Exception as e:
-                log.LOGGER(f"Warning: failed to prepare buildx builder '{BUILDX_BUILDER}': {e}")
-
-        build_cmd = DOCKER_COMMAND + [
-            "buildx", "build",
-            "--platform", target_arch,
+        # BuildKit is driven directly instead of through `docker buildx`: buildx is
+        # only a front end for it, and the standalone daemon runs rootless as our
+        # own user, so no step of a pack needs sudo. There is no builder to create
+        # or bootstrap either — nodo starts buildkitd around the pack
+        # (bash/start_buildkit_daemon.sh) with the host network, which is what the
+        # old `--network host` buildx builder existed to provide.
+        build_cmd = BUILDCTL_COMMAND + [
+            "build",
+            "--frontend", "dockerfile.v0",
+            "--local", f"context={self.path}",
+            "--local", f"dockerfile={self.path}",
+            "--opt", f"filename={DOCKERFILE_NAME}",
+            "--opt", f"platform={target_arch}",
             "--progress", "plain",
             "--no-cache",
-            "--builder", str(BUILDX_BUILDER),
-            "--network", str(BUILDX_NETWORK),
             "--output", f"type=tar,dest={tar_path}",
-            self.path
         ]
 
         # 4. Secure execution
@@ -142,7 +108,7 @@ class ZipContainerPacker:
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.STDOUT, 
                 text=True,
-                env=DOCKER_ENV,
+                env=BUILDKIT_ENV,
                 bufsize=1,
                 universal_newlines=True
             )
@@ -206,7 +172,7 @@ class ZipContainerPacker:
             return normalized
 
         def parseFilesys() -> celaut.Metadata.HashTag:
-            # File system is already exported to filesystem/ by buildx
+            # File system is already exported to filesystem/ by BuildKit
             # Add filesystem data to filesystem buffer object.
             def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
                 host_dir = CACHE + self.aux_id + "/filesystem"
@@ -528,7 +494,6 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
         identifier, metadata, service = spec_file.save()
         iobd.log_snapshot(context=f"pack-worker:before-unlock aux_id={aux_id} service_id={identifier}")
 
-    # os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')  <-- This avoids rebuilding the container on the first run, but it causes file permission issues since it inherits them as they were on the host. Preferably, if using Docker, it is better to rebuild it.
     iobd.log_snapshot(context=f"pack-worker:after-unlock aux_id={aux_id} service_id={identifier}")
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, metadata, service
