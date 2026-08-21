@@ -229,7 +229,7 @@ if __name__ == '__main__':
                     "\n- debit_client <client id> <amount>"
                     "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
                     "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your balance on that peer afterward)"
-                    "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
+                    "\n- local_builder <buildctl args>  (runs buildctl against nodo's rootless builder; local packer only)"
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
                     "\n- nat-guide  (how to forward the gateway port on your router so this node is reachable)"
@@ -819,25 +819,22 @@ if __name__ == '__main__':
                     os._exit(1)
                 os._exit(0 if ok else 1)
 
-            case "local_docker_packer":
-                # Run docker commands in nodo's isolated Docker context (the
-                # optional local packer's toolchain). Import lazily so this never
-                # loads on CH-only nodes that don't have Docker installed.
-                if os.geteuid() != 0:
-                    print("This script requires superuser privileges. Please run with sudo.")
-                    exit()
-
-                from src.utils.docker_env import DOCKER_COMMAND, DOCKER_ENV
-                docker_args = sys.argv[2:] if len(sys.argv) > 2 else []
-                if not docker_args:
-                    print("Usage: nodo docker <docker command>", flush=True)
-                    print("Example: nodo docker ps", flush=True)
-                    print("Example: nodo docker images", flush=True)
-                    print("\nThis uses nodo's isolated Docker daemon.", flush=True)
+            case "local_builder":
+                # Run buildctl against nodo's rootless builder (the optional local
+                # packer's toolchain). Import lazily so this never loads on CH-only
+                # nodes that have no builder installed. No privilege check: the
+                # builder runs as the invoking user, so sudo would be wrong here.
+                from src.utils.buildkit_env import BUILDCTL_COMMAND, BUILDKIT_ENV
+                builder_args = sys.argv[2:] if len(sys.argv) > 2 else []
+                if not builder_args:
+                    print("Usage: nodo local_builder <buildctl command>", flush=True)
+                    print("Example: nodo local_builder debug workers", flush=True)
+                    print("Example: nodo local_builder du", flush=True)
+                    print("\nThis uses nodo's rootless BuildKit builder.", flush=True)
                 else:
                     result = subprocess.run(
-                        DOCKER_COMMAND + docker_args,
-                        env=DOCKER_ENV,
+                        BUILDCTL_COMMAND + builder_args,
+                        env=BUILDKIT_ENV,
                     )
                     if result.returncode != 0:
                         sys.exit(result.returncode)
