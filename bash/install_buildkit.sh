@@ -37,20 +37,38 @@ CONFIG_FILE="$TARGET_DIR/config.yaml"
 BUILDKIT_VERSION="${NODO_BUILDKIT_VERSION:-0.32.2}"
 ROOTLESSKIT_VERSION="${NODO_ROOTLESSKIT_VERSION:-3.1.0}"
 
+# Known-good digests for the pinned releases above, so a tampered or truncated
+# download is caught by default rather than only when someone remembers to set
+# NODO_*_SHA256. Bump these together with the version pins; overriding a version
+# without its digest disables the check for that download (see verify_sha256).
+BUILDKIT_SHA256_linux_amd64="2975d0f651ad96ba8b80b9992ae1f9a964f4408569af5b6dc36544165c3926af"
+BUILDKIT_SHA256_linux_arm64="9e8f46bf309ec0ab262967be5538a4dbe06be756a82621f98253933bac5dcf92"
+ROOTLESSKIT_SHA256_x86_64="b1302b7395918266d561b9e3053771253f20761807e042ae80a1868d6e86b71c"
+ROOTLESSKIT_SHA256_aarch64="42d1c22a34be7bb458f9ae7363d68dd05d553422d95392b44d0be7fa1fd76bf0"
+
 case "$(uname -m)" in
     x86_64|amd64)
         BUILDKIT_ARCH="linux-amd64"
         ROOTLESSKIT_ARCH="x86_64"
+        BUILDKIT_SHA256_DEFAULT="$BUILDKIT_SHA256_linux_amd64"
+        ROOTLESSKIT_SHA256_DEFAULT="$ROOTLESSKIT_SHA256_x86_64"
         ;;
     aarch64|arm64)
         BUILDKIT_ARCH="linux-arm64"
         ROOTLESSKIT_ARCH="aarch64"
+        BUILDKIT_SHA256_DEFAULT="$BUILDKIT_SHA256_linux_arm64"
+        ROOTLESSKIT_SHA256_DEFAULT="$ROOTLESSKIT_SHA256_aarch64"
         ;;
     *)
         echo "Error: Unsupported architecture $(uname -m)."
         exit 1
         ;;
 esac
+
+# A pinned digest only describes the pinned version: if the caller overrides the
+# version, fall back to "unverified unless they also supply a digest".
+[ "$BUILDKIT_VERSION" = "0.32.2" ] || BUILDKIT_SHA256_DEFAULT=""
+[ "$ROOTLESSKIT_VERSION" = "3.1.0" ] || ROOTLESSKIT_SHA256_DEFAULT=""
 
 BUILDKIT_URL="https://github.com/moby/buildkit/releases/download/v${BUILDKIT_VERSION}/buildkit-v${BUILDKIT_VERSION}.${BUILDKIT_ARCH}.tar.gz"
 ROOTLESSKIT_URL="https://github.com/rootless-containers/rootlesskit/releases/download/v${ROOTLESSKIT_VERSION}/rootlesskit-${ROOTLESSKIT_ARCH}.tar.gz"
@@ -111,6 +129,41 @@ verify_sha256() {
     local actual
     actual="$(sha256sum "$file" | awk '{print $1}')"
     [ "$actual" = "$expected" ] || fail "SHA256 mismatch for ${file}. expected=${expected} actual=${actual}"
+}
+
+# Pick a 65536-wide subordinate id range that does not overlap anything already
+# allocated. usermod does not deduplicate across users, so a fixed 100000 base
+# silently collides on hosts where rootless Docker/Podman already claimed it —
+# two users sharing a range can chown each other's files inside a namespace.
+# Starts at the conventional 100000 and steps past every existing entry.
+next_free_subid_start() {
+    local file="$1"
+    local size=65536
+    local start=100000
+
+    [ -r "$file" ] || { printf '%s' "$start"; return 0; }
+
+    # Walk the allocated ranges in ascending order, pushing the candidate past
+    # any that would overlap it. awk keeps this to a single pass over the file.
+    start="$(awk -F: -v start="$start" -v size="$size" '
+        BEGIN { n = 0 }   # without this, the first s[n] indexes s[""] and is lost
+        NF >= 3 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { s[n]=$2; c[n]=$3; n++ }
+        END {
+            # insertion sort by range start; these files are tiny
+            for (i = 1; i < n; i++) {
+                ks = s[i]; kc = c[i]; j = i - 1
+                while (j >= 0 && s[j] > ks) { s[j+1]=s[j]; c[j+1]=c[j]; j-- }
+                s[j+1]=ks; c[j+1]=kc
+            }
+            for (i = 0; i < n; i++) {
+                if (start + size - 1 < s[i]) break        # fits before this range
+                if (start < s[i] + c[i]) start = s[i] + c[i]   # overlaps: jump past it
+            }
+            print start
+        }
+    ' "$file")"
+
+    printf '%s' "$start"
 }
 
 # --- One-time host prerequisites ---------------------------------------------
@@ -180,7 +233,7 @@ install_static_rootlesskit() {
 
     echo "Downloading ${ROOTLESSKIT_URL} ..."
     download_file "$ROOTLESSKIT_URL" "$archive"
-    verify_sha256 "$archive" "${NODO_ROOTLESSKIT_SHA256:-}"
+    verify_sha256 "$archive" "${NODO_ROOTLESSKIT_SHA256:-$ROOTLESSKIT_SHA256_DEFAULT}"
     tar -xzf "$archive" -C "$extract_dir"
     for b in rootlesskit rootlesskit-docker-proxy; do
         [ -f "$extract_dir/$b" ] && cp -f "$extract_dir/$b" "$bin_dir/$b" && chmod +x "$bin_dir/$b"
@@ -242,7 +295,7 @@ cleanup_legacy_dockerd() {
 ensure_rootless_prereqs() {
     local bin_dir="$1"
     local missing
-    missing="$(rootless_prereqs_missing || true)"
+    missing="$(rootless_prereqs_missing "$bin_dir" || true)"
     if [ -z "$missing" ]; then
         echo "Rootless prerequisites already satisfied; nothing privileged to do."
         return 0
@@ -270,17 +323,21 @@ ensure_rootless_prereqs() {
     local user
     user="$(id -un)"
     if echo "$missing" | grep -qx "subuid"; then
-        echo "Allocating a subordinate uid range for ${user} ..."
-        ${SUDO} usermod --add-subuids 100000-165535 "$user" \
-            || fail "Could not allocate subuids for ${user}. Add '${user}:100000:65536' to /etc/subuid and re-run."
+        local start
+        start="$(next_free_subid_start /etc/subuid)"
+        echo "Allocating a subordinate uid range for ${user} (${start}-$((start + 65535))) ..."
+        ${SUDO} usermod --add-subuids "${start}-$((start + 65535))" "$user" \
+            || fail "Could not allocate subuids for ${user}. Add '${user}:${start}:65536' to /etc/subuid and re-run."
     fi
     if echo "$missing" | grep -qx "subgid"; then
-        echo "Allocating a subordinate gid range for ${user} ..."
-        ${SUDO} usermod --add-subgids 100000-165535 "$user" \
-            || fail "Could not allocate subgids for ${user}. Add '${user}:100000:65536' to /etc/subgid and re-run."
+        local start
+        start="$(next_free_subid_start /etc/subgid)"
+        echo "Allocating a subordinate gid range for ${user} (${start}-$((start + 65535))) ..."
+        ${SUDO} usermod --add-subgids "${start}-$((start + 65535))" "$user" \
+            || fail "Could not allocate subgids for ${user}. Add '${user}:${start}:65536' to /etc/subgid and re-run."
     fi
 
-    missing="$(rootless_prereqs_missing || true)"
+    missing="$(rootless_prereqs_missing "$bin_dir" || true)"
     [ -z "$missing" ] || fail "Rootless prerequisites still missing after provisioning: $(echo ${missing} | tr '\n' ' ')"
 }
 
@@ -301,7 +358,7 @@ trap 'rm -rf "$archive" "$extract_dir"' EXIT
 
 echo "Downloading ${BUILDKIT_URL} ..."
 download_file "$BUILDKIT_URL" "$archive"
-verify_sha256 "$archive" "${NODO_BUILDKIT_SHA256:-}"
+verify_sha256 "$archive" "${NODO_BUILDKIT_SHA256:-$BUILDKIT_SHA256_DEFAULT}"
 
 tar -xzf "$archive" -C "$extract_dir"
 SRC_DIR="$extract_dir/bin"
