@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import stat
+import tarfile
 from dataclasses import dataclass
 from typing import Mapping, MutableMapping, Optional
 
@@ -85,6 +86,79 @@ def metadata_from_lstat(stat_result: os.stat_result) -> FilesystemNodeMetadata:
         device_major=device_major,
         device_minor=device_minor,
         device_is_block=device_is_block,
+    )
+
+
+# tarfile.TarInfo.type -> the S_IF* type bits os.stat would report for the
+# same entry. LNKTYPE (a tar hardlink) is deliberately mapped like a regular
+# file: that is what it becomes once extracted, and the tar header carries no
+# separate "this is a hardlink" mode bit of its own.
+_TAR_TYPE_TO_S_IFMT = {
+    tarfile.REGTYPE: stat.S_IFREG,
+    tarfile.AREGTYPE: stat.S_IFREG,
+    tarfile.LNKTYPE: stat.S_IFREG,
+    tarfile.DIRTYPE: stat.S_IFDIR,
+    tarfile.SYMTYPE: stat.S_IFLNK,
+    tarfile.CHRTYPE: stat.S_IFCHR,
+    tarfile.BLKTYPE: stat.S_IFBLK,
+    tarfile.FIFOTYPE: stat.S_IFIFO,
+}
+
+
+def metadata_from_tarinfo(tarinfo: tarfile.TarInfo) -> FilesystemNodeMetadata:
+    # `tarfile.extractall` only chowns extracted entries to the uid/gid recorded
+    # in the tar when it is running as root; as an unprivileged user every entry
+    # comes out owned by the extracting user instead, silently. Since those
+    # uid/gid values feed the content-addressed service hash, packing the same
+    # image as two different users produced two different ids. The tar header
+    # itself is unaffected by who extracts it, so reading metadata from the
+    # tarfile.TarInfo (this function) instead of from the extracted tree
+    # (metadata_from_lstat) keeps the hash independent of the packer's uid.
+    ifmt = _TAR_TYPE_TO_S_IFMT.get(tarinfo.type)
+    if ifmt is None:
+        raise ValueError(
+            f"unsupported tar entry type {tarinfo.type!r} for '{tarinfo.name}'"
+        )
+    mode = ifmt | (tarinfo.mode & 0o7777)
+
+    if tarinfo.type in (tarfile.CHRTYPE, tarfile.BLKTYPE):
+        device_major = int(tarinfo.devmajor)
+        device_minor = int(tarinfo.devminor)
+        device_is_block = tarinfo.type == tarfile.BLKTYPE
+    else:
+        device_major = 0
+        device_minor = 0
+        device_is_block = False
+
+    return FilesystemNodeMetadata(
+        mode=mode,
+        uid=int(tarinfo.uid),
+        gid=int(tarinfo.gid),
+        # Symlink mtimes are zeroed for the same reason metadata_from_lstat
+        # zeroes them: tarfile re-stamps a symlink's mtime to wall-clock on
+        # each extract, so restoring the tar's own value would not survive a
+        # second extraction on the same host, let alone a different one.
+        mtime_ns=0 if ifmt == stat.S_IFLNK else int(tarinfo.mtime) * 1_000_000_000,
+        device_major=device_major,
+        device_minor=device_minor,
+        device_is_block=device_is_block,
+    )
+
+
+def implicit_directory_metadata() -> FilesystemNodeMetadata:
+    # A directory that tarfile materialized on disk only because a deeper entry
+    # needed it as a parent, with no member of its own in the tar (some tar
+    # writers omit them). Every packer fabricates the same synthetic values for
+    # it, so it stays out of the non-determinism metadata_from_tarinfo exists to
+    # avoid.
+    return FilesystemNodeMetadata(
+        mode=stat.S_IFDIR | 0o755,
+        uid=0,
+        gid=0,
+        mtime_ns=0,
+        device_major=0,
+        device_minor=0,
+        device_is_block=False,
     )
 
 

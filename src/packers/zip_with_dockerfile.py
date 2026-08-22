@@ -1,5 +1,7 @@
 import base64
 import fcntl
+import posixpath
+import stat
 from typing import Generator, List, Tuple
 
 from src.utils import logger as log
@@ -23,8 +25,10 @@ from src.utils.buildkit_env import BUILDCTL_COMMAND, BUILDKIT_ENV
 from src.utils.filesystem_xattrs import (
     describe_mode_type,
     encode_filesystem_metadata_xattrs,
+    implicit_directory_metadata,
     is_supported_filesystem_entry_mode,
     metadata_from_lstat,
+    metadata_from_tarinfo,
 )
 from src.utils.verify import calculate_hashes, calculate_hashes_by_stream
 from src.utils.config import ConfigManager
@@ -52,6 +56,16 @@ if BLOCKDIR:
     modify_env(cache_dir=CACHE, block_dir=BLOCKDIR)
 
 
+def _normalize_tar_member_path(name: str) -> str:
+    # Tar member names are posix paths, sometimes "./bin/bash", sometimes
+    # "bin/bash", sometimes "bin/" for a directory. Normalize to the same
+    # "bin/bash" shape recursive_parsing's own (directory + b_name) builds, so
+    # a lookup by path always hits. The root entry ("." or "./") normalizes to
+    # "" and is filtered out by the caller — it has no corresponding branch.
+    normalized = posixpath.normpath(name).lstrip("/")
+    return "" if normalized == "." else normalized
+
+
 class ZipContainerPacker:
     def __init__(self, path, aux_id):
         self.blocks: List[bytes] = []
@@ -61,6 +75,7 @@ class ZipContainerPacker:
         self.json = json.load(open(self.path + "service.json", "r"))
         self.aux_id = aux_id
         self.error_msg = None
+        self._tar_metadata_by_path = {}
         self._validate_service_json_shape()
 
         arch = None
@@ -131,7 +146,20 @@ class ZipContainerPacker:
             log.LOGGER(f"Extracting {tar_path} to {dest_path}...")
             import tarfile
             with tarfile.open(tar_path) as tar:
-                tar.extractall(path=dest_path)
+                members = tar.getmembers()
+                tar.extractall(path=dest_path, members=members)
+                # `tarfile.extractall` only chowns to the tar's uid/gid when run as
+                # root; unprivileged (our case, always, now that the builder is
+                # rootless) every entry lands owned by us regardless of what the
+                # tar says. Those uid/gid values feed the content-addressed service
+                # hash, so hashing what's on disk after extraction would make the
+                # id depend on who ran the pack. Keep the tar's own metadata
+                # instead, keyed by the path as parseContainer will look it up.
+                self._tar_metadata_by_path = {
+                    _normalize_tar_member_path(member.name): metadata_from_tarinfo(member)
+                    for member in members
+                    if _normalize_tar_member_path(member.name)
+                }
             os.remove(tar_path)
 
             log.LOGGER("Filesystem export completed successfully.")
@@ -198,7 +226,23 @@ class ZipContainerPacker:
                             f"{describe_mode_type(branch_stat.st_mode)} "
                             f"(mode={oct(branch_stat.st_mode)})"
                         )
-                    branch_metadata = metadata_from_lstat(branch_stat)
+                    # Prefer the tar's own record of this entry over the extracted
+                    # copy on disk: extractall only restores uid/gid from the tar
+                    # when run as root, so an unprivileged extraction (always, now
+                    # that the builder is rootless) would otherwise stamp the
+                    # content-addressed hash with the packer's own uid/gid instead
+                    # of the image's. A directory tarfile only created implicitly,
+                    # as a deeper entry's parent, has no member of its own; every
+                    # packer fabricates the same synthetic metadata for it. Anything
+                    # else missing from the tar (there should be nothing) falls back
+                    # to the previous, best-effort behavior.
+                    tar_metadata = self._tar_metadata_by_path.get((directory + b_name).lstrip("/"))
+                    if tar_metadata is not None:
+                        branch_metadata = tar_metadata
+                    elif stat.S_ISDIR(branch_stat.st_mode):
+                        branch_metadata = implicit_directory_metadata()
+                    else:
+                        branch_metadata = metadata_from_lstat(branch_stat)
                     encode_filesystem_metadata_xattrs(branch.xattrs, branch_metadata)
 
                     # It's a link.
