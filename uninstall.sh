@@ -55,6 +55,21 @@ cleanup_legacy_docker() {
         fi
     fi
 
+    # Stop the rootless BuildKit builder (current local-packer toolchain) and its
+    # rootlesskit parent. Unlike the retired root dockerd, these belong to the
+    # invoking user, so no privileged signal is needed to reach them.
+    if pgrep -f "$TARGET_DIR/bin/buildkitd" >/dev/null 2>&1; then
+        log "Stopping the rootless BuildKit builder..."
+        pkill -f "$TARGET_DIR/bin/buildkitd" 2>/dev/null || true
+        sleep 2
+
+        if pgrep -f "$TARGET_DIR/bin/buildkitd" >/dev/null 2>&1; then
+            log "Force killing the BuildKit builder..."
+            pkill -9 -f "$TARGET_DIR/bin/buildkitd" 2>/dev/null || true
+            sleep 1
+        fi
+    fi
+
     # Stop any helper processes that may still hold mounts
     pkill -f "$TARGET_DIR/docker" 2>/dev/null || true
     pkill -f "buildkitd-entrypoint" 2>/dev/null || true

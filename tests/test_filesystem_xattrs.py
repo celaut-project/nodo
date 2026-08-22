@@ -1,5 +1,6 @@
 import os
 import stat
+import tarfile
 import tempfile
 import unittest
 
@@ -13,7 +14,9 @@ from src.utils.filesystem_xattrs import (
     UID_KEY,
     FilesystemNodeMetadata,
     encode_filesystem_metadata_xattrs,
+    implicit_directory_metadata,
     metadata_from_lstat,
+    metadata_from_tarinfo,
     parse_filesystem_metadata_xattrs,
 )
 
@@ -86,6 +89,103 @@ class FilesystemXattrsTests(unittest.TestCase):
         self.assertEqual(metadata.device_major, 0)
         self.assertEqual(metadata.device_minor, 0)
         self.assertFalse(metadata.device_is_block)
+
+
+class MetadataFromTarinfoTests(unittest.TestCase):
+    """The service hash is fed by this metadata. tarfile.extractall only chowns
+    to the tar's own uid/gid when running as root, so an unprivileged extraction
+    stamps everything with the packer's own uid/gid instead — reading metadata
+    from the TarInfo rather than the extracted tree is what keeps two different
+    users packing the same image at the same hash."""
+
+    def _tarinfo(self, **overrides):
+        ti = tarfile.TarInfo(name=overrides.pop("name", "bin/bash"))
+        ti.type = overrides.pop("type", tarfile.REGTYPE)
+        ti.mode = overrides.pop("mode", 0o755)
+        ti.uid = overrides.pop("uid", 0)
+        ti.gid = overrides.pop("gid", 0)
+        ti.mtime = overrides.pop("mtime", 1712000000)
+        ti.devmajor = overrides.pop("devmajor", 0)
+        ti.devminor = overrides.pop("devminor", 0)
+        assert not overrides, f"unknown overrides: {overrides}"
+        return ti
+
+    def test_regular_file_takes_uid_gid_from_the_tar_header(self):
+        metadata = metadata_from_tarinfo(self._tarinfo(uid=0, gid=0))
+        self.assertEqual(metadata.uid, 0)
+        self.assertEqual(metadata.gid, 0)
+        self.assertEqual(metadata.mode, stat.S_IFREG | 0o755)
+        self.assertEqual(metadata.mtime_ns, 1712000000_000000000)
+        self.assertFalse(metadata.is_device)
+
+    def test_same_tar_member_is_identical_regardless_of_who_reads_it(self):
+        # The whole point: the extracting uid must not leak into the metadata.
+        # A TarInfo carries no notion of "who is extracting", so two identical
+        # calls always agree — unlike metadata_from_lstat on an unprivileged
+        # extraction, whose st_uid/st_gid would follow the caller instead.
+        a = metadata_from_tarinfo(self._tarinfo(uid=0, gid=0))
+        b = metadata_from_tarinfo(self._tarinfo(uid=0, gid=0))
+        self.assertEqual(a, b)
+
+    def test_directory_type(self):
+        metadata = metadata_from_tarinfo(
+            self._tarinfo(name="bin/", type=tarfile.DIRTYPE, mode=0o755)
+        )
+        self.assertEqual(metadata.mode, stat.S_IFDIR | 0o755)
+        self.assertFalse(metadata.is_device)
+
+    def test_symlink_mtime_is_zeroed(self):
+        # Mirrors metadata_from_lstat: tarfile re-stamps a symlink's mtime to
+        # wall-clock on every extract, so restoring the tar's own value would
+        # not survive a second extraction, let alone a different host.
+        metadata = metadata_from_tarinfo(
+            self._tarinfo(type=tarfile.SYMTYPE, mtime=1712000000)
+        )
+        self.assertEqual(metadata.mtime_ns, 0)
+
+    def test_hardlink_is_treated_as_a_regular_file(self):
+        # A tar hardlink (LNKTYPE) carries no mode bit of its own for "this is a
+        # hardlink" — once extracted it is a regular file, so it hashes as one.
+        metadata = metadata_from_tarinfo(self._tarinfo(type=tarfile.LNKTYPE))
+        self.assertEqual(metadata.mode, stat.S_IFREG | 0o755)
+
+    def test_char_device_carries_major_minor(self):
+        metadata = metadata_from_tarinfo(
+            self._tarinfo(type=tarfile.CHRTYPE, devmajor=1, devminor=5)
+        )
+        self.assertEqual(metadata.device_major, 1)
+        self.assertEqual(metadata.device_minor, 5)
+        self.assertFalse(metadata.device_is_block)
+        self.assertTrue(metadata.is_device)
+
+    def test_block_device_is_flagged_as_block(self):
+        metadata = metadata_from_tarinfo(
+            self._tarinfo(type=tarfile.BLKTYPE, devmajor=8, devminor=0)
+        )
+        self.assertTrue(metadata.device_is_block)
+
+    def test_unsupported_entry_type_raises(self):
+        with self.assertRaisesRegex(ValueError, "unsupported tar entry type"):
+            metadata_from_tarinfo(self._tarinfo(type=tarfile.GNUTYPE_SPARSE))
+
+    def test_roundtrips_through_the_xattr_contract(self):
+        metadata = metadata_from_tarinfo(self._tarinfo())
+        xattrs: dict[str, bytes] = {}
+        encode_filesystem_metadata_xattrs(xattrs, metadata)
+        self.assertEqual(parse_filesystem_metadata_xattrs(xattrs), metadata)
+
+
+class ImplicitDirectoryMetadataTests(unittest.TestCase):
+    def test_is_a_directory_with_no_owner(self):
+        metadata = implicit_directory_metadata()
+        self.assertTrue(stat.S_ISDIR(metadata.mode))
+        self.assertEqual(metadata.uid, 0)
+        self.assertEqual(metadata.gid, 0)
+        self.assertEqual(metadata.mtime_ns, 0)
+        self.assertFalse(metadata.is_device)
+
+    def test_is_deterministic(self):
+        self.assertEqual(implicit_directory_metadata(), implicit_directory_metadata())
 
 
 if __name__ == "__main__":
