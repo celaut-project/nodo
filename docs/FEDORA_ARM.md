@@ -45,8 +45,18 @@ Fedora package names worth knowing if you install by hand: `gcc make` for
   When something does build from source, it looks for `clang` by name: the portable
   CPython from python-build-standalone records `CC=clang` in its `sysconfig`. The setup
   scripts fall back to `CC=gcc CXX=g++` when clang is absent.
-- **`nodo doctor`'s KVM smoke test** asks for the right serial device per
-  architecture: CH gives aarch64 guests a PL011 (`ttyAMA0`), not an 8250 (`ttyS0`).
+- **The guest console is `ttyAMA0`, and it is not optional.** CH gives aarch64 guests
+  a PL011; `nodo-guest-arm64.config` enables that driver and no 8250 at all. Naming
+  `ttyS0` there is not a lost log — the kernel cannot bind a device it has no driver
+  for, so `/dev/console` never opens, `/init` dies on its first statement
+  (`exec >/dev/console 2>&1`, and a non-interactive shell exits on a failed
+  redirection), and the launch ends as `Kernel panic - not syncing: Attempted to kill
+  init! exitcode=0x00000100` at ~0.1s with no output of its own.
+
+  Both cmdline builders derive it from `src/virtualizers/ch/guest.py`, so it cannot
+  be set wrong. If `virtualizers.ch.KERNEL_CMDLINE_EXTRA` in an older `config.yaml`
+  still carries `console=ttyS0` — it was the shipped default — it is dropped with a
+  warning rather than honoured.
 - **This host can only execute services packed for its own architecture.** There is
   no QEMU/binfmt (see *Operational notes* in [`INSTALL.md`](INSTALL.md)), and the
   installer disables the other architecture for exactly that reason. On an ARM node,

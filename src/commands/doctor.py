@@ -14,6 +14,7 @@ from pathlib import Path
 # exactly when it is worth running. Anything that pulls in config or the logger
 # (which creates the storage directory on import) does not belong in this file.
 from src.virtualizers.ch import initramfs as ch_initramfs
+from src.virtualizers.ch import guest as ch_guest
 
 
 def _parse_unit_user(unit_content: str) -> str:
@@ -272,18 +273,6 @@ def _parse_kernel_version(release: str):
     return None, None
 
 
-def _guest_serial_device(machine: str = "") -> str:
-    """The guest's serial console, which is not the same device on every architecture.
-
-    Cloud Hypervisor gives aarch64 guests a PL011 (ttyAMA0) and x86_64 guests an
-    8250 (ttyS0). Passing the wrong one leaves the serial log empty, so the smoke
-    test below never sees the boot it is waiting for and falls back to reporting
-    only that the process was still alive.
-    """
-    machine = machine or platform.machine().lower()
-    return "ttyAMA0" if machine in ("aarch64", "arm64") else "ttyS0"
-
-
 def _classify_ch_smoke_failure(stderr: str) -> str:
     """Name why the smoke-test VM died: 'vcpu', 'kernel_load' or 'unknown'.
 
@@ -512,7 +501,7 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
             print(f"[SKIP] Cannot create test rootfs: {e}", flush=True)
             return
 
-        cmdline = f"root=/dev/vda rw console={_guest_serial_device()}"
+        cmdline = f"root=/dev/vda rw console={ch_guest.serial_device()}"
 
         cmd = [
             ch_binary,

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from src.commands import doctor
+from src.virtualizers.ch import guest as ch_guest
 
 
 class GuestSerialDeviceTests(unittest.TestCase):
@@ -13,18 +14,23 @@ class GuestSerialDeviceTests(unittest.TestCase):
     def test_arm_hosts_get_the_pl011(self):
         for machine in ("aarch64", "arm64"):
             with self.subTest(machine=machine):
-                self.assertEqual(doctor._guest_serial_device(machine), "ttyAMA0")
+                self.assertEqual(ch_guest.serial_device(machine), "ttyAMA0")
 
     def test_x86_hosts_get_the_8250(self):
-        self.assertEqual(doctor._guest_serial_device("x86_64"), "ttyS0")
+        self.assertEqual(ch_guest.serial_device("x86_64"), "ttyS0")
 
-    def test_the_smoke_test_asks_for_the_right_one(self):
-        # Hardcoding console=ttyS0 left the serial log empty on aarch64, so the
-        # "boot detected via serial output" branch was unreachable there and the
-        # check degraded to "the process was still alive after 2s".
-        source = Path("src/commands/doctor.py").read_text(encoding="utf-8")
-        self.assertIn("console={_guest_serial_device()}", source)
-        self.assertNotIn('cmdline = "root=/dev/vda rw console=ttyS0"', source)
+    def test_both_cmdline_builders_derive_it_from_one_place(self):
+        # There were two copies of this decision. One got fixed and the other did
+        # not, and the unfixed one was the launcher: on arm64 `console=ttyS0` panics
+        # PID 1 before it prints anything, so no service could start.
+        for path in ("src/commands/doctor.py", "src/virtualizers/ch/execute.py"):
+            with self.subTest(path=path):
+                source = Path(path).read_text(encoding="utf-8")
+                self.assertIn("ch_guest.serial_device()", source)
+                for line in source.splitlines():
+                    if line.lstrip().startswith("#"):
+                        continue  # comments recount the bug this prevents
+                    self.assertNotIn("console=ttyS0", line)
 
 
 class SmokeFailureClassificationTests(unittest.TestCase):
