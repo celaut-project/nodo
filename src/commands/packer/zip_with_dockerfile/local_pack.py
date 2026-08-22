@@ -1,15 +1,15 @@
-"""`nodo pack` — optional LOCAL (Docker) packer.
+"""`nodo pack` — optional LOCAL (rootless BuildKit) packer.
 
 Enabled by ``packer.local: true`` in config.yaml (default False). This restores
 nodo's original local build path — generate the service zip and build it with
-nodo's isolated Docker toolchain by calling ``pack_zip()`` directly, in process,
+nodo's rootless BuildKit toolchain by calling ``pack_zip()`` directly, in process,
 streaming back the service id, metadata and service directory — but wraps it in
 the policy Josemi asked for:
 
-  * Docker is provisioned on demand (``install_docker.sh``) the first time it's
-    needed, isolated to the node (never the host Docker).
-  * nodo's isolated Docker daemon is started right before the build and stopped
-    right after it.
+  * the builder is provisioned on demand (``install_buildkit.sh``) the first time
+    it's needed, under MAIN_DIR (never a system-wide daemon).
+  * nodo's rootless builder is started right before the build and stopped right
+    after it. It runs as the invoking user, so no part of a pack needs sudo.
   * a command-level lock prevents two ``nodo pack`` runs at once.
 
 Packing is fully local now: ``nodo pack`` calls ``pack_zip()`` in process instead
@@ -29,10 +29,10 @@ from typing import Optional
 
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.utils.docker_dependency import (
-    ensure_docker_installed,
-    start_docker_daemon,
-    stop_docker_daemon,
+from src.utils.builder_dependency import (
+    ensure_builder_installed,
+    start_builder,
+    stop_builder,
 )
 
 from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_directory
@@ -50,7 +50,7 @@ REGISTRY = env_manager.get("REGISTRY")
 # A service that declares dependencies packs those dependencies first
 # (generate_service_zip -> __export_registry -> pack -> pack_local). Those nested
 # packs are part of the SAME `nodo pack` operation, so they must reuse the
-# top-level pack's lock and its already-running isolated Docker daemon rather than
+# top-level pack's lock and its already-running rootless builder rather than
 # trying (and failing) to re-acquire the single-holder command lock. `_pack_depth`
 # tracks this reentrancy: only the outermost call owns the lock and the daemon.
 # --------------------------------------------------------------------------- #
@@ -207,13 +207,13 @@ def __remove_path(path):
 
 
 def pack_local(directory: str) -> Optional[str]:
-    """Build a project locally with nodo's isolated Docker toolchain.
+    """Build a project locally with nodo's rootless BuildKit toolchain.
 
     Nested dependency packs (triggered from generate_service_zip while packing a
     service that declares yet-unpacked dependencies) are part of the same pack
-    operation: they reuse the top-level pack's command lock and running Docker
-    daemon instead of re-acquiring the single-holder lock (which would fail and
-    cancel the dependency).
+    operation: they reuse the top-level pack's command lock and running builder
+    instead of re-acquiring the single-holder lock (which would fail and cancel
+    the dependency).
     """
     global _pack_depth
     nested = _pack_depth > 0
@@ -226,7 +226,7 @@ def pack_local(directory: str) -> Optional[str]:
         if lock_file is None:
             print(
                 "\nAnother `nodo pack` is already running. Only one local pack can run "
-                "at a time (nodo's isolated Docker daemon is shared). Wait for it to "
+                "at a time (nodo's rootless builder is shared). Wait for it to "
                 "finish and try again."
             )
             return None
@@ -237,11 +237,11 @@ def pack_local(directory: str) -> Optional[str]:
     is_remote = False
     try:
         if not nested:
-            # Provision the isolated Docker toolchain on demand, then start its
-            # daemon. It is started before generate_service_zip so nested
-            # dependency packs build against the already-running daemon.
-            ensure_docker_installed()
-            start_docker_daemon()
+            # Provision the rootless BuildKit toolchain on demand, then start the
+            # builder. It is started before generate_service_zip so nested
+            # dependency packs build against the already-running builder.
+            ensure_builder_installed()
+            start_builder()
             daemon_started = True
 
         is_remote, directory = prepare_directory(directory)
@@ -258,8 +258,8 @@ def pack_local(directory: str) -> Optional[str]:
     finally:
         _pack_depth -= 1
         if daemon_started:
-            # Stop nodo's isolated Docker daemon once the whole pack completes.
-            stop_docker_daemon()
+            # Stop nodo's rootless builder once the whole pack completes.
+            stop_builder()
         if is_remote:
             __remove_path(directory)
         if lock_file is not None:

@@ -12,12 +12,24 @@ much work it would take to run without `sudo`. For the diagnostic command see
 
 ## Summary
 
-**The remaining `sudo` requirement has nothing to do with Docker.** Docker is
+**The remaining `sudo` requirement has nothing to do with containers.** They are
 entirely absent from the execution path — services run as Cloud Hypervisor
-microVMs, and Docker only ever appears in the optional local packer toolchain.
-What is left is, in substance, **one thing: networking** (`CAP_NET_ADMIN`), plus
-a trivial cgroups path and a set of `geteuid()` guards inherited from the Docker
-era.
+microVMs. What is left is, in substance, **one thing: networking**
+(`CAP_NET_ADMIN`), plus a trivial cgroups path and a set of `geteuid()` guards
+inherited from the Docker era.
+
+> **Update (2026-08-21): the local packer is now rootless.** When this was first
+> audited, `packer.local: true` drove an isolated `dockerd` started through sudo.
+> Because an unprivileged pack could not signal a root daemon, a failed build left
+> it alive holding its data-root lock while the stop script deleted its socket and
+> reported success — after which every later pack died with *"already running but
+> is not responding"*. The packer's only use of Docker was
+> `docker buildx build --output type=tar`, and buildx is just a front end for
+> BuildKit, so nodo now drives BuildKit directly under `rootlesskit`. The builder
+> runs as the invoking user and `nodo pack` performs **no privileged call at all**;
+> `bash/install_buildkit.sh` may ask for sudo once to provision the host
+> prerequisites (`uidmap`, `rootlesskit`, subordinate id ranges). See
+> *Rootless local packer* below.
 
 The hard parts of running a hypervisor — KVM access and root filesystem image
 construction — **already work unprivileged today**.
@@ -31,6 +43,39 @@ construction — **already work unprivileged today**.
 | cgroup v2 | `user@1000.service` already has `cpu memory pids` delegated **and writable** in `cgroup.subtree_control`. |
 | Exposed ports | `network.FREE_PORTS_RANGE` defaults to 50000–60000 — unprivileged. |
 | `nodo observe` | Already degrades gracefully without `CAP_NET_RAW`: it loses only the AF_PACKET `capture.pcap`, not the metrics (`src/commands/observe.py:748`). |
+
+## Rootless local packer (done)
+
+`packer.local: true` builds with BuildKit under `rootlesskit`, started and stopped
+by `bash/start_buildkit_daemon.sh` / `stop_buildkit_daemon.sh`. Neither script
+contains a privileged call, and `tests/test_rootless_builder.py` fails the build
+if one is reintroduced.
+
+What the host must provide once (`bash/install_buildkit.sh` provisions it):
+
+| Prerequisite | Why | Provisioned by |
+|---|---|---|
+| `newuidmap` / `newgidmap` | Map more than one uid inside the namespace. Without them most Dockerfiles fail on `apt-get install`/`chown`. | `uidmap` (deb) / `shadow-utils` (rpm) / `shadow` (Arch, SUSE) |
+| `/etc/subuid`, `/etc/subgid` entry | The id range those tools hand out. | `usermod --add-subuids 100000-165535` |
+| `rootlesskit` | Creates the namespace. | distro package, else the upstream static binary |
+
+**AppArmor, and why the path of the binary matters.** On Ubuntu 24.04+,
+`kernel.apparmor_restrict_unprivileged_userns=1` denies user namespaces to
+*unconfined* binaries — verified, `unshare -Ur` fails exactly as this document
+already reported for Route B. What was **not** previously noted is that Ubuntu
+ships `/etc/apparmor.d/rootlesskit`, a `flags=(unconfined)` profile granting
+`userns` **by executable path** (`/usr/bin/rootlesskit`). Verified: invoking
+`/usr/bin/rootlesskit` clears the restriction, while `aa-exec -p
+unprivileged_userns -- unshare -Ur` does not. So nodo deliberately prefers a
+distro-packaged rootlesskit over a copy under `MAIN_DIR/bin`, which the profile
+would not cover; when it has to fall back to its own binary, the installer writes
+a matching profile for that path.
+
+**Consequence for Route B.** The AppArmor obstacle recorded below is real for a
+bare `unshare`, but it is **not** the dead end it appeared to be: a binary with a
+`userns` profile passes, and installing such a profile is a one-time privileged
+step of the same kind Route A already needs. Route B's remaining cost is the
+port-forwarding rewrite, not AppArmor.
 
 ## Still requires privileges
 
@@ -89,9 +134,11 @@ apt packages genuinely need root, and only once.
 
 ## Inherited `geteuid()` guards from the Docker era
 
-`kill` (`src/commands/kill.py:7`), `remove` (`src/commands/remove.py:16`),
-`prune_containers` and `local_docker_packer` (`nodo.py:636`, `nodo.py:688`) all
-require root. There is a **real design inconsistency** here:
+`kill` (`src/commands/kill.py:7`), `remove` (`src/commands/remove.py:16`) and
+`prune_containers` (`nodo.py:636`) still require root. The fourth,
+`local_docker_packer`, is **gone**: it is now `local_builder` and carries no
+privilege check, because the builder it queries runs as the invoking user. There
+is a **real design inconsistency** in what remains:
 
 - `nodo execute` reaches the daemon over **gRPC** (`src/commands/execute.py`, via
   `get_execute_client`) and therefore needs no privileges at all;
@@ -131,11 +178,13 @@ explicitly rejects anything but `tap_bridge` ("this phase supports only
 'tap_bridge'"), so the architecture anticipated this. The work is replacing
 bridge + DNAT with `pasta`/`slirp4netns` and their own port forwarding.
 
-**Concrete obstacle on Ubuntu 24.04:** `kernel.apparmor_restrict_unprivileged_userns = 1`
-blocks unprivileged user namespaces — a test namespace could not even be created
+**Obstacle on Ubuntu 24.04, since qualified:** `kernel.apparmor_restrict_unprivileged_userns = 1`
+blocks unprivileged user namespaces — a test namespace could not be created
 (`unshare: write failed /proc/self/uid_map: Operation not permitted`). This route
-would require an AppArmor profile or disabling that sysctl, which reintroduces
-privileged configuration by the back door.
+needs an AppArmor profile granting `userns` to the binary that creates the
+namespace. That is a one-time privileged install step rather than a blocker: the
+rootless packer already relies on exactly such a profile (see *Rootless local
+packer* above), so the pattern is proven on this host.
 
 ### C. Minimal privileged helper — medium effort
 

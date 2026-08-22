@@ -49,13 +49,14 @@ it (see
 ## `dependencies` — local runtimes
 
 Portable runtimes installed under `MAIN_DIR` (not system-wide): `python`, `java`,
-`yq`, and `docker`. Override only to relocate the toolchain.
+`yq`, and `buildkit`. Override only to relocate the toolchain.
 
-`dependencies.docker.*` (`BIN`, `DAEMON_BIN`, `BUILDX_BIN`, `DOCKER_SOCKET`) is an
+`dependencies.buildkit.*` (`BIN`, `DAEMON_BIN`, `BUILDKIT_SOCKET`) is an
 **optional, node-local** toolchain used **only** by the local packer
 (`packer.local: true`). It is **not** installed at node-install time — nodo runs
-`bash/install_docker.sh` on demand and drives an **isolated** daemon under
-`MAIN_DIR`, never the host's Docker.
+`bash/install_buildkit.sh` on demand and drives its own **rootless** builder under
+`MAIN_DIR`, never a system-wide daemon. Because the builder runs as the invoking
+user, `nodo pack` needs no privileges at all.
 
 ## `virtualizers` — execution runtime
 
@@ -100,12 +101,12 @@ The most important choice for anyone packing services. Full authoring format:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `packer.local` | `false` | `false` → delegate the build to a **packer-service** microVM (no Docker on this host). `true` → build **locally** with nodo's isolated Docker toolchain (provisioned on demand). |
+| `packer.local` | `false` | `false` → delegate the build to a **packer-service** microVM (no builder on this host). `true` → build **locally** with nodo's rootless BuildKit toolchain (provisioned on demand, no sudo). |
 | `packer.PACKER_SOURCE_URL` | `""` | Manifest URL nodo downloads the packer service from directly when it needs to acquire it. Empty → resolve via the `source-application` core service. |
 | `packer.PACKER_SERVICE_URL` | `""` | Override: `ip:port` base URL of an out-of-band packer-service. Used only when no packer id is set / no running instance is found. |
 | `packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT` | `true` | Architectures `nodo pack` accepts/announces (**packer-side** — to limit what the node can *execute*, use `builder.*` instead). |
 | `packer.PACKER_MEMORY_SIZE_FACTOR` | `2.0` | Local-packer only: RAM to lock as a factor of the exported filesystem size. |
-| `packer.docker.BUILDX_NETWORK` / `BUILDX_BUILDER` | `host` / `nodo-hostnet` | Local-packer buildx settings. |
+| `packer.buildkit.DOCKERFILE_NAME` | `Dockerfile` | Local-packer only: name of the Dockerfile inside the project directory. |
 
 The **default-mode** packer is *not* configured here by URL — it is referenced by
 its published content hash (service id) in the `core_services` mapping (below), which
