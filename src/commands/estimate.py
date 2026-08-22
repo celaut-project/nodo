@@ -17,7 +17,6 @@ from src.utils.utils import (
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 # Balance the throwaway estimation client is given. It only has to clear whatever the
 # node quotes; it is never actually spent, since estimating launches nothing.
 ESTIMATION_BALANCE_MU = 10 ** 16
@@ -46,7 +45,7 @@ def estimate(service: str) -> None:
         initial_mu=to_amount(ESTIMATION_BALANCE_MU)
     )
 
-    channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
+    channel = grpc.insecure_channel(f"localhost:{env_manager.get_gateway_port()}")
     g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
     print(f"Estimate {service}")

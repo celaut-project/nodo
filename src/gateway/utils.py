@@ -18,7 +18,12 @@ from src.utils.utils import (
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
+# Read on use rather than at import: the port may not be assigned yet when this
+# module loads, and an unassigned one must raise where it is needed, not here.
+def _gateway_port() -> int:
+    return env_manager.get_gateway_port()
+
+
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
@@ -72,7 +77,7 @@ def _uri_for_network(network: str) -> celaut.Instance.Uri:
             raise Exception('Error generating gateway instance --> ' + str(e))
     else:
         raise ValueError('Network interface name cannot be None')
-    uri.port = GATEWAY_PORT
+    uri.port = _gateway_port()
     return uri
 
 
@@ -143,8 +148,9 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     public_host = _public_host()
     if public_host:
         seen_ips.add(public_host)
-        uris.append(celaut.Instance.Uri(ip=public_host, port=GATEWAY_PORT))
-        log.LOGGER(f'Announcing public host {public_host}:{GATEWAY_PORT}')
+        gateway_port = _gateway_port()
+        uris.append(celaut.Instance.Uri(ip=public_host, port=gateway_port))
+        log.LOGGER(f'Announcing public host {public_host}:{gateway_port}')
     else:
         log.LOGGER('No public address to announce (set network.PUBLIC_IP if behind NAT).')
 
@@ -161,9 +167,9 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
             continue
         seen_ips.add(ip)
         if _is_globally_routable(ip):
-            uris.append(celaut.Instance.Uri(ip=ip, port=GATEWAY_PORT))
+            uris.append(celaut.Instance.Uri(ip=ip, port=_gateway_port()))
         else:
-            private.append(celaut.Instance.Uri(ip=ip, port=GATEWAY_PORT))
+            private.append(celaut.Instance.Uri(ip=ip, port=_gateway_port()))
 
     if announce_private:
         uris.extend(private)
@@ -283,14 +289,14 @@ def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     instance = celaut.Instance()
 
     slot = instance.api.slot.add()
-    slot.port = GATEWAY_PORT
+    slot.port = _gateway_port()
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
     for rate, amount in peer.mu_per_call.items():
         slot.mu_per_call[rate].n = amount.n
     instance.api.payment_contracts.extend(peer.payment_contracts)
 
     uri_slot = instance.uri_slot.add()
-    uri_slot.internal_port = GATEWAY_PORT
+    uri_slot.internal_port = _gateway_port()
     uri_slot.uri.extend(celaut.Instance.Uri(ip=u.ip, port=u.port) for u in peer.uri)
     return instance
 

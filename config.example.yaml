@@ -155,7 +155,20 @@ packer:
     DOCKERFILE_NAME: "Dockerfile"
 
 network:
+  # The gRPC port guests and peers reach this node on. "auto" means "not assigned
+  # yet": the first *privileged* start picks a free port from FREE_PORTS_RANGE,
+  # opens it in the host firewall, verifies a guest can actually reach it, and only
+  # then writes the number back here. An unprivileged run leaves "auto" untouched
+  # rather than storing a port nothing opened. Once a number is here it is fixed,
+  # and the accept rule is re-applied on every start (netfilter rules do not
+  # survive a reboot; this file does).
   GATEWAY_PORT: auto
+  # Before serving, prove a guest can reach GATEWAY_PORT by connecting to it from a
+  # throwaway namespace on the guest bridge. A conclusive failure stops the node:
+  # an unreachable gateway means every service it accepts is unable to call back
+  # into it, which is worse than not starting. Set to false only if this host's
+  # networking makes the probe unusable -- 'nodo doctor' still reports it either way.
+  VERIFY_GATEWAY_REACHABILITY: true
   LOCAL_NETWORK: "lo"
   # How long (seconds) this node expects to keep its current address -- typically the
   # ISP's DHCP lease for a dynamic public IP. Published (signed) alongside the
