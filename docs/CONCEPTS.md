@@ -130,6 +130,71 @@ request services from their peers, so a node can run a workload locally or hand 
 to a peer. **Clients** are the entities (nodes or external callers) that have
 registered with this node and pay it. `nodo peers` / `nodo clients` list them.
 
+A peer is named by its identity public key — see [Node identity](#node-identity).
+
+## Node identity
+
+A node's **id is its identity public key**; there is no other name for it. Every
+announcement (`Peer`, in `celaut.proto`) carries that key, a signature over everything
+the peer advertises, and the cryptography those two are in. A peer that carries no
+key, or whose signature does not verify, is refused outright — there is nothing else
+to register it under. The key is derived from the node's single mnemonic
+(`ledgers.ergo.WALLET_MNEMONIC`), which is also its wallet, so an identity cannot
+change underneath the peers that recorded it.
+
+### The signature scheme is declared, not assumed
+
+`Peer.signature_scheme` is a `tags` / `prose` / `formal` descriptor — the same shape a
+ledger (`Contract.Ledger`), an address's transport (`Peer.Uri.Protocol`) or a container
+architecture is declared with. Nothing derives an id from it, here or anywhere else in
+celaut: a hash algorithm can name itself as `H("")` because hashing is keyless and
+unary, but verification takes a key, a message and a signature and has no such
+canonical output. **The descriptor is the name**, and whether two of them mean the same
+cryptography is a comparison — `node_identity.same_signature_scheme`, which is also the
+single place an equivalence service of the shape `(scheme_a, scheme_b) -> bool` would
+be asked instead.
+
+How a node compares them on its own, until such a service is asked:
+
+* **`formal` first.** A machine-readable specification is the strictest identity.
+  Nothing publishes one yet, so this node's is empty — exactly as the Ergo ledger's is.
+* **The tags as a set** when neither side has a `formal`, never by intersection: a peer
+  declaring `["secp256k1", "bip340"]` names the same curve this node does and produces
+  signatures it cannot read.
+* **`prose`, never.** It is human text with no agreed wording, and making it decisive
+  would refuse a peer for rewording a sentence. What it is for is being read: while
+  `formal` is empty, that paragraph *is* the specification of the scheme, written to be
+  enough to implement the verification from.
+
+An empty descriptor means the sender's default, so an announcement predating the field
+still verifies. This node speaks Schnorr over secp256k1 in Ergo's off-chain encoding
+and nothing else: an announcement declaring another scheme is refused unread, rather
+than reported as a bad signature.
+
+### One identity, many ways to pay
+
+What is singular and what is plural is deliberate, and the two do not conflict:
+
+| Field | Count | Why |
+|---|---|---|
+| `public_key`, `signature`, `signature_scheme` | one | The key is what **names** the node, so a second one is a second identity: reputation, deposits and payment attribution all split in two. Cross-signing the two keys does not heal the split — whoever needs the link speaks only one of the schemes, so they can verify only half of the proof. |
+| `payment_contracts` | many | What a node accepts is a **menu the payer picks one item from**, so a longer one costs nothing. Identifying under Ergo while accepting ERG, bitcoin and anything else that settles is the expected shape, not a contradiction. See [Balances and prices](#balances-and-prices). |
+| `reputation_proofs` | many | A node holds as many proofs as it has published opinions under. See [Reputation proof](#reputation-proof). |
+
+A scheme that genuinely needs two keypairs — a classical/post-quantum hybrid — is *one*
+scheme, whose key and signature encodings carry both, and not two schemes on one peer.
+
+Advertising several payment contracts is not the same as settling in several: which
+one pays for a given interaction is matched per payment, and a pair of nodes that
+happens to share more than one is refused as ambiguous rather than chosen between
+(`mu_conversion.matching_payment_system`) — picking is policy nobody has written yet.
+
+Only *signing* is singular, though. What a node can **verify** is a local capability:
+the way to reach a peer that signs differently is to plug a verifier for that scheme
+into the reader, never to ask the peer to carry more keys. Nothing plugs one in today,
+so in practice two nodes must speak the same scheme to register each other, and a node
+that changes its scheme becomes a new peer, with the reputation of one.
+
 ## Service composition (dependencies)
 
 Services can depend on other services. In `pack_config.json` you declare

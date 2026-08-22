@@ -416,10 +416,86 @@ message Peer {
     // it under (see manager.add_peer_instance).
     string public_key = 5;
     string signature = 6;
+
+    // Which cryptography `public_key` and `signature` are in, declared rather than
+    // assumed -- the same shape every other replaceable component in celaut is
+    // declared with (Uri.Protocol, Contract.Ledger, Container.Architecture): `tags`
+    // name it, `prose` describes it to a reader, `formal` points at a machine-readable
+    // specification when one exists. Without this field, secp256k1 + Ergo's Schnorr is
+    // not a component at all but the hardcoded meaning of the two fields above, and a
+    // peer signing with anything else is indistinguishable from a peer with a corrupt
+    // signature.
+    //
+    // There is no id derived from the descriptor, here or anywhere else in celaut: a
+    // hash algorithm can be named by H("") because hashing is unary and keyless, so
+    // the algorithm itself yields a name nobody has to agree on, but verification
+    // takes a key, a message and a signature and has no such canonical output. So the
+    // descriptor IS the name, exactly as it is for a ledger or an architecture, and
+    // whether two of them denote the same cryptography is decided by *comparing*
+    // them -- loosely, since these definitions are deliberately loose. A service of
+    // the shape (scheme_a, scheme_b) -> bool can eventually make that call better
+    // than a node does on its own; node_identity.same_signature_scheme is the one
+    // place it would be asked from.
+    //
+    // Declaring a scheme does NOT oblige a node to implement it, and this one
+    // implements exactly one: it checks that the scheme a peer declares is the scheme
+    // it speaks and refuses the announcement otherwise (manager.add_peer_instance).
+    // That asymmetry is inherent, not a shortcut -- an unknown *hash* is inert (skip
+    // it, another hash of the same object still verifies), while an unknown
+    // *signature* is an authentication decision with no third answer: accepting one
+    // unverified admits anyone. So a scheme needs no global consensus, but it does
+    // need the peer reading it to speak it.
+    //
+    // An empty descriptor means the sender's default, so an announcement from a node
+    // that predates this field still verifies.
+    //
+    // One scheme per Peer, and therefore one public_key: they are not repeated, and a
+    // node signing under two schemes at once is not representable. That is a decision,
+    // not an oversight. The public key IS the peer's id, so a second one is a second
+    // identity -- it splits the node's reputation, its deposits and its payment
+    // attribution in two, and the split cannot be healed by cross-signing the keys
+    // because whoever needs the link speaks only one of the two schemes and can verify
+    // only one half of it. It would also leave every later interaction asking which
+    // key to authenticate with (nothing does yet -- the gateway channel is plain
+    // grpc.insecure_channel -- but session authentication is the obvious next use of
+    // this key, and it wants exactly one answer).
+    //
+    // Reading a scheme is a different matter from signing with one, and stays open:
+    // a node that must talk to peers signing differently plugs in a verifier for that
+    // scheme rather than asking them to carry more keys. And a scheme that genuinely
+    // needs two keypairs -- a classical/post-quantum hybrid, say -- is ONE scheme with
+    // one descriptor whose encoding carries both, not two schemes on one Peer.
+    //
+    // Singular here and ONLY here. payment_contracts and reputation_proofs above are
+    // repeated on purpose and stay that way: a node identifying itself under Ergo
+    // while accepting payment in ERG, in bitcoin and in whatever else settles is the
+    // expected shape, not a contradiction. The asymmetry is what each field does. What
+    // a node accepts is a menu the payer picks one item from, so a longer menu costs
+    // nothing and refusing to hold two of them would only turn away money; the
+    // identity is what NAMES the node, and a second name is a second node as far as
+    // its reputation, its deposits and its payment attribution are concerned.
+    //
+    // Not covered by `signature`, and safe to leave out only while a single scheme is
+    // accepted: tampering with it can then turn a valid announcement into a refused
+    // one but never into an accepted one, which a MITM could do by corrupting any
+    // other byte anyway. The moment a second scheme is accepted it MUST enter
+    // node_identity.canonical_peer_content_digest, or a relay could re-label a
+    // signature as belonging to a weaker scheme that also accepts those bytes.
+    //
+    // `formal` is empty in this node's own declaration, as it is on the Ergo ledger
+    // (reputation_system/envs.py): there is no machine-readable artifact to point at
+    // yet, and the tags carry the identity until there is one.
+    message SignatureScheme {
+        repeated string tags = 1;
+        string prose = 2;
+        bytes formal = 3;
+    }
+    SignatureScheme signature_scheme = 7;
+
     // Anti-replay: a verifier rejects a message whose ts is not strictly newer than
     // the last one it accepted for this public_key. Guards only against a downgrade
     // to a stale address; the claim itself is safe to freely redistribute.
-    int64 ts = 7;
+    int64 ts = 8;
 }
 
 message Client {

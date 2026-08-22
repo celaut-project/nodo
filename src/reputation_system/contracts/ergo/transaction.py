@@ -187,6 +187,7 @@ def _self_network_data() -> str:
     from src.reputation_system.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
+        declare_signature_scheme,
         get_node_public_key_hex,
         sign_peer_payload,
     )
@@ -227,6 +228,12 @@ def _self_network_data() -> str:
             peer.public_key = public_key_hex
             peer.signature = signature
             peer.ts = ts
+            # This one is read off the ledger by people who never contacted the node,
+            # so it is the announcement that most needs to say which cryptography it
+            # is asking them to verify -- but the tags say it. Spelling the scheme out
+            # in prose as well would be a third of this register, paid for in storage
+            # rent by every box that carries it.
+            declare_signature_scheme(peer, prose=False)
     else:
         LOGGER("No node identity available; publishing the address unsigned.")
 

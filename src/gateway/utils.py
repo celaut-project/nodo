@@ -205,6 +205,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     from src.reputation_system.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
+        declare_signature_scheme,
         get_node_public_key_hex,
         sign_peer_payload,
     )
@@ -236,6 +237,9 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     peer.public_key = public_key_hex
     peer.signature = signature
     peer.ts = ts
+    # Declared alongside the signature, never without one: the field says what this
+    # signature is, so on an unsigned announcement it would state a fact about nothing.
+    declare_signature_scheme(peer)
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
