@@ -30,12 +30,21 @@ Fedora package names worth knowing if you install by hand: `gcc make` for
 
 ## aarch64 specifics
 
-- **A C compiler is required**, and `clang` specifically is worth having. The portable
-  CPython from python-build-standalone records `CC=clang` in its `sysconfig`, so any
-  package pip builds from source looks for clang by name. The setup scripts fall back
-  to `CC=gcc CXX=g++` when it is absent. Everything in `bash/requirements.txt` that
-  has an aarch64 wheel uses it, `psutil` included since it is pinned at `6.1.1` —
-  below `6.0.0` there is no manylinux aarch64 wheel and it compiles.
+- **Nothing in `bash/requirements.txt` compiles here today.** The whole tree resolves
+  to `cp311`/aarch64 wheels: the nine PyPI pins, plus `bee-rpc` and `ergpy` (both pure
+  Python) and their transitive `grpcio==1.56.0`, `protobuf`, `JPype1` and `stubgenj`.
+  `psutil` joined them at `6.1.1`; below `6.0.0` there is no aarch64 wheel and it built
+  from source.
+
+  A compiler is still installed, as insurance rather than a current need. Those wheels
+  are tagged per CPython version, and **`grpcio==1.56.0` publishes aarch64 wheels only
+  up to `cp311`** — the same 3.11 the portable runtime pins. Moving that runtime to
+  3.12 or later turns grpcio into a from-source C++ build, so treat the two pins as
+  coupled.
+
+  When something does build from source, it looks for `clang` by name: the portable
+  CPython from python-build-standalone records `CC=clang` in its `sysconfig`. The setup
+  scripts fall back to `CC=gcc CXX=g++` when clang is absent.
 - **`nodo doctor`'s KVM smoke test** asks for the right serial device per
   architecture: CH gives aarch64 guests a PL011 (`ttyAMA0`), not an 8250 (`ttyS0`).
 - **This host can only execute services packed for its own architecture.** There is
