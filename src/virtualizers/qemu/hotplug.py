@@ -1,0 +1,230 @@
+"""Live resource resize for a QEMU (TCG) cross-arch guest.
+
+Why QEMU needs its own hotplug rather than reusing CH's cgroup path:
+
+CH resizes a guest's memory by talking to the guest (its own balloon/mem path),
+so the guest genuinely gives RAM back. QEMU here boots with a *fixed* ``-m``
+allocation. Enforcing a memory *shrink* purely by tightening the process's
+cgroup ``memory.max`` (what ``ch_hotplug`` does) does not resize the guest at
+all: the guest still believes it has its full ``-m`` and keeps its resident
+pages, so the kernel either swaps the qemu process or -- with no swap --
+**OOM-kills it**. Both were reproduced live on nodo#274: shrinking ``memory.max``
+below the guest's resident set killed ``qemu-system-aarch64`` outright.
+
+The correct primitive is ``virtio-balloon`` over QMP: inflating the balloon makes
+the *guest* return its free pages to the host (host RSS drops, proven live:
+~600MB -> ~194MB), and it only ever surrenders free pages, so it never OOMs a
+guest that is actually using its RAM. So memory is driven through the balloon and
+the cgroup ``memory.max`` is kept as a *ceiling at the boot allocation*, never as
+the shrink knob. CPU is unchanged: cgroup ``cpu.max`` throttles the vCPU threads
+correctly for both backends, so that reuses CH's helper directly.
+
+Falls back to CH's cgroup-only behaviour (with an explicit best-effort caveat)
+for instances launched before the QMP socket existed.
+"""
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
+from protos import celaut_pb2
+from src.manager.modify_resources import modify_sysreq
+from src.utils import logger as log
+from src.virtualizers.ch.cgroups import (
+    apply_cpu_limit,
+    apply_memory_limit,
+    cgroup_v2_available,
+    ensure_vm_cgroup,
+)
+from src.virtualizers.ch.runtime_state import load_runtime_state, save_runtime_state
+from src.virtualizers.qemu.qmp import QMPClient, QMPError
+
+# Guests cannot use less than a small floor; a balloon target of zero would ask
+# the guest to surrender everything. Keep a conservative floor.
+MIN_BALLOON_BYTES = 64 * 1024 * 1024
+
+
+def _field_result(status: str, detail: str, requested: Any = None) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"status": status, "detail": detail}
+    if requested is not None:
+        payload["requested"] = requested
+    return payload
+
+
+def _cpu_requested(sysreq: celaut_pb2.Sysresources) -> bool:
+    if not sysreq:
+        return False
+    if not (sysreq.HasField("cpu_period") or sysreq.HasField("cpu_quota")):
+        return False
+    period = int(sysreq.cpu_period) if sysreq.HasField("cpu_period") else 0
+    quota = int(sysreq.cpu_quota) if sysreq.HasField("cpu_quota") else 0
+    return (period > 0) or (quota > 0)
+
+
+def _persist_report(vmachine_id: str, state: Dict[str, Any], report: Dict[str, Any], cgroup_path: str) -> None:
+    new_state = dict(state or {})
+    new_state["vmachine_id"] = vmachine_id
+    new_state["cgroup_path"] = cgroup_path
+    new_state["last_hotplug_report"] = report
+    save_runtime_state(vmachine_id, new_state)
+
+
+def _apply_memory_balloon(
+    *,
+    qmp_socket: str,
+    target_bytes: int,
+    boot_mem_bytes: int,
+    vm_cgroup,
+    cgroup_path: str,
+) -> Dict[str, Any]:
+    """Resize guest memory via the balloon, keeping the cgroup a safe ceiling.
+
+    Shrink: inflate the balloon to ``target`` first (guest returns pages), then
+    the cgroup cap can stay at the boot allocation -- never shrunk below it, so
+    the qemu process is never squeezed into OOM. Grow: deflate the balloon back
+    up (bounded by the boot ``-m``; QEMU cannot exceed its boot allocation, so a
+    request above it is clamped and reported).
+    """
+    clamped = max(MIN_BALLOON_BYTES, min(int(target_bytes), int(boot_mem_bytes)))
+    try:
+        with QMPClient(qmp_socket) as qmp:
+            qmp.set_balloon(clamped)
+        # Keep memory.max pinned at the boot allocation: it is a hard ceiling,
+        # not the resize knob. Shrinking it below boot alloc is exactly what OOMs
+        # QEMU, so we never do that here.
+        apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=int(boot_mem_bytes))
+        detail = (
+            f"virtio-balloon target set to {clamped} bytes via QMP; cgroup "
+            f"memory.max held at boot allocation {int(boot_mem_bytes)} in {cgroup_path}"
+        )
+        if int(target_bytes) > int(boot_mem_bytes):
+            detail += (
+                f" (requested {int(target_bytes)} exceeds boot -m; clamped -- QEMU "
+                f"cannot grow a guest above its boot allocation)"
+            )
+        return _field_result(status="applied", detail=detail, requested=int(target_bytes))
+    except QMPError as e:
+        return _field_result(status="failed", detail=f"QMP balloon failed: {e}", requested=int(target_bytes))
+    except Exception as e:
+        return _field_result(status="failed", detail=f"balloon resize error: {e}", requested=int(target_bytes))
+
+
+def hotplug(
+    vmachine_id: str,
+    system_requeriments_range: celaut_pb2.ModifyServiceSystemResourcesInput,
+) -> bool:
+    _id = vmachine_id[:6]
+    log.LOGGER(f"[QEMU][{_id}] event=hotplug request")
+
+    if not system_requeriments_range:
+        log.LOGGER(f"[QEMU][{_id}] hotplug failed: empty ModifyServiceSystemResourcesInput")
+        return False
+    sysreq = system_requeriments_range.max_sysreq
+    if not sysreq:
+        log.LOGGER(f"[QEMU][{_id}] hotplug failed: empty max_sysreq")
+        return False
+
+    state = load_runtime_state(vmachine_id) or {}
+    pid = int(state.get("pid") or 0)
+    qmp_socket = str(state.get("qmp_socket") or "")
+    boot_mem_bytes = int(state.get("boot_mem_bytes") or 0)
+
+    report: Dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "vmachine_id": vmachine_id,
+        "backend": "qemu",
+        "results": {},
+        "cgroup_v2_available": cgroup_v2_available(),
+    }
+    for name, present in (("blkio_weight", sysreq.HasField("blkio_weight")), ("disk_space", sysreq.HasField("disk_space"))):
+        val = int(getattr(sysreq, name)) if present else 0
+        if present and val > 0:
+            report["results"][name] = _field_result("unsupported", f"QEMU hotplug does not support {name}.", val)
+        else:
+            report["results"][name] = _field_result("ignored", f"{name} not requested.")
+
+    mem_requested = sysreq.HasField("mem_limit")
+    cpu_requested = _cpu_requested(sysreq)
+    supported_requested = mem_requested or cpu_requested
+
+    if supported_requested and pid <= 0:
+        report["results"]["runtime"] = _field_result("failed", "Runtime state has no valid PID.", pid)
+        report["success"] = False
+        _persist_report(vmachine_id, state, report, str(state.get("cgroup_path", "")))
+        log.LOGGER(f"[QEMU][{_id}] hotplug failed: invalid runtime PID ({pid})")
+        return False
+
+    cgroup_path = str(state.get("cgroup_path") or "")
+    vm_cgroup = None
+    if supported_requested:
+        try:
+            vm_cgroup = ensure_vm_cgroup(vmachine_id=vmachine_id, pid=pid)
+            cgroup_path = str(vm_cgroup)
+            report["results"]["runtime"] = _field_result("applied", f"VM process validated in cgroup: {cgroup_path}")
+        except Exception as e:
+            report["results"]["runtime"] = _field_result("failed", str(e))
+            report["success"] = False
+            _persist_report(vmachine_id, state, report, cgroup_path)
+            log.LOGGER(f"[QEMU][{_id}] hotplug failed ensuring cgroup: {e}")
+            return False
+
+    # ---- memory: virtio-balloon (falls back to cgroup-only, best-effort) ----
+    if mem_requested:
+        target = int(sysreq.mem_limit)
+        if qmp_socket and boot_mem_bytes > 0:
+            report["results"]["mem_limit"] = _apply_memory_balloon(
+                qmp_socket=qmp_socket, target_bytes=target, boot_mem_bytes=boot_mem_bytes,
+                vm_cgroup=vm_cgroup, cgroup_path=cgroup_path,
+            )
+        else:
+            # Legacy instance without a QMP socket: cgroup-only, and honestly
+            # flagged as best-effort because a shrink below the guest's resident
+            # set can swap or OOM the qemu process (the guest is not resized).
+            try:
+                apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=target)
+                report["results"]["mem_limit"] = _field_result(
+                    "applied",
+                    f"cgroup memory.max set to {target} in {cgroup_path} "
+                    f"(best-effort: no QMP balloon; a shrink below the guest RSS may swap/OOM qemu)",
+                    target,
+                )
+            except Exception as e:
+                report["results"]["mem_limit"] = _field_result("failed", str(e), target)
+    else:
+        report["results"]["mem_limit"] = _field_result("ignored", "mem_limit not requested.")
+
+    # ---- cpu: cgroup cpu.max (identical to CH; correct for both backends) ----
+    if cpu_requested:
+        period = int(sysreq.cpu_period) if sysreq.HasField("cpu_period") else 0
+        quota = int(sysreq.cpu_quota) if sysreq.HasField("cpu_quota") else 0
+        if period <= 0:
+            report["results"]["cpu"] = _field_result("failed", "cpu_period must be > 0.", {"cpu_quota": quota, "cpu_period": period})
+        else:
+            try:
+                apply_cpu_limit(vm_cgroup=vm_cgroup, cpu_quota=quota, cpu_period=period)
+                report["results"]["cpu"] = _field_result("applied", f"Applied cpu.max in {cgroup_path}", {"cpu_quota": quota, "cpu_period": period})
+            except Exception as e:
+                report["results"]["cpu"] = _field_result("failed", str(e), {"cpu_quota": quota, "cpu_period": period})
+    else:
+        report["results"]["cpu"] = _field_result("ignored", "cpu_period/cpu_quota not requested.")
+
+    strict_ok = True
+    if mem_requested and report["results"]["mem_limit"]["status"] != "applied":
+        strict_ok = False
+    if cpu_requested and report["results"]["cpu"]["status"] != "applied":
+        strict_ok = False
+
+    if strict_ok:
+        if not modify_sysreq(id=vmachine_id, sys_req=sysreq):
+            report["results"]["db"] = _field_result("failed", "modify_sysreq rejected DB update.")
+            strict_ok = False
+        else:
+            report["results"]["db"] = _field_result("applied", "System requirements persisted in DB.")
+    else:
+        report["results"]["db"] = _field_result("ignored", "DB update skipped because a supported field failed.")
+
+    report["success"] = strict_ok
+    _persist_report(vmachine_id, state, report, cgroup_path)
+    log.LOGGER(
+        f"[QEMU][{_id}] event=hotplug result={strict_ok}, "
+        f"mem={report['results']['mem_limit']['status']}, cpu={report['results']['cpu']['status']}"
+    )
+    return strict_ok

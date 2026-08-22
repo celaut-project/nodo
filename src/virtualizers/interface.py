@@ -6,6 +6,11 @@ from src.virtualizers.ch.execute import execute as ch_execute
 from src.virtualizers.ch.hotplug import hotplug as ch_hotplug
 from src.virtualizers.ch.kill import kill as ch_kill
 from src.virtualizers.ch.maintain import maintain as ch_maintain
+from src.virtualizers.qemu.execute import execute as qemu_execute
+from src.virtualizers.qemu.kill import kill as qemu_kill
+from src.virtualizers.qemu.maintain import maintain as qemu_maintain
+from src.virtualizers.qemu.hotplug import hotplug as qemu_hotplug
+from src.virtualizers.selection import CH, QEMU, select_virtualizer
 from src.virtualizers.firewall import TransportProtocol, remove_rule as vm_remove_rule
 from typing import Optional, Callable, Dict, Tuple
 from src.virtualizers.architecture import check_supported_architecture, UnsupportedArchitectureException
@@ -18,16 +23,46 @@ from src.database.sql_connection import SQLConnection
 """
 This interface defines the functions that any virtualizer implementation must provide.
 
-Cloud Hypervisor (CH) is the only supported virtualizer. The Docker virtualizer
-was removed so the node no longer depends on a local Docker install; service
-packing is delegated to the external packer-service.
+Two virtualizers are supported, chosen per service by architecture:
+
+* **Cloud Hypervisor (CH)** — the default. Boots a service as a microVM under KVM,
+  which only runs a guest of the host's own architecture. Native services always
+  take this path, so native performance never regresses.
+* **QEMU** — the opt-in cross-arch path (``virtualizers.qemu.ENABLE``). Boots a
+  foreign-arch service under TCG software emulation (e.g. an arm64 service on an
+  x86_64 node). Slow, so it is only chosen when the service arch differs from the
+  host and emulation is enabled and available.
+
+The Docker virtualizer was removed so the node no longer depends on a local
+Docker install; service packing is delegated to the external packer-service.
 """
 
 env_manager = ConfigManager()
 sc = SQLConnection()
 
 def get_configured_virtualizer() -> str:
-    return "ch"
+    """Default virtualizer name (the native backend).
+
+    The *actual* backend for a launch is chosen per service by
+    :func:`src.virtualizers.selection.select_virtualizer`; this remains the
+    fallback used where no service is in hand.
+    """
+    return CH
+
+
+def _resolve_instance_virtualizer(vmachine_id: str) -> str:
+    """Which backend launched ``vmachine_id`` (from the DB), defaulting to CH.
+
+    Lifecycle calls (kill/maintain/hotplug) route by this so a QEMU guest is torn
+    down and health-checked by the QEMU backend, never CH's.
+    """
+    try:
+        recorded = sc.get_internal_virtualizer(id=vmachine_id)
+        if isinstance(recorded, str) and recorded.strip().lower() == QEMU:
+            return QEMU
+    except Exception:
+        pass
+    return CH
 
 def is_built(service_hash: str) -> bool:
     """Check if a service with the given hash is already built."""
@@ -76,18 +111,39 @@ def hotplug(
         vmachine_id: str,
         system_requeriments_range: celaut_pb2.ModifyServiceSystemResourcesInput
 ) -> bool:
-    """Modify the system requirements of a running service."""
+    """Modify the system requirements of a running service.
+
+    CPU enforcement is cgroup-based and shared, but MEMORY is not: a QEMU guest
+    boots with a fixed ``-m`` and only a ``virtio-balloon`` resize (over QMP)
+    actually returns guest RAM, whereas tightening the process cgroup alone
+    swaps or OOM-kills qemu without resizing the guest. So QEMU instances route
+    to their own hotplug (balloon for memory, cgroup for CPU); CH is unchanged.
+    """
+    if _resolve_instance_virtualizer(vmachine_id) == QEMU:
+        return qemu_hotplug(
+            vmachine_id=vmachine_id,
+            system_requeriments_range=system_requeriments_range,
+        )
     return ch_hotplug(
         vmachine_id=vmachine_id,
         system_requeriments_range=system_requeriments_range,
     )
 
 def kill(vmachine_id: str) -> bool:
-    """Kill a running service."""
+    """Kill a running service, routed to the backend that launched it."""
+    if _resolve_instance_virtualizer(vmachine_id) == QEMU:
+        return qemu_kill(vmachine_id=vmachine_id)
     return ch_kill(vmachine_id=vmachine_id)
 
 def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
     """Check the status of a running service and remove it if it has exited."""
+    if _resolve_instance_virtualizer(vmachine_id) == QEMU:
+        qemu_maintain(
+            vmachine_id=vmachine_id,
+            debug_mode=debug_mode,
+            remove_and_penalize=remove_and_penalize,
+        )
+        return
     ch_maintain(
         vmachine_id=vmachine_id,
         debug_mode=debug_mode,
@@ -110,7 +166,23 @@ def execute(
     defaults and floors already applied -- so the launcher persists what the instance
     holds rather than what its manifest requested (#249). A field left at 0 means the
     virtualizer does not resolve it, and the launcher falls back to the manifest.
+
+    The backend is chosen per service by :func:`select_virtualizer` on the same
+    ``service`` the launcher used to record the ``virtualizer`` column, so the row
+    and the running guest never disagree. A native-arch service takes the CH path
+    unchanged; a foreign-arch service takes QEMU when emulation is enabled and
+    available, else ``select_virtualizer`` raises ``UnsupportedArchitectureException``.
     """
+    if select_virtualizer(service=service) == QEMU:
+        return qemu_execute(
+            assigment_ports=assigment_ports,
+            by_local=by_local,
+            service_id=service_id,
+            service=service,
+            config=config,
+            initial_system_resources=initial_system_resources,
+            father_id=father_id,
+        )
     return ch_execute(
         assigment_ports=assigment_ports,
         by_local=by_local,
