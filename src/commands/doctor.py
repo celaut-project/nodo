@@ -272,6 +272,36 @@ def _parse_kernel_version(release: str):
     return None, None
 
 
+def _guest_serial_device(machine: str = "") -> str:
+    """The guest's serial console, which is not the same device on every architecture.
+
+    Cloud Hypervisor gives aarch64 guests a PL011 (ttyAMA0) and x86_64 guests an
+    8250 (ttyS0). Passing the wrong one leaves the serial log empty, so the smoke
+    test below never sees the boot it is waiting for and falls back to reporting
+    only that the process was still alive.
+    """
+    machine = machine or platform.machine().lower()
+    return "ttyAMA0" if machine in ("aarch64", "arm64") else "ttyS0"
+
+
+def _classify_ch_smoke_failure(stderr: str) -> str:
+    """Name why the smoke-test VM died: 'vcpu', 'kernel_load' or 'unknown'.
+
+    Matched loosely on purpose. Cloud Hypervisor wraps the same underlying failure
+    in different call paths -- a kernel it cannot read surfaces as
+    `Vmm(VmCreate(KernelLoad(...` or `VmBoot(VmBoot(KernelLoad(...` depending on
+    where it gave up, and on arm64 a non-raw Image is rejected by the PE loader and
+    retried as UEFI, arriving as `UefiLoad(UefiTooBig)`. Matching one exact spelling
+    sent every other shape to the generic branch, which prints the stderr and no
+    diagnosis.
+    """
+    if "VcpuRun" in stderr or "InternalError" in stderr:
+        return "vcpu"
+    if "KernelLoad" in stderr or "UefiLoad" in stderr or "ReadKernelImage" in stderr:
+        return "kernel_load"
+    return "unknown"
+
+
 def _doctor_ch_binary(ch_binary: str):
     """Check cloud-hypervisor binary exists, is executable, and report its version."""
     print("\nCloud Hypervisor binary:", flush=True)
@@ -323,15 +353,23 @@ def _doctor_host_kernel():
         # Kernels >= 6.13 may introduce KVM exit reason changes that break
         # older Cloud Hypervisor builds.  6.17+ is experimentally bleeding-edge.
         if major > 6 or (major == 6 and minor >= 17):
+            # Deliberately not a verdict: this runs before the smoke test, which is
+            # the only thing here that actually exercises KVM. Saying "bleeding-edge"
+            # and recommending an LTS downgrade read as a diagnosis, and on hosts
+            # whose kernel is the platform -- Apple Silicon under Asahi is 7.x, with
+            # no LTS track to fall back to -- it recommended something impossible on
+            # a machine where CH in fact works.
             print(
-                f"[WARN] Kernel {major}.{minor} is bleeding-edge. Cloud Hypervisor may fail with "
-                "'VcpuRun InternalError' if the CH binary does not support the KVM changes "
-                "introduced in this kernel.",
+                f"[INFO] Kernel {major}.{minor} is newer than the versions Cloud Hypervisor "
+                "is most tested against. If the CH binary predates this kernel's KVM "
+                "changes, guests fail with 'VcpuRun InternalError'.",
                 flush=True,
             )
             print(
-                "  Suggestion: Upgrade Cloud Hypervisor to the latest release, or "
-                "use a stable kernel (e.g. 6.8, 6.11, 6.12 LTS).",
+                "  The KVM smoke test below is the actual check; a pass here means this "
+                "note does not apply. If it fails, upgrade Cloud Hypervisor first, and "
+                "only consider an LTS kernel (6.8, 6.11, 6.12) where your platform "
+                "offers one.",
                 flush=True,
             )
         elif major == 6 and minor >= 13:
@@ -474,7 +512,7 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
             print(f"[SKIP] Cannot create test rootfs: {e}", flush=True)
             return
 
-        cmdline = "root=/dev/vda rw console=ttyS0"
+        cmdline = f"root=/dev/vda rw console={_guest_serial_device()}"
 
         cmd = [
             ch_binary,
@@ -516,7 +554,8 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
 
         if poll is not None:
             # Process exited — this is a problem
-            if "VcpuRun" in stderr_content or "InternalError" in stderr_content:
+            failure = _classify_ch_smoke_failure(stderr_content)
+            if failure == "vcpu":
                 print(
                     "[FAIL] Cloud Hypervisor vCPU failed to execute. The CH binary is "
                     "incompatible with this host kernel's KVM implementation.",
@@ -524,11 +563,12 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
                 )
                 print(f"  stderr: {stderr_content.strip()[:500]}", flush=True)
                 print(
-                    "  Suggestion: Update Cloud Hypervisor to the latest version, or "
-                    "downgrade the host kernel to a stable release (e.g. 6.8, 6.11, 6.12 LTS).",
+                    "  Suggestion: Update Cloud Hypervisor to the latest version. Where "
+                    "your platform offers one, an LTS kernel (6.8, 6.11, 6.12) is the "
+                    "other way out.",
                     flush=True,
                 )
-            elif "Vmm(VmCreate(KernelLoad" in stderr_content:
+            elif failure == "kernel_load":
                 print(
                     "[FAIL] Cloud Hypervisor could not load the guest kernel. "
                     "The vmlinuz file may be incompatible or corrupt.",
@@ -536,8 +576,9 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
                 )
                 print(f"  stderr: {stderr_content.strip()[:500]}", flush=True)
                 print(
-                    "  Suggestion: Re-install Nodo or replace the guest kernel with a "
-                    "known-good vmlinuz for this architecture.",
+                    "  Suggestion: Re-run the installer to fetch the pinned guest kernel. "
+                    "On arm64 Cloud Hypervisor only loads a raw Image (magic 'ARM\\x64' at "
+                    "offset 56); a distro's CONFIG_EFI_ZBOOT vmlinuz is rejected here.",
                     flush=True,
                 )
             else:

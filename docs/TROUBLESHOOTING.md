@@ -33,6 +33,8 @@ virtualization (`/dev/kvm`). It is commonly unavailable when:
 - Running inside a VM without **nested virtualization** enabled.
 - Running inside an unprivileged container without `/dev/kvm` passed through.
 - On WSL2 — see [`WSL.md`](WSL.md) for the mirrored-networking / KVM setup.
+- On Fedora/RHEL or aarch64 — see [`FEDORA_ARM.md`](FEDORA_ARM.md), which also covers
+  why `doctor` only notes (rather than faults) a kernel newer than Cloud Hypervisor.
 
 **Fix — run `sudo nodo doctor` and read its checks:**
 - **CPU virtualization flags (`vmx`/`svm`)** — if absent, enable virtualization in
