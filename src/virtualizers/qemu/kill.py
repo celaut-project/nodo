@@ -56,6 +56,18 @@ def _kill_pid(vmachine_id: str, pid: int) -> None:
         log.LOGGER(f"[QEMU][{vmachine_id}] failed to kill pid={pid}: {e}")
 
 
+
+def _cleanup_vm_firewall_rules(vmachine_id: str) -> None:
+    """Delete every rule nodo wrote for this VM, by its comment prefix."""
+    try:
+        from src.virtualizers.firewall import remove_vm_rules
+
+        removed = remove_vm_rules(vmachine_id=vmachine_id)
+        if removed:
+            log.LOGGER(f"[QEMU][{vmachine_id}] removed {removed} firewall rule(s)")
+    except Exception as e:
+        log.LOGGER(f"[QEMU][{vmachine_id}] error removing firewall rules: {e}")
+
 def kill(vmachine_id: str) -> bool:
     state = load_runtime_state(vmachine_id) or {}
     pid = int(state.get("pid") or 0)
@@ -66,7 +78,12 @@ def kill(vmachine_id: str) -> bool:
 
     log.LOGGER(f"[QEMU][{vmachine_id}] event=kill requested")
     _kill_pid(vmachine_id=vmachine_id, pid=pid)
+    # Two paths on purpose. cleanup_rules is what pre-nftables versions recorded
+    # and is empty for anything this version launched; the prefix sweep is what
+    # removes the rules by the comment they carry, so a teardown cannot leave an
+    # orphan DNAT behind because the recorded command no longer matches.
     _cleanup_dnat_rules(vmachine_id=vmachine_id, cleanup_rules=cleanup_rules)
+    _cleanup_vm_firewall_rules(vmachine_id=vmachine_id)
     _cleanup_tap(vmachine_id=vmachine_id, tap_name=tap_name)
     remove_vm_cgroup(vmachine_id=vmachine_id, cgroup_path=cgroup_path)
 

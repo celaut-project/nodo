@@ -11,6 +11,7 @@ from src.tunneling import delegated_endpoints
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.firewall.gateway import GatewayPortUnavailable, ensure_gateway_port_open
+from src.utils.firewall.legacy import sweep_compat_tables
 
 env_manager = ConfigManager()
 
@@ -54,6 +55,17 @@ def serve():
     # would be unable to call back into it.
     port = env_manager.get_gateway_port()
     _open_and_verify_gateway_port(port)
+
+    # One-time migration: versions before nodo managed nftables natively wrote
+    # their rules through the iptables compatibility tables. On an nftables host
+    # those are now duplicates at best, and a stale DNAT pointing a published
+    # port at a dead VM at worst.
+    try:
+        swept = sweep_compat_tables(log=log.LOGGER)
+        if swept:
+            log.LOGGER(f"Removed {swept} firewall rule(s) left by a pre-nftables nodo.")
+    except Exception as e:
+        log.LOGGER(f"Could not sweep pre-nftables firewall rules: {e}")
 
     # Re-open the local tunnel endpoints that delegated instances were given
     # before the last shutdown; clients hold those addresses and cannot be told

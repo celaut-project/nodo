@@ -40,7 +40,6 @@ from typing import Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
-from src.gateway.utils import GATEWAY_PORT
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException
@@ -64,10 +63,8 @@ from src.virtualizers.qemu.config import (
     qemu_system_binary,
 )
 from src.virtualizers.qemu.process import qemu_process_name
-from src.virtualizers.firewall import (
-    TransportProtocol,
-    resolve_slot_transport_protocols,
-)
+from src.utils.firewall import policy as fw_policy
+from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 env_manager = ConfigManager()
 sc = SQLConnection()
@@ -480,14 +477,13 @@ def execute(
                 )
                 if not protocol:
                     continue
-                removal_commands = ch_exec._add_dnat_rule(
+                ch_exec._add_dnat_rule(
                     vmachine_id=vmachine_id,
                     protocol=protocol.value,
                     external_port=external_port,
                     vm_ip=vm_ip,
                     internal_port=internal_port,
                 )
-                cleanup_rules.extend(removal_commands)
                 dnat_rules_state.append(
                     {
                         "protocol": protocol.value,
@@ -516,6 +512,7 @@ def execute(
                 "entrypoint": resolved_entrypoint,
                 "dnat_rules": dnat_rules_state,
                 "cleanup_rules": cleanup_rules,
+                "rule_comment_prefix": fw_policy.vm_comment_prefix(vmachine_id),
                 "dns_allowlist": [
                     {"domain": domain, "ip": ip} for domain, ip in domain_records
                 ],
@@ -544,6 +541,13 @@ def execute(
         log.LOGGER(f"[QEMU][{vmachine_id}] serial tail ({serial_log_path}): {ch_exec._tail_file(serial_log_path)}")
 
         ch_exec._remove_rules(cleanup_rules)
+        # Whatever was applied before the failure carries this VM's prefix.
+        try:
+            from src.virtualizers.firewall import remove_vm_rules
+
+            remove_vm_rules(vmachine_id=vmachine_id)
+        except Exception as e:
+            log.LOGGER(f"[QEMU][{vmachine_id}] could not remove this VM's firewall rules: {e}")
 
         if process and process.poll() is None:
             process.terminate()

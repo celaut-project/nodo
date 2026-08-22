@@ -15,9 +15,11 @@ from src.utils.network import get_free_port
 from src.utils.singleton import Singleton
 
 
-# "not assigned yet". Kept here, next to the only code that reads it, because
-# src.utils.config is imported by the shell-completion helper and must not pull
-# in the firewall package to compare a string.
+# "not assigned yet". Defined here, next to the only code that reads it, so that
+# comparing a config string needs nothing but this module: src.utils.config is
+# imported by the shell-completion helper, which the shell runs on every Tab
+# keypress, so the firewall package is imported lazily below rather than pulled
+# in on every CLI invocation.
 GATEWAY_PORT_AUTO = "auto"
 
 
@@ -283,7 +285,8 @@ class ConfigManager(metaclass=Singleton):
             self.log("Could not pick a free gateway port: none available in FREE_PORTS_RANGE.")
             return
 
-        # Imported here, not at module scope: see GATEWAY_PORT_AUTO above.
+        # Imported here, not at module scope: see GATEWAY_PORT_AUTO above. Only a
+        # privileged start ever reaches this point.
         from src.utils.firewall.gateway import (
             GatewayPortUnavailable,
             ensure_gateway_port_open,

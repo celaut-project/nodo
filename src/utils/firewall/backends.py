@@ -2,55 +2,95 @@
 
 Two backends behind one interface:
 
-* ``NftBackend``      -- native nftables, in nodo's own ``inet nodo`` table.
+* ``NftBackend``      -- native nftables, in nodo's own tables.
 * ``IptablesBackend`` -- the legacy ``iptables`` binary.
 
 ``detect_backend()`` prefers nftables whenever the host actually speaks it,
 because on such hosts ``iptables`` is the ``iptables-nft`` shim writing into the
-compatibility ``ip filter`` table: the rules work, but they live in a table nodo
-does not own and stay invisible to an admin reading ``nft list ruleset``.
+compatibility ``ip filter``/``ip nat`` tables: the rules work, but they live where
+nodo does not own them and stay invisible to an admin reading ``nft list
+ruleset``. Mixing the two is worse than either, which is why every rule nodo
+writes -- gateway port, guest egress policy, masquerade, published-port DNAT --
+goes through here.
 
-What no backend can do
-----------------------
-A rule inserted here cannot override a *later* base chain that rejects the same
-packet. In nftables ``accept`` ends evaluation of its own chain only; the packet
-then traverses every other base chain registered on the same hook, and a ``drop``
-or ``reject`` there still wins. Chain priority changes the order, not that
-outcome -- so no priority makes our accept authoritative over a foreign
-reject. An accept rule is necessary but never sufficient, and the only honest
-way to know a port is reachable is to try it: see ``reachability``.
+Tables and chains
+-----------------
+Filter lives in ``inet nodo`` (``input``, ``forward``, both at priority -5, ahead
+of the standard filter chains). NAT lives in ``ip nodo`` (``prerouting`` at -100,
+``postrouting`` at 100); it is a separate table because a table has exactly one
+family and all of nodo's NAT is IPv4, which keeps us off the inet-NAT support
+matrix entirely.
+
+What ordering can and cannot buy
+--------------------------------
+``accept`` ends evaluation of its own chain only: the packet still traverses every
+other base chain on the same hook, and a ``drop`` or ``reject`` there wins. So no
+priority makes nodo's *accept* authoritative over a foreign reject -- an accept
+rule is necessary but never sufficient, and the honest way to know a port is
+reachable is to try it (see ``reachability``).
+
+``drop`` is the opposite: it is terminal for the whole hook. So nodo's egress
+policy -- the blanket NEW drop that isolates a guest -- becomes *stronger* here
+than it was through the compatibility table, because it now runs at -5, ahead of
+anything a host firewall might accept. That is the intended behaviour, and it is
+the reason isolation must be verified rather than assumed too.
 
 Nothing in this package may import ``src.utils.config`` or ``src.utils.logger``
-(both of which build a ``ConfigManager``), because ``ConfigManager`` imports
-this package. Callers pass their own values and their own ``log`` callable.
+(both build a ``ConfigManager``), because ``ConfigManager`` imports this package.
+Callers pass their own values and their own ``log`` callable.
 """
 
 import json
+import shlex
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
+
+from src.utils.firewall.errors import FirewallError, FirewallUnavailable
+from src.utils.firewall.rules import Chain, Rule, Verdict
 
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
 
-NFT_FAMILY = "inet"
+NFT_FILTER_FAMILY = "inet"
+NFT_NAT_FAMILY = "ip"
 NFT_TABLE = "nodo"
-NFT_CHAIN = "input"
-# Evaluated before the standard filter chains (iptables-nft's `ip filter` sits at
-# 0, firewalld's `inet firewalld` at 10). This buys ordering and nothing else --
-# see the module docstring on why ordering cannot defeat a foreign reject.
-NFT_CHAIN_PRIORITY = -5
 
-SUPPORTED_PROTOCOLS = ("tcp", "udp")
+# Ahead of the standard filter chains (iptables-nft's compatibility table sits at
+# 0, firewalld's at 10). See the module docstring on what this does and does not
+# achieve.
+NFT_FILTER_PRIORITY = -5
 
+_NFT_CHAINS: Dict[Chain, Tuple[str, str, str]] = {
+    Chain.INPUT: (
+        NFT_FILTER_FAMILY,
+        "input",
+        f"type filter hook input priority {NFT_FILTER_PRIORITY} ; policy accept ;",
+    ),
+    Chain.FORWARD: (
+        NFT_FILTER_FAMILY,
+        "forward",
+        f"type filter hook forward priority {NFT_FILTER_PRIORITY} ; policy accept ;",
+    ),
+    Chain.PREROUTING: (
+        NFT_NAT_FAMILY,
+        "prerouting",
+        "type nat hook prerouting priority -100 ; policy accept ;",
+    ),
+    Chain.POSTROUTING: (
+        NFT_NAT_FAMILY,
+        "postrouting",
+        "type nat hook postrouting priority 100 ; policy accept ;",
+    ),
+}
 
-class FirewallError(Exception):
-    """A netfilter operation failed."""
-
-
-class FirewallUnavailable(FirewallError):
-    """Neither nft nor iptables can be used on this host."""
+_IPTABLES_CHAINS: Dict[Chain, str] = {
+    Chain.INPUT: "INPUT",
+    Chain.FORWARD: "FORWARD",
+    Chain.PREROUTING: "PREROUTING",
+    Chain.POSTROUTING: "POSTROUTING",
+}
 
 
 @dataclass(frozen=True)
@@ -68,35 +108,31 @@ class ForeignRejector:
 
 
 @dataclass(frozen=True)
-class InputRule:
-    """An input-accept rule owned by nodo."""
+class AppliedRule:
+    """A rule nodo owns, as read back from the live ruleset."""
 
+    chain: Chain
     comment: str
-    port: Optional[int]
-    protocol: Optional[str]
+    port: Optional[int] = None
+    protocol: Optional[str] = None
     handle: Optional[int] = None
-    raw: Optional[str] = None
+    tokens: Optional[Tuple[str, ...]] = None
+
+
+# The gateway work predates the generic model and imports this name.
+InputRule = AppliedRule
 
 
 def _default_runner(command: Sequence[str]) -> subprocess.CompletedProcess:
     return subprocess.run(list(command), capture_output=True, text=True, check=False)
 
 
-def _validate(port: int, protocol: str) -> None:
-    if not isinstance(port, int) or isinstance(port, bool):
-        raise FirewallError(f"Port must be an int, got {port!r}.")
-    if not 1 <= port <= 65535:
-        raise FirewallError(f"Port {port} is outside 1-65535.")
-    if protocol not in SUPPORTED_PROTOCOLS:
-        raise FirewallError(f"Unsupported protocol {protocol!r}. Supported: {', '.join(SUPPORTED_PROTOCOLS)}.")
-
-
 def _failure_text(proc: subprocess.CompletedProcess) -> str:
     return ((proc.stderr or "") + (proc.stdout or "")).strip() or f"exit status {proc.returncode}"
 
 
-def _means_absent(message: str) -> str:
-    """Whether a netfilter error means "that object does not exist" rather than a fault."""
+def _means_absent(message: str) -> bool:
+    """Whether a netfilter error means "no such object" rather than a fault."""
     lowered = message.lower()
     return any(
         phrase in lowered
@@ -105,102 +141,183 @@ def _means_absent(message: str) -> str:
 
 
 class FirewallBackend(ABC):
-    """Manage nodo-owned accept rules on the input hook."""
+    """Apply, list and delete the rules nodo owns."""
 
     name: str = "unknown"
 
     def __init__(self, run: Optional[Runner] = None) -> None:
         self._run: Runner = run or _default_runner
 
-    @abstractmethod
-    def list_input_accepts(self, comment_prefix: str) -> List[InputRule]:
-        """Every nodo-owned input rule whose comment starts with ``comment_prefix``."""
+    # --- primitives each backend provides ---------------------------------
 
     @abstractmethod
-    def add_input_accept(self, port: int, protocol: str, comment: str) -> None:
-        """Insert an accept rule. Must not be called when one already exists."""
+    def list_rules(self, chain: Chain, comment_prefix: str = "") -> List[AppliedRule]:
+        """Rules in ``chain`` whose comment starts with ``comment_prefix``, in order."""
 
     @abstractmethod
-    def remove_input_accept(self, rule: InputRule) -> None:
-        """Delete a rule previously returned by ``list_input_accepts``."""
+    def add(self, rule: Rule) -> None:
+        """Apply ``rule`` unconditionally, at the head or the tail per ``at_head``."""
+
+    @abstractmethod
+    def delete(self, applied: AppliedRule) -> None:
+        """Delete a rule previously returned by ``list_rules``."""
 
     def foreign_input_rejectors(self) -> List[ForeignRejector]:
-        """Base chains outside nodo's own table that could reject inbound packets.
+        """Base chains outside nodo's tables that could reject inbound packets.
 
         Best-effort diagnosis for the operator: never used to decide anything.
         """
         return []
 
-    def ensure_input_accept(self, port: int, protocol: str, comment: str) -> bool:
-        """Idempotently ensure the accept rule exists. True when it was added now."""
-        _validate(port, protocol)
-        for rule in self.list_input_accepts(comment):
-            if rule.comment == comment:
+    # --- the operations callers actually use -------------------------------
+
+    def ensure(self, rule: Rule) -> bool:
+        """Apply ``rule`` unless its comment is already present. True when added.
+
+        Comments are unique per rule by construction, so this is exact.
+        """
+        for existing in self.list_rules(rule.chain, rule.comment):
+            if existing.comment == rule.comment:
                 return False
-        self.add_input_accept(port=port, protocol=protocol, comment=comment)
+        self.add(rule)
         return True
 
-    def prune_input_accepts(self, comment_prefix: str, keep: str) -> List[InputRule]:
-        """Drop nodo-owned rules under ``comment_prefix`` other than ``keep``.
+    def ensure_first(self, rule: Rule) -> bool:
+        """Apply ``rule`` and guarantee it is the first rule in its chain.
 
-        This is how a reassigned port stops leaving an orphan hole behind.
+        Used for the blanket RELATED,ESTABLISHED accept, whose whole purpose is to
+        short-circuit everything below it. Duplicates left by earlier versions are
+        collapsed rather than tolerated.
         """
-        removed: List[InputRule] = []
-        for rule in self.list_input_accepts(comment_prefix):
-            if rule.comment == keep:
+        existing = self.list_rules(rule.chain)
+        matching = [applied for applied in existing if applied.comment == rule.comment]
+        if len(matching) == 1 and existing and existing[0].comment == rule.comment:
+            return False
+
+        for applied in reversed(matching):
+            self.delete(applied)
+        self.add(Rule(**{**rule.__dict__, "at_head": True}))
+        return True
+
+    def delete_by_comment(self, chain: Chain, comment: str) -> int:
+        """Delete every rule in ``chain`` carrying exactly ``comment``."""
+        removed = 0
+        for applied in reversed(self.list_rules(chain, comment)):
+            if applied.comment != comment:
+                continue
+            self.delete(applied)
+            removed += 1
+        return removed
+
+    def delete_by_comment_prefix(self, comment_prefix: str, chains: Sequence[Chain] = ()) -> int:
+        """Delete every nodo rule under ``comment_prefix`` across ``chains``.
+
+        How a VM's whole footprint is torn down: one prefix, every chain, no
+        reliance on remembering the exact arguments that created each rule.
+        """
+        removed = 0
+        for chain in chains or tuple(Chain):
+            try:
+                applied_rules = self.list_rules(chain, comment_prefix)
+            except FirewallError:
+                continue
+            for applied in reversed(applied_rules):
+                try:
+                    self.delete(applied)
+                    removed += 1
+                except FirewallError:
+                    continue
+        return removed
+
+    def prune_by_prefix(self, chain: Chain, comment_prefix: str, keep: str) -> List[AppliedRule]:
+        """Drop rules under ``comment_prefix`` other than ``keep``.
+
+        How a reassigned port stops leaving an orphan hole behind.
+        """
+        removed: List[AppliedRule] = []
+        for applied in reversed(self.list_rules(chain, comment_prefix)):
+            if applied.comment == keep:
                 continue
             try:
-                self.remove_input_accept(rule)
-                removed.append(rule)
+                self.delete(applied)
+                removed.append(applied)
             except FirewallError:
                 continue
         return removed
+
+    # --- gateway-port helpers (the input-hook special case) ----------------
+
+    def list_input_accepts(self, comment_prefix: str) -> List[AppliedRule]:
+        return self.list_rules(Chain.INPUT, comment_prefix)
+
+    def ensure_input_accept(self, port: int, protocol: str, comment: str) -> bool:
+        return self.ensure(
+            Rule(
+                chain=Chain.INPUT,
+                comment=comment,
+                verdict=Verdict.ACCEPT,
+                protocol=protocol,
+                dport=port,
+                at_head=True,
+            )
+        )
+
+    def remove_input_accept(self, rule: AppliedRule) -> None:
+        self.delete(rule)
+
+    def prune_input_accepts(self, comment_prefix: str, keep: str) -> List[AppliedRule]:
+        return self.prune_by_prefix(Chain.INPUT, comment_prefix, keep=keep)
 
 
 class NftBackend(FirewallBackend):
     name = "nftables"
 
+    def __init__(self, run: Optional[Runner] = None) -> None:
+        super().__init__(run=run)
+        self._ready: set = set()
+
     def _nft(self, *args: str) -> subprocess.CompletedProcess:
         return self._run(["nft", *args])
 
-    def _nft_json(self, *args: str) -> dict:
-        proc = self._run(["nft", "-j", *args])
-        if proc.returncode != 0:
-            raise FirewallError(f"nft -j {' '.join(args)} failed: {_failure_text(proc)}")
+    def _chain_spec(self, chain: Chain) -> Tuple[str, str, str]:
         try:
-            return json.loads(proc.stdout or "{}")
-        except ValueError as e:
-            raise FirewallError(f"Could not parse nft JSON output: {e}") from e
+            return _NFT_CHAINS[chain]
+        except KeyError:
+            raise FirewallError(f"No nft chain defined for {chain}.")
 
-    def _ensure_chain(self) -> None:
-        table = self._nft("add", "table", NFT_FAMILY, NFT_TABLE)
+    def _ensure_chain(self, chain: Chain) -> None:
+        if chain in self._ready:
+            return
+        family, name, spec = self._chain_spec(chain)
+
+        table = self._nft("add", "table", family, NFT_TABLE)
         if table.returncode != 0:
-            raise FirewallError(f"Could not create nft table {NFT_FAMILY} {NFT_TABLE}: {_failure_text(table)}")
-        spec = (
-            "{ type filter hook input priority "
-            f"{NFT_CHAIN_PRIORITY}"
-            " ; policy accept ; }"
-        )
-        chain = self._nft("add", "chain", NFT_FAMILY, NFT_TABLE, NFT_CHAIN, spec)
-        if chain.returncode != 0:
-            raise FirewallError(f"Could not create nft chain {NFT_CHAIN}: {_failure_text(chain)}")
+            raise FirewallError(
+                f"Could not create nft table {family} {NFT_TABLE}: {_failure_text(table)}"
+            )
+        created = self._nft("add", "chain", family, NFT_TABLE, name, "{ " + spec + " }")
+        if created.returncode != 0:
+            raise FirewallError(f"Could not create nft chain {name}: {_failure_text(created)}")
+        self._ready.add(chain)
 
-    def list_input_accepts(self, comment_prefix: str) -> List[InputRule]:
-        proc = self._run(["nft", "-j", "list", "chain", NFT_FAMILY, NFT_TABLE, NFT_CHAIN])
+    def list_rules(self, chain: Chain, comment_prefix: str = "") -> List[AppliedRule]:
+        family, name, _ = self._chain_spec(chain)
+        proc = self._nft("-j", "list", "chain", family, NFT_TABLE, name)
         if proc.returncode != 0:
             message = _failure_text(proc)
             if _means_absent(message):
                 # nodo's table has not been created yet: nothing of ours exists.
                 return []
             # Anything else -- notably a permission error -- must not be read as
-            # "no rules", or ensure_input_accept would add a duplicate every start.
-            raise FirewallError(f"Could not list nodo's nft chain: {message}")
+            # "no rules", or ensure() would add a duplicate on every start.
+            raise FirewallError(f"Could not list nft chain {name}: {message}")
+
         try:
             data = json.loads(proc.stdout or "{}")
         except ValueError as e:
             raise FirewallError(f"Could not parse nft JSON output: {e}") from e
 
-        rules: List[InputRule] = []
+        found: List[AppliedRule] = []
         for item in data.get("nftables") or []:
             rule = item.get("rule") if isinstance(item, dict) else None
             if not isinstance(rule, dict):
@@ -208,58 +325,65 @@ class NftBackend(FirewallBackend):
             comment = rule.get("comment")
             if not isinstance(comment, str) or not comment.startswith(comment_prefix):
                 continue
-            port, protocol = _nft_rule_match(rule.get("expr") or [])
+            port, protocol = _nft_port_match(rule.get("expr") or [])
             handle = rule.get("handle")
-            rules.append(
-                InputRule(
+            found.append(
+                AppliedRule(
+                    chain=chain,
                     comment=comment,
                     port=port,
                     protocol=protocol,
                     handle=int(handle) if isinstance(handle, int) else None,
                 )
             )
-        return rules
+        return found
 
-    def add_input_accept(self, port: int, protocol: str, comment: str) -> None:
-        _validate(port, protocol)
-        self._ensure_chain()
+    def add(self, rule: Rule) -> None:
+        self._ensure_chain(rule.chain)
+        family, name, _ = self._chain_spec(rule.chain)
+        verb = "insert" if rule.at_head else "add"
         # nft joins argv into one command string before parsing, so the whole
         # expression goes in as a single argument: that keeps the quoting of a
         # comment containing ';' unambiguous.
-        expression = f'{protocol} dport {port} accept comment "{comment}"'
-        proc = self._nft("add", "rule", NFT_FAMILY, NFT_TABLE, NFT_CHAIN, expression)
+        proc = self._nft(verb, "rule", family, NFT_TABLE, name, _render_nft(rule))
         if proc.returncode != 0:
-            raise FirewallError(f"Could not add nft accept rule for port {port}: {_failure_text(proc)}")
+            raise FirewallError(
+                f"Could not {verb} nft rule in {name} ({rule.comment}): {_failure_text(proc)}"
+            )
 
-    def remove_input_accept(self, rule: InputRule) -> None:
-        if rule.handle is None:
-            raise FirewallError(f"Cannot delete nft rule without a handle: {rule.comment}")
+    def delete(self, applied: AppliedRule) -> None:
+        if applied.handle is None:
+            raise FirewallError(f"Cannot delete an nft rule without a handle: {applied.comment}")
+        family, name, _ = self._chain_spec(applied.chain)
         proc = self._nft(
-            "delete", "rule", NFT_FAMILY, NFT_TABLE, NFT_CHAIN, "handle", str(rule.handle)
+            "delete", "rule", family, NFT_TABLE, name, "handle", str(applied.handle)
         )
         if proc.returncode != 0:
-            raise FirewallError(f"Could not delete nft rule {rule.handle}: {_failure_text(proc)}")
+            raise FirewallError(
+                f"Could not delete nft rule {applied.handle} in {name}: {_failure_text(proc)}"
+            )
 
     def foreign_input_rejectors(self) -> List[ForeignRejector]:
+        proc = self._nft("-j", "list", "ruleset")
+        if proc.returncode != 0:
+            return []
         try:
-            data = self._nft_json("list", "ruleset")
-        except FirewallError:
+            data = json.loads(proc.stdout or "{}")
+        except ValueError:
             return []
 
-        chains: dict = {}
+        chains: Dict[tuple, dict] = {}
         for item in data.get("nftables") or []:
             if not isinstance(item, dict):
                 continue
             chain = item.get("chain")
             if isinstance(chain, dict) and chain.get("hook") == "input":
-                table = chain.get("table")
-                if table == NFT_TABLE and chain.get("family") == NFT_FAMILY:
+                if chain.get("table") == NFT_TABLE and chain.get("family") == NFT_FILTER_FAMILY:
                     continue
-                key = (chain.get("family"), table, chain.get("name"))
-                policy = chain.get("policy")
+                key = (chain.get("family"), chain.get("table"), chain.get("name"))
                 chains[key] = {
                     "priority": chain.get("prio"),
-                    "policy": policy,
+                    "policy": chain.get("policy"),
                     "verdicts": set(),
                 }
 
@@ -302,8 +426,35 @@ class NftBackend(FirewallBackend):
         return rejectors
 
 
-def _nft_rule_match(expressions: Sequence) -> tuple:
-    """Best-effort (port, protocol) of an nft accept rule, for reporting only."""
+def _render_nft(rule: Rule) -> str:
+    """The nft expression for ``rule``, matches first, then verdict, then comment."""
+    parts: List[str] = []
+    if rule.source:
+        parts.append(f"ip saddr {rule.source}")
+    if rule.destination:
+        operator = "!= " if rule.destination_is_negated else ""
+        parts.append(f"ip daddr {operator}{rule.destination}")
+    if rule.protocol and (rule.dport is not None or rule.sport is not None):
+        if rule.dport is not None:
+            parts.append(f"{rule.protocol} dport {rule.dport}")
+        if rule.sport is not None:
+            parts.append(f"{rule.protocol} sport {rule.sport}")
+    elif rule.protocol:
+        parts.append(f"meta l4proto {rule.protocol}")
+    if rule.ct_states:
+        parts.append("ct state " + ",".join(state.lower() for state in rule.ct_states))
+
+    if rule.verdict is Verdict.DNAT:
+        parts.append(f"dnat to {rule.dnat_to}")
+    else:
+        parts.append(rule.verdict.value)
+
+    parts.append(f'comment "{rule.comment}"')
+    return " ".join(parts)
+
+
+def _nft_port_match(expressions: Sequence) -> Tuple[Optional[int], Optional[str]]:
+    """Best-effort (port, protocol) of an nft rule, for reporting only."""
     port = None
     protocol = None
     for expr in expressions:
@@ -326,78 +477,110 @@ def _nft_rule_match(expressions: Sequence) -> tuple:
 class IptablesBackend(FirewallBackend):
     name = "iptables"
 
-    def _iptables(self, *args: str) -> subprocess.CompletedProcess:
-        return self._run(["iptables", *args])
+    def _iptables(self, chain: Chain, *args: str) -> subprocess.CompletedProcess:
+        table = ["-t", "nat"] if chain.is_nat else []
+        return self._run(["iptables", *table, *args])
 
-    def _rule_args(self, port: int, protocol: str, comment: str) -> List[str]:
-        return [
-            "-p", protocol,
-            "--dport", str(port),
-            "-j", "ACCEPT",
-            "-m", "comment",
-            "--comment", comment,
-        ]
-
-    def list_input_accepts(self, comment_prefix: str) -> List[InputRule]:
-        proc = self._iptables("-S", "INPUT")
+    def list_rules(self, chain: Chain, comment_prefix: str = "") -> List[AppliedRule]:
+        name = _IPTABLES_CHAINS[chain]
+        proc = self._iptables(chain, "-S", name)
         if proc.returncode != 0:
             # Not "no rules": an unreadable chain must not be mistaken for an
             # empty one, or every start would insert another copy of the rule.
-            raise FirewallError(f"Could not list the INPUT chain: {_failure_text(proc)}")
+            raise FirewallError(f"Could not list the {name} chain: {_failure_text(proc)}")
 
-        rules: List[InputRule] = []
+        found: List[AppliedRule] = []
         for line in (proc.stdout or "").splitlines():
             line = line.strip()
-            if not line.startswith("-A INPUT"):
+            if not line.startswith(f"-A {name}"):
                 continue
-            comment = _iptables_option(line, "--comment")
+            try:
+                tokens = shlex.split(line)
+            except ValueError:
+                continue
+            comment = _token_value(tokens, "--comment")
             if not comment or not comment.startswith(comment_prefix):
                 continue
-            port_text = _iptables_option(line, "--dport")
-            protocol = _iptables_option(line, "-p")
+            port_text = _token_value(tokens, "--dport")
             try:
                 port = int(port_text) if port_text else None
             except ValueError:
                 port = None
-            rules.append(
-                InputRule(comment=comment, port=port, protocol=protocol, raw=line)
+            found.append(
+                AppliedRule(
+                    chain=chain,
+                    comment=comment,
+                    port=port,
+                    protocol=_token_value(tokens, "-p"),
+                    tokens=tuple(tokens),
+                )
             )
-        return rules
+        return found
 
-    def add_input_accept(self, port: int, protocol: str, comment: str) -> None:
-        _validate(port, protocol)
-        proc = self._iptables("-I", "INPUT", *self._rule_args(port, protocol, comment))
+    def add(self, rule: Rule) -> None:
+        name = _IPTABLES_CHAINS[rule.chain]
+        verb = "-I" if rule.at_head else "-A"
+        proc = self._iptables(rule.chain, verb, name, *_render_iptables(rule))
         if proc.returncode != 0:
             raise FirewallError(
-                f"Could not add iptables accept rule for port {port}: {_failure_text(proc)}"
+                f"Could not add iptables rule in {name} ({rule.comment}): {_failure_text(proc)}"
             )
 
-    def remove_input_accept(self, rule: InputRule) -> None:
-        if rule.port is None or not rule.protocol:
-            raise FirewallError(f"Cannot delete iptables rule without port/protocol: {rule.comment}")
-        proc = self._iptables(
-            "-D", "INPUT", *self._rule_args(rule.port, rule.protocol, rule.comment)
-        )
+    def delete(self, applied: AppliedRule) -> None:
+        if not applied.tokens:
+            raise FirewallError(
+                f"Cannot delete an iptables rule without its own listing: {applied.comment}"
+            )
+        # Reconstructed from iptables' own -S output, so the delete matches the
+        # rule exactly even when a previous nodo version wrote it differently.
+        args = list(applied.tokens)
+        args[0] = "-D"
+        proc = self._iptables(applied.chain, *args)
         if proc.returncode != 0:
-            raise FirewallError(f"Could not delete iptables rule for port {rule.port}: {_failure_text(proc)}")
+            raise FirewallError(
+                f"Could not delete iptables rule ({applied.comment}): {_failure_text(proc)}"
+            )
 
 
-def _iptables_option(line: str, option: str) -> Optional[str]:
-    """Value following ``option`` in an ``iptables -S`` line, unquoting comments."""
-    try:
-        tokens = _split_iptables_line(line)
-    except ValueError:
-        return None
+def _render_iptables(rule: Rule) -> List[str]:
+    """The iptables match arguments for ``rule``.
+
+    ``-p`` comes first because ``--dport``/``--sport`` are extensions of the
+    protocol match and iptables rejects them otherwise.
+    """
+    args: List[str] = []
+    if rule.protocol:
+        args += ["-p", rule.protocol]
+    if rule.source:
+        args += ["-s", rule.source]
+    if rule.destination:
+        if rule.destination_is_negated:
+            args += ["!", "-d", rule.destination]
+        else:
+            args += ["-d", rule.destination]
+    if rule.dport is not None:
+        args += ["--dport", str(rule.dport)]
+    if rule.sport is not None:
+        args += ["--sport", str(rule.sport)]
+    if rule.ct_states:
+        args += ["-m", "conntrack", "--ctstate", ",".join(rule.ct_states)]
+
+    if rule.verdict is Verdict.DNAT:
+        args += ["-j", "DNAT", "--to-destination", str(rule.dnat_to)]
+    elif rule.verdict is Verdict.MASQUERADE:
+        args += ["-j", "MASQUERADE"]
+    else:
+        args += ["-j", rule.verdict.value.upper()]
+
+    args += ["-m", "comment", "--comment", rule.comment]
+    return args
+
+
+def _token_value(tokens: List[str], option: str) -> Optional[str]:
     for index in range(len(tokens) - 1):
         if tokens[index] == option:
             return tokens[index + 1]
     return None
-
-
-def _split_iptables_line(line: str) -> List[str]:
-    import shlex
-
-    return shlex.split(line)
 
 
 def detect_backend(run: Optional[Runner] = None) -> FirewallBackend:
@@ -405,7 +588,7 @@ def detect_backend(run: Optional[Runner] = None) -> FirewallBackend:
 
     ``nft list tables`` is the probe rather than the mere presence of the binary:
     a host can ship ``nft`` while the kernel or the caller's privileges make it
-    useless, and in that case the iptables path is the one that will work.
+    useless, and there the iptables path is the one that will work.
     """
     runner = run or _default_runner
     if shutil.which("nft"):

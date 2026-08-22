@@ -1,15 +1,16 @@
 """Host firewall handling: backend detection, rule management, real verification."""
 
 from src.utils.firewall.backends import (
+    AppliedRule,
     FirewallBackend,
-    FirewallError,
-    FirewallUnavailable,
     ForeignRejector,
     InputRule,
     IptablesBackend,
     NftBackend,
     detect_backend,
 )
+from src.utils.firewall.errors import FirewallError, FirewallUnavailable, RuleError
+from src.utils.firewall.rules import Chain, Rule, Verdict
 from src.utils.firewall.gateway import (
     GATEWAY_COMMENT_PREFIX,
     GatewayPortUnavailable,
@@ -21,6 +22,11 @@ from src.utils.firewall.gateway import (
 from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
 
 __all__ = [
+    "AppliedRule",
+    "Chain",
+    "Rule",
+    "RuleError",
+    "Verdict",
     "GATEWAY_COMMENT_PREFIX",
     "FirewallBackend",
     "FirewallError",

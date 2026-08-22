@@ -11,7 +11,7 @@ import grpc
 from bee_rpc.client import client_grpc
 from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
 
-from src.commands.inspect import inspect as inspect_service
+from src.commands.inspect_service import inspect as inspect_service
 from src.commands.__by_tag import get_id
 from src.core_services.source_application import acquire_service
 from src.manager.manager import get_execute_client

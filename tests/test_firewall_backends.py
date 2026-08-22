@@ -19,6 +19,7 @@ from src.utils.firewall.backends import (
     detect_backend,
 )
 from src.utils.firewall.gateway import gateway_comment
+from src.utils.firewall.rules import Chain, Rule, Verdict
 
 
 def _proc(returncode=0, stdout="", stderr=""):
@@ -91,7 +92,7 @@ class NftBackendTests(unittest.TestCase):
             commands,
         )
         self.assertIn(
-            'nft add rule inet nodo input tcp dport 58443 accept comment "%s"' % self.comment,
+            'nft insert rule inet nodo input tcp dport 58443 accept comment "%s"' % self.comment,
             commands,
         )
 
@@ -103,7 +104,7 @@ class NftBackendTests(unittest.TestCase):
             backend.ensure_input_accept(port=58443, protocol="tcp", comment=self.comment)
         )
         self.assertFalse(
-            [c for c in runner.commands() if c.startswith("nft add rule")],
+            [c for c in runner.commands() if "rule" in c and ("add" in c or "insert" in c)],
             "an existing rule must not be duplicated",
         )
 
@@ -230,17 +231,29 @@ class IptablesBackendTests(unittest.TestCase):
             runner.commands(),
         )
 
-    def test_removal_mirrors_the_insert(self):
-        runner = FakeRunner()
-        backend = IptablesBackend(run=runner)
-        backend.remove_input_accept(
-            InputRule(comment=self.comment, port=58443, protocol="tcp")
+    def test_removal_replays_the_rule_iptables_itself_reported(self):
+        listing = (
+            f'-A INPUT -p tcp -m tcp --dport 58443 -m comment --comment "{self.comment}" -j ACCEPT\n'
         )
+        runner = FakeRunner({("iptables", "-S", "INPUT"): _proc(0, listing)})
+        backend = IptablesBackend(run=runner)
+
+        [rule] = backend.list_input_accepts("nodo;gateway;port")
+        backend.remove_input_accept(rule)
+
+        # Byte-for-byte the line iptables printed, with -A swapped for -D: it matches
+        # even when an older nodo wrote the rule with different argument order.
         self.assertIn(
-            "iptables -D INPUT -p tcp --dport 58443 -j ACCEPT -m comment --comment "
-            + self.comment,
+            f'iptables -D INPUT -p tcp -m tcp --dport 58443 -m comment --comment {self.comment} -j ACCEPT',
             runner.commands(),
         )
+
+    def test_a_rule_without_a_listing_cannot_be_deleted(self):
+        backend = IptablesBackend(run=FakeRunner())
+        with self.assertRaises(FirewallError):
+            backend.remove_input_accept(
+                InputRule(chain=Chain.INPUT, comment=self.comment, port=58443, protocol="tcp")
+            )
 
     def test_a_failing_insert_is_an_error_not_a_silent_pass(self):
         backend = IptablesBackend(
@@ -267,3 +280,188 @@ class ValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NatChainTests(unittest.TestCase):
+    """NAT lives in its own table, and iptables needs to be told which one."""
+
+    def test_nft_puts_nat_in_the_ip_family_table(self):
+        runner = FakeRunner({("nft", "-j", "list", "chain"): _proc(0, _nft_chain_listing([]))})
+        backend = NftBackend(run=runner)
+        backend.add(
+            Rule(
+                chain=Chain.POSTROUTING,
+                comment="nodo;masquerade;subnet=192.168.200.0/24",
+                verdict=Verdict.MASQUERADE,
+                source="192.168.200.0/24",
+                destination="192.168.200.0/24",
+                destination_is_negated=True,
+            )
+        )
+        commands = runner.commands()
+        self.assertIn("nft add table ip nodo", commands)
+        self.assertTrue(
+            any("add chain ip nodo postrouting { type nat hook postrouting" in c for c in commands),
+            commands,
+        )
+
+    def test_iptables_reaches_for_the_nat_table(self):
+        runner = FakeRunner({("iptables", "-t", "nat", "-S"): _proc(0, "")})
+        backend = IptablesBackend(run=runner)
+        backend.add(
+            Rule(
+                chain=Chain.PREROUTING,
+                comment="nodo;vm=v;dnat;tcp;59629",
+                verdict=Verdict.DNAT,
+                protocol="tcp",
+                dport=59629,
+                dnat_to="192.168.200.148:5000",
+            )
+        )
+        self.assertIn(
+            "iptables -t nat -A PREROUTING -p tcp --dport 59629 -j DNAT "
+            "--to-destination 192.168.200.148:5000 -m comment --comment nodo;vm=v;dnat;tcp;59629",
+            runner.commands(),
+        )
+
+    def test_filter_chains_do_not_get_the_nat_flag(self):
+        runner = FakeRunner({("iptables", "-S"): _proc(0, "")})
+        backend = IptablesBackend(run=runner)
+        backend.add(Rule(chain=Chain.FORWARD, comment="nodo;vm=v;allow_all_egress", source="10.0.0.1"))
+        self.assertTrue(
+            all("-t" not in command for command in runner.calls),
+            runner.commands(),
+        )
+
+
+class TeardownTests(unittest.TestCase):
+    """A VM's whole footprint comes out by prefix, across every chain."""
+
+    def test_every_chain_is_swept_for_the_prefix(self):
+        prefix = "nodo;vm=abc;"
+        listings = {
+            Chain.FORWARD: [
+                {"comment": prefix + "block_all;tcp", "handle": 1, "expr": []},
+                {"comment": prefix + "dnat_in;tcp;5000", "handle": 2, "expr": []},
+            ],
+            Chain.PREROUTING: [{"comment": prefix + "dnat;tcp;59629", "handle": 3, "expr": []}],
+        }
+
+        def responder(command):
+            command = list(command)
+            if command[:4] == ["nft", "-j", "list", "chain"]:
+                chain_name = command[-1]
+                for chain, rules in listings.items():
+                    if chain.value == chain_name:
+                        return _proc(0, _nft_chain_listing(rules))
+                return _proc(0, _nft_chain_listing([]))
+            return _proc(0)
+
+        runner = FakeRunner()
+        runner.__call__ = None  # not used; responder drives it instead
+        recorded = []
+
+        def run(command):
+            recorded.append(list(command))
+            return responder(command)
+
+        backend = NftBackend(run=run)
+        removed = backend.delete_by_comment_prefix(prefix)
+
+        self.assertEqual(removed, 3)
+        deletes = [" ".join(c) for c in recorded if "delete" in c]
+        self.assertEqual(len(deletes), 3)
+        self.assertTrue(any("handle 3" in d for d in deletes), deletes)
+
+    def test_another_vms_rules_are_left_alone(self):
+        mine = "nodo;vm=mine;"
+        runner = FakeRunner(
+            {
+                ("nft", "-j", "list", "chain"): _proc(
+                    0,
+                    _nft_chain_listing(
+                        [
+                            {"comment": mine + "block_all;tcp", "handle": 1, "expr": []},
+                            {"comment": "nodo;vm=theirs;block_all;tcp", "handle": 2, "expr": []},
+                        ]
+                    ),
+                )
+            }
+        )
+        backend = NftBackend(run=runner)
+        backend.delete_by_comment_prefix(mine, chains=(Chain.FORWARD,))
+
+        deletes = [c for c in runner.commands() if "delete" in c]
+        self.assertEqual(len(deletes), 1)
+        self.assertIn("handle 1", deletes[0])
+
+
+class EnsureFirstTests(unittest.TestCase):
+    """The return-traffic accept is worthless unless it is actually first."""
+
+    COMMENT = "nodo;forward;related_established"
+
+    def _rule(self):
+        return Rule(
+            chain=Chain.FORWARD,
+            comment=self.COMMENT,
+            ct_states=("RELATED", "ESTABLISHED"),
+            at_head=True,
+        )
+
+    def test_left_alone_when_it_is_already_on_top(self):
+        runner = FakeRunner(
+            {
+                ("nft", "-j", "list", "chain"): _proc(
+                    0,
+                    _nft_chain_listing(
+                        [
+                            {"comment": self.COMMENT, "handle": 1, "expr": []},
+                            {"comment": "nodo;vm=x;block_all;tcp", "handle": 2, "expr": []},
+                        ]
+                    ),
+                )
+            }
+        )
+        backend = NftBackend(run=runner)
+        self.assertFalse(backend.ensure_first(self._rule()))
+        self.assertFalse([c for c in runner.commands() if "insert" in c or "delete" in c])
+
+    def test_relocated_when_something_sits_above_it(self):
+        runner = FakeRunner(
+            {
+                ("nft", "-j", "list", "chain"): _proc(
+                    0,
+                    _nft_chain_listing(
+                        [
+                            {"comment": "nodo;vm=x;block_all;tcp", "handle": 2, "expr": []},
+                            {"comment": self.COMMENT, "handle": 1, "expr": []},
+                        ]
+                    ),
+                )
+            }
+        )
+        backend = NftBackend(run=runner)
+        self.assertTrue(backend.ensure_first(self._rule()))
+        commands = runner.commands()
+        self.assertTrue(any("delete" in c and "handle 1" in c for c in commands), commands)
+        self.assertTrue(any("insert rule" in c for c in commands), commands)
+
+    def test_duplicates_are_collapsed_to_one(self):
+        runner = FakeRunner(
+            {
+                ("nft", "-j", "list", "chain"): _proc(
+                    0,
+                    _nft_chain_listing(
+                        [
+                            {"comment": self.COMMENT, "handle": 1, "expr": []},
+                            {"comment": self.COMMENT, "handle": 5, "expr": []},
+                        ]
+                    ),
+                )
+            }
+        )
+        backend = NftBackend(run=runner)
+        self.assertTrue(backend.ensure_first(self._rule()))
+        deletes = [c for c in runner.commands() if "delete" in c]
+        self.assertEqual(len(deletes), 2, deletes)
