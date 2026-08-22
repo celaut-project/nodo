@@ -159,6 +159,73 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         self.assertIsNone(manager.add_peer_instance(peer))
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM peer").fetchone()[0], 0)
 
+    def test_a_peer_declaring_our_signature_scheme_is_registered(self):
+        # The cryptography a node speaks, spelled out rather than assumed. Declaring
+        # it must be the same announcement as declaring nothing, or upgrading would
+        # split the network in two.
+        peer = self._peer([("10.0.0.1", 9999)])
+        ni.declare_signature_scheme(peer)
+        self.assertEqual(manager.add_peer_instance(peer), self.pubkey)
+
+    def test_a_peer_signing_with_another_scheme_is_refused(self):
+        # Same key, same curve, a valid signature over the same payload -- and still
+        # refused, because the peer says those bytes are something this node cannot
+        # verify. Accepting it would mean trusting a signature nobody checked.
+        peer = self._peer([("10.0.0.1", 9999)])
+        peer.signature_scheme.tags.extend(["secp256k1", "bip340"])
+        self.assertIsNone(manager.verified_peer_public_key(peer))
+        self.assertIsNone(manager.add_peer_instance(peer))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM peer").fetchone()[0], 0)
+
+    def test_a_shared_tag_is_not_a_shared_scheme(self):
+        # The tags are compared as a set, not by intersection: a BIP-340 signer names
+        # the same curve this node does and produces signatures it cannot read. The
+        # laxer match the rest of the codebase uses for ledgers would accept it.
+        peer = self._peer([("10.0.0.1", 9999)])
+        ni.declare_signature_scheme(peer)
+        peer.signature_scheme.tags.append("bip340")
+        self.assertIsNone(manager.verified_peer_public_key(peer))
+
+        del peer.signature_scheme.tags[:]
+        peer.signature_scheme.tags.extend(reversed(ni.SIGNATURE_SCHEME_TAGS))
+        self.assertEqual(
+            manager.verified_peer_public_key(peer),
+            self.pubkey,
+            "tag order is not part of what a descriptor says",
+        )
+
+    def test_rewording_the_description_is_not_a_different_scheme(self):
+        # prose is human text with no agreed wording; refusing a peer over it would
+        # make every edit to that sentence a network split.
+        peer = self._peer([("10.0.0.1", 9999)])
+        ni.declare_signature_scheme(peer)
+        peer.signature_scheme.prose = "however this peer prefers to word it"
+        self.assertEqual(manager.verified_peer_public_key(peer), self.pubkey)
+
+    def test_a_formal_specification_decides_over_the_tags(self):
+        # Nothing publishes one yet (ours is empty, like the Ergo ledger's), but when
+        # one side names an artifact the tags stop being what the answer rests on.
+        peer = self._peer([("10.0.0.1", 9999)])
+        ni.declare_signature_scheme(peer)
+        peer.signature_scheme.formal = b"some formal specification"
+        self.assertIsNone(manager.verified_peer_public_key(peer))
+
+    def test_the_scheme_is_a_descriptor_and_not_a_derived_id(self):
+        # Pins the shape: tags/prose/formal, compared, the way every other replaceable
+        # component in celaut is declared -- not a hash of any of it.
+        scheme = ni.node_signature_scheme()
+        self.assertEqual(tuple(scheme.tags), ni.SIGNATURE_SCHEME_TAGS)
+        self.assertEqual(scheme.prose, ni.SIGNATURE_SCHEME_PROSE)
+        self.assertEqual(scheme.formal, b"")
+        self.assertTrue(ni.same_signature_scheme(scheme, ni.node_signature_scheme()))
+
+    def test_an_announcement_without_a_scheme_still_verifies(self):
+        # What every node sent before the field existed. It has exactly one meaning,
+        # so it keeps it -- an empty descriptor is the default, never a wildcard.
+        peer = self._peer([("10.0.0.1", 9999)])
+        self.assertFalse(peer.HasField("signature_scheme"))
+        self.assertEqual(manager.verified_peer_public_key(peer), self.pubkey)
+
     def test_every_stored_peer_id_is_a_public_key(self):
         for signed in (False, True):
             manager.add_peer_instance(self._peer([("10.0.0.1", 9999)], signed=signed))

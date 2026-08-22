@@ -10,10 +10,11 @@ identity can never change underneath the peers that recorded it.
 """
 import string
 from functools import lru_cache
-from typing import Optional
+from typing import Final, Optional, Tuple
 
 import ecdsa
 
+from protos import celaut_pb2
 from src.reputation_system.bip_wallet_verification import (
     bip_schnorr_verify_proposition,
     derive_keypair,
@@ -31,6 +32,128 @@ _P2PK_PREFIX_HEX = "0008cd"
 # A SEC-compressed secp256k1 public key is 33 bytes -> 66 hex characters.
 _PUBLIC_KEY_HEX_LENGTH = 66
 _HEX_DIGITS = frozenset(string.hexdigits.lower())
+
+# The cryptography this node's identity signatures are in, announced on
+# ``Peer.signature_scheme`` and demanded of every peer it registers.
+#
+# A descriptor, not an id derived from one: celaut never names a tags/prose/formal
+# component by a hash of itself (compare ``envs.ergo_ledger``, whose ``formal`` is
+# even empty), and doing it here would invent a naming rule for signature schemes that
+# nothing else in the protocol follows. The descriptor IS the name, and deciding
+# whether two of them denote the same thing is a comparison -- one a service of the
+# shape ``(scheme_a, scheme_b) -> bool`` can eventually make better than this node
+# does (see :func:`same_signature_scheme`).
+#
+# ``formal`` is empty for the same reason it is empty on the Ergo ledger: there is no
+# machine-readable artifact to point at yet. When there is one -- a specification
+# document, or the content hash of a verifier service -- it goes here and becomes the
+# part that decides, which is why it is compared first.
+SIGNATURE_SCHEME_TAGS: Final[Tuple[str, ...]] = (
+    "secp256k1", "schnorr", "ergo", "blake2b256",
+)
+# Prose is read by whoever receives the announcement, so it states the scheme itself
+# and nothing about this implementation of it: a reader holding only the Peer message
+# -- off a gRPC response, or off an Ergo register -- cannot follow a path into some
+# repository, and naming other projects only moves the question along ("and what is
+# that?"). Same reason envs.PROSE describes the Ergo system and not nodo's client for
+# it. Until `formal` points at a specification this text IS the specification, so it
+# says everything a verification has to be written from and stands on its own.
+SIGNATURE_SCHEME_PROSE: Final[str] = (
+    "Schnorr signatures over secp256k1, with generator G and group order n. "
+    "Private key: a scalar s in [1, n). Public key: the point P = s*G, encoded as its "
+    "33-byte SEC-compressed form, lowercase hex. Message: the payload bytes, signed "
+    "as given, with no pre-hash. Signature: the 65 bytes a || z, lowercase hex, where "
+    "k is a nonce drawn uniformly from [1, n) for each signature, a is the 33-byte "
+    "SEC-compressed form of k*G, and z is the 32-byte big-endian encoding of "
+    "(k + e*s) mod n. Challenge: e = blake2b256(a || m || P), its 32 bytes read as a "
+    "two's-complement big-endian integer, so a digest whose first byte is >= 0x80 "
+    "denotes a negative e. Valid if and only if z*G == a + e*P. A signer redraws k "
+    "until the first byte of both e and z is < 0x80: for z that is required, since a "
+    "set top bit would make it a negative scalar, and for e it makes the "
+    "two's-complement and unsigned readings coincide, so the signature verifies under "
+    "either. The keypair is the one an Ergo P2PK proposition names, and this is the "
+    "sigma protocol those proofs are built on."
+)
+SIGNATURE_SCHEME_FORMAL: Final[bytes] = b""
+
+
+def node_signature_scheme():
+    """This node's own scheme descriptor, as a fresh ``Peer.SignatureScheme``.
+
+    Built per call rather than kept as a module constant so no caller can mutate the
+    node's own declaration through the object it was handed.
+    """
+    return celaut_pb2.Peer.SignatureScheme(
+        tags=list(SIGNATURE_SCHEME_TAGS),
+        prose=SIGNATURE_SCHEME_PROSE,
+        formal=SIGNATURE_SCHEME_FORMAL,
+    )
+
+
+def declare_signature_scheme(peer, *, prose: bool = True) -> None:
+    """Declare on ``peer`` which cryptography its ``public_key``/``signature`` are in.
+
+    Called wherever this node signs an announcement: on the wire it is what lets a
+    reader that speaks something else say so, instead of reporting a peer whose
+    signature simply "does not verify".
+
+    ``prose=False`` leaves out the description, which costs nothing over a gRPC
+    response but is a kilobyte of an Ergo register a box pays storage rent on forever
+    -- the whole budget, on its own (see
+    ``tests/reputation_system/test_onchain_peer_object.py``). The tags stay:
+    while ``formal`` is empty they are the whole machine-readable half of the
+    declaration, and dropping them would leave a descriptor that says nothing.
+    """
+    peer.signature_scheme.CopyFrom(node_signature_scheme())
+    if not prose:
+        peer.signature_scheme.ClearField("prose")
+
+
+def same_signature_scheme(a, b) -> bool:
+    """Whether two scheme descriptors denote the same cryptography.
+
+    The comparison a node makes on its own, and the one place a
+    ``(scheme_a, scheme_b) -> bool`` equivalence service would be called from instead
+    -- deciding that two differently-worded descriptors mean the same scheme is
+    exactly the judgement such a service exists to make, and until one is asked this
+    node has to answer conservatively.
+
+    Follows the ledger ladder (``sql_connection.get_ledger_if_exists``): ``formal``
+    first, as the strictest and most machine-readable identity, and the tags only when
+    neither side has one. The strictness differs, though, and deliberately -- that
+    ladder decides whether to store a second row, this one decides whether to trust a
+    signature:
+
+    * the tags must match as a **set**, never by intersection. A peer declaring
+      ``["secp256k1", "bip340"]`` shares a tag with this node and signs something this
+      node cannot read -- same curve, different scheme -- so "at least one tag in
+      common" is exactly the answer that must not be given here.
+    * ``prose`` is not compared at all. It is human text this node has no way to
+      judge, and making it decisive would refuse a peer for rewording a sentence.
+    """
+    formal_a, formal_b = bytes(a.formal), bytes(b.formal)
+    if formal_a or formal_b:
+        return formal_a == formal_b
+    return set(a.tags) == set(b.tags)
+
+
+def speaks_our_signature_scheme(peer) -> bool:
+    """Whether ``peer``'s announcement is signed with the one scheme this node verifies.
+
+    The node implements no scheme negotiation and no second scheme: this is the whole
+    of its handling of ``Peer.signature_scheme``. It has to be checked *before* the
+    key and the signature are read, because what those two fields mean -- their
+    length, their encoding, the verification procedure -- is exactly what the scheme
+    decides.
+
+    A descriptor with nothing in it is the pre-field default rather than a wildcard:
+    back when the field did not exist there was only one scheme an announcement could
+    mean, so it resolves to this one, and a peer meaning anything else has to say so.
+    """
+    scheme = peer.signature_scheme
+    if not scheme.tags and not scheme.prose and not scheme.formal:
+        return True
+    return same_signature_scheme(scheme, node_signature_scheme())
 
 
 def normalize_public_key_hex(public_key_hex: str) -> Optional[str]:
@@ -154,6 +277,14 @@ def canonical_peer_content_digest(peer) -> str:
     not guarantee to be canonical (field order, unknown fields, non-minimal varints).
     Every repeated element is sorted so the digest does not depend on the order a node
     happened to enumerate things in.
+
+    ``signature_scheme`` is deliberately NOT covered, and that holds only while
+    :func:`speaks_our_signature_scheme` accepts exactly one scheme: altering the field
+    can then turn a valid announcement into a refused one but never into an accepted
+    one, which anyone able to alter it could do by corrupting any other byte anyway.
+    Accepting a second scheme changes that -- a relay could re-label a signature as
+    belonging to whichever accepted scheme is weakest -- so the scheme id has to enter
+    this digest in the same commit that accepts one.
     """
     uris = sorted(_canonical_uri(uri) for uri in peer.uri)
     contracts = sorted(_canonical_contract(gp) for gp in peer.payment_contracts)

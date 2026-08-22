@@ -258,9 +258,10 @@ def verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
     slots, not just the addresses, so a relayed message cannot have its payment
     contract swapped out and still verify.
 
-    Returns None for a peer with no public_key/signature at all, None for a signature
-    that does not verify, and None for a non-canonical public key. There is no fallback
-    behind it: a peer that cannot be identified this way is refused (see
+    Returns None for a peer with no public_key/signature at all, None for a peer
+    signing with cryptography this node does not speak, None for a signature that does
+    not verify, and None for a non-canonical public key. There is no fallback behind
+    it: a peer that cannot be identified this way is refused (see
     :func:`add_peer_instance`).
 
     Public, not private, because that refusal is now an outcome callers have to report
@@ -275,8 +276,25 @@ def verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
         canonical_peer_content_digest,
         canonical_peer_payload,
         normalize_public_key_hex,
+        speaks_our_signature_scheme,
         verify_peer_payload,
     )
+
+    if not speaks_our_signature_scheme(peer):
+        # The peer says it signs with cryptography other than this node's, so nothing
+        # below applies: the key length, the encodings and the verification procedure
+        # are all the scheme's to define. Refusing here rather than letting the
+        # signature check fail is the difference between "we do not speak that" and
+        # "that peer is broken or lying" -- and the peer said which one it is, so the
+        # log can too. Adding a scheme means implementing its verifier, not relaxing
+        # this (see the Peer.signature_scheme comment in celaut.proto).
+        scheme = peer.signature_scheme
+        log.LOGGER(
+            f"Peer signs with scheme [{' '.join(scheme.tags) or 'no tags'}]"
+            f"{' formal=' + bytes(scheme.formal).hex() if scheme.formal else ''}, "
+            "which this node does not speak; ignoring it."
+        )
+        return None
 
     public_key = normalize_public_key_hex(peer.public_key)
     if public_key is None or public_key != peer.public_key:
