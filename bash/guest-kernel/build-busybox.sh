@@ -4,10 +4,10 @@
 #   bash/guest-kernel/build-busybox.sh <arm64|x86_64> <output-dir>
 #
 # Produces <output-dir>/busybox-linux-{arm64,amd64} plus its .sha256, published
-# alongside the guest kernel. The initramfs is still built on the host (its /init
-# is part of the contract with src/virtualizers/ch/execute.py and must travel with
-# the code), but its binary no longer does: distros compile different applet sets
-# and versions, so the guest userspace used to differ per node.
+# alongside the guest kernel and the initramfs that build-initramfs.sh packs this
+# binary into. Shipping it removed the last host-provided input to the guest:
+# distros compile different applet sets and versions, so the guest userspace used
+# to differ per node.
 #
 # Runs unchanged in CI and by hand. Native builds only.
 set -euo pipefail

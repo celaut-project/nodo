@@ -1,3 +1,4 @@
+import gzip
 import subprocess
 import tempfile
 import unittest
@@ -59,30 +60,65 @@ class CloudHypervisorExecuteHelpersTests(unittest.TestCase):
         with self.assertRaisesRegex(ch_execute.CHExecuteError, "not CLI arguments"):
             ch_execute._validate_entrypoint_strict(service)
 
+    def _write_initramfs(self, tmp_path, *, marker="nodo-ch-initramfs:v1", entries=True):
+        # A real gzip'd newc cpio archive, built with cpio itself, rather than a
+        # mock of the listing: the validator's whole job is to read the format that
+        # bash/build_ch_initramfs.sh emits and that the kernel consumes, so mocking
+        # the reader would leave exactly that unverified.
+        root = Path(tmp_path) / "root"
+        (root / "bin").mkdir(parents=True)
+        (root / "etc").mkdir(parents=True)
+        if entries:
+            (root / "init").write_text("#!/bin/sh\n", encoding="utf-8")
+            (root / "bin" / "busybox").write_bytes(b"busybox")
+        if marker is not None:
+            (root / "etc" / "nodo-ch-initramfs.marker").write_text(
+                f"{marker}\narch:linux/arm64\n", encoding="utf-8"
+            )
+
+        names = b"\0".join(
+            str(p.relative_to(root)).encode() for p in sorted(root.rglob("*"))
+        ) + b"\0"
+        archive = subprocess.run(
+            ["cpio", "--null", "-o", "--format=newc", "--quiet"],
+            input=names,
+            cwd=root,
+            capture_output=True,
+            check=True,
+        ).stdout
+
+        path = Path(tmp_path) / "initramfs"
+        path.write_bytes(gzip.compress(archive))
+        return str(path)
+
     def test_validate_custom_initramfs_accepts_required_entries(self):
-        completed = subprocess.CompletedProcess(
-            args=["lsinitramfs", "/tmp/initramfs"],
-            returncode=0,
-            stdout="init\nbin/busybox\netc/nodo-ch-initramfs.marker\n",
-            stderr="",
-        )
-        with patch.object(ch_execute, "_ensure_command_available"), patch.object(
-            ch_execute, "_run", return_value=completed
-        ):
-            ch_execute._validate_custom_initramfs("/tmp/initramfs")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ch_execute._validate_custom_initramfs(self._write_initramfs(tmp_dir))
 
     def test_validate_custom_initramfs_rejects_missing_marker(self):
-        completed = subprocess.CompletedProcess(
-            args=["lsinitramfs", "/tmp/initramfs"],
-            returncode=0,
-            stdout="init\nbin/busybox\n",
-            stderr="",
-        )
-        with patch.object(ch_execute, "_ensure_command_available"), patch.object(
-            ch_execute, "_run", return_value=completed
-        ):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            initramfs_path = self._write_initramfs(tmp_dir, marker=None)
             with self.assertRaisesRegex(ch_execute.CHExecuteError, "Missing required custom entries"):
-                ch_execute._validate_custom_initramfs("/tmp/initramfs")
+                ch_execute._validate_custom_initramfs(initramfs_path)
+
+    def test_validate_custom_initramfs_rejects_a_contract_version_skew(self):
+        # The initramfs is a pinned release asset and /init's half of its contract
+        # with execute.py is not, so the pair can be bumped out of step. Without
+        # this check the guest boots and parks in /init's fatal() loop instead.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            initramfs_path = self._write_initramfs(
+                tmp_dir, marker="nodo-ch-initramfs:v99"
+            )
+            with self.assertRaisesRegex(ch_execute.CHExecuteError, "contract version"):
+                ch_execute._validate_custom_initramfs(initramfs_path)
+
+    def test_validate_custom_initramfs_rejects_a_non_gzip_image(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "initramfs"
+            path.write_bytes(b"not gzip at all")
+            with self.assertRaisesRegex(ch_execute.CHExecuteError, "gzip"):
+                ch_execute._validate_custom_initramfs(str(path))
+
 
     def test_resolve_guest_config_targets_is_root_config_path(self):
         service = celaut.Service()
