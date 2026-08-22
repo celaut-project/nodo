@@ -611,7 +611,7 @@ if __name__ == '__main__':
                 remove(service=sys.argv[2])
 
             case "inspect":
-                from src.commands.inspect import inspect
+                from src.commands.inspect_service import inspect
                 inspect(service=sys.argv[2])
 
             case "services":

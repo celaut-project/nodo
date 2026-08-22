@@ -1,3 +1,12 @@
+"""``nodo inspect``: print what a packaged service declares.
+
+Named ``inspect_service`` rather than ``inspect`` on purpose. A module called
+``inspect`` here shadows the standard library module of that name for any script
+run from inside this directory -- and one is: ``completion.py``, which the shell
+invokes on every Tab keypress. Anything that then imported ``inspect``, directly
+or through a stdlib module that does (``dataclasses`` does), got this file and a
+``bee_rpc`` ImportError instead. The CLI command is still ``nodo inspect``.
+"""
 import os
 from bee_rpc.utils import getsize
 from src.commands.__by_tag import get_id

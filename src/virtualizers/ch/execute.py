@@ -41,14 +41,15 @@ from src.virtualizers.ch.virtiofs import (
     shared_fs_base_dir,
     GUEST_MOUNT_PLAN_PATH,
 )
-from src.utils.shared_filesystems import exported_dirs, share_id
 from src.virtualizers.entry_path import resolve_entrypoint_path
+from src.utils.firewall import policy as fw_policy
 from src.virtualizers.firewall import (
     TransportProtocol,
     allow_connection as vm_allow_connection,
     allow_connection_to_instance as vm_allow_connection_to_instance,
     block_all as vm_block_all,
     allow_all_egress as vm_allow_all_egress,
+    remove_vm_rules as vm_remove_vm_rules,
     resolve_slot_transport_protocols,
 )
 
@@ -309,8 +310,16 @@ def _network_preflight() -> ipaddress.IPv4Network:
             f"Unsupported NETWORK_MODE '{NETWORK_MODE}'. This phase supports only 'tap_bridge'."
         )
 
-    for command in ("ip", "sysctl", "iptables", "debugfs", "ping"):
+    for command in ("ip", "sysctl", "debugfs", "ping"):
         _ensure_command_available(command)
+
+    # Either netfilter front-end will do; the backend picks whichever this host
+    # actually speaks, so demanding iptables specifically would fail an
+    # nftables-only host that works perfectly well.
+    if not any(shutil.which(command) for command in ("nft", "iptables")):
+        raise CHExecuteError(
+            "No netfilter tool found in PATH: install nftables (preferred) or iptables."
+        )
 
     network = _ip_network()
     prefix_len = network.prefixlen
@@ -330,52 +339,20 @@ def _network_preflight() -> ipaddress.IPv4Network:
 
     return network
 
-# TODO Use firewall.py
 def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
-    # The MASQUERADE rule is shared across all VMs in the NETWORK_SUBNET.
-    # It should NOT be added to 'cleanup_rules' or removed when shutting down a single VM,
-    # as doing so could break connectivity for other active machines.
-    # Only DNAT / port-forwarding rules are VM-specific and safe to clean up
-    # when the instance terminates.
-    subnet = network.with_prefixlen
-    check_cmd = [
-        "iptables",
-        "-t",
-        "nat",
-        "-C",
-        "POSTROUTING",
-        "-s",
-        subnet,
-        "!",
-        "-d",
-        subnet,
-        "-j",
-        "MASQUERADE",
-        "-m", "comment",
-        "--comment", f"nodo;masquerade;subnet={subnet}",
-    ]
-    exists = _run(check_cmd, check=False)
-    if exists.returncode == 0:
-        return
+    """Source-NAT the guest subnet on its way off this host.
 
-    _run(
-        [
-            "iptables",
-            "-t",
-            "nat",
-            "-A",
-            "POSTROUTING",
-            "-s",
-            subnet,
-            "!",
-            "-d",
-            subnet,
-            "-j",
-            "MASQUERADE",
-            "-m", "comment",
-            "--comment", f"nodo;masquerade;subnet={subnet}",
-        ]
-    )
+    Shared by every VM in NETWORK_SUBNET, so it is never part of a single
+    instance's teardown: removing it would cut connectivity for the others.
+    """
+    from src.virtualizers.ch.firewall import backend
+
+    rule = fw_policy.masquerade_rule(network.with_prefixlen)
+    try:
+        if backend().ensure(rule):
+            log.LOGGER(f"[CH][FW] Masquerading {network.with_prefixlen} on egress.")
+    except Exception as e:
+        raise CHExecuteError(f"Could not ensure the guest subnet masquerade: {e}") from e
 
 
 def _create_tap(vmachine_id: str) -> str:
@@ -487,101 +464,42 @@ def _run_debugfs_write(image_path: Path, host_file: Path, guest_target: str) -> 
     _run(["debugfs", "-w", "-R", write_cmd, str(image_path)])
 
 
-# TODO Use firewall.py
-def _add_dnat_rule(vmachine_id: str, protocol: str, external_port: int, vm_ip: str, internal_port: int) -> List[List[str]]:
+def _add_dnat_rule(
+    vmachine_id: str, protocol: str, external_port: int, vm_ip: str, internal_port: int
+) -> None:
+    """Publish a guest port on the host.
+
+    PREROUTING does the translation; the FORWARD pair lets the translated packet
+    and its replies past the guest policy. OUTPUT is not involved because it only
+    sees traffic the host itself originates.
+
+    Nothing is returned: the rules carry this VM's comment prefix, so teardown
+    deletes them by prefix instead of replaying the arguments that created them.
     """
-    Forwards a host port to a VM.
+    from src.virtualizers.ch.firewall import backend
 
-    - PREROUTING: redirects incoming traffic from outside.
-    - FORWARD: allows new connections to the VM and the return of the session.
-    - OUTPUT is not used because it only affects traffic originating locally on the host.
-
-    Note:
-    - Each iptables rule includes a comment with the VM ID (`vmachine_id`) to allow
-      filtering, coloring, or later removal specific to this VM.
-    """
-    protocol = protocol.lower().strip()
-    if protocol not in {"tcp", "udp"}:
-        raise ValueError(f"Unsupported protocol: {protocol}")
-
-    external_port_s = str(int(external_port))
-    internal_port_s = str(int(internal_port))
-
-    # Add DNAT and FORWARD rules with VM-specific comments for easier identification
-    add_commands = [
-        [
-            "iptables", "-t", "nat", "-A", "PREROUTING",
-            "-p", protocol,
-            "--dport", external_port_s,
-            "-j", "DNAT",
-            "--to-destination", f"{vm_ip}:{internal_port_s}",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-        [
-            "iptables", "-A", "FORWARD",
-            "-p", protocol,
-            "-d", vm_ip,
-            "--dport", internal_port_s,
-            "-m", "conntrack",
-            "--ctstate", "NEW,ESTABLISHED,RELATED",
-            "-j", "ACCEPT",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-        [
-            "iptables", "-A", "FORWARD",
-            "-p", protocol,
-            "-s", vm_ip,
-            "--sport", internal_port_s,
-            "-m", "conntrack",
-            "--ctstate", "ESTABLISHED,RELATED",
-            "-j", "ACCEPT",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-    ]
-
-    for command in add_commands:
-        _run(command)
-
-    # Return the commands to remove the rules later (also including the comment)
-    return [
-        [
-            "iptables", "-t", "nat", "-D", "PREROUTING",
-            "-p", protocol,
-            "--dport", external_port_s,
-            "-j", "DNAT",
-            "--to-destination", f"{vm_ip}:{internal_port_s}",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-        [
-            "iptables", "-D", "FORWARD",
-            "-p", protocol,
-            "-d", vm_ip,
-            "--dport", internal_port_s,
-            "-m", "conntrack",
-            "--ctstate", "NEW,ESTABLISHED,RELATED",
-            "-j", "ACCEPT",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-        [
-            "iptables", "-D", "FORWARD",
-            "-p", protocol,
-            "-s", vm_ip,
-            "--sport", internal_port_s,
-            "-m", "conntrack",
-            "--ctstate", "ESTABLISHED,RELATED",
-            "-j", "ACCEPT",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-    ]
+    active = backend()
+    for rule in fw_policy.port_forward_rules(
+        vmachine_id=vmachine_id,
+        vm_ip=vm_ip,
+        protocol=protocol,
+        external_port=external_port,
+        internal_port=internal_port,
+    ):
+        try:
+            active.ensure(rule)
+        except Exception as e:
+            raise CHExecuteError(
+                f"Could not publish {protocol} port {external_port} for {vmachine_id}: {e}"
+            ) from e
 
 
 def _remove_rules(commands: List[List[str]]) -> None:
+    """Replay the removal commands stored by pre-nftables versions of nodo.
+
+    Kept for runtime state written before rules were deleted by comment. New
+    instances persist an empty list and are torn down by comment prefix instead.
+    """
     for command in commands:
         _run(command, check=False)
 
@@ -1240,14 +1158,13 @@ def execute(
                     )
                     continue
 
-                removal_commands = _add_dnat_rule(
+                _add_dnat_rule(
                     vmachine_id=vmachine_id,
                     protocol=protocol.value,
                     external_port=external_port,
                     vm_ip=vm_ip,
                     internal_port=internal_port,
                 )
-                cleanup_rules.extend(removal_commands)
                 dnat_rules_state.append(
                     {
                         "protocol": protocol.value,
@@ -1276,6 +1193,7 @@ def execute(
                 "entrypoint": resolved_entrypoint,
                 "dnat_rules": dnat_rules_state,
                 "cleanup_rules": cleanup_rules,
+                "rule_comment_prefix": fw_policy.vm_comment_prefix(vmachine_id),
                 "dns_allowlist": [
                     {"domain": domain, "ip": ip}
                     for domain, ip in domain_records
@@ -1314,6 +1232,11 @@ def execute(
         if cleanup_rules:
             log.LOGGER(f"[CH][{vmachine_id}] removing {len(cleanup_rules)} cleanup firewall rules")
         _remove_rules(cleanup_rules)
+        # Whatever was applied before the failure carries this VM's prefix.
+        try:
+            vm_remove_vm_rules(vmachine_id)
+        except Exception as e:
+            log.LOGGER(f"[CH][{vmachine_id}] could not remove this VM's firewall rules: {e}")
 
         if process and process.poll() is None:
             log.LOGGER(f"[CH][{vmachine_id}] terminating cloud-hypervisor process pid={process.pid}")

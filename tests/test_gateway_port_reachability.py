@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from src.utils.firewall.backends import ForeignRejector, InputRule, NftBackend
+from src.utils.firewall.rules import Chain
 from src.utils.firewall.gateway import (
     GatewayPortUnavailable,
     ensure_gateway_port_open,
@@ -136,12 +137,13 @@ class ProbePrivilegeTests(unittest.TestCase):
 @patch("src.utils.firewall.gateway.os.geteuid", return_value=0)
 class EnsureGatewayPortOpenTests(unittest.TestCase):
     def _backend(self, existing=()):
+        """A backend whose primitives are recorded rather than executed."""
         backend = NftBackend(run=FakeRunner())
-        backend.list_input_accepts = lambda prefix: [
-            rule for rule in existing if rule.comment.startswith(prefix)
+        backend.list_rules = lambda chain, comment_prefix="": [
+            rule for rule in existing if rule.comment.startswith(comment_prefix)
         ]
-        backend.add_input_accept = lambda **kwargs: self.added.append(kwargs)
-        backend.remove_input_accept = lambda rule: self.removed.append(rule)
+        backend.add = lambda rule: self.added.append(rule)
+        backend.delete = lambda applied: self.removed.append(applied)
         backend.foreign_input_rejectors = lambda: self.rejectors
         return backend
 
@@ -198,7 +200,10 @@ class EnsureGatewayPortOpenTests(unittest.TestCase):
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
     def test_a_rule_for_an_old_port_is_pruned(self, mock_probe, _euid):
         mock_probe.return_value = ProbeResult(True, "connected")
-        stale = InputRule(comment=gateway_comment(59110), port=59110, protocol="tcp", handle=4)
+        stale = InputRule(
+            chain=Chain.INPUT, comment=gateway_comment(59110), port=59110,
+            protocol="tcp", handle=4,
+        )
 
         ensure_gateway_port_open(
             port=PORT,
@@ -209,12 +214,15 @@ class EnsureGatewayPortOpenTests(unittest.TestCase):
         )
 
         self.assertEqual([rule.comment for rule in self.removed], [stale.comment])
-        self.assertEqual([kwargs["port"] for kwargs in self.added], [PORT])
+        self.assertEqual([rule.dport for rule in self.added], [PORT])
 
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
     def test_an_existing_rule_is_not_duplicated(self, mock_probe, _euid):
         mock_probe.return_value = ProbeResult(True, "connected")
-        current = InputRule(comment=gateway_comment(PORT), port=PORT, protocol="tcp", handle=9)
+        current = InputRule(
+            chain=Chain.INPUT, comment=gateway_comment(PORT), port=PORT,
+            protocol="tcp", handle=9,
+        )
 
         ensure_gateway_port_open(
             port=PORT,
@@ -232,7 +240,7 @@ class EnsureGatewayPortOpenTests(unittest.TestCase):
             port=PORT, backend=self._backend(), verify=False
         )
         self.assertIsNone(result.reachable)
-        self.assertEqual([kwargs["port"] for kwargs in self.added], [PORT])
+        self.assertEqual([rule.dport for rule in self.added], [PORT])
 
 
 class EnsureGatewayPortPrivilegeTests(unittest.TestCase):
