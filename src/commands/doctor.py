@@ -9,6 +9,12 @@ import tempfile
 import time
 from pathlib import Path
 
+# The only project import here, and safe because that module is stdlib-only too:
+# doctor has to stay runnable on a checkout too broken to import the node, which is
+# exactly when it is worth running. Anything that pulls in config or the logger
+# (which creates the storage directory on import) does not belong in this file.
+from src.virtualizers.ch import initramfs as ch_initramfs
+
 
 def _parse_unit_user(unit_content: str) -> str:
     match = re.search(r"^\s*User\s*=\s*(\S+)\s*$", unit_content, flags=re.MULTILINE)
@@ -393,42 +399,39 @@ def _doctor_initramfs(initramfs_paths: dict, host_arch_tag: str):
     size = os.path.getsize(initramfs_path)
     print(f"[OK] Initramfs found: {initramfs_path} ({size} bytes)", flush=True)
 
-    # Verify contents with lsinitramfs if available
-    lsinitramfs = shutil.which("lsinitramfs")
-    if lsinitramfs:
-        try:
-            result = subprocess.run(
-                [lsinitramfs, initramfs_path], capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                entries = {
-                    line.strip().lstrip("./")
-                    for line in (result.stdout or "").splitlines()
-                    if line.strip()
-                }
-                required = {"init", "bin/busybox", "etc/nodo-ch-initramfs.marker"}
-                missing = sorted(required - entries)
-                if missing:
-                    print(
-                        f"[FAIL] Initramfs is missing required entries: {missing}",
-                        flush=True,
-                    )
-                    print(
-                        "  Suggestion: Re-run the installer to regenerate the initramfs.",
-                        flush=True,
-                    )
-                else:
-                    print("[OK] Initramfs contains all required entries (init, busybox, marker).", flush=True)
-            else:
-                print(
-                    f"[WARN] lsinitramfs returned error ({result.returncode}). "
-                    "Cannot verify initramfs contents.",
-                    flush=True,
-                )
-        except Exception as e:
-            print(f"[WARN] Could not inspect initramfs: {e}", flush=True)
+    # Read through src.virtualizers.ch.initramfs so that doctor checks exactly what
+    # execute.py refuses to launch on -- including the contract version, which is
+    # the one failure a pinned release asset can develop on its own and the one an
+    # operator has no other way to see before a launch hangs.
+    try:
+        entries, version = ch_initramfs.read(initramfs_path)
+    except ch_initramfs.InitramfsReadError as e:
+        print(f"[WARN] Could not inspect initramfs: {e}", flush=True)
+        return initramfs_path
+
+    missing = ch_initramfs.missing_entries(entries)
+    if missing:
+        print(f"[FAIL] Initramfs is missing required entries: {missing}", flush=True)
+        print(
+            "  Suggestion: Re-run the installer to regenerate the initramfs.",
+            flush=True,
+        )
     else:
-        print("[WARN] lsinitramfs not found; skipping content verification.", flush=True)
+        print("[OK] Initramfs contains all required entries (init, busybox, marker).", flush=True)
+
+    if version == ch_initramfs.CONTRACT_VERSION:
+        print(f"[OK] Initramfs contract version is {version}.", flush=True)
+    else:
+        print(
+            f"[FAIL] Initramfs speaks contract version '{version or '<unknown>'}', "
+            f"but this checkout needs '{ch_initramfs.CONTRACT_VERSION}'. "
+            "Services will refuse to launch.",
+            flush=True,
+        )
+        print(
+            "  Suggestion: Re-run the installer to fetch the initramfs matching this code.",
+            flush=True,
+        )
 
     return initramfs_path
 

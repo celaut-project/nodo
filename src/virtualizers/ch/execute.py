@@ -26,6 +26,10 @@ from src.virtualizers.ch.cgroups import apply_cpu_limit, apply_memory_limit, ens
 # The guest floors live in `limits`: the pricing side applies the same ones to quote an
 # instance before it exists, so both sides read one definition.
 from src.virtualizers.ch import limits
+# What a nodo initramfs is (required entries, marker, contract version) lives in
+# one place, because doctor.py reports on the same image this module refuses to
+# launch on.
+from src.virtualizers.ch import initramfs as ch_initramfs
 from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.ch.virtiofs import (
     attach_virtiofs_backends,
@@ -173,30 +177,33 @@ def _load_bundle(service_id: str, arch: str) -> Dict[str, str]:
 
 
 def _validate_custom_initramfs(initramfs_path: str) -> None:
-    _ensure_command_available("lsinitramfs")
-    result = _run(["lsinitramfs", initramfs_path], check=False)
-    if result.returncode != 0:
+    try:
+        entries, version = ch_initramfs.read(initramfs_path)
+    except ch_initramfs.InitramfsReadError as e:
         raise CHExecuteError(
-            f"Unable to inspect initramfs with lsinitramfs: {initramfs_path}. "
-            f"stderr={((result.stderr or '').strip() or '<empty>')}"
-        )
+            f"Unable to inspect CH initramfs {initramfs_path}: {e}"
+        ) from e
 
-    entries = {
-        line.strip().lstrip("./")
-        for line in (result.stdout or "").splitlines()
-        if line.strip()
-    }
-    required_entries = {
-        "init",
-        "bin/busybox",
-        "etc/nodo-ch-initramfs.marker",
-    }
-    missing = sorted(required_entries.difference(entries))
+    missing = ch_initramfs.missing_entries(entries)
     if missing:
         raise CHExecuteError(
             "Invalid Cloud Hypervisor initramfs. Missing required custom entries: "
             f"{missing}. initramfs={initramfs_path}. Re-run installation to regenerate "
             "the custom CH initramfs."
+        )
+
+    # The image is pinned by digest, while /init's half of its contract with this
+    # module lives in the code, so the two can be bumped out of step. Checking the
+    # version turns that skew into one precise error here, instead of a guest that
+    # boots and then parks forever in /init's fatal() loop while the launch times
+    # out with nothing useful to show.
+    if version != ch_initramfs.CONTRACT_VERSION:
+        raise CHExecuteError(
+            "Cloud Hypervisor initramfs speaks contract version "
+            f"'{version or '<unknown>'}', but this node needs "
+            f"'{ch_initramfs.CONTRACT_VERSION}'. initramfs={initramfs_path}. The "
+            "pinned guest asset and this checkout disagree: re-run installation to "
+            "fetch the initramfs matching this code."
         )
 
 

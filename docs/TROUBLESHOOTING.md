@@ -44,9 +44,11 @@ virtualization (`/dev/kvm`). It is commonly unavailable when:
 - **Guest kernel (`vmlinuz`) / initramfs presence** — the guest kernel must
   exist and be ≥1 MiB; the initramfs must exist and contain `init`,
   `bin/busybox`, and the `etc/nodo-ch-initramfs.marker` marker (verified with
-  `lsinitramfs`). To rebuild the initramfs, re-run the installer, or invoke the
-  builder with its positional arguments, e.g.
-  `sudo bash /nodo/bash/build_ch_initramfs.sh /nodo linux/amd64 /nodo/cloud_hypervisor/initramfs/linux/amd64/initramfs`.
+  `cpio`). Both are release assets, so re-running the installer downloads them
+  again. To audit the installed initramfs instead, rebuild it from this checkout
+  — `bash/build_ch_initramfs.sh` is byte-reproducible, so the digests must match:
+  `bash /nodo/bash/build_ch_initramfs.sh /nodo linux/arm64 /tmp/initramfs`
+  (`linux/amd64` on x86_64), then compare `sha256sum` with the installed file.
 - **KVM smoke test** — launches a minimal VM; a failure here means CH cannot
   execute vCPUs on this kernel even though the earlier checks passed (often a
   container/nested-virt limitation, or a bleeding-edge host kernel that `doctor`
@@ -56,8 +58,8 @@ virtualization (`/dev/kvm`). It is commonly unavailable when:
 
 ## Guest kernel missing or rejected by Cloud Hypervisor
 
-**Symptom:** the installer fails downloading the guest kernel or busybox, or CH
-refuses to boot the kernel (`KernelLoad(Pe(...))`, `UefiLoad(UefiTooBig)`).
+**Symptom:** the installer fails downloading the guest kernel, initramfs or
+busybox, or CH refuses to boot the kernel (`KernelLoad(Pe(...))`, `UefiLoad(UefiTooBig)`).
 
 **Why:** the guest kernel is a Nodo release asset (`vmlinuz-linux-arm64` /
 `vmlinuz-linux-amd64` under the `guest-kernel-vN` tag), built by
@@ -72,17 +74,41 @@ refuses to boot the kernel (`KernelLoad(Pe(...))`, `UefiLoad(UefiTooBig)`).
   `SHA256SUMS` published in the release, which sits in the same mutable place as the
   artifact it vouches for.
 - To pin a different kernel release, change `GUEST_KERNEL_VERSION` in `install.sh`
-  **and** update `TAG` plus all four digests in
-  `bash/guest-kernel/SHA256SUMS.pinned`; the installer refuses to run when the two
+  **and** update `TAG` plus all six digests (kernel, initramfs and busybox, per arch)
+  in `bash/guest-kernel/SHA256SUMS.pinned`; the installer refuses to run when the two
   disagree. Cross-check the digests against the CI artifacts of the run that built
   them (`gh run download <run-id>`), which is a copy independent of the release.
 - To build them locally: `bash bash/guest-kernel/build.sh <arm64|x86_64> <out-dir>`
   (native builds only; needs ~15 GB of scratch space in `TMPDIR`) and
-  `bash bash/guest-kernel/build-busybox.sh <arm64|x86_64> <out-dir>`.
+  `bash bash/guest-kernel/build-busybox.sh <arm64|x86_64> <out-dir>`. The
+  initramfs is `bash bash/build_ch_initramfs.sh <MAIN_DIR> <arch-tag> <out-file>`,
+  which needs the provisioned busybox and reproduces the published image byte for
+  byte.
 - The same release carries `busybox-linux-{arm64,amd64}`, the static binary that is
-  the guest's entire userspace. `build_ch_initramfs.sh` uses the provisioned one at
-  `<MAIN_DIR>/cloud_hypervisor/busybox/<arch>/busybox` and only falls back to the
-  host's if it is missing.
+  the guest's entire userspace, and `initramfs-linux-{arm64,amd64}`, the image CI
+  builds from it with `bash/build_ch_initramfs.sh`. busybox is installed at
+  `<MAIN_DIR>/cloud_hypervisor/busybox/<arch>/busybox`, which is the only source
+  the builder accepts; it falls back to the host's busybox only when
+  `NODO_ALLOW_HOST_BUSYBOX=1` is set, which the installer never does and which
+  produces a dev-only image no node runs.
+
+## Initramfs contract version mismatch
+
+**Symptom:** `nodo execute` fails before the microVM starts, with *Cloud
+Hypervisor initramfs speaks contract version '…', but this node needs '…'*.
+
+**Why:** the initramfs' `/init` and `src/virtualizers/ch/execute.py` share a
+contract — which files `execute.py` writes into the service rootfs
+(`__config__`, `.__nodo_entrypoint`, `.__nodo_virtiofs`) and how `/init` reads
+them. The initramfs is a pinned release asset while the contract lives in this
+checkout, so the two can be bumped out of step. `execute.py` compares its
+`INITRAMFS_CONTRACT_VERSION` against `etc/nodo-ch-initramfs.marker` inside the
+archive and refuses the launch, instead of letting the guest boot and park in
+`/init`'s fatal loop until the launch times out with nothing to show.
+
+**Fix:** re-run the installer to fetch the initramfs matching this code, or bump
+`GUEST_KERNEL_VERSION` (and `bash/guest-kernel/SHA256SUMS.pinned`) to the release
+whose initramfs speaks the version this checkout expects.
 
 ## KyA prompt blocks automation
 

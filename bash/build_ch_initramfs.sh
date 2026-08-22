@@ -25,18 +25,27 @@ case "$ARCH_TAG" in
         ;;
 esac
 
-# busybox is the guest's entire userspace. Prefer the one provisioned from the
-# Nodo release (same binary, same applets on every node) and fall back to the
-# host's only for manual/dev builds, where the applet check below is the net.
+# busybox is the guest's entire userspace, and the only input to this initramfs
+# that could still come from the host. It must not: distros compile different
+# applet sets and link against different libc behaviour, so a host busybox means
+# every node runs services on a subtly different guest. The release-provisioned
+# binary is therefore the only accepted source.
+#
+# NODO_ALLOW_HOST_BUSYBOX=1 exists for developers rebuilding an initramfs by hand
+# on a machine with no provisioned asset. The installer never sets it, and what it
+# produces is explicitly not what nodes run.
 PROVISIONED_BUSYBOX="$TARGET_DIR/cloud_hypervisor/busybox/${ARCH_TAG}/busybox"
 if [ -x "$PROVISIONED_BUSYBOX" ]; then
     BUSYBOX_BIN="$PROVISIONED_BUSYBOX"
-else
+elif [ "${NODO_ALLOW_HOST_BUSYBOX:-0}" = "1" ]; then
     BUSYBOX_BIN="$(command -v busybox || true)"
     if [ -z "$BUSYBOX_BIN" ]; then
-        fail "No busybox at ${PROVISIONED_BUSYBOX} and none in PATH. Re-run the installer to provision it."
+        fail "NODO_ALLOW_HOST_BUSYBOX=1 but no busybox in PATH."
     fi
-    echo "Warning: using the host's busybox (${BUSYBOX_BIN}); the installer normally provisions one." >&2
+    echo "Warning: NODO_ALLOW_HOST_BUSYBOX=1, using the host's busybox (${BUSYBOX_BIN})." >&2
+    echo "Warning: the resulting initramfs is a local dev build, not the one nodes run." >&2
+else
+    fail "No provisioned busybox at ${PROVISIONED_BUSYBOX}. Re-run the installer to provision it, or set NODO_ALLOW_HOST_BUSYBOX=1 for a local dev build."
 fi
 if ! command -v ldd >/dev/null 2>&1; then
     fail "ldd is required to validate that busybox is static."
@@ -46,12 +55,12 @@ if ldd "$BUSYBOX_BIN" 2>&1 | grep -vq "not a dynamic executable"; then
     fail "busybox must be static for initramfs usage. Install busybox-static."
 fi
 
-# Every applet /init calls. busybox is the one input to the initramfs that still
-# comes from the host, and distros compile different applet sets — Fedora's build
-# has all 394, a minimal one may not. Symlinking blindly would defer the failure
-# to guest boot ("applet not found"), where it looks like a nodo bug and only
-# happens on some distros. `ip` is the sharp edge: without it the guest never
-# configures its network from the ip= kernel argument.
+# Every applet /init calls. The provisioned busybox is built from a known config,
+# but this check still earns its place: it guards the NODO_ALLOW_HOST_BUSYBOX dev
+# path, where distros compile different applet sets. Symlinking blindly would
+# defer the failure to guest boot ("applet not found"), where it looks like a nodo
+# bug. `ip` is the sharp edge: without it the guest never configures its network
+# from the ip= kernel argument.
 APPLET_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/guest-kernel/applets.txt"
 [ -f "$APPLET_FILE" ] || fail "Missing applet list at ${APPLET_FILE}"
 mapfile -t BUSYBOX_APPLETS < <(grep -vE '^[[:space:]]*(#|$)' "$APPLET_FILE")
@@ -344,21 +353,42 @@ chmod 0755 "$ROOT/init"
 
 printf 'nodo-ch-initramfs:v1\narch:%s\n' "$ARCH_TAG" > "$ROOT/etc/nodo-ch-initramfs.marker"
 
+# Byte-reproducible output, so CI's published artifact can be checked against a
+# local rebuild of the same commit — which is what makes the pinned digest in
+# guest-kernel/SHA256SUMS.pinned auditable rather than just a checksum.
+#
+# The newc format records mode, mtime, uid, gid and inode numbers per entry, and
+# the tree is staged in a fresh mktemp dir, so without all of these the same
+# inputs produce a different file on every single run: the chmods pin the modes
+# (`mkdir` and `printf >` inherit the caller's umask, so root's 022 and a
+# developer's 077 archived different bytes), `touch` pins the mtimes, --owner
+# pins ownership (CI runners are not root, installers are), --reproducible drops
+# device/inode numbers, and `gzip -n` keeps the build timestamp out of the gzip
+# header. `sort -z` already pinned the entry order.
+find "$ROOT" -mindepth 1 -type d -exec chmod 0755 {} +
+find "$ROOT" -mindepth 1 -type f -exec chmod 0644 {} +
+chmod 0755 "$ROOT/init" "$ROOT/bin/busybox"
+find "$ROOT" -mindepth 1 -exec touch -h -d @0 {} +
+
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 (
     cd "$ROOT"
     find . -mindepth 1 -print0 \
         | sort -z \
-        | cpio --null -o --format=newc 2>/dev/null \
-        | gzip -9 > "$OUTPUT_PATH"
+        | cpio --null -o --format=newc --reproducible --owner 0:0 2>/dev/null \
+        | gzip -9n > "$OUTPUT_PATH"
 )
 chmod 0644 "$OUTPUT_PATH"
 
-if command -v lsinitramfs >/dev/null 2>&1; then
-    listing="$(lsinitramfs "$OUTPUT_PATH")"
-    printf '%s\n' "$listing" | grep -qx 'init' || fail "generated initramfs misses /init"
-    printf '%s\n' "$listing" | grep -qx 'bin/busybox' || fail "generated initramfs misses /bin/busybox"
-    printf '%s\n' "$listing" | grep -qx 'etc/nodo-ch-initramfs.marker' || fail "generated initramfs misses marker"
-fi
+# Verified with cpio, never lsinitramfs/lsinitrd. The gzip'd newc cpio layout is
+# a kernel ABI, but every distro brands its own inspector for it (initramfs-tools
+# ships lsinitramfs, dracut lsinitrd, mkinitcpio lsinitcpio), so gating this check
+# on one of them skipped it silently everywhere else — including on the host that
+# built the artifact. cpio is already a hard requirement above.
+listing="$(gzip -dc "$OUTPUT_PATH" | cpio -t --quiet 2>/dev/null)"
+for required in init bin/busybox etc/nodo-ch-initramfs.marker; do
+    printf '%s\n' "$listing" | grep -qx "$required" \
+        || fail "generated initramfs misses /${required}"
+done
 
 echo "Generated Cloud Hypervisor initramfs: $OUTPUT_PATH"
