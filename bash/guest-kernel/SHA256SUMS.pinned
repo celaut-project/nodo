@@ -16,17 +16,22 @@
 # artifact store and the release are two independent copies of the same build.
 #
 # The initramfs is checkable a third way, which the kernel and busybox are not:
-# bash/build_ch_initramfs.sh is byte-reproducible, so running it against this
-# commit and the pinned busybox must reproduce the published digest exactly.
+# it is byte-reproducible, so rebuilding it from this commit against the pinned
+# busybox must reproduce the published digest exactly. Verified for arm64 across
+# two unrelated machines -- an Ubuntu 24.04 CI runner and a Fedora Asahi M1 with
+# 16 KiB pages -- so a digest that does not reproduce means the release, not the
+# host that checked it.
 #
-#   bash bash/build_ch_initramfs.sh <MAIN_DIR> linux/arm64 /tmp/initramfs
-#   sha256sum /tmp/initramfs
+#   gh release download guest-kernel --pattern busybox-linux-arm64 --dir /tmp/gk
+#   bash bash/guest-kernel/build-initramfs.sh arm64 /tmp/gk /tmp/gk/busybox-linux-arm64
 #
-# An initramfs entry missing below is not a soft failure: download_guest_asset
-# refuses to install an asset it has no pinned digest for, which is the intended
-# behaviour until the digests of the run that built them are recorded here.
+# A missing entry below is not a soft failure: download_guest_asset refuses to
+# install an asset it has no pinned digest for. That is deliberate -- an
+# unverifiable guest is worse than a failed install.
 TAG guest-kernel
 219c226db4e9a6e580845af61adf398fc52e5e40f27b95cd3e091b58f41fa3ea  busybox-linux-amd64
 4520dbcf7ee36bc4de616a8f0b001660ffaef9c682cbb8f3e3bdec6879443863  busybox-linux-arm64
+ee89a955e6a90931e76eb883f31f55679b3fc5581c0fdcb4ff13637a93f95978  initramfs-linux-amd64
+a550d57b67788f1ba81cb7ea3de592a623ceb2b4fc65f7711ebe5b5923d3fd14  initramfs-linux-arm64
 75f06d965398657331f67a1e60a2b33496bdc62346526c877f97c75308751896  vmlinuz-linux-amd64
 47ba56ef366c843ceafd595d487e330598447e21d6068d63eefc549980d0d908  vmlinuz-linux-arm64
