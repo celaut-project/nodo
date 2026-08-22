@@ -180,12 +180,17 @@ class SourceBuildToolchainTests(unittest.TestCase):
 
 
 class PinnedGuestAssetTests(unittest.TestCase):
-    """The guest kernel is the most privileged thing nodo downloads."""
+    """The guest is the most privileged thing nodo downloads."""
 
     PIN = Path("bash/guest-kernel/SHA256SUMS.pinned")
+    # Every asset the setup scripts fetch, spelled out rather than derived: an
+    # unpinned one is a guest nobody verified, so it is worth having to say it here
+    # too. The initramfs joined the list when it stopped being built per host.
     ASSETS = (
         "busybox-linux-amd64",
         "busybox-linux-arm64",
+        "initramfs-linux-amd64",
+        "initramfs-linux-arm64",
         "vmlinuz-linux-amd64",
         "vmlinuz-linux-arm64",
     )
