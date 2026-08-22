@@ -211,6 +211,22 @@ class GuestUserspaceTests(unittest.TestCase):
         self.assertIn("SHA256 mismatch for", workflow)
         self.assertIn("refusing to build", workflow)
 
+        # Native runners per architecture. Packing looks arch-independent, but the
+        # builder runs `busybox --list` to check the applets /init needs, and an
+        # arm64 binary does not execute on an x86_64 runner -- a single-runner
+        # version of this job failed with "produced no output", which named nothing
+        # about the real cause.
+        self.assertIn("ubuntu-24.04-arm", workflow)
+        self.assertIn("ubuntu-24.04", workflow)
+
+    def test_the_asset_builder_refuses_to_cross_build(self):
+        # Same reason: it has to run the busybox it is packing. Failing here names
+        # the cause, instead of surfacing as an empty `busybox --list`.
+        builder = Path("bash/guest-kernel/build-initramfs.sh").read_text(encoding="utf-8")
+
+        self.assertIn("Cross-building is not supported", builder)
+        self.assertIn("aarch64:arm64|arm64:arm64|x86_64:x86_64", builder)
+
 
 class InitramfsContractTests(unittest.TestCase):
     def test_contract_version_matches_the_marker_the_builder_stamps(self):

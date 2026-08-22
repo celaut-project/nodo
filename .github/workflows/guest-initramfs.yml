@@ -1,6 +1,6 @@
 name: guest-initramfs
 
-# Publishes the guest initramfs onto an existing guest-kernel release, without
+# Publishes the guest initramfs onto the existing guest-kernel release, without
 # touching the kernel or busybox already there.
 #
 # Why this exists separately from guest-kernel.yml:
@@ -8,7 +8,8 @@ name: guest-initramfs
 #   * Adding the initramfs to a release that predates it (or shipping a new /init)
 #     must not disturb the other assets. Rebuilding the whole guest would: neither
 #     the kernel nor the busybox build is reproducible, so their bytes -- and their
-#     digests -- change, and every commit pinning the old ones stops installing.
+#     digests -- change, and every commit pinning the old ones stops installing,
+#     `stable` included.
 #   * The initramfs is the only part of the guest that changes at code speed, since
 #     /init is a contract with src/virtualizers/ch/execute.py. Republishing it
 #     should not cost a ~30 minute kernel build.
@@ -34,61 +35,87 @@ permissions:
   contents: read
 
 jobs:
-  publish:
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners, even though this job only repacks a binary it did not
+          # compile: build_ch_initramfs.sh verifies the applets /init needs by
+          # running `busybox --list`, and an arm64 binary does not execute on x86_64.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            tag: linux-arm64
+          - arch: x86_64
+            runner: ubuntu-24.04
+            tag: linux-amd64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
-      # cpio and gzip only: no compiler, no kernel source, nothing to cross-build.
-      # The initramfs is architecture-independent to assemble -- it just repacks a
-      # busybox someone else built -- so one runner covers both architectures.
+      # cpio and gzip only: no compiler and no kernel source, since nothing here is
+      # built from source.
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cpio gzip curl ca-certificates
 
-      - name: Build both initramfs images from the published busybox
+      - name: Fetch the published busybox and verify it against the in-tree pin
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
+          ASSET: busybox-${{ matrix.tag }}
         run: |
           set -euo pipefail
-          mkdir -p out busybox
+          PIN=bash/guest-kernel/SHA256SUMS.pinned
 
-          for pair in arm64:busybox-linux-arm64 x86_64:busybox-linux-amd64; do
-            arch="${pair%%:*}"
-            asset="${pair##*:}"
+          # The digest committed in-tree, not the SHA256SUMS published next to the
+          # artifact: that one lives in the same mutable release, so it proves only
+          # that the download was not truncated. Anyone able to edit the release
+          # swaps artifact and checksum together.
+          expected="$(awk -v n="$ASSET" '$2 == n { print $1; exit }' "$PIN")"
+          [ -n "$expected" ] || { echo "No pinned digest for $ASSET in $PIN"; exit 1; }
 
-            # The digest committed in-tree, not the SHA256SUMS published next to the
-            # artifact: that one lives in the same mutable release, so it proves only
-            # that the download was not truncated. Anyone able to edit the release
-            # swaps artifact and checksum together.
-            expected="$(awk -v n="$asset" '$2 == n { print $1; exit }' \
-              bash/guest-kernel/SHA256SUMS.pinned)"
-            [ -n "$expected" ] || { echo "No pinned digest for $asset"; exit 1; }
+          pinned_tag="$(awk '$1 == "TAG" { print $2; exit }' "$PIN")"
+          [ "$pinned_tag" = "$TAG" ] || {
+            echo "Pin is for '$pinned_tag' but this run targets '$TAG'."
+            echo "The busybox in the initramfs must be the one pinned by this commit."
+            exit 1
+          }
 
-            pinned_tag="$(awk '$1 == "TAG" { print $2; exit }' bash/guest-kernel/SHA256SUMS.pinned)"
-            [ "$pinned_tag" = "$TAG" ] || {
-              echo "Pin is for '$pinned_tag' but this run targets '$TAG'."
-              echo "The busybox in the initramfs must be the one pinned by this commit."
-              exit 1
-            }
+          mkdir -p busybox
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            --pattern "$ASSET" --dir busybox --clobber
 
-            gh release download "$TAG" --repo "${{ github.repository }}" \
-              --pattern "$asset" --dir busybox --clobber
+          actual="$(sha256sum "busybox/$ASSET" | awk '{print $1}')"
+          [ "$expected" = "$actual" ] || {
+            echo "SHA256 mismatch for $ASSET: pinned $expected, got $actual."
+            echo "The release asset does not match this commit -- refusing to build."
+            exit 1
+          }
+          echo "$ASSET matches its pinned digest."
 
-            actual="$(sha256sum "busybox/$asset" | awk '{print $1}')"
-            [ "$expected" = "$actual" ] || {
-              echo "SHA256 mismatch for $asset: pinned $expected, got $actual."
-              echo "The release asset does not match this commit -- refusing to build."
-              exit 1
-            }
-            echo "$asset matches its pinned digest."
+      - name: Build guest initramfs
+        run: |
+          bash bash/guest-kernel/build-initramfs.sh ${{ matrix.arch }} \
+            "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/busybox/busybox-${{ matrix.tag }}"
 
-            bash bash/guest-kernel/build-initramfs.sh "$arch" out "busybox/$asset"
-          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-initramfs-${{ matrix.tag }}
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
 
       - name: Publish onto the existing release
         env:
@@ -96,7 +123,7 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          cd out
+          cd artifacts
           test -f initramfs-linux-arm64 && test -f initramfs-linux-amd64
 
           # Refresh the release's SHA256SUMS in place: fetch it, drop any stale

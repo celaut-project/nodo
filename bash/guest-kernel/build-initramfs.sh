@@ -15,8 +15,11 @@
 # binary. The kernel is the other half of the same guest but is not an input here --
 # the initramfs loads no modules, so it is kernel-version independent.
 #
-# Unlike its sibling scripts this one is architecture-independent in practice (it
-# only repacks a binary someone else built), so it does not refuse to cross-build.
+# Native builds only, like its siblings, even though this only repacks a binary
+# someone else compiled: build_ch_initramfs.sh runs `busybox --list` to verify the
+# applets /init calls, and a foreign binary cannot execute. Without this guard the
+# failure surfaces as "'busybox --list' produced no output", which says nothing
+# about the actual problem.
 set -euo pipefail
 
 fail() { echo "Error: $1" >&2; exit 1; }
@@ -31,6 +34,13 @@ case "$TARGET_ARCH" in
     arm64)  ASSET="initramfs-linux-arm64"; ARCH_TAG="linux/arm64" ;;
     x86_64) ASSET="initramfs-linux-amd64"; ARCH_TAG="linux/amd64" ;;
     *)      fail "Unsupported architecture '$TARGET_ARCH' (expected arm64 or x86_64)." ;;
+esac
+
+HOST_ARCH="$(uname -m)"
+case "$HOST_ARCH:$TARGET_ARCH" in
+    aarch64:arm64|arm64:arm64|x86_64:x86_64) ;;
+    *) fail "Cross-building is not supported: host is $HOST_ARCH, target is $TARGET_ARCH.
+The applet check has to execute the busybox going into the image." ;;
 esac
 
 [ -f "$BUSYBOX_PATH" ] || fail "No busybox at $BUSYBOX_PATH"
