@@ -104,7 +104,9 @@ def _normalize_virtualizer(name: Optional[str]) -> str:
         raise ValueError("Virtualizer value is empty.")
     if v in {"ch", "cloud_hypervisor", "cloud-hypervisor"}:
         return "ch"
-    raise ValueError(f"Unknown virtualizer '{name}'. Supported: ch.")
+    if v == "qemu":
+        return "qemu"
+    raise ValueError(f"Unknown virtualizer '{name}'. Supported: ch, qemu.")
 
 
 def _resolve_virtualizer(vmachine_id: str) -> str:
@@ -225,7 +227,7 @@ def allow_connection(
         return False
 
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
+    if virtualizer in ("ch", "qemu"):
         from src.virtualizers.ch.firewall import allow_connection as ch_allow_connection
 
         return ch_allow_connection(
@@ -248,7 +250,7 @@ def allow_connection_to_instance(
         return False
 
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
+    if virtualizer in ("ch", "qemu"):
         from src.virtualizers.ch.firewall import (
             allow_connection_to_instance as ch_allow_connection_to_instance,
         )
@@ -267,7 +269,7 @@ def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
         return False
 
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
+    if virtualizer in ("ch", "qemu"):
         from src.virtualizers.ch.firewall import block_all as ch_block_all
 
         return ch_block_all(vmachine_id=vmachine_id, source_ip=source_ip)
@@ -277,7 +279,7 @@ def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
 
 def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
+    if virtualizer in ("ch", "qemu"):
         from src.virtualizers.ch.firewall import allow_all_egress as ch_allow_all_egress
 
         return ch_allow_all_egress(vmachine_id=vmachine_id, source_ip=source_ip)
@@ -292,7 +294,7 @@ def remove_rule(
     protocol: TransportProtocol = TransportProtocol.TCP,
 ) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
+    if virtualizer in ("ch", "qemu"):
         from src.virtualizers.ch.firewall import remove_rule as ch_remove_rule
 
         return ch_remove_rule(
