@@ -30,6 +30,9 @@ from src.virtualizers.ch import limits
 # one place, because doctor.py reports on the same image this module refuses to
 # launch on.
 from src.virtualizers.ch import initramfs as ch_initramfs
+# Which serial device the guest exposes is architecture-determined; doctor.py builds
+# a cmdline too, and the two must not disagree.
+from src.virtualizers.ch import guest as ch_guest
 from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
 from src.virtualizers.ch.virtiofs import (
     attach_virtiofs_backends,
@@ -61,7 +64,9 @@ NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br
 NETWORK_SUBNET = env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")
 NETWORK_GATEWAY_IP = env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1")
 GUEST_NET_DEVICE = env_manager.get("virtualizers.ch.GUEST_NET_DEVICE", "auto")
-KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "console=ttyS0")
+# No console here: _kernel_cmdline() derives it from the architecture. Defaulting it
+# to console=ttyS0 is what made arm64 guests panic before /init printed anything.
+KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "")
 CH_SERIAL_MODE = env_manager.get("virtualizers.ch.SERIAL_MODE", "file")
 CH_CONSOLE_MODE = env_manager.get("virtualizers.ch.CONSOLE_MODE", "off")
 CH_API_SOCKET_DIR = env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch")
@@ -871,10 +876,31 @@ def _kernel_cmdline(vm_ip: str, netmask: str) -> str:
     else:
         ip_param = f"ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}::{guest_dev}:off"
 
-    cmdline_parts = ["root=/dev/vda", "rw", ip_param]
+    # The console is derived, never configured. It is determined by the architecture
+    # (see ch.guest.serial_device), and naming the wrong one does not degrade the
+    # guest, it kills it: /init's first statement redirects to /dev/console, so on
+    # arm64 a `console=ttyS0` panics PID 1 before it prints anything.
+    #
+    # A console= in KERNEL_CMDLINE_EXTRA is therefore dropped rather than honoured.
+    # config.example.yaml shipped `console=ttyS0` with a comment telling operators to
+    # keep it, so it is in the config of every node installed before this, and those
+    # nodes cannot launch anything until it stops taking effect.
+    console = ch_guest.serial_device()
+    cmdline_parts = ["root=/dev/vda", "rw", ip_param, f"console={console}"]
+
     extra = str(KERNEL_CMDLINE_EXTRA).strip() if KERNEL_CMDLINE_EXTRA is not None else ""
     if extra:
-        cmdline_parts.append(extra)
+        kept = [tok for tok in extra.split() if not tok.startswith("console=")]
+        dropped = [tok for tok in extra.split() if tok.startswith("console=")]
+        for tok in dropped:
+            if tok != f"console={console}":
+                log.LOGGER(
+                    f"[CH] ignoring '{tok}' from virtualizers.ch.KERNEL_CMDLINE_EXTRA: "
+                    f"this architecture's guest console is {console}."
+                )
+        if kept:
+            cmdline_parts.extend(kept)
+
     return " ".join(cmdline_parts)
 
 

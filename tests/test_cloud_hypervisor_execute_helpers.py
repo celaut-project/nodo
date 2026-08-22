@@ -197,3 +197,53 @@ class CloudHypervisorExecuteHelpersTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class KernelCmdlineTests(unittest.TestCase):
+    """The cmdline that launches every service. An error here starts nothing."""
+
+    def _cmdline(self, machine, extra):
+        with patch.object(ch_execute.ch_guest, "platform") as fake_platform:
+            fake_platform.machine.return_value = machine
+            with patch.object(ch_execute, "KERNEL_CMDLINE_EXTRA", extra):
+                with patch.object(ch_execute, "GUEST_NET_DEVICE", "auto"):
+                    return ch_execute._kernel_cmdline(vm_ip="192.168.200.5",
+                                                      netmask="255.255.255.0")
+
+    def test_arm_guests_are_told_about_the_pl011(self):
+        self.assertIn("console=ttyAMA0", self._cmdline("aarch64", ""))
+
+    def test_x86_guests_are_told_about_the_8250(self):
+        self.assertIn("console=ttyS0", self._cmdline("x86_64", ""))
+
+    def test_a_stale_console_in_the_config_is_dropped(self):
+        # config.example.yaml shipped `console=ttyS0` and told operators to keep it,
+        # so it is in the config of every node installed before this. Honouring it on
+        # arm64 panics PID 1 before /init prints anything, so it cannot be honoured.
+        cmdline = self._cmdline("aarch64", "console=ttyS0")
+
+        self.assertIn("console=ttyAMA0", cmdline)
+        self.assertNotIn("ttyS0", cmdline)
+
+    def test_genuinely_extra_parameters_survive_alongside_the_console(self):
+        cmdline = self._cmdline("aarch64", "console=ttyS0 loglevel=7 nokaslr")
+
+        self.assertIn("console=ttyAMA0", cmdline)
+        self.assertIn("loglevel=7", cmdline)
+        self.assertIn("nokaslr", cmdline)
+        self.assertNotIn("ttyS0", cmdline)
+
+    def test_exactly_one_console_is_ever_passed(self):
+        for machine, extra in (("aarch64", "console=ttyAMA0"), ("x86_64", "console=ttyS0"),
+                               ("aarch64", ""), ("aarch64", "console=hvc0")):
+            with self.subTest(machine=machine, extra=extra):
+                cmdline = self._cmdline(machine, extra)
+                self.assertEqual(cmdline.count("console="), 1)
+
+    def test_the_root_device_and_ip_are_still_there(self):
+        cmdline = self._cmdline("aarch64", "")
+
+        self.assertIn("root=/dev/vda", cmdline)
+        self.assertIn("rw", cmdline.split())
+        self.assertIn("ip=192.168.200.5::", cmdline)

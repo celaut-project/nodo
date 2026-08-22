@@ -53,9 +53,15 @@ virtualizers:
     # Guest interface used by the kernel ip=... cmdline.
     # Use "auto" to avoid hardcoding (recommended), or set e.g. "eth0".
     GUEST_NET_DEVICE: "auto"
-    # Extra kernel cmdline parameters for guest boot diagnostics.
-    # Keep console=ttyS0 so serial logs receive kernel/init output.
-    KERNEL_CMDLINE_EXTRA: "console=ttyS0"
+    # Extra kernel cmdline parameters for guest boot diagnostics. Empty by default.
+    #
+    # Do NOT put console= here. The guest console is architecture-determined and set
+    # automatically (ttyAMA0 on arm64, ttyS0 on x86_64); a console= in this field is
+    # dropped with a warning. This used to default to "console=ttyS0", which on arm64
+    # names a device the guest kernel has no driver for -- /dev/console never opens,
+    # /init dies on its first redirection, and every launch ends in
+    # "Kernel panic - not syncing: Attempted to kill init!".
+    KERNEL_CMDLINE_EXTRA: ""
     # Fail fast if the guest does not become reachable on the bridge network.
     GUEST_NETWORK_READY_TIMEOUT_S: 20
     # Memory policy for VM boot:
