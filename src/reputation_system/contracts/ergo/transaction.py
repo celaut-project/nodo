@@ -206,7 +206,7 @@ def _self_network_data() -> str:
         LOGGER("No public address to advertise (set network.PUBLIC_IP if the node is behind NAT).")
         return NO_NETWORK_ADDRESS
 
-    internal_port = int(env_manager.get("GATEWAY_PORT"))
+    internal_port = env_manager.get_gateway_port()
     public_port = resolve_public_port(env_manager.get("network.PUBLIC_TCP_PORT", ""), internal_port)
     peer = celaut_pb2.Peer()
     uri = peer.uri.add()

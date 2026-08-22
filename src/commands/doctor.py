@@ -690,6 +690,115 @@ def _doctor_network_checks():
         flush=True
     )
 
+    _doctor_guest_gateway_reachability()
+
+
+def _doctor_guest_gateway_reachability():
+    """Can a guest actually reach the gateway port? Tried, not assumed.
+
+    Everything else about the gateway can look right while this is broken: the
+    daemon listens, the accept rule is in the ruleset, and every guest's gRPC call
+    is still rejected by a higher-priority chain in a table nodo does not own. That
+    is not a hypothetical -- it is what this check was written after. So the answer
+    comes from sending a packet down the path a guest uses, not from reading rules.
+    """
+    print("\nGuest-facing gateway:", flush=True)
+
+    # Imported here, not at module scope: see the note on this file's imports.
+    try:
+        from src.utils.config import ConfigManager
+        from src.utils.firewall.backends import FirewallError, detect_backend
+        from src.utils.firewall.gateway import gateway_comment
+        from src.utils.firewall.reachability import probe_tcp_from_bridge
+    except Exception as e:
+        print(f"[WARN] Could not load the firewall helpers: {e}", flush=True)
+        return
+
+    # doctor must survive a checkout too broken to load config: that is exactly
+    # when it is worth running.
+    try:
+        env_manager = ConfigManager()
+        port = env_manager.gateway_port_or_none()
+    except Exception as e:
+        print(f"[WARN] Could not read the node config: {e}", flush=True)
+        return
+
+    if not port:
+        print(
+            "[FAIL] network.GATEWAY_PORT is not assigned, so no guest can call back "
+            "into this node. Start the node once as root to have it assigned and "
+            "opened, or set the key to a port you opened yourself.",
+            flush=True
+        )
+        return
+
+    try:
+        backend = detect_backend()
+    except Exception as e:
+        print(f"[FAIL] No usable firewall backend: {e}", flush=True)
+        return
+    print(f"[OK] Firewall backend in use: {backend.name}.", flush=True)
+
+    comment = gateway_comment(port)
+    try:
+        owned = [rule for rule in backend.list_input_accepts(comment) if rule.comment == comment]
+    except FirewallError as e:
+        # Unknown, so say nothing about presence: claiming the rule is missing
+        # when the chain simply could not be read is worse than staying quiet.
+        owned = None
+        print(f"[WARN] Could not list nodo's own input rules: {e}", flush=True)
+    if owned:
+        print(f"[OK] nodo's accept rule for TCP {port} is present.", flush=True)
+    elif owned is not None:
+        print(
+            f"[WARN] nodo has no accept rule for TCP {port} in {backend.name}. "
+            "Starting the node re-applies it.",
+            flush=True
+        )
+
+    try:
+        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch"))
+        gateway_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
+        subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
+    except Exception as e:
+        print(f"[WARN] Could not read the guest network settings: {e}", flush=True)
+        return
+
+    probe = probe_tcp_from_bridge(
+        bridge=bridge, target_ip=gateway_ip, port=port, subnet=subnet
+    )
+
+    if probe.reachable is True:
+        print(f"[OK] A guest on {bridge} can reach {gateway_ip}:{port}.", flush=True)
+        return
+
+    if probe.reachable is None:
+        print(f"[WARN] Could not test it: {probe.detail}", flush=True)
+        return
+
+    print(
+        f"[FAIL] A guest on {bridge} CANNOT reach {gateway_ip}:{port}. Every service "
+        "this node runs would fail to launch dependencies, modify its resources or "
+        "observe traffic.",
+        flush=True
+    )
+    print(f"  {probe.detail}", flush=True)
+
+    try:
+        rejectors = backend.foreign_input_rejectors()
+    except Exception:
+        rejectors = []
+    if rejectors:
+        print("  Chains on the input hook, outside nodo's own table, that can reject:", flush=True)
+        for rejector in rejectors:
+            print(f"    - {rejector}", flush=True)
+        print(
+            "  An accept rule cannot override those: in nftables 'accept' ends its own "
+            "chain only, and a reject in another base chain on the same hook still "
+            "wins whatever the priority. Open the port where that ruleset is managed.",
+            flush=True
+        )
+
 
 def doctor_command(main_dir):
     if os.geteuid() != 0:

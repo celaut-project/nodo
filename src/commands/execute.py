@@ -21,7 +21,6 @@ from src.utils.instance_names import inject_instance_name
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
 CONFIGURED_HASH_ID = get_configured_hash_id(env_manager)
@@ -145,7 +144,7 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
         daemon=True,
     )
     try:
-        channel = grpc.insecure_channel(f"localhost:{GATEWAY_PORT}")
+        channel = grpc.insecure_channel(f"localhost:{env_manager.get_gateway_port()}")
         g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
         inspect_service(service)

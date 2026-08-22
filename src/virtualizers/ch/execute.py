@@ -15,7 +15,6 @@ from typing import Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
-from src.gateway.utils import GATEWAY_PORT
 from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
@@ -805,19 +804,22 @@ def _configure_guest_firewall_policy(
             f"Failed to apply default deny firewall policy for VM {vmachine_id} ({vm_ip})."
         )
 
+    # Read here rather than at import: the port is assigned by the daemon, which
+    # may well happen after this module was first loaded.
+    gateway_port = env_manager.get_gateway_port()
     if not vm_allow_connection(
         vmachine_id=vmachine_id,
         ip=NETWORK_GATEWAY_IP,
-        port=GATEWAY_PORT,
+        port=gateway_port,
         protocol=TransportProtocol.TCP,
         source_ip=vm_ip,
     ):
         raise CHExecuteError(
             f"Failed to allow gateway egress for VM {vmachine_id}: "
-            f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{GATEWAY_PORT}/tcp"
+            f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
         )
     log.LOGGER(
-        f"[CH][{vmachine_id}] firewall allow gateway: {vm_ip} -> {NETWORK_GATEWAY_IP}:{GATEWAY_PORT}/tcp"
+        f"[CH][{vmachine_id}] firewall allow gateway: {vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
     )
 
     for dns_protocol in (TransportProtocol.UDP, TransportProtocol.TCP):

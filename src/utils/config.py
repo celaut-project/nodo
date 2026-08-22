@@ -2,7 +2,6 @@ import copy
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
@@ -14,6 +13,33 @@ from mnemonic import Mnemonic
 
 from src.utils.network import get_free_port
 from src.utils.singleton import Singleton
+
+
+# "not assigned yet". Kept here, next to the only code that reads it, because
+# src.utils.config is imported by the shell-completion helper and must not pull
+# in the firewall package to compare a string.
+GATEWAY_PORT_AUTO = "auto"
+
+
+def coerce_gateway_port(value: Any) -> Optional[int]:
+    """The gateway port as an int, or None when it is unassigned or unusable.
+
+    ``auto`` is the sentinel meaning "not assigned yet"; anything unparseable or
+    out of range is treated the same way, because a bad value must stop the node
+    rather than be silently rounded into something plausible.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 1 <= value <= 65535 else None
+    text = str(value).strip()
+    if not text or text.lower() == GATEWAY_PORT_AUTO:
+        return None
+    try:
+        port = int(text)
+    except ValueError:
+        return None
+    return port if 1 <= port <= 65535 else None
 
 
 def to_yaml_safe(value: Any) -> Any:
@@ -205,42 +231,105 @@ class ConfigManager(metaclass=Singleton):
 
         self.log(f"Reloaded {self.config_path} after an external change.")
 
-    def _allow_gateway_port_with_iptables(self, port: int):
-        rule = [
-            "-p",
-            "tcp",
-            "--dport",
-            str(port),
-            "-j",
-            "ACCEPT",
-            "-m",
-            "comment",
-            "--comment",
-            "nodo;gateway;auto_port",
-        ]
-        try:
-            check_result = subprocess.run(
-                ["iptables", "-C", "INPUT", *rule],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if check_result.returncode == 0:
-                return
+    def _guest_network_unlocked(self) -> Dict[str, Optional[str]]:
+        """Where guests reach this node, for the reachability probe.
 
-            subprocess.run(
-                ["iptables", "-I", "INPUT", *rule],
-                check=True,
-                capture_output=True,
-                text=True,
+        Read straight from the loaded tree: this runs mid-load, before path
+        interpolation, and these are plain strings rather than paths.
+        """
+        def _text(keys: List[str], fallback: str) -> str:
+            value = self._get_nested(self._config, keys)
+            text = str(value).strip() if value is not None else ""
+            return text or fallback
+
+        return {
+            "bridge": _text(["virtualizers", "ch", "NETWORK_BRIDGE_NAME"], "br-ch"),
+            "gateway_ip": _text(["virtualizers", "ch", "NETWORK_GATEWAY_IP"], "192.168.200.1"),
+            "subnet": _text(["virtualizers", "ch", "NETWORK_SUBNET"], "192.168.200.0/24"),
+        }
+
+    def _resolve_gateway_port_unlocked(self):
+        """Assign a gateway port when there is none -- but only if we can open it.
+
+        The port is persisted *after* the host firewall accepted it and the probe
+        confirmed a guest could reach it. Anything less leaves the sentinel in
+        place so the next privileged start tries again.
+
+        This ordering is the whole point. The previous version resolved the port,
+        skipped the firewall unless it happened to be root, and persisted either
+        way -- so a single unprivileged `nodo <anything>` consumed the sentinel,
+        and the daemon then read a plausible number and never opened a thing.
+        """
+        stored = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
+        if coerce_gateway_port(stored) is not None:
+            return
+
+        if os.geteuid() != 0:
+            self.log(
+                "network.GATEWAY_PORT is unassigned and this process is not root, so it "
+                "cannot open the port in the host firewall. Leaving it unassigned rather "
+                "than storing a port nothing can reach: run 'sudo nodo serve' once, or "
+                "set network.GATEWAY_PORT to a port you have opened yourself."
             )
-        except subprocess.CalledProcessError as e:
-            raise Exception(
-                f"Error attempting to open port {port} in the firewall (iptables): {e.stderr}"
+            return
+
+        free_port_ranges = self._get_nested(self._config, ["network", "FREE_PORTS_RANGE"]) or []
+        try:
+            port = get_free_port(free_port_ranges=free_port_ranges)
+        except Exception as e:
+            self.log(f"Could not pick a free gateway port: {e}")
+            return
+        if not port:
+            self.log("Could not pick a free gateway port: none available in FREE_PORTS_RANGE.")
+            return
+
+        # Imported here, not at module scope: see GATEWAY_PORT_AUTO above.
+        from src.utils.firewall.gateway import (
+            GatewayPortUnavailable,
+            ensure_gateway_port_open,
+        )
+
+        network = self._guest_network_unlocked()
+        try:
+            ensure_gateway_port_open(
+                port=port,
+                bridge=network["bridge"],
+                gateway_ip=network["gateway_ip"],
+                subnet=network["subnet"],
+                config_path=self.config_path,
+                log=self.log,
             )
-        except FileNotFoundError:
-            raise Exception(
-                "iptables command not found. Ensure iptables is installed if you intend to open ports."
+        except GatewayPortUnavailable as e:
+            self.log(
+                f"Not assigning gateway port {port}: it could not be opened and verified.\n{e}"
+            )
+            return
+
+        self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
+        self.log(f"Assigned gateway port {port} and opened it in the host firewall.")
+
+    def _require_gateway_port(self, value: Any) -> int:
+        port = coerce_gateway_port(value)
+        if port is None:
+            from src.utils.firewall.gateway import unassigned_port_error
+
+            raise unassigned_port_error(self.config_path)
+        return port
+
+    def get_gateway_port(self) -> int:
+        """The assigned gateway port, or a ``GatewayPortUnavailable`` with instructions."""
+        with self._lock:
+            self.ensure_loaded()
+            return self._require_gateway_port(
+                self._get_nested(self._config, ["network", "GATEWAY_PORT"])
+            )
+
+    def gateway_port_or_none(self) -> Optional[int]:
+        """The assigned gateway port, or None. For diagnostics that must not raise."""
+        with self._lock:
+            self.ensure_loaded()
+            return coerce_gateway_port(
+                self._get_nested(self._config, ["network", "GATEWAY_PORT"])
             )
 
     def load_config(self, force_reload: bool = False):
@@ -295,14 +384,7 @@ class ConfigManager(metaclass=Singleton):
             validate_pricing_config(self._config, warn=lambda message: self.log(f"[PRICING] {message}"))
 
             # Process dynamic values.
-            gateway_port = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
-            if gateway_port == "auto":
-                free_port_ranges = self._get_nested(self._config, ["network", "FREE_PORTS_RANGE"]) or []
-                port = get_free_port(free_port_ranges=free_port_ranges)
-                if port and os.geteuid() == 0:
-                    self._allow_gateway_port_with_iptables(port=port)
-                self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
-                self.log(f"Dynamically assigned Gateway Port: {port}")
+            self._resolve_gateway_port_unlocked()
 
             # Each ledger owns exactly ONE wallet (WALLET_MNEMONIC) -- there is no
             # auxiliary/receiver wallet -- and that same key is the node's identity
@@ -414,18 +496,25 @@ class ConfigManager(metaclass=Singleton):
         with self._lock:
             self.ensure_loaded()
 
-            value = self._get_nested(self._config, key.split("."))
-            if value is not None:
-                return value
+            resolved = self._get_nested(self._config, key.split("."))
 
-            if "." not in key:
+            if resolved is None and "." not in key:
                 if key in self._config:
-                    return self._config[key]
-                for section in self._config.values():
-                    if isinstance(section, dict) and key in section:
-                        return section[key]
+                    resolved = self._config[key]
+                else:
+                    for section in self._config.values():
+                        if isinstance(section, dict) and key in section:
+                            resolved = section[key]
+                            break
 
-            return default
+            # GATEWAY_PORT never comes back as the 'auto' sentinel. A caller that
+            # formatted it into an address would bind '[::]:auto', and one that
+            # cast it would raise an opaque ValueError; both hide the real problem.
+            # No assigned port is a hard stop carrying instructions instead.
+            if key.split(".")[-1] == "GATEWAY_PORT":
+                return self._require_gateway_port(resolved)
+
+            return resolved if resolved is not None else default
 
     def set(self, key: str, value: Any):
         """

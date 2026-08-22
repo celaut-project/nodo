@@ -10,6 +10,7 @@ dataset.bin
 *.log
 app.log
 config.yaml
+config-*.yaml
 venv
 .venv
 tests/script_data.json
