@@ -1,4 +1,5 @@
-# Digests of the guest kernel and busybox that nodo installs, pinned in-tree.
+# Digests of the guest kernel, initramfs and busybox that nodo installs, pinned
+# in-tree.
 #
 # install.sh names a release TAG (GUEST_KERNEL_VERSION), and a tag is mutable.
 # Verifying a download against a SHA256SUMS fetched from that same release only
@@ -9,10 +10,21 @@
 # same reason bash/guest-kernel/build.sh pins KERNEL_SHA256 for the upstream
 # tarball instead of trusting cdn.kernel.org.
 #
-# When bumping GUEST_KERNEL_VERSION in install.sh, update TAG and all four digests
+# When bumping GUEST_KERNEL_VERSION in install.sh, update TAG and all six digests
 # here, and check them against the CI artifacts of the run that built them
 # (`gh run download <run-id>`) and not only against the release assets -- the
 # artifact store and the release are two independent copies of the same build.
+#
+# The initramfs is checkable a third way, which the kernel and busybox are not:
+# bash/build_ch_initramfs.sh is byte-reproducible, so running it against this
+# commit and the pinned busybox must reproduce the published digest exactly.
+#
+#   bash bash/build_ch_initramfs.sh <MAIN_DIR> linux/arm64 /tmp/initramfs
+#   sha256sum /tmp/initramfs
+#
+# An initramfs entry missing below is not a soft failure: download_guest_asset
+# refuses to install an asset it has no pinned digest for, which is the intended
+# behaviour until the digests of the run that built them are recorded here.
 TAG guest-kernel
 219c226db4e9a6e580845af61adf398fc52e5e40f27b95cd3e091b58f41fa3ea  busybox-linux-amd64
 4520dbcf7ee36bc4de616a8f0b001660ffaef9c682cbb8f3e3bdec6879443863  busybox-linux-arm64

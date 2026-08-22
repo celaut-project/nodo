@@ -53,8 +53,9 @@ pkg_for() {
 
 # What the node needs from the host, by role:
 #   compiler/clang            build psutil during `pip install`
-#   cpio/gzip                 pack the Cloud Hypervisor initramfs (busybox, its
-#                             only binary, comes from the Nodo release)
+#   cpio/gzip                 inspect the Cloud Hypervisor initramfs before each
+#                             launch (src/virtualizers/ch/execute.py); the image
+#                             itself is built by CI and comes from the Nodo release
 #   curl/ca-certificates/git  fetch runtimes and sources
 #   procps/iproute/ping/iptables/e2fsprogs  execute preflight (src/virtualizers/ch/execute.py)
 #   zip                       packing

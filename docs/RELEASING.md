@@ -13,11 +13,13 @@ The Windows installer (`bash/install.ps1` / `Nodo-Setup.exe`) downloads assets f
 | `debian.tar` | WSL2 rootfs imported by the installer | Ubuntu 22.04 base with nodo code + venv pre-installed |
 | `vmlinuz` | Cloud Hypervisor **guest** kernel | Downloaded by `setup_linux_x86.sh` from the `guest-kernel-vN` release |
 | `bzImage` | WSL2 **host** kernel | Written to `C:\wsl-kernel\bzImage` and referenced in `.wslconfig`; currently Josemi's custom `microhobby` build — requires a separate kernel build environment to update |
-| `initramfs` | Pre-built staging initramfs | Placed at `/boot/initramfs` inside the distro before `install.sh` runs; overwritten during install by `build_ch_initramfs.sh` — its content is not load-bearing, but it must exist |
+| `initramfs` | WSL2 distro-side initramfs, paired with `bzImage` | `install.ps1` (STEP 5.3, "Downloading internal kernel") downloads it from the `wsl-exe` release to `/boot/initramfs` inside the distro, before `install.sh` runs. **Unrelated to the Cloud Hypervisor guest initramfs**, which `setup_linux_x86.sh` downloads from the `guest-kernel-vN` release into `$TARGET_DIR/cloud_hypervisor/initramfs/<arch>/initramfs` — nothing writes to `/boot` at install time |
 
 ## When to cut a release
 
-- Any change to `bash/build_ch_initramfs.sh` (initramfs modules, virtio support)
+- Any change to `bash/build_ch_initramfs.sh` (the guest userspace it assembles, or
+  the `/init` ↔ `execute.py` contract version it stamps) — note the image itself is
+  built by CI and shipped in the `guest-kernel-vN` release, so that pin moves first
 - Any change to `bash/setup_linux_x86.sh` (setup flow, dependency versions)
 - Significant feature merges that should ship to Windows users
 
@@ -39,7 +41,9 @@ cd /tmp
 rm -rf nodo-release-build
 git clone https://github.com/celaut-project/nodo.git --branch dev nodo-release-build
 
-# Start a privileged container (--privileged required for modprobe inside build_ch_initramfs.sh)
+# Start a privileged container. Nothing in setup needs modprobe any more — the
+# initramfs is a release asset, not built here — but this recipe has only been
+# validated with --privileged.
 docker run --privileged -d --name nodo-v2-build ubuntu:22.04 sleep infinity
 
 # Copy nodo code into the container filesystem (NOT a bind mount — must be inside for docker export)
@@ -48,16 +52,17 @@ docker cp /tmp/nodo-release-build/. nodo-v2-build:/nodo/
 
 ### 2. Run setup
 
-`setup_linux_x86.sh` downloads the guest kernel from the `guest-kernel-vN` release, so the build
-container needs no kernel package of its own (`/boot` is never read, and the initramfs no longer
-packs host modules).
+`setup_linux_x86.sh` downloads the guest kernel, initramfs and busybox from the `guest-kernel-vN`
+release, so the build container needs no kernel package of its own and builds no part of the guest
+(`/boot` is never read, and there are no guest modules — `CONFIG_MODULES` is off in the guest
+kernel).
 
 ```bash
 # Copy the example config so setup_linux_x86.sh can find config.yaml
 docker exec nodo-v2-build cp /nodo/config.example.yaml /nodo/config.yaml
 
 # Run the full setup — installs portable Python, Cloud Hypervisor binary,
-# builds initramfs via build_ch_initramfs.sh, creates venv, runs migrations
+# downloads the guest kernel/initramfs/busybox, creates venv, runs migrations
 docker exec nodo-v2-build bash /nodo/bash/setup_linux_x86.sh /nodo
 ```
 
@@ -94,7 +99,7 @@ NEXT_TAG=v2   # increment as needed (v3, v4, …)
 gh release create "$NEXT_TAG" \
   --repo celaut-project/nodo \
   --title "Nodo WSL ${NEXT_TAG} [Windows 11 - x86_64]" \
-  --notes "Rebuilt from dev HEAD. Fixes: initramfs includes virtio_blk/virtio_net/virtiofs modules." \
+  --notes "Rebuilt from dev HEAD." \
   --latest \
   /tmp/debian.tar#debian.tar \
   /tmp/vmlinuz#vmlinuz \

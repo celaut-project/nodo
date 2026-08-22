@@ -26,7 +26,8 @@ export TARGET_DIR=/nodo
 ## 2) Install base system packages
 
 Host-level tools only. Nodo installs its own Python, JRE, yq, cloud-hypervisor and
-guest kernel in later steps, so nothing here is a build dependency of CPython.
+guest assets (kernel, initramfs, busybox) in later steps, so nothing here is a
+build dependency of CPython.
 These are the same packages `bash/lib_pkg.sh` installs for you when you run
 `install.sh`.
 
@@ -55,8 +56,10 @@ Why these:
   `psutil` has no `linux-aarch64` wheel, so pip compiles it from source. Without a
   compiler the install fails at `pip install -r requirements.txt`. (`gcc` works
   too if you `export CC=gcc CXX=g++`.)
-- `cpio`, `gzip` — pack the Cloud Hypervisor initramfs. Its only binary, a static
-  busybox, is downloaded from the Nodo release in step 10, so no busybox package
+- `cpio`, `gzip` — inspect the Cloud Hypervisor initramfs before each launch
+  (`src/virtualizers/ch/execute.py`). The image itself is built by CI and
+  downloaded from the Nodo release in step 10, along with the static busybox that
+  is its only binary, so neither a busybox package nor `initramfs-tools`/`dracut`
   is needed here.
 - `iproute2`/`iproute` and `zip` are load-bearing at runtime: `ip` is a hard
   preflight requirement for `execute` (CH networking), and `zip` is invoked when
@@ -314,9 +317,11 @@ done
 [ -n "$CH_OK" ] || { echo "Unable to download cloud-hypervisor"; exit 1; }
 rm -f /tmp/cloud-hypervisor.bin
 
-# Guest kernel: a Nodo release asset, never the host's /boot kernel. It is built
-# by .github/workflows/guest-kernel.yml from bash/guest-kernel/ and pinned in
-# install.sh as GUEST_KERNEL_VERSION.
+# Guest assets: Nodo release assets, never the host's /boot kernel and never built
+# here. The kernel, initramfs and busybox are all built by
+# .github/workflows/guest-kernel.yml from bash/guest-kernel/ and
+# bash/build_ch_initramfs.sh, under the tag pinned in install.sh as
+# GUEST_KERNEL_VERSION.
 GUEST_KERNEL_VERSION="guest-kernel"
 GUEST_KERNEL_ASSET="vmlinuz-${CH_ARCH_TAG/\//-}"   # linux/arm64 -> vmlinuz-linux-arm64
 GUEST_KERNEL_BASE="https://github.com/celaut-project/nodo/releases/download/${GUEST_KERNEL_VERSION}"
@@ -346,11 +351,14 @@ fetch_guest_asset() {  # <asset-name> <destination> <mode>
   rm -f /tmp/nodo-guest-asset
 }
 
-# The guest kernel, and the static busybox that is the guest's entire userspace.
+# The whole guest comes from the release: kernel, initramfs, and the static busybox
+# that is the initramfs' only binary. The initramfs is not built here — building it
+# on the host would make the guest depend on the host's cpio, gzip and umask.
+# busybox is still installed so you can rebuild the initramfs from this commit and
+# diff it against the shipped one (`bash/build_ch_initramfs.sh` is byte-reproducible).
 fetch_guest_asset "$GUEST_KERNEL_ASSET" "$CH_KERNEL_TARGET" 0644
+fetch_guest_asset "initramfs-${CH_ARCH_TAG/\//-}" "$CH_INITRAMFS_TARGET" 0644
 fetch_guest_asset "busybox-${CH_ARCH_TAG/\//-}" "$CH_BUSYBOX_TARGET" 0755
-
-bash "$TARGET_DIR/bash/build_ch_initramfs.sh" "$TARGET_DIR" "$CH_ARCH_TAG" "$CH_INITRAMFS_TARGET"
 
 CH_BINARY_PATH="$CH_BINARY_PATH" "$YQ_BIN" -i '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_PATH)' "$TARGET_DIR/config.yaml"
 CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$CH_KERNEL_TARGET" "$YQ_BIN" -i \

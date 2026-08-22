@@ -265,16 +265,12 @@ provision_cloud_hypervisor_assets() {
     local ch_kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
     local ch_initramfs_target="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
     local ch_busybox_target="$TARGET_DIR/cloud_hypervisor/busybox/${CH_ARCH_TAG}/busybox"
-    local ch_initramfs_builder="$TARGET_DIR/bash/build_ch_initramfs.sh"
 
     if [ ! -f "$CONFIG_FILE" ]; then
         fail "config.yaml not found at ${CONFIG_FILE}."
     fi
     if [ ! -x "$YQ_BIN" ]; then
         fail "Local yq binary is required at ${YQ_BIN}."
-    fi
-    if [ ! -x "$ch_initramfs_builder" ]; then
-        fail "Missing executable initramfs builder at ${ch_initramfs_builder}."
     fi
 
     mkdir -p "$(dirname "$ch_binary_target")"
@@ -287,11 +283,16 @@ provision_cloud_hypervisor_assets() {
         fail "Unable to download Cloud Hypervisor ${CH_VERSION} release asset for x86_64."
     fi
 
-    echo "Provisioning guest kernel and busybox ${GUEST_KERNEL_VERSION} for ${CH_ARCH_TAG}..."
+    # The whole guest comes from the release: kernel, initramfs, and the busybox
+    # that is the initramfs' only binary. Building the initramfs here instead would
+    # make the guest depend on the host's cpio, gzip and umask, which is the thing
+    # a node must never vary by.
+    echo "Provisioning guest kernel, initramfs and busybox ${GUEST_KERNEL_VERSION} for ${CH_ARCH_TAG}..."
     download_guest_asset "vmlinuz-${CH_ARCH_TAG//\//-}" "$ch_kernel_target" 0644
+    download_guest_asset "initramfs-${CH_ARCH_TAG//\//-}" "$ch_initramfs_target" 0644
+    # Kept on disk so an operator can rebuild the initramfs from this commit and
+    # diff it against the shipped one; build_ch_initramfs.sh is byte-reproducible.
     download_guest_asset "busybox-${CH_ARCH_TAG//\//-}" "$ch_busybox_target" 0755
-
-    "$ch_initramfs_builder" "$TARGET_DIR" "$CH_ARCH_TAG" "$ch_initramfs_target"
 
     CH_BINARY_TARGET="$ch_binary_target" "$YQ_BIN" -i \
         '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
@@ -306,7 +307,7 @@ provision_cloud_hypervisor_assets() {
     test -x "$ch_binary_target" || fail "Cloud Hypervisor binary is not executable at ${ch_binary_target}."
     test -f "$ch_kernel_target" || fail "Guest kernel download failed at ${ch_kernel_target}."
     test -x "$ch_busybox_target" || fail "Guest busybox download failed at ${ch_busybox_target}."
-    test -f "$ch_initramfs_target" || fail "Initramfs copy failed at ${ch_initramfs_target}."
+    test -f "$ch_initramfs_target" || fail "Guest initramfs download failed at ${ch_initramfs_target}."
 }
 
 echo "Detecting package manager..."
