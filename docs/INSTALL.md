@@ -14,7 +14,8 @@ It follows the current runtime model:
 ## 1) Scope and assumptions
 
 - OS: any Linux with `apt` or `dnf` (tested on Ubuntu 22.04/24.04 and Fedora 44,
-  x86_64 and aarch64 — including Fedora Asahi Remix on Apple Silicon).
+  x86_64 and aarch64 — including Fedora Asahi Remix on Apple Silicon). What differs
+  on non-Debian and ARM hosts is collected in [`FEDORA_ARM.md`](FEDORA_ARM.md).
 - Architecture: `x86_64` or `aarch64`.
 - You have `sudo` access.
 - Installation root: `TARGET_DIR` (default `/nodo`).
