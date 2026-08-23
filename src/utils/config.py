@@ -2,6 +2,7 @@ import copy
 import os
 import re
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -166,14 +167,23 @@ class ConfigManager(metaclass=Singleton):
     interface to access configuration values.
     """
 
-    def __init__(self, config_path: str = "config.yaml", log: Callable[[str], None] = lambda msg: None):
+    def __init__(self, config_path: str = "config.yaml", log: Optional[Callable[[str], None]] = None):
         self.config_path = config_path
         self._config: Dict[str, Any] = {}
         self._lock = threading.RLock()
         self._loaded = False
         self._config_mtime_ns: Optional[int] = None
         self._last_reload_check: float = 0.0
-        self.log = log
+        # ConfigManager is a Singleton: whichever module constructs it first wins,
+        # and every later ``ConfigManager(log=...)`` call -- including nodo.py's own,
+        # intended to route this through log.LOGGER -- is silently ignored (Singleton
+        # only runs __init__ once). A caller-supplied logger can still lose the race,
+        # so the fallback must never be a no-op: it is the only thing that has ever
+        # surfaced *why* an auto-assigned gateway port failed (see
+        # docs/TROUBLESHOOTING.md -> "Gateway port unreachable, or never assigned").
+        self.log = log if log is not None else (
+            lambda msg: print(msg, file=sys.stderr, flush=True)
+        )
 
     def _get_nested(self, data: Dict[str, Any], keys: List[str]) -> Any:
         """Access a nested dictionary value using a list of keys."""
