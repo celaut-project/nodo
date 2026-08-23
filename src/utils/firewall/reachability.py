@@ -14,11 +14,13 @@ same input hook, same verdict.
 
 Root-only, and deliberately best-effort: when the bridge does not exist yet (a
 fresh node that has never run an instance) the answer is "unknown", not "closed".
+The same goes for a port nothing is listening on -- see ``_listener_present``.
 """
 
 import ipaddress
 import os
 import random
+import socket
 import subprocess
 import sys
 import time
@@ -74,6 +76,28 @@ _CONNECT_SNIPPET = (
     "finally:\n"
     "    s.close()\n"
 )
+
+
+def _listener_present(port: int) -> bool:
+    """Is anything on this host bound to ``port``?
+
+    The probe can only separate a firewall verdict from an empty port when there
+    is something on the other end to answer. Without a listener the connect fails
+    either way, and the failure looks the same: a port nobody is bound to answers
+    with a RST, and so does a reject rule. So "no listener" is "unknown", never
+    "closed" -- which is why the gateway is probed only after it starts listening.
+
+    Bind rather than parse ``ss``: the question is precisely whether a bind here
+    would collide. gRPC binds its listener with SO_REUSEPORT, but a bind that does
+    not set it collides all the same.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("", port))
+        except OSError:
+            return True
+    return False
 
 
 def _addresses_in_use(run: Runner, bridge: str) -> Set[str]:
@@ -133,6 +157,13 @@ def probe_tcp_from_bridge(
         return ProbeResult(
             None,
             f"bridge {bridge} does not exist yet; it is created on the first instance launch",
+        )
+
+    if not _listener_present(port):
+        return ProbeResult(
+            None,
+            f"nothing is listening on TCP {port} on this host, so a failed connect "
+            "would say nothing about the firewall; start the node and check again",
         )
 
     try:
