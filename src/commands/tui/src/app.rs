@@ -4047,7 +4047,7 @@ Cold Wallet: 9cold\n";
     fn opening_the_editor_picks_the_widget_from_the_inferred_type() {
         let mut app = App::default();
 
-        select_config_entry(&mut app, config_entry("builder.ARM_SUPPORT", "true", "true", "bool", false));
+        select_config_entry(&mut app, config_entry("virtualizers.qemu.ENABLE", "true", "true", "bool", false));
         app.open_config_editor();
         assert_eq!(app.edit_kind, EditKind::Bool);
 

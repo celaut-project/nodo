@@ -57,11 +57,12 @@ Fedora package names worth knowing if you install by hand: `gcc make` for
   be set wrong. If `virtualizers.ch.KERNEL_CMDLINE_EXTRA` in an older `config.yaml`
   still carries `console=ttyS0` — it was the shipped default — it is dropped with a
   warning rather than honoured.
-- **This host can only execute services packed for its own architecture.** There is
-  no QEMU/binfmt (see *Operational notes* in [`INSTALL.md`](INSTALL.md)), and the
-  installer disables the other architecture for exactly that reason. On an ARM node,
-  a network catalogue that is mostly `linux/amd64` means the node participates but
-  executes little. This is a property of the install profile, not a bug.
+- **This host executes `linux/amd64` services under emulation, not KVM.** The
+  installer provisions the amd64 guest assets and installs `qemu-system-x86`, so an
+  ARM node does take work from a catalogue that is mostly `linux/amd64` — but under
+  TCG, an order of magnitude slower than the arm64 services it boots natively. Set
+  `virtualizers.qemu.ENABLE: false` to serve only arm64. *Packing* is still
+  host-only (see *Operational notes* in [`INSTALL.md`](INSTALL.md)).
 
 ## Verified on 16 KiB pages
 

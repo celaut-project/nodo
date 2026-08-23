@@ -60,7 +60,7 @@ class PackageManagerAbstractionTests(unittest.TestCase):
         for script in (ARM_SETUP, X86_SETUP):
             with self.subTest(script=str(script)):
                 content = script.read_text(encoding="utf-8")
-                self.assertIn('download_guest_asset "busybox-${CH_ARCH_TAG//\\//-}"', content)
+                self.assertIn('download_guest_asset "busybox-${asset_suffix}"', content)
 
 
 SERVICE_TEMPLATE = Path("bash/nodo.service.template")
@@ -155,16 +155,52 @@ class ServiceUnitPortabilityTests(unittest.TestCase):
 
 
 class HostArchitectureGatingTests(unittest.TestCase):
-    def test_setup_disables_the_architecture_the_host_cannot_boot(self):
-        # This profile installs no QEMU/binfmt, so a node must not accept services
-        # built for the other architecture: it could never boot them.
+    def test_setup_restricts_only_the_packer_to_the_host_arch(self):
+        # PACKING is host-only: a local build runs the target's own toolchain and
+        # nodo installs no binfmt handler. EXECUTION is not: the node emulates the
+        # foreign arch under QEMU, so the installer must NOT write an execution
+        # gate into the config -- capability is derived from what is on disk
+        # (src/utils/architectures.py), and the flags that used to declare it are
+        # rejected outright (config_validation.REMOVED_KEYS).
         arm = ARM_SETUP.read_text(encoding="utf-8")
         x86 = X86_SETUP.read_text(encoding="utf-8")
 
-        self.assertIn(".builder.X86_SUPPORT = false", arm)
         self.assertIn(".packer.X86_PACKER_SUPPORT = false", arm)
-        self.assertIn(".builder.ARM_SUPPORT = false", x86)
         self.assertIn(".packer.ARM_PACKER_SUPPORT = false", x86)
+
+        for name, content in (("arm", arm), ("x86", x86)):
+            with self.subTest(script=name):
+                self.assertNotIn(".builder.ARM_SUPPORT", content)
+                self.assertNotIn(".builder.X86_SUPPORT", content)
+
+    def test_setup_provisions_guest_assets_for_both_architectures(self):
+        # The foreign arch's kernel/initramfs are what QEMU boots, and their absence
+        # is exactly how a node with `builder.ARM_SUPPORT: true` on x86_64 used to
+        # fail: deep in the CH build, on a kernel path nothing had downloaded.
+        for name, script, foreign in (
+            ("arm", ARM_SETUP, "linux/amd64"),
+            ("x86", X86_SETUP, "linux/arm64"),
+        ):
+            with self.subTest(script=name):
+                content = script.read_text(encoding="utf-8")
+                self.assertIn(f'FOREIGN_ARCH_TAG="{foreign}"', content)
+                self.assertIn(
+                    'provision_guest_assets_for_arch "$CH_ARCH_TAG"', content
+                )
+                self.assertIn(
+                    'provision_guest_assets_for_arch "$FOREIGN_ARCH_TAG"', content
+                )
+                self.assertIn(
+                    'install_foreign_arch_emulator "$FOREIGN_ARCH_TAG"', content
+                )
+
+    def test_emulator_install_never_fails_the_install(self):
+        # The emulator is a large optional package: a host that cannot install it
+        # must still end up with a working node that serves its own arch.
+        lib = (ARM_SETUP.parent / "lib_pkg.sh").read_text(encoding="utf-8")
+        body = lib.split("install_foreign_arch_emulator()", 1)[1].split("\n}", 1)[0]
+        self.assertNotIn("fail ", body)
+        self.assertIn("Warning: could not install", body)
 
 
 class SourceBuildToolchainTests(unittest.TestCase):

@@ -324,15 +324,7 @@ rm -f /tmp/cloud-hypervisor.bin
 # bash/build_ch_initramfs.sh, under the tag pinned in install.sh as
 # GUEST_KERNEL_VERSION.
 GUEST_KERNEL_VERSION="guest-kernel"
-GUEST_KERNEL_ASSET="vmlinuz-${CH_ARCH_TAG/\//-}"   # linux/arm64 -> vmlinuz-linux-arm64
 GUEST_KERNEL_BASE="https://github.com/celaut-project/nodo/releases/download/${GUEST_KERNEL_VERSION}"
-
-CH_KERNEL_TARGET="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
-CH_INITRAMFS_TARGET="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
-mkdir -p "$(dirname "$CH_KERNEL_TARGET")" "$(dirname "$CH_INITRAMFS_TARGET")"
-
-CH_BUSYBOX_TARGET="$TARGET_DIR/cloud_hypervisor/busybox/${CH_ARCH_TAG}/busybox"
-mkdir -p "$(dirname "$CH_BUSYBOX_TARGET")"
 
 # Expected digests come from bash/guest-kernel/SHA256SUMS.pinned in this checkout,
 # NOT from the SHA256SUMS published next to the artifact: that one lives in the same
@@ -352,22 +344,41 @@ fetch_guest_asset() {  # <asset-name> <destination> <mode>
   rm -f /tmp/nodo-guest-asset
 }
 
+CH_BINARY_PATH="$CH_BINARY_PATH" "$YQ_BIN" -i '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_PATH)' "$TARGET_DIR/config.yaml"
+
 # The whole guest comes from the release: kernel, initramfs, and the static busybox
 # that is the initramfs' only binary. The initramfs is not built here — building it
 # on the host would make the guest depend on the host's cpio, gzip and umask.
 # busybox is still installed so you can rebuild the initramfs from this commit and
 # diff it against the shipped one (`bash/build_ch_initramfs.sh` is byte-reproducible).
-fetch_guest_asset "$GUEST_KERNEL_ASSET" "$CH_KERNEL_TARGET" 0644
-fetch_guest_asset "initramfs-${CH_ARCH_TAG/\//-}" "$CH_INITRAMFS_TARGET" 0644
-fetch_guest_asset "busybox-${CH_ARCH_TAG/\//-}" "$CH_BUSYBOX_TARGET" 0755
+#
+# Both architectures, not just this host's: the foreign one is what QEMU boots under
+# emulation, and the node decides whether to advertise that arch by looking for
+# exactly these files (src/utils/architectures.py). Installing only the host's arch
+# is what used to make an arm64 launch on x86_64 die inside the CH build.
+for ARCH_TAG in linux/amd64 linux/arm64; do
+  SUFFIX="${ARCH_TAG/\//-}"   # linux/arm64 -> linux-arm64
+  KERNEL_TARGET="$TARGET_DIR/cloud_hypervisor/kernels/${ARCH_TAG}/vmlinuz"
+  INITRAMFS_TARGET="$TARGET_DIR/cloud_hypervisor/initramfs/${ARCH_TAG}/initramfs"
+  BUSYBOX_TARGET="$TARGET_DIR/cloud_hypervisor/busybox/${ARCH_TAG}/busybox"
+  mkdir -p "$(dirname "$KERNEL_TARGET")" "$(dirname "$INITRAMFS_TARGET")" "$(dirname "$BUSYBOX_TARGET")"
 
-CH_BINARY_PATH="$CH_BINARY_PATH" "$YQ_BIN" -i '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_PATH)' "$TARGET_DIR/config.yaml"
-CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$CH_KERNEL_TARGET" "$YQ_BIN" -i \
-  '.virtualizers.ch.KERNEL_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_KERNEL_TARGET)' \
-  "$TARGET_DIR/config.yaml"
-CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$CH_INITRAMFS_TARGET" "$YQ_BIN" -i \
-  '.virtualizers.ch.INITRAMFS_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_INITRAMFS_TARGET)' \
-  "$TARGET_DIR/config.yaml"
+  fetch_guest_asset "vmlinuz-${SUFFIX}" "$KERNEL_TARGET" 0644
+  fetch_guest_asset "initramfs-${SUFFIX}" "$INITRAMFS_TARGET" 0644
+  fetch_guest_asset "busybox-${SUFFIX}" "$BUSYBOX_TARGET" 0755
+
+  ARCH_TAG="$ARCH_TAG" KERNEL_TARGET="$KERNEL_TARGET" "$YQ_BIN" -i \
+    '.virtualizers.ch.KERNEL_PATHS[strenv(ARCH_TAG)] = strenv(KERNEL_TARGET)' \
+    "$TARGET_DIR/config.yaml"
+  ARCH_TAG="$ARCH_TAG" INITRAMFS_TARGET="$INITRAMFS_TARGET" "$YQ_BIN" -i \
+    '.virtualizers.ch.INITRAMFS_PATHS[strenv(ARCH_TAG)] = strenv(INITRAMFS_TARGET)' \
+    "$TARGET_DIR/config.yaml"
+done
+
+# The emulator for the arch this host does NOT run natively. Optional: without it
+# the node simply serves only its own arch.
+#   Debian/Ubuntu:  apt-get install -y qemu-system-arm   # or qemu-system-x86
+#   Fedora/RHEL:    dnf install -y qemu-system-aarch64   # or qemu-system-x86
 ```
 
 ## 11) Rootless local builder directories
@@ -445,12 +456,15 @@ Cloud Hypervisor checks:
 
 ```bash
 test -x "$CH_BINARY_PATH"
-test -f "$CH_KERNEL_TARGET"
-test -f "$CH_INITRAMFS_TARGET"
+# Both arches, since both were provisioned above.
+for ARCH_TAG in linux/amd64 linux/arm64; do
+  test -f "$TARGET_DIR/cloud_hypervisor/kernels/${ARCH_TAG}/vmlinuz"
+  test -f "$TARGET_DIR/cloud_hypervisor/initramfs/${ARCH_TAG}/initramfs"
+done
 ```
 
 ## 15) Operational notes
 
-- Cross-arch builds are disabled in this profile. If target architecture differs from host architecture, build/pack flows fail early with an explicit message.
-- QEMU/binfmt are intentionally not installed.
+- Cross-arch *packing* is disabled in this profile: a local build runs the target's own toolchain, so if the target architecture differs from the host's, pack flows fail early with an explicit message. binfmt is intentionally not installed.
+- Cross-arch *execution* is supported and on by default. The installer provisions the guest kernel/initramfs for **both** architectures and installs `qemu-system-<foreign arch>`, so this node executes its own arch under Cloud Hypervisor/KVM and the other under QEMU/TCG. Emulation is an order of magnitude slower than KVM; set `virtualizers.qemu.ENABLE: false` to serve only the host's arch. If the emulator package cannot be installed, the install still succeeds and the node just does not advertise the foreign arch.
 - Keep `config.yaml` and actual installed paths aligned. If you move runtimes/binaries, update `dependencies.*` and restart `nodo.service`.
