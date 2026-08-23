@@ -66,9 +66,12 @@ class GatewayPortResolutionTests(unittest.TestCase):
 
             mock_open_port.assert_called_once()
             self.assertEqual(mock_open_port.call_args.kwargs["port"], 41001)
-            # The probe must run before the port is committed to the file.
             self.assertEqual(mock_open_port.call_args.kwargs["bridge"], "br-ch")
             self.assertEqual(mock_open_port.call_args.kwargs["subnet"], "192.168.200.0/24")
+            # Not verified here: nothing is listening on the port yet, so the
+            # guest-side connect could only fail. src/serve.py proves reachability
+            # once the gateway is up.
+            self.assertIs(mock_open_port.call_args.kwargs["verify"], False)
 
     @patch(
         "src.utils.firewall.gateway.ensure_gateway_port_open",

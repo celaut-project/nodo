@@ -253,9 +253,9 @@ class ConfigManager(metaclass=Singleton):
     def _resolve_gateway_port_unlocked(self):
         """Assign a gateway port when there is none -- but only if we can open it.
 
-        The port is persisted *after* the host firewall accepted it and the probe
-        confirmed a guest could reach it. Anything less leaves the sentinel in
-        place so the next privileged start tries again.
+        The port is persisted *after* the host firewall accepted the rule for it.
+        Anything less leaves the sentinel in place so the next privileged start
+        tries again.
 
         This ordering is the whole point. The previous version resolved the port,
         skipped the firewall unless it happened to be root, and persisted either
@@ -294,17 +294,25 @@ class ConfigManager(metaclass=Singleton):
 
         network = self._guest_network_unlocked()
         try:
+            # verify=False: nothing is listening on the port at the moment it is
+            # being assigned -- the node is not up yet, and on the install path it
+            # is `nodo migrate` that triggers this. A guest-side connect would fail
+            # for that reason alone, which used to be read as "the firewall blocks
+            # it" and left the sentinel in place forever on any host whose guest
+            # bridge already existed. Reachability is proved in src/serve.py once
+            # the gateway is listening, and re-checked by `nodo doctor`.
             ensure_gateway_port_open(
                 port=port,
                 bridge=network["bridge"],
                 gateway_ip=network["gateway_ip"],
                 subnet=network["subnet"],
+                verify=False,
                 config_path=self.config_path,
                 log=self.log,
             )
         except GatewayPortUnavailable as e:
             self.log(
-                f"Not assigning gateway port {port}: it could not be opened and verified.\n{e}"
+                f"Not assigning gateway port {port}: it could not be opened.\n{e}"
             )
             return
 

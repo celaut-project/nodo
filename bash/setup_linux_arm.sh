@@ -65,6 +65,51 @@ read_config_path_or_default() {
     expand_main_dir_placeholder "$value"
 }
 
+# Set by report_gateway_port: whether this install ends with a node that can serve.
+GATEWAY_PORT_ASSIGNED="no"
+
+report_gateway_port() {
+    # Running the migration as root is this node's first privileged run, so it is
+    # where network.GATEWAY_PORT stops being "auto": a free port is picked, opened
+    # in the host firewall, and written back to config.yaml. Read it back and say
+    # so. When it did not happen the reason is in the node's own log and nowhere
+    # else, and an install that looks finished while the daemon cannot serve a
+    # single request is worse than a noisy one.
+    #
+    # $1 is the captured migration output, shown only in the failing case: with
+    # main.USE_PRINT the reason is in there rather than in app.log.
+    local migration_log="${1:-}"
+    local port storage
+    port="$(read_config_path_or_default '.network.GATEWAY_PORT' "")"
+
+    case "$port" in
+        ""|auto)
+            storage="$(read_config_path_or_default '.main.STORAGE' "$TARGET_DIR/storage")"
+            {
+                echo "Warning: network.GATEWAY_PORT is still unassigned."
+                echo "  The node could not open a port in the host firewall, so it has no"
+                echo "  address to serve on. The reason is in the gateway port lines of"
+                echo "  ${storage}/app.log."
+                if [ -n "$migration_log" ] && [ -s "$migration_log" ]; then
+                    echo "  The migration printed:"
+                    sed 's/^/    /' "$migration_log"
+                fi
+                echo "  Fix it in one of two ways, then run 'nodo doctor':"
+                echo "    - resolve what the log reports and run 'sudo nodo serve' once, or"
+                echo "    - open a port yourself and pin it in ${CONFIG_FILE}:"
+                echo "        network:"
+                echo "          GATEWAY_PORT: 58443"
+            } >&2
+            ;;
+        *)
+            GATEWAY_PORT_ASSIGNED="yes"
+            echo "Gateway port: ${port}, open in the host firewall."
+            echo "  Guests reach the node on it, and so do peers -- forward it on your router"
+            echo "  to be reachable from outside ('nodo nat-guide')."
+            ;;
+    esac
+}
+
 apply_configured_dependency_paths() {
     local configured_yq_bin
 
@@ -361,8 +406,21 @@ if ! command -v cargo >/dev/null; then
 fi
 
 echo "Running Python database migrations..."
-"$TARGET_DIR/venv/bin/python" "$TARGET_DIR/nodo.py" migrate >/dev/null || {
+migration_output="$(mktemp)"
+if ! "$TARGET_DIR/venv/bin/python" "$TARGET_DIR/nodo.py" migrate >"$migration_output" 2>&1; then
+    # Kept until now so a successful run stays quiet, and shown in full when it
+    # fails: the output is the only description of what went wrong.
+    sed 's/^/  /' "$migration_output" >&2
+    rm -f "$migration_output"
     fail "Migration failed."
-}
+fi
 
-echo "ARM setup completed successfully!"
+report_gateway_port "$migration_output"
+rm -f "$migration_output"
+
+if [ "$GATEWAY_PORT_ASSIGNED" = "yes" ]; then
+    echo "ARM setup completed successfully!"
+else
+    echo "ARM setup completed, but the node has no gateway port and cannot serve until"
+    echo "it has one. See the warning above."
+fi

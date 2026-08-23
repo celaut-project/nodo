@@ -9,7 +9,6 @@ from src.utils.network import get_local_ip
 
 env_manager = ConfigManager(log=log.LOGGER)
 
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 MEMORY_LOGS = env_manager.get("MEMORY_LOGS")
 REGISTRY = env_manager.get("REGISTRY")
 CACHE = env_manager.get("CACHE")
@@ -18,16 +17,32 @@ METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MAIN_DIR = env_manager.get("MAIN_DIR")
 
+def gateway_port():
+    """The assigned gateway port, or None -- resolved on demand, never at import.
+
+    An unassigned port is a hard error carrying instructions (see
+    src/utils/firewall/gateway.py), which is right for anything that talks to the
+    node and wrong as a module-level constant: reading it here made *every*
+    command abort before dispatch, including `nodo migrate` (which the installer
+    runs, so a fresh install could not finish) and `nodo doctor` (which that very
+    error message tells the operator to run next).
+    """
+    return env_manager.gateway_port_or_none()
+
+
 def is_nodo_service_running():
-    """Check if the nodo service is running by verifying if GATEWAY_PORT is in use."""
+    """Check if the nodo service is running by verifying if the gateway port is in use."""
     import socket
+    port = gateway_port()
+    if not port:
+        return False  # No port assigned means nothing can be serving on one.
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(1)
-            result = s.connect_ex(('localhost', int(GATEWAY_PORT)))
+            result = s.connect_ex(('localhost', int(port)))
             return result == 0  # Port is in use (connection successful)
     except Exception as e:
-        print(f"Error checking if GATEWAY_PORT is in use: {e}", flush=True)
+        print(f"Error checking if the gateway port is in use: {e}", flush=True)
         return False
 
 
@@ -250,7 +265,16 @@ if __name__ == '__main__':
 
                 print(f"Nodo version: {get_git_commit()}", flush=True)
 
-                print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
+                port = gateway_port()
+                if port:
+                    print(f"Nodo address: {get_local_ip()}:{port}", flush=True)
+                else:
+                    print(
+                        "Nodo address: unavailable -- network.GATEWAY_PORT is not "
+                        "assigned yet. Start the node once as root ('sudo nodo serve') "
+                        "so it can pick a port and open it, then run 'nodo doctor'.",
+                        flush=True
+                    )
 
                 try:
                     from src.manager.ddns import status as ddns_status
@@ -262,15 +286,15 @@ if __name__ == '__main__':
                             f"({ddns_info['provider']}) -> {resolves}",
                             flush=True
                         )
-                        if ddns_info["resolves_to"]:
+                        if ddns_info["resolves_to"] and port:
                             from src.utils.network import resolve_public_port
                             public_port = resolve_public_port(
-                                env_manager.get("network.PUBLIC_TCP_PORT", ""), GATEWAY_PORT
+                                env_manager.get("network.PUBLIC_TCP_PORT", ""), port
                             )
                             print(
                                 f"  Reachable from outside only if your router forwards "
                                 f"{ddns_info['resolves_to']}:{public_port} to this host's "
-                                f"port {GATEWAY_PORT}.",
+                                f"port {port}.",
                                 flush=True
                             )
                         print("  Run 'nodo nat-guide' for the router steps.", flush=True)

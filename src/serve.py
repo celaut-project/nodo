@@ -16,13 +16,41 @@ from src.utils.firewall.legacy import sweep_compat_tables
 env_manager = ConfigManager()
 
 
-def _open_and_verify_gateway_port(port: int) -> None:
-    """Re-open the gateway port, and check a guest can actually reach it.
+def _gateway_port_call(port: int, *, verify: bool) -> None:
+    """Apply nodo's accept rule for ``port``, optionally probing it afterwards."""
+    ensure_gateway_port_open(
+        port=port,
+        bridge=str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")),
+        gateway_ip=str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1")),
+        subnet=str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")),
+        verify=verify,
+        strict=True,
+        config_path=env_manager.config_path,
+        log=log.LOGGER,
+    )
+
+
+def _open_gateway_port(port: int) -> None:
+    """Re-open the gateway port in the host firewall, before anything binds it.
 
     Netfilter rules do not survive a reboot but config.yaml does, so the accept
     rule has to be re-applied on every start rather than only when the port is
     first assigned -- otherwise the first reboot silently closes the gateway for
     good.
+
+    No probe here: nothing is listening yet, and a connect to a port with no
+    listener fails whatever the firewall says (see
+    ``src.utils.firewall.reachability``). Verification happens in
+    ``_verify_gateway_port``, once the server is up and can answer.
+    """
+    try:
+        _gateway_port_call(port, verify=False)
+    except GatewayPortUnavailable as e:
+        _refuse_to_start(e)
+
+
+def _verify_gateway_port(port: int) -> None:
+    """Check a guest can actually reach the gateway, now that it is listening.
 
     The probe is what turns a silent misconfiguration into a startup failure. This
     node ran for two days with a correct accept rule that a higher-priority
@@ -30,23 +58,22 @@ def _open_and_verify_gateway_port(port: int) -> None:
     into the gateway, and nothing noticed, because nothing ever tried the path a
     guest takes. An unreachable gateway is worse than a stopped node, so a
     conclusive failure stops here.
+
+    It has to run *after* ``server.start()``: the answer is only conclusive when
+    something is there to answer.
     """
-    verify = env_manager.get("network.VERIFY_GATEWAY_REACHABILITY", True)
+    if not bool(env_manager.get("network.VERIFY_GATEWAY_REACHABILITY", True)):
+        return
     try:
-        ensure_gateway_port_open(
-            port=port,
-            bridge=str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")),
-            gateway_ip=str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1")),
-            subnet=str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")),
-            verify=bool(verify),
-            strict=True,
-            config_path=env_manager.config_path,
-            log=log.LOGGER,
-        )
+        _gateway_port_call(port, verify=True)
     except GatewayPortUnavailable as e:
-        log.LOGGER(f"Refusing to start: {e}")
-        print(f"\n{e}\n", file=sys.stderr, flush=True)
-        raise SystemExit(1) from e
+        _refuse_to_start(e)
+
+
+def _refuse_to_start(e: GatewayPortUnavailable) -> None:
+    log.LOGGER(f"Refusing to start: {e}")
+    print(f"\n{e}\n", file=sys.stderr, flush=True)
+    raise SystemExit(1) from e
 
 
 def serve():
@@ -54,7 +81,7 @@ def serve():
     # unreachable cannot serve a single request, and every service it accepted
     # would be unable to call back into it.
     port = env_manager.get_gateway_port()
-    _open_and_verify_gateway_port(port)
+    _open_gateway_port(port)
 
     # One-time migration: versions before nodo managed nftables natively wrote
     # their rules through the iptables compatibility tables. On an nftables host
@@ -94,4 +121,13 @@ def serve():
     server.add_insecure_port('[::]:' + str(port))
 
     server.start()
+
+    # Only now can the guest-side probe distinguish "the firewall drops this" from
+    # "nothing answers on this port".
+    try:
+        _verify_gateway_port(port)
+    except SystemExit:
+        server.stop(0)
+        raise
+
     server.wait_for_termination()

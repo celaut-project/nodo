@@ -189,15 +189,18 @@ packer:
 
 network:
   # The gRPC port guests and peers reach this node on. "auto" means "not assigned
-  # yet": the first *privileged* start picks a free port from FREE_PORTS_RANGE,
-  # opens it in the host firewall, verifies a guest can actually reach it, and only
-  # then writes the number back here. An unprivileged run leaves "auto" untouched
-  # rather than storing a port nothing opened. Once a number is here it is fixed,
-  # and the accept rule is re-applied on every start (netfilter rules do not
-  # survive a reboot; this file does).
+  # yet": the first *privileged* run picks a free port from FREE_PORTS_RANGE, opens
+  # it in the host firewall, and only then writes the number back here. An
+  # unprivileged run leaves "auto" untouched rather than storing a port nothing
+  # opened. Once a number is here it is fixed, and the accept rule is re-applied on
+  # every start (netfilter rules do not survive a reboot; this file does).
+  # Reachability is proved separately, once the gateway is actually listening --
+  # see VERIFY_GATEWAY_REACHABILITY below.
   GATEWAY_PORT: auto
-  # Before serving, prove a guest can reach GATEWAY_PORT by connecting to it from a
-  # throwaway namespace on the guest bridge. A conclusive failure stops the node:
+  # Just after the gateway starts listening, prove a guest can reach GATEWAY_PORT by
+  # connecting to it from a throwaway namespace on the guest bridge. The check runs
+  # there and not earlier because a port with nothing bound to it refuses a connect
+  # exactly like a firewalled one does. A conclusive failure stops the node:
   # an unreachable gateway means every service it accepts is unable to call back
   # into it, which is worse than not starting. Set to false only if this host's
   # networking makes the probe unusable -- 'nodo doctor' still reports it either way.

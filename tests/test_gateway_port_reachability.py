@@ -65,6 +65,15 @@ def _probe(runner, **kwargs):
 
 @patch("src.utils.firewall.reachability.os.geteuid", return_value=0)
 class ProbeTests(unittest.TestCase):
+    def setUp(self):
+        # Every probe here assumes the gateway is already listening; with nothing
+        # bound the probe never runs at all (NoListenerTests below).
+        patcher = patch(
+            "src.utils.firewall.reachability._listener_present", return_value=True
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_a_successful_connect_is_conclusive(self, _euid):
         runner = FakeRunner()
         result = _probe(runner)
@@ -121,6 +130,27 @@ class ProbeTests(unittest.TestCase):
 
         self.assertIsNone(result.reachable)
         self.assertIn("could not create netns", result.detail)
+
+
+@patch("src.utils.firewall.reachability.os.geteuid", return_value=0)
+@patch("src.utils.firewall.reachability._listener_present", return_value=False)
+class NoListenerTests(unittest.TestCase):
+    """A port nothing is bound to answers like a blocked one. That is not a verdict.
+
+    This is what made a fresh install unrecoverable: the port is opened *before*
+    anything listens on it, so the probe's connect always failed, the assignment
+    was rolled back, and ``GATEWAY_PORT`` stayed ``auto`` forever on any host whose
+    guest bridge already existed.
+    """
+
+    def test_no_listener_is_unknown_not_closed(self, _listener, _euid):
+        runner = FakeRunner({("ip", "netns", "exec"): _proc(1, "ConnectionRefusedError")})
+        result = _probe(runner)
+
+        self.assertIsNone(result.reachable)
+        self.assertIn("nothing is listening", result.detail)
+        # And no namespace was built to find that out.
+        self.assertFalse(runner.ran("ip", "netns", "add"))
 
 
 class ProbePrivilegeTests(unittest.TestCase):
