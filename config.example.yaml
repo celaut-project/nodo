@@ -199,12 +199,23 @@ packer:
 network:
   # The gRPC port guests and peers reach this node on. "auto" means "not assigned
   # yet": the first *privileged* run picks a free port from FREE_PORTS_RANGE, opens
-  # it in the host firewall, and only then writes the number back here. An
-  # unprivileged run leaves "auto" untouched rather than storing a port nothing
-  # opened. Once a number is here it is fixed, and the accept rule is re-applied on
-  # every start (netfilter rules do not survive a reboot; this file does).
-  # Reachability is proved separately, once the gateway is actually listening --
-  # see VERIFY_GATEWAY_REACHABILITY below.
+  # it in nodo's own nftables (or iptables) ruleset, PROVES it is reachable, and only
+  # then writes the number back here. An unprivileged run leaves "auto" untouched
+  # rather than storing a port nothing opened.
+  #
+  # The port is proved before it is stored, using a throwaway listener -- nothing is
+  # bound to it at that moment, and a connect to a port with no listener refuses
+  # exactly like a firewalled one does. If it cannot be proved AND this host has
+  # other firewall rules that could reject it, "auto" is left in place with
+  # instructions rather than storing a port peers may not reach: a node that looks
+  # alive and answers nothing is worse than one that refuses to start.
+  #
+  # Once a number is here it is fixed, and the accept rule is re-applied on every
+  # start (netfilter rules do not survive a reboot; this file does).
+  # Reachability is re-proved once the gateway is actually
+  # listening -- see VERIFY_GATEWAY_REACHABILITY below. Whether peers OUTSIDE this
+  # LAN can reach the port is a separate question no check here can answer: run
+  # 'nodo nat-guide'.
   GATEWAY_PORT: auto
   # Just after the gateway starts listening, prove a guest can reach GATEWAY_PORT by
   # connecting to it from a throwaway namespace on the guest bridge. The check runs

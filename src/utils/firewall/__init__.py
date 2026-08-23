@@ -14,6 +14,7 @@ from src.utils.firewall.rules import Chain, Rule, Verdict
 from src.utils.firewall.gateway import (
     GATEWAY_COMMENT_PREFIX,
     GatewayPortUnavailable,
+    assign_gateway_port,
     cleanup_legacy_rules,
     ensure_gateway_port_open,
     gateway_comment,
@@ -37,6 +38,7 @@ __all__ = [
     "IptablesBackend",
     "NftBackend",
     "ProbeResult",
+    "assign_gateway_port",
     "cleanup_legacy_rules",
     "detect_backend",
     "ensure_gateway_port_open",

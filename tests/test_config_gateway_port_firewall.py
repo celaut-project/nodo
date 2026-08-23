@@ -1,4 +1,4 @@
-"""The gateway port is assigned only when it can actually be opened.
+"""The gateway port is assigned only when it has been cleared for use.
 
 The bug these tests pin down: the previous version resolved ``auto`` to a free
 port, opened it in the firewall *only if it happened to be root*, and persisted
@@ -37,7 +37,7 @@ class GatewayPortResolutionTests(unittest.TestCase):
         self._write_config(config_path, gateway_port=gateway_port)
         return ConfigManager(config_path=str(config_path)), config_path
 
-    @patch("src.utils.firewall.gateway.ensure_gateway_port_open")
+    @patch("src.utils.firewall.gateway.assign_gateway_port")
     @patch("src.utils.config.get_free_port", return_value=41000)
     @patch("src.utils.config.os.geteuid", return_value=1000)
     def test_unprivileged_run_leaves_the_sentinel_alone(
@@ -53,7 +53,7 @@ class GatewayPortResolutionTests(unittest.TestCase):
             mock_open_port.assert_not_called()
             self.assertIn("GATEWAY_PORT: auto", config_path.read_text(encoding="utf-8"))
 
-    @patch("src.utils.firewall.gateway.ensure_gateway_port_open")
+    @patch("src.utils.firewall.gateway.assign_gateway_port")
     @patch("src.utils.config.get_free_port", return_value=41001)
     @patch("src.utils.config.os.geteuid", return_value=0)
     def test_privileged_run_opens_then_persists(self, _euid, _free_port, mock_open_port):
@@ -67,19 +67,16 @@ class GatewayPortResolutionTests(unittest.TestCase):
             mock_open_port.assert_called_once()
             self.assertEqual(mock_open_port.call_args.kwargs["port"], 41001)
             self.assertEqual(mock_open_port.call_args.kwargs["bridge"], "br-ch")
+            self.assertEqual(mock_open_port.call_args.kwargs["gateway_ip"], "192.168.200.1")
             self.assertEqual(mock_open_port.call_args.kwargs["subnet"], "192.168.200.0/24")
-            # Not verified here: nothing is listening on the port yet, so the
-            # guest-side connect could only fail. src/serve.py proves reachability
-            # once the gateway is up.
-            self.assertIs(mock_open_port.call_args.kwargs["verify"], False)
 
     @patch(
-        "src.utils.firewall.gateway.ensure_gateway_port_open",
+        "src.utils.firewall.gateway.assign_gateway_port",
         side_effect=GatewayPortUnavailable("blocked", "open it yourself", port=41002),
     )
     @patch("src.utils.config.get_free_port", return_value=41002)
     @patch("src.utils.config.os.geteuid", return_value=0)
-    def test_port_is_not_persisted_when_it_cannot_be_opened(
+    def test_port_is_not_persisted_when_it_cannot_be_cleared(
         self, _euid, _free_port, _mock_open_port
     ):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -90,7 +87,7 @@ class GatewayPortResolutionTests(unittest.TestCase):
             self.assertIsNone(manager.gateway_port_or_none())
             self.assertIn("GATEWAY_PORT: auto", config_path.read_text(encoding="utf-8"))
 
-    @patch("src.utils.firewall.gateway.ensure_gateway_port_open")
+    @patch("src.utils.firewall.gateway.assign_gateway_port")
     @patch("src.utils.config.get_free_port")
     @patch("src.utils.config.os.geteuid", return_value=0)
     def test_an_already_assigned_port_is_never_reassigned(
