@@ -335,9 +335,41 @@ def _network_preflight() -> ipaddress.IPv4Network:
 
     _run(["ip", "link", "set", NETWORK_BRIDGE_NAME, "up"])
     _run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+    _ensure_guest_l2_isolation()
     _ensure_masquerade(network)
 
     return network
+
+def _ensure_guest_l2_isolation() -> None:
+    """Route guest-to-guest traffic through the host, where the policy lives.
+
+    ``block_all`` and every ``allow`` nodo writes sit on the *forward* hook, which
+    only sees packets the host routes. Two guests on this bridge share one L2
+    domain: they ARP each other directly and their frames are switched tap to
+    tap, never reaching that hook. So the allow-list is a no-op for the one class
+    of destination that matters most -- the other instances on this node.
+
+    Isolating the ports (see ``_create_tap``) alone only breaks things: the
+    neighbour stops answering ARP, so a service cannot reach its own dependency
+    either. Proxy ARP is the other half. The host answers on the neighbour's
+    behalf, the guest hands it the frame, and the host routes it -- which is
+    exactly what puts the packet in front of the forward chain. ``proxy_arp_pvlan``
+    is the variant that replies on the interface the request arrived on; plain
+    ``proxy_arp`` stays silent in that case, which is the case we have. And
+    redirects have to go: otherwise the host helpfully tells the guest to talk to
+    the neighbour directly, which isolation has just made impossible.
+
+    Failing here is deliberate. A half-applied setup is the worst outcome: either
+    guests reach each other unfiltered while the rules claim otherwise, or
+    dependencies break with no ARP answer and no route.
+    """
+    for key, value in (
+        (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.proxy_arp", "1"),
+        (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.proxy_arp_pvlan", "1"),
+        (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.send_redirects", "0"),
+    ):
+        _run(["sysctl", "-w", f"{key}={value}"])
+
 
 def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
     """Source-NAT the guest subnet on its way off this host.
@@ -365,6 +397,11 @@ def _create_tap(vmachine_id: str) -> str:
 
     _run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap"])
     _run(["ip", "link", "set", tap_name, "master", NETWORK_BRIDGE_NAME])
+    # An isolated bridge port can only exchange frames with the bridge itself,
+    # never with another isolated port, so a guest reaches its neighbours through
+    # the host -- and through the firewall. See _ensure_guest_l2_isolation for the
+    # proxy-ARP half this depends on.
+    _run(["ip", "link", "set", "dev", tap_name, "type", "bridge_slave", "isolated", "on"])
     _run(["ip", "link", "set", tap_name, "up"])
 
     return tap_name
