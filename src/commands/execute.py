@@ -198,7 +198,38 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
             channel.close()
 
 
-def print_endpoints(response) -> None:
+def _dim(text: str) -> str:
+    """Dim, but only where something will render it -- never escape noise in a pipe."""
+    if not sys.stdout.isatty():
+        return text
+    return f"\033[2m{text}\033[0m"
+
+
+def print_lan_reachability_note(response) -> None:
+    """Footnote for `--remote`: the address handed out is the node's LAN address.
+
+    That is the point of the flag -- an external client gets the address the node
+    is reachable at on its own network, not the guest-internal one -- and it is
+    exactly what an operator connected over SSH from somewhere else cannot use.
+    Nothing has gone wrong when that happens, so this stays a footnote.
+    """
+    slot = next(
+        (uri_slot.internal_port for uri_slot in response.instance.uri_slot),
+        "<slot>",
+    )
+    token = response.token or "<instance>"
+
+    print(_dim(
+        "\n  Note: that address is the one the node is reachable at on its own local\n"
+        "  network, so it only answers from a machine on that network. Over the\n"
+        "  internet it is unroutable, whatever you forward on your side. To reach the\n"
+        "  instance from elsewhere, run a node where you are and tunnel in through\n"
+        "  this one:\n"
+        f"      nodo tunnel {token} {slot} --peer <node address>:<gateway port>"
+    ))
+
+
+def print_endpoints(response, remote: bool = False) -> None:
     """Print the HTTP endpoints (if any) a `ServiceInstance` response exposes."""
     endpoints: list[str] = []
     for slot in response.instance.api.slot:
@@ -221,6 +252,9 @@ def print_endpoints(response) -> None:
             print(f"  • {endpoint}")
     else:
         print("No endpoints available")
+
+    if remote:
+        print_lan_reachability_note(response)
 
 
 def execute(
@@ -262,7 +296,7 @@ def execute(
         if response is None:
             return
 
-        print_endpoints(response)
+        print_endpoints(response, remote=external)
 
     finally:
         if sink:
