@@ -831,8 +831,16 @@ def _doctor_guest_gateway_reachability():
         print(f"[WARN] Could not read the guest network settings: {e}", flush=True)
         return
 
+    # provide_listener: doctor is usually run with the node stopped, and a connect to
+    # a port with no listener fails whatever the firewall says. Supplying one turns
+    # "could not test it" into an actual verdict, which is the whole point of running
+    # doctor after a launch failure.
     probe = probe_tcp_from_bridge(
-        bridge=bridge, target_ip=gateway_ip, port=port, subnet=subnet
+        bridge=bridge,
+        target_ip=gateway_ip,
+        port=port,
+        subnet=subnet,
+        provide_listener=True,
     )
 
     if probe.reachable is True:
@@ -865,6 +873,12 @@ def _doctor_guest_gateway_reachability():
             "wins whatever the priority. Open the port where that ruleset is managed.",
             flush=True
         )
+    print(
+        "  This tests the guest subnet only. Whether peers OUTSIDE this LAN can reach "
+        "the port is a separate question no check on this host can answer -- run "
+        "'nodo nat-guide'.",
+        flush=True
+    )
 
 
 def doctor_command(main_dir):

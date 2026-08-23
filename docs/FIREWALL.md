@@ -120,7 +120,8 @@ deliberately stricter than everything else (`src/utils/firewall/gateway.py`):
 
 - The accept is re-applied on **every** daemon start, not once when the port is
   first assigned.
-- A port is only persisted after it has been opened *and* proven reachable.
+- A port is only persisted after it has been **cleared**, not merely opened. See
+  below: this is the part that used to be assumed.
 - `network.GATEWAY_PORT` never resolves to `auto`. No port is a hard error with
   operator instructions, never a plausible-looking default.
 
@@ -129,7 +130,57 @@ namespace with a veth enslaved to the guest bridge and connects from inside it
 (`src/utils/firewall/reachability.py`). Checking from the host itself would prove
 nothing — a connect to a local address goes over `lo`, which nearly every
 firewall accepts unconditionally. The probe is tri-state: "could not run" (no
-bridge yet, no listener, not root) is reported as unknown, never as closed.
+bridge yet, not root) is reported as unknown, never as closed.
+
+### Clearing a port before storing it
+
+Assignment (`assign_gateway_port`) is stricter than a daemon start, because the
+port it picks is written to `config.yaml` and every peer is then told to use it. A
+port that turns out to be blocked is not a transient failure there — it is a node
+that looks alive and answers nothing.
+
+The obstacle used to be circular: nothing is listening at assignment time, and a
+connect to a port with no listener fails whether or not the firewall allows it, so
+assignment skipped verification and stored a port no packet had ever traversed.
+The probe now **supplies its own throwaway listener** (`provide_listener`), which
+makes the port checkable before the gateway exists. The kernel completes the
+handshake from the accept queue, so the verdict is the one a real listener would
+get; the firewall cannot tell the difference.
+
+The decision, in order:
+
+| Probe | Foreign chains that can reject | Outcome |
+|---|---|---|
+| reachable | — | port is stored |
+| **not** reachable | any | refused, with instructions naming what rejects |
+| inconclusive | none | port is stored (nodo's accept is the only verdict on the hook) |
+| inconclusive | some | **refused** — the one check that could have cleared it did not run |
+
+That last row is the Fedora case: a fresh host whose guest bridge does not exist
+yet, with firewalld sitting on the input hook. There is no reason to commit to a
+port there, so `GATEWAY_PORT` stays `auto` and the operator gets the commands to
+run. An unassigned port stops the node with a message; an unreachable one does
+not, which is the worse of the two.
+
+When a port is refused, the message does **not** prescribe a command. nodo speaks
+the two interfaces the kernel offers — nftables and iptables — and nothing above
+them: it writes its own rules, reads the ruleset back, and drives no firewall
+front-end. Which program owns the rest of the ruleset is not something it can know,
+and naming one would be wrong on every host that uses a different one. So the
+refusal names the rejecting chains it actually read, and states the property the
+host has to satisfy:
+
+> TCP *port* inbound must be accepted on the input hook — from the guest subnet
+> over the guest bridge, and from wherever peers reach this host — and no other
+> base chain on that hook may reject or drop it.
+
+Establishing that is the operator's, who knows what manages their firewall. The
+worked examples for the two common owners are in the next section; they are
+guidance for a human reading these docs, not something the node runs.
+
+None of this says anything about reachability from **outside this LAN**: no check
+on the host can answer that (a connect from inside succeeds whether or not the
+router forwards anything). That is `nodo nat-guide`.
 
 ## Sharing the host with another firewall
 
@@ -165,8 +216,8 @@ ahead of the `filter` table, and a drop is terminal.
 which typically allows only ssh/cockpit/dhcpv6-client and ends in
 `reject with icmpx admin-prohibited`. That reject applies to guest → node
 traffic, including the gateway port, and a guest sees it as `EHOSTUNREACH`
-("No route to host"). Give the bridge a zone of its own with just the gateway
-port:
+("No route to host"). nodo does not drive `firewall-cmd`, so this one is yours to
+apply. Give the bridge a zone of its own with just the gateway port:
 
 ```bash
 firewall-cmd --permanent --new-zone=nodo
@@ -181,8 +232,9 @@ every guest.
 Forwarded traffic that has been DNAT'd is accepted by firewalld regardless of
 zone, unless `StrictForwardPorts=yes` is set in `firewalld.conf`.
 
-`nodo doctor` reports the foreign chains on the input hook that can reject, and
-runs the gateway probe.
+`nodo doctor` reports which foreign chains on the input hook can reject, and runs
+the gateway probe — supplying a listener, so it gives a verdict with the node
+stopped, which is when you are most likely to be running it.
 
 ## Configuration
 

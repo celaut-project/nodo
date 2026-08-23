@@ -289,30 +289,31 @@ class ConfigManager(metaclass=Singleton):
         # privileged start ever reaches this point.
         from src.utils.firewall.gateway import (
             GatewayPortUnavailable,
-            ensure_gateway_port_open,
+            assign_gateway_port,
         )
 
         network = self._guest_network_unlocked()
         try:
-            # verify=False: nothing is listening on the port at the moment it is
-            # being assigned -- the node is not up yet, and on the install path it
-            # is `nodo migrate` that triggers this. A guest-side connect would fail
-            # for that reason alone, which used to be read as "the firewall blocks
-            # it" and left the sentinel in place forever on any host whose guest
-            # bridge already existed. Reachability is proved in src/serve.py once
-            # the gateway is listening, and re-checked by `nodo doctor`.
-            ensure_gateway_port_open(
+            # The port is cleared before it is stored, not after. `assign_gateway_port`
+            # opens it in nodo's own ruleset, then proves it with a real connect from
+            # the guest subnet -- supplying its own throwaway listener, since the node
+            # is not up yet. It refuses when the port is blocked, and also when it could
+            # not be proven AND some other ruleset on the input hook can reject: a node
+            # whose gateway peers cannot reach looks alive and answers nothing, so an
+            # unassigned port is the better of the two failures. Reachability from
+            # outside this LAN is a separate question -- see `nodo nat-guide`.
+            assign_gateway_port(
                 port=port,
                 bridge=network["bridge"],
                 gateway_ip=network["gateway_ip"],
                 subnet=network["subnet"],
-                verify=False,
                 config_path=self.config_path,
                 log=self.log,
             )
         except GatewayPortUnavailable as e:
             self.log(
-                f"Not assigning gateway port {port}: it could not be opened.\n{e}"
+                f"Not assigning gateway port {port}: it is not usable as a gateway "
+                f"port on this host.\n{e}"
             )
             return
 

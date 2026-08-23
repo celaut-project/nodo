@@ -158,6 +158,64 @@ archive and refuses the launch, instead of letting the guest boot and park in
 `GUEST_KERNEL_VERSION` (and `bash/guest-kernel/SHA256SUMS.pinned`) to the release
 whose initramfs speaks the version this checkout expects.
 
+## Gateway port unreachable, or never assigned
+
+**Symptom, one of:**
+- The node refuses to start with *"network.GATEWAY_PORT is not assigned"*, or
+  *"Gateway port N could not be verified as reachable"*.
+- The node runs, but another machine on the LAN gets **"no route to host"**
+  connecting to its port, and peers never reach it.
+
+**Why:** nodo writes an accept rule for the port in its own nftables table, and on
+a host that shares the firewall that rule is *necessary but not sufficient*. In
+nftables `accept` ends the evaluation of its own chain only; the packet still
+traverses every other base chain on the same hook, and a `reject` there wins
+regardless of priority. firewalld's default zone ends in
+`reject with icmpx admin-prohibited` — which is precisely the "no route to host"
+above.
+
+So nodo does not store a port it could not clear. If the port cannot be proven
+reachable and this host has other rules that could reject it, `GATEWAY_PORT` stays
+`auto` and the node stops with an explanation. That is deliberate: an unassigned
+port is a loud failure, an unreachable one is a node that looks healthy and answers
+nothing.
+
+**What nodo tells you.** The refusal names the chains it read from the ruleset and
+states the property your host has to satisfy:
+
+> TCP *port* inbound must be accepted on the input hook — from the guest subnet
+> over the guest bridge, and from wherever peers reach this host — and no other
+> base chain on that hook may reject or drop it.
+
+It stops there on purpose. nodo writes nftables (or iptables) rules and reads the
+ruleset back; it drives no firewall front-end, and does not assume which program
+owns the rest of your ruleset. A command for the wrong one is worse than none.
+
+**Fix — run `sudo nodo doctor` and read the gateway section.** It lists the foreign
+chains that can reject and the result of a real connect from the guest bridge (it
+supplies its own listener, so this works with the node stopped). Then establish the
+property above wherever your ruleset is managed. For the two common owners,
+[`FIREWALL.md`](FIREWALL.md) → *Sharing the host with another firewall* has worked
+examples; in short:
+
+- **firewalld** (Fedora/RHEL): allow the port, and give the guest bridge a zone of
+  its own containing just that port — not `trusted`, which would expose every port
+  this host listens on to every guest.
+- **ufw:** `sudo ufw allow <GATEWAY_PORT>/tcp`.
+- **A hand-managed nftables ruleset, or a config-management template:** put the
+  accept where that ruleset is defined, so it survives the next run.
+
+Assignment retries on the next privileged start. **Or pin a port you have already
+opened yourself** in `config.yaml` (`network.GATEWAY_PORT: 58443`): nodo then
+trusts you and does not re-pick.
+
+**Reachability from outside the LAN is a separate problem.** Nothing on the host
+can prove it: a connect from inside succeeds whether or not the router forwards
+anything. If peers on the Internet must reach this node you also need a port
+forward to this host's `GATEWAY_PORT`, an ISP that is not putting you behind CGNAT,
+and a check from a genuinely external network. Run `nodo nat-guide`, which reports
+the facts it can establish and tells you the rest.
+
 ## KyA prompt blocks automation
 
 **Symptom:** a headless/agent run hangs or exits at the Know Your Assumptions

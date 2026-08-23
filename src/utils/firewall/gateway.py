@@ -100,18 +100,7 @@ def _blocked_port_error(
             lines.append(f"  - {rejector}")
 
     lines.append("")
-    lines.append("Open the port in whatever owns that ruleset, then start the node again.")
-
-    if any("firewalld" in rejector.table for rejector in rejectors):
-        lines.extend(
-            [
-                "This host runs firewalld. nodo does not manage it; you need to allow both "
-                "the port and the guest bridge:",
-                f"  sudo firewall-cmd --permanent --add-port={port}/tcp",
-                f"  sudo firewall-cmd --permanent --zone=trusted --add-interface={bridge}",
-                "  sudo firewall-cmd --reload",
-            ]
-        )
+    lines.extend(_hook_contract(port, bridge, subnet))
 
     lines.extend(
         [
@@ -169,6 +158,7 @@ def ensure_gateway_port_open(
     backend: Optional[FirewallBackend] = None,
     verify: bool = True,
     strict: bool = True,
+    probe_with_listener: bool = False,
     config_path: str = "config.yaml",
     log: Callable[[str], None] = lambda message: None,
     run: Optional[Runner] = None,
@@ -179,6 +169,10 @@ def ensure_gateway_port_open(
     ``GatewayPortUnavailable`` when the port is provably unreachable and
     ``strict``; an *inconclusive* probe only warns, because "the guest bridge does
     not exist yet" is the normal state of a node that has never run an instance.
+
+    ``probe_with_listener`` lets the probe supply its own throwaway listener, so
+    the port can be checked before the gateway is up. Port assignment needs that;
+    the daemon start path does not, because by then the gateway is listening.
     """
     if os.geteuid() != 0:
         raise GatewayPortUnavailable(
@@ -218,7 +212,12 @@ def ensure_gateway_port_open(
         return ProbeResult(None, "guest network is not configured; nothing to probe from")
 
     probe = probe_tcp_from_bridge(
-        bridge=bridge, target_ip=gateway_ip, port=port, subnet=subnet, run=run
+        bridge=bridge,
+        target_ip=gateway_ip,
+        port=port,
+        subnet=subnet,
+        run=run,
+        provide_listener=probe_with_listener,
     )
 
     if probe.reachable is True:
@@ -245,6 +244,147 @@ def ensure_gateway_port_open(
     if strict:
         raise error
     log(f"[FW] {error}")
+    return probe
+
+
+def _hook_contract(port: int, bridge: str, subnet: str) -> List[str]:
+    """A formal statement of what the host must satisfy, with no tool named.
+
+    nodo speaks the two interfaces the kernel offers, nftables and iptables, and
+    nothing above them. Which program owns the rest of the ruleset -- a distro
+    front-end, a config-management template, a hand-written nft file -- is not
+    nodo's to know, let alone to write to. Naming one would also be a lie of
+    omission on every host that uses a different one.
+
+    So the node states the property that has to hold, in terms of the ruleset it can
+    actually read, and leaves the operator to establish it however their host is
+    managed. They know what owns their firewall; nodo does not.
+    """
+    return [
+        f"For this node to work, TCP {port} inbound must be accepted on the input",
+        "hook, and no other base chain on that hook may reject or drop it:",
+        f"  - from {subnet}, the guest subnet, reached over {bridge}: every",
+        "    node_controller call a service makes goes this way, so without it the",
+        "    node accepts services that cannot call back into it.",
+        "  - from wherever peers reach this host: without it the node is invisible to",
+        "    the network while looking healthy locally.",
+        "",
+        "How to establish that depends on what manages the ruleset on this host, which",
+        "nodo deliberately does not assume: it writes nftables (or iptables) rules and",
+        "reads the ruleset back, and does not drive any firewall front-end. Apply the",
+        "change wherever the chains listed above are managed, then start the node again.",
+    ]
+
+
+def _unverified_port_error(
+    *,
+    port: int,
+    probe: ProbeResult,
+    rejectors: Sequence[ForeignRejector],
+    bridge: str,
+    subnet: str,
+    config_path: str,
+) -> GatewayPortUnavailable:
+    """The port could not be proven reachable AND something else can reject it."""
+    lines = [
+        f"nodo opened TCP {port} in its own ruleset, but could not prove the port is "
+        "actually reachable, and this host has other firewall rules that can reject it.",
+        f"Probe: {probe.detail}",
+        "",
+        "Chains on the input hook, outside nodo's own table, that can reject:",
+    ]
+    lines.extend(f"  - {rejector}" for rejector in rejectors)
+    lines.extend(
+        [
+            "",
+            "An accept rule of nodo's does not overrule them: in nftables 'accept' ends "
+            "the evaluation of its own chain only, and a reject in another base chain on "
+            "the same hook wins regardless of priority.",
+            "",
+            "Rather than store a port that peers may not be able to reach, nodo left "
+            "network.GATEWAY_PORT unassigned.",
+            "",
+            *_hook_contract(port, bridge, subnet),
+            "",
+            f"Or pin a port you have already opened, in {config_path}:",
+            "  network:",
+            "    GATEWAY_PORT: <an open port>",
+            "",
+            "Note that reachability from OUTSIDE this LAN is a separate question that "
+            "nothing on this host can answer: run 'nodo nat-guide' for that.",
+        ]
+    )
+    return GatewayPortUnavailable(
+        summary=f"Gateway port {port} could not be verified as reachable.",
+        instructions="\n".join(lines),
+        port=port,
+    )
+
+
+def assign_gateway_port(
+    port: int,
+    *,
+    bridge: str,
+    gateway_ip: str,
+    subnet: str,
+    config_path: str = "config.yaml",
+    log: Callable[[str], None] = lambda message: None,
+    run: Optional[Runner] = None,
+) -> ProbeResult:
+    """Clear ``port`` for use as THE gateway port, or raise rather than settle for it.
+
+    Assignment is stricter than the daemon's start path, because the port it picks
+    gets written to config.yaml and every peer is then told to use it. A port that
+    turns out to be blocked is not a transient failure there: it is a node that
+    looks alive and cannot be called, which is worse than a node that refused to
+    start. So:
+
+    * The port is probed for real, with a throwaway listener, instead of being
+      assumed reachable because a rule was accepted. Nothing is listening at
+      assignment time -- that is precisely why this used to skip verification and
+      persist a port no packet had ever traversed.
+    * An INCONCLUSIVE probe is not good enough either, if the host has foreign
+      chains that can reject. That combination is how a Fedora host ends up with an
+      assigned port that firewalld quietly rejects, and there is no reason to
+      commit to the port when the one thing that could have cleared it did not run.
+    * An inconclusive probe with nothing that can reject is fine: a fresh node whose
+      guest bridge does not exist yet is the ordinary case, and nodo's own accept
+      rule is then the only verdict on the hook.
+
+    Raises ``GatewayPortUnavailable`` in either failing case; the caller must leave
+    the port unassigned and surface the instructions.
+    """
+    probe = ensure_gateway_port_open(
+        port=port,
+        bridge=bridge,
+        gateway_ip=gateway_ip,
+        subnet=subnet,
+        verify=True,
+        strict=True,
+        probe_with_listener=True,
+        config_path=config_path,
+        log=log,
+        run=run,
+    )
+
+    if probe.reachable is True:
+        return probe
+
+    rejectors = _safe_rejectors(detect_backend(run=run))
+    if rejectors:
+        raise _unverified_port_error(
+            port=port,
+            probe=probe,
+            rejectors=rejectors,
+            bridge=bridge,
+            subnet=subnet,
+            config_path=config_path,
+        )
+
+    log(
+        f"[FW] Gateway port {port} could not be verified ({probe.detail}), but nothing "
+        "outside nodo's ruleset can reject it on the input hook. Assigning it."
+    )
     return probe
 
 

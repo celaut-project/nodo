@@ -17,6 +17,7 @@ fresh node that has never run an instance) the answer is "unknown", not "closed"
 The same goes for a port nothing is listening on -- see ``_listener_present``.
 """
 
+import contextlib
 import ipaddress
 import os
 import random
@@ -100,6 +101,36 @@ def _listener_present(port: int) -> bool:
     return False
 
 
+@contextlib.contextmanager
+def _temporary_listener(port: int):
+    """Hold ``port`` open for the duration of a probe, or yield False if we cannot.
+
+    This is what makes a port checkable *before* the gateway exists. Without a
+    listener the probe has to answer "unknown" (see ``_listener_present``), which
+    is why port assignment used to skip verification entirely and persist a port
+    nothing had ever tried to reach. A throwaway socket is enough: the kernel
+    completes the handshake from the accept queue, so the probe gets the same
+    verdict a real listener would give it -- the firewall does not know the
+    difference.
+
+    Binds the wildcard address, because the probe connects to the bridge's gateway
+    IP, not to loopback.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("", port))
+        sock.listen(8)
+    except OSError:
+        sock.close()
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        sock.close()
+
+
 def _addresses_in_use(run: Runner, bridge: str) -> Set[str]:
     in_use: Set[str] = set()
     for args in (
@@ -145,8 +176,15 @@ def probe_tcp_from_bridge(
     connect_timeout_s: float = PROBE_CONNECT_TIMEOUT_S,
     retry_delay_s: float = PROBE_RETRY_DELAY_S,
     sleep: Callable[[float], None] = time.sleep,
+    provide_listener: bool = False,
 ) -> ProbeResult:
-    """Try a TCP connect to ``target_ip:port`` from inside ``bridge``'s subnet."""
+    """Try a TCP connect to ``target_ip:port`` from inside ``bridge``'s subnet.
+
+    ``provide_listener`` opens a throwaway socket on ``port`` when nothing is
+    listening, so the port can be checked before the gateway is up -- which is what
+    port *assignment* needs. Leave it false where a real listener is expected: then
+    "nothing is listening" is itself the finding.
+    """
     runner = run or _default_runner
 
     if os.geteuid() != 0:
@@ -160,11 +198,28 @@ def probe_tcp_from_bridge(
         )
 
     if not _listener_present(port):
-        return ProbeResult(
-            None,
-            f"nothing is listening on TCP {port} on this host, so a failed connect "
-            "would say nothing about the firewall; start the node and check again",
-        )
+        if not provide_listener:
+            return ProbeResult(
+                None,
+                f"nothing is listening on TCP {port} on this host, so a failed connect "
+                "would say nothing about the firewall; start the node and check again",
+            )
+        with _temporary_listener(port) as held:
+            if not held:
+                return ProbeResult(
+                    None, f"could not bind TCP {port} to probe it; something else holds it"
+                )
+            return probe_tcp_from_bridge(
+                bridge=bridge,
+                target_ip=target_ip,
+                port=port,
+                subnet=subnet,
+                run=run,
+                attempts=attempts,
+                connect_timeout_s=connect_timeout_s,
+                retry_delay_s=retry_delay_s,
+                sleep=sleep,
+            )
 
     try:
         source_ip, prefix_len = _pick_source_ip(
