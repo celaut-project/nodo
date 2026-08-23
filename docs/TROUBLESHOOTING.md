@@ -6,13 +6,17 @@ itself, see `nodo doctor` in [`USAGE.md`](USAGE.md); for packing errors see the
 
 ## Architecture mismatch (most common packing failure)
 
-**Symptom:** `nodo pack` (or an execute of a freshly packed service) fails early
-with an explicit architecture/unsupported-architecture message.
+**Symptom:** `nodo pack` fails early with an explicit
+architecture/unsupported-architecture message.
 
-**Why:** this install profile **disables cross-arch builds** and **does not
-install QEMU/binfmt** (see *Operational notes* in [`INSTALL.md`](INSTALL.md)). A
-service's `service.json → architecture` (e.g. `linux/amd64`, `linux/arm64`) must
-match the host running the packer.
+**Why:** **packing** is host-only. A local build runs the target's own toolchain
+and nodo installs no binfmt handler, so a service's `service.json → architecture`
+(e.g. `linux/amd64`, `linux/arm64`) must match the host running the packer
+(`src/utils/arch_guard.py`).
+
+Note this is a *packing* limit, not an execution one: a default install
+**executes both architectures** — the host's under Cloud Hypervisor/KVM and the
+other under QEMU emulation (see below).
 
 **Fix:**
 - Set `service.json → architecture` to your host's architecture (`uname -m` →
@@ -21,6 +25,48 @@ match the host running the packer.
 - Or pack on a host of the target architecture.
 - `packer.ARM_PACKER_SUPPORT` / `packer.X86_PACKER_SUPPORT` in `config.yaml`
   control which architectures the packer will accept/announce.
+
+## Unsupported architecture when *executing* a service
+
+**Symptom:** a launch fails with `UnsupportedArchitectureException`, or — on an
+older config — deep inside the build with
+`Cloud Hypervisor kernel not found at '.../linux/arm64/vmlinuz'`.
+
+**Why:** the node executes its **own** architecture under Cloud Hypervisor, plus
+any **foreign** one QEMU can emulate. That second half needs three things
+present, all of which a default install provides:
+
+1. `virtualizers.qemu.ENABLE: true` in `config.yaml` (the default);
+2. the emulator, `qemu-system-aarch64` / `qemu-system-x86_64`, on `PATH` (or set
+   in `virtualizers.qemu.BINARY_PATHS`);
+3. that arch's guest kernel **and** initramfs on disk, at the paths in
+   `virtualizers.ch.KERNEL_PATHS` / `INITRAMFS_PATHS`.
+
+With any one missing, the node simply does not advertise that architecture and a
+request for it is refused up front — it never accepts work it cannot boot.
+
+**Fix:** check all three, in that order:
+
+```bash
+grep -A3 -e ENABLE -e KERNEL_PATHS -e INITRAMFS_PATHS /nodo/config.yaml
+command -v qemu-system-aarch64 qemu-system-x86_64
+ls -l /nodo/cloud_hypervisor/kernels/linux/*/vmlinuz /nodo/cloud_hypervisor/initramfs/linux/*/initramfs
+```
+
+Missing guest assets are release artifacts: re-running the installer downloads
+both architectures. A missing emulator is a distro package — `qemu-system-arm`
+(Debian/Ubuntu) or `qemu-system-aarch64` (Fedora) for arm64 guests,
+`qemu-system-x86` for amd64 ones; the installer tries to install it but does not
+fail the install if it cannot.
+
+If the config still carries `builder.ARM_SUPPORT` or `builder.X86_SUPPORT`, the
+node refuses to start and names them: those keys are gone, delete them. They used
+to *declare* which architectures the node executed, which is what produced the
+missing-kernel crash above — a host announced arm64 and then had no arm64 kernel
+to boot. Capability is now derived from what is installed.
+
+Emulated execution is an order of magnitude slower than KVM. To serve only the
+host's architecture, set `virtualizers.qemu.ENABLE: false`.
 
 ## KVM unavailable (services won't execute)
 

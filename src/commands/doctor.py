@@ -152,6 +152,8 @@ def _resolve_config_paths(main_dir: str):
             return value
         return value.replace("${main.MAIN_DIR}", str(main_dir_cfg))
 
+    qemu_cfg = raw.get("virtualizers", {}).get("qemu", {}) or {}
+
     return {
         "binary_path": _interpolate(ch_cfg.get("BINARY_PATH", "")),
         "kernel_paths": {
@@ -161,6 +163,11 @@ def _resolve_config_paths(main_dir: str):
         "initramfs_paths": {
             k: _interpolate(v)
             for k, v in (ch_cfg.get("INITRAMFS_PATHS") or {}).items()
+        },
+        "qemu_enabled": bool(qemu_cfg.get("ENABLE", False)),
+        "qemu_binary_paths": {
+            k: _interpolate(v)
+            for k, v in (qemu_cfg.get("BINARY_PATHS") or {}).items()
         },
         "main_dir": str(main_dir_cfg),
     }
@@ -604,6 +611,65 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def _doctor_emulated_architectures(cfg: dict, host_arch_tag: str):
+    """Report which FOREIGN architecture this node can execute, and why not if none.
+
+    Nothing here can fail the node: a missing emulator or missing guest assets mean
+    the arch is simply not advertised (src/utils/architectures.py), so this reports
+    capacity rather than health. It is worth reporting because the alternative is an
+    operator guessing why the node never receives arm64 work.
+    """
+    import shutil
+
+    print("\nEmulated (foreign) architectures:", flush=True)
+
+    if not cfg.get("qemu_enabled"):
+        print(
+            "[INFO] virtualizers.qemu.ENABLE is false: this node serves only "
+            f"{host_arch_tag}.",
+            flush=True,
+        )
+        return []
+
+    binaries = {"linux/amd64": "qemu-system-x86_64", "linux/arm64": "qemu-system-aarch64"}
+    executable = []
+
+    for arch, default_binary in binaries.items():
+        if arch == host_arch_tag:
+            continue
+
+        configured = (cfg.get("qemu_binary_paths") or {}).get(arch) or ""
+        emulator = configured if configured else shutil.which(default_binary)
+        kernel = (cfg.get("kernel_paths") or {}).get(arch, "")
+        initramfs = (cfg.get("initramfs_paths") or {}).get(arch, "")
+
+        missing = []
+        if not emulator or not os.path.isfile(emulator):
+            missing.append(f"emulator ({configured or default_binary})")
+        if not kernel or not os.path.isfile(kernel):
+            missing.append(f"guest kernel ({kernel or 'unconfigured'})")
+        if not initramfs or not os.path.isfile(initramfs):
+            missing.append(f"initramfs ({initramfs or 'unconfigured'})")
+
+        if missing:
+            print(f"[INFO] {arch} is NOT executable here; missing: {', '.join(missing)}.", flush=True)
+            print(
+                "  Suggestion: re-run the installer for the guest assets, or install "
+                f"{default_binary} (qemu-system-arm / qemu-system-x86 on Debian).",
+                flush=True,
+            )
+            continue
+
+        executable.append(arch)
+        print(f"[OK] {arch} is executable under emulation ({emulator}).", flush=True)
+        print(
+            "  Note: TCG emulation is an order of magnitude slower than KVM.",
+            flush=True,
+        )
+
+    return executable
+
+
 def _doctor_cloud_hypervisor(main_dir: str):
     """Run all Cloud Hypervisor compatibility checks."""
     cfg = _resolve_config_paths(main_dir)
@@ -619,6 +685,7 @@ def _doctor_cloud_hypervisor(main_dir: str):
     guest_kernel = _doctor_guest_kernel(cfg.get("kernel_paths", {}), host_arch_tag)
     initramfs = _doctor_initramfs(cfg.get("initramfs_paths", {}), host_arch_tag)
     _doctor_ch_smoke_test(ch_binary, guest_kernel, initramfs)
+    _doctor_emulated_architectures(cfg, host_arch_tag)
 
 
 def _doctor_network_checks():

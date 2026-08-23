@@ -6,7 +6,7 @@ It is aligned with the current runtime model:
 
 - Python/JRE/yq can be local to `MAIN_DIR`.
 - `nodo.service` exports `JAVA_HOME` and `PATH` from configured local paths.
-- No local Docker (services run under Cloud Hypervisor); QEMU/binfmt are not part of the install profile.
+- No local Docker: services run under Cloud Hypervisor natively, or under QEMU when their architecture is not the host's. binfmt is not part of the install profile.
 
 ## 1) Automatic uninstall (`uninstall.sh`)
 

@@ -60,31 +60,60 @@ user, `nodo pack` needs no privileges at all.
 
 ## `virtualizers` — execution runtime
 
-Cloud Hypervisor (`ch`) is the only virtualizer; the Docker virtualizer was
-removed, so the node needs no local Docker install to *run* services.
+Cloud Hypervisor (`ch`) runs everything of the host's own architecture, under
+KVM; QEMU (`qemu`) runs the rest, under TCG software emulation. The Docker
+virtualizer was removed, so the node needs no local Docker install to *run*
+services. Which backend a given service takes is decided per service by
+`src/virtualizers/selection.py` — never configured.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `virtualizers.DEFAULT_VIRTUALIZER` | `ch` | Only `ch` is supported. |
+| `virtualizers.DEFAULT_VIRTUALIZER` | `ch` | Native backend. The per-service choice is derived, not read from here. |
+| `virtualizers.qemu.ENABLE` | `true` | Execute FOREIGN-arch services under emulation. Off = serve only the host's arch. See *Which architectures the node can execute* below. |
+| `virtualizers.qemu.BINARY_PATHS` | (from `PATH`) | Per-arch `qemu-system-<arch>`. Empty resolves the well-known name on `PATH`. |
+| `virtualizers.qemu.CPU_MODEL` | `max` | QEMU `-cpu` model under TCG. |
+| `virtualizers.qemu.GUEST_NETWORK_READY_TIMEOUT_S` | `120` | Emulated boots reach the console far slower than KVM ones; this is the CH timeout's looser twin. |
 | `virtualizers.ch.BINARY_PATH` | (set at install) | Cloud Hypervisor binary. |
 | `virtualizers.ch.KERNEL_PATHS` / `INITRAMFS_PATHS` | per-arch | Guest kernel/initramfs per `linux/amd64` \| `linux/arm64`. Both are downloaded at install time from the `guest-kernel-vN` release (pinned as `GUEST_KERNEL_VERSION` in `install.sh`): the kernel is not taken from the host's `/boot`, and the initramfs is not built on the host — CI builds it from `bash/build_ch_initramfs.sh`, which is byte-reproducible, so the same commit and busybox reproduce the published image. |
 | `virtualizers.ch.NETWORK_MODE` | `tap_bridge` | Guest networking mode. |
 | `virtualizers.ch.MIN_MEM_MIB` / `DEFAULT_MEM_MIB` | `128` / `256` | Boot memory floor / default. |
 | `virtualizers.ch.SECURITY.*` | — | rootfs path confinement, device-node policy, trusted-service allowlists. |
 
-## `builder` — architectures the node can *execute*
+## Which architectures the node can *execute*
 
-These keys govern **which architectures the node can EXECUTE** — they drive
-`SUPPORTED_ARCHITECTURES` (`src/utils/architectures.py`). Setting **both** to
-`false` means the node executes nothing. Do **not** confuse them with the
-packer-side pair below (`packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT`), which
-only affect what `nodo pack` builds/announces: to limit *execution* architectures,
-edit these `builder.*` keys, not the packer pair.
+**There is no config key for this.** `SUPPORTED_ARCHITECTURES`
+(`src/utils/architectures.py`) is *derived*, from two things the node can check:
+
+1. the **host's own architecture**, which Cloud Hypervisor boots under KVM;
+2. plus every **foreign architecture QEMU can emulate here** — which needs
+   `virtualizers.qemu.ENABLE` (on by default), the `qemu-system-<arch>` binary,
+   and that arch's guest kernel/initramfs on disk. The installer provisions the
+   guest assets for *both* architectures and installs the foreign emulator, so a
+   default install executes both.
+
+So a node advertises exactly what it can boot, and the way to change that is to
+change what is installed — or set `virtualizers.qemu.ENABLE: false` to serve only
+the host's own arch. An arch whose emulator or guest assets are missing is
+silently not advertised, which is why a node never fails a launch on an arch it
+claimed.
+
+This replaces the old `builder.ARM_SUPPORT` / `builder.X86_SUPPORT` pair, which
+could disagree with reality in both directions — set to `true` on a host that
+could not run that arch, a service was accepted and then died deep inside the CH
+build looking for a guest kernel that was never installed. Both keys are now
+**rejected**: a config that still carries either one stops the node with a
+`ConfigValidationError` (`src/utils/config_validation.py`), so delete them.
+
+Do not confuse any of this with the packer-side pair below
+(`packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT`), which only affect what
+`nodo pack` builds/announces. Those stay explicit flags, and the installer *does*
+pin them to the host arch: a local build runs the target's own toolchain and nodo
+installs no binfmt handler, so cross-arch *packing* genuinely cannot work.
+
+## `builder` — build tuning
 
 | Key | Default | Meaning |
 |---|---|---|
-| `builder.ARM_SUPPORT` | `true` | Node can execute `linux/arm64` services. |
-| `builder.X86_SUPPORT` | `true` | Node can execute `linux/amd64` services. |
 | `builder.WAIT_FOR_UNLOCK_MEMORY` | `60` | Seconds to wait for a memory lock to release during a build (`src/utils/utils.py`). |
 
 ## `communication` — peer messaging policy

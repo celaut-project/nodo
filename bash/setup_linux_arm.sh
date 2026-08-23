@@ -20,6 +20,9 @@ CONFIG_FILE="$TARGET_DIR/config.yaml"
 # shellcheck source=bash/lib_pkg.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_pkg.sh"
 CH_ARCH_TAG="linux/arm64"
+# The arch this host cannot run under KVM, and therefore the one QEMU emulates.
+# Its guest assets are installed too (see provision_guest_assets_for_arch).
+FOREIGN_ARCH_TAG="linux/amd64"
 
 # Pinned portable runtimes.
 PYTHON_VERSION="3.11.15"
@@ -305,11 +308,50 @@ install_portable_python() {
     rm -f "$archive" "$checksums"
 }
 
+provision_guest_assets_for_arch() {
+    # Guest kernel + initramfs + busybox for ONE architecture, and the config
+    # entries that point at them.
+    #
+    # Called for the host arch AND for the foreign one. The foreign assets are what
+    # QEMU boots under emulation, and src/utils/architectures.py decides whether to
+    # advertise that arch by looking for exactly these files -- so an install that
+    # shipped only the host's arch could never execute the other one, no matter what
+    # the config said.
+    local arch_tag="$1"
+    local asset_suffix="${arch_tag//\//-}"
+    local kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${arch_tag}/vmlinuz"
+    local initramfs_target="$TARGET_DIR/cloud_hypervisor/initramfs/${arch_tag}/initramfs"
+    local busybox_target="$TARGET_DIR/cloud_hypervisor/busybox/${arch_tag}/busybox"
+
+    mkdir -p "$(dirname "$kernel_target")"
+    mkdir -p "$(dirname "$initramfs_target")"
+    mkdir -p "$(dirname "$busybox_target")"
+
+    # The whole guest comes from the release: kernel, initramfs, and the busybox
+    # that is the initramfs' only binary. Building the initramfs here instead would
+    # make the guest depend on the host's cpio, gzip and umask, which is the thing
+    # a node must never vary by.
+    echo "Provisioning guest kernel, initramfs and busybox ${GUEST_KERNEL_VERSION} for ${arch_tag}..."
+    download_guest_asset "vmlinuz-${asset_suffix}" "$kernel_target" 0644
+    download_guest_asset "initramfs-${asset_suffix}" "$initramfs_target" 0644
+    # Kept on disk so an operator can rebuild the initramfs from this commit and
+    # diff it against the shipped one; build_ch_initramfs.sh is byte-reproducible.
+    download_guest_asset "busybox-${asset_suffix}" "$busybox_target" 0755
+
+    ARCH_TAG="$arch_tag" KERNEL_TARGET="$kernel_target" "$YQ_BIN" -i \
+        '.virtualizers.ch.KERNEL_PATHS[strenv(ARCH_TAG)] = strenv(KERNEL_TARGET)' \
+        "$CONFIG_FILE"
+    ARCH_TAG="$arch_tag" INITRAMFS_TARGET="$initramfs_target" "$YQ_BIN" -i \
+        '.virtualizers.ch.INITRAMFS_PATHS[strenv(ARCH_TAG)] = strenv(INITRAMFS_TARGET)' \
+        "$CONFIG_FILE"
+
+    test -f "$kernel_target" || fail "Guest kernel download failed at ${kernel_target}."
+    test -f "$initramfs_target" || fail "Guest initramfs download failed at ${initramfs_target}."
+    test -x "$busybox_target" || fail "Guest busybox download failed at ${busybox_target}."
+}
+
 provision_cloud_hypervisor_assets() {
     local ch_binary_target="$TARGET_DIR/bin/cloud-hypervisor"
-    local ch_kernel_target="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
-    local ch_initramfs_target="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
-    local ch_busybox_target="$TARGET_DIR/cloud_hypervisor/busybox/${CH_ARCH_TAG}/busybox"
 
     if [ ! -f "$CONFIG_FILE" ]; then
         fail "config.yaml not found at ${CONFIG_FILE}."
@@ -319,40 +361,22 @@ provision_cloud_hypervisor_assets() {
     fi
 
     mkdir -p "$(dirname "$ch_binary_target")"
-    mkdir -p "$(dirname "$ch_kernel_target")"
-    mkdir -p "$(dirname "$ch_initramfs_target")"
-    mkdir -p "$(dirname "$ch_busybox_target")"
 
     echo "Provisioning Cloud Hypervisor assets..."
     if ! download_ch_binary "$ch_binary_target"; then
         fail "Unable to download Cloud Hypervisor ${CH_VERSION} release asset for arm64."
     fi
 
-    # The whole guest comes from the release: kernel, initramfs, and the busybox
-    # that is the initramfs' only binary. Building the initramfs here instead would
-    # make the guest depend on the host's cpio, gzip and umask, which is the thing
-    # a node must never vary by.
-    echo "Provisioning guest kernel, initramfs and busybox ${GUEST_KERNEL_VERSION} for ${CH_ARCH_TAG}..."
-    download_guest_asset "vmlinuz-${CH_ARCH_TAG//\//-}" "$ch_kernel_target" 0644
-    download_guest_asset "initramfs-${CH_ARCH_TAG//\//-}" "$ch_initramfs_target" 0644
-    # Kept on disk so an operator can rebuild the initramfs from this commit and
-    # diff it against the shipped one; build_ch_initramfs.sh is byte-reproducible.
-    download_guest_asset "busybox-${CH_ARCH_TAG//\//-}" "$ch_busybox_target" 0755
-
     CH_BINARY_TARGET="$ch_binary_target" "$YQ_BIN" -i \
         '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_TARGET)' \
         "$CONFIG_FILE"
-    CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$ch_kernel_target" "$YQ_BIN" -i \
-        '.virtualizers.ch.KERNEL_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_KERNEL_TARGET)' \
-        "$CONFIG_FILE"
-    CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$ch_initramfs_target" "$YQ_BIN" -i \
-        '.virtualizers.ch.INITRAMFS_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_INITRAMFS_TARGET)' \
-        "$CONFIG_FILE"
 
     test -x "$ch_binary_target" || fail "Cloud Hypervisor binary is not executable at ${ch_binary_target}."
-    test -f "$ch_kernel_target" || fail "Guest kernel download failed at ${ch_kernel_target}."
-    test -x "$ch_busybox_target" || fail "Guest busybox download failed at ${ch_busybox_target}."
-    test -f "$ch_initramfs_target" || fail "Guest initramfs download failed at ${ch_initramfs_target}."
+
+    # Both architectures: the host's, which CH boots under KVM, and the foreign
+    # one, which QEMU boots under TCG.
+    provision_guest_assets_for_arch "$CH_ARCH_TAG"
+    provision_guest_assets_for_arch "$FOREIGN_ARCH_TAG"
 }
 
 echo "Detecting package manager..."
@@ -369,8 +393,15 @@ echo "Installing local yq runtime..."
 install_local_yq
 apply_configured_dependency_paths
 
-echo "Restricting executable architectures to this host (arm64)..."
-"$YQ_BIN" -i '.builder.X86_SUPPORT = false | .packer.X86_PACKER_SUPPORT = false' "$CONFIG_FILE"
+# Only the PACKER is restricted to this host: a local build runs the target's own
+# toolchain, and nodo installs no binfmt handler, so packing amd64 here cannot work
+# (src/utils/arch_guard.py). EXECUTION is not restricted by config at all -- the
+# node derives it from the host arch plus what QEMU can emulate, so the amd64
+# assets and emulator installed below are what make amd64 executable here.
+echo "Restricting the packer to this host's architecture (arm64)..."
+"$YQ_BIN" -i '.packer.X86_PACKER_SUPPORT = false' "$CONFIG_FILE"
+
+install_foreign_arch_emulator "$FOREIGN_ARCH_TAG"
 
 echo "Provisioning Cloud Hypervisor..."
 provision_cloud_hypervisor_assets

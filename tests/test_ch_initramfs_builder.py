@@ -64,7 +64,7 @@ class CloudHypervisorInitramfsBuilderTests(unittest.TestCase):
             with self.subTest(script=script):
                 content = Path(script).read_text(encoding="utf-8")
 
-                self.assertIn('download_guest_asset "vmlinuz-${CH_ARCH_TAG//\\//-}"', content)
+                self.assertIn('download_guest_asset "vmlinuz-${asset_suffix}"', content)
                 self.assertIn("${GUEST_KERNEL_VERSION}", content)
                 self.assertIn("SHA256 mismatch for", content)
                 self.assertNotIn("/boot/vmlinuz", content)
@@ -74,7 +74,7 @@ class CloudHypervisorInitramfsBuilderTests(unittest.TestCase):
                 # the kernel: assembling it here would make the guest a function of
                 # whatever cpio, gzip, busybox and umask the host happens to have.
                 self.assertIn(
-                    'download_guest_asset "initramfs-${CH_ARCH_TAG//\\//-}" "$ch_initramfs_target" 0644',
+                    'download_guest_asset "initramfs-${asset_suffix}" "$initramfs_target" 0644',
                     content,
                 )
                 self.assertNotIn("ch_initramfs_builder", content)

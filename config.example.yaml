@@ -34,12 +34,16 @@ virtualizers:
   DEFAULT_VIRTUALIZER: ch
   ch:
     BINARY_PATH: ""
+    # Guest kernel/initramfs per architecture. The installer provisions BOTH
+    # arches from the pinned guest-kernel release, not just the host's: the
+    # foreign one is what QEMU boots under emulation (see virtualizers.qemu), and
+    # an arch whose assets are missing from disk is simply never advertised.
     KERNEL_PATHS:
-      linux/amd64: "${main.MAIN_DIR}/ch/kernels/linux/amd64/vmlinuz"
-      linux/arm64: "${main.MAIN_DIR}/ch/kernels/linux/arm64/vmlinuz"
+      linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/amd64/vmlinuz"
+      linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/arm64/vmlinuz"
     INITRAMFS_PATHS:
-      linux/amd64: "${main.MAIN_DIR}/ch/initramfs/linux/amd64/initramfs"
-      linux/arm64: "${main.MAIN_DIR}/ch/initramfs/linux/arm64/initramfs"
+      linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/amd64/initramfs"
+      linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/arm64/initramfs"
     CACHE_DIR: "${main.CACHE}/ch"
     # Keep this path short to avoid Unix socket SUN_LEN limits.
     API_SOCKET_DIR: "/tmp/nodo-ch"
@@ -98,27 +102,34 @@ virtualizers:
       ROOTFS_BUILD_SANDBOX: "none"
       # When true, if a VM fails to boot or encounters an error, its runtime directory will be preserved for debugging instead of being deleted.
 
-  # QEMU is the OPT-IN cross-architecture execution backend. Cloud Hypervisor
-  # boots a service as a microVM under KVM, which can only run a guest of the
-  # host's OWN architecture. When a request targets a FOREIGN arch (e.g. an
-  # arm64 service on an x86_64 node) there is no KVM path, so nodo boots the same
+  # QEMU is the cross-architecture execution backend, and it is what makes a node
+  # advertise a FOREIGN arch as executable at all. Cloud Hypervisor boots a
+  # service as a microVM under KVM, which can only run a guest of the host's OWN
+  # architecture; for anything else there is no KVM path, so nodo boots the same
   # rootfs/kernel/initramfs under qemu-system-<arch> with `-accel tcg` (software
-  # emulation). TCG is an order of magnitude slower than KVM, so this is disabled
-  # by default: native services always take the CH path above and never regress.
+  # emulation). Native services always take the CH path above and never regress.
+  #
+  # TCG is an order of magnitude slower than KVM. That is the trade this node
+  # accepts by default: it takes arm64 work on x86_64 (and vice versa) rather
+  # than rejecting it. Turn ENABLE off to serve only the host's own arch -- the
+  # node then stops advertising the foreign one, and a foreign-arch request gets
+  # UnsupportedArchitectureException.
   qemu:
-    # Master switch. When false (default), foreign-arch requests fail with
-    # UnsupportedArchitectureException exactly as before, and no emulated arch is
-    # advertised as executable.
-    ENABLE: false
+    # Master switch for emulated execution. Even when true, an arch is only
+    # advertised (and only launchable) if BOTH the emulator binary and that
+    # arch's guest kernel/initramfs are present -- so a node never claims a
+    # capability it cannot deliver, and turning this on cannot break an install
+    # whose qemu-system-<arch> package is missing.
+    ENABLE: true
     # Per-arch qemu-system binary. Leave empty to resolve `qemu-system-x86_64` /
     # `qemu-system-aarch64` from PATH.
     BINARY_PATHS:
       linux/amd64: ""
       linux/arm64: ""
     # Guest kernel/initramfs for the EMULATED arch. Leave empty to reuse the CH
-    # assets above (virtualizers.ch.KERNEL_PATHS / INITRAMFS_PATHS), which
-    # nodo#271 makes cross-arch-available. Override only to point QEMU at a
-    # different image than CH uses.
+    # assets above (virtualizers.ch.KERNEL_PATHS / INITRAMFS_PATHS), which the
+    # installer provisions for every arch, not only the host's. Override only to
+    # point QEMU at a different image than CH uses.
     KERNEL_PATHS:
       linux/amd64: ""
       linux/arm64: ""
@@ -135,8 +146,6 @@ builder:
   WAIT_FOR_CONTAINER: 60
   WAIT_FOR_UNLOCK_MEMORY: 60
   BUILD_CONTAINER_MEMORY_SIZE_FACTOR: 3.1
-  ARM_SUPPORT: true
-  X86_SUPPORT: true
   TRUST_METADATA_ARCHITECTURE: false
 
 packer:

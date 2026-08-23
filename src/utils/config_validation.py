@@ -56,6 +56,14 @@ REMOVED_KEYS = (
     "MODIFY_RESOURCES_ERG",
     "CREDIT_ERG_PER_NEW_CLIENT",
     "CLIENT_MIN_BALANCE_ERG_TO_RESET_EXPIRATION",
+    # Which architectures the node executes is no longer declared, it is derived
+    # from the host arch plus whatever `virtualizers.qemu` can emulate here
+    # (src/utils/architectures.py). Keeping these would let a config claim a
+    # capability the node does not have -- the exact failure they caused: true on
+    # an x86_64 host sent an arm64 service into the CH build, which then died on a
+    # guest kernel that was never installed.
+    "ARM_SUPPORT",
+    "X86_SUPPORT",
 )
 
 
