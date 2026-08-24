@@ -383,6 +383,13 @@ timing:
   START_SERVICE_ON_PEER_TIMEOUT: 120
 
 communication:
+  # The most components a Peer.signature_scheme may declare before this node refuses
+  # to compare it (node_identity.same_signature_scheme). Comparing two schemes is a
+  # search for a one-to-one pairing between their components, which is factorial in a
+  # length the *peer* chooses: four components is 24 pairings, five is 120, twelve is
+  # 479 million. This node declares four, so five leaves room for a scheme with one
+  # more building block. Raise it only alongside a scheme that genuinely needs more.
+  MAX_SIGNATURE_SCHEME_COMPONENTS: 5
   SELF_ANNOUNCE_TO_CONNECTING_PEERS: false
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false

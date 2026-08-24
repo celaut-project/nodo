@@ -8,9 +8,10 @@ config load when unset. It is both the node's wallet and its identity, so a repu
 proof published later is already tied to this node's identity for free, and the
 identity can never change underneath the peers that recorded it.
 """
+import itertools
 import string
 from functools import lru_cache
-from typing import Final, Optional, Tuple
+from typing import Final, NamedTuple, Optional, Tuple
 
 import ecdsa
 
@@ -33,8 +34,36 @@ _P2PK_PREFIX_HEX = "0008cd"
 _PUBLIC_KEY_HEX_LENGTH = 66
 _HEX_DIGITS = frozenset(string.hexdigits.lower())
 
+
+class SignatureSchemeComponent(NamedTuple):
+    """One building block of a signature scheme, in celaut's tags/prose/formal shape.
+
+    ``formal`` belongs to the component it describes, not to the scheme around it: it
+    is what :func:`_same_component` compares *first*, so a single value shared across
+    every component would make them all interchangeable -- and a peer repeating that
+    one value on however many components would match whatever its tags said, which is
+    exactly what the exact-tag-set rule exists to refuse.
+
+    It defaults to empty because no block of this node's scheme has a machine-readable
+    artifact to point at yet, the same reason it is empty on the Ergo ledger
+    (``reputation_system/envs.py``). When one gets a specification document, or the
+    content hash of a verifier service, it goes on that entry alone and becomes the
+    part that decides for it.
+    """
+
+    tags: Tuple[str, ...]
+    prose: str
+    formal: bytes = b""
+
+
 # The cryptography this node's identity signatures are in, announced on
 # ``Peer.signature_scheme`` and demanded of every peer it registers.
+#
+# A scheme is an unordered stack of components (``Peer.SignatureScheme.components``,
+# each a ``tags``/``prose``/``formal`` descriptor exactly like ``Uri.Protocol`` or
+# ``Contract.Ledger``) -- one per building block, rather than a fixed set of named
+# fields, so a future scheme with a different shape (hash-based, threshold, no curve
+# at all) needs no proto migration to be expressed, only a different-length stack.
 #
 # A descriptor, not an id derived from one: celaut never names a tags/prose/formal
 # component by a hash of itself (compare ``envs.ergo_ledger``, whose ``formal`` is
@@ -44,37 +73,80 @@ _HEX_DIGITS = frozenset(string.hexdigits.lower())
 # shape ``(scheme_a, scheme_b) -> bool`` can eventually make better than this node
 # does (see :func:`same_signature_scheme`).
 #
-# ``formal`` is empty for the same reason it is empty on the Ergo ledger: there is no
-# machine-readable artifact to point at yet. When there is one -- a specification
-# document, or the content hash of a verifier service -- it goes here and becomes the
-# part that decides, which is why it is compared first.
-SIGNATURE_SCHEME_TAGS: Final[Tuple[str, ...]] = (
-    "secp256k1", "schnorr", "ergo", "blake2b256",
-)
-# Prose is read by whoever receives the announcement, so it states the scheme itself
-# and nothing about this implementation of it: a reader holding only the Peer message
-# -- off a gRPC response, or off an Ergo register -- cannot follow a path into some
+# Order carries no meaning (curve, algorithm, hash, ledger convention only because
+# that is the order a reader meets them in below); each entry is a
+# :class:`SignatureSchemeComponent`, carrying its own ``formal``.
+# Prose is read by whoever receives the announcement, so each block states itself and
+# nothing about this implementation of it: a reader holding only the Peer message --
+# off a gRPC response, or off an Ergo register -- cannot follow a path into some
 # repository, and naming other projects only moves the question along ("and what is
 # that?"). Same reason envs.PROSE describes the Ergo system and not nodo's client for
 # it. Until `formal` points at a specification this text IS the specification, so it
 # says everything a verification has to be written from and stands on its own.
-SIGNATURE_SCHEME_PROSE: Final[str] = (
-    "Schnorr signatures over secp256k1, with generator G and group order n. "
-    "Private key: a scalar s in [1, n). Public key: the point P = s*G, encoded as its "
-    "33-byte SEC-compressed form, lowercase hex. Message: the payload bytes, signed "
-    "as given, with no pre-hash. Signature: the 65 bytes a || z, lowercase hex, where "
-    "k is a nonce drawn uniformly from [1, n) for each signature, a is the 33-byte "
-    "SEC-compressed form of k*G, and z is the 32-byte big-endian encoding of "
-    "(k + e*s) mod n. Challenge: e = blake2b256(a || m || P), its 32 bytes read as a "
-    "two's-complement big-endian integer, so a digest whose first byte is >= 0x80 "
-    "denotes a negative e. Valid if and only if z*G == a + e*P. A signer redraws k "
-    "until the first byte of both e and z is < 0x80: for z that is required, since a "
-    "set top bit would make it a negative scalar, and for e it makes the "
-    "two's-complement and unsigned readings coincide, so the signature verifies under "
-    "either. The keypair is the one an Ergo P2PK proposition names, and this is the "
-    "sigma protocol those proofs are built on."
+SIGNATURE_SCHEME_COMPONENTS: Final[Tuple[SignatureSchemeComponent, ...]] = (
+    SignatureSchemeComponent(
+        ("secp256k1",),
+        "The secp256k1 elliptic curve, with generator G and group order n. Private "
+        "key: a scalar s in [1, n). Public key: the point P = s*G, encoded as its "
+        "33-byte SEC-compressed form, lowercase hex.",
+    ),
+    SignatureSchemeComponent(
+        ("schnorr",),
+        "A Schnorr signature over the curve named by the accompanying curve "
+        "component. Message: the payload bytes, signed as given, with no pre-hash. "
+        "Signature: the 65 bytes a || z, lowercase hex, where k is a nonce drawn "
+        "uniformly from [1, n) for each signature, a is the 33-byte SEC-compressed "
+        "form of k*G, and z is the 32-byte big-endian encoding of (k + e*s) mod n, e "
+        "being the challenge named by the accompanying hash component. Valid if and "
+        "only if z*G == a + e*P. A signer redraws k until the first byte of both e "
+        "and z is < 0x80: for z that is required, since a set top bit would make it "
+        "a negative scalar, and for e it makes the two's-complement and unsigned "
+        "readings coincide, so the signature verifies under either.",
+    ),
+    SignatureSchemeComponent(
+        ("blake2b256",),
+        "The challenge hash: e = blake2b256(a || m || P), its 32 bytes read as a "
+        "two's-complement big-endian integer, so a digest whose first byte is >= "
+        "0x80 denotes a negative e.",
+    ),
+    SignatureSchemeComponent(
+        ("ergo",),
+        "The keypair is the one an Ergo P2PK proposition names, and this scheme is "
+        "the sigma protocol those proofs are built on.",
+    ),
 )
-SIGNATURE_SCHEME_FORMAL: Final[bytes] = b""
+
+# Comparing two schemes is a search for a one-to-one pairing between their components
+# (see :func:`same_signature_scheme`), which is factorial in a number a *peer* chooses.
+# The length check there means the only comparison this node actually runs is against
+# its own four-component scheme, so the search is bounded today -- but the function is
+# a general ``(scheme_a, scheme_b) -> bool``, and nothing stops a later caller from
+# handing it two peer schemes. Five leaves room for a scheme with one more building
+# block than ours at 120 pairings; twelve would be 479 million, so past the cap a
+# scheme is refused rather than computed. Configurable because the ceiling is a policy
+# about what this node is willing to spend, not a fact about cryptography.
+MAX_SIGNATURE_SCHEME_COMPONENTS_KEY: Final[str] = (
+    "communication.MAX_SIGNATURE_SCHEME_COMPONENTS"
+)
+DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS: Final[int] = 5
+
+
+def _max_signature_scheme_components() -> int:
+    """The configured cap, read per call so raising it needs no restart.
+
+    Anything unreadable falls back to the default, deliberately catching everything:
+    this is a safety bound consulted from the peer-registration path, and a node with
+    no config file yet (or a malformed one) must fail to *read the cap*, not fail to
+    decide whether it speaks a peer's scheme. A non-positive value falls back too --
+    a cap of zero would refuse every scheme, including this node's own.
+    """
+    try:
+        configured = int(ConfigManager().get(
+            MAX_SIGNATURE_SCHEME_COMPONENTS_KEY, DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS
+        ))
+    except Exception:
+        return DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS
+    return configured if configured > 0 else DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS
 
 
 def node_signature_scheme():
@@ -83,11 +155,12 @@ def node_signature_scheme():
     Built per call rather than kept as a module constant so no caller can mutate the
     node's own declaration through the object it was handed.
     """
-    return celaut_pb2.Peer.SignatureScheme(
-        tags=list(SIGNATURE_SCHEME_TAGS),
-        prose=SIGNATURE_SCHEME_PROSE,
-        formal=SIGNATURE_SCHEME_FORMAL,
-    )
+    scheme = celaut_pb2.Peer.SignatureScheme()
+    for component in SIGNATURE_SCHEME_COMPONENTS:
+        scheme.components.add(
+            tags=list(component.tags), prose=component.prose, formal=component.formal
+        )
+    return scheme
 
 
 def declare_signature_scheme(peer, *, prose: bool = True) -> None:
@@ -97,16 +170,58 @@ def declare_signature_scheme(peer, *, prose: bool = True) -> None:
     reader that speaks something else say so, instead of reporting a peer whose
     signature simply "does not verify".
 
-    ``prose=False`` leaves out the description, which costs nothing over a gRPC
-    response but is a kilobyte of an Ergo register a box pays storage rent on forever
-    -- the whole budget, on its own (see
-    ``tests/reputation_system/test_onchain_peer_object.py``). The tags stay:
-    while ``formal`` is empty they are the whole machine-readable half of the
-    declaration, and dropping them would leave a descriptor that says nothing.
+    ``prose=False`` leaves out every component's description, which costs nothing
+    over a gRPC response but is a kilobyte of an Ergo register a box pays storage
+    rent on forever -- the whole budget, on its own (see
+    ``tests/reputation_system/test_onchain_peer_object.py``). The tags stay: while
+    ``formal`` is empty they are the whole machine-readable half of each component,
+    and dropping them would leave a descriptor that says nothing.
     """
     peer.signature_scheme.CopyFrom(node_signature_scheme())
     if not prose:
-        peer.signature_scheme.ClearField("prose")
+        for component in peer.signature_scheme.components:
+            component.ClearField("prose")
+
+
+def _component_is_declared(component) -> bool:
+    """Whether a component names what it is at all.
+
+    ``tags`` or ``formal``; either alone is enough, and a component carrying both is
+    better still. Neither is not a building block this node can reason about: ``prose``
+    is human text it has no way to judge, so a component holding only prose -- or
+    nothing -- states nothing a comparison could act on. Something is missing from it,
+    and the conservative answer to "is this the cryptography I speak?" is no.
+
+    It also keeps the relation reflexive: with no tags and no formal, a component would
+    otherwise fail to match a byte-identical copy of itself.
+    """
+    return bool(component.tags) or bool(bytes(component.formal))
+
+
+def _same_component(a, b) -> bool:
+    """Whether two ``SignatureScheme.Protocol`` entries name the same building block.
+
+    ``formal`` first, as the strictest and most machine-readable identity, and the tags
+    only when neither side has one -- and there as a **set**, never by intersection.
+    The tags within one component are meant to be synonyms for the one thing it names
+    (``["secp256k1", "K-256"]``), but nothing in the message says so: this node cannot
+    tell that ``K-256`` restates the component it sits in while ``bip340`` beside
+    ``schnorr`` names a second, different thing. Only one of the two guesses is safe,
+    and the unsafe one accepts a signer whose signatures this node cannot verify -- so
+    an extra tag makes it a different component, exactly as an extra tag made it a
+    different scheme under the flat-set rule this replaced.
+
+    ``formal`` is the way out of that rigidity rather than a workaround for it: once a
+    component points at a specification, that specification decides on its own and the
+    vocabulary stops mattering.
+
+    ``prose`` is not compared at all: it is human text this node has no way to judge,
+    and making it decisive would refuse a peer for rewording a sentence.
+    """
+    formal_a, formal_b = bytes(a.formal), bytes(b.formal)
+    if formal_a or formal_b:
+        return formal_a == formal_b
+    return set(a.tags) == set(b.tags)
 
 
 def same_signature_scheme(a, b) -> bool:
@@ -118,23 +233,44 @@ def same_signature_scheme(a, b) -> bool:
     exactly the judgement such a service exists to make, and until one is asked this
     node has to answer conservatively.
 
-    Follows the ledger ladder (``sql_connection.get_ledger_if_exists``): ``formal``
-    first, as the strictest and most machine-readable identity, and the tags only when
-    neither side has one. The strictness differs, though, and deliberately -- that
-    ladder decides whether to store a second row, this one decides whether to trust a
-    signature:
+    A scheme is an unordered stack of components (see ``Peer.SignatureScheme`` in
+    celaut.proto), so this asks for a one-to-one pairing between the two schemes'
+    components, not a positional comparison. Within a pair, matching is
+    :func:`_same_component`'s (``formal`` first, an exact set of tags otherwise);
+    across the whole scheme, the pairing must be total. A peer declaring an extra
+    component, or missing one, is a different scheme even if every paired component
+    matches -- same reasoning as the flat-tag-set rule this replaced (a peer declaring
+    ``["secp256k1", "bip340"]`` shares a tag with this node and signs something this
+    node cannot read -- same curve, different algorithm -- so "at least one shared
+    component" is exactly the answer that must not be given here), just expressed
+    per-component instead of over one flat list.
 
-    * the tags must match as a **set**, never by intersection. A peer declaring
-      ``["secp256k1", "bip340"]`` shares a tag with this node and signs something this
-      node cannot read -- same curve, different scheme -- so "at least one tag in
-      common" is exactly the answer that must not be given here.
-    * ``prose`` is not compared at all. It is human text this node has no way to
-      judge, and making it decisive would refuse a peer for rewording a sentence.
+    Three things are refused before the pairing is searched for, each of them a "no"
+    in its own right rather than an optimization:
+
+    * **Different cardinality.** Nothing to pair; see above.
+    * **More components than the configured cap**
+      (``communication.MAX_SIGNATURE_SCHEME_COMPONENTS``). The search is factorial in
+      a length a peer chooses. Today the only comparison this node runs is against its
+      own four-component scheme, so the cardinality check already bounds it -- the cap
+      is what keeps that true if this ever compares two peers' schemes to each other.
+    * **A component that declares neither tags nor formal** on either side; see
+      :func:`_component_is_declared`.
     """
-    formal_a, formal_b = bytes(a.formal), bytes(b.formal)
-    if formal_a or formal_b:
-        return formal_a == formal_b
-    return set(a.tags) == set(b.tags)
+    a_components, b_components = list(a.components), list(b.components)
+    if len(a_components) != len(b_components):
+        return False
+
+    if len(a_components) > _max_signature_scheme_components():
+        return False
+
+    if not all(_component_is_declared(c) for c in a_components + b_components):
+        return False
+
+    return any(
+        all(_same_component(x, y) for x, y in zip(a_components, permutation))
+        for permutation in itertools.permutations(b_components)
+    )
 
 
 def speaks_our_signature_scheme(peer) -> bool:
@@ -146,12 +282,12 @@ def speaks_our_signature_scheme(peer) -> bool:
     length, their encoding, the verification procedure -- is exactly what the scheme
     decides.
 
-    A descriptor with nothing in it is the pre-field default rather than a wildcard:
+    A descriptor with no components is the pre-field default rather than a wildcard:
     back when the field did not exist there was only one scheme an announcement could
     mean, so it resolves to this one, and a peer meaning anything else has to say so.
     """
     scheme = peer.signature_scheme
-    if not scheme.tags and not scheme.prose and not scheme.formal:
+    if not scheme.components:
         return True
     return same_signature_scheme(scheme, node_signature_scheme())
 
