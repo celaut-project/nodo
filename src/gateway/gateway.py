@@ -16,6 +16,7 @@ from src.payment_system.payment_process import generate_deposit_token, validate_
 from src.utils import logger as log
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 from src.utils.config import ConfigManager
+from src.utils.cost_functions.generate_estimated_cost import get_resource_availability
 from src.utils.monetary import prices
 
 env_manager = ConfigManager()
@@ -27,6 +28,29 @@ class Gateway(celaut_pb2_grpc.Gateway):
         print("DEBUG. GET SERVICE ESTIMATED COST")
         log.LOGGER("DEBUG. GET SERVICE ESTIMATED COST")
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
+
+    def GetResourceAvailability(self, request_iterator, context, **kwargs):
+        # Answers "could you run an instance shaped like this right now?" for a
+        # resource profile that may not correspond to any packed service on
+        # either side -- unlike GetServiceEstimatedCost, which round-trips
+        # through the local service registry. Used by peers evaluating whether
+        # a Service.PossibleEnvironmentWorkload scenario (a declared descendant
+        # workload with only `resources`, no `hash`/embedded `service`) could
+        # be satisfied somewhere in the network.
+        resources = next(bee.parse_from_buffer(
+                    request_iterator=request_iterator,
+                    indices=celaut_pb2.Service.Container.Resources,
+                    partitions_message_mode=True
+                ), celaut_pb2.Service.Container.Resources())
+
+        availability = get_resource_availability(resources)
+
+        yield from bee.serialize_to_buffer(
+                message_iterator=celaut_pb2.ResourceAvailability(
+                    can_execute=availability["can_execute"],
+                    reason=availability.get("reason", ""),
+                )
+        )
 
     def StartService(self, request_iterator, context, **kwargs):
         yield from StartServiceIterable(request_iterator, context)
