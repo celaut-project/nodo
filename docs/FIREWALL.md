@@ -158,25 +158,36 @@ The decision, in order:
 
 That last row is the Fedora case: a fresh host whose guest bridge does not exist
 yet, with firewalld sitting on the input hook. There is no reason to commit to a
-port there, so `GATEWAY_PORT` stays `auto` and the operator gets the commands to
-run. An unassigned port stops the node with a message; an unreachable one does
-not, which is the worse of the two.
+port there, so `GATEWAY_PORT` stays `auto` and the operator gets the command to
+run. The candidate port itself is remembered in `<main.CACHE>/aux_port`, so the
+port that command mentions is the same one on the next start rather than a fresh
+random pick. An unassigned port stops the node with a message; an unreachable one
+does not, which is the worse of the two.
 
-When a port is refused, the message does **not** prescribe a command. nodo speaks
-the two interfaces the kernel offers — nftables and iptables — and nothing above
-them: it writes its own rules, reads the ruleset back, and drives no firewall
-front-end. Which program owns the rest of the ruleset is not something it can know,
-and naming one would be wrong on every host that uses a different one. So the
-refusal names the rejecting chains it actually read, and states the property the
-host has to satisfy:
+When a port is refused, the message ends with the one command that opens it —
+provided nodo could work out which command that is. It still writes only nftables
+or iptables rules and drives no front-end, but *reading* the host to see which
+front-end is running costs nothing and turns "establish this property" into
+something an operator can paste. Detection is deliberately narrow: the binary must
+be present **and** report itself active (`firewall-cmd --state` says `running`,
+`ufw status` says `active`), because an installed-but-stopped firewalld is not what
+rejected the packet.
 
-> TCP *port* inbound must be accepted on the input hook — from the guest subnet
-> over the guest bridge, and from wherever peers reach this host — and no other
-> base chain on that hook may reject or drop it.
+- **firewalld:** `sudo firewall-cmd --permanent --add-port=<port>/tcp && sudo firewall-cmd --reload`
+- **ufw:** `sudo ufw allow <port>/tcp`
+
+Where nothing was detected there is nothing to name — the ruleset may be a
+hand-written `nft` file, a config-management template, or a container runtime's
+doing — and nodo will not invent a command for a front-end that is not running.
+It names the rejecting chains it actually read, and states the property instead:
+
+> Inbound TCP *port* must be accepted on the netfilter input hook, with no other
+> base chain on that hook rejecting or dropping it. Guests reach it from the guest
+> subnet over the guest bridge.
 
 Establishing that is the operator's, who knows what manages their firewall. The
-worked examples for the two common owners are in the next section; they are
-guidance for a human reading these docs, not something the node runs.
+worked examples for the two common owners are in the next section — including the
+guest-bridge zone firewalld needs, which a bare `--add-port` does not cover.
 
 None of this says anything about reachability from **outside this LAN**: no check
 on the host can answer that (a connect from inside succeeds whether or not the

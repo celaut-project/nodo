@@ -183,8 +183,9 @@ class EnsureGatewayPortOpenTests(unittest.TestCase):
         self.rejectors = []
 
 
+    @patch("src.utils.firewall.frontend.detect_frontend", return_value=None)
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_a_provably_closed_port_stops_the_node(self, mock_probe, _euid):
+    def test_a_provably_closed_port_stops_the_node(self, mock_probe, _frontend, _euid):
         mock_probe.return_value = ProbeResult(False, "connect refused", source_ip="192.168.200.254")
         self.rejectors = [
             ForeignRejector(
@@ -208,11 +209,9 @@ class EnsureGatewayPortOpenTests(unittest.TestCase):
         # It must say why an accept rule did not help, and name what is rejecting.
         self.assertIn("filter_INPUT", instructions)
         self.assertIn("accept", instructions)
-        # ...and state the property the host has to satisfy, without naming a
-        # firewall front-end: nodo speaks nftables/iptables and nothing above them.
-        self.assertIn(f"TCP {PORT} inbound must be accepted", instructions)
+        # ...and then say what to do about it: the command for the front-end running
+        # here, or -- as mocked below -- the property the host has to satisfy.
         self.assertIn(SUBNET, instructions)
-        self.assertNotIn("firewall-cmd", instructions)
         self.assertEqual(ctx.exception.port, PORT)
 
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")

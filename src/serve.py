@@ -10,7 +10,11 @@ from src.manager.maintain import manager_thread
 from src.tunneling import delegated_endpoints
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.utils.firewall.gateway import GatewayPortUnavailable, ensure_gateway_port_open
+from src.utils.firewall.gateway import (
+    GatewayPortUnavailable,
+    ensure_gateway_port_open,
+    operator_notice,
+)
 from src.utils.firewall.legacy import sweep_compat_tables
 
 env_manager = ConfigManager()
@@ -71,8 +75,11 @@ def _verify_gateway_port(port: int) -> None:
 
 
 def _refuse_to_start(e: GatewayPortUnavailable) -> None:
-    log.LOGGER(f"Refusing to start: {e}")
-    print(f"\n{e}\n", file=sys.stderr, flush=True)
+    # Framed like every other gateway-port message, so it stays readable when it
+    # lands between whatever else the start path is printing.
+    notice = operator_notice("refusing to start", str(e))
+    log.LOGGER(notice)
+    print(notice, file=sys.stderr, flush=True)
     raise SystemExit(1) from e
 
 

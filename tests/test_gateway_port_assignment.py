@@ -13,10 +13,11 @@ not the firewall allows it. So the probe now brings its own throwaway listener, 
 a port that still cannot be cleared is not stored -- an unassigned port stops the
 node with an explanation, which is strictly better than a node that answers nothing.
 
-What nodo does NOT do is drive the firewall for the operator. It writes nftables
-(or iptables) rules and reads the ruleset back; which program owns the rest is not
-something it assumes, so the failure states the property the host must satisfy
-rather than commands for one distro's front-end.
+nodo still does not drive the firewall for the operator: it writes nftables (or
+iptables) rules and reads the ruleset back. But the failure message names the
+front-end that is *running on this host* -- detected, not assumed -- and gives the
+single command that opens the port with it, falling back to a one-paragraph
+statement of what has to hold where there is no front-end to name.
 """
 import socket
 import subprocess
@@ -24,6 +25,7 @@ import unittest
 from unittest.mock import patch
 
 from src.utils.firewall.backends import ForeignRejector, NftBackend
+from src.utils.firewall.frontend import Frontend
 from src.utils.firewall import gateway
 from src.utils.firewall.gateway import GatewayPortUnavailable, assign_gateway_port
 from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
@@ -44,42 +46,73 @@ FIREWALLD_REJECTOR = ForeignRejector(
 )
 
 
-class HookContractTests(unittest.TestCase):
-    """What the operator is told: a property to establish, not a tool to run.
+class OperatorAdviceTests(unittest.TestCase):
+    """What the operator is told: one command when there is one, else the property.
 
-    nodo speaks the two interfaces the kernel offers. Naming a front-end would be
-    wrong on every host that uses a different one, and telling an operator to run a
-    command that does not exist there costs more trust than saying nothing.
+    The old wording refused to name any front-end, which was correct and useless:
+    an operator was left to work out for themselves whether firewalld, ufw or
+    nothing at all owns their host before they could act. nodo already reads enough
+    of the host to answer that, so it does -- and only falls back to the property
+    statement where nothing is running to name.
     """
 
-    def _text(self):
-        return "\n".join(gateway._hook_contract(PORT, BRIDGE, SUBNET))
+    def _text(self, frontend):
+        with patch(
+            "src.utils.firewall.frontend.detect_frontend", return_value=frontend
+        ):
+            return "\n".join(gateway.open_port_advice(PORT, bridge=BRIDGE, subnet=SUBNET))
 
-    def test_it_states_the_property_in_ruleset_terms(self):
-        text = self._text()
-        self.assertIn(f"TCP {PORT} inbound must be accepted", text)
-        self.assertIn("input", text)          # the hook it has to hold on
-        self.assertIn(SUBNET, text)           # guests
+    def test_a_detected_front_end_becomes_one_command(self):
+        text = self._text(Frontend(name="firewalld", command=f"sudo firewall-cmd --add-port={PORT}/tcp"))
+        self.assertIn("firewalld", text)
+        self.assertIn(f"sudo firewall-cmd --add-port={PORT}/tcp", text)
+
+    def test_with_no_front_end_it_states_the_property_instead(self):
+        text = self._text(None)
+        self.assertIn(f"inbound TCP {PORT} accepted", text)
+        self.assertIn("input hook", text)
+        self.assertIn(SUBNET, text)     # guests
         self.assertIn(BRIDGE, text)
-        self.assertIn("peers", text)          # and the outside
 
-    def test_it_names_no_firewall_front_end(self):
-        text = self._text().lower()
-        for tool in ("firewall-cmd", "firewalld", "ufw", "yast", "shorewall"):
+    def test_it_invents_no_command_when_it_detected_nothing(self):
+        # Guessing at a front-end that is not running is how an operator ends up
+        # configuring the wrong thing, or breaking a ruleset nodo does not own.
+        # Naming what it looked for is fine; prescribing a command is not.
+        text = self._text(None).lower()
+        for tool in ("sudo", "firewall-cmd", "--add-port", "ufw allow", "nft add", "iptables -"):
             with self.subTest(tool=tool):
                 self.assertNotIn(tool, text)
 
-    def test_it_suggests_no_commands_at_all(self):
-        # Not even a "sudo": the host's ruleset may be managed from a template or a
-        # config-management run, where an ad-hoc command would be reverted anyway.
-        self.assertNotIn("sudo", self._text())
 
-    def test_it_says_which_interfaces_nodo_itself_speaks(self):
-        # So an operator knows where nodo's own rules live, and that nothing else
-        # on the host is being written to behind their back.
-        text = self._text()
-        self.assertIn("nftables", text)
-        self.assertIn("iptables", text)
+class OperatorNoticeTests(unittest.TestCase):
+    """The block has to stay separate from whatever printed around it.
+
+    These messages are emitted while ConfigManager loads, which on a fresh install
+    happens during nodo.py's imports -- so the next thing on the terminal is the KyA
+    banner, and the two ran together into one wall of text.
+    """
+
+    def test_it_is_padded_with_a_blank_line_at_both_ends(self):
+        lines = gateway.operator_notice("gateway port", "body").split("\n")
+        self.assertEqual(lines[0], "")
+        self.assertEqual(lines[-1], "")
+
+    def test_the_body_is_framed_and_titled(self):
+        lines = gateway.operator_notice("gateway port 1 not assigned", "body").split("\n")
+        self.assertEqual(lines[1], gateway.NOTICE_RULE)
+        self.assertIn("gateway port 1 not assigned", lines[2])
+        self.assertEqual(lines[3], gateway.NOTICE_RULE)
+        self.assertEqual(lines[4], "body")
+        self.assertEqual(lines[5], gateway.NOTICE_RULE)
+
+    def test_a_multi_line_body_is_kept_intact(self):
+        # The instructions carry a command on its own indented line; reflowing or
+        # re-indenting it here would break the one thing meant to be pasted.
+        body = "first\n\n  sudo something --add-port=1/tcp\nlast"
+        self.assertIn(body, gateway.operator_notice("t", body))
+
+    def test_the_rule_fits_an_eighty_column_terminal(self):
+        self.assertLessEqual(len(gateway.NOTICE_RULE), 79)
 
 
 @patch("src.utils.firewall.gateway.os.geteuid", return_value=0)
@@ -151,8 +184,7 @@ class AssignGatewayPortTests(unittest.TestCase):
 
         instructions = ctx.exception.instructions
         self.assertIn("filter_INPUT", instructions)          # names what can reject
-        self.assertIn("must be accepted", instructions)      # states what has to hold
-        self.assertIn("GATEWAY_PORT", instructions)          # and the manual way out
+        self.assertIn("GATEWAY_PORT", instructions)          # the manual way out
         self.assertIn("nat-guide", instructions)             # outside the LAN is separate
 
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
@@ -172,12 +204,13 @@ class AssignGatewayPortTests(unittest.TestCase):
             self.logged,
         )
 
+    @patch("src.utils.firewall.frontend.detect_frontend", return_value=None)
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_the_refusal_explains_the_problem_instead_of_prescribing_a_tool(
-        self, mock_probe, _euid
+    def test_the_refusal_reports_the_chain_it_read(
+        self, mock_probe, _frontend, _euid
     ):
-        # The operator knows what owns their firewall; nodo does not. It reports the
-        # rejecting chain it read from the ruleset and the property that must hold.
+        # The rejecting chain is read from the live ruleset, never guessed at, and
+        # with no front-end running there is no command to offer.
         mock_probe.return_value = ProbeResult(None, "bridge br-ch does not exist yet")
         self.rejectors = [FIREWALLD_REJECTOR]
 
@@ -186,9 +219,28 @@ class AssignGatewayPortTests(unittest.TestCase):
 
         instructions = ctx.exception.instructions
         self.assertIn("inet firewalld / filter_INPUT", instructions)  # read, not assumed
-        self.assertIn(f"TCP {PORT} inbound must be accepted", instructions)
+        self.assertIn(f"inbound TCP {PORT} accepted", instructions)
         self.assertNotIn("firewall-cmd", instructions)
-        self.assertNotIn("sudo", instructions)
+
+    @patch(
+        "src.utils.firewall.frontend.detect_frontend",
+        return_value=Frontend(name="firewalld", command="sudo firewall-cmd --x"),
+    )
+    @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
+    def test_the_refusal_carries_the_command_for_a_running_front_end(
+        self, mock_probe, _frontend, _euid
+    ):
+        mock_probe.return_value = ProbeResult(None, "bridge br-ch does not exist yet")
+        self.rejectors = [FIREWALLD_REJECTOR]
+
+        with self.assertRaises(GatewayPortUnavailable) as ctx:
+            self._assign()
+
+        instructions = ctx.exception.instructions
+        self.assertIn("This host runs firewalld", instructions)
+        self.assertIn("sudo firewall-cmd --x", instructions)
+        # Still short enough to read, and to paste somewhere.
+        self.assertLess(len(instructions.splitlines()), 16, instructions)
 
 
 @patch("src.utils.firewall.reachability.os.geteuid", return_value=0)

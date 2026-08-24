@@ -797,6 +797,22 @@ def _doctor_guest_gateway_reachability():
             "opened, or set the key to a port you opened yourself.",
             flush=True
         )
+        # Which port, concretely: it is remembered between attempts precisely so the
+        # operator can open THAT one instead of chasing a new random pick each run.
+        pending = None
+        try:
+            pending = env_manager.pending_gateway_port()
+        except Exception:
+            pass
+        if pending:
+            print(f"  The port it will try next is {pending}.", flush=True)
+            try:
+                from src.utils.firewall.frontend import open_port_advice
+
+                for line in open_port_advice(pending):
+                    print(f"  {line}", flush=True)
+            except Exception:
+                pass
         return
 
     try:
@@ -864,15 +880,24 @@ def _doctor_guest_gateway_reachability():
     except Exception:
         rejectors = []
     if rejectors:
-        print("  Chains on the input hook, outside nodo's own table, that can reject:", flush=True)
+        print("  Rejecting chains, outside nodo's own ruleset:", flush=True)
         for rejector in rejectors:
             print(f"    - {rejector}", flush=True)
         print(
             "  An accept rule cannot override those: in nftables 'accept' ends its own "
-            "chain only, and a reject in another base chain on the same hook still "
-            "wins whatever the priority. Open the port where that ruleset is managed.",
+            "chain only, and a reject in another base chain on the same hook still wins "
+            "whatever the priority.",
             flush=True
         )
+    # The one thing worth adding: the command for the front-end actually running
+    # here, rather than a description of the property the operator must establish.
+    try:
+        from src.utils.firewall.frontend import open_port_advice
+
+        for line in open_port_advice(port, bridge=bridge, subnet=subnet):
+            print(f"  {line}", flush=True)
+    except Exception:
+        pass
     print(
         "  This tests the guest subnet only. Whether peers OUTSIDE this LAN can reach "
         "the port is a separate question no check on this host can answer -- run "
