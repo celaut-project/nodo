@@ -180,34 +180,38 @@ reachable and this host has other rules that could reject it, `GATEWAY_PORT` sta
 port is a loud failure, an unreachable one is a node that looks healthy and answers
 nothing.
 
-**What nodo tells you.** The refusal names the chains it read from the ruleset and
-states the property your host has to satisfy:
+**What nodo tells you.** The refusal names the chains it read from the live ruleset
+and then, when it can, the single command that fixes it. nodo checks which
+high-level firewall is *running* on the host — firewalld, ufw — and prints its
+command, e.g.:
 
-> TCP *port* inbound must be accepted on the input hook — from the guest subnet
-> over the guest bridge, and from wherever peers reach this host — and no other
-> base chain on that hook may reject or drop it.
+> Rejecting chains, outside nodo's own ruleset:
+>   - inet firewalld / filter_INPUT (hook input, priority 10): contains a reject rule
+> This host runs firewalld. Open the port with:
+>   sudo firewall-cmd --permanent --add-port=58443/tcp && sudo firewall-cmd --reload
 
-It stops there on purpose. nodo writes nftables (or iptables) rules and reads the
-ruleset back; it drives no firewall front-end, and does not assume which program
-owns the rest of your ruleset. A command for the wrong one is worse than none.
+Where no front-end is running there is nothing to name — the ruleset may be a
+hand-written `nft` file or a config-management template — so it states the property
+instead: inbound TCP on that port must be accepted on the netfilter input hook, and
+no other base chain on that hook may reject or drop it. nodo never invents a command
+for a front-end it did not detect.
 
-**Fix — run `sudo nodo doctor` and read the gateway section.** It lists the foreign
-chains that can reject and the result of a real connect from the guest bridge (it
-supplies its own listener, so this works with the node stopped). Then establish the
-property above wherever your ruleset is managed. For the two common owners,
-[`FIREWALL.md`](FIREWALL.md) → *Sharing the host with another firewall* has worked
-examples; in short:
+**The port it asks about does not change between runs.** A candidate is only written
+to `network.GATEWAY_PORT` once it works, so until then it is parked in
+`<main.CACHE>/aux_port` and reused. Without that, every run picked a fresh random
+port and asked you to open a different one each time. Delete that file if you want
+nodo to pick another candidate.
 
-- **firewalld** (Fedora/RHEL): allow the port, and give the guest bridge a zone of
-  its own containing just that port — not `trusted`, which would expose every port
-  this host listens on to every guest.
-- **ufw:** `sudo ufw allow <GATEWAY_PORT>/tcp`.
-- **A hand-managed nftables ruleset, or a config-management template:** put the
-  accept where that ruleset is defined, so it survives the next run.
+**Fix — run `sudo nodo doctor` and read the gateway section.** It reports the result
+of a real connect from the guest bridge (it supplies its own listener, so this works
+with the node stopped), the foreign chains that can reject, and the same command.
+Then start the node again. [`FIREWALL.md`](FIREWALL.md) → *Sharing the host with
+another firewall* has the longer worked examples, including giving the guest bridge
+a firewalld zone of its own rather than `trusted`.
 
-Assignment retries on the next privileged start. **Or pin a port you have already
-opened yourself** in `config.yaml` (`network.GATEWAY_PORT: 58443`): nodo then
-trusts you and does not re-pick.
+Assignment retries on the next privileged start, with the same port. **Or pin a port
+you have already opened yourself** in `config.yaml` (`network.GATEWAY_PORT: 58443`):
+nodo then trusts you and does not re-pick.
 
 **Reachability from outside the LAN is a separate problem.** Nothing on the host
 can prove it: a connect from inside succeeds whether or not the router forwards

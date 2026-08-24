@@ -12,10 +12,15 @@ closed the node looks alive and is useless, so the rules here are strict:
 * ``network.GATEWAY_PORT`` never resolves to the string ``auto``. No port means a
   clear exception and a stopped process, never a plausible-looking default.
 
+* A refusal ends with the single command that fixes it, when
+  ``firewall.frontend`` could detect which front-end is running here. nodo still
+  drives none of them -- it prints the command, the operator runs it.
+
 Nothing here imports ``ConfigManager``; callers pass the values in.
 """
 
 import os
+import textwrap
 from typing import Callable, List, Optional, Sequence
 
 from src.utils.firewall.backends import (
@@ -25,12 +30,36 @@ from src.utils.firewall.backends import (
     Runner,
     detect_backend,
 )
+from src.utils.firewall.frontend import open_port_advice
 from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
 
 GATEWAY_COMMENT_PREFIX = "nodo;gateway;port"
 # What nodo wrote before this module existed: same purpose, no port in the
 # comment, so it cannot be pruned when the port changes. Cleaned up on sight.
 LEGACY_GATEWAY_COMMENT = "nodo;gateway;auto_port"
+
+
+# Wide enough for a wrapped paragraph, narrow enough for an 80-column terminal.
+NOTICE_RULE = "-" * 78
+
+
+def operator_notice(title: str, body: str) -> str:
+    """Frame ``body`` so it survives landing in the middle of other output.
+
+    These messages are long, and the worst of them are emitted while ConfigManager
+    is loading -- which on a fresh install happens during ``nodo.py``'s imports, so
+    the next thing on the terminal is the KyA banner. Run together they read as one
+    wall of text and the instructions get lost. Blank lines top and bottom, and a
+    rule with a title, keep the block separate from whatever printed around it.
+    """
+    return "\n".join(["", NOTICE_RULE, f" nodo: {title}", NOTICE_RULE, body, NOTICE_RULE, ""])
+
+
+def _para(text: str) -> List[str]:
+    """One prose paragraph, wrapped. These messages get read in a terminal and
+    pasted elsewhere, so they are wrapped here rather than left to whatever is
+    displaying them."""
+    return textwrap.wrap(text, width=78)
 
 
 def gateway_comment(port: int, protocol: str = "tcp") -> str:
@@ -82,33 +111,25 @@ def _blocked_port_error(
     probe: ProbeResult,
     rejectors: Sequence[ForeignRejector],
     config_path: str,
+    run: Optional[Runner] = None,
 ) -> GatewayPortUnavailable:
-    lines: List[str] = [
-        f"nodo added an accept rule for TCP {port} via {backend_name}, but the port is "
-        f"still not reachable from the guest subnet {subnet}.",
-        f"Probe: {probe.detail}",
-        "",
-        "An accept rule cannot fix this on its own. In nftables 'accept' ends the "
-        "evaluation of its own chain only; the packet still traverses every other base "
-        "chain on the same hook, and a reject there wins regardless of priority.",
-    ]
-
+    lines: List[str] = _para(
+        f"nodo's accept rule for TCP {port} is in place ({backend_name}), but the port "
+        f"is still not reachable from the guest subnet {subnet}: {probe.detail} "
+        "Something else on the input hook rejects it, and an accept of nodo's cannot "
+        "override that: in nftables 'accept' ends the evaluation of its own chain only."
+    )
     if rejectors:
-        lines.append("")
-        lines.append("Chains on the input hook, outside nodo's own table, that can reject:")
-        for rejector in rejectors:
-            lines.append(f"  - {rejector}")
-
+        lines.append("Rejecting chains, outside nodo's own ruleset:")
+        lines.extend(f"  - {rejector}" for rejector in rejectors)
     lines.append("")
-    lines.extend(_hook_contract(port, bridge, subnet))
-
+    lines.extend(open_port_advice(port, bridge=bridge, subnet=subnet, run=run))
+    lines.append("")
     lines.extend(
-        [
-            "",
-            f"Alternatively pin a port that is already open, in {config_path}:",
-            "  network:",
-            "    GATEWAY_PORT: <an open port>",
-        ]
+        _para(
+            f"Then start the node again -- or set network.GATEWAY_PORT in {config_path} "
+            "to a port you have already opened."
+        )
     )
 
     return GatewayPortUnavailable(
@@ -240,40 +261,12 @@ def ensure_gateway_port_open(
         probe=probe,
         rejectors=rejectors,
         config_path=config_path,
+        run=run,
     )
     if strict:
         raise error
     log(f"[FW] {error}")
     return probe
-
-
-def _hook_contract(port: int, bridge: str, subnet: str) -> List[str]:
-    """A formal statement of what the host must satisfy, with no tool named.
-
-    nodo speaks the two interfaces the kernel offers, nftables and iptables, and
-    nothing above them. Which program owns the rest of the ruleset -- a distro
-    front-end, a config-management template, a hand-written nft file -- is not
-    nodo's to know, let alone to write to. Naming one would also be a lie of
-    omission on every host that uses a different one.
-
-    So the node states the property that has to hold, in terms of the ruleset it can
-    actually read, and leaves the operator to establish it however their host is
-    managed. They know what owns their firewall; nodo does not.
-    """
-    return [
-        f"For this node to work, TCP {port} inbound must be accepted on the input",
-        "hook, and no other base chain on that hook may reject or drop it:",
-        f"  - from {subnet}, the guest subnet, reached over {bridge}: every",
-        "    node_controller call a service makes goes this way, so without it the",
-        "    node accepts services that cannot call back into it.",
-        "  - from wherever peers reach this host: without it the node is invisible to",
-        "    the network while looking healthy locally.",
-        "",
-        "How to establish that depends on what manages the ruleset on this host, which",
-        "nodo deliberately does not assume: it writes nftables (or iptables) rules and",
-        "reads the ruleset back, and does not drive any firewall front-end. Apply the",
-        "change wherever the chains listed above are managed, then start the node again.",
-    ]
 
 
 def _unverified_port_error(
@@ -284,35 +277,30 @@ def _unverified_port_error(
     bridge: str,
     subnet: str,
     config_path: str,
+    run: Optional[Runner] = None,
 ) -> GatewayPortUnavailable:
     """The port could not be proven reachable AND something else can reject it."""
-    lines = [
-        f"nodo opened TCP {port} in its own ruleset, but could not prove the port is "
-        "actually reachable, and this host has other firewall rules that can reject it.",
-        f"Probe: {probe.detail}",
-        "",
-        "Chains on the input hook, outside nodo's own table, that can reject:",
-    ]
+    lines = _para(
+        f"nodo opened TCP {port} in its own ruleset but could not prove it is reachable "
+        f"({probe.detail}), and this host has rules that can reject it:"
+    )
     lines.extend(f"  - {rejector}" for rejector in rejectors)
     lines.extend(
-        [
-            "",
-            "An accept rule of nodo's does not overrule them: in nftables 'accept' ends "
-            "the evaluation of its own chain only, and a reject in another base chain on "
-            "the same hook wins regardless of priority.",
-            "",
-            "Rather than store a port that peers may not be able to reach, nodo left "
-            "network.GATEWAY_PORT unassigned.",
-            "",
-            *_hook_contract(port, bridge, subnet),
-            "",
-            f"Or pin a port you have already opened, in {config_path}:",
-            "  network:",
-            "    GATEWAY_PORT: <an open port>",
-            "",
-            "Note that reachability from OUTSIDE this LAN is a separate question that "
-            "nothing on this host can answer: run 'nodo nat-guide' for that.",
-        ]
+        _para(
+            "An accept of nodo's does not overrule them (in nftables 'accept' ends its "
+            "own chain only), so rather than store a port peers may not reach, "
+            "network.GATEWAY_PORT was left unassigned."
+        )
+    )
+    lines.append("")
+    lines.extend(open_port_advice(port, bridge=bridge, subnet=subnet, run=run))
+    lines.append("")
+    lines.extend(
+        _para(
+            f"Then start the node again -- or set network.GATEWAY_PORT in {config_path} "
+            "to a port you have already opened. Reachability from OUTSIDE this LAN is a "
+            "separate question no check here can answer: run 'nodo nat-guide' for that."
+        )
     )
     return GatewayPortUnavailable(
         summary=f"Gateway port {port} could not be verified as reachable.",
@@ -379,6 +367,7 @@ def assign_gateway_port(
             bridge=bridge,
             subnet=subnet,
             config_path=config_path,
+            run=run,
         )
 
     log(

@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import yaml
 from mnemonic import Mnemonic
 
-from src.utils.network import get_free_port
+from src.utils.network import _is_port_free, get_free_port
 from src.utils.singleton import Singleton
 
 
@@ -22,6 +22,15 @@ from src.utils.singleton import Singleton
 # keypress, so the firewall package is imported lazily below rather than pulled
 # in on every CLI invocation.
 GATEWAY_PORT_AUTO = "auto"
+
+# Where a *candidate* gateway port is parked while it is still unusable. The node
+# only writes network.GATEWAY_PORT once the port is proven usable, so before that
+# every run used to pick a fresh random port -- and every run therefore printed a
+# different port for the operator to open, which made the instructions useless:
+# by the time they had opened one, nodo was asking about another. The candidate is
+# remembered here instead, so the port in the message stays the same until it
+# works. One line, one integer; deleting the file only costs a new candidate.
+AUX_PORT_FILE = "aux_port"
 
 
 def coerce_gateway_port(value: Any) -> Optional[int]:
@@ -260,6 +269,53 @@ class ConfigManager(metaclass=Singleton):
             "subnet": _text(["virtualizers", "ch", "NETWORK_SUBNET"], "192.168.200.0/24"),
         }
 
+    def _aux_port_path_unlocked(self) -> str:
+        """Where the remembered gateway-port candidate lives: ``<CACHE>/aux_port``.
+
+        This runs mid-load, before ``_interpolate_paths``, so ``main.CACHE`` is still
+        ``${main.STORAGE}/__cache__/`` and has to be resolved here. If it cannot be
+        (a trimmed-down config, a missing key), the file goes beside config.yaml:
+        remembering the candidate somewhere is what matters, not where.
+        """
+        raw = str(self._get_nested(self._config, ["main", "CACHE"]) or "").strip()
+        resolved = self._interpolate_paths(raw) if raw else ""
+        if not resolved or "${" in resolved:
+            resolved = os.path.dirname(os.path.realpath(self.config_path)) or "."
+        return os.path.join(resolved, AUX_PORT_FILE)
+
+    def _remembered_aux_port_unlocked(self) -> Optional[int]:
+        """The candidate port from a previous attempt, if it is still usable.
+
+        Still *free* is checked, because something else may have bound it in the
+        meantime; a port another process now owns is worse than a new candidate.
+        """
+        try:
+            with open(self._aux_port_path_unlocked(), "r") as f:
+                port = coerce_gateway_port(f.read())
+        except OSError:
+            return None
+        if port is None:
+            return None
+        if not _is_port_free(port):
+            self.log(
+                f"The remembered gateway port candidate {port} is in use by something "
+                "else now; picking another one."
+            )
+            return None
+        return port
+
+    def _remember_aux_port_unlocked(self, port: int) -> Optional[str]:
+        """Park ``port`` as the candidate to retry. Best-effort: returns the path."""
+        path = self._aux_port_path_unlocked()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(f"{port}\n")
+            return path
+        except OSError as e:
+            self.log(f"Could not remember the gateway port candidate in {path}: {e}")
+            return None
+
     def _resolve_gateway_port_unlocked(self):
         """Assign a gateway port when there is none -- but only if we can open it.
 
@@ -277,23 +333,36 @@ class ConfigManager(metaclass=Singleton):
             return
 
         if os.geteuid() != 0:
-            self.log(
-                "network.GATEWAY_PORT is unassigned and this process is not root, so it "
-                "cannot open the port in the host firewall. Leaving it unassigned rather "
-                "than storing a port nothing can reach: run 'sudo nodo serve' once, or "
-                "set network.GATEWAY_PORT to a port you have opened yourself."
-            )
+            # Framed: this lands mid-import, so on a fresh install the next thing on
+            # the terminal is the KyA banner.
+            from src.utils.firewall.gateway import operator_notice
+
+            self.log(operator_notice(
+                "gateway port not assigned",
+                "network.GATEWAY_PORT is unassigned and this process is not root, so it\n"
+                "cannot open the port in the host firewall. Leaving it unassigned rather\n"
+                "than storing a port nothing can reach: run 'sudo nodo serve' once, or\n"
+                "set network.GATEWAY_PORT to a port you have opened yourself.",
+            ))
             return
 
-        free_port_ranges = self._get_nested(self._config, ["network", "FREE_PORTS_RANGE"]) or []
-        try:
-            port = get_free_port(free_port_ranges=free_port_ranges)
-        except Exception as e:
-            self.log(f"Could not pick a free gateway port: {e}")
-            return
-        if not port:
-            self.log("Could not pick a free gateway port: none available in FREE_PORTS_RANGE.")
-            return
+        # The same candidate as last time, whenever there was one: the operator is
+        # being asked to open a specific port in their firewall, and that request
+        # only makes sense if it does not change under them between commands.
+        port = self._remembered_aux_port_unlocked()
+        if port is None:
+            free_port_ranges = self._get_nested(self._config, ["network", "FREE_PORTS_RANGE"]) or []
+            try:
+                port = get_free_port(free_port_ranges=free_port_ranges)
+            except Exception as e:
+                self.log(f"Could not pick a free gateway port: {e}")
+                return
+            if not port:
+                self.log("Could not pick a free gateway port: none available in FREE_PORTS_RANGE.")
+                return
+        # Remembered before the attempt, not after it: an attempt that raises must
+        # still leave the next run asking about this same port.
+        self._remember_aux_port_unlocked(port)
 
         # Imported here, not at module scope: see GATEWAY_PORT_AUTO above. Only a
         # privileged start ever reaches this point.
@@ -321,10 +390,14 @@ class ConfigManager(metaclass=Singleton):
                 log=self.log,
             )
         except GatewayPortUnavailable as e:
-            self.log(
-                f"Not assigning gateway port {port}: it is not usable as a gateway "
-                f"port on this host.\n{e}"
-            )
+            from src.utils.firewall.gateway import operator_notice
+
+            self.log(operator_notice(
+                f"gateway port {port} not assigned",
+                f"{e}\n\n"
+                f"nodo will keep asking about this same port ({port}); it is remembered\n"
+                f"in {self._aux_port_path_unlocked()}.",
+            ))
             return
 
         self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
@@ -345,6 +418,17 @@ class ConfigManager(metaclass=Singleton):
             return self._require_gateway_port(
                 self._get_nested(self._config, ["network", "GATEWAY_PORT"])
             )
+
+    def pending_gateway_port(self) -> Optional[int]:
+        """The candidate port a privileged start will try next, if one is parked.
+
+        For diagnostics: with no port assigned, this is the port the operator has to
+        open, and knowing it is the difference between actionable advice and "open
+        whichever port nodo picks next time".
+        """
+        with self._lock:
+            self.ensure_loaded()
+            return self._remembered_aux_port_unlocked()
 
     def gateway_port_or_none(self) -> Optional[int]:
         """The assigned gateway port, or None. For diagnostics that must not raise."""
