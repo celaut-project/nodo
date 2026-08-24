@@ -12,6 +12,22 @@ refused admission. This generalizes the exact same boolean admission gate
 service's own `at_most` resources, applied instead to each descendant group's
 `resources`.
 
+Every limit a group declares is checked, not only `mem_limit`: memory and disk
+against what is free right now, a CPU quota against the number of cores the
+host has at all (a quota is a share of time, so refusing on instantaneous load
+would make admission flap), and `blkio_weight` against the range cgroups
+accept. See `generate_estimated_cost._sysreq_shortfalls`.
+
+Two policies govern the rest, both in `config.yaml` under `workload_admission`
+and both read per call:
+
+* `POLICY` -- how much to probe. `fail_fast` (default) stops at the first group
+  that fits nowhere; `full` probes every group so the message names all of them.
+  This never changes *what* is admitted: every group must fit either way.
+* `ON_UNSATISFIABLE` -- what a group that fits nowhere means. `reject` (default)
+  refuses the launch; `warn` logs and lets it through, for an operator who would
+  rather risk it than lose a launch to a momentary reading.
+
 What this does NOT do, and should not be read as doing: it does not reserve
 capacity, and it does not prove that `count` concurrent instances of a group
 could all run at once (locally, or spread across peers) -- there is no
@@ -23,15 +39,81 @@ non-cumulative (see the proto comment on PossibleEnvironmentWorkload), so
 this is a per-scenario, per-workload-group check, not a sum across the whole
 service.
 """
-from typing import Optional
+from typing import Final, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.utils import logger as log
+from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
 EXTERNAL_COST_TIMEOUT = env_manager.get("EXTERNAL_COST_TIMEOUT")
+
+# How much of the declaration to probe before answering. This is *only* about how much
+# is probed, never about what is admitted: every declared group must fit, under both
+# policies. What differs is whether the node keeps asking once the answer is settled.
+#
+#   fail_fast -- stop at the first group that fits nowhere. The service is refused the
+#                moment one group fails, so every probe after that one buys nothing but
+#                a longer error message, and each of them is a gRPC round-trip to every
+#                known peer. The default: the rejection path must not be the expensive
+#                one.
+#   full      -- probe every group and report all of them. Worth its cost when a
+#                declaration is being debugged and "which of my groups do not fit?" is
+#                the actual question, not "may this launch proceed?".
+PROBE_ALL_GROUPS: Final[str] = "full"
+PROBE_UNTIL_FIRST_FAILURE: Final[str] = "fail_fast"
+_DEFAULT_PROBE_POLICY: Final[str] = PROBE_UNTIL_FIRST_FAILURE
+
+# What a group that fits nowhere means for the launch.
+#
+#   reject -- refuse it (the default). The declaration says these descendants may be
+#             spawned; if there is nowhere to spawn them, starting the parent only
+#             defers the failure to a worse moment.
+#   warn   -- log it and launch anyway. This check reads capacity *right now* and
+#             holds nothing, so on a busy node it can refuse a service that would have
+#             run perfectly well a second later; an operator who would rather take
+#             that chance than lose the launch says so here.
+ON_UNSATISFIABLE_REJECT: Final[str] = "reject"
+ON_UNSATISFIABLE_WARN: Final[str] = "warn"
+_DEFAULT_ON_UNSATISFIABLE: Final[str] = ON_UNSATISFIABLE_REJECT
+
+
+def _policy(key: str, valid: Tuple[str, ...], default: str) -> str:
+    """One of ``valid``, read per call so a change needs no daemon restart.
+
+    An unrecognised value falls back to the default and says so: silently applying
+    something other than what the config asks for is how a node ends up admitting
+    work its operator believed it was refusing.
+    """
+    try:
+        configured = str(env_manager.get(key, default) or default).strip().lower()
+    except Exception:
+        return default
+    if configured not in valid:
+        log.LOGGER(
+            f"[WORKLOAD ADMISSION] {key} is {configured!r}, which is not one of "
+            f"{', '.join(valid)}; using {default!r}."
+        )
+        return default
+    return configured
+
+
+def _probe_policy() -> str:
+    return _policy(
+        "workload_admission.POLICY",
+        (PROBE_ALL_GROUPS, PROBE_UNTIL_FIRST_FAILURE),
+        _DEFAULT_PROBE_POLICY,
+    )
+
+
+def _on_unsatisfiable() -> str:
+    return _policy(
+        "workload_admission.ON_UNSATISFIABLE",
+        (ON_UNSATISFIABLE_REJECT, ON_UNSATISFIABLE_WARN),
+        _DEFAULT_ON_UNSATISFIABLE,
+    )
 
 
 def _timeout() -> Optional[int]:
@@ -59,6 +141,11 @@ def check_resource_availability_on_peer(
     from protos import celaut_pb2_grpc
     from src.utils.utils import generate_uris_by_peer_id
 
+    # TODO(#257): this is the one plaintext peer channel left once the TLS branch
+    # lands -- it must become `grpc_transport.peer_channel(peer_id)`, which also
+    # resolves the address, so `generate_uris_by_peer_id` disappears from here.
+    # Deliberately not done in this PR: the helper does not exist on this branch yet.
+
     try:
         response = next(bee.client_grpc(
             method=celaut_pb2_grpc.GatewayStub(
@@ -76,13 +163,12 @@ def check_resource_availability_on_peer(
 
 
 def _local_resource_availability(resources: celaut.Service.Container.Resources) -> dict:
-    # Lazily imported: generate_estimated_cost.py's own import chain reaches
-    # into the CH virtualizer build machinery (for unrelated billing helpers),
-    # which needs bee_rpc symbols this module otherwise has no reason to
-    # require just to evaluate a resource shape. Wrapped in its own function
-    # (rather than imported straight into _workload_group_is_satisfiable) so
-    # tests can replace this one name without importing any of that chain.
-    from src.utils.cost_functions.generate_estimated_cost import get_resource_availability
+    """Whether this host could take one instance shaped like ``resources``.
+
+    Its own function rather than a call inlined into
+    :func:`_workload_group_is_satisfiable` so a test can replace exactly this step and
+    drive the peer half of the decision on its own.
+    """
     return get_resource_availability(resources)
 
 
@@ -104,15 +190,19 @@ def _workload_group_is_satisfiable(
     return False
 
 
-def evaluate_possible_environment_workloads(
+def _unsatisfiable_groups(
         service: celaut.Service,
-        ignore_network: Optional[str] = None,
-) -> Optional[str]:
-    """None when every declared scenario is satisfiable; otherwise a message
-    listing every workload group that isn't, so a rejection explains itself
-    fully rather than pointing at only the first failure.
+        ignore_network: Optional[str],
+        *,
+        stop_at_first: bool,
+) -> List[str]:
+    """Every declared workload group that fits nowhere, described one per entry.
+
+    ``stop_at_first`` returns as soon as one is found. It changes nothing about which
+    services are admitted -- every group still has to fit -- only how many peers are
+    asked once the answer is already settled.
     """
-    failures = []
+    failures: List[str] = []
 
     for scenario_index, scenario in enumerate(service.possible_environment_workload):
         for workload_index, workload in enumerate(scenario.workloads):
@@ -125,13 +215,55 @@ def evaluate_possible_environment_workloads(
 
             failures.append(
                 f"possible_environment_workload[{scenario_index}].workloads[{workload_index}] "
-                f"(count={workload.count}, mem_limit={workload.resources.mem_limit}) "
+                f"(count={workload.count}, mem_limit={workload.resources.mem_limit}, "
+                f"disk_space={workload.resources.disk_space}, "
+                f"cpu_quota={workload.resources.cpu_quota}) "
                 "cannot be satisfied locally or by any known peer."
             )
+            if stop_at_first:
+                return failures
+
+    return failures
+
+
+def evaluate_possible_environment_workloads(
+        service: celaut.Service,
+        ignore_network: Optional[str] = None,
+) -> Optional[str]:
+    """The reason to refuse this launch, or None to let it proceed.
+
+    Every declared group must fit somewhere for the launch to be admitted -- that is
+    the rule, and neither policy below changes it.
+
+    ``workload_admission.POLICY`` decides how much is probed: ``fail_fast`` (the
+    default) stops at the first group that fits nowhere, since the launch is already
+    refused and each further group costs a gRPC round-trip to every known peer;
+    ``full`` probes all of them so the message names every one.
+
+    ``workload_admission.ON_UNSATISFIABLE`` decides what that means: ``reject`` (the
+    default) returns the message, so the caller refuses the launch; ``warn`` logs it
+    and returns None. The second exists because this check reads capacity *right now*
+    and reserves nothing, so a busy moment can refuse a service that would have run.
+    """
+    failures = _unsatisfiable_groups(
+        service,
+        ignore_network,
+        stop_at_first=_probe_policy() == PROBE_UNTIL_FIRST_FAILURE,
+    )
 
     if not failures:
         return None
-    return (
+
+    message = (
         "Declared descendant workload(s) the network cannot currently satisfy: "
         + " | ".join(failures)
     )
+
+    if _on_unsatisfiable() == ON_UNSATISFIABLE_WARN:
+        log.LOGGER(
+            f"[WORKLOAD ADMISSION] {message} Launching anyway "
+            f"(workload_admission.ON_UNSATISFIABLE={ON_UNSATISFIABLE_WARN})."
+        )
+        return None
+
+    return message

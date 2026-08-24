@@ -65,9 +65,148 @@ def tearDownModule():
 
 
 from protos import celaut_pb2 as celaut  # noqa: E402
+from src.utils.cost_functions import workload_admission as wa  # noqa: E402
 from src.utils.cost_functions.workload_admission import (  # noqa: E402
+    ON_UNSATISFIABLE_REJECT,
+    ON_UNSATISFIABLE_WARN,
+    PROBE_ALL_GROUPS,
+    PROBE_UNTIL_FIRST_FAILURE,
     evaluate_possible_environment_workloads,
 )
+
+
+def _config(**overrides):
+    """Patch the module's ConfigManager reads, defaulting everything else through."""
+    return patch.object(
+        wa.env_manager, "get",
+        side_effect=lambda key, default=None: overrides.get(key, default),
+    )
+
+
+def _two_unsatisfiable_groups() -> celaut.Service:
+    service = celaut.Service()
+    scenario = service.possible_environment_workload.add()
+    scenario.workloads.add().count = 1
+    scenario.workloads.add().count = 1
+    scenario.workloads[0].resources.mem_limit = 111
+    scenario.workloads[1].resources.mem_limit = 222
+    return service
+
+
+_NOTHING_FITS = patch(
+    "src.utils.cost_functions.workload_admission._local_resource_availability",
+    return_value={"can_execute": False, "reason": "no local memory"},
+)
+_NO_PEER_TAKES_IT = patch(
+    "src.utils.cost_functions.workload_admission.check_resource_availability_on_peer",
+    return_value=False,
+)
+_TWO_PEERS = patch(
+    "src.utils.utils.peers_id_iterator", side_effect=lambda **_: iter(["peer-a", "peer-b"])
+)
+
+
+class ProbePolicyTests(unittest.TestCase):
+    """How much is probed. Never *what* is admitted: every group must fit either way."""
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_fail_fast_is_the_default_and_stops_at_the_first_failure(self, peer_check, peers, local):
+        with _config():
+            failure = evaluate_possible_environment_workloads(_two_unsatisfiable_groups())
+        self.assertIsNotNone(failure)
+        self.assertIn("workloads[0]", failure)
+        self.assertNotIn("workloads[1]", failure)
+        # The second group was never probed, so its peers were never asked.
+        self.assertEqual(local.call_count, 1)
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_full_policy_reports_every_unsatisfiable_group(self, peer_check, peers, local):
+        with _config(**{"workload_admission.POLICY": PROBE_ALL_GROUPS}):
+            failure = evaluate_possible_environment_workloads(_two_unsatisfiable_groups())
+        self.assertIsNotNone(failure)
+        self.assertIn("workloads[0]", failure)
+        self.assertIn("workloads[1]", failure)
+        self.assertEqual(local.call_count, 2)
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_an_unrecognised_policy_falls_back_to_fail_fast(self, peer_check, peers, local):
+        with _config(**{"workload_admission.POLICY": "whatever"}):
+            failure = evaluate_possible_environment_workloads(_two_unsatisfiable_groups())
+        self.assertNotIn("workloads[1]", failure)
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_neither_policy_admits_a_service_whose_groups_do_not_fit(self, peer_check, peers, local):
+        for policy in (PROBE_UNTIL_FIRST_FAILURE, PROBE_ALL_GROUPS):
+            with self.subTest(policy=policy), _config(**{"workload_admission.POLICY": policy}):
+                self.assertIsNotNone(
+                    evaluate_possible_environment_workloads(_two_unsatisfiable_groups())
+                )
+
+    @patch(
+        "src.utils.cost_functions.workload_admission._local_resource_availability",
+        return_value={"can_execute": True, "reason": ""},
+    )
+    def test_fail_fast_still_probes_every_group_when_they_all_fit(self, local):
+        with _config():
+            self.assertIsNone(
+                evaluate_possible_environment_workloads(_two_unsatisfiable_groups())
+            )
+        # Nothing failed, so there was nothing to stop at: both groups were checked.
+        self.assertEqual(local.call_count, 2)
+
+
+class OnUnsatisfiablePolicyTests(unittest.TestCase):
+    """What a group that fits nowhere means for the launch."""
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_reject_is_the_default(self, peer_check, peers, local):
+        with _config():
+            self.assertIsNotNone(
+                evaluate_possible_environment_workloads(_two_unsatisfiable_groups())
+            )
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_warn_admits_the_launch_and_says_why(self, peer_check, peers, local):
+        with _config(**{"workload_admission.ON_UNSATISFIABLE": ON_UNSATISFIABLE_WARN}):
+            with patch("src.utils.cost_functions.workload_admission.log.LOGGER") as logger:
+                self.assertIsNone(
+                    evaluate_possible_environment_workloads(_two_unsatisfiable_groups())
+                )
+        logged = " ".join(str(call) for call in logger.call_args_list)
+        self.assertIn("workloads[0]", logged)
+        self.assertIn(ON_UNSATISFIABLE_WARN, logged)
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_an_unrecognised_value_falls_back_to_reject(self, peer_check, peers, local):
+        with _config(**{"workload_admission.ON_UNSATISFIABLE": "maybe"}):
+            self.assertIsNotNone(
+                evaluate_possible_environment_workloads(_two_unsatisfiable_groups())
+            )
+
+    @patch(
+        "src.utils.cost_functions.workload_admission._local_resource_availability",
+        return_value={"can_execute": True, "reason": ""},
+    )
+    def test_warn_changes_nothing_when_everything_fits(self, local):
+        with _config(**{"workload_admission.ON_UNSATISFIABLE": ON_UNSATISFIABLE_WARN}):
+            self.assertIsNone(
+                evaluate_possible_environment_workloads(_two_unsatisfiable_groups())
+            )
+        self.assertEqual(ON_UNSATISFIABLE_REJECT, "reject")
 
 
 def _service_with_workload(count: int, mem_limit: int) -> celaut.Service:
@@ -150,29 +289,6 @@ class EvaluatePossibleEnvironmentWorkloadsTests(unittest.TestCase):
                 self.assertIsNotNone(failure)
                 mock_peers.assert_not_called()
 
-    @patch(
-        "src.utils.cost_functions.workload_admission.check_resource_availability_on_peer",
-        return_value=False,
-    )
-    @patch("src.utils.utils.peers_id_iterator", side_effect=lambda **_: iter(["peer-a"]))
-    @patch(
-        "src.utils.cost_functions.workload_admission._local_resource_availability",
-        return_value={"can_execute": False, "reason": "no local memory"},
-    )
-    def test_reports_every_unsatisfiable_group_not_just_the_first(
-            self, mock_availability, mock_peers, mock_peer_check,
-    ):
-        service = celaut.Service()
-        scenario = service.possible_environment_workload.add()
-        scenario.workloads.add().count = 1
-        scenario.workloads.add().count = 1
-        scenario.workloads[0].resources.mem_limit = 111
-        scenario.workloads[1].resources.mem_limit = 222
-
-        failure = evaluate_possible_environment_workloads(service)
-        self.assertIsNotNone(failure)
-        self.assertIn("workloads[0]", failure)
-        self.assertIn("workloads[1]", failure)
 
     @patch(
         "src.utils.cost_functions.workload_admission._local_resource_availability",
