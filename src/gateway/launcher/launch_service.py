@@ -15,6 +15,7 @@ from src.utils.cost_functions.generate_estimated_cost import (
     generate_estimated_cost,
     get_resource_availability,
 )
+from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.utils.shared_filesystems import service_requires_parent_colocation
 
@@ -177,6 +178,21 @@ def launch_service(
                     service_hash=service_id,
                 )
             ))
+
+        # Refuse admission when a declared descendant workload scenario
+        # (service.json's `possible_environment_workload`) has no shape that
+        # fits anywhere -- neither here nor on any known peer -- right now.
+        # Ahead of `forced_peer` on purpose: forcing which peer runs *this*
+        # instance doesn't change whether its descendants could ever run.
+        workload_admission_failure = evaluate_possible_environment_workloads(
+            service=service,
+            ignore_network=utils.get_network_name(direction=father_ip),
+        )
+        if workload_admission_failure:
+            log.LOGGER(f"Refusing to launch service {service_id}: {workload_admission_failure}")
+            raise Exception(
+                f"Unable to launch service {service_id}: {workload_admission_failure}"
+            )
 
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never
