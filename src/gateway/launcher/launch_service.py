@@ -11,10 +11,8 @@ from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
-from src.utils.cost_functions.generate_estimated_cost import (
-    generate_estimated_cost,
-    get_resource_availability,
-)
+from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
+from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.utils.shared_filesystems import service_requires_parent_colocation

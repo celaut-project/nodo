@@ -564,10 +564,23 @@ At launch, every scenario's workload groups that declare `resources` are checked
 existence — is there a place, right now, that could run one instance shaped like this? — using
 the same admission gate a service's own `resources.at_most` goes through: first locally, then,
 if `network.DELEGATE_EXECUTION` is on, by asking known peers (`GetResourceAvailability`). A
-service is refused if any group has nowhere that could take it. This is an existence check, not
-a capacity reservation: it does not prove `count` concurrent instances of a group could all run
-at once, locally or spread across peers, and it does not hold the capacity it found for later —
-by the time the service actually spawns that descendant, the answer could have changed.
+service is refused if any group has nowhere that could take it. Every limit the group declares
+is checked, not just memory: `mem_limit` and `disk_space` against what is free right now,
+`cpu_quota`/`cpu_period` against how many cores the host has at all (a quota is a share of
+time, so a momentary spike is not a reason to refuse), and `blkio_weight` against the
+10–1000 range cgroups accept.
+
+This is an existence check, not a capacity reservation: it does not prove `count` concurrent
+instances of a group could all run at once, locally or spread across peers, and it does not
+hold the capacity it found for later — by the time the service actually spawns that
+descendant, the answer could have changed.
+
+Two settings under `workload_admission` in `config.yaml` govern it. `POLICY` decides how much
+is probed — `fail_fast` (default) stops at the first group that fits nowhere, `full` probes
+all of them so the error names each one — and never changes *what* is admitted; every group
+must fit either way. `ON_UNSATISFIABLE` decides what a group that fits nowhere means:
+`reject` (default) refuses the launch, `warn` logs it and launches anyway, for an operator
+who would rather risk it than lose a launch to a reading taken at a busy instant.
 
 **Hash-only dependency — resolve by content identity:**
 
