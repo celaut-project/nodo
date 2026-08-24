@@ -99,6 +99,38 @@ SIGNATURE_SCHEME_COMPONENTS: Final[Tuple[Tuple[Tuple[str, ...], str], ...]] = (
 )
 SIGNATURE_SCHEME_FORMAL: Final[bytes] = b""
 
+# Comparing two schemes is a search for a one-to-one pairing between their components
+# (see :func:`same_signature_scheme`), which is factorial in a number a *peer* chooses.
+# The length check there means the only comparison this node actually runs is against
+# its own four-component scheme, so the search is bounded today -- but the function is
+# a general ``(scheme_a, scheme_b) -> bool``, and nothing stops a later caller from
+# handing it two peer schemes. Five leaves room for a scheme with one more building
+# block than ours at 120 pairings; twelve would be 479 million, so past the cap a
+# scheme is refused rather than computed. Configurable because the ceiling is a policy
+# about what this node is willing to spend, not a fact about cryptography.
+MAX_SIGNATURE_SCHEME_COMPONENTS_KEY: Final[str] = (
+    "communication.MAX_SIGNATURE_SCHEME_COMPONENTS"
+)
+DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS: Final[int] = 5
+
+
+def _max_signature_scheme_components() -> int:
+    """The configured cap, read per call so raising it needs no restart.
+
+    Anything unreadable falls back to the default, deliberately catching everything:
+    this is a safety bound consulted from the peer-registration path, and a node with
+    no config file yet (or a malformed one) must fail to *read the cap*, not fail to
+    decide whether it speaks a peer's scheme. A non-positive value falls back too --
+    a cap of zero would refuse every scheme, including this node's own.
+    """
+    try:
+        configured = int(ConfigManager().get(
+            MAX_SIGNATURE_SCHEME_COMPONENTS_KEY, DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS
+        ))
+    except Exception:
+        return DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS
+    return configured if configured > 0 else DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS
+
 
 def node_signature_scheme():
     """This node's own scheme descriptor, as a fresh ``Peer.SignatureScheme``.
@@ -132,21 +164,45 @@ def declare_signature_scheme(peer, *, prose: bool = True) -> None:
             component.ClearField("prose")
 
 
+def _component_is_declared(component) -> bool:
+    """Whether a component names what it is at all.
+
+    ``tags`` or ``formal``; either alone is enough, and a component carrying both is
+    better still. Neither is not a building block this node can reason about: ``prose``
+    is human text it has no way to judge, so a component holding only prose -- or
+    nothing -- states nothing a comparison could act on. Something is missing from it,
+    and the conservative answer to "is this the cryptography I speak?" is no.
+
+    It also keeps the relation reflexive: with no tags and no formal, a component would
+    otherwise fail to match a byte-identical copy of itself.
+    """
+    return bool(component.tags) or bool(bytes(component.formal))
+
+
 def _same_component(a, b) -> bool:
     """Whether two ``SignatureScheme.Protocol`` entries name the same building block.
 
-    ``formal`` first, as the strictest and most machine-readable identity, and the
-    tags only when neither side has one -- and there, *any* shared tag is enough:
-    within one component the tags are synonyms for the one thing it names (e.g.
-    ``["secp256k1", "K-256"]``), same idiom as ``Uri.Protocol``/``Network.tags``
-    elsewhere. ``prose`` is not compared at all: it is human text this node has no
-    way to judge, and making it decisive would refuse a peer for rewording a
-    sentence.
+    ``formal`` first, as the strictest and most machine-readable identity, and the tags
+    only when neither side has one -- and there as a **set**, never by intersection.
+    The tags within one component are meant to be synonyms for the one thing it names
+    (``["secp256k1", "K-256"]``), but nothing in the message says so: this node cannot
+    tell that ``K-256`` restates the component it sits in while ``bip340`` beside
+    ``schnorr`` names a second, different thing. Only one of the two guesses is safe,
+    and the unsafe one accepts a signer whose signatures this node cannot verify -- so
+    an extra tag makes it a different component, exactly as an extra tag made it a
+    different scheme under the flat-set rule this replaced.
+
+    ``formal`` is the way out of that rigidity rather than a workaround for it: once a
+    component points at a specification, that specification decides on its own and the
+    vocabulary stops mattering.
+
+    ``prose`` is not compared at all: it is human text this node has no way to judge,
+    and making it decisive would refuse a peer for rewording a sentence.
     """
     formal_a, formal_b = bytes(a.formal), bytes(b.formal)
     if formal_a or formal_b:
         return formal_a == formal_b
-    return bool(set(a.tags) & set(b.tags))
+    return set(a.tags) == set(b.tags)
 
 
 def same_signature_scheme(a, b) -> bool:
@@ -160,20 +216,38 @@ def same_signature_scheme(a, b) -> bool:
 
     A scheme is an unordered stack of components (see ``Peer.SignatureScheme`` in
     celaut.proto), so this asks for a one-to-one pairing between the two schemes'
-    components, not a positional comparison -- schemes have a handful of components,
-    so trying every permutation is cheap. Within a pair, matching is
-    :func:`_same_component`'s (``formal`` first, tags as synonyms otherwise); across
-    the whole scheme, the pairing must be total. A peer declaring an extra component,
-    or missing one, is a different scheme even if every paired component matches --
-    same reasoning as the flat-tag-set rule this replaced (a peer declaring
+    components, not a positional comparison. Within a pair, matching is
+    :func:`_same_component`'s (``formal`` first, an exact set of tags otherwise);
+    across the whole scheme, the pairing must be total. A peer declaring an extra
+    component, or missing one, is a different scheme even if every paired component
+    matches -- same reasoning as the flat-tag-set rule this replaced (a peer declaring
     ``["secp256k1", "bip340"]`` shares a tag with this node and signs something this
     node cannot read -- same curve, different algorithm -- so "at least one shared
     component" is exactly the answer that must not be given here), just expressed
     per-component instead of over one flat list.
+
+    Three things are refused before the pairing is searched for, each of them a "no"
+    in its own right rather than an optimization:
+
+    * **Different cardinality.** Nothing to pair; see above.
+    * **More components than the configured cap**
+      (``communication.MAX_SIGNATURE_SCHEME_COMPONENTS``). The search is factorial in
+      a length a peer chooses. Today the only comparison this node runs is against its
+      own four-component scheme, so the cardinality check already bounds it -- the cap
+      is what keeps that true if this ever compares two peers' schemes to each other.
+    * **A component that declares neither tags nor formal** on either side; see
+      :func:`_component_is_declared`.
     """
     a_components, b_components = list(a.components), list(b.components)
     if len(a_components) != len(b_components):
         return False
+
+    if len(a_components) > _max_signature_scheme_components():
+        return False
+
+    if not all(_component_is_declared(c) for c in a_components + b_components):
+        return False
+
     return any(
         all(_same_component(x, y) for x, y in zip(a_components, permutation))
         for permutation in itertools.permutations(b_components)

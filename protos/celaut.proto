@@ -496,8 +496,11 @@ message Peer {
             bytes formal = 3;
         }
         // Two schemes match iff there is a one-to-one pairing between their
-        // components where each pair shares a tag or matches on `formal` --
-        // see node_identity.same_signature_scheme. Order carries no meaning.
+        // components where each pair matches on `formal`, or -- when neither side
+        // of the pair has one -- carries exactly the same set of `tags`. Order
+        // carries no meaning. Every component must declare `tags`, `formal` or
+        // both: one holding only `prose` states nothing a comparison can act on.
+        // See node_identity.same_signature_scheme.
         repeated Protocol components = 1;
     }
     SignatureScheme signature_scheme = 7;
