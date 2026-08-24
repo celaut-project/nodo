@@ -288,10 +288,12 @@ def verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
         # "that peer is broken or lying" -- and the peer said which one it is, so the
         # log can too. Adding a scheme means implementing its verifier, not relaxing
         # this (see the Peer.signature_scheme comment in celaut.proto).
-        scheme = peer.signature_scheme
+        components = [
+            ' '.join(c.tags) + (f" formal={bytes(c.formal).hex()}" if c.formal else "")
+            for c in peer.signature_scheme.components
+        ]
         log.LOGGER(
-            f"Peer signs with scheme [{' '.join(scheme.tags) or 'no tags'}]"
-            f"{' formal=' + bytes(scheme.formal).hex() if scheme.formal else ''}, "
+            f"Peer signs with scheme [{'; '.join(components) or 'no components'}], "
             "which this node does not speak; ignoring it."
         )
         return None

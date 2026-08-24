@@ -418,7 +418,11 @@ message Peer {
     string signature = 6;
 
     // Which cryptography `public_key` and `signature` are in, declared rather than
-    // assumed -- the same shape every other replaceable component in celaut is
+    // assumed. A scheme is an open, unordered stack of building blocks (curve,
+    // signature algorithm, ledger convention, challenge hash, ...) -- deliberately
+    // not four named fields: a scheme with a different shape (hash-based, threshold,
+    // ...) needs no proto migration to be expressed, only a different-length stack.
+    // Each block uses the same shape every other replaceable component in celaut is
     // declared with (Uri.Protocol, Contract.Ledger, Container.Architecture): `tags`
     // name it, `prose` describes it to a reader, `formal` points at a machine-readable
     // specification when one exists. Without this field, secp256k1 + Ergo's Schnorr is
@@ -482,13 +486,22 @@ message Peer {
     // node_identity.canonical_peer_content_digest, or a relay could re-label a
     // signature as belonging to a weaker scheme that also accepts those bytes.
     //
-    // `formal` is empty in this node's own declaration, as it is on the Ergo ledger
-    // (reputation_system/envs.py): there is no machine-readable artifact to point at
-    // yet, and the tags carry the identity until there is one.
+    // `formal` is empty on every component of this node's own declaration, as it is
+    // on the Ergo ledger (reputation_system/envs.py): there is no machine-readable
+    // artifact to point at yet, and the tags carry the identity until there is one.
     message SignatureScheme {
-        repeated string tags = 1;
-        string prose = 2;
-        bytes formal = 3;
+        message Protocol {
+            repeated string tags = 1;
+            string prose = 2;
+            bytes formal = 3;
+        }
+        // Two schemes match iff there is a one-to-one pairing between their
+        // components where each pair matches on `formal`, or -- when neither side
+        // of the pair has one -- carries exactly the same set of `tags`. Order
+        // carries no meaning. Every component must declare `tags`, `formal` or
+        // both: one holding only `prose` states nothing a comparison can act on.
+        // See node_identity.same_signature_scheme.
+        repeated Protocol components = 1;
     }
     SignatureScheme signature_scheme = 7;
 
