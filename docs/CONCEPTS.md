@@ -144,8 +144,13 @@ change underneath the peers that recorded it.
 
 ### The signature scheme is declared, not assumed
 
-`Peer.signature_scheme` is a `tags` / `prose` / `formal` descriptor — the same shape a
-ledger (`Contract.Ledger`), an address's transport (`Peer.Uri.Protocol`) or a container
+`Peer.signature_scheme` is an open, unordered stack of components
+(`Peer.SignatureScheme.components`) — one per building block (curve, signature
+algorithm, challenge hash, ledger convention, ...) — rather than four fixed named
+fields, so a future scheme with a different shape (hash-based, threshold, no curve at
+all) needs no proto migration to be expressed, only a different-length stack. Each
+component is a `tags` / `prose` / `formal` descriptor, the same shape a ledger
+(`Contract.Ledger`), an address's transport (`Peer.Uri.Protocol`) or a container
 architecture is declared with. Nothing derives an id from it, here or anywhere else in
 celaut: a hash algorithm can name itself as `H("")` because hashing is keyless and
 unary, but verification takes a key, a message and a signature and has no such
@@ -154,22 +159,31 @@ cryptography is a comparison — `node_identity.same_signature_scheme`, which is
 single place an equivalence service of the shape `(scheme_a, scheme_b) -> bool` would
 be asked instead.
 
-How a node compares them on its own, until such a service is asked:
+How a node compares two schemes on its own, until such a service is asked, is a
+one-to-one pairing between their components — every component on each side paired with
+exactly one on the other, order carrying no meaning — where each pair is decided by:
 
-* **`formal` first.** A machine-readable specification is the strictest identity.
-  Nothing publishes one yet, so this node's is empty — exactly as the Ergo ledger's is.
-* **The tags as a set** when neither side has a `formal`, never by intersection: a peer
-  declaring `["secp256k1", "bip340"]` names the same curve this node does and produces
-  signatures it cannot read.
+* **`formal` first.** A machine-readable specification is the strictest identity for
+  that one component. Nothing publishes one yet, so every component of this node's own
+  scheme has an empty `formal` — exactly as the Ergo ledger's is.
+* **The tags as alternatives** when neither side of the pair has a `formal`: any shared
+  tag makes the pair match, since within one component the tags are synonyms for the
+  one thing it names (e.g. `["secp256k1", "K-256"]`).
 * **`prose`, never.** It is human text with no agreed wording, and making it decisive
   would refuse a peer for rewording a sentence. What it is for is being read: while
-  `formal` is empty, that paragraph *is* the specification of the scheme, written to be
-  enough to implement the verification from.
+  `formal` is empty, that paragraph *is* the specification of that building block,
+  written to be enough to implement the verification from.
 
-An empty descriptor means the sender's default, so an announcement predating the field
-still verifies. This node speaks Schnorr over secp256k1 in Ergo's off-chain encoding
-and nothing else: an announcement declaring another scheme is refused unread, rather
-than reported as a bad signature.
+Across the whole scheme, though, the pairing must be total: a peer declaring
+`["secp256k1"]` and `["bip340"]` as two components shares the curve component with a
+node declaring `["secp256k1"]`, `["schnorr"]`, `["blake2b256"]` and `["ergo"]`, and still
+produces signatures that node cannot read — same cardinality or not, a partial match is
+not a shared scheme.
+
+An empty descriptor (no components at all) means the sender's default, so an
+announcement predating the field still verifies. This node speaks Schnorr over
+secp256k1 in Ergo's off-chain encoding and nothing else: an announcement declaring
+another scheme is refused unread, rather than reported as a bad signature.
 
 ### One identity, many ways to pay
 

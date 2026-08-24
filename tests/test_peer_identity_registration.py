@@ -172,26 +172,35 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         # refused, because the peer says those bytes are something this node cannot
         # verify. Accepting it would mean trusting a signature nobody checked.
         peer = self._peer([("10.0.0.1", 9999)])
-        peer.signature_scheme.tags.extend(["secp256k1", "bip340"])
+        peer.signature_scheme.components.add(tags=["secp256k1"])
+        peer.signature_scheme.components.add(tags=["bip340"])
         self.assertIsNone(manager.verified_peer_public_key(peer))
         self.assertIsNone(manager.add_peer_instance(peer))
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM peer").fetchone()[0], 0)
 
-    def test_a_shared_tag_is_not_a_shared_scheme(self):
-        # The tags are compared as a set, not by intersection: a BIP-340 signer names
-        # the same curve this node does and produces signatures it cannot read. The
-        # laxer match the rest of the codebase uses for ledgers would accept it.
+    def test_a_shared_component_is_not_a_shared_scheme(self):
+        # Same cardinality, three of four components in common, and still refused:
+        # a BIP-340 signer names the same curve/hash/ledger this node does and still
+        # produces signatures it cannot read. The pairing must be total, not "most
+        # components matched" -- the laxer match the rest of the codebase uses for
+        # ledgers would accept it.
         peer = self._peer([("10.0.0.1", 9999)])
         ni.declare_signature_scheme(peer)
-        peer.signature_scheme.tags.append("bip340")
+        for component in peer.signature_scheme.components:
+            if "schnorr" in component.tags:
+                component.tags[:] = ["bip340"]
         self.assertIsNone(manager.verified_peer_public_key(peer))
 
-        del peer.signature_scheme.tags[:]
-        peer.signature_scheme.tags.extend(reversed(ni.SIGNATURE_SCHEME_TAGS))
+        # Rebuilding the same four components in reverse order still matches: order
+        # is not part of what a descriptor says (Peer.SignatureScheme.components is
+        # explicitly unordered).
+        del peer.signature_scheme.components[:]
+        for tags, prose in reversed(ni.SIGNATURE_SCHEME_COMPONENTS):
+            peer.signature_scheme.components.add(tags=list(tags), prose=prose)
         self.assertEqual(
             manager.verified_peer_public_key(peer),
             self.pubkey,
-            "tag order is not part of what a descriptor says",
+            "component order is not part of what a descriptor says",
         )
 
     def test_rewording_the_description_is_not_a_different_scheme(self):
@@ -199,24 +208,28 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         # make every edit to that sentence a network split.
         peer = self._peer([("10.0.0.1", 9999)])
         ni.declare_signature_scheme(peer)
-        peer.signature_scheme.prose = "however this peer prefers to word it"
+        peer.signature_scheme.components[0].prose = "however this peer prefers to word it"
         self.assertEqual(manager.verified_peer_public_key(peer), self.pubkey)
 
     def test_a_formal_specification_decides_over_the_tags(self):
         # Nothing publishes one yet (ours is empty, like the Ergo ledger's), but when
-        # one side names an artifact the tags stop being what the answer rests on.
+        # one side names an artifact for a component the tags stop being what the
+        # answer for that component rests on.
         peer = self._peer([("10.0.0.1", 9999)])
         ni.declare_signature_scheme(peer)
-        peer.signature_scheme.formal = b"some formal specification"
+        peer.signature_scheme.components[0].formal = b"some formal specification"
         self.assertIsNone(manager.verified_peer_public_key(peer))
 
-    def test_the_scheme_is_a_descriptor_and_not_a_derived_id(self):
-        # Pins the shape: tags/prose/formal, compared, the way every other replaceable
-        # component in celaut is declared -- not a hash of any of it.
+    def test_the_scheme_is_an_unordered_stack_of_descriptors(self):
+        # Pins the shape: an unordered stack of tags/prose/formal components, the way
+        # every other replaceable component in celaut is declared -- not a hash of any
+        # of it, and not four fixed named fields either.
         scheme = ni.node_signature_scheme()
-        self.assertEqual(tuple(scheme.tags), ni.SIGNATURE_SCHEME_TAGS)
-        self.assertEqual(scheme.prose, ni.SIGNATURE_SCHEME_PROSE)
-        self.assertEqual(scheme.formal, b"")
+        self.assertEqual(len(scheme.components), len(ni.SIGNATURE_SCHEME_COMPONENTS))
+        for component, (tags, prose) in zip(scheme.components, ni.SIGNATURE_SCHEME_COMPONENTS):
+            self.assertEqual(tuple(component.tags), tags)
+            self.assertEqual(component.prose, prose)
+            self.assertEqual(component.formal, b"")
         self.assertTrue(ni.same_signature_scheme(scheme, ni.node_signature_scheme()))
 
     def test_an_announcement_without_a_scheme_still_verifies(self):
