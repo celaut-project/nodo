@@ -28,12 +28,18 @@ except ImportError as exc:  # pragma: no cover - environment-dependent
 
 from protos import celaut_pb2 as celaut
 
-# bee_rpc reads `FieldDescriptor.label`, which protobuf dropped in 7.x. Where the
-# installed protobuf is newer than bee_rpc supports, nothing that serializes a Buffer
-# can run -- including the node itself -- so this is an environment mismatch to skip
-# over, not a failure of the code under test.
-if _MISSING is None and not hasattr(celaut.ResourceAvailability.DESCRIPTOR.fields[0], "label"):
-    _MISSING = "installed protobuf is newer than bee_rpc supports (no FieldDescriptor.label)"
+# bee_rpc reads protobuf descriptor attributes that have changed across protobuf
+# versions, so an installed bee_rpc is not necessarily a working one: some releases
+# raise `AttributeError: ... no attribute 'label'` on protobuf >= 7 from inside
+# `contain_blocks`, which every serialization reaches. That is an environment mismatch
+# to skip over rather than a failure of the code under test -- but it is worth probing
+# for the *capability* rather than version-checking a proxy for it, so a fixed bee_rpc
+# on a modern protobuf actually runs these tests.
+if _MISSING is None:
+    try:
+        list(bee.serialize_to_buffer(message_iterator=celaut.ResourceAvailability(can_execute=True)))
+    except Exception as exc:  # pragma: no cover - environment-dependent
+        _MISSING = f"installed bee_rpc cannot serialize with this protobuf: {exc!r}"
 
 
 @unittest.skipIf(_MISSING, f"needs a working grpc/bee_rpc ({_MISSING})")
