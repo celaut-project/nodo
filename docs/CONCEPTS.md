@@ -166,13 +166,28 @@ exactly one on the other, order carrying no meaning — where each pair is decid
 * **`formal` first.** A machine-readable specification is the strictest identity for
   that one component. Nothing publishes one yet, so every component of this node's own
   scheme has an empty `formal` — exactly as the Ergo ledger's is.
-* **The tags as alternatives** when neither side of the pair has a `formal`: any shared
-  tag makes the pair match, since within one component the tags are synonyms for the
-  one thing it names (e.g. `["secp256k1", "K-256"]`).
+* **The tags as an exact set** when neither side of the pair has a `formal`. Not an
+  intersection: the tags within one component are *meant* to be synonyms for the one
+  thing it names (`["secp256k1", "K-256"]`), but nothing in the message says so, and a
+  node cannot tell a restatement from a second, different claim — `["schnorr",
+  "bip340"]` looks exactly like `["secp256k1", "K-256"]` from here. One of the two
+  guesses accepts a signer whose signatures this node cannot verify, so an extra tag
+  makes it a different component. `formal` is the way out of that rigidity: a component
+  that points at a specification is decided by the specification, and its vocabulary
+  stops mattering.
+* **Nothing at all, never.** A component must carry `tags`, `formal` or both. One
+  holding only `prose` — or nothing — is not a building block this node can reason
+  about, so the scheme is refused rather than half-compared.
 * **`prose`, never.** It is human text with no agreed wording, and making it decisive
   would refuse a peer for rewording a sentence. What it is for is being read: while
   `formal` is empty, that paragraph *is* the specification of that building block,
   written to be enough to implement the verification from.
+
+The search for that pairing is factorial in the number of components, which is a number
+the *peer* chooses, so `communication.MAX_SIGNATURE_SCHEME_COMPONENTS` (5 by default)
+caps it: a longer scheme is refused rather than computed. Comparing against this node's
+own four-component scheme is bounded by the cardinality check regardless; the cap is
+what keeps that true if two peers' schemes are ever compared to each other.
 
 Across the whole scheme, though, the pairing must be total: a peer declaring
 `["secp256k1"]` and `["bip340"]` as two components shares the curve component with a

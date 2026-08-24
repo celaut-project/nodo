@@ -11,6 +11,7 @@ once this file's tests are done.
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 _STUBBED = {}
 
@@ -98,9 +99,31 @@ class SameSignatureSchemeTests(unittest.TestCase):
         b = _scheme((["secp256k1"], b""), (["schnorr"], b""), (["blake2b256"], b""))
         self.assertFalse(ni.same_signature_scheme(a, b))
 
-    def test_synonym_tags_within_one_component_match(self):
+    def test_an_extra_tag_makes_it_a_different_component(self):
+        # The tags in one component are *meant* to be synonyms, but nothing in the
+        # message says so: ["secp256k1", "K-256"] (a restatement) and
+        # ["schnorr", "bip340"] (two different algorithms) are indistinguishable from
+        # here, and only one of the two readings is safe. So tags are compared as an
+        # exact set, and the peer below is refused -- as it was under the flat-set rule
+        # this replaced.
         a = _scheme((["secp256k1"], b""),)
         b = _scheme((["secp256k1", "K-256"], b""),)
+        self.assertFalse(ni.same_signature_scheme(a, b))
+
+    def test_a_conflicting_tag_beside_ours_is_refused(self):
+        # The case the whole rule exists for: a BIP-340 signer that also writes the
+        # tag we use. Accepting it would let a peer whose signatures this node cannot
+        # verify pass as compatible.
+        ours = ni.node_signature_scheme()
+        theirs = ni.node_signature_scheme()
+        for component in theirs.components:
+            if "schnorr" in component.tags:
+                component.tags.append("bip340")
+        self.assertFalse(ni.same_signature_scheme(ours, theirs))
+
+    def test_identical_tag_sets_match_whatever_their_order(self):
+        a = _scheme((["secp256k1", "K-256"], b""),)
+        b = _scheme((["K-256", "secp256k1"], b""),)
         self.assertTrue(ni.same_signature_scheme(a, b))
 
     def test_formal_decides_over_tags_when_present(self):
@@ -119,6 +142,86 @@ class SameSignatureSchemeTests(unittest.TestCase):
 
     def test_empty_schemes_match(self):
         self.assertTrue(ni.same_signature_scheme(celaut.Peer.SignatureScheme(), celaut.Peer.SignatureScheme()))
+
+
+class UndeclaredComponentTests(unittest.TestCase):
+    """A component must say what it is: tags, formal, or both -- never neither."""
+
+    def test_tags_alone_are_a_declaration(self):
+        a = _scheme((["secp256k1"], b""),)
+        self.assertTrue(ni.same_signature_scheme(a, _scheme((["secp256k1"], b""),)))
+
+    def test_formal_alone_is_a_declaration(self):
+        a = _scheme(([], b"spec-v1"),)
+        self.assertTrue(ni.same_signature_scheme(a, _scheme(([], b"spec-v1"),)))
+
+    def test_formal_alone_does_not_match_a_different_formal(self):
+        a = _scheme(([], b"spec-v1"),)
+        self.assertFalse(ni.same_signature_scheme(a, _scheme(([], b"spec-v2"),)))
+
+    def test_neither_tags_nor_formal_never_matches(self):
+        undeclared = celaut.Peer.SignatureScheme()
+        undeclared.components.add(prose="a description and nothing else")
+        # Not even against a byte-identical copy of itself: something is missing from
+        # that component, and "is this the cryptography I speak?" has one safe answer.
+        other = celaut.Peer.SignatureScheme()
+        other.components.add(prose="a description and nothing else")
+        self.assertFalse(ni.same_signature_scheme(undeclared, other))
+
+    def test_one_undeclared_component_sinks_the_whole_scheme(self):
+        a = _scheme((["secp256k1"], b""), (["schnorr"], b""))
+        b = celaut.Peer.SignatureScheme()
+        b.components.add(tags=["secp256k1"])
+        b.components.add(prose="the algorithm, described but not named")
+        self.assertFalse(ni.same_signature_scheme(a, b))
+
+    def test_a_peer_with_an_undeclared_component_does_not_speak_our_scheme(self):
+        peer = celaut.Peer()
+        ni.declare_signature_scheme(peer)
+        peer.signature_scheme.components[1].ClearField("tags")
+        self.assertFalse(ni.speaks_our_signature_scheme(peer))
+
+
+class ComponentCapTests(unittest.TestCase):
+    """The pairing search is factorial in a length the peer picks; the cap bounds it."""
+
+    @staticmethod
+    def _config(value):
+        # Patches the name node_identity resolves, so the real read path
+        # (ConfigManager().get(KEY, default)) is the one under test.
+        return patch.object(
+            ni, "ConfigManager",
+            lambda: types.SimpleNamespace(get=lambda key, default=None: value)
+        )
+
+    def _n_components(self, n):
+        return _scheme(*(([f"tag{i}"], b"") for i in range(n)))
+
+    def test_a_scheme_at_the_cap_is_still_compared(self):
+        with self._config(5):
+            self.assertTrue(ni.same_signature_scheme(self._n_components(5), self._n_components(5)))
+
+    def test_a_scheme_over_the_cap_is_refused_rather_than_computed(self):
+        with self._config(5):
+            self.assertFalse(ni.same_signature_scheme(self._n_components(6), self._n_components(6)))
+
+    def test_the_cap_is_configurable(self):
+        with self._config(6):
+            self.assertTrue(ni.same_signature_scheme(self._n_components(6), self._n_components(6)))
+
+    def test_an_unusable_cap_falls_back_to_the_default(self):
+        # Zero would refuse every scheme, including this node's own.
+        for unusable in (0, -1, "", None, "many"):
+            with self.subTest(configured=unusable), self._config(unusable):
+                self.assertEqual(
+                    ni._max_signature_scheme_components(),
+                    ni.DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS,
+                )
+
+    def test_our_own_scheme_fits_under_the_default_cap(self):
+        self.assertLessEqual(
+            len(ni.SIGNATURE_SCHEME_COMPONENTS), ni.DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS
+        )
 
 
 class SpeaksOurSignatureSchemeTests(unittest.TestCase):
