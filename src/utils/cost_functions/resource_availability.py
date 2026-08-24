@@ -119,7 +119,8 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
     # check above is against total capacity, not instantaneous load, on purpose. The
     # sample is left in place regardless: it is part of what this function *returns*,
     # that dict now travels to peers, and dropping a field from a wire-visible payload
-    # is a separate decision from fixing admission. Do not remove it here.
+    # is a separate decision from fixing admission. Do not remove it here -- issue #288
+    # records the options and the evidence.
     cpu_available_percent = max(0.0, 100.0 - psutil.cpu_percent(interval=0.1))
 
     service_memory_pool_total, service_memory_pool_available = _get_service_memory_snapshot()
