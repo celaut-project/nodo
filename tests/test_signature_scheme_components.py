@@ -47,10 +47,19 @@ class NodeSignatureSchemeTests(unittest.TestCase):
     def test_builds_one_component_per_declared_building_block(self):
         scheme = ni.node_signature_scheme()
         self.assertEqual(len(scheme.components), len(ni.SIGNATURE_SCHEME_COMPONENTS))
-        for component, (tags, prose) in zip(scheme.components, ni.SIGNATURE_SCHEME_COMPONENTS):
-            self.assertEqual(tuple(component.tags), tags)
-            self.assertEqual(component.prose, prose)
-            self.assertEqual(component.formal, b"")
+        for component, declared in zip(scheme.components, ni.SIGNATURE_SCHEME_COMPONENTS):
+            self.assertEqual(tuple(component.tags), declared.tags)
+            self.assertEqual(component.prose, declared.prose)
+            self.assertEqual(component.formal, declared.formal)
+
+    def test_no_formal_is_shared_between_two_components(self):
+        # `formal` is compared first and decides on its own, so two components
+        # carrying the same one are interchangeable -- and a peer repeating that value
+        # on as many components would then match whatever its tags said, which is the
+        # acceptance the exact-tag-set rule exists to refuse. Empty ones are the
+        # "nothing to point at yet" default and are compared by tags instead.
+        formals = [c.formal for c in ni.SIGNATURE_SCHEME_COMPONENTS if c.formal]
+        self.assertEqual(len(formals), len(set(formals)))
 
     def test_matches_itself(self):
         self.assertTrue(ni.same_signature_scheme(ni.node_signature_scheme(), ni.node_signature_scheme()))

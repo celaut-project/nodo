@@ -11,7 +11,7 @@ identity can never change underneath the peers that recorded it.
 import itertools
 import string
 from functools import lru_cache
-from typing import Final, Optional, Tuple
+from typing import Final, NamedTuple, Optional, Tuple
 
 import ecdsa
 
@@ -34,6 +34,28 @@ _P2PK_PREFIX_HEX = "0008cd"
 _PUBLIC_KEY_HEX_LENGTH = 66
 _HEX_DIGITS = frozenset(string.hexdigits.lower())
 
+
+class SignatureSchemeComponent(NamedTuple):
+    """One building block of a signature scheme, in celaut's tags/prose/formal shape.
+
+    ``formal`` belongs to the component it describes, not to the scheme around it: it
+    is what :func:`_same_component` compares *first*, so a single value shared across
+    every component would make them all interchangeable -- and a peer repeating that
+    one value on however many components would match whatever its tags said, which is
+    exactly what the exact-tag-set rule exists to refuse.
+
+    It defaults to empty because no block of this node's scheme has a machine-readable
+    artifact to point at yet, the same reason it is empty on the Ergo ledger
+    (``reputation_system/envs.py``). When one gets a specification document, or the
+    content hash of a verifier service, it goes on that entry alone and becomes the
+    part that decides for it.
+    """
+
+    tags: Tuple[str, ...]
+    prose: str
+    formal: bytes = b""
+
+
 # The cryptography this node's identity signatures are in, announced on
 # ``Peer.signature_scheme`` and demanded of every peer it registers.
 #
@@ -51,13 +73,9 @@ _HEX_DIGITS = frozenset(string.hexdigits.lower())
 # shape ``(scheme_a, scheme_b) -> bool`` can eventually make better than this node
 # does (see :func:`same_signature_scheme`).
 #
-# ``formal`` is empty on every component for the same reason it is empty on the Ergo
-# ledger: there is no machine-readable artifact to point at yet. When there is one --
-# a specification document, or the content hash of a verifier service -- it goes on
-# that component and becomes the part that decides, which is why it is compared first.
-#
 # Order carries no meaning (curve, algorithm, hash, ledger convention only because
-# that is the order a reader meets them in below); each entry is (tags, prose).
+# that is the order a reader meets them in below); each entry is a
+# :class:`SignatureSchemeComponent`, carrying its own ``formal``.
 # Prose is read by whoever receives the announcement, so each block states itself and
 # nothing about this implementation of it: a reader holding only the Peer message --
 # off a gRPC response, or off an Ergo register -- cannot follow a path into some
@@ -65,14 +83,14 @@ _HEX_DIGITS = frozenset(string.hexdigits.lower())
 # that?"). Same reason envs.PROSE describes the Ergo system and not nodo's client for
 # it. Until `formal` points at a specification this text IS the specification, so it
 # says everything a verification has to be written from and stands on its own.
-SIGNATURE_SCHEME_COMPONENTS: Final[Tuple[Tuple[Tuple[str, ...], str], ...]] = (
-    (
+SIGNATURE_SCHEME_COMPONENTS: Final[Tuple[SignatureSchemeComponent, ...]] = (
+    SignatureSchemeComponent(
         ("secp256k1",),
         "The secp256k1 elliptic curve, with generator G and group order n. Private "
         "key: a scalar s in [1, n). Public key: the point P = s*G, encoded as its "
         "33-byte SEC-compressed form, lowercase hex.",
     ),
-    (
+    SignatureSchemeComponent(
         ("schnorr",),
         "A Schnorr signature over the curve named by the accompanying curve "
         "component. Message: the payload bytes, signed as given, with no pre-hash. "
@@ -85,19 +103,18 @@ SIGNATURE_SCHEME_COMPONENTS: Final[Tuple[Tuple[Tuple[str, ...], str], ...]] = (
         "a negative scalar, and for e it makes the two's-complement and unsigned "
         "readings coincide, so the signature verifies under either.",
     ),
-    (
+    SignatureSchemeComponent(
         ("blake2b256",),
         "The challenge hash: e = blake2b256(a || m || P), its 32 bytes read as a "
         "two's-complement big-endian integer, so a digest whose first byte is >= "
         "0x80 denotes a negative e.",
     ),
-    (
+    SignatureSchemeComponent(
         ("ergo",),
         "The keypair is the one an Ergo P2PK proposition names, and this scheme is "
         "the sigma protocol those proofs are built on.",
     ),
 )
-SIGNATURE_SCHEME_FORMAL: Final[bytes] = b""
 
 # Comparing two schemes is a search for a one-to-one pairing between their components
 # (see :func:`same_signature_scheme`), which is factorial in a number a *peer* chooses.
@@ -139,8 +156,10 @@ def node_signature_scheme():
     node's own declaration through the object it was handed.
     """
     scheme = celaut_pb2.Peer.SignatureScheme()
-    for tags, prose in SIGNATURE_SCHEME_COMPONENTS:
-        scheme.components.add(tags=list(tags), prose=prose, formal=SIGNATURE_SCHEME_FORMAL)
+    for component in SIGNATURE_SCHEME_COMPONENTS:
+        scheme.components.add(
+            tags=list(component.tags), prose=component.prose, formal=component.formal
+        )
     return scheme
 
 

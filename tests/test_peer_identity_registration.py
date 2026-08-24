@@ -195,8 +195,10 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         # is not part of what a descriptor says (Peer.SignatureScheme.components is
         # explicitly unordered).
         del peer.signature_scheme.components[:]
-        for tags, prose in reversed(ni.SIGNATURE_SCHEME_COMPONENTS):
-            peer.signature_scheme.components.add(tags=list(tags), prose=prose)
+        for declared in reversed(ni.SIGNATURE_SCHEME_COMPONENTS):
+            peer.signature_scheme.components.add(
+                tags=list(declared.tags), prose=declared.prose, formal=declared.formal
+            )
         self.assertEqual(
             manager.verified_peer_public_key(peer),
             self.pubkey,
@@ -226,10 +228,10 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         # of it, and not four fixed named fields either.
         scheme = ni.node_signature_scheme()
         self.assertEqual(len(scheme.components), len(ni.SIGNATURE_SCHEME_COMPONENTS))
-        for component, (tags, prose) in zip(scheme.components, ni.SIGNATURE_SCHEME_COMPONENTS):
-            self.assertEqual(tuple(component.tags), tags)
-            self.assertEqual(component.prose, prose)
-            self.assertEqual(component.formal, b"")
+        for component, declared in zip(scheme.components, ni.SIGNATURE_SCHEME_COMPONENTS):
+            self.assertEqual(tuple(component.tags), declared.tags)
+            self.assertEqual(component.prose, declared.prose)
+            self.assertEqual(component.formal, declared.formal)
         self.assertTrue(ni.same_signature_scheme(scheme, ni.node_signature_scheme()))
 
     def test_an_announcement_without_a_scheme_still_verifies(self):
