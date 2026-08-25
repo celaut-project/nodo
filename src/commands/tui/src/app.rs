@@ -1557,7 +1557,13 @@ impl App {
                     .position(|option| option == self.input.trim())
                     .unwrap_or(0) as i32;
                 let len = options.len() as i32;
-                let next_index = (current_index + delta).rem_euclid(len) as usize;
+                // Minus, where the number branch above adds: `delta` is the screen
+                // direction the arrow points (+1 for Up, see the handler), and the
+                // options are drawn as a vertical list in declaration order, so Up
+                // has to reach the option *above* -- the one at a lower index. The
+                // sign that makes Up increment a number is the opposite of the one
+                // that walks a list upwards.
+                let next_index = (current_index - delta).rem_euclid(len) as usize;
                 self.input = options[next_index].clone();
             }
             EditKind::Text => {}
@@ -4469,19 +4475,31 @@ Cold Wallet: 9cold\n";
     }
 
     #[test]
-    fn arrow_keys_cycle_an_enum_and_wrap_at_both_ends() {
-        let mut app = App::default();
-        app.edit_kind = EditKind::Enum(vec!["auto".to_string(), "always".to_string(), "never".to_string()]);
+    fn the_enum_picker_walks_the_way_the_arrow_points_and_wraps_at_both_ends() {
+        // Up is `adjust_edit_value(1)` (see the handler) and the options are drawn as
+        // a vertical list in declaration order, so Up has to land on the option
+        // *above* the marker. It used to land on the one below: the picker was the
+        // only ↑/↓ in the TUI that moved against the key.
+        let mut app = App {
+            edit_kind: EditKind::Enum(vec![
+                "auto".to_string(),
+                "always".to_string(),
+                "never".to_string(),
+            ]),
+            ..Default::default()
+        };
 
-        app.input = "auto".to_string();
+        app.input = "always".to_string();
         app.adjust_edit_value(1);
-        assert_eq!(app.input, "always");
-        app.adjust_edit_value(1);
-        assert_eq!(app.input, "never");
-        app.adjust_edit_value(1);
-        assert_eq!(app.input, "auto", "cycling past the last option wraps to the first");
+        assert_eq!(app.input, "auto", "Up moves to the option above");
         app.adjust_edit_value(-1);
-        assert_eq!(app.input, "never", "cycling before the first option wraps to the last");
+        assert_eq!(app.input, "always", "Down moves to the option below");
+        app.adjust_edit_value(-1);
+        assert_eq!(app.input, "never");
+        app.adjust_edit_value(-1);
+        assert_eq!(app.input, "auto", "Down past the last option wraps to the first");
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "never", "Up before the first wraps to the last");
     }
 
     #[test]
