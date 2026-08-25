@@ -16,6 +16,7 @@ from src.utils.cost_functions.generate_estimated_cost import (
     get_resource_availability,
 )
 from src.virtualizers.architecture import UnsupportedArchitectureException
+from src.utils.network_policy import enforce_network_policy
 from src.utils.shared_filesystems import service_requires_parent_colocation
 
 sc = SQLConnection()
@@ -177,6 +178,18 @@ def launch_service(
                     service_hash=service_id,
                 )
             ))
+
+        # The operator's network policy, before the balancer -- and before the
+        # force_execution bypass below, which overrides peer *selection* and not
+        # what this node is willing to have reached on its behalf. Enforced here
+        # rather than in the local branch because a node that refuses to reach a
+        # domain itself and then pays a peer to reach it has not applied a policy,
+        # it has outsourced one. The raise carries the report the client reads:
+        # being told which pattern refused which tag is the point (#280).
+        enforce_network_policy(
+            networks=service.network,
+            subject=f"service {service_id}" if service_id else "this service",
+        )
 
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never

@@ -264,6 +264,42 @@ network:
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
 
+# Which communication domains this node is willing to run a service for.
+#
+# A service declares the domains it wants to reach as Service.Network tags -- a
+# DNS name, "pow:bitcoin", "*" for open-internet egress (see docs/NETWORKS.md).
+# Two controls already narrowed that ask, and neither of them was yours: the
+# ancestor chain intersects a child's request with what its parents declared, and
+# the per-VM firewall opens only what got resolved. These two lists are yours.
+#
+# Both empty (the default) restricts nothing, which is how every node behaved
+# before this block existed. Patterns are globs, matched case-insensitively
+# against each tag -- glob over the tag and nothing more, so "google.com" does NOT
+# match "www.google.com": write "*google.com" when you mean the subdomains too.
+#
+# The blacklist is checked first and wins over the whitelist. A non-empty
+# whitelist has to cover EVERY tag a service declares, because each tag can open
+# egress on its own. A service that declares no network is always accepted, and
+# `blacklist: ["*"]` refuses every service that declares any -- that is how you
+# say "nothing beyond this node".
+#
+# A rejected client is told which tag, which list and which pattern refused it.
+# The policy applies to every service, the core services this node starts for
+# itself included (packer, source-application): their egress is egress from this
+# node too, so whitelist what they need rather than expecting an exemption.
+#
+# NOTE the name: `service_networks`, not `networks`. The `network:` block above is
+# this node's own ports and addresses; the two would be one letter apart, and a
+# typo between them would leave the node with no policy while looking configured.
+service_networks:
+  blacklist: []
+  whitelist: []
+  # blacklist:
+  #   - "*google.com"
+  # whitelist:
+  #   - "dns:*"
+  #   - "pow:bitcoin"
+
 # Dynamic DNS: keep a hostname pointing at this node's public IP, so peers can
 # find it by name when the address changes. Tunneling means only the gateway port
 # needs to be reachable -- but it still needs forwarding on the router, which is
