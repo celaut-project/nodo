@@ -15,7 +15,7 @@ particular installation directory.
 | **Peers** | Who we talk to: endpoints, our balance with each, reputation, and the payment contracts and rates a peer declares. The detail card adds every payment we have made to the selected peer — including one broadcast that the peer never acknowledged — and the reputation events behind its score, each with the reason that produced it. Peers can be connected (`c`) and forgotten (`d`) from here. |
 | **Clients** | Who pays us: balance, last usage, and whether the client is metered at all. The detail card lists what it has paid, the deposit tokens it holds and what became of them, and the instances it started here. A client cannot be resolved to a peer and the page does not pretend otherwise (see issue #178). Balance can be credited/debited with `+`/`-`. |
 | **Pricing** | What this node charges, per resource, as vertical bars you can nudge. Recurring and one-off prices are charted apart because their magnitudes are unrelated. Beside them: the display unit, what one MU is worth on the ledger, the scarcity ceiling, and a worked hourly example. |
-| **Config** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited. |
+| **Config** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited, and list elements can be added and removed. |
 | **Logs** | Tail of `storage/app.log` beside commands/actions launched from the TUI. |
 
 ## Money
@@ -68,7 +68,8 @@ common case.
 | `→` / `←` | Enter/leave a Config branch (see below); ignored by the other pages |
 | `r` | Force a refresh |
 | `c` | Connect a peer, from Peers |
-| `d` | Delete the selected service, or forget the selected peer on Peers |
+| `a` | Config: append an element to the selected list |
+| `d` | Delete the selected service, forget the selected peer on Peers, or remove the selected Config list element |
 | `k` | Kill the selected instance |
 | `g` | Instances: dependency tree / flat list |
 | `i` | Service details |
@@ -103,6 +104,15 @@ example, list values appear as `core_services[1].id` and nested values as
   whatever is currently visible.
 - Input is parsed as YAML, so `true`, `5000`, `1.5`, `null`, `[]`, and quoted strings retain
   the expected type.
+- Lists are the one shape a single-value editor cannot cover, so they have their own two
+  keys: `a` appends an element, `d` removes the selected one (asking first). `a` works on
+  the list itself — an empty one is a leaf, which is the only way to fill it — and on any
+  of its elements, which is where the cursor lands after an add. `d` only ever takes an
+  element (`[0]`, `[1]`, …): with a key *inside* an element selected it says so rather
+  than removing the element that key belongs to.
+- A new element is a YAML literal like any other value, so a leading `*` has to be
+  quoted (`"*.example.com"`) — there it is YAML's alias indicator, not text. A `*`
+  anywhere else, as in `dns:*`, needs no quoting.
 - The update is performed with nodo's configured `yq` binary, preserving comments and the
   rest of the file layout.
 - Before every write, the previous file is snapshotted to `config-<YYYYMMDDHHMMSS>.yaml`

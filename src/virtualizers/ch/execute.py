@@ -17,6 +17,7 @@ from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
+from src.utils.network_policy import enforce_network_policy
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_bytes
@@ -440,6 +441,15 @@ def _build_network_resolution(
     networks = service.network
     if father_id and sc.internal_instance_exists(id=father_id):
         networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
+
+    # Defence in depth for the operator's network policy (#280). The launcher and the
+    # cost path already refuse a service whose declaration the policy rejects, so
+    # what is judged here is the narrower set that survived the ancestor chain --
+    # what is actually about to be opened. It aborts the launch instead of dropping
+    # the network, because reaching this line at all means an earlier check did not
+    # run, and a guest silently started without the egress it asked for is the
+    # unexplained rejection this policy exists to replace.
+    enforce_network_policy(networks=networks, subject="this instance")
 
     # The requesting instance's own environment values drive Network peer
     # filtering (Service.Network.environment_variable).

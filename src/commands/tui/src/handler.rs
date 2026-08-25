@@ -31,7 +31,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         InputMode::Confirm => {
             match (key.modifiers, key.code) {
                 (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
-                (_, KeyCode::Char('y') | KeyCode::Char('Y')) => app.confirm_pending(),
+                (_, KeyCode::Char('y') | KeyCode::Char('Y')) => app.confirm_pending().await,
                 (_, KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Enter) => {
                     app.close_input()
                 }
@@ -53,7 +53,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             return Ok(());
         }
         InputMode::Normal => {}
-        // Text-entry modals: Connect, EditConfig, FilterConfig.
+        // Text-entry modals: Connect, EditConfig, AddConfigItem, FilterConfig.
         _ => {
             let is_bool_editor =
                 app.input_mode == InputMode::EditConfig && app.edit_kind == EditKind::Bool;
@@ -146,6 +146,14 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Config => {
             app.open_config_editor()
+        }
+        // Lists are the one config shape a single-value editor cannot cover: `a`
+        // appends an element, `d` removes the selected one.
+        (KeyModifiers::NONE, KeyCode::Char('a')) if app.page() == Page::Config => {
+            app.open_config_list_add()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Config => {
+            app.open_delete_config_item_confirm()
         }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Services => {
             app.execute_selected_service()
