@@ -48,6 +48,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         InputMode::Details => draw_details_popup(frame, app),
         InputMode::Connect
         | InputMode::EditConfig
+        | InputMode::AddConfigItem
         | InputMode::FilterConfig
         | InputMode::CreditClient => draw_input_popup(frame, app),
     }
@@ -1725,7 +1726,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             "tab/shift+tab cycle  •  ↑/↓ select  •  +/- adjust 10%  •  e exact value  •  r refresh  •  q quit"
         }
         Page::Config => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  →/← branch  •  ⏎ toggle  •  e edit  •  / filter  •  x clear  •  q quit"
+            "tab/shift+tab cycle  •  ↑/↓ select  •  →/← branch  •  ⏎ toggle  •  e edit  •  a add to list  •  d remove element  •  / filter  •  q quit"
         }
         Page::Logs => "tab/shift+tab cycle  •  r refresh  •  q quit",
     };
@@ -1741,6 +1742,16 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
 /// original freeform text field (also used outside config editing, e.g. Connect
 /// and the filter box).
 fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
+    if app.input_mode == InputMode::AddConfigItem {
+        // The quoting note is not decoration: a leading `*` is YAML's alias
+        // indicator, so `*.example.com` unquoted is rejected as invalid YAML rather
+        // than stored. A `*` anywhere else needs no quoting.
+        return (
+            vec![Line::from(app.input.clone())],
+            "Enter appends • Esc cancels • a YAML literal, so quote a leading *: \"*.example.com\""
+                .to_string(),
+        );
+    }
     if app.input_mode != InputMode::EditConfig {
         return (
             vec![Line::from(app.input.clone())],

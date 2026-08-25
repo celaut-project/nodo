@@ -9,6 +9,7 @@ from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
 from src.manager.manager import default_initial_balance
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
+from src.utils.network_policy import enforce_network_policy
 from src.utils.logger import LOGGER as logger
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 
@@ -42,6 +43,15 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
 
                 if not service:
                     raise Exception(f"Service {self.service_hash} not on local registry.")
+
+                # This node does not quote a service it would then refuse to run:
+                # a price is an offer, and answering one for a service whose
+                # networks the policy rejects only gets the peer's balancer to
+                # select us and fail at launch (#280).
+                enforce_network_policy(
+                    networks=service.network,
+                    subject=f"service {self.service_hash}",
+                )
 
                 resources = service.container.resources
                 del service
