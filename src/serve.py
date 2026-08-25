@@ -16,6 +16,7 @@ from src.utils.firewall.gateway import (
     operator_notice,
 )
 from src.utils.firewall.legacy import sweep_compat_tables
+from src.utils.network_policy import NetworkPolicy, NetworkPolicyConfigError
 
 env_manager = ConfigManager()
 
@@ -83,12 +84,30 @@ def _refuse_to_start(e: GatewayPortUnavailable) -> None:
     raise SystemExit(1) from e
 
 
+def _report_network_policy() -> None:
+    """Print which communication domains this node will serve, once, at start.
+
+    Read here so a policy the node cannot parse stops it now instead of failing
+    every launch later, and printed even when it restricts nothing: a control the
+    operator cannot see in the log is one they cannot tell is in force (#280).
+    """
+    try:
+        log.LOGGER(f"Network policy -- {NetworkPolicy.from_config().describe()}")
+    except NetworkPolicyConfigError as e:
+        notice = operator_notice("refusing to start", str(e))
+        log.LOGGER(notice)
+        print(notice, file=sys.stderr, flush=True)
+        raise SystemExit(1) from e
+
+
 def serve():
     # Resolved before anything else: a node whose gateway port is unassigned or
     # unreachable cannot serve a single request, and every service it accepted
     # would be unable to call back into it.
     port = env_manager.get_gateway_port()
     _open_gateway_port(port)
+
+    _report_network_policy()
 
     # One-time migration: versions before nodo managed nftables natively wrote
     # their rules through the iptables compatibility tables. On an nftables host

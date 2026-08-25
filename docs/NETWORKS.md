@@ -74,6 +74,90 @@ launch that requests no network needs no ancestor spec at all.
 
 ---
 
+## Operator Policy: `service_networks`
+
+The ancestor chain answers "did the instances above this one ask for the same
+domain?". It never answers "does the person running this node want it reached at
+all". That is a separate control, in `config.yaml`:
+
+```yaml
+service_networks:
+  blacklist:
+    - "*google.com"
+  whitelist:
+    - "dns:*"
+    - "pow:bitcoin"
+```
+
+* **Implementation:** `src/utils/network_policy.py`
+* **Consumers:** `launch_service()`, `GetServiceEstimatedCostIterable`,
+  `_build_network_resolution()`
+
+Both lists empty — the shipped default — restricts nothing.
+
+### Rules
+
+| Rule | Meaning |
+|---|---|
+| Blacklist first | It is evaluated over every tag before the whitelist is, so a tag on both lists is rejected and reported as blacklisted. |
+| Glob, case-insensitive | `fnmatch` over the tag, lowercased on both sides. Glob over the *tag* and nothing else: `google.com` does not match `www.google.com` — write `*google.com`. |
+| Every tag must pass | A non-empty whitelist has to cover each tag of each declared network. A network is not one destination, it is as many as it names: `resolve_network` walks the tags one by one and stops at the first that resolves, and the firewall reads them one by one too. A tag nobody vetted is a destination nobody vetted. |
+| No network, no question | A service that declares none is always accepted; it asked for no domain. Same for a network with no tags, and for an empty tag: they name nothing, the resolver ignores them and the firewall opens nothing for them. |
+| `blacklist: ["*"]` | Refuses every service that declares any tagged network — "nothing beyond this node". |
+
+The block is `service_networks`, not `networks`: `network:` is this node's own
+ports and addresses, and a typo between two names one letter apart would leave the
+node with no policy while looking configured. A `networks:` block carrying
+`blacklist`/`whitelist` keys is therefore reported as a config error rather than
+ignored.
+
+### Where it is enforced
+
+| Point | Judges | Why there |
+|---|---|---|
+| `launch_service()`, before the balancer | What the service **declares** | Before the balancer, so it covers delegation: a node that refuses to reach a domain itself and then pays a peer to reach it has outsourced a policy, not applied one. Before the `force_execution` bypass too, which overrides peer *selection* and not what this node will have reached on its behalf. |
+| `GetServiceEstimatedCostIterable` | What the service **declares** | A price is an offer. Quoting a service this node would refuse only gets the asking peer's balancer to select it and fail at launch. |
+| `_build_network_resolution()` | What **survived** the ancestor chain | Defence in depth, on the narrower set that is actually about to be opened. It aborts the launch rather than dropping the network: reaching it means an earlier check did not run, and a guest silently started without the egress it asked for is exactly the unexplained rejection this policy replaces. |
+
+The declaration is what the first two judge, and it is what the client can see and
+change; the launch is refused even when the ancestor chain would have dropped the
+offending network anyway.
+
+`nodo serve` reads the policy once at start and logs it, restrictions or none — a
+control nobody can see in the log is one nobody can tell is in force. A policy the
+node cannot parse stops it there, rather than failing every launch later; a list
+this node failed to read is never read as a list that allowed everything.
+
+### What the client is told
+
+```
+Network policy: this node refuses to run a service for service <hash> that reaches 'maps.google.com'.
+  declared networks:
+    #1: maps.google.com, dns:google
+    #2: pow:bitcoin
+  rejected tag:      maps.google.com (network #1)
+  rule:              service_networks.blacklist
+  pattern:           *google.com
+```
+
+A whitelist miss replaces the `pattern:` line with `matched none of:` and the
+whitelist. Either way the report names every declared network and not just the
+offending one, because the client sent a set and a verdict on one tag of it says
+nothing about the rest.
+
+### Scope
+
+Every service, including the core services the node starts for itself (packer,
+source-application, low-demand-fallback). Their egress is egress from this node
+too, and exempting them would make `blacklist: ["*"]` a claim the node does not
+keep. An operator who needs one of them whitelists what it needs.
+
+This is a policy on what a service may **ask** to reach, not a guarantee about
+what it can reach. The firewall is what confines a running guest
+([`FIREWALL.md`](FIREWALL.md)); this decides whether the guest starts at all.
+
+---
+
 ## Use Cases
 
 ### 1. DNS

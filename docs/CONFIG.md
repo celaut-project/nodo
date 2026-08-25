@@ -188,6 +188,29 @@ The two directions are separate settings, and neither implies the other:
 | Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
 | Keep delegating, but approve every outgoing payment yourself | `deposits.AUTOMATIC_REFILL: false` |
 
+## `service_networks`
+
+Which communication domains this node is willing to run a service for. A service
+declares them as `Service.Network` tags; these two glob lists are the operator's
+verdict on that declaration, checked at launch, when quoting a peer, and once more
+in the virtualizer.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `service_networks.blacklist` | `[]` | Tags this node refuses. Checked first, and it wins over the whitelist. `["*"]` refuses every service that declares any tagged network. |
+| `service_networks.whitelist` | `[]` | When non-empty, every tag of every declared network must match one of these. |
+
+Both empty — the default — restricts nothing. Patterns are globs matched
+case-insensitively against each tag, and glob over the tag only: `google.com` does
+not match `www.google.com`, so write `*google.com` for the subdomains too. A
+service declaring no network is always accepted. A rejected client is told which
+tag, which list and which pattern refused it.
+
+The name is `service_networks`, not `networks`: `network:` above is this node's own
+ports and addresses, and a `networks:` block carrying `blacklist`/`whitelist` is
+rejected as a config error rather than silently ignored. Full semantics and the
+enforcement points: [`NETWORKS.md`](NETWORKS.md).
+
 ## `ddns`
 
 Keeps a hostname pointing at this node's public IP, so peers can find it by name
