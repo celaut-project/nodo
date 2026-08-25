@@ -12,20 +12,22 @@ from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.firewall.gateway import (
     GatewayPortUnavailable,
+    defer_operator_notice,
     ensure_gateway_port_open,
     operator_notice,
 )
 from src.utils.firewall.legacy import sweep_compat_tables
+from src.utils.firewall.reachability import ProbeResult
 from src.utils.network_policy import NetworkPolicy, NetworkPolicyConfigError
 
 env_manager = ConfigManager()
 
 
-def _gateway_port_call(port: int, *, verify: bool) -> None:
+def _gateway_port_call(port: int, *, verify: bool) -> ProbeResult:
     """Apply nodo's accept rule for ``port``, optionally probing it afterwards."""
-    ensure_gateway_port_open(
+    return ensure_gateway_port_open(
         port=port,
-        bridge=str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")),
+        bridge=str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch")),
         gateway_ip=str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1")),
         subnet=str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")),
         verify=verify,
@@ -33,6 +35,31 @@ def _gateway_port_call(port: int, *, verify: bool) -> None:
         config_path=env_manager.config_path,
         log=log.LOGGER,
     )
+
+
+def _ensure_guest_bridge() -> None:
+    """Bring up the guest bridge now, rather than on the first instance launch.
+
+    The bridge is the only place the gateway port can be probed from the way a
+    guest reaches it, so creating it here is what makes the verification below
+    conclusive on a node that has never run anything. Without it the probe can only
+    answer "the bridge does not exist yet", which is how this node ran for two days
+    with a gateway port firewalld was rejecting: the check existed, it just had
+    nowhere to run from.
+
+    Best-effort: a host where the bridge cannot be created cannot launch instances
+    either, and that failure belongs to the launch path with its own diagnostics.
+    Here it only costs an inconclusive probe, which is reported as such.
+    """
+    try:
+        from src.virtualizers.ch.execute import ensure_guest_bridge
+
+        ensure_guest_bridge()
+    except Exception as e:
+        log.LOGGER(
+            f"Could not bring up the guest bridge before verifying the gateway port: {e}. "
+            "The port cannot be proven reachable until an instance has run."
+        )
 
 
 def _open_gateway_port(port: int) -> None:
@@ -69,10 +96,23 @@ def _verify_gateway_port(port: int) -> None:
     """
     if not bool(env_manager.get("network.VERIFY_GATEWAY_REACHABILITY", True)):
         return
+    if env_manager.gateway_port_passed(port):
+        log.LOGGER(
+            f"Gateway port {port} was already proven reachable in this boot; skipping "
+            "the probe."
+        )
+        return
     try:
-        _gateway_port_call(port, verify=True)
+        probe = _gateway_port_call(port, verify=True)
     except GatewayPortUnavailable as e:
         _refuse_to_start(e)
+        return
+
+    # Only a conclusive yes is recorded, and an inconclusive probe does not raise --
+    # so "it did not fail" is not the test. A marker written on an unknown would be
+    # the original bug in a new place: a port nobody proved, never checked again.
+    if probe.reachable is True:
+        env_manager.mark_gateway_port_passed(port)
 
 
 def _refuse_to_start(e: GatewayPortUnavailable) -> None:
@@ -80,7 +120,10 @@ def _refuse_to_start(e: GatewayPortUnavailable) -> None:
     # lands between whatever else the start path is printing.
     notice = operator_notice("refusing to start", str(e))
     log.LOGGER(notice)
-    print(notice, file=sys.stderr, flush=True)
+    # Deferred rather than printed: everything this start path has already written
+    # is above it, and in a terminal the last line is the one that gets read. The
+    # atexit hook fires on the SystemExit below.
+    defer_operator_notice(notice)
     raise SystemExit(1) from e
 
 
@@ -104,7 +147,17 @@ def serve():
     # Resolved before anything else: a node whose gateway port is unassigned or
     # unreachable cannot serve a single request, and every service it accepted
     # would be unable to call back into it.
+    #
+    # Asked for explicitly. Assignment writes a firewall rule and a config value,
+    # so it happens where that is the intent -- here and the installer -- rather
+    # than as a side effect of loading the config, which any privileged `nodo`
+    # command used to trigger.
+    try:
+        env_manager.assign_gateway_port_if_unset()
+    except GatewayPortUnavailable as e:
+        _refuse_to_start(e)
     port = env_manager.get_gateway_port()
+    _ensure_guest_bridge()
     _open_gateway_port(port)
 
     _report_network_policy()

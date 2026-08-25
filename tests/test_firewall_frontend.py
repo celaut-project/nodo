@@ -71,16 +71,16 @@ class OpenPortAdviceTests(unittest.TestCase):
         with patch.object(
             fe, "detect_frontend", return_value=fe.Frontend("ufw", "sudo ufw allow 1/tcp")
         ):
-            lines = fe.open_port_advice(1, bridge="br-ch", subnet="10.0.0.0/24")
+            lines = fe.open_port_advice(1, bridge="nodo-br-ch", subnet="10.0.0.0/24")
         self.assertEqual(len(lines), 2)
         self.assertIn("sudo ufw allow 1/tcp", lines[1])
 
     def test_it_states_the_property_when_nothing_was_detected(self):
         with patch.object(fe, "detect_frontend", return_value=None):
-            lines = fe.open_port_advice(58443, bridge="br-ch", subnet="10.0.0.0/24")
+            lines = fe.open_port_advice(58443, bridge="nodo-br-ch", subnet="10.0.0.0/24")
         text = "\n".join(lines)
         self.assertIn("inbound TCP 58443 accepted", text)
-        self.assertIn("br-ch", text)
+        self.assertIn("nodo-br-ch", text)
         self.assertIn("10.0.0.0/24", text)
         # Short, and wrapped: this gets printed into a terminal and pasted around.
         self.assertLessEqual(len(lines), 6, text)

@@ -51,7 +51,7 @@ virtualizers:
     # Only invoked for services that declare shared/guest directories.
     VIRTIOFSD_BINARY: "virtiofsd"
     NETWORK_MODE: "tap_bridge"
-    NETWORK_BRIDGE_NAME: "br-ch"
+    NETWORK_BRIDGE_NAME: "nodo-br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"
     NETWORK_GATEWAY_IP: "192.168.200.1"
     # Guest interface used by the kernel ip=... cmdline.
@@ -198,32 +198,37 @@ packer:
 
 network:
   # The gRPC port guests and peers reach this node on. "auto" means "not assigned
-  # yet": the first *privileged* run picks a free port from FREE_PORTS_RANGE, opens
-  # it in nodo's own nftables (or iptables) ruleset, PROVES it is reachable, and only
-  # then writes the number back here. An unprivileged run leaves "auto" untouched
-  # rather than storing a port nothing opened.
+  # yet": the installer, and 'nodo serve', pick a free port from FREE_PORTS_RANGE,
+  # open it in nodo's own nftables (or iptables) ruleset and write the number back
+  # here. Only those two -- an ordinary nodo command never assigns one, even as root:
+  # opening a port is not something that should happen because some unrelated command
+  # imported a module. An unprivileged run leaves "auto" untouched.
   #
-  # The port is proved before it is stored, using a throwaway listener -- nothing is
-  # bound to it at that moment, and a connect to a port with no listener refuses
-  # exactly like a firewalled one does. If it cannot be proved AND this host has
-  # other firewall rules that could reject it, "auto" is left in place with
-  # instructions rather than storing a port peers may not reach: a node that looks
-  # alive and answers nothing is worse than one that refuses to start.
+  # The number is stored before the port is proven reachable, and the protection is
+  # elsewhere: the node REFUSES TO SERVE on a port it has proven unreachable (see
+  # VERIFY_GATEWAY_REACHABILITY below). Proving it at assignment time was tried and
+  # was worse -- nothing can be probed before the guest bridge exists, so a host with
+  # firewalld and no bridge yet could never be assigned a port at all, and the only
+  # way forward was to pin one by hand, which was the one path with no check on it.
+  # Storing it early also keeps it stable: "open TCP 58443" is still true tomorrow.
   #
-  # Once a number is here it is fixed, and the accept rule is re-applied on every
-  # start (netfilter rules do not survive a reboot; this file does).
-  # Reachability is re-proved once the gateway is actually
-  # listening -- see VERIFY_GATEWAY_REACHABILITY below. Whether peers OUTSIDE this
-  # LAN can reach the port is a separate question no check here can answer: run
-  # 'nodo nat-guide'.
+  # Pinning a port you have opened yourself is supported and does NOT skip the check.
+  # The accept rule is re-applied on every start (netfilter rules do not survive a
+  # reboot; this file does). Whether peers OUTSIDE this LAN can reach the port is a
+  # separate question no check here can answer: run 'nodo nat-guide'.
   GATEWAY_PORT: auto
-  # Just after the gateway starts listening, prove a guest can reach GATEWAY_PORT by
-  # connecting to it from a throwaway namespace on the guest bridge. The check runs
-  # there and not earlier because a port with nothing bound to it refuses a connect
-  # exactly like a firewalled one does. A conclusive failure stops the node:
-  # an unreachable gateway means every service it accepts is unable to call back
-  # into it, which is worse than not starting. Set to false only if this host's
-  # networking makes the probe unusable -- 'nodo doctor' still reports it either way.
+  # Before serving anything, prove a guest can reach GATEWAY_PORT by connecting to it
+  # from a throwaway namespace on the guest bridge -- the bridge is brought up at
+  # start for this, rather than on the first instance launch, or there would be
+  # nowhere to probe from on a node that has never run anything. A conclusive failure
+  # stops the node: an unreachable gateway means every service it accepts is unable
+  # to call back into it, which is worse than not starting. An inconclusive probe
+  # only warns.
+  #
+  # A success is remembered in <main.CACHE>/gateway_port_passed, so a restart does not
+  # redo it; that record is dropped when the port changes and when the host reboots.
+  # Set to false only if this host's networking makes the probe unusable -- 'nodo
+  # doctor' still reports it either way.
   VERIFY_GATEWAY_REACHABILITY: true
   LOCAL_NETWORK: "lo"
   # How long (seconds) this node expects to keep its current address -- typically the

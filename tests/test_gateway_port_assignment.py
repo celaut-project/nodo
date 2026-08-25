@@ -1,4 +1,4 @@
-"""Clearing the gateway port BEFORE it is written to config.yaml.
+"""Who decides that the gateway port is usable, and when.
 
 The incident: a host picked a port, wrote it down, opened it in nodo's own nftables
 table, and started serving. Another ruleset on the same input hook rejected it, so
@@ -7,11 +7,26 @@ inside. nodo's accept rule was correct and irrelevant -- in nftables 'accept' en
 the evaluation of its own chain only, and a reject elsewhere on the hook wins
 regardless of priority.
 
-Assignment used to skip verification entirely, for a real reason: nothing is
-listening at that moment, and a connect to a port with no listener fails whether or
-not the firewall allows it. So the probe now brings its own throwaway listener, and
-a port that still cannot be cleared is not stored -- an unassigned port stops the
-node with an explanation, which is strictly better than a node that answers nothing.
+The first fix put the check at *assignment* time: probe the port with a throwaway
+listener, and refuse to store one that could not be cleared. It made things worse
+in a way worth remembering. Nothing can be probed before the guest bridge exists,
+and the bridge was created on the first instance launch -- so on a host with
+firewalld and no bridge yet, every assignment was refused, forever. The only move
+left to the operator was to pin a port by hand, and a hand-pinned port went through
+no check at all. The guard did not prevent the bad state; it routed people around
+itself into the one path with no verification on it.
+
+So the decision moved instead of being strengthened:
+
+* Assignment opens the port in nodo's ruleset and stores it. It does not probe --
+  see ``assign_gateway_port``.
+* The daemon's start path creates the bridge first, then proves the port, and
+  refuses to serve on one that is provably unreachable. Once per port per boot;
+  the verdict is cached (``src/utils/config.py``).
+* A refusal takes nodo's accept rule back out. Opening a port for a node that then
+  declines to answer on it leaves a hole, not a leftover.
+* The alert is deferred to the end of the process, because in a terminal the last
+  thing printed is the first thing read.
 
 nodo still does not drive the firewall for the operator: it writes nftables (or
 iptables) rules and reads the ruleset back. But the failure message names the
@@ -21,10 +36,12 @@ statement of what has to hold where there is no front-end to name.
 """
 import socket
 import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
-from src.utils.firewall.backends import ForeignRejector, NftBackend
+from src.utils.firewall.backends import ForeignRejector, NftBackend, RejectorScan
+from src.utils.firewall.errors import FirewallError
 from src.utils.firewall.frontend import Frontend
 from src.utils.firewall import gateway
 from src.utils.firewall.gateway import GatewayPortUnavailable, assign_gateway_port
@@ -115,132 +132,185 @@ class OperatorNoticeTests(unittest.TestCase):
         self.assertLessEqual(len(gateway.NOTICE_RULE), 79)
 
 
+class _FakeBackend(NftBackend):
+    """An nft backend that records instead of touching the host."""
+
+    def __init__(self, rejectors=()):
+        super().__init__(run=FakeRunner())
+        self.opened = []
+        self.withdrawn = []
+        self.rejectors = list(rejectors)
+
+    name = "nftables"
+
+    def ensure_input_accept(self, port, protocol, comment):
+        self.opened.append((port, protocol, comment))
+        return True
+
+    def prune_input_accepts(self, comment_prefix, keep):
+        return []
+
+    def delete_by_comment(self, chain, comment):
+        self.withdrawn.append(comment)
+        return 1
+
+    def list_input_accepts(self, comment_prefix):
+        return []
+
+    def foreign_input_rejectors(self):
+        return RejectorScan(rejectors=tuple(self.rejectors))
+
+
 @patch("src.utils.firewall.gateway.os.geteuid", return_value=0)
 class AssignGatewayPortTests(unittest.TestCase):
-    """The assignment decision itself: store the port, or refuse and explain."""
+    """Assignment claims the port. It does not adjudicate reachability."""
 
     def setUp(self):
-        self.rejectors = []
+        self.backend = _FakeBackend()
         self.logged = []
-
-        backend_patch = patch(
-            "src.utils.firewall.gateway.detect_backend", side_effect=self._backend
+        patcher = patch(
+            "src.utils.firewall.gateway.detect_backend", return_value=self.backend
         )
-        backend_patch.start()
-        self.addCleanup(backend_patch.stop)
-
-    def _backend(self, *_args, **_kwargs):
-        backend = NftBackend(run=FakeRunner())
-        backend.list_rules = lambda chain, comment_prefix="": []
-        backend.add = lambda rule: None
-        backend.delete = lambda applied: None
-        backend.foreign_input_rejectors = lambda: self.rejectors
-        return backend
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _assign(self):
         return assign_gateway_port(
-            port=PORT,
-            bridge=BRIDGE,
-            gateway_ip=GATEWAY_IP,
-            subnet=SUBNET,
-            config_path="/nodo/config.yaml",
-            log=self.logged.append,
+            port=PORT, config_path="/nodo/config.yaml", log=self.logged.append
+        )
+
+    def test_the_port_is_opened_in_nodos_own_ruleset(self, _euid):
+        self._assign()
+        self.assertEqual(
+            self.backend.opened, [(PORT, "tcp", gateway.gateway_comment(PORT))]
         )
 
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_a_port_proven_reachable_is_cleared(self, mock_probe, _euid):
-        mock_probe.return_value = ProbeResult(True, "connected")
-        self.assertIs(self._assign().reachable, True)
-
-    @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_the_probe_is_asked_to_bring_its_own_listener(self, mock_probe, _euid):
-        # Without this the probe can only answer "unknown" at assignment time,
-        # which is how an unverified port used to get stored.
-        mock_probe.return_value = ProbeResult(True, "connected")
+    def test_it_does_not_probe(self, mock_probe, _euid):
+        # There is nothing to probe from yet: assignment runs while the config
+        # loads, before the guest bridge exists. A probe that cannot run is not a
+        # verdict, and treating it as one is what made this unassignable.
         self._assign()
-        self.assertIs(mock_probe.call_args.kwargs["provide_listener"], True)
+        mock_probe.assert_not_called()
 
-    @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_a_provably_blocked_port_is_refused(self, mock_probe, _euid):
-        mock_probe.return_value = ProbeResult(False, "connect refused")
-        self.rejectors = [FIREWALLD_REJECTOR]
+    def test_a_host_that_can_reject_no_longer_blocks_assignment(self, _euid):
+        # The Fedora dead end: firewalld on the input hook, no bridge to probe from.
+        # This used to refuse, every time, so the port was never stored and the
+        # operator's only way forward was an unverified manual pin.
+        self.backend.rejectors = [FIREWALLD_REJECTOR]
+        self._assign()
+        self.assertEqual(len(self.backend.opened), 1)
 
+    def test_a_rule_that_cannot_be_applied_still_refuses(self, _euid):
+        # Nothing was opened, so there is nothing to store: this is the one failure
+        # assignment still owns.
+        def explode(*_args, **_kwargs):
+            raise FirewallError("nft: permission denied")
+
+        self.backend.ensure_input_accept = explode
         with self.assertRaises(GatewayPortUnavailable) as ctx:
             self._assign()
         self.assertEqual(ctx.exception.port, PORT)
 
-    @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_an_unverifiable_port_is_refused_when_something_can_reject_it(
-        self, mock_probe, _euid
-    ):
-        # The Fedora case: the bridge does not exist yet so nothing can be proven,
-        # and firewalld is sitting on the input hook. Storing the port here is what
-        # produced a node that looked alive and answered nothing.
-        mock_probe.return_value = ProbeResult(None, "bridge br-ch does not exist yet")
-        self.rejectors = [FIREWALLD_REJECTOR]
+    def test_it_needs_root(self, _euid):
+        with patch("src.utils.firewall.gateway.os.geteuid", return_value=1000):
+            with self.assertRaises(GatewayPortUnavailable) as ctx:
+                self._assign()
+        self.assertIn("root", str(ctx.exception).lower())
 
-        with self.assertRaises(GatewayPortUnavailable) as ctx:
-            self._assign()
 
-        instructions = ctx.exception.instructions
-        self.assertIn("filter_INPUT", instructions)          # names what can reject
-        self.assertIn("GATEWAY_PORT", instructions)          # the manual way out
-        self.assertIn("nat-guide", instructions)             # outside the LAN is separate
+@patch("src.utils.firewall.gateway.os.geteuid", return_value=0)
+class RefusalWithdrawsTheRuleTests(unittest.TestCase):
+    """A port nodo will not answer on does not stay open in the host's ruleset.
 
-    @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_an_unverifiable_port_is_accepted_when_nothing_can_reject_it(
-        self, mock_probe, _euid
-    ):
-        # A fresh node whose guest bridge has never been created is the ordinary
-        # case; refusing here would make a first install unrecoverable.
-        mock_probe.return_value = ProbeResult(None, "bridge br-ch does not exist yet")
-        self.rejectors = []
+    ``ensure_gateway_port_open`` applies the accept rule before it can probe --
+    there is no other order available, the probe needs the rule under test. When
+    the probe then comes back conclusively negative and the node refuses to start,
+    that rule is left pointing at a port nothing will ever answer on. The next
+    start re-applies it, so nothing is lost by taking it out, and a hole nobody
+    uses is not something to leave behind.
+    """
 
-        result = self._assign()
+    def setUp(self):
+        self.backend = _FakeBackend()
+        self.logged = []
 
-        self.assertIsNone(result.reachable)
-        self.assertTrue(
-            any("nothing outside nodo's ruleset" in line for line in self.logged),
-            self.logged,
+    def _open(self, probe):
+        with patch(
+            "src.utils.firewall.gateway.probe_tcp_from_bridge", return_value=probe
+        ):
+            return gateway.ensure_gateway_port_open(
+                port=PORT,
+                bridge=BRIDGE,
+                gateway_ip=GATEWAY_IP,
+                subnet=SUBNET,
+                backend=self.backend,
+                verify=True,
+                strict=True,
+                log=self.logged.append,
+            )
+
+    def test_a_blocked_port_is_refused_and_its_rule_removed(self, _euid):
+        with self.assertRaises(GatewayPortUnavailable):
+            self._open(ProbeResult(False, "connect refused"))
+        self.assertEqual(self.backend.withdrawn, [gateway.gateway_comment(PORT)])
+
+    def test_a_reachable_port_keeps_its_rule(self, _euid):
+        self._open(ProbeResult(True, "connected"))
+        self.assertEqual(self.backend.withdrawn, [])
+
+    def test_an_inconclusive_probe_keeps_its_rule(self, _euid):
+        # Not a verdict, so not a refusal, so nothing to undo. The node warns and
+        # runs; the port simply stays unmarked and is probed again next start.
+        self._open(ProbeResult(None, "bridge nodo-br-ch does not exist yet"))
+        self.assertEqual(self.backend.withdrawn, [])
+
+    def test_a_failed_withdrawal_does_not_mask_the_refusal(self, _euid):
+        # The operator needs the instructions far more than they need the rule gone.
+        def explode(*_args, **_kwargs):
+            raise FirewallError("nft: cannot delete")
+
+        self.backend.delete_by_comment = explode
+        with self.assertRaises(GatewayPortUnavailable):
+            self._open(ProbeResult(False, "connect refused"))
+
+
+class DeferredNoticeTests(unittest.TestCase):
+    """The alert has to be the last thing on the terminal, not the middle.
+
+    These are emitted while ConfigManager loads -- on a fresh install, during
+    nodo.py's imports -- and after an install the operator is looking at pages of
+    completion, chown and systemd output. A message in the middle of that is a
+    message nobody acts on.
+    """
+
+    def setUp(self):
+        gateway._DEFERRED_NOTICES.clear()
+        self.addCleanup(gateway._DEFERRED_NOTICES.clear)
+
+    def test_deferring_prints_nothing_yet(self):
+        with patch("builtins.print") as mock_print:
+            gateway.defer_operator_notice("open the port")
+        mock_print.assert_not_called()
+        self.assertEqual(gateway._DEFERRED_NOTICES, ["open the port"])
+
+    def test_flushing_writes_them_to_stderr_and_empties_the_queue(self):
+        gateway.defer_operator_notice("first")
+        gateway.defer_operator_notice("second")
+        with patch("builtins.print") as mock_print:
+            gateway.flush_operator_notices()
+        self.assertEqual(
+            [call.args[0] for call in mock_print.call_args_list], ["first", "second"]
         )
+        self.assertTrue(all(call.kwargs["file"] is sys.stderr for call in mock_print.call_args_list))
+        self.assertEqual(gateway._DEFERRED_NOTICES, [])
 
-    @patch("src.utils.firewall.frontend.detect_frontend", return_value=None)
-    @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_the_refusal_reports_the_chain_it_read(
-        self, mock_probe, _frontend, _euid
-    ):
-        # The rejecting chain is read from the live ruleset, never guessed at, and
-        # with no front-end running there is no command to offer.
-        mock_probe.return_value = ProbeResult(None, "bridge br-ch does not exist yet")
-        self.rejectors = [FIREWALLD_REJECTOR]
-
-        with self.assertRaises(GatewayPortUnavailable) as ctx:
-            self._assign()
-
-        instructions = ctx.exception.instructions
-        self.assertIn("inet firewalld / filter_INPUT", instructions)  # read, not assumed
-        self.assertIn(f"inbound TCP {PORT} accepted", instructions)
-        self.assertNotIn("firewall-cmd", instructions)
-
-    @patch(
-        "src.utils.firewall.frontend.detect_frontend",
-        return_value=Frontend(name="firewalld", command="sudo firewall-cmd --x"),
-    )
-    @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_the_refusal_carries_the_command_for_a_running_front_end(
-        self, mock_probe, _frontend, _euid
-    ):
-        mock_probe.return_value = ProbeResult(None, "bridge br-ch does not exist yet")
-        self.rejectors = [FIREWALLD_REJECTOR]
-
-        with self.assertRaises(GatewayPortUnavailable) as ctx:
-            self._assign()
-
-        instructions = ctx.exception.instructions
-        self.assertIn("This host runs firewalld", instructions)
-        self.assertIn("sudo firewall-cmd --x", instructions)
-        # Still short enough to read, and to paste somewhere.
-        self.assertLess(len(instructions.splitlines()), 16, instructions)
+    def test_the_same_notice_twice_is_one_alert(self):
+        # ConfigManager can load more than once in a process; the operator has one
+        # thing to do about it either way.
+        gateway.defer_operator_notice("open the port")
+        gateway.defer_operator_notice("open the port")
+        self.assertEqual(len(gateway._DEFERRED_NOTICES), 1)
 
 
 @patch("src.utils.firewall.reachability.os.geteuid", return_value=0)

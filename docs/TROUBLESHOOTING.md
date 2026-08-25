@@ -174,14 +174,17 @@ regardless of priority. firewalld's default zone ends in
 `reject with icmpx admin-prohibited` — which is precisely the "no route to host"
 above.
 
-So nodo does not store a port it could not clear. If the port cannot be proven
-reachable and this host has other rules that could reject it, `GATEWAY_PORT` stays
-`auto` and the node stops with an explanation. That is deliberate: an unassigned
-port is a loud failure, an unreachable one is a node that looks healthy and answers
-nothing.
+So nodo proves the port before it serves on it. At every daemon start it brings up
+the guest bridge, connects to the port from inside that subnet the way a guest
+would, and **refuses to start** if that connect is conclusively rejected — taking
+its own accept rule back out on the way, since nothing is going to answer there.
+That is deliberate: a node that will not start is a loud failure, an unreachable one
+is a node that looks healthy and answers nothing.
 
-**What nodo tells you.** The refusal names the chains it read from the live ruleset
-and then, when it can, the single command that fixes it. nodo checks which
+**What nodo tells you.** The refusal reports what it found on the input hook
+outside nodo's own tables — the chains that can reject, *or* that nothing can, *or*
+that the ruleset could not be read at all, which is a different thing and now says
+so. Then, when it can, the single command that fixes it. nodo checks which
 high-level firewall is *running* on the host — firewalld, ufw — and prints its
 command, e.g.:
 
@@ -196,11 +199,30 @@ instead: inbound TCP on that port must be accepted on the netfilter input hook, 
 no other base chain on that hook may reject or drop it. nodo never invents a command
 for a front-end it did not detect.
 
-**The port it asks about does not change between runs.** A candidate is only written
-to `network.GATEWAY_PORT` once it works, so until then it is parked in
-`<main.CACHE>/aux_port` and reused. Without that, every run picked a fresh random
-port and asked you to open a different one each time. Delete that file if you want
-nodo to pick another candidate.
+**The port it asks about does not change between runs.** It is written to
+`network.GATEWAY_PORT` as soon as it is opened in nodo's own ruleset, before it is
+proven, precisely so that "open TCP 58443" is still true on the next start. Earlier
+versions withheld the port until it was proven and therefore asked about a fresh
+random one every run — an operator following the instructions was always a step
+behind.
+
+**And it is only proven once.** A successful check is recorded in
+`<main.CACHE>/gateway_port_passed`, so a restart does not rebuild a network
+namespace to re-answer it. Editing `network.GATEWAY_PORT` deletes that file (the
+TUI does it too), and so does a reboot: if you opened the port with
+`firewall-cmd --add-port` and no `--permanent`, the rule is gone after the reboot
+and the check has to run again. Delete the file yourself to force a re-check.
+
+**The alert is printed last, on purpose.** It is written while the config loads —
+during nodo's imports on a fresh install — so it is held back to the end of the
+process and left in `.gateway_notice` beside `config.yaml`; `install.sh` prints that
+file as its final act. In a terminal the last thing printed is the first thing read.
+
+**"Not assigned" after an install.** The port is assigned by `install.sh` and by
+`sudo nodo serve`, and by nothing else — an ordinary `nodo` command will not do it
+for you, by design: picking a port writes a rule into the host's firewall. If the
+installer could not assign one it says so and points here, and the alert is the last
+thing it prints.
 
 **Fix — run `sudo nodo doctor` and read the gateway section.** It reports the result
 of a real connect from the guest bridge (it supplies its own listener, so this works
@@ -209,9 +231,12 @@ Then start the node again. [`FIREWALL.md`](FIREWALL.md) → *Sharing the host wi
 another firewall* has the longer worked examples, including giving the guest bridge
 a firewalld zone of its own rather than `trusted`.
 
-Assignment retries on the next privileged start, with the same port. **Or pin a port
-you have already opened yourself** in `config.yaml` (`network.GATEWAY_PORT: 58443`):
-nodo then trusts you and does not re-pick.
+**Pinning a port you have already opened yourself** in `config.yaml`
+(`network.GATEWAY_PORT: 58443`) stops nodo re-picking — but it does not exempt the
+port from the check. A pinned port is verified at the next start like any other, and
+the node refuses to serve if it is rejected. That is the point: a hand-pinned port
+used to be the one path with no verification on it, which is how a node ends up
+serving on a port firewalld rejects.
 
 **Reachability from outside the LAN is a separate problem.** Nothing on the host
 can prove it: a connect from inside succeeds whether or not the router forwards
