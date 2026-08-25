@@ -115,6 +115,8 @@ pub enum InputMode {
     Normal,
     Connect,
     EditConfig,
+    /// A new element for the list the Config page's selection points at.
+    AddConfigItem,
     FilterConfig,
     /// Amount entry for crediting/debiting the selected client's balance.
     CreditClient,
@@ -159,24 +161,36 @@ pub enum PendingAction {
     DeleteService { id: String, label: String },
     KillInstance { id: String, label: String },
     DisconnectPeer { id: String, label: String },
+    /// Remove one element from a list in config.yaml. Confirmed like the others
+    /// because dropping an entry from, say, a network policy loosens it silently.
+    DeleteConfigItem {
+        path: Vec<ConfigPathSegment>,
+        label: String,
+    },
 }
 
 /// The `nodo` invocation a confirmed [`PendingAction`] turns into, plus the label its
-/// outcome is reported under. Every destructive action goes through the same CLI the
-/// operator would type, so the TUI can never do something `nodo` cannot.
-fn pending_command(action: PendingAction) -> (String, Vec<String>) {
+/// outcome is reported under. Every destructive action that has a CLI equivalent goes
+/// through the same CLI the operator would type, so the TUI can never do something
+/// `nodo` cannot.
+///
+/// `None` for the one action that has no such equivalent: no `nodo` subcommand edits a
+/// single config key, which is why the config editor writes through `yq` at all, so
+/// removing a list element takes that same path (`delete_config_list_item`).
+fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
     match action {
-        PendingAction::DeleteService { id, label } => (
+        PendingAction::DeleteService { id, label } => Some((
             format!("Delete service {label}"),
             vec!["remove".to_string(), id],
-        ),
+        )),
         PendingAction::KillInstance { id, label } => {
-            (format!("Kill instance {label}"), vec!["kill".to_string(), id])
+            Some((format!("Kill instance {label}"), vec!["kill".to_string(), id]))
         }
-        PendingAction::DisconnectPeer { id, label } => (
+        PendingAction::DisconnectPeer { id, label } => Some((
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
-        ),
+        )),
+        PendingAction::DeleteConfigItem { .. } => None,
     }
 }
 
@@ -1335,6 +1349,153 @@ impl App {
             .cloned()
     }
 
+    /// The config path the tree selection points at, section or leaf alike.
+    ///
+    /// A section has no [`ConfigEntry`] of its own, so the segments come from the
+    /// first leaf underneath it, truncated to the selection's depth: the path is read
+    /// back out of the data rather than parsed out of the tree's `[1]`-style tokens,
+    /// which a mapping key could otherwise imitate.
+    fn selected_config_path(&self) -> Option<Vec<ConfigPathSegment>> {
+        let selected = self.config_tree_state.selected();
+        if selected.is_empty() {
+            return None;
+        }
+        self.config_all.iter().find_map(|entry| {
+            let tokens = entry_tokens(entry);
+            (tokens.len() >= selected.len() && tokens[..selected.len()] == selected[..])
+                .then(|| entry.path_segments[..selected.len()].to_vec())
+        })
+    }
+
+    /// Whether `path` names a list.
+    ///
+    /// An empty list is a leaf that says so (`flatten_yaml` stops there), a populated
+    /// one has no entry of its own and is recognised by its children being indexed.
+    fn is_list_at(&self, path: &[ConfigPathSegment]) -> bool {
+        self.config_all.iter().any(|entry| {
+            if entry.path_segments == path {
+                return entry.value_type == "list";
+            }
+            entry.path_segments.len() > path.len()
+                && entry.path_segments[..path.len()] == *path
+                && matches!(entry.path_segments[path.len()], ConfigPathSegment::Index(_))
+        })
+    }
+
+    /// The list the selection can append to: itself when it is one, or its parent
+    /// when the selection is an element of one -- so `a` works both on the list and
+    /// with an element highlighted, which is where the cursor already is after
+    /// adding one.
+    fn selected_list_path(&self) -> Option<Vec<ConfigPathSegment>> {
+        let path = self.selected_config_path()?;
+        if self.is_list_at(&path) {
+            return Some(path);
+        }
+        match path.last() {
+            Some(ConfigPathSegment::Index(_)) => Some(path[..path.len() - 1].to_vec()),
+            _ => None,
+        }
+    }
+
+    /// The list element the selection points at: any path ending in an index, a
+    /// scalar element and a whole object in a list alike.
+    ///
+    /// A leaf *inside* such an object (`network.FREE_PORTS_RANGE[0].START`) is not
+    /// one: removing the element a key belongs to is not what selecting that key
+    /// asks for, so the operator is told to select the element itself.
+    fn selected_list_item(&self) -> Option<Vec<ConfigPathSegment>> {
+        let path = self.selected_config_path()?;
+        matches!(path.last(), Some(ConfigPathSegment::Index(_))).then_some(path)
+    }
+
+    /// Start appending an element to the list the selection points at.
+    pub fn open_config_list_add(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        let Some(path) = self.selected_list_path() else {
+            self.status = "Select a list, or one of its elements, to add to".to_string();
+            return;
+        };
+        self.input_mode = InputMode::AddConfigItem;
+        self.input_title = format!("Add to {}", config_path_display(&path));
+        self.input.clear();
+        self.edit_config_path = Some(path);
+        self.edit_config_secret = false;
+        self.edit_kind = EditKind::Text;
+    }
+
+    /// Append what was typed to the list, as one more element.
+    ///
+    /// The value is parsed as YAML exactly as an ordinary edit is, so a number stays
+    /// a number and an object stays an object; a glob has to be quoted (`"*.foo"`),
+    /// because a bare leading `*` is a YAML alias and not a string.
+    async fn save_config_list_add(&mut self) {
+        let Some(path) = self.edit_config_path.clone() else {
+            self.status = "No list selected".to_string();
+            self.close_input();
+            return;
+        };
+        if self.input.trim().is_empty() {
+            self.status = "Nothing to add: type a value".to_string();
+            return;
+        }
+        if let Err(error) = serde_yaml::from_str::<Value>(&self.input) {
+            self.status = format!("Invalid YAML value: {error}");
+            return;
+        }
+
+        let value = self.input.clone();
+        let expression = format!("{} += [env(NODO_TUI_VALUE)]", yq_path_expression(&path));
+        match self.run_yq(expression, Some(&value)).await {
+            Ok(()) => {
+                self.reload_after_config_write();
+                self.close_input();
+                // A list that was empty was a leaf and is now a section: open it, or
+                // the element just added would be written but invisible.
+                self.config_tree_state.open(path_tokens(&path));
+                self.status = format!(
+                    "Added to {} • restart nodo to apply runtime changes",
+                    config_path_display(&path)
+                );
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// Confirm removing the list element the selection points at.
+    pub fn open_delete_config_item_confirm(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        let Some(path) = self.selected_list_item() else {
+            self.status = "Select a list element ([0], [1], ...) to remove".to_string();
+            return;
+        };
+        let label = config_path_display(&path);
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Remove {label}? (y/N)");
+        self.pending_action = Some(PendingAction::DeleteConfigItem { path, label });
+    }
+
+    /// Remove one element from a list in config.yaml.
+    async fn delete_config_list_item(&mut self, path: &[ConfigPathSegment], label: &str) {
+        let expression = format!("del({})", yq_path_expression(path));
+        match self.run_yq(expression, None).await {
+            Ok(()) => {
+                self.reload_after_config_write();
+                // Every index after the removed one shifts down, so the selection is
+                // moved to the list rather than left on a position that now holds a
+                // different element than the one that was on screen.
+                self.config_tree_state
+                    .select(path_tokens(&path[..path.len().saturating_sub(1)]));
+                self.status =
+                    format!("Removed {label} • restart nodo to apply runtime changes");
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
     pub fn open_config_editor(&mut self) {
         let Some(entry) = self.selected_config_entry() else {
             self.status =
@@ -1470,6 +1631,7 @@ impl App {
             InputMode::Connect => self.connect(),
             InputMode::CreditClient => self.submit_credit_client(),
             InputMode::EditConfig => self.save_config_edit().await,
+            InputMode::AddConfigItem => self.save_config_list_add().await,
             InputMode::FilterConfig => {
                 self.config_filter = self.input.trim().to_string();
                 self.apply_config_filter();
@@ -1606,17 +1768,30 @@ impl App {
         value: &str,
     ) -> Result<(), String> {
         let expression = format!("{} = env(NODO_TUI_VALUE)", yq_path_expression(path));
+        self.run_yq(expression, Some(value)).await
+    }
+
+    /// Apply one in-place `yq` expression to config.yaml, backing the file up first.
+    ///
+    /// Every config write lands here -- a scalar edit, a price, an appended list
+    /// element, a removed one -- so they cannot drift into several sets of quoting,
+    /// backup and failure-reporting rules. A value is handed over through the
+    /// environment rather than interpolated into the expression, so nothing an
+    /// operator types can be read as yq syntax.
+    async fn run_yq(&mut self, expression: String, value: Option<&str>) -> Result<(), String> {
         backup_config(&self.paths.config)
             .map_err(|error| format!("Could not create config backup: {error}"))?;
 
-        let output = Command::new(&self.paths.yq)
+        let mut command = Command::new(&self.paths.yq);
+        command
             .arg("e")
             .arg("-i")
             .arg(expression)
-            .arg(&self.paths.config)
-            .env("NODO_TUI_VALUE", value)
-            .output()
-            .await;
+            .arg(&self.paths.config);
+        if let Some(value) = value {
+            command.env("NODO_TUI_VALUE", value);
+        }
+        let output = command.output().await;
 
         match output {
             Ok(output) if output.status.success() => {
@@ -1864,14 +2039,22 @@ impl App {
     }
 
     /// Run the pending destructive action (called on `y` in a Confirm modal).
-    pub fn confirm_pending(&mut self) {
+    pub async fn confirm_pending(&mut self) {
         let Some(action) = self.pending_action.take() else {
             self.close_input();
             return;
         };
-        let (label, args) = pending_command(action);
         self.close_input();
-        self.spawn_command(CommandKind::Generic, label, args);
+        match action {
+            PendingAction::DeleteConfigItem { path, label } => {
+                self.delete_config_list_item(&path, &label).await
+            }
+            other => {
+                if let Some((label, args)) = pending_command(other) {
+                    self.spawn_command(CommandKind::Generic, label, args);
+                }
+            }
+        }
     }
 
     /// Scroll the Details overlay by `delta` lines (clamped).
@@ -2744,7 +2927,12 @@ pub(crate) fn segment_token(segment: &ConfigPathSegment) -> String {
 }
 
 pub(crate) fn entry_tokens(entry: &ConfigEntry) -> Vec<String> {
-    entry.path_segments.iter().map(segment_token).collect()
+    path_tokens(&entry.path_segments)
+}
+
+/// The tree identifier for a path, whether or not a leaf sits at the end of it.
+pub(crate) fn path_tokens(path: &[ConfigPathSegment]) -> Vec<String> {
+    path.iter().map(segment_token).collect()
 }
 
 fn config_path_display(path: &[ConfigPathSegment]) -> String {
@@ -4034,6 +4222,179 @@ Cold Wallet: 9cold\n";
         app.config_all = vec![entry];
     }
 
+    /// An app on the Config page whose tree is the real `flatten_yaml` reading of
+    /// `yaml`, so a list is a leaf or a section here for exactly the reason it is one
+    /// on screen.
+    fn on_config_page(yaml: &str) -> App {
+        let document: Value = serde_yaml::from_str(yaml).unwrap();
+        let mut entries = Vec::new();
+        flatten_yaml(&document, &mut Vec::new(), &mut entries);
+        let mut app = App::default();
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Config)
+            .unwrap();
+        app.config_all = entries;
+        app
+    }
+
+    fn key(path: &str) -> Vec<String> {
+        path.split('.').map(ToString::to_string).collect()
+    }
+
+    #[test]
+    fn an_empty_list_can_be_added_to_where_it_sits() {
+        // `service_networks.blacklist: []` is a leaf: there is no element to select,
+        // so `a` has to work on the list itself or the list can never be filled.
+        let mut app = on_config_page("service_networks:\n  blacklist: []\n");
+        app.config_tree_state
+            .select(key("service_networks.blacklist"));
+
+        assert_eq!(
+            app.selected_list_path(),
+            Some(vec![
+                ConfigPathSegment::Key("service_networks".to_string()),
+                ConfigPathSegment::Key("blacklist".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_populated_list_can_be_added_to_from_the_list_or_from_an_element() {
+        // Once it has elements the list is a section with no entry of its own, and
+        // the cursor sits on an element after every add -- both have to work.
+        let mut app = on_config_page("service_networks:\n  blacklist: [\"*.a\", \"*.b\"]\n");
+        let list = vec![
+            ConfigPathSegment::Key("service_networks".to_string()),
+            ConfigPathSegment::Key("blacklist".to_string()),
+        ];
+
+        app.config_tree_state
+            .select(key("service_networks.blacklist"));
+        assert_eq!(app.selected_list_path(), Some(list.clone()));
+
+        app.config_tree_state.select(vec![
+            "service_networks".to_string(),
+            "blacklist".to_string(),
+            "[1]".to_string(),
+        ]);
+        assert_eq!(app.selected_list_path(), Some(list));
+    }
+
+    #[test]
+    fn a_scalar_is_not_a_list_to_add_to() {
+        let mut app = on_config_page("network:\n  GATEWAY_PORT: 8080\n");
+        app.config_tree_state.select(key("network.GATEWAY_PORT"));
+
+        assert_eq!(app.selected_list_path(), None);
+
+        app.open_config_list_add();
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.status.contains("Select a list"), "{}", app.status);
+    }
+
+    #[test]
+    fn only_an_element_can_be_removed() {
+        let mut app = on_config_page(
+            "network:\n  FREE_PORTS_RANGE:\n    - START: 50000\n      END: 60000\n",
+        );
+
+        // The element itself: removing it takes the whole range with it.
+        app.config_tree_state.select(vec![
+            "network".to_string(),
+            "FREE_PORTS_RANGE".to_string(),
+            "[0]".to_string(),
+        ]);
+        assert_eq!(
+            app.selected_list_item(),
+            Some(vec![
+                ConfigPathSegment::Key("network".to_string()),
+                ConfigPathSegment::Key("FREE_PORTS_RANGE".to_string()),
+                ConfigPathSegment::Index(0),
+            ])
+        );
+
+        // A key inside it is not: selecting START does not ask for the range to go.
+        app.config_tree_state.select(vec![
+            "network".to_string(),
+            "FREE_PORTS_RANGE".to_string(),
+            "[0]".to_string(),
+            "START".to_string(),
+        ]);
+        assert_eq!(app.selected_list_item(), None);
+
+        app.open_delete_config_item_confirm();
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.pending_action.is_none());
+        assert!(app.status.contains("Select a list element"), "{}", app.status);
+    }
+
+    #[test]
+    fn removing_an_element_asks_first_and_names_it() {
+        let mut app = on_config_page("service_networks:\n  blacklist: [\"*.a\", \"*.b\"]\n");
+        app.config_tree_state.select(vec![
+            "service_networks".to_string(),
+            "blacklist".to_string(),
+            "[1]".to_string(),
+        ]);
+
+        app.open_delete_config_item_confirm();
+
+        assert_eq!(app.input_mode, InputMode::Confirm);
+        assert!(
+            app.input_title.contains("service_networks.blacklist[1]"),
+            "{}",
+            app.input_title
+        );
+        assert!(matches!(
+            app.pending_action,
+            Some(PendingAction::DeleteConfigItem { ref path, .. })
+                if path.last() == Some(&ConfigPathSegment::Index(1))
+        ));
+    }
+
+    #[test]
+    fn a_config_deletion_is_not_a_nodo_invocation() {
+        // Every other confirmable action turns into the CLI command the operator
+        // would type; this one goes through the same `yq` path as any config write,
+        // because no `nodo` subcommand edits one key.
+        assert!(pending_command(PendingAction::DeleteConfigItem {
+            path: vec![ConfigPathSegment::Index(0)],
+            label: "blacklist[0]".to_string(),
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn the_add_popup_appends_rather_than_overwriting() {
+        let mut app = on_config_page("service_networks:\n  blacklist: []\n");
+        app.config_tree_state
+            .select(key("service_networks.blacklist"));
+        app.open_config_list_add();
+
+        assert_eq!(app.input_mode, InputMode::AddConfigItem);
+        assert!(app.input.is_empty(), "the field starts blank, it is a new element");
+        assert!(app.input_title.starts_with("Add to "), "{}", app.input_title);
+        assert_eq!(
+            yq_path_expression(app.edit_config_path.as_ref().unwrap()),
+            ".[\"service_networks\"][\"blacklist\"]"
+        );
+    }
+
+    #[test]
+    fn a_leading_star_has_to_be_quoted_and_only_a_leading_one() {
+        // Why the add popup's hint singles out a leading `*`: there it is YAML's alias
+        // indicator, so the same check that keeps an ordinary edit well-formed rejects
+        // it before yq is ever run. Anywhere else a `*` is ordinary text, and a
+        // pattern like `dns:*` needs no quoting at all.
+        assert!(serde_yaml::from_str::<Value>("*google.com").is_err());
+        assert!(serde_yaml::from_str::<Value>("\"*google.com\"").is_ok());
+        assert_eq!(
+            serde_yaml::from_str::<Value>("dns:*").unwrap(),
+            Value::String("dns:*".to_string())
+        );
+    }
+
     #[test]
     fn known_enum_values_covers_the_documented_policy_and_nothing_else() {
         assert_eq!(
@@ -4321,7 +4682,8 @@ Cold Wallet: 9cold\n";
             let (label, args) = pending_command(PendingAction::DisconnectPeer {
                 id: "peer-abc".to_string(),
                 label: "peer-abc".to_string(),
-            });
+            })
+            .expect("a peer disconnect is a `nodo` invocation");
             assert_eq!(args, vec!["disconnect".to_string(), "peer-abc".to_string()]);
             assert_eq!(label, "Forget peer peer-abc");
         }

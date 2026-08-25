@@ -211,6 +211,9 @@ ports and addresses, and a `networks:` block carrying `blacklist`/`whitelist` is
 rejected as a config error rather than silently ignored. Full semantics and the
 enforcement points: [`NETWORKS.md`](NETWORKS.md).
 
+On the `nodo tui` Config page, `a` appends a pattern to the selected list and `d`
+removes the selected one.
+
 ## `ddns`
 
 Keeps a hostname pointing at this node's public IP, so peers can find it by name
