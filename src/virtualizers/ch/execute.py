@@ -61,7 +61,7 @@ HASH_SPEC = get_configured_hash_spec(env_manager)
 CACHE = env_manager.get("CACHE")
 CH_BINARY_PATH = env_manager.get("virtualizers.ch.BINARY_PATH")
 NETWORK_MODE = env_manager.get("virtualizers.ch.NETWORK_MODE", "tap_bridge")
-NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")
+NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch")
 NETWORK_SUBNET = env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")
 NETWORK_GATEWAY_IP = env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1")
 GUEST_NET_DEVICE = env_manager.get("virtualizers.ch.GUEST_NET_DEVICE", "auto")
@@ -305,6 +305,35 @@ def _ensure_command_available(command: str) -> None:
         raise CHExecuteError(f"Required command not found in PATH: {command}")
 
 
+def ensure_guest_bridge() -> ipaddress.IPv4Network:
+    """Create the guest bridge with its gateway address, idempotently. Root only.
+
+    Split out of ``_network_preflight`` because the bridge is needed before any
+    instance runs: it is the only vantage point from which the gateway port can be
+    probed the way a guest reaches it (``src.utils.firewall.reachability``), and
+    creating it lazily on the first launch meant that at every moment the node
+    actually had to decide something about that port -- assigning it, verifying it
+    at startup -- the bridge did not exist and nothing could be proven.
+
+    Only the link, its address and its state. Forwarding, masquerading and guest
+    isolation stay in ``_network_preflight``: they are about carrying guest traffic,
+    which is the virtualizer's business and not the gateway's.
+    """
+    network = _ip_network()
+
+    link_exists = _run(["ip", "link", "show", NETWORK_BRIDGE_NAME], check=False)
+    if link_exists.returncode != 0:
+        _run(["ip", "link", "add", NETWORK_BRIDGE_NAME, "type", "bridge"])
+
+    addr_show = _run(["ip", "-4", "addr", "show", "dev", NETWORK_BRIDGE_NAME], check=False)
+    expected_cidr = f"{NETWORK_GATEWAY_IP}/{network.prefixlen}"
+    if expected_cidr not in (addr_show.stdout or ""):
+        _run(["ip", "addr", "add", expected_cidr, "dev", NETWORK_BRIDGE_NAME])
+
+    _run(["ip", "link", "set", NETWORK_BRIDGE_NAME, "up"])
+    return network
+
+
 def _network_preflight() -> ipaddress.IPv4Network:
     if NETWORK_MODE != "tap_bridge":
         raise CHExecuteError(
@@ -322,19 +351,8 @@ def _network_preflight() -> ipaddress.IPv4Network:
             "No netfilter tool found in PATH: install nftables (preferred) or iptables."
         )
 
-    network = _ip_network()
-    prefix_len = network.prefixlen
+    network = ensure_guest_bridge()
 
-    link_exists = _run(["ip", "link", "show", NETWORK_BRIDGE_NAME], check=False)
-    if link_exists.returncode != 0:
-        _run(["ip", "link", "add", NETWORK_BRIDGE_NAME, "type", "bridge"])
-
-    addr_show = _run(["ip", "-4", "addr", "show", "dev", NETWORK_BRIDGE_NAME], check=False)
-    expected_cidr = f"{NETWORK_GATEWAY_IP}/{prefix_len}"
-    if expected_cidr not in (addr_show.stdout or ""):
-        _run(["ip", "addr", "add", expected_cidr, "dev", NETWORK_BRIDGE_NAME])
-
-    _run(["ip", "link", "set", NETWORK_BRIDGE_NAME, "up"])
     _run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
     _ensure_guest_l2_isolation()
     _ensure_masquerade(network)

@@ -539,6 +539,7 @@ pub struct Paths {
     pub metadata: PathBuf,
     pub log: PathBuf,
     pub cgroups: PathBuf,
+    pub cache: PathBuf,
     pub yq: PathBuf,
 }
 
@@ -575,6 +576,7 @@ impl Paths {
                 &["virtualizers", "ch", "CGROUPS_BASE_DIR"],
                 PathBuf::from("/sys/fs/cgroup"),
             ),
+            cache: resolve(&["main", "CACHE"], storage.join("__cache__")),
             yq: resolve(&["dependencies", "yq", "BIN"], PathBuf::from("yq")),
             storage,
         }
@@ -858,6 +860,16 @@ fn yaml_scalar(document: Option<&Value>, keys: &[&str]) -> Option<String> {
         Value::Bool(flag) => Some(flag.to_string()),
         _ => None,
     }
+}
+
+/// `network.GATEWAY_PORT` as written, or None when the file cannot be read.
+///
+/// The sentinel `auto` and a real port are both just text here: what matters is
+/// whether the value changed, not what it means.
+fn read_gateway_port(config: &Path) -> Option<String> {
+    read_yaml(config)
+        .ok()
+        .and_then(|document| yaml_scalar(Some(&document), &["network", "GATEWAY_PORT"]))
 }
 
 fn resolve_config_path(value: &str, main_dir: &Path, storage: Option<&Path>) -> PathBuf {
@@ -1784,9 +1796,19 @@ impl App {
     /// backup and failure-reporting rules. A value is handed over through the
     /// environment rather than interpolated into the expression, so nothing an
     /// operator types can be read as yq syntax.
+    /// Apply one `yq` expression to config.yaml, with a backup first.
+    ///
+    /// Also the single place that invalidates the gateway-port verdict. The node
+    /// records "this port was proven reachable" in `<CACHE>/gateway_port_passed`
+    /// (`src/utils/config.py`) and skips its startup probe while that holds; a port
+    /// edited here has never been proven, so the file has to go or the next start
+    /// would serve on an unchecked port. Compared before and after rather than
+    /// matched against the expression, because an expression that touches the key
+    /// can be shaped many ways and only the value actually matters.
     async fn run_yq(&mut self, expression: String, value: Option<&str>) -> Result<(), String> {
         backup_config(&self.paths.config)
             .map_err(|error| format!("Could not create config backup: {error}"))?;
+        let gateway_port_before = read_gateway_port(&self.paths.config);
 
         let mut command = Command::new(&self.paths.yq);
         command
@@ -1802,6 +1824,10 @@ impl App {
         match output {
             Ok(output) if output.status.success() => {
                 self.paths = Paths::discover();
+                if read_gateway_port(&self.paths.config) != gateway_port_before {
+                    let marker = self.paths.cache.join("gateway_port_passed");
+                    let _ = fs::remove_file(marker);
+                }
                 Ok(())
             }
             Ok(output) => Err(format!(

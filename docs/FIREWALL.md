@@ -66,7 +66,7 @@ the part worth internalising:
 
 | Traffic | Host path | Enforced by |
 |---|---|---|
-| guest → anywhere off-node | routed `br-ch` → uplink | the forward chain, i.e. the policy above |
+| guest → anywhere off-node | routed `nodo-br-ch` → uplink | the forward chain, i.e. the policy above |
 | guest → the node itself (`192.168.200.1`) | **local delivery**, input hook | the host's input rules, **not** `block_all` |
 | guest → another guest | routed via the host (see below) | the forward chain |
 
@@ -79,7 +79,7 @@ below.
 
 ## Guest-to-guest
 
-Two guests on `br-ch` share one L2 domain, so by default they would ARP each
+Two guests on `nodo-br-ch` share one L2 domain, so by default they would ARP each
 other and their frames would be switched tap to tap, never reaching the forward
 hook — the allow-list would be a no-op for the destinations that matter most.
 Two settings, applied together, prevent that (`src/virtualizers/ch/execute.py`):
@@ -120,8 +120,10 @@ deliberately stricter than everything else (`src/utils/firewall/gateway.py`):
 
 - The accept is re-applied on **every** daemon start, not once when the port is
   first assigned.
-- A port is only persisted after it has been **cleared**, not merely opened. See
-  below: this is the part that used to be assumed.
+- The node **refuses to serve** on a port it has proven unreachable, and proves it
+  before serving anything. See below.
+- A refusal takes nodo's own accept rule back out. A port nothing will answer on
+  does not stay open.
 - `network.GATEWAY_PORT` never resolves to `auto`. No port is a hard error with
   operator instructions, never a plausible-looking default.
 
@@ -132,37 +134,67 @@ nothing — a connect to a local address goes over `lo`, which nearly every
 firewall accepts unconditionally. The probe is tri-state: "could not run" (no
 bridge yet, not root) is reported as unknown, never as closed.
 
-### Clearing a port before storing it
+### Who assigns it, and when
 
-Assignment (`assign_gateway_port`) is stricter than a daemon start, because the
-port it picks is written to `config.yaml` and every peer is then told to use it. A
-port that turns out to be blocked is not a transient failure there — it is a node
-that looks alive and answers nothing.
+Assignment happens in exactly two places, both of which are asking for it:
+`install.sh` (via `src/commands/assign_gateway_port.py`, once, as root, with the
+operator watching) and the daemon's start path
+(`ConfigManager.assign_gateway_port_if_unset`). It used to happen while the config
+*loaded*, which meant any privileged `nodo <anything>` — down to the shell
+completion helper the terminal runs on a Tab keypress — could pick a port, write a
+rule into the host's firewall and edit `config.yaml`. Loading the config now only
+reads it.
 
-The obstacle used to be circular: nothing is listening at assignment time, and a
-connect to a port with no listener fails whether or not the firewall allows it, so
-assignment skipped verification and stored a port no packet had ever traversed.
-The probe now **supplies its own throwaway listener** (`provide_listener`), which
-makes the port checkable before the gateway exists. The kernel completes the
-handshake from the accept queue, so the verdict is the one a real listener would
-get; the firewall cannot tell the difference.
+### Where the port is proven
 
-The decision, in order:
+Assignment (`assign_gateway_port`) opens the port in nodo's ruleset and stores it
+in `config.yaml`. It does not decide whether the port is *reachable* — that is
+answered once, in the daemon's start path, and a negative answer stops the node.
 
-| Probe | Foreign chains that can reject | Outcome |
-|---|---|---|
-| reachable | — | port is stored |
-| **not** reachable | any | refused, with instructions naming what rejects |
-| inconclusive | none | port is stored (nodo's accept is the only verdict on the hook) |
-| inconclusive | some | **refused** — the one check that could have cleared it did not run |
+It was the other way round, and the reason it changed is worth keeping. Assignment
+used to probe the port and refuse to store one it could not clear, which sounds
+strictly safer and was not: nothing can be probed before the guest bridge exists,
+and the bridge was created on the first instance launch. On a host with firewalld
+and no bridge yet, every assignment was refused forever, and the only move left to
+the operator was to pin a port by hand — which went through no check at all. The
+guard did not prevent the bad state; it routed people into the one path with no
+verification on it.
 
-That last row is the Fedora case: a fresh host whose guest bridge does not exist
-yet, with firewalld sitting on the input hook. There is no reason to commit to a
-port there, so `GATEWAY_PORT` stays `auto` and the operator gets the command to
-run. The candidate port itself is remembered in `<main.CACHE>/aux_port`, so the
-port that command mentions is the same one on the next start rather than a fresh
-random pick. An unassigned port stops the node with a message; an unreachable one
-does not, which is the worse of the two.
+So the bridge is now brought up at daemon start (`ensure_guest_bridge`), before the
+port is touched, and the decision is made where it can be acted on:
+
+| Probe, at daemon start | Outcome |
+|---|---|
+| reachable | recorded as proven; the node serves |
+| **not** reachable | **the node does not start**, nodo's accept rule is withdrawn, and the message names what rejects |
+| inconclusive | warning, nothing recorded, node serves; the next start tries again |
+
+The probe supplies its own throwaway listener where nothing is listening yet
+(`provide_listener`), which is what `nodo doctor` uses to give a verdict on a
+stopped node. In the start path the gateway is already listening, so it does not
+need to.
+
+A conclusive *yes* is cached in `<main.CACHE>/gateway_port_passed`, so a restart
+does not rebuild a network namespace to re-answer the same question. The file names
+the port and the boot it was proven in: a port edited in `config.yaml` invalidates
+it (both the Python side and the TUI delete the file on any write to the key), and
+so does a reboot — an operator who opened the port with `firewall-cmd --add-port`
+and no `--permanent` loses the rule there, and a verdict that outlived it would
+skip the one check that catches that.
+
+Anything that leaves the operator with something to do is written to
+`.gateway_notice` beside `config.yaml` and held back until the process exits, so
+it is the last thing on the terminal rather than the middle. `install.sh` prints
+that file as its final act for the same reason.
+
+What the message says about *other* rulesets has three states, not two, because
+"nothing else on this hook rejects" and "the ruleset could not be read" are
+different findings (`RejectorScan`). `nft -j list ruleset` is the fragile part: a
+host whose ruleset includes tables managed by iptables-nft — Docker's, typically —
+can have the JSON listing fail while plain `nft list ruleset` works. Reporting that
+as "nothing found" sent operators looking in the wrong place. `IptablesBackend`
+answers *unreadable* by construction: `iptables -S` cannot see a native nft table,
+so it has nothing to find and must not claim otherwise.
 
 When a port is refused, the message ends with the one command that opens it —
 provided nodo could work out which command that is. It still writes only nftables
@@ -216,8 +248,8 @@ to the end of the chain and is dropped. That covers every published port on this
 node. The supported hook for an exception is `DOCKER-USER`:
 
 ```bash
-iptables -I DOCKER-USER -o br-ch -j ACCEPT   # inbound to the guests
-iptables -I DOCKER-USER -i br-ch -j ACCEPT   # replies and egress
+iptables -I DOCKER-USER -o nodo-br-ch -j ACCEPT   # inbound to the guests
+iptables -I DOCKER-USER -i nodo-br-ch -j ACCEPT   # replies and egress
 ```
 
 Neither rule weakens guest confinement: the node's own drop runs at priority -5,
@@ -232,7 +264,7 @@ apply. Give the bridge a zone of its own with just the gateway port:
 
 ```bash
 firewall-cmd --permanent --new-zone=nodo
-firewall-cmd --permanent --zone=nodo --add-interface=br-ch
+firewall-cmd --permanent --zone=nodo --add-interface=nodo-br-ch
 firewall-cmd --permanent --zone=nodo --add-port=<GATEWAY_PORT>/tcp
 firewall-cmd --reload
 ```
@@ -252,7 +284,7 @@ stopped, which is when you are most likely to be running it.
 | Key | Default | Meaning |
 |---|---|---|
 | `network.GATEWAY_PORT` | *(assigned on first root start)* | the port guests and peers reach the node at |
-| `virtualizers.ch.NETWORK_BRIDGE_NAME` | `br-ch` | guest bridge |
+| `virtualizers.ch.NETWORK_BRIDGE_NAME` | `nodo-br-ch` | guest bridge |
 | `virtualizers.ch.NETWORK_SUBNET` | `192.168.200.0/24` | guest subnet |
 | `virtualizers.ch.NETWORK_GATEWAY_IP` | `192.168.200.1` | the bridge address, as guests see the node |
 | `network.ISOLATE_INTERNAL_CHILDREN` | `true` | a child launched by a local instance is not exposed outside |

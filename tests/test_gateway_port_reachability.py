@@ -11,7 +11,12 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from src.utils.firewall.backends import ForeignRejector, InputRule, NftBackend
+from src.utils.firewall.backends import (
+    ForeignRejector,
+    InputRule,
+    NftBackend,
+    RejectorScan,
+)
 from src.utils.firewall.rules import Chain
 from src.utils.firewall.gateway import (
     GatewayPortUnavailable,
@@ -20,7 +25,7 @@ from src.utils.firewall.gateway import (
 )
 from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
 
-BRIDGE = "br-ch"
+BRIDGE = "nodo-br-ch"
 GATEWAY_IP = "192.168.200.1"
 SUBNET = "192.168.200.0/24"
 PORT = 58443
@@ -114,7 +119,7 @@ class ProbeTests(unittest.TestCase):
         runner = FakeRunner(
             {
                 ("ip", "neigh", "show"): _proc(
-                    0, "192.168.200.254 dev br-ch lladdr 02:aa:bb:cc:dd:ee REACHABLE\n"
+                    0, "192.168.200.254 dev nodo-br-ch lladdr 02:aa:bb:cc:dd:ee REACHABLE\n"
                 ),
             }
         )
@@ -180,21 +185,23 @@ class EnsureGatewayPortOpenTests(unittest.TestCase):
     def setUp(self):
         self.added = []
         self.removed = []
-        self.rejectors = []
+        self.rejectors = RejectorScan()
 
 
     @patch("src.utils.firewall.frontend.detect_frontend", return_value=None)
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
     def test_a_provably_closed_port_stops_the_node(self, mock_probe, _frontend, _euid):
         mock_probe.return_value = ProbeResult(False, "connect refused", source_ip="192.168.200.254")
-        self.rejectors = [
-            ForeignRejector(
-                table="inet firewalld",
-                chain="filter_INPUT",
-                priority=10,
-                reason="contains a reject rule",
+        self.rejectors = RejectorScan(
+            rejectors=(
+                ForeignRejector(
+                    table="inet firewalld",
+                    chain="filter_INPUT",
+                    priority=10,
+                    reason="contains a reject rule",
+                ),
             )
-        ]
+        )
 
         with self.assertRaises(GatewayPortUnavailable) as ctx:
             ensure_gateway_port_open(
@@ -216,7 +223,7 @@ class EnsureGatewayPortOpenTests(unittest.TestCase):
 
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
     def test_an_unknown_result_only_warns(self, mock_probe, _euid):
-        mock_probe.return_value = ProbeResult(None, "bridge br-ch does not exist yet")
+        mock_probe.return_value = ProbeResult(None, "bridge nodo-br-ch does not exist yet")
         logged = []
 
         result = ensure_gateway_port_open(

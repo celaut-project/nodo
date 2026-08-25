@@ -797,22 +797,6 @@ def _doctor_guest_gateway_reachability():
             "opened, or set the key to a port you opened yourself.",
             flush=True
         )
-        # Which port, concretely: it is remembered between attempts precisely so the
-        # operator can open THAT one instead of chasing a new random pick each run.
-        pending = None
-        try:
-            pending = env_manager.pending_gateway_port()
-        except Exception:
-            pass
-        if pending:
-            print(f"  The port it will try next is {pending}.", flush=True)
-            try:
-                from src.utils.firewall.frontend import open_port_advice
-
-                for line in open_port_advice(pending):
-                    print(f"  {line}", flush=True)
-            except Exception:
-                pass
         return
 
     try:
@@ -840,7 +824,7 @@ def _doctor_guest_gateway_reachability():
         )
 
     try:
-        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch"))
+        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch"))
         gateway_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
         subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
     except Exception as e:
@@ -875,14 +859,18 @@ def _doctor_guest_gateway_reachability():
     )
     print(f"  {probe.detail}", flush=True)
 
+    # Three outcomes, all worth saying out loud: chains that can reject, a hook that
+    # is clear, or a ruleset nobody could read. The last one used to print as the
+    # middle one, which told the operator to go looking somewhere else entirely.
     try:
-        rejectors = backend.foreign_input_rejectors()
-    except Exception:
-        rejectors = []
-    if rejectors:
-        print("  Rejecting chains, outside nodo's own ruleset:", flush=True)
-        for rejector in rejectors:
-            print(f"    - {rejector}", flush=True)
+        scan = backend.foreign_input_rejectors()
+    except Exception as e:
+        from src.utils.firewall.backends import RejectorScan
+
+        scan = RejectorScan(readable=False, reason=f"reading the ruleset raised {e!r}")
+    for line in scan.describe():
+        print(f"  {line}", flush=True)
+    if scan.rejectors:
         print(
             "  An accept rule cannot override those: in nftables 'accept' ends its own "
             "chain only, and a reject in another base chain on the same hook still wins "

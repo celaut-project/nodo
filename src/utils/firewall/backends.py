@@ -108,6 +108,43 @@ class ForeignRejector:
 
 
 @dataclass(frozen=True)
+class RejectorScan:
+    """What was found on the input hook outside nodo's own tables -- or that nobody looked.
+
+    Three states, not two. "No rejecting chains" and "the ruleset could not be read"
+    used to arrive as the same empty list, and that ambiguity was load-bearing at
+    the worst possible moment: it decided whether to assign a port, so a backend
+    that cannot read foreign chains at all (``IptablesBackend``) or an ``nft -j``
+    that failed silently both read as "nothing can reject this, go ahead".
+
+    Nothing decides on this any more -- reachability is settled by an actual packet
+    (``reachability.py``). But it is still what the operator is told, and telling
+    them "nothing outside nodo's ruleset rejects this" when nobody checked is its
+    own kind of wrong.
+    """
+
+    rejectors: Tuple[ForeignRejector, ...] = ()
+    readable: bool = True
+    reason: str = ""
+
+    def describe(self) -> List[str]:
+        """The finding, as lines for an operator-facing message."""
+        if not self.readable:
+            return [
+                "Whether anything else on the input hook rejects this port could not "
+                f"be determined: {self.reason}",
+            ]
+        if not self.rejectors:
+            return [
+                "Nothing outside nodo's own ruleset rejects on the input hook, as far "
+                "as the live ruleset shows.",
+            ]
+        return ["Rejecting chains, outside nodo's own ruleset:"] + [
+            f"  - {rejector}" for rejector in self.rejectors
+        ]
+
+
+@dataclass(frozen=True)
 class AppliedRule:
     """A rule nodo owns, as read back from the live ruleset."""
 
@@ -162,12 +199,18 @@ class FirewallBackend(ABC):
     def delete(self, applied: AppliedRule) -> None:
         """Delete a rule previously returned by ``list_rules``."""
 
-    def foreign_input_rejectors(self) -> List[ForeignRejector]:
+    def foreign_input_rejectors(self) -> RejectorScan:
         """Base chains outside nodo's tables that could reject inbound packets.
 
-        Best-effort diagnosis for the operator: never used to decide anything.
+        Unreadable by default, which is the honest answer for a backend that cannot
+        see other tables: ``iptables -S`` lists iptables' own chains, so on a host
+        where firewalld owns a native nft table there is nothing for it to find and
+        "I found nothing" would be a lie. Only ``NftBackend`` can answer this.
         """
-        return []
+        return RejectorScan(
+            readable=False,
+            reason=f"the {self.name} backend cannot read chains outside its own tables",
+        )
 
     # --- the operations callers actually use -------------------------------
 
@@ -363,14 +406,29 @@ class NftBackend(FirewallBackend):
                 f"Could not delete nft rule {applied.handle} in {name}: {_failure_text(proc)}"
             )
 
-    def foreign_input_rejectors(self) -> List[ForeignRejector]:
+    def foreign_input_rejectors(self) -> RejectorScan:
+        """Read the live ruleset and report the input-hook chains that can reject.
+
+        A read that fails comes back as *unreadable*, never as "nothing found". The
+        JSON listing is the fragile part here: a host whose ruleset includes tables
+        managed by iptables-nft -- Docker's, typically -- can have `nft -j list
+        ruleset` fail or return something this cannot parse while plain `nft list
+        ruleset` works perfectly well. Reporting that as an empty result told the
+        operator the input hook was clear when nothing had been read at all.
+        """
         proc = self._nft("-j", "list", "ruleset")
         if proc.returncode != 0:
-            return []
+            return RejectorScan(
+                readable=False,
+                reason=f"'nft -j list ruleset' failed: {_failure_text(proc)}",
+            )
         try:
             data = json.loads(proc.stdout or "{}")
-        except ValueError:
-            return []
+        except ValueError as e:
+            return RejectorScan(
+                readable=False,
+                reason=f"the JSON from 'nft -j list ruleset' could not be parsed: {e}",
+            )
 
         chains: Dict[tuple, dict] = {}
         for item in data.get("nftables") or []:
@@ -423,7 +481,7 @@ class NftBackend(FirewallBackend):
                 )
             )
         rejectors.sort(key=lambda r: (r.priority if r.priority is not None else 0, r.table))
-        return rejectors
+        return RejectorScan(rejectors=tuple(rejectors))
 
 
 def _render_nft(rule: Rule) -> str:

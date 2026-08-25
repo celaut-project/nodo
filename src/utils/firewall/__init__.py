@@ -7,6 +7,7 @@ from src.utils.firewall.backends import (
     InputRule,
     IptablesBackend,
     NftBackend,
+    RejectorScan,
     detect_backend,
 )
 from src.utils.firewall.errors import FirewallError, FirewallUnavailable, RuleError
@@ -17,10 +18,14 @@ from src.utils.firewall.gateway import (
     GatewayPortUnavailable,
     assign_gateway_port,
     cleanup_legacy_rules,
+    defer_operator_notice,
+    drain_operator_notices,
     ensure_gateway_port_open,
+    flush_operator_notices,
     gateway_comment,
     operator_notice,
     unassigned_port_error,
+    withdraw_gateway_port,
 )
 from src.utils.firewall.frontend import Frontend, detect_frontend, open_port_advice
 from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
@@ -43,14 +48,19 @@ __all__ = [
     "IptablesBackend",
     "NftBackend",
     "ProbeResult",
+    "RejectorScan",
     "assign_gateway_port",
     "cleanup_legacy_rules",
+    "defer_operator_notice",
     "detect_backend",
+    "drain_operator_notices",
     "detect_frontend",
     "ensure_gateway_port_open",
+    "flush_operator_notices",
     "gateway_comment",
     "open_port_advice",
     "operator_notice",
     "probe_tcp_from_bridge",
     "unassigned_port_error",
+    "withdraw_gateway_port",
 ]

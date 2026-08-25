@@ -171,13 +171,14 @@ class NftBackendTests(unittest.TestCase):
         backend = NftBackend(
             run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(0, json.dumps(ruleset))})
         )
-        rejectors = backend.foreign_input_rejectors()
+        scan = backend.foreign_input_rejectors()
 
-        self.assertEqual(len(rejectors), 1, rejectors)
-        self.assertEqual(rejectors[0].chain, "filter_INPUT")
-        self.assertIn("firewalld", rejectors[0].table)
-        self.assertEqual(rejectors[0].priority, 10)
-        self.assertIn("reject", rejectors[0].reason)
+        self.assertTrue(scan.readable)
+        self.assertEqual(len(scan.rejectors), 1, scan)
+        self.assertEqual(scan.rejectors[0].chain, "filter_INPUT")
+        self.assertIn("firewalld", scan.rejectors[0].table)
+        self.assertEqual(scan.rejectors[0].priority, 10)
+        self.assertIn("reject", scan.rejectors[0].reason)
 
     def test_a_chain_whose_policy_is_drop_counts_too(self):
         ruleset = {
@@ -189,9 +190,46 @@ class NftBackendTests(unittest.TestCase):
         backend = NftBackend(
             run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(0, json.dumps(ruleset))})
         )
-        rejectors = backend.foreign_input_rejectors()
-        self.assertEqual(len(rejectors), 1)
-        self.assertIn("policy is drop", rejectors[0].reason)
+        scan = backend.foreign_input_rejectors()
+        self.assertEqual(len(scan.rejectors), 1)
+        self.assertIn("policy is drop", scan.rejectors[0].reason)
+
+    def test_a_ruleset_that_could_not_be_read_is_not_a_clear_hook(self):
+        # The difference the third state exists for. Docker's iptables-nft tables can
+        # make the JSON listing fail while plain `nft list ruleset` works, and an
+        # empty result there told the operator the input hook was clear.
+        backend = NftBackend(
+            run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(1, "", "Error: no such file")})
+        )
+        scan = backend.foreign_input_rejectors()
+
+        self.assertFalse(scan.readable)
+        self.assertEqual(scan.rejectors, ())
+        self.assertIn("nft -j list ruleset", scan.reason)
+        self.assertIn("could not be determined", " ".join(scan.describe()))
+
+    def test_unparseable_json_is_not_a_clear_hook_either(self):
+        backend = NftBackend(
+            run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(0, "not json at all")})
+        )
+        scan = backend.foreign_input_rejectors()
+
+        self.assertFalse(scan.readable)
+        self.assertIn("could not be parsed", scan.reason)
+
+    def test_a_genuinely_clear_hook_says_so(self):
+        ruleset = {"nftables": [
+            {"chain": {"family": "inet", "table": "nodo", "name": "input",
+                       "type": "filter", "hook": "input", "prio": -5, "policy": "accept"}},
+        ]}
+        backend = NftBackend(
+            run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(0, json.dumps(ruleset))})
+        )
+        scan = backend.foreign_input_rejectors()
+
+        self.assertTrue(scan.readable)
+        self.assertEqual(scan.rejectors, ())
+        self.assertIn("Nothing outside nodo", " ".join(scan.describe()))
 
 
 class IptablesBackendTests(unittest.TestCase):
