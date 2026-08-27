@@ -220,7 +220,26 @@ class IOBigData(metaclass=Singleton):
                 return
 
 def could_ve_this_sysreq(sysreq: celaut_pb2.Sysresources) -> bool:
-    return IOBigData().prevent_kill(len=sysreq.mem_limit)  
+    """Is there room for an instance that would hold ``sysreq.mem_limit``?
+
+    For a *new* instance, whose whole footprint has yet to be found. An instance
+    that already exists must be asked about with ``could_ve_this_extra_memory``:
+    its current limit is already accounted for, so asking this about its new
+    absolute limit counts the same bytes twice.
+    """
+    return IOBigData().prevent_kill(len=sysreq.mem_limit)
+
+
+def could_ve_this_extra_memory(extra_mem_bytes: int) -> bool:
+    """Is there room for ``extra_mem_bytes`` *on top of* what is already held?
+
+    The question a resize asks. Growth is the only part of a resize that has to be
+    found anywhere: an instance shrinking, or re-affirming the limit it already
+    has, needs nothing from the pool.
+    """
+    if extra_mem_bytes <= 0:
+        return True
+    return IOBigData().prevent_kill(len=extra_mem_bytes)
 
 def _get_nodo_ch_memory_stats() -> tuple[int, int]:
     """Devuelve una tupla con (total_rss_bytes, total_reserved_bytes) en una sola pasada."""

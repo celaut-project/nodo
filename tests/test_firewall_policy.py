@@ -107,6 +107,77 @@ class AllowTests(unittest.TestCase):
         )
 
 
+class AllowHostTests(unittest.TestCase):
+    """A guest reaching the host itself is an input-hook rule, not a forward one.
+
+    The node's gateway port and the guest's resolver live on the bridge's gateway
+    address, which is one of the host's own. A packet addressed there is delivered
+    locally and never traverses forward -- so the allows nodo used to write for them
+    (`allow_connection_rule`, chain FORWARD) could not match a single packet, while
+    the log announced them as granted.
+    """
+
+    GATEWAY = "192.168.200.1"
+
+    def test_the_rule_is_on_the_input_hook(self):
+        rule = policy.allow_host_connection_rule(
+            vmachine_id=VM, vm_ip=VM_IP, host_ip=self.GATEWAY, port=58443, protocol="tcp"
+        )
+        self.assertIs(rule.chain, Chain.INPUT)
+        self.assertIs(rule.verdict, Verdict.ACCEPT)
+
+    def test_it_is_scoped_to_one_guest_and_one_port(self):
+        rule = policy.allow_host_connection_rule(
+            vmachine_id=VM, vm_ip=VM_IP, host_ip=self.GATEWAY, port=58443, protocol="tcp"
+        )
+        self.assertEqual(rule.source, VM_IP)
+        self.assertEqual(rule.destination, self.GATEWAY)
+        self.assertEqual(rule.dport, 58443)
+        # No conntrack state: it has to match every packet of the flow it permits,
+        # because there is no input-side RELATED,ESTABLISHED accept behind it.
+        self.assertEqual(rule.ct_states, ())
+
+    def test_renders_the_same_intent_in_both_backends(self):
+        rule = policy.allow_host_connection_rule(
+            vmachine_id=VM, vm_ip=VM_IP, host_ip=self.GATEWAY, port=53, protocol="udp"
+        )
+        self.assertEqual(
+            iptables(rule),
+            f"-p udp -s {VM_IP} -d {self.GATEWAY} --dport 53 -j ACCEPT "
+            f"-m comment --comment nodo;vm={VM};allow_host;{self.GATEWAY}:53/udp",
+        )
+        self.assertEqual(
+            _render_nft(rule),
+            f'ip saddr {VM_IP} ip daddr {self.GATEWAY} udp dport 53 accept '
+            f'comment "nodo;vm={VM};allow_host;{self.GATEWAY}:53/udp"',
+        )
+
+    def test_its_comment_does_not_collide_with_the_forward_allow(self):
+        # Both can coexist: an upgraded node still carries the old FORWARD rule for
+        # instances that were already running when it restarted.
+        host_rule = policy.allow_host_connection_rule(
+            VM, VM_IP, self.GATEWAY, 58443, "tcp"
+        )
+        forward_rule = policy.allow_connection_rule(
+            VM, VM_IP, self.GATEWAY, 58443, "tcp"
+        )
+        self.assertNotEqual(host_rule.comment, forward_rule.comment)
+
+    def test_teardown_still_reaches_it_by_the_vm_prefix(self):
+        rule = policy.allow_host_connection_rule(
+            VM, VM_IP, self.GATEWAY, 58443, "tcp"
+        )
+        self.assertTrue(rule.comment.startswith(policy.vm_comment_prefix(VM)))
+
+    def test_a_malformed_host_address_never_reaches_the_firewall(self):
+        for bad in ("", "not-an-ip", "192.168.200.999", "; rm -rf /"):
+            with self.subTest(address=bad):
+                with self.assertRaises(RuleError):
+                    policy.allow_host_connection_rule(
+                        VM, VM_IP, bad, 58443, "tcp"
+                    )
+
+
 class MasqueradeTests(unittest.TestCase):
     def test_nats_the_subnet_only_on_the_way_out(self):
         rule = policy.masquerade_rule(SUBNET)

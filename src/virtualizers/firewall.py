@@ -131,23 +131,37 @@ def ensure_forward_related_established_rule() -> bool:
     return True
 
 
-def allow_connection(
+# There is no ``allow_connection`` here on purpose. A bare "let this guest reach
+# this ip:port" had two callers, both of them host destinations, and both now go
+# through ``allow_host_connection`` below. What remains of the routed case is
+# ``allow_connection_to_instance``, which is the shape callers actually hold (an
+# Instance with its slots and protocols); it reaches the forward-hook allow inside
+# ``ch.firewall`` directly. A dispatcher wrapper nobody dispatches through is worse
+# than none: it is dead code that its own tests make look alive.
+def allow_host_connection(
     vmachine_id: str,
-    ip: str,
+    host_ip: str,
     port: Optional[int] = None,
     protocol: TransportProtocol = TransportProtocol.TCP,
     source_ip: Optional[str] = None,
 ) -> bool:
-    if not ensure_forward_related_established_rule():
-        return False
+    """A guest reaching a service on this host: an input-hook rule, not a forward one.
 
+    No ``ensure_forward_related_established_rule`` here, unlike the forward-side
+    allows: that accept exists so return traffic for an allowed *forwarded*
+    connection is not re-evaluated against the blanket drop. This rule carries no
+    conntrack state of its own, so it already matches every packet of the flow it
+    permits, and the host's reply leaves through output.
+    """
     virtualizer = _resolve_virtualizer(vmachine_id)
     if virtualizer in ("ch", "qemu"):
-        from src.virtualizers.ch.firewall import allow_connection as ch_allow_connection
+        from src.virtualizers.ch.firewall import (
+            allow_host_connection as ch_allow_host_connection,
+        )
 
-        return ch_allow_connection(
+        return ch_allow_host_connection(
             vmachine_id=vmachine_id,
-            ip=ip,
+            host_ip=host_ip,
             port=port,
             protocol=protocol,
             source_ip=source_ip,

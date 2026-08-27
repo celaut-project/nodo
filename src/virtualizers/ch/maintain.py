@@ -53,9 +53,16 @@ def janitor_cleanup_orphans(debug_mode: bool = False) -> None:
         pid = int((state or {}).get("pid") or 0)
         in_db = sc.internal_instance_exists(id=vmachine_id)
         alive = pid_alive(pid, vmachine_id=vmachine_id) if pid > 0 else False
+        # `execute` writes the state file the instant the hypervisor process exists
+        # and registers the instance immediately after (see `save_booting_state`),
+        # so for the width of those two writes a live VM legitimately has no row
+        # yet. Killing it there would race the launcher for the VM it is still
+        # setting up. Nothing leaks: a boot that fails deletes its own state, and a
+        # process that dies is still caught below, `booting` or not.
+        booting = bool((state or {}).get("booting")) and alive
 
         reason = None
-        if not in_db:
+        if not in_db and not booting:
             reason = "orphan_runtime_state"
         elif not alive:
             reason = "stale_runtime_process_dead"

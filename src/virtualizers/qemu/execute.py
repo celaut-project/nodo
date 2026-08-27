@@ -36,7 +36,7 @@ import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
@@ -46,7 +46,7 @@ from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.virtualizers.ch import execute as ch_exec
 from src.virtualizers.ch import limits
 from src.virtualizers.ch.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
-from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state
+from src.virtualizers.ch.runtime_state import save_runtime_state, save_booting_state, delete_runtime_state
 from src.virtualizers.ch.virtiofs import (
     attach_virtiofs_backends,
     build_guest_mount_plan,
@@ -253,13 +253,16 @@ def execute(
     config: Optional[celaut.Configuration],
     initial_system_resources: celaut.Sysresources,
     father_id: str,
+    register_instance: Optional[Callable[[str, str, celaut.Sysresources], None]] = None,
 ) -> Tuple[str, str, celaut.Sysresources]:
     """Emulated counterpart of :func:`src.virtualizers.ch.execute.execute`.
 
     Same contract: build the guest from its bundle, wire host networking and
     firewall, boot it, wait for the guest to come up, and return
     ``(vmachine_id, vm_ip, resolved_resources)``. Only the hypervisor process
-    differs.
+    differs -- including ``register_instance``, which is called the instant the
+    emulator process exists so the node can identify the guest by its address
+    before the guest calls in.
     """
     vmachine_id = ch_exec._generate_vmachine_id()
     runtime_dir = _runtime_vm_dir(vmachine_id)
@@ -334,13 +337,6 @@ def execute(
                 guest_target=target_path,
             )
 
-        hosts_host_path, resolv_host_path, domain_records = ch_exec._prepare_guest_dns_files(
-            runtime_dir=runtime_dir,
-            network_resolution=network_resolution,
-        )
-        ch_exec._run_debugfs_write(image_path=rootfs_path, host_file=hosts_host_path, guest_target="/etc/hosts")
-        ch_exec._run_debugfs_write(image_path=rootfs_path, host_file=resolv_host_path, guest_target="/etc/resolv.conf")
-
         with open(entrypoint_host_path, "w", encoding="utf-8") as f:
             f.write(f"{resolved_entrypoint}\n")
         ch_exec._run_debugfs_write(
@@ -348,7 +344,10 @@ def execute(
             host_file=entrypoint_host_path,
             guest_target="/.__nodo_entrypoint",
         )
-        log.LOGGER(f"[QEMU][{vmachine_id}] guest metadata injected (config/dns/entrypoint)")
+        # No /etc/hosts nor /etc/resolv.conf: name resolution is not the node's to
+        # install in someone else's filesystem. See the note above
+        # `_configure_guest_firewall_policy` in src/virtualizers/ch/execute.py.
+        log.LOGGER(f"[QEMU][{vmachine_id}] guest metadata injected (config/entrypoint)")
 
         # Shared filesystems (parent -> child inheritance). Identical semantics to
         # CH; only the guest device wiring (vhost-user-fs vs CH --fs) differs.
@@ -385,6 +384,15 @@ def execute(
 
         tap_name = ch_exec._create_tap(vmachine_id)
         log.LOGGER(f"[QEMU][{vmachine_id}] TAP created and attached: {tap_name}")
+
+        # Committed before the guest exists, not after it starts pinging. See
+        # src/virtualizers/ch/execute.py for why: none of this needs the guest to
+        # be alive, and the tap above is already forwarding-capable.
+        ch_exec._configure_guest_firewall_policy(
+            vmachine_id=vmachine_id,
+            vm_ip=vm_ip,
+            network_resolution=network_resolution,
+        )
 
         vcpus, mem_b, cpu_quota, cpu_period = limits.resolve_initial_resources(initial_system_resources)
         disk_b = ch_exec._runtime_disk_bytes(vmachine_id=vmachine_id, rootfs_path=rootfs_path)
@@ -437,6 +445,24 @@ def execute(
             f"[QEMU][{vmachine_id}] process started: pid={process.pid}, visible_name={process_args[0]}"
         )
 
+        # The guest is running from here; record it before it can call the node.
+        # See src/virtualizers/ch/execute.py for why this is not left to the end.
+        save_booting_state(
+            vmachine_id,
+            virtualizer="qemu",
+            service_id=service_id,
+            pid=process.pid,
+            ip=vm_ip,
+            mac=mac,
+            tap=tap_name,
+            bridge=NETWORK_BRIDGE_NAME,
+            cleanup_rules=cleanup_rules,
+            rule_comment_prefix=fw_policy.vm_comment_prefix(vmachine_id),
+        )
+        if register_instance:
+            register_instance(vmachine_id, vm_ip, resolved_resources)
+            log.LOGGER(f"[QEMU][{vmachine_id}] instance registered before the guest could call in")
+
         time.sleep(1.0)
         if process.poll() is not None:
             raise QEMUExecuteError(
@@ -457,11 +483,6 @@ def execute(
             vm_ip=vm_ip,
             timeout_s=network_timeout_s,
             serial_log_path=serial_log_path,
-        )
-        ch_exec._configure_guest_firewall_policy(
-            vmachine_id=vmachine_id,
-            vm_ip=vm_ip,
-            network_resolution=network_resolution,
         )
         log.LOGGER(f"[QEMU][{vmachine_id}] event=ready")
 
@@ -513,9 +534,6 @@ def execute(
                 "dnat_rules": dnat_rules_state,
                 "cleanup_rules": cleanup_rules,
                 "rule_comment_prefix": fw_policy.vm_comment_prefix(vmachine_id),
-                "dns_allowlist": [
-                    {"domain": domain, "ip": ip} for domain, ip in domain_records
-                ],
                 "cgroup_path": vm_cgroup.as_posix(),
                 "qmp_socket": str(qmp_socket_path),
                 "boot_mem_bytes": mem_b,

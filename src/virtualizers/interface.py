@@ -1,6 +1,7 @@
 from src.virtualizers.ch.build import is_service_built as ch_is_service_built
 from src.virtualizers.ch.build import build as ch_build
 from src.virtualizers.ch.build import built_rootfs_size_bytes as ch_built_rootfs_size_bytes
+from src.virtualizers.ch.build import remove_built_service as ch_remove_built_service
 from src.virtualizers.ch.limits import billable_resources as ch_billable_resources
 from src.virtualizers.ch.execute import execute as ch_execute
 from src.virtualizers.ch.hotplug import hotplug as ch_hotplug
@@ -67,6 +68,15 @@ def _resolve_instance_virtualizer(vmachine_id: str) -> str:
 def is_built(service_hash: str) -> bool:
     """Check if a service with the given hash is already built."""
     return ch_is_service_built(service_hash)
+
+def remove_built_service(service_hash: str) -> int:
+    """Delete what building this service left on disk; return the bytes freed.
+
+    One implementation for both backends, because there is only one build cache:
+    QEMU boots the bundles CH builds (``qemu/execute.py`` loads them through
+    ``ch_exec._load_bundle``), so there is nothing to route between.
+    """
+    return ch_remove_built_service(service_id=service_hash)
 
 def resolve_billable_resources(
         resources: celaut_pb2.Sysresources,
@@ -158,6 +168,7 @@ def execute(
         config: Optional[celaut_pb2.Configuration],
         initial_system_resources: celaut_pb2.Sysresources,
         father_id: str,
+        register_instance: Optional[Callable[[str, str, celaut_pb2.Sysresources], None]] = None,
 ) -> Tuple[str, str, celaut_pb2.Sysresources]:
     """
     Execute a built service and return (vmachine_id, vmachine_ip, resolved_resources).
@@ -166,6 +177,12 @@ def execute(
     defaults and floors already applied -- so the launcher persists what the instance
     holds rather than what its manifest requested (#249). A field left at 0 means the
     virtualizer does not resolve it, and the launcher falls back to the manifest.
+
+    ``register_instance`` is how the launcher gets those three values *before* this
+    returns: every backend calls it the instant the guest starts running, which is
+    also the instant the guest can call the node back. Waiting for the return value
+    to record the instance left a window in which the node could not tell who was
+    calling it (see the backends' own docstrings).
 
     The backend is chosen per service by :func:`select_virtualizer` on the same
     ``service`` the launcher used to record the ``virtualizer`` column, so the row
@@ -182,6 +199,7 @@ def execute(
             config=config,
             initial_system_resources=initial_system_resources,
             father_id=father_id,
+            register_instance=register_instance,
         )
     return ch_execute(
         assigment_ports=assigment_ports,
@@ -191,6 +209,7 @@ def execute(
         config=config,
         initial_system_resources=initial_system_resources,
         father_id=father_id,
+        register_instance=register_instance,
     )
 
 def remove_firewall_rule(

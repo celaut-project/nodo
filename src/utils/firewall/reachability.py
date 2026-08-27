@@ -15,12 +15,17 @@ same input hook, same verdict.
 Root-only, and deliberately best-effort: when the bridge does not exist yet (a
 fresh node that has never run an instance) the answer is "unknown", not "closed".
 The same goes for a port nothing is listening on -- see ``_listener_present``.
+
+The namespace is entered with ``nsenter``, not with iproute2's own switch, for the
+reason spelled out in ``NamespaceEntry``: ``ip -n`` remounts /sys, and a host that
+forbids that mount could never verify its own gateway port.
 """
 
 import contextlib
 import ipaddress
 import os
 import random
+import shutil
 import socket
 import subprocess
 import sys
@@ -129,6 +134,55 @@ def _temporary_listener(port: int):
         yield True
     finally:
         sock.close()
+
+
+# Where ``ip netns add`` publishes the namespace it just created. /var/run is a
+# symlink to /run on any host this runs on, but both are looked at rather than
+# assumed.
+NETNS_MOUNT_DIRS = ("/run/netns", "/var/run/netns")
+
+
+@dataclass(frozen=True)
+class NamespaceEntry:
+    """How to run something inside the probe's network namespace.
+
+    ``ip -n`` and ``ip netns exec`` do more than enter a network namespace: they
+    unshare the mount namespace and mount a fresh sysfs over /sys, so that
+    /sys/class/net describes the namespace they entered. Where that mount is
+    refused, iproute2 fails with ``mount of /sys failed: Permission denied`` and
+    the probe can only answer "unknown" -- which is exactly what a node running as
+    a systemd service on an SELinux host reported: ``ip`` runs there in the
+    ``ifconfig_t`` domain, which is denied ``mounton`` over /sys, while the same
+    probe from an interactive root shell (a different domain) went through. Being
+    root is not what decides it, so root is not enough to assume it works.
+
+    Nothing this module does inside the namespace needs sysfs: ``ip addr``/``ip
+    link`` speak netlink, and the connect is a plain socket. ``nsenter --net=<netns
+    path>`` enters the network namespace and touches no mounts at all, so it is
+    preferred. iproute2 stays as the fallback for a host with no nsenter, where it
+    is the only way in -- best effort, same as before.
+    """
+
+    exec_prefix: tuple  # prefix for an arbitrary command
+    ip_prefix: tuple    # prefix for an `ip` subcommand
+    name: str           # how it gets in, for the operator-facing detail
+
+
+def _namespace_entry(namespace: str) -> NamespaceEntry:
+    nsenter = shutil.which("nsenter")
+    if nsenter:
+        for directory in NETNS_MOUNT_DIRS:
+            path = os.path.join(directory, namespace)
+            if os.path.exists(path):
+                entry = (nsenter, f"--net={path}")
+                return NamespaceEntry(
+                    exec_prefix=entry, ip_prefix=entry + ("ip",), name="nsenter"
+                )
+    return NamespaceEntry(
+        exec_prefix=("ip", "netns", "exec", namespace),
+        ip_prefix=("ip", "-n", namespace),
+        name="ip netns exec",
+    )
 
 
 def _addresses_in_use(run: Runner, bridge: str) -> Set[str]:
@@ -248,23 +302,29 @@ def probe_tcp_from_bridge(
             return ProbeResult(None, f"could not create veth pair: {_text(add_link)}")
         created_link = True
 
+        # Resolved once the namespace exists, because nsenter needs a path to it.
+        entry = _namespace_entry(namespace)
+
         for args in (
             ["ip", "link", "set", host_veth, "master", bridge],
             ["ip", "link", "set", host_veth, "up"],
             ["ip", "link", "set", guest_veth, "netns", namespace],
-            ["ip", "-n", namespace, "link", "set", "lo", "up"],
-            ["ip", "-n", namespace, "addr", "add", f"{source_ip}/{prefix_len}", "dev", guest_veth],
-            ["ip", "-n", namespace, "link", "set", guest_veth, "up"],
+            [*entry.ip_prefix, "link", "set", "lo", "up"],
+            [*entry.ip_prefix, "addr", "add", f"{source_ip}/{prefix_len}", "dev", guest_veth],
+            [*entry.ip_prefix, "link", "set", guest_veth, "up"],
         ):
             proc = runner(args)
             if proc.returncode != 0:
-                return ProbeResult(None, f"could not set up the probe interface: {_text(proc)}")
+                return ProbeResult(
+                    None,
+                    f"could not set up the probe interface (via {entry.name}): {_text(proc)}",
+                )
 
         last = ""
         for attempt in range(1, max(1, attempts) + 1):
             connect = runner(
                 [
-                    "ip", "netns", "exec", namespace,
+                    *entry.exec_prefix,
                     sys.executable, "-c", _CONNECT_SNIPPET,
                     target_ip, str(port), str(connect_timeout_s),
                 ]
