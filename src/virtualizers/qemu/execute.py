@@ -94,6 +94,13 @@ def _runtime_vm_dir(vmachine_id: str) -> Path:
     return Path(CACHE) / "cloud_hypervisor" / "runtime" / vmachine_id
 
 
+def _qmp_socket_path(vmachine_id: str) -> Path:
+    # Kept in the short CH API socket dir, not runtime_dir, to stay under the
+    # AF_UNIX SUN_LEN limit (runtime_dir is nested under CACHE and keyed by the
+    # full 64-hex vmachine_id, which alone can exceed the 108-byte limit).
+    return Path(CH_API_SOCKET_DIR) / f"qmp-{vmachine_id[:16]}.sock"
+
+
 # --------------------------------------------------------------------------- #
 # Pure builders — unit-tested directly, no side effects.
 # --------------------------------------------------------------------------- #
@@ -275,7 +282,7 @@ def execute(
     stdout_path = runtime_dir / "qemu.stdout.log"
     stderr_path = runtime_dir / "qemu.stderr.log"
     serial_log_path = runtime_dir / "qemu.serial.log"
-    qmp_socket_path = runtime_dir / "qmp.sock"
+    qmp_socket_path = _qmp_socket_path(vmachine_id)
     resolved_entrypoint: Optional[str] = None
 
     try:
@@ -316,6 +323,8 @@ def execute(
         log.LOGGER(f"[QEMU][{vmachine_id}] deterministic networking: ip={vm_ip}, mac={mac}")
 
         runtime_dir.mkdir(parents=True, exist_ok=True)
+        qmp_socket_path.parent.mkdir(parents=True, exist_ok=True)
+        log.LOGGER(f"[QEMU][{vmachine_id}] QMP socket dir prepared: {qmp_socket_path.parent}")
         shutil.copy2(bundle["rootfs_path"], rootfs_path)
         log.LOGGER(f"[QEMU][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
 
