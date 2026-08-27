@@ -28,12 +28,17 @@ from src.virtualizers.qemu.process import pid_matches_vmachine
 
 env_manager = ConfigManager()
 CACHE = env_manager.get("CACHE")
+CH_API_SOCKET_DIR = env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch")
 
 
 def _runtime_dir(vmachine_id: str) -> Optional[Path]:
     if not CACHE:
         return None
     return Path(CACHE) / "cloud_hypervisor" / "runtime" / vmachine_id
+
+
+def _qmp_socket_path(vmachine_id: str) -> Path:
+    return Path(CH_API_SOCKET_DIR) / f"qmp-{vmachine_id[:16]}.sock"
 
 
 def _kill_pid(vmachine_id: str, pid: int) -> None:
@@ -75,6 +80,7 @@ def kill(vmachine_id: str) -> bool:
     cleanup_rules: List[List[str]] = state.get("cleanup_rules") or []
     cgroup_path = str(state.get("cgroup_path") or "")
     runtime_dir = _runtime_dir(vmachine_id)
+    qmp_socket = str(state.get("qmp_socket") or "").strip()
 
     log.LOGGER(f"[QEMU][{vmachine_id}] event=kill requested")
     _kill_pid(vmachine_id=vmachine_id, pid=pid)
@@ -86,6 +92,15 @@ def kill(vmachine_id: str) -> bool:
     _cleanup_vm_firewall_rules(vmachine_id=vmachine_id)
     _cleanup_tap(vmachine_id=vmachine_id, tap_name=tap_name)
     remove_vm_cgroup(vmachine_id=vmachine_id, cgroup_path=cgroup_path)
+
+    # qmp.sock lives in the short CH_API_SOCKET_DIR, not runtime_dir (see
+    # execute.py:_qmp_socket_path), so it must be unlinked explicitly.
+    qmp_socket_path = Path(qmp_socket) if qmp_socket else _qmp_socket_path(vmachine_id)
+    try:
+        qmp_socket_path.unlink(missing_ok=True)
+        log.LOGGER(f"[QEMU][{vmachine_id}] event=cleanup qmp_socket_removed={qmp_socket_path}")
+    except Exception as e:
+        log.LOGGER(f"[QEMU][{vmachine_id}] failed removing QMP socket {qmp_socket_path}: {e}")
 
     try:
         if runtime_dir and runtime_dir.exists():
