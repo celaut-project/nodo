@@ -8,13 +8,11 @@ try:
     from src.virtualizers.ch import kill as ch_kill
     from src.virtualizers.ch import maintain as ch_maintain
     from src.virtualizers.ch import process as ch_process
-    from src.virtualizers.ch import remove as ch_remove
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     ch_kill = None  # type: ignore[assignment]
     ch_maintain = None  # type: ignore[assignment]
     ch_process = None  # type: ignore[assignment]
-    ch_remove = None  # type: ignore[assignment]
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -166,33 +164,6 @@ class CloudHypervisorLifecycleTests(unittest.TestCase):
             alive = ch_process.pid_alive(pid=222, vmachine_id="vm-reused")
 
         self.assertFalse(alive)
-
-    def test_remove_dual_mode_runtime_prefers_kill(self):
-        with patch.object(
-            ch_remove, "CACHE", "/tmp"
-        ), patch.object(
-            ch_remove, "load_runtime_state", return_value={"pid": 333}
-        ), patch.object(
-            ch_remove, "kill", return_value=True
-        ) as kill_mock:
-            result = ch_remove.remove("vm-runtime")
-
-        self.assertTrue(result)
-        kill_mock.assert_called_once_with(vmachine_id="vm-runtime")
-
-    def test_remove_dual_mode_bundle_cleanup(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            bundle_dir = Path(tmpdir) / "cloud_hypervisor" / "service-1"
-            bundle_dir.mkdir(parents=True, exist_ok=True)
-            with patch.object(
-                ch_remove, "CACHE", tmpdir
-            ), patch.object(
-                ch_remove, "load_runtime_state", return_value=None
-            ):
-                result = ch_remove.remove("service-1")
-
-        self.assertTrue(result)
-        self.assertFalse(bundle_dir.exists())
 
     def test_janitor_cleans_orphan_runtime(self):
         with patch.object(

@@ -123,7 +123,19 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for modify service system resources.')
-        token = get_internal_service_id_by_uri(uri=get_only_the_ip_from_context(context_peer=context.peer()))
+        caller_ip = get_only_the_ip_from_context(context_peer=context.peer())
+        token = get_internal_service_id_by_uri(uri=caller_ip)
+        # Two different failures used to share one message. Charging an unknown
+        # caller fails because there is nobody to charge, and reporting that as
+        # "Error charging" pointed at the price of the call instead of at the fact
+        # that the node did not recognise the address it came from -- which is what
+        # the caller and the operator need to know, and what they were told for a
+        # guest that called in before its instance was registered.
+        if not token:
+            raise Exception(
+                f'No local instance is registered at {caller_ip}, so this node cannot tell '
+                f'which instance is asking to change its resources ({context.peer()}).'
+            )
         refund_container = []
         if not spend_mu(
                 id=token,

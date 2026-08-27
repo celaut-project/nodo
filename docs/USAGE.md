@@ -57,8 +57,13 @@ These are the most commonly used commands for daily tasks:
   `nodo estimate my_service_tag`  
   `nodo estimate ./my-service.celaut.bee`
 
-- **remove `<service id>`** (requires root)  
-  Removes a service from the node using its ID.  
+- **remove `<service id | service tag>`** (requires root)  
+  Removes a service from the node: its registry entry, its metadata entry, and its
+  built image (the guest rootfs cached under `CACHE/cloud_hypervisor/<id>/<arch>`,
+  which is normally the bulk of the disk a service holds). Reports the bytes freed,
+  or that no image was cached. Running instances of the service are not stopped --
+  each already holds its own copy of the image -- and are counted in the output if any
+  exist; the next `nodo execute` of that service rebuilds it.  
   **Example:**  
   `sudo nodo remove 1234567890abcdef`
 

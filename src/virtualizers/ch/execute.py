@@ -11,7 +11,7 @@ import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
@@ -33,7 +33,12 @@ from src.virtualizers.ch import initramfs as ch_initramfs
 # Which serial device the guest exposes is architecture-determined; doctor.py builds
 # a cmdline too, and the two must not disagree.
 from src.virtualizers.ch import guest as ch_guest
-from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
+from src.virtualizers.ch.runtime_state import (
+    save_runtime_state,
+    save_booting_state,
+    delete_runtime_state,
+    list_runtime_states,
+)
 from src.virtualizers.ch.virtiofs import (
     attach_virtiofs_backends,
     build_guest_mount_plan,
@@ -46,8 +51,8 @@ from src.virtualizers.entry_path import resolve_entrypoint_path
 from src.utils.firewall import policy as fw_policy
 from src.virtualizers.firewall import (
     TransportProtocol,
-    allow_connection as vm_allow_connection,
     allow_connection_to_instance as vm_allow_connection_to_instance,
+    allow_host_connection as vm_allow_host_connection,
     block_all as vm_block_all,
     allow_all_egress as vm_allow_all_egress,
     remove_vm_rules as vm_remove_vm_rules,
@@ -714,67 +719,32 @@ def _resolve_guest_config_targets(service: celaut.Service) -> List[str]:
     return ["/__config__"]
 
 
-def _is_domain_tag(tag: str) -> bool:
-    text = str(tag).strip().lower()
-    if not text or "." not in text or " " in text:
-        return False
-    return all(ch.isalnum() or ch in {"-", "."} for ch in text)
-
-
-def _resolve_domain_allowlist_records(
-    network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
-) -> List[Tuple[str, str]]:
-    records: set[Tuple[str, str]] = set()
-
-    for net_res in network_resolution:
-        domains = [str(tag).strip().lower() for tag in net_res.tags if _is_domain_tag(tag)]
-        if not domains:
-            continue
-
-        ips: set[str] = set()
-        for instance in net_res.peer_instances:
-            for slot in instance.uri_slot:
-                for uri in slot.uri:
-                    ip_text = str(uri.ip).strip()
-                    if not ip_text:
-                        continue
-                    try:
-                        parsed = ipaddress.ip_address(ip_text)
-                    except ValueError:
-                        continue
-                    if parsed.version != 4:
-                        continue
-                    ips.add(ip_text)
-
-        for domain in domains:
-            for ip in ips:
-                records.add((domain, ip))
-
-    return sorted(records, key=lambda item: (item[0], item[1]))
-
-
-def _prepare_guest_dns_files(
-    runtime_dir: Path,
-    network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
-) -> Tuple[Path, Path, List[Tuple[str, str]]]:
-    domain_records = _resolve_domain_allowlist_records(network_resolution)
-
-    hosts_lines = ["127.0.0.1 localhost"]
-    for domain, ip in domain_records:
-        hosts_lines.append(f"{ip} {domain}")
-    hosts_content = "\n".join(hosts_lines) + "\n"
-
-    resolv_content = f"nameserver {NETWORK_GATEWAY_IP}\noptions ndots:1\n"
-
-    hosts_host_path = runtime_dir / ".__nodo_hosts"
-    resolv_host_path = runtime_dir / ".__nodo_resolv.conf"
-
-    with open(hosts_host_path, "w", encoding="utf-8") as f:
-        f.write(hosts_content)
-    with open(resolv_host_path, "w", encoding="utf-8") as f:
-        f.write(resolv_content)
-
-    return hosts_host_path, resolv_host_path, domain_records
+# Name resolution is deliberately not nodo's business.
+#
+# This module used to resolve every network tag that looked like a domain and write
+# the answers into the guest's own /etc/hosts, plus an /etc/resolv.conf naming the
+# bridge address as the guest's nameserver. Both are gone, because both were wrong
+# in the same way: the node reached into a filesystem it does not own to install a
+# glibc-specific convention that the service could neither declare, refuse, nor
+# receive in a format of its choosing -- which is precisely what
+# `Container.ConfigDeclaration` exists to avoid.
+#
+# What the node owes a guest is the DATA, and it already delivers it the declared
+# way: `ConfigurationFile.network_resolution` (tags -> peer Instances, each with its
+# uri_slot and protocol stack) inside `__config__`, at the path and format the
+# service declared. That is strictly richer than a hosts file -- it carries ports,
+# protocols and env-filtered peers, and it is not frozen at launch the way a
+# resolved A record is.
+#
+# Name resolution on top of that is a service's job, and the ecosystem already does
+# it: a service reads `network_resolution` from its own `__config__` and serves DNS
+# from it for whatever inside the guest wants `getaddrinfo`. The injected
+# resolv.conf actively broke that -- it pointed the guest at the bridge address,
+# where nodo listens for gRPC and nothing answers on 53, instead of leaving the
+# guest's own resolver reachable.
+#
+# A `Network` in the spec is "a logical communication domain", identified by tags.
+# Reading a tag as a DNS hostname was nodo's invention, not the model's.
 
 
 def _configure_guest_firewall_policy(
@@ -787,38 +757,34 @@ def _configure_guest_firewall_policy(
             f"Failed to apply default deny firewall policy for VM {vmachine_id} ({vm_ip})."
         )
 
-    # Read here rather than at import: the port is assigned by the daemon, which
+    # NETWORK_GATEWAY_IP is one of this host's own addresses, so this allow goes on
+    # the *input* hook. Written as an ordinary egress allow -- which is what it was
+    # -- it landed in FORWARD, which a packet addressed to the host never traverses:
+    # the rule could not match anything, while the log announced it as granted
+    # access. See `policy.allow_host_connection_rule`.
+    #
+    # This is the only service of the node's own that a guest is given access to.
+    # There is no rule for port 53: nodo does not serve DNS, and a guest that wants
+    # name resolution gets it from a service (see the note above
+    # `_configure_guest_firewall_policy`), reached through the ordinary peer-instance
+    # allows or inside its own container.
+    #
+    # Read the port here rather than at import: it is assigned by the daemon, which
     # may well happen after this module was first loaded.
     gateway_port = env_manager.get_gateway_port()
-    if not vm_allow_connection(
+    if not vm_allow_host_connection(
         vmachine_id=vmachine_id,
-        ip=NETWORK_GATEWAY_IP,
+        host_ip=NETWORK_GATEWAY_IP,
         port=gateway_port,
         protocol=TransportProtocol.TCP,
         source_ip=vm_ip,
     ):
         raise CHExecuteError(
-            f"Failed to allow gateway egress for VM {vmachine_id}: "
+            f"Failed to allow gateway access for VM {vmachine_id}: "
             f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
         )
     log.LOGGER(
         f"[CH][{vmachine_id}] firewall allow gateway: {vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
-    )
-
-    for dns_protocol in (TransportProtocol.UDP, TransportProtocol.TCP):
-        if not vm_allow_connection(
-            vmachine_id=vmachine_id,
-            ip=NETWORK_GATEWAY_IP,
-            port=53,
-            protocol=dns_protocol,
-            source_ip=vm_ip,
-        ):
-            raise CHExecuteError(
-                f"Failed to allow DNS egress for VM {vmachine_id}: "
-                f"{vm_ip} -> {NETWORK_GATEWAY_IP}:53/{dns_protocol.value}"
-            )
-    log.LOGGER(
-        f"[CH][{vmachine_id}] firewall allow DNS: {vm_ip} -> {NETWORK_GATEWAY_IP}:53/tcp,udp"
     )
 
     # Network tag "*" => open-internet egress. Allow-all is inserted at the head
@@ -919,7 +885,22 @@ def execute(
     config: Optional[celaut.Configuration],
     initial_system_resources: celaut.Sysresources,
     father_id: str,
+    register_instance: Optional[Callable[[str, str, celaut.Sysresources], None]] = None,
 ) -> Tuple[str, str, celaut.Sysresources]:
+    """Boot ``service`` as a microVM and return (vmachine_id, vm_ip, resolved).
+
+    ``register_instance`` is called once, with those same three values, the instant
+    the hypervisor process exists -- not when this function returns. A guest starts
+    running code while the rest of this function is still waiting for its network,
+    applying firewall rules and recording DNAT, and a service's first act is often
+    a call back to the node: an observed one asked for ModifyServiceSystemResources
+    less than a second after boot. Everything the node knows about a caller it looks
+    up by source address, so an instance it has not recorded yet is a caller it
+    cannot identify -- and it answered that first call with
+    ``Error charging for the resource change of <ip>``, because the charge is where
+    the missing row was first noticed. Hence the callback here rather than at the
+    call site: only the backend knows when the guest becomes able to speak.
+    """
     vmachine_id = _generate_vmachine_id()
     runtime_dir = _runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []
@@ -1009,25 +990,6 @@ def execute(
             )
         log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed for {len(config_targets)} target(s)")
 
-        hosts_host_path, resolv_host_path, domain_records = _prepare_guest_dns_files(
-            runtime_dir=runtime_dir,
-            network_resolution=network_resolution,
-        )
-        _run_debugfs_write(
-            image_path=rootfs_path,
-            host_file=hosts_host_path,
-            guest_target="/etc/hosts",
-        )
-        _run_debugfs_write(
-            image_path=rootfs_path,
-            host_file=resolv_host_path,
-            guest_target="/etc/resolv.conf",
-        )
-        log.LOGGER(
-            f"[CH][{vmachine_id}] guest DNS metadata injected: /etc/hosts + /etc/resolv.conf "
-            f"(allowed_domains={len(domain_records)}, resolver={NETWORK_GATEWAY_IP})"
-        )
-
         with open(entrypoint_host_path, "w", encoding="utf-8") as f:
             f.write(f"{resolved_entrypoint}\n")
         log.LOGGER(f"[CH][{vmachine_id}] entrypoint metadata serialized: {entrypoint_host_path}")
@@ -1086,6 +1048,23 @@ def execute(
         tap_name = _create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
+
+        # Committed to the FORWARD chain before the guest exists, not after it
+        # starts pinging. Nothing this needs -- vm_ip, the gateway's address and
+        # port, network_resolution -- depends on the guest being alive; every one
+        # of them was already resolved above, to build this VM's own config. The
+        # tap is enslaved to the bridge as of the line above, so it is already
+        # forwarding-capable: a policy applied any later (this used to run after
+        # `_wait_guest_network_ready`, seconds from now) left a real window in
+        # which a booting guest's traffic answered only to the host's own default
+        # FORWARD policy -- unrestricted on a plain install -- instead of nodo's
+        # allow-list. This is that policy's only chance to be in place before a
+        # single packet could have been forwarded.
+        _configure_guest_firewall_policy(
+            vmachine_id=vmachine_id,
+            vm_ip=vm_ip,
+            network_resolution=network_resolution,
+        )
 
         vcpus, mem_b, cpu_quota, cpu_period = limits.resolve_initial_resources(initial_system_resources)
         # The row must record what was resolved here -- the values actually enforced
@@ -1167,6 +1146,26 @@ def execute(
             f"stdout={stdout_path}, stderr={stderr_path}"
         )
 
+        # From here the guest is running: the kernel is booting and the service on
+        # it can reach the gateway before this function does anything else. So the
+        # node's two records of it are written now, before the health check's own
+        # second of sleep, and not at the end of the launch.
+        save_booting_state(
+            vmachine_id,
+            virtualizer="ch",
+            service_id=service_id,
+            pid=process.pid,
+            ip=vm_ip,
+            mac=mac,
+            tap=tap_name,
+            bridge=NETWORK_BRIDGE_NAME,
+            cleanup_rules=cleanup_rules,
+            rule_comment_prefix=fw_policy.vm_comment_prefix(vmachine_id),
+        )
+        if register_instance:
+            register_instance(vmachine_id, vm_ip, resolved_resources)
+            log.LOGGER(f"[CH][{vmachine_id}] instance registered before the guest could call in")
+
         time.sleep(1.0)
         if process.poll() is not None:
             raise CHExecuteError(
@@ -1190,11 +1189,6 @@ def execute(
             vm_ip=vm_ip,
             timeout_s=network_timeout_s,
             serial_log_path=serial_log_path,
-        )
-        _configure_guest_firewall_policy(
-            vmachine_id=vmachine_id,
-            vm_ip=vm_ip,
-            network_resolution=network_resolution,
         )
         log.LOGGER(f"[CH][{vmachine_id}] event=ready")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
@@ -1259,10 +1253,6 @@ def execute(
                 "dnat_rules": dnat_rules_state,
                 "cleanup_rules": cleanup_rules,
                 "rule_comment_prefix": fw_policy.vm_comment_prefix(vmachine_id),
-                "dns_allowlist": [
-                    {"domain": domain, "ip": ip}
-                    for domain, ip in domain_records
-                ],
                 "cgroup_path": vm_cgroup.as_posix(),
                 "virtiofs": virtiofs_mounts,
                 "exported_shares": exported_share_ids,

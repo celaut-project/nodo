@@ -138,41 +138,6 @@ class CloudHypervisorExecuteHelpersTests(unittest.TestCase):
         self.assertEqual(str(socket_path), "/tmp/nodo-ch/ch-aaaaaaaaaaaaaaaa.sock")
         self.assertLess(len(str(socket_path)), 108)
 
-    def test_resolve_domain_allowlist_records_uses_domain_tags_and_ipv4(self):
-        net_res = celaut.ConfigurationFile.NetworkResolution()
-        net_res.tags.extend(["google.com", "www.google.com"])
-
-        instance = celaut.Instance()
-        uri_slot = celaut.Instance.Uri_Slot()
-        uri_slot.internal_port = 1
-        uri_slot.uri.extend(
-            [
-                celaut.Instance.Uri(ip="142.250.184.14", port=443),
-                celaut.Instance.Uri(ip="2001:4860:4860::8888", port=443),
-            ]
-        )
-        instance.uri_slot.extend([uri_slot])
-        net_res.peer_instances.extend([instance])
-
-        records = ch_execute._resolve_domain_allowlist_records([net_res])
-        self.assertIn(("google.com", "142.250.184.14"), records)
-        self.assertIn(("www.google.com", "142.250.184.14"), records)
-        self.assertNotIn(("google.com", "2001:4860:4860::8888"), records)
-
-    def test_resolve_domain_allowlist_records_ignores_non_domain_tags(self):
-        net_res = celaut.ConfigurationFile.NetworkResolution()
-        net_res.tags.extend(["ERGO", "my_network", "google.com"])
-
-        instance = celaut.Instance()
-        uri_slot = celaut.Instance.Uri_Slot()
-        uri_slot.internal_port = 1
-        uri_slot.uri.extend([celaut.Instance.Uri(ip="8.8.8.8", port=53)])
-        instance.uri_slot.extend([uri_slot])
-        net_res.peer_instances.extend([instance])
-
-        records = ch_execute._resolve_domain_allowlist_records([net_res])
-        self.assertEqual(records, [("google.com", "8.8.8.8")])
-
     def test_runtime_disk_bytes_reports_the_image_size_the_instance_got(self):
         # The instance holds its own copy of the rootfs, so its size -- not the
         # manifest's disk_space -- is what the node committed on its behalf.

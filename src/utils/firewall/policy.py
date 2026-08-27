@@ -120,6 +120,46 @@ def allow_connection_rule(
     )
 
 
+def allow_host_connection_rule(
+    vmachine_id: str,
+    vm_ip: str,
+    host_ip: str,
+    port: Optional[int] = None,
+    protocol: str = "tcp",
+) -> Rule:
+    """Let one guest reach a service on the host itself.
+
+    Separate from ``allow_connection_rule`` because of the chain, and the chain is
+    the whole point. A packet addressed to one of the host's own addresses -- the
+    guest bridge's gateway IP is one -- is delivered locally, so it is evaluated on
+    the *input* hook and never reaches forward. The same allow written in FORWARD,
+    which is what nodo wrote for the node's own gateway port and for the guest
+    resolver, cannot match a single packet: it sits in the ruleset (and is
+    announced in the log) as though it granted an access it plays no part in.
+
+    There is deliberately no input-side counterpart to ``block_all``: the node's
+    gateway has to stay reachable for every guest that runs on it, and the accept
+    that opens that port (``firewall.gateway.ensure_gateway_port_open``) is
+    source-agnostic on purpose, because peers reach the same port from off-host.
+    So this rule states a guest's intended access to the host rather than gating
+    it -- but stated on the hook where it can be true.
+    """
+    source = validate_address(vm_ip, "VM address")
+    destination = validate_address(host_ip, "Host address")
+    resolved = _validate_protocol(protocol)
+    target = f"{destination}:{port}" if port is not None else destination
+    return Rule(
+        chain=Chain.INPUT,
+        comment=_comment(vmachine_id, f"allow_host;{target}/{resolved}"),
+        verdict=Verdict.ACCEPT,
+        source=source,
+        destination=destination,
+        protocol=resolved,
+        dport=port,
+        at_head=True,
+    )
+
+
 def allow_all_egress_rule(vmachine_id: str, vm_ip: str) -> Rule:
     """Unrestricted egress, for a service whose network tag is '*'."""
     return Rule(

@@ -293,5 +293,74 @@ class EnsureGatewayPortPrivilegeTests(unittest.TestCase):
         self.assertIn("sudo nodo serve", ctx.exception.instructions)
 
 
+@patch("src.utils.firewall.reachability.os.geteuid", return_value=0)
+class NamespaceEntryTests(unittest.TestCase):
+    """How the probe gets into its namespace decides whether it can run at all.
+
+    ``ip -n`` / ``ip netns exec`` remount /sys on their way in, and a host that
+    refuses that mount (SELinux denying ``mounton`` to ``ifconfig_t``, which is the
+    domain ``ip`` gets when the node runs as a systemd service) leaves the node
+    unable to verify its own gateway port. ``nsenter --net=`` needs no mount.
+    """
+
+    def setUp(self):
+        patcher = patch(
+            "src.utils.firewall.reachability._listener_present", return_value=True
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def _with_nsenter():
+        return (
+            patch("src.utils.firewall.reachability.shutil.which", return_value="/usr/bin/nsenter"),
+            patch("src.utils.firewall.reachability.os.path.exists", return_value=True),
+        )
+
+    def test_nsenter_is_preferred_and_nothing_remounts_sys(self, _euid):
+        which, exists = self._with_nsenter()
+        with which, exists:
+            runner = FakeRunner()
+            result = _probe(runner)
+        self.assertIs(result.reachable, True)
+        entered = [c for c in runner.calls if c[0] == "/usr/bin/nsenter"]
+        self.assertTrue(entered, "the namespace was never entered with nsenter")
+        self.assertTrue(all(c[1].startswith("--net=/run/netns/nodofw") for c in entered))
+        # The two iproute2 forms are the ones that mount /sys.
+        self.assertFalse(runner.ran("ip", "netns", "exec"))
+        self.assertFalse(any(c[:2] == ["ip", "-n"] for c in runner.calls))
+
+    def test_the_address_and_the_connect_both_run_inside_the_namespace(self, _euid):
+        which, exists = self._with_nsenter()
+        with which, exists:
+            runner = FakeRunner()
+            _probe(runner)
+        addr = [c for c in runner.calls if "addr" in c and "add" in c][0]
+        self.assertEqual(addr[0], "/usr/bin/nsenter")
+        self.assertEqual(addr[2], "ip")
+        connect = [c for c in runner.calls if "-c" in c][0]
+        self.assertEqual(connect[0], "/usr/bin/nsenter")
+
+    def test_without_nsenter_it_falls_back_to_iproute2(self, _euid):
+        with patch("src.utils.firewall.reachability.shutil.which", return_value=None):
+            runner = FakeRunner()
+            result = _probe(runner)
+        self.assertIs(result.reachable, True)
+        self.assertTrue(runner.ran("ip", "netns", "exec"))
+        self.assertTrue(any(c[:2] == ["ip", "-n"] for c in runner.calls))
+
+    def test_a_refused_sys_mount_is_unknown_and_names_the_mechanism(self, _euid):
+        # Verbatim iproute2 failure from the host that could not verify its port.
+        with patch("src.utils.firewall.reachability.shutil.which", return_value=None):
+            runner = FakeRunner(
+                {("ip", "-n"): _proc(1, "", "mount of /sys failed: Permission denied")}
+            )
+            result = _probe(runner)
+        self.assertIsNone(result.reachable, "an unusable probe is never a closed port")
+        self.assertIn("mount of /sys failed", result.detail)
+        self.assertIn("via ip netns exec", result.detail)
+        self.assertTrue(runner.ran("ip", "netns", "del"))
+
+
 if __name__ == "__main__":
     unittest.main()

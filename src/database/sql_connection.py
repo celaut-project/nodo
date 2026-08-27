@@ -387,6 +387,25 @@ class SQLConnection(metaclass=Singleton):
               serialized_instance, service_id, virtualizer, envs))
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
+    def set_local_instance_definition(self, id: str, serialized_instance) -> bool:
+        """Store the celaut ``Instance`` of an already-registered local instance.
+
+        An instance is registered the moment its guest starts running, which is
+        before the launcher can know the instance definition: the published URI
+        slots depend on the address the guest ended up with. The row is written
+        first (so the node can identify the guest the moment it calls in) and its
+        definition lands here right after, once the launch completes.
+        """
+        try:
+            self._execute(
+                "UPDATE local_instances SET serialized_instance = ? WHERE id = ?",
+                (serialized_instance, id),
+            )
+            return True
+        except Exception as e:
+            log.LOGGER(f"Could not store the instance definition of {id}: {e}")
+            return False
+
     def get_local_instance_envs(self, id: str) -> Optional[str]:
         """
         Retrieves the stored launch environment variables (raw JSON text) for a

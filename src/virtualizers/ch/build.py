@@ -104,6 +104,54 @@ def _bundle_dir(service_id: str, arch: str) -> Path:
     return Path(CACHE) / "cloud_hypervisor" / service_id / arch
 
 
+# Names under CACHE/cloud_hypervisor that are not service bundles: the runtime
+# directories of live VMs and the preserved debris of failed launches. A service id
+# is a hex hash and cannot collide with either, but a function that deletes trees in
+# this directory says so explicitly rather than trusting that.
+NON_BUNDLE_CACHE_DIRS = frozenset({"runtime", "failures"})
+
+
+def remove_built_service(service_id: str) -> int:
+    """Delete every architecture bundle built for ``service_id``; return bytes freed.
+
+    A bundle is the rootfs image a guest boots from -- gigabytes for a real service
+    -- and nothing ever removed one: `nodo remove` cleared the registry and the
+    metadata entry, and the build stayed in the cache until somebody deleted
+    __cache__ by hand.
+
+    Removing it while instances of the service are running is safe: ``execute``
+    copies the image into each instance's own runtime directory at launch, so a
+    running guest does not read the bundle again. The next launch rebuilds it.
+
+    Returns 0 when the service has no bundle here. Raises ValueError for anything
+    that is not a single bundle directory -- an empty id (which resolves to the
+    whole cache), a traversal, or one of ``NON_BUNDLE_CACHE_DIRS``.
+    """
+    if not CACHE:
+        raise RuntimeError("CACHE path is not configured.")
+
+    bundles_root = (Path(CACHE) / "cloud_hypervisor").resolve()
+    target = (bundles_root / service_id).resolve()
+    if target.parent != bundles_root or target.name in NON_BUNDLE_CACHE_DIRS:
+        raise ValueError(
+            f"{service_id!r} does not name a service bundle under {bundles_root}; "
+            "refusing to delete it."
+        )
+
+    if not target.is_dir():
+        logger(f"[CH][{service_id}] no built bundle to remove ({target}).")
+        return 0
+
+    freed = _dir_size_bytes(target)
+    shutil.rmtree(target, ignore_errors=True)
+    if target.exists():
+        logger(f"[CH][{service_id}] bundle removal left files behind: {target}")
+        return max(0, freed - _dir_size_bytes(target))
+
+    logger(f"[CH][{service_id}] event=remove mode=bundle bundle_removed={target} freed_bytes={freed}")
+    return freed
+
+
 def _validate_guest_assets(arch: str) -> tuple[str, str]:
     kernel_path = KERNEL_PATHS.get(arch)
     initramfs_path = INITRAMFS_PATHS.get(arch)
