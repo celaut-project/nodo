@@ -80,7 +80,7 @@ def inspect(service: str):
         service_obj = load_service_from_disk(service_hash=service)
     except ServiceRegistryError as e:
         print(f"⚠️  Could not load the service definition: {e}\n")
-        return
+        raise
     print(f"Prose: {service_obj.prose}\n")
 
     print_rule("🔌 Service Interface")

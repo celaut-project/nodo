@@ -636,7 +636,10 @@ if __name__ == '__main__':
 
             case "inspect":
                 from src.commands.inspect_service import inspect
-                inspect(service=sys.argv[2])
+                try:
+                    inspect(service=sys.argv[2])
+                except:  # Control the ServiceRegistryError exception, don't show to the user.
+                    pass
 
             case "services":
                 from src.commands.services import list_services

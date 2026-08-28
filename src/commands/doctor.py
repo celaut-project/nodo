@@ -882,10 +882,17 @@ def _doctor_guest_gateway_reachability():
     try:
         from src.utils.firewall.frontend import open_port_advice
 
-        for line in open_port_advice(port, bridge=bridge, subnet=subnet):
-            print(f"  {line}", flush=True)
+        advice_lines = open_port_advice(port, bridge=bridge, subnet=subnet)
     except Exception:
-        pass
+        advice_lines = []
+    if advice_lines:
+        # Blank line plus the "Suggestion:" label used elsewhere in this command:
+        # otherwise this reads as more diagnostic narrative instead of the one
+        # actionable step, and gets lost after the reject-chain scan output above.
+        print(flush=True)
+        print(f"  Suggestion: {advice_lines[0]}", flush=True)
+        for line in advice_lines[1:]:
+            print(f"  {line}", flush=True)
     print(
         "  This tests the guest subnet only. Whether peers OUTSIDE this LAN can reach "
         "the port is a separate question no check on this host can answer -- run "
