@@ -31,7 +31,9 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
     cpu_total = psutil.cpu_count(logical=False) or 0
-    cpu_available_percent = max(0.0, 100.0 - psutil.cpu_percent(interval=0.1))
+    # Non-blocking: interval=None is usage since the previous call. interval=0.1
+    # slept 100 ms per invocation for a field nothing reads (#288).
+    cpu_available_percent = max(0.0, 100.0 - psutil.cpu_percent(interval=None))
 
     service_memory_pool_total, service_memory_pool_available = _get_service_memory_snapshot()
 
