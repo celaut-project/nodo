@@ -25,6 +25,8 @@ from src.utils.firewall.rules import Chain, Rule, Verdict, truncate_comment
 PROTOCOLS: Tuple[str, ...] = ("tcp", "udp")
 
 FORWARD_RELATED_ESTABLISHED_COMMENT = "nodo;forward;related_established"
+BRIDGE_FORWARD_IN_COMMENT_PREFIX = "nodo;forward;bridge_in;"
+BRIDGE_FORWARD_OUT_COMMENT_PREFIX = "nodo;forward;bridge_out;"
 MASQUERADE_COMMENT_PREFIX = "nodo;masquerade;subnet="
 VM_COMMENT_ROOT = "nodo;vm="
 
@@ -68,6 +70,18 @@ def _validate_protocol(protocol: str) -> str:
     return text
 
 
+def _validate_interface(value: str, label: str) -> str:
+    """A Linux interface name. Kept strict so it can be handed to iptables/nft."""
+    text = str(value or "").strip()
+    if not text:
+        raise RuleError(f"{label} is empty.")
+    if len(text) > 15:
+        raise RuleError(f"{label} {text!r} is longer than 15 characters.")
+    if any(ch in text for ch in " \t\n\"';`$|&<>"):
+        raise RuleError(f"{label} {text!r} is not a safe interface name.")
+    return text
+
+
 def forward_related_established_rule() -> Rule:
     """The blanket accept for return traffic, which must sit first in the chain."""
     return Rule(
@@ -77,6 +91,34 @@ def forward_related_established_rule() -> Rule:
         ct_states=("RELATED", "ESTABLISHED"),
         at_head=True,
     )
+
+
+def bridge_forward_passthrough_rules(bridge: str) -> List[Rule]:
+    """Accept traffic that already survived nodo's nft isolation, in Docker's table.
+
+    nodo's ``inet nodo`` forward chain accepts at priority -5. Docker's
+    ``ip filter FORWARD`` (policy DROP, priority 0) still drops the packet.
+    These two rules live in that compatibility table so parent-to-child and
+    allowed guest egress can complete. Isolation stays in nft: a DROP there
+    is terminal and never reaches this hole.
+    """
+    name = _validate_interface(bridge, "Bridge")
+    return [
+        Rule(
+            chain=Chain.FORWARD,
+            comment=f"{BRIDGE_FORWARD_IN_COMMENT_PREFIX}{name}",
+            verdict=Verdict.ACCEPT,
+            in_interface=name,
+            at_head=True,
+        ),
+        Rule(
+            chain=Chain.FORWARD,
+            comment=f"{BRIDGE_FORWARD_OUT_COMMENT_PREFIX}{name}",
+            verdict=Verdict.ACCEPT,
+            out_interface=name,
+            at_head=True,
+        ),
+    ]
 
 
 def block_all_rules(vmachine_id: str, vm_ip: str) -> List[Rule]:

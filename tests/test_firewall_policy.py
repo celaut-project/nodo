@@ -289,5 +289,40 @@ class ReturnTrafficTests(unittest.TestCase):
         )
 
 
+class BridgeForwardPassthroughTests(unittest.TestCase):
+    def test_accepts_both_directions_on_the_guest_bridge(self):
+        inbound, outbound = policy.bridge_forward_passthrough_rules("br-ch")
+        self.assertEqual(inbound.in_interface, "br-ch")
+        self.assertIsNone(inbound.out_interface)
+        self.assertEqual(outbound.out_interface, "br-ch")
+        self.assertIsNone(outbound.in_interface)
+        for rule in (inbound, outbound):
+            self.assertIs(rule.chain, Chain.FORWARD)
+            self.assertIs(rule.verdict, Verdict.ACCEPT)
+            self.assertTrue(rule.at_head)
+            self.assertIsNone(rule.source)
+
+    def test_renders_into_docker_s_iptables_table(self):
+        inbound, outbound = policy.bridge_forward_passthrough_rules("br-ch")
+        self.assertEqual(
+            iptables(inbound),
+            "-i br-ch -j ACCEPT -m comment --comment nodo;forward;bridge_in;br-ch",
+        )
+        self.assertEqual(
+            iptables(outbound),
+            "-o br-ch -j ACCEPT -m comment --comment nodo;forward;bridge_out;br-ch",
+        )
+        self.assertEqual(
+            _render_nft(inbound),
+            'iifname "br-ch" accept comment "nodo;forward;bridge_in;br-ch"',
+        )
+
+    def test_refuses_a_junk_interface_name(self):
+        with self.assertRaises(RuleError):
+            policy.bridge_forward_passthrough_rules("br-ch; rm -rf /")
+        with self.assertRaises(RuleError):
+            policy.bridge_forward_passthrough_rules("")
+
+
 if __name__ == "__main__":
     unittest.main()

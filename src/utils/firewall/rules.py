@@ -71,6 +71,8 @@ class Rule:
     sport: Optional[int] = None
     ct_states: Tuple[str, ...] = field(default_factory=tuple)
     dnat_to: Optional[str] = None
+    in_interface: Optional[str] = None
+    out_interface: Optional[str] = None
     at_head: bool = False
 
     def __post_init__(self):

@@ -1,3 +1,4 @@
+import shutil
 from enum import Enum
 from typing import Callable, List, Optional
 
@@ -128,6 +129,45 @@ def ensure_forward_related_established_rule() -> bool:
 
     if added:
         logger("[FW] Ensured global FORWARD RELATED,ESTABLISHED rule in position 1.")
+
+    bridge = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch")
+    if not ensure_bridge_forward_passthrough(bridge):
+        return False
+    return True
+
+
+def ensure_bridge_forward_passthrough(bridge: Optional[str] = None) -> bool:
+    """Punch a hole in iptables-nft filter FORWARD for the guest bridge.
+
+    nodo's nft table accepts at priority -5, but Docker's ``ip filter FORWARD``
+    (policy DROP, priority 0) still drops the packet. Isolation remains in
+    ``inet nodo``: a DROP there is terminal and never reaches this hole.
+
+    Always uses ``IptablesBackend`` even on nft hosts -- that is the table that
+    actually drops us. If iptables is not present, there is no Docker
+    compatibility table to punch, so this is a no-op success.
+    """
+    from src.utils.firewall.backends import IptablesBackend
+
+    name = (bridge or env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch") or "").strip()
+    if not name:
+        return True
+    if not shutil.which("iptables"):
+        return True
+    try:
+        ipt = IptablesBackend()
+        added_any = False
+        for rule in policy.bridge_forward_passthrough_rules(name):
+            if ipt.ensure(rule):
+                added_any = True
+    except FirewallError as e:
+        logger(f"[FW] Failed ensuring bridge FORWARD passthrough for {name}: {e}")
+        return False
+    except Exception as e:
+        logger(f"[FW] Unexpected error ensuring bridge FORWARD passthrough for {name}: {e}")
+        return False
+    if added_any:
+        logger(f"[FW] Ensured iptables FORWARD passthrough for bridge {name}.")
     return True
 
 

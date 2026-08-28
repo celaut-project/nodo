@@ -55,6 +55,7 @@ from src.virtualizers.firewall import (
     allow_host_connection as vm_allow_host_connection,
     block_all as vm_block_all,
     allow_all_egress as vm_allow_all_egress,
+    ensure_bridge_forward_passthrough as vm_ensure_bridge_forward_passthrough,
     remove_vm_rules as vm_remove_vm_rules,
     resolve_slot_transport_protocols,
 )
@@ -360,6 +361,12 @@ def _network_preflight() -> ipaddress.IPv4Network:
 
     _run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
     _ensure_guest_l2_isolation()
+    if not vm_ensure_bridge_forward_passthrough(NETWORK_BRIDGE_NAME):
+        raise CHExecuteError(
+            f"Could not ensure iptables FORWARD passthrough for {NETWORK_BRIDGE_NAME}. "
+            "Docker's filter FORWARD policy DROP would swallow guest traffic that "
+            "nodo's nft table already accepted."
+        )
     _ensure_masquerade(network)
 
     return network

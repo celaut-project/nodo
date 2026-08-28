@@ -487,6 +487,10 @@ class NftBackend(FirewallBackend):
 def _render_nft(rule: Rule) -> str:
     """The nft expression for ``rule``, matches first, then verdict, then comment."""
     parts: List[str] = []
+    if rule.in_interface:
+        parts.append(f'iifname "{rule.in_interface}"')
+    if rule.out_interface:
+        parts.append(f'oifname "{rule.out_interface}"')
     if rule.source:
         parts.append(f"ip saddr {rule.source}")
     if rule.destination:
@@ -607,6 +611,10 @@ def _render_iptables(rule: Rule) -> List[str]:
     protocol match and iptables rejects them otherwise.
     """
     args: List[str] = []
+    if rule.in_interface:
+        args += ["-i", rule.in_interface]
+    if rule.out_interface:
+        args += ["-o", rule.out_interface]
     if rule.protocol:
         args += ["-p", rule.protocol]
     if rule.source:
