@@ -17,6 +17,7 @@ from bee_rpc.client import copy_block_if_exists, get_hash_from_block
 
 from protos import celaut_pb2
 from src.utils.config import ConfigManager
+from src.utils.container_filesystem import load_container_filesystem
 from src.utils.filesystem_xattrs import (
     FilesystemNodeMetadata,
     parse_filesystem_metadata_xattrs,
@@ -1070,8 +1071,7 @@ def build(
     rootfs_dir = Path(tempfile.mkdtemp(prefix="_rootfs.", dir=str(bundle_dir)))
     os.chmod(rootfs_dir, 0o700)
 
-    fs = celaut_pb2.Service.Container.Filesystem()
-    fs.ParseFromString(service.container.filesystem)
+    fs = load_container_filesystem(service)
 
     symlinks: List[_PendingSymlink] = []
     legacy_regular_files: Set[Path] = set()

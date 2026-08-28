@@ -134,7 +134,11 @@ The most important choice for anyone packing services. Full authoring format:
 | `packer.PACKER_SOURCE_URL` | `""` | Manifest URL nodo downloads the packer service from directly when it needs to acquire it. Empty → resolve via the `source-application` core service. |
 | `packer.PACKER_SERVICE_URL` | `""` | Override: `ip:port` base URL of an out-of-band packer-service. Used only when no packer id is set / no running instance is found. |
 | `packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT` | `true` | Architectures `nodo pack` accepts/announces (**packer-side** — to limit what the node can *execute*, use `builder.*` instead). |
-| `packer.PACKER_MEMORY_SIZE_FACTOR` | `2.0` | Local-packer only: RAM to lock as a factor of the exported filesystem size. |
+| `packer.MIN_BUFFER_BLOCK_SIZE` | `32768` (32 kB) | Local-packer only: inline/block threshold. A file at or above this size is stored as a content-addressed block (`main.BLOCKDIR`); a smaller one is inlined into the service's filesystem message. The main lever on what a service costs in memory — a build streams a pointer straight to its place in the rootfs, so only the inlined part is ever held. Raising it trades memory for fewer, larger block files and faster packs; it never changes a service id. |
+| `packer.PACKER_MEMORY_SIZE_FACTOR` | `6.0` | Local-packer only: RAM to lock as a factor of the *inlined* bytes (files under `packer.MIN_BUFFER_BLOCK_SIZE`). Larger files are streamed into blocks and cost no memory. |
+| `packer.PACKER_MEMORY_PER_BLOCK` | `10000` | Local-packer only: bytes added per block. With a low `packer.MIN_BUFFER_BLOCK_SIZE` almost every file is a block and nothing is inlined, so this term decides the reservation. |
+| `packer.PACKER_MEMORY_OVERHEAD` | `40000000` | Local-packer only: fixed bytes on top — the worker interpreter itself. |
+| `packer.WAIT_FOR_UNLOCK_MEMORY` | `300` | Local-packer only: seconds a pack waits for memory before failing instead of waiting indefinitely. |
 | `packer.buildkit.DOCKERFILE_NAME` | `Dockerfile` | Local-packer only: name of the Dockerfile inside the project directory. |
 
 The **default-mode** packer is *not* configured here by URL — it is referenced by
@@ -159,7 +163,7 @@ closed ("Service not allowed.").
 
 | Key | Default | Meaning |
 |---|---|---|
-| `hashing.HASH` | `sha3_256` | Service/file identification hash. Accepts `sha3_256`, `sha256`, `shake_256`, `blake2b`, or a hex hash-id. |
+| `hashing.HASH` | `sha3_256` | Service/file identification hash. Accepts `sha2_256`, `sha3_256`, `shake_256`, `blake2b_256` (each also its older/shorter alias: `sha256`, `sha3`, `shake`, `blake2b`, `blake2`), or a hex hash-id. |
 | `hashing.CHECK_INTEGRITY_ON_SERVE` | `false` | Run integrity/migration automatically on `nodo serve`. |
 
 ## `network`
@@ -311,9 +315,6 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 ## `general_flags`, `misc`, `logs`, `low_demand`, `publisher`
 
 - `general_flags.SIMULATE_PAYMENTS` — dry-run payments (dev).
-- `misc.MIN_BUFFER_BLOCK_SIZE` (`1.0e+7` = 10 MB) — inline/block threshold: files
-  at or above this size are stored as content-addressed blocks (`main.BLOCKDIR`),
-  smaller ones inline.
 - `misc.VALIDATE_ON_IMPORT` (`true`), `misc.CONFIGURATION_REQUIRED`.
 - `logs.DEBUG_MODE`, `logs.MEMORY_LOGS`.
 - `logs.TUNNEL_LOGS` — log every tunnel handshake, relay close and billing tick

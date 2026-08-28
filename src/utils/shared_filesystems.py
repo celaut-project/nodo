@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from typing import List, Mapping
 
 from protos import celaut_pb2 as celaut
+from src.utils.container_filesystem import load_container_filesystem
 
 # Reserved sharing xattr keys (distinct from the POSIX metadata keys in
 # src/utils/filesystem_xattrs.py).
@@ -136,10 +137,7 @@ def _walk(fs: celaut.Service.Container.Filesystem, parent_path: str) -> List[Sha
 
 def declarations_for_service(service: celaut.Service) -> List[SharedDir]:
     """All shared/guest directory declarations in a service's container fs."""
-    fs = celaut.Service.Container.Filesystem()
-    if service.container.filesystem:
-        fs.ParseFromString(service.container.filesystem)
-    return _walk(fs, "/")
+    return _walk(load_container_filesystem(service), "/")
 
 
 def exported_dirs(service: celaut.Service) -> List[SharedDir]:
