@@ -144,13 +144,20 @@ pub enum EditKind {
 }
 
 /// Fixed value sets for config keys whose comment in `config.example.yaml`
-/// documents a closed set of options. Deliberately small and explicit: a key
-/// like `hashing.HASH` documents aliases but also accepts an arbitrary hex
-/// hash-id, so it stays freeform text rather than a misleadingly restrictive
-/// picker. Add an entry here only when every accepted value is enumerable.
+/// documents a closed set of options. Deliberately small and explicit --
+/// listing a value here is a claim that it is a real, working setting.
+///
+/// This does not have to be the *complete* set a key accepts: `Enum` only adds
+/// an ↑/↓ cycle-through-these on top of ordinary typing (see `EditKind::Enum`
+/// and `adjust_edit_value`), and `save_config_edit` validates the typed value
+/// as YAML, never against this list. So `hashing.HASH` belongs here even
+/// though it also accepts an arbitrary hex hash-id: the picker offers the
+/// four canonical algorithm names (`src/utils/hashing.py`'s `HASH_SPECS`) as a
+/// fast path, and typing a hex id past it still works exactly as before.
 fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
     match path {
         "network.DELEGATION_TUNNEL_POLICY" => Some(&["auto", "always", "never"]),
+        "hashing.HASH" => Some(&["sha2_256", "sha3_256", "shake_256", "blake2b_256"]),
         _ => None,
     }
 }
@@ -4428,10 +4435,14 @@ Cold Wallet: 9cold\n";
     }
 
     #[test]
-    fn known_enum_values_covers_the_documented_policy_and_nothing_else() {
+    fn known_enum_values_covers_only_the_documented_keys() {
         assert_eq!(
             known_enum_values("network.DELEGATION_TUNNEL_POLICY"),
             Some(["auto", "always", "never"].as_slice())
+        );
+        assert_eq!(
+            known_enum_values("hashing.HASH"),
+            Some(["sha2_256", "sha3_256", "shake_256", "blake2b_256"].as_slice())
         );
         assert_eq!(known_enum_values("packer.local"), None);
     }
@@ -4456,6 +4467,21 @@ Cold Wallet: 9cold\n";
         assert_eq!(
             app.edit_kind,
             EditKind::Enum(vec!["auto".to_string(), "always".to_string(), "never".to_string()])
+        );
+
+        select_config_entry(
+            &mut app,
+            config_entry("hashing.HASH", "sha3_256", "sha3_256", "string", false),
+        );
+        app.open_config_editor();
+        assert_eq!(
+            app.edit_kind,
+            EditKind::Enum(vec![
+                "sha2_256".to_string(),
+                "sha3_256".to_string(),
+                "shake_256".to_string(),
+                "blake2b_256".to_string(),
+            ])
         );
 
         select_config_entry(&mut app, config_entry("publisher.REPOSITORY", "owner/repo", "owner/repo", "string", false));
@@ -4526,6 +4552,38 @@ Cold Wallet: 9cold\n";
         assert_eq!(app.input, "auto", "Down past the last option wraps to the first");
         app.adjust_edit_value(1);
         assert_eq!(app.input, "never", "Up before the first wraps to the last");
+    }
+
+    #[test]
+    fn the_hash_picker_does_not_discard_an_existing_hex_id() {
+        // hashing.HASH also accepts an arbitrary hex hash-id (see
+        // src/utils/hashing.py's resolve_hash_config), which the picker's four
+        // canonical names cannot represent. Opening the editor on a node
+        // already configured that way must show the hex id as-is, not snap it
+        // to one of the four -- and character typing is unrestricted for Enum
+        // (only Bool blocks it, in handler.rs), so it stays editable by hand.
+        let mut app = App::default();
+        let hex_id = "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a";
+        select_config_entry(
+            &mut app,
+            config_entry("hashing.HASH", hex_id, hex_id, "string", false),
+        );
+        app.open_config_editor();
+        assert_eq!(app.input, hex_id, "the existing value must survive opening the editor");
+        assert_eq!(
+            app.edit_kind,
+            EditKind::Enum(vec![
+                "sha2_256".to_string(),
+                "sha3_256".to_string(),
+                "shake_256".to_string(),
+                "blake2b_256".to_string(),
+            ])
+        );
+
+        // Cycling from a value the list does not contain must not panic --
+        // adjust_edit_value falls back to treating it as index 0.
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "blake2b_256");
     }
 
     #[test]

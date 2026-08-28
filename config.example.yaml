@@ -188,8 +188,53 @@ packer:
   ARM_PACKER_SUPPORT: true
   X86_PACKER_SUPPORT: true
   # Local-packer tuning (only used when packer.local: true).
-  # Factor of the exported filesystem size to lock as RAM during a local build.
-  PACKER_MEMORY_SIZE_FACTOR: 2.0
+  #
+  # Inline/block threshold. A file at or over this size is stored as a
+  # content-addressed block under main.BLOCKDIR and referenced by a pointer;
+  # a smaller one is inlined into the service's filesystem message.
+  #
+  # It is the main lever on how much memory a service costs, because only the
+  # inlined part is ever held: the build streams a pointer straight to its place
+  # in the rootfs. Measured packing and building a real 1.17 GB service image
+  # (28,131 files):
+  #
+  #   threshold   blocks   inline retained   pack peak   pack time   build peak
+  #       10 MB       13         876.6 MB           -           -     2720.5 MB
+  #      256 kB      476         403.3 MB    2449.0 MB       61 s      856.6 MB
+  #       32 kB     3962         121.7 MB     802.4 MB      277 s      293.3 MB
+  #
+  # (10 MB row: inline/blocks measured, pack peak/time not re-measured under the
+  # current code -- the formula below estimates ~5.3 GB, consistent with the
+  # trend.) 256 kB looked like a middle ground and is not one: this image has
+  # 281 MB spread across the 3,486 files between 32 kB and 256 kB, so raising
+  # the threshold that far puts most of it back inline, at ~6x cost each. Time
+  # scales with block *count*, memory with the bytes still outside a block --
+  # in a Python-shaped image those move in opposite directions across most of
+  # the range, so there is no threshold that is cheap on both at once here.
+  #
+  # The cost of a low threshold is pack time and one file per block in
+  # main.BLOCKDIR instead of a handful. Identical files across services share a
+  # block, so a low threshold also deduplicates far more. Changing it does not
+  # change any service id: an object expands to the same bytes either way.
+  MIN_BUFFER_BLOCK_SIZE: 32768
+  # RAM to lock during a local build, as a factor of the *inlined* bytes -- the
+  # files under packer.MIN_BUFFER_BLOCK_SIZE above, which are the only ones held
+  # in memory. Files at or over that threshold are streamed into blocks on disk,
+  # so an image dominated by large files packs in far less than its size
+  # suggests. The default is measured: peak memory tracks the inlined bytes at
+  # ~5.9x.
+  PACKER_MEMORY_SIZE_FACTOR: 6.0
+  # Bytes added per block. With a low packer.MIN_BUFFER_BLOCK_SIZE almost every
+  # file becomes a block and nothing is inlined, so this is the term that
+  # decides the reservation. Measured at ~7 kB per block.
+  PACKER_MEMORY_PER_BLOCK: 10000
+  # Fixed cost on top: the worker interpreter itself, ~30 MB before it packs
+  # anything.
+  PACKER_MEMORY_OVERHEAD: 40000000
+  # Seconds a pack waits for that memory before failing. Without a deadline a
+  # busy node leaves the pack waiting indefinitely, and it cannot be told apart
+  # from one that is still working.
+  WAIT_FOR_UNLOCK_MEMORY: 300
   # Reserved: persist every packed artifact to the registry. Kept for parity.
   SAVE_ALL: false
   buildkit:
@@ -449,7 +494,6 @@ client:
   ACCEPT_NEW_DEPOSITS: true
 
 misc:
-  MIN_BUFFER_BLOCK_SIZE: 1.0e+7
   MEMSWAP_FACTOR: 0
   USE_PRINT: false
   VALIDATE_ON_IMPORT: true
@@ -457,7 +501,8 @@ misc:
 
 hashing:
   # Main hash selector for service/file identification.
-  # Accepts hash aliases (sha3_256, sha256, shake_256, blake2b) or a hash-id in hex.
+  # Accepts sha2_256, sha3_256, shake_256, blake2b_256 (each also accepts its
+  # older/shorter alias: sha256, sha3, shake, blake2b, blake2) or a hash-id in hex.
   HASH: "sha3_256"
   # If true, run integrity check/migration automatically when starting `nodo serve`.
   CHECK_INTEGRITY_ON_SERVE: false
