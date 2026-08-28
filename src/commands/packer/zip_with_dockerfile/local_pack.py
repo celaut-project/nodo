@@ -183,7 +183,11 @@ def _pack_and_register(service_zip_dir: str) -> Optional[str]:
                 f"(validated result: {validated_hash_hex})"
             )
 
-        min_block_size = env_manager.get("packer.MIN_BUFFER_BLOCK_SIZE")
+        # Use the same compatibility-resolved value as the packer itself. An
+        # upgraded config may still keep this under the legacy ``misc`` key.
+        from src.packers.zip_with_dockerfile import MIN_BUFFER_BLOCK_SIZE
+
+        min_block_size = MIN_BUFFER_BLOCK_SIZE
         if min_block_size < 10 ** 6:
             print(
                 f"\n\n ALERT!! A buffer size that is too small (actual is {min_block_size}) may "

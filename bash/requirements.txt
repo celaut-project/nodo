@@ -10,5 +10,5 @@ python-dotenv==1.0.0
 mnemonic==0.21
 bip32==4.0
 PyYAML==6.0.1
-git+https://github.com/bee-rpc-protocol/bee-rpc-over-grpc-py@feat/nested-block-write
+git+https://github.com/bee-rpc-protocol/bee-rpc-over-grpc-py@6877e7144356198d7ec4cf4e89330af120ae95a6
 git+https://github.com/reputation-systems/ergpy

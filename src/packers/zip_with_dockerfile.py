@@ -5,6 +5,7 @@ import stat
 from typing import Generator, List, Tuple
 
 from src.utils import logger as log
+from src.utils.packer_config import resolve_min_buffer_block_size
 import json
 import os, shutil, subprocess, platform, sys, uuid
 import src.manager.resources as resources
@@ -57,7 +58,7 @@ PACKER_MEMORY_OVERHEAD = env_manager.get("PACKER_MEMORY_OVERHEAD", 40_000_000) o
 # How long a pack waits for that memory before giving up.
 WAIT_FOR_UNLOCK_MEMORY = env_manager.get("packer.WAIT_FOR_UNLOCK_MEMORY", 300) or 300
 SAVE_ALL = env_manager.get("SAVE_ALL", False)
-MIN_BUFFER_BLOCK_SIZE = env_manager.get("packer.MIN_BUFFER_BLOCK_SIZE")
+MIN_BUFFER_BLOCK_SIZE = resolve_min_buffer_block_size(env_manager)
 # Name of the Dockerfile inside the project directory. BuildKit's dockerfile
 # frontend defaults to "Dockerfile" too; this only exists to make it overridable.
 DOCKERFILE_NAME = env_manager.get("packer.buildkit.DOCKERFILE_NAME", "Dockerfile") or "Dockerfile"
