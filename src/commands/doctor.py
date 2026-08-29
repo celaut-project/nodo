@@ -758,6 +758,7 @@ def _doctor_network_checks():
     )
 
     _doctor_guest_gateway_reachability()
+    _doctor_guest_to_guest_forwarding()
 
 
 def _doctor_guest_gateway_reachability():
@@ -899,6 +900,84 @@ def _doctor_guest_gateway_reachability():
         "'nodo nat-guide'.",
         flush=True
     )
+
+
+def _doctor_guest_to_guest_forwarding():
+    """Can one guest reach another? The parent-to-child path, tried rather than assumed.
+
+    Every service that launches a dependency uses this path, and when it is broken
+    the failure arrives disguised: the parent gets a connect timeout, which from the
+    outside is indistinguishable from a child that died on boot -- a node has been
+    accused of shortchanging a guest's memory on exactly this evidence.
+
+    nodo cannot fix it from here and does not try. ``inet nodo`` accepts at priority
+    -5, a foreign ``drop`` later on the same hook is terminal, and punching a hole in
+    a table nodo does not own would override the operator's own rules and leave a
+    rule behind with nobody to remove it. What doctor owes is the name of the chain.
+    """
+    print("\nGuest-to-guest forwarding:", flush=True)
+
+    # Imported here, not at module scope: see the note on this file's imports.
+    try:
+        from src.utils.config import ConfigManager
+        from src.utils.firewall.backends import detect_backend
+        from src.utils.firewall.reachability import probe_tcp_between_guests
+    except Exception as e:
+        print(f"[WARN] Could not load the firewall helpers: {e}", flush=True)
+        return
+
+    try:
+        env_manager = ConfigManager()
+        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch"))
+        gateway_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
+        subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
+    except Exception as e:
+        print(f"[WARN] Could not read the guest network settings: {e}", flush=True)
+        return
+
+    probe = probe_tcp_between_guests(bridge=bridge, subnet=subnet, gateway_ip=gateway_ip)
+
+    if probe.reachable is True:
+        print(f"[OK] A guest on {bridge} can reach another guest through the host.", flush=True)
+        return
+
+    if probe.reachable is None:
+        print(f"[WARN] Could not test it: {probe.detail}", flush=True)
+        return
+
+    print(
+        f"[FAIL] Guests on {bridge} CANNOT reach each other. Any service that launches "
+        "a dependency would report it as unreachable or dead, whatever the child is "
+        "actually doing.",
+        flush=True
+    )
+    print(f"  {probe.detail}", flush=True)
+
+    try:
+        backend = detect_backend()
+        scan = backend.foreign_forward_rejectors()
+    except Exception as e:
+        from src.utils.firewall.backends import RejectorScan
+
+        scan = RejectorScan(
+            readable=False, hook="forward", reason=f"reading the ruleset raised {e!r}"
+        )
+    for line in scan.describe():
+        print(f"  {line}", flush=True)
+    if scan.rejectors:
+        print(
+            "  nodo accepts this traffic in its own table at priority -5, which those "
+            "cannot see: 'accept' ends its own chain only, and a drop in another base "
+            "chain on the same hook still wins whatever the priority.",
+            flush=True
+        )
+        print(
+            "  This is host configuration, not a node setting. Docker sets FORWARD's "
+            "policy to DROP, ufw defaults DEFAULT_FORWARD_POLICY to DROP, and firewalld "
+            f"rejects forwarded traffic by zone. Allow forwarding for {bridge} in "
+            "whichever of those owns the chain above.",
+            flush=True
+        )
 
 
 def doctor_command(main_dir):
