@@ -9,7 +9,7 @@ import json
 import os, shutil, subprocess, platform, sys, uuid
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
-from bee_rpc.utils import Enviroment, modify_env
+from bee_rpc.utils import Enviroment, modify_env, block_pointer, hash_types_for_packing
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
@@ -353,11 +353,18 @@ class ZipContainerPacker:
                             with open(branch_host_path, 'rb') as file:
                                 branch.file = file.read()
                         else:
-                            block_hash, block = block_builder.create_block(
+                            block_hash, _ = block_builder.create_block(
                                 file_path=branch_host_path,
                                 copy=True
                             )
-                            branch.file = block.SerializeToString()
+                            # No hash type in the pointer: the filesystem is stored as
+                            # a block of its own, so these sit one level down and take
+                            # their types from the pointer that names it. An image of
+                            # a few thousand large files would otherwise repeat the
+                            # same 32 bytes a few thousand times for no information.
+                            branch.file = block_pointer(
+                                block_id=block_hash, omit_types=True
+                            ).SerializeToString()
                             if block_hash not in self.blocks:
                                 self.blocks.append(block_hash)
                     # It's a folder.
@@ -387,10 +394,16 @@ class ZipContainerPacker:
             # too -- with no blocks to substitute, the object's id is the plain
             # sha3_256 of its serialization, exactly what the old
             # `calculate_hashes` branch produced.
+            # `inherited` tells the builder what the pointers above leave unsaid, so
+            # it can read them at all. It does not change what this block expands to
+            # -- a pointer is replaced by its block's content either way -- so the
+            # filesystem block's id, and the service id above it, are the same as
+            # they would be with every type spelled out.
             self.filesystem_block = _install_as_block(
                 *block_builder.build_multiblock(
                     pf_object_with_block_pointers=recursive_parsing(directory="/"),
-                    blocks=self.blocks
+                    blocks=self.blocks,
+                    inherited=hash_types_for_packing()
                 )
             )
 
@@ -567,11 +580,13 @@ class ZipContainerPacker:
         # this re-reads the same bytes under the schema that says `bytes`.
         spec = celaut.Service()
         spec.ParseFromString(self.service.SerializeToString())
-        spec.container.filesystem = buffer_pb2.Buffer.Block(
-            hashes=[buffer_pb2.Buffer.Block.Hash(
-                type=Enviroment.hash_type,
-                value=self.filesystem_block
-            )]
+        # The top of what gets written to disk, so it states the hash type outright:
+        # there is nothing above it to inherit from, and this is the pointer another
+        # node has to be able to read without sharing this one's configuration.
+        # Everything below it -- the per-file pointers in parseFilesys -- inherits
+        # from here and leaves the type out.
+        spec.container.filesystem = block_pointer(
+            block_id=self.filesystem_block
         ).SerializeToString()
 
         # Always build a multiblock directory so the service is returned as a path.

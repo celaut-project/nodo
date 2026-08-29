@@ -17,8 +17,10 @@ from bee_rpc.utils import Enviroment, modify_env
 
 import src.packers.zip_with_dockerfile as packer
 from protos import celaut_pb2 as celaut
+from bee_rpc.utils import block_pointer, hash_types_for_packing
 from src.utils.container_filesystem import (
     filesystem_block_id,
+    filesystem_hash_types,
     load_container_filesystem,
 )
 
@@ -121,6 +123,120 @@ class ContainerFilesystemTests(unittest.TestCase):
 
     def test_a_service_with_no_filesystem_reads_as_empty(self):
         self.assertEqual(len(load_container_filesystem(celaut.Service()).branch), 0)
+
+
+class CompressedPointersInTheFilesystemBlock(unittest.TestCase):
+    """The per-file pointers inside a filesystem block leave their hash types out.
+
+    The filesystem is stored as a block of its own, so those pointers sit one
+    level down and take their types from the pointer that names it. An image of a
+    few thousand large files would otherwise repeat the same 32 bytes a few
+    thousand times to say what the level above already said. The pointer in the
+    spec -- the top of what reaches disk -- still states it: there is nothing
+    above it, and it is what another node has to read without sharing this one's
+    configuration.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="cfs-compressed-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.blocks = os.path.join(self.root, "blocks")
+        os.makedirs(self.blocks)
+        modify_env(cache_dir=self.root + os.sep, block_dir=self.blocks + os.sep)
+        self.addCleanup(modify_env, cache_dir=packer.CACHE, block_dir=packer.BLOCKDIR)
+        self._blockdir, packer.BLOCKDIR = packer.BLOCKDIR, self.blocks + os.sep
+        self.addCleanup(setattr, packer, "BLOCKDIR", self._blockdir)
+
+    def _tree(self, omit_types: bool):
+        """What parseFilesys builds: a tree whose large file is a pointer."""
+        big_path = os.path.join(self.root, "big.bin")
+        with open(big_path, "wb") as f:
+            f.write(BIG)
+        block_hash, _ = block_builder.create_block(file_path=big_path, copy=True)
+
+        filesystem = celaut.Service.Container.Filesystem()
+        small = filesystem.branch.add()
+        small.name = "small.txt"
+        small.file = SMALL
+        big = filesystem.branch.add()
+        big.name = "big.bin"
+        big.file = block_pointer(
+            block_id=block_hash, omit_types=omit_types).SerializeToString()
+        return filesystem, [block_hash]
+
+    def _service(self, omit_types: bool = True):
+        """What save() writes: a typed pointer to a block built the packer's way."""
+        filesystem, blocks = self._tree(omit_types)
+        block_id = packer._install_as_block(*block_builder.build_multiblock(
+            filesystem, blocks,
+            inherited=hash_types_for_packing() if omit_types else None))
+        service = celaut.Service()
+        service.container.filesystem = block_pointer(
+            block_id=block_id).SerializeToString()
+        return service, block_id
+
+    # -- the context ----------------------------------------------------
+    def test_an_inline_filesystem_inherits_nothing(self):
+        filesystem, _ = self._tree(omit_types=False)
+        service = celaut.Service()
+        service.container.filesystem = filesystem.SerializeToString()
+        self.assertIsNone(filesystem_hash_types(service),
+                          "an inline tree is part of the spec, so it is the top")
+
+    def test_a_filesystem_block_passes_its_own_types_down(self):
+        service, _ = self._service()
+        self.assertEqual(filesystem_hash_types(service), (Enviroment.hash_type,))
+
+    def test_the_spec_pointer_states_its_type(self):
+        service, block_id = self._service()
+        pointer = buffer_pb2.Buffer.Block()
+        pointer.ParseFromString(service.container.filesystem)
+        self.assertTrue(all(h.type for h in pointer.hashes))
+        # Readable with no context at all, which is the point of it.
+        self.assertEqual(filesystem_block_id(service.container.filesystem),
+                         block_id.hex())
+
+    # -- reading the compressed pointers back ---------------------------
+    def test_a_per_file_pointer_needs_the_context_it_inherits(self):
+        service, _ = self._service()
+        big = {b.name: b for b in load_container_filesystem(service).branch}["big.bin"]
+        pointer = buffer_pb2.Buffer.Block()
+        pointer.ParseFromString(big.file)
+        self.assertFalse(any(h.type for h in pointer.hashes))
+
+        self.assertIsNotNone(
+            filesystem_block_id(big.file, inherited=filesystem_hash_types(service)))
+
+    def test_the_content_still_comes_back(self):
+        # What ch/build.py's _write_item does, now with the context threaded to it.
+        service, _ = self._service()
+        big = {b.name: b for b in load_container_filesystem(service).branch}["big.bin"]
+        target = os.path.join(self.root, "restored.bin")
+        self.assertTrue(copy_block_if_exists(
+            buffer=big.file, directory=target,
+            inherited=filesystem_hash_types(service)))
+        with open(target, "rb") as f:
+            self.assertEqual(f.read(), BIG)
+
+    # -- and it costs nothing -------------------------------------------
+    def test_the_saving_does_not_rename_the_filesystem_block(self):
+        """Which is what makes it safe to adopt: a pointer is replaced by its
+        block's content in the expansion, so what the pointer looked like never
+        reaches the hash. The filesystem block keeps its id, and so does the
+        service above it."""
+        spelled_out, spelled_out_id = self._service(omit_types=False)
+        inherited, inherited_id = self._service(omit_types=True)
+        self.assertEqual(spelled_out_id, inherited_id)
+        self.assertEqual(spelled_out.container.filesystem,
+                         inherited.container.filesystem)
+
+    def test_the_stored_tree_is_smaller(self):
+        spelled_out, _ = self._tree(omit_types=False)
+        inherited, _ = self._tree(omit_types=True)
+        self.assertEqual(
+            len(spelled_out.SerializeToString()) - len(inherited.SerializeToString()),
+            len(Enviroment.hash_type) + 2,          # the type, its tag and its length
+        )
 
 
 class PackingMemoryEstimateTests(unittest.TestCase):

@@ -7,17 +7,18 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, List, Set, Tuple
+from typing import Any, Optional, List, Sequence, Set, Tuple
 import tempfile
 
 import warnings
 from google.protobuf.message import DecodeError
 from bee_rpc import buffer_pb2
 from bee_rpc.client import copy_block_if_exists, get_hash_from_block
+from bee_rpc.utils import block_id_from_pointer
 
 from protos import celaut_pb2
 from src.utils.config import ConfigManager
-from src.utils.container_filesystem import load_container_filesystem
+from src.utils.container_filesystem import load_container_filesystem, filesystem_hash_types
 from src.utils.filesystem_xattrs import (
     FilesystemNodeMetadata,
     parse_filesystem_metadata_xattrs,
@@ -642,7 +643,10 @@ def _write_item(
     symlinks: List[_PendingSymlink],
     legacy_regular_files: Set[Path],
     security_context: _BuildSecurityContext,
+    hash_types: Optional[Sequence[bytes]] = None,
 ) -> None:
+    """`hash_types` is the context this tree's block pointers sit in -- what a
+    pointer that leaves its hash types out inherits. See container_filesystem."""
     rel_path = _join_relative_path(parent_rel_path, branch.name)
     metadata = _decode_branch_metadata(branch=branch, rel_path=rel_path)
     _ensure_metadata_matches_branch(metadata=metadata, branch=branch, rel_path=rel_path)
@@ -661,6 +665,7 @@ def _write_item(
             symlinks=symlinks,
             legacy_regular_files=legacy_regular_files,
             security_context=security_context,
+            hash_types=hash_types,
         )
         if metadata is not None:
             _apply_regular_metadata(path=target_path, metadata=metadata, rel_path=rel_path)
@@ -678,7 +683,8 @@ def _write_item(
             _apply_regular_metadata(path=target_path, metadata=metadata, rel_path=rel_path)
             return
 
-        if not copy_block_if_exists(buffer=branch.file, directory=str(target_path)):
+        if not copy_block_if_exists(buffer=branch.file, directory=str(target_path),
+                                    inherited=hash_types):
             # copy_block_if_exists returns False in two very different cases:
             #   (1) branch.file is genuine inline content (small files)   -> writing it is correct
             #   (2) branch.file is a block *pointer* (large files) whose block copy failed
@@ -696,13 +702,13 @@ def _write_item(
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", category=RuntimeWarning)
                     _blk.ParseFromString(branch.file)
-                # Match copy_block_if_exists' own resolution: the block pointers this
-                # pipeline produces carry a single hash of type Enviroment.hash_type
-                # (internal_block=False), not the empty type (internal_block=True). Check
-                # both so the guard actually fires for hash-typed pointers.
+                # Match copy_block_if_exists' own resolution, context and all: a
+                # pointer in a filesystem stored as its own block may leave its hash
+                # types out and inherit them, and this guard has to fire for those
+                # too. The legacy empty-type form is the second try there as well.
                 block_id = (
-                    get_hash_from_block(block=_blk, internal_block=True)
-                    or get_hash_from_block(block=_blk, internal_block=False)
+                    block_id_from_pointer(block=_blk, inherited=hash_types)
+                    or get_hash_from_block(block=_blk, internal_block=True)
                 )
                 
                 _is_block_pointer = block_id is not None
@@ -711,9 +717,11 @@ def _write_item(
 
             if _is_block_pointer:  #  Si llega aqui, copy_block_if_exists tuvo que retornar el último False.
 
-                # Vuelve a obtener ambos hashes para el mensaje de error, para que sea más fácil de depurar.
-                internal = get_hash_from_block(_blk, internal_block=True)
-                external = get_hash_from_block(_blk, internal_block=False)
+                # Ambas resoluciones en el mensaje de error, para depurar: la del
+                # esquema de tipos de hash (con el contexto que hereda este árbol) y
+                # la legacy del tipo vacío.
+                resolved = block_id_from_pointer(block=_blk, inherited=hash_types)
+                legacy = get_hash_from_block(_blk, internal_block=True)
 
                 raise RuntimeError(
                     f"""
@@ -723,8 +731,9 @@ def _write_item(
                 type(block_id)={type(block_id)}
                 _is_block_pointer={_is_block_pointer}
 
-                internal={internal!r} ({type(internal)})
-                external={external!r} ({type(external)})
+                inherited hash types={hash_types!r}
+                resolved={resolved!r} ({type(resolved)})
+                legacy (empty type)={legacy!r} ({type(legacy)})
                 block_id={block_id!r}
                 
                 Parsed block:
@@ -779,6 +788,7 @@ def _write_fs(
     symlinks: List[_PendingSymlink],
     legacy_regular_files: Set[Path],
     security_context: _BuildSecurityContext,
+    hash_types: Optional[Sequence[bytes]] = None,
 ) -> None:
     for branch in fs_element.branch:
         _write_item(
@@ -788,6 +798,7 @@ def _write_fs(
             symlinks=symlinks,
             legacy_regular_files=legacy_regular_files,
             security_context=security_context,
+            hash_types=hash_types,
         )
 
 
@@ -1072,6 +1083,9 @@ def build(
     os.chmod(rootfs_dir, 0o700)
 
     fs = load_container_filesystem(service)
+    # What the tree's pointers inherit: nothing when the filesystem is inline in
+    # the spec, the filesystem pointer's own types when it is a block of its own.
+    fs_hash_types = filesystem_hash_types(service)
 
     symlinks: List[_PendingSymlink] = []
     legacy_regular_files: Set[Path] = set()
@@ -1082,6 +1096,7 @@ def build(
         symlinks=symlinks,
         legacy_regular_files=legacy_regular_files,
         security_context=security_context,
+        hash_types=fs_hash_types,
     )
     _apply_symlinks(symlinks, rootfs_dir, security_context)
     entrypoint = (
