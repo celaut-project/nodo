@@ -21,12 +21,13 @@ id does not depend on which one it is stored in.
 """
 import os
 import warnings
-from typing import Optional
+from typing import Optional, Sequence, Tuple
 
 from bee_rpc import buffer_pb2
 from bee_rpc.client import get_hash_from_block
 from bee_rpc.reader import block_exists, read_block
-from bee_rpc.utils import Enviroment, WITHOUT_BLOCK_POINTERS_FILE_NAME
+from bee_rpc.utils import Enviroment, WITHOUT_BLOCK_POINTERS_FILE_NAME, HashTypeError, \
+    block_id_from_pointer, hash_types_for_packing, inherit_hash_types, resolve_hash_types
 from google.protobuf.message import DecodeError
 
 from protos import celaut_pb2 as celaut
@@ -37,13 +38,8 @@ from src.utils import logger as log
 _LARGEST_PLAUSIBLE_POINTER = 512
 
 
-def filesystem_block_id(raw: bytes) -> Optional[str]:
-    """The block this filesystem field points at, or ``None`` if it is inline.
-
-    Settled by the block registry rather than by the bytes: a pointer names a
-    hash we actually hold. An inline filesystem would have to both parse as a
-    ``Buffer.Block`` *and* name a stored block to be mistaken for one, and what
-    it would name is a hash of the whole rootfs.
+def _as_pointer(raw: bytes) -> Optional[buffer_pb2.Buffer.Block]:
+    """The ``Buffer.Block`` these bytes are, if they could plausibly be one.
 
     The size check is not an optimisation. An inline filesystem is the entire
     image, and handing all of it to ``ParseFromString`` on every call -- this
@@ -65,19 +61,63 @@ def filesystem_block_id(raw: bytes) -> Optional[str]:
     except (DecodeError, UnicodeDecodeError):
         return None
 
-    if not block.hashes:
+    return block if block.hashes else None
+
+
+def filesystem_block_id(
+        raw: bytes,
+        inherited: Optional[Sequence[bytes]] = None
+) -> Optional[str]:
+    """The block this filesystem field points at, or ``None`` if it is inline.
+
+    Settled by the block registry rather than by the bytes: a pointer names a
+    hash we actually hold. An inline filesystem would have to both parse as a
+    ``Buffer.Block`` *and* name a stored block to be mistaken for one, and what
+    it would name is a hash of the whole rootfs.
+
+    ``inherited`` is the hash-type context these bytes sit in. ``None`` is the
+    spec's own field, which is the top of a stored tree and carries its types.
+    """
+    block = _as_pointer(raw)
+    if block is None:
         return None
 
-    # Both pointer encodings: create_block's carries the hash type, the block
-    # driver's omits it. `copy_block_if_exists` resolves both, so this does too.
-    block_id = (
-        get_hash_from_block(block=block, internal_block=True)
-        or get_hash_from_block(block=block, internal_block=False)
-    )
+    block_id = block_id_from_pointer(block=block, inherited=inherited)
+    if not block_id:
+        # Artefacts written before the top of a tree was required to carry its
+        # types: a single hash of the empty type, which meant "whatever this node
+        # addresses blocks with".
+        block_id = get_hash_from_block(block=block, internal_block=True)
     if not block_id:
         return None
 
     return block_id if block_exists(block_id=block_id) else None
+
+
+def filesystem_hash_types(service: celaut.Service) -> Optional[Tuple[bytes, ...]]:
+    """The hash-type context the pointers *inside* the filesystem tree sit in.
+
+    A filesystem stored as a block of its own is one level down, so the per-file
+    pointers in it may leave their hash types out and take them from the pointer
+    that named the filesystem -- which is what makes the tree cheap to store when
+    it holds thousands of files. Reading those pointers back means knowing what
+    they inherit, and that is this.
+
+    ``None`` when the filesystem is inline: it is then part of the spec itself,
+    the top of the tree, where a pointer has to carry its own types.
+    """
+    raw = service.container.filesystem
+    if filesystem_block_id(raw) is None:
+        return None
+
+    block = _as_pointer(raw)
+    try:
+        return inherit_hash_types(resolve_hash_types(block), None)
+    except HashTypeError:
+        # A pointer from before the top was required to carry its types. The empty
+        # type meant "whatever this node addresses blocks with", so that is the
+        # context it sets for everything below it.
+        return hash_types_for_packing()
 
 
 def load_container_filesystem(service: celaut.Service) -> celaut.Service.Container.Filesystem:
