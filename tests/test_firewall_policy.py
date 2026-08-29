@@ -289,5 +289,59 @@ class ReturnTrafficTests(unittest.TestCase):
         )
 
 
+class CompatRuleTests(unittest.TestCase):
+    """The four guest paths nodo asks another firewall to stop swallowing."""
+
+    def setUp(self):
+        self.rules = {
+            rule.comment.rsplit(";", 1)[1]: rule for rule in policy.compat_rules("br-ch")
+        }
+
+    def test_every_rule_lands_in_nodos_own_chain(self):
+        for rule in self.rules.values():
+            self.assertIs(rule.chain, Chain.FORWARD_COMPAT)
+            self.assertIs(rule.verdict, Verdict.ACCEPT)
+
+    def test_parent_to_child_is_the_bridge_talking_to_itself(self):
+        rule = self.rules["guests"]
+        self.assertEqual(rule.in_interface, "br-ch")
+        self.assertEqual(rule.out_interface, "br-ch")
+        self.assertFalse(rule.out_interface_is_negated)
+
+    def test_egress_is_the_bridge_talking_to_anything_else(self):
+        rule = self.rules["egress"]
+        self.assertEqual(rule.in_interface, "br-ch")
+        self.assertTrue(rule.out_interface_is_negated)
+        self.assertEqual(
+            iptables(rule),
+            "-i br-ch ! -o br-ch -j ACCEPT -m comment --comment nodo;forward;compat;egress",
+        )
+
+    def test_traffic_towards_a_guest_is_always_conntrack_bound(self):
+        # Unsolicited inbound to a guest is not a path nodo needs, so it is not a
+        # path nodo asks for: replies and DNAT'd published ports, nothing else.
+        for name in ("replies", "published"):
+            rule = self.rules[name]
+            self.assertEqual(rule.out_interface, "br-ch")
+            self.assertIsNone(rule.in_interface)
+            self.assertTrue(rule.ct_states, name)
+        self.assertEqual(self.rules["replies"].ct_states, ("RELATED", "ESTABLISHED"))
+        self.assertEqual(self.rules["published"].ct_states, ("DNAT",))
+
+    def test_the_jump_is_the_only_thing_added_to_a_chain_nodo_does_not_own(self):
+        jump = policy.compat_jump_rule("NODO_FWD")
+        self.assertIs(jump.chain, Chain.FORWARD)
+        self.assertIs(jump.verdict, Verdict.JUMP)
+        self.assertEqual(jump.jump_to, "NODO_FWD")
+        # At the head: what it has to get in front of is a policy DROP, which is
+        # applied after every rule in the chain.
+        self.assertTrue(jump.at_head)
+
+    def test_a_junk_bridge_name_is_refused_before_it_reaches_iptables(self):
+        for bad in ("", "br-ch; rm -rf /", "e" * 16, "br*"):
+            with self.assertRaises(RuleError, msg=bad):
+                policy.compat_rules(bad)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,9 @@ FORWARD_RELATED_ESTABLISHED_COMMENT = "nodo;forward;related_established"
 MASQUERADE_COMMENT_PREFIX = "nodo;masquerade;subnet="
 VM_COMMENT_ROOT = "nodo;vm="
 
+COMPAT_COMMENT_PREFIX = "nodo;forward;compat;"
+COMPAT_JUMP_COMMENT = f"{COMPAT_COMMENT_PREFIX}jump"
+
 
 def vm_comment_prefix(vmachine_id: str) -> str:
     """Everything nodo writes for one VM starts with this."""
@@ -77,6 +80,61 @@ def forward_related_established_rule() -> Rule:
         ct_states=("RELATED", "ESTABLISHED"),
         at_head=True,
     )
+
+
+def compat_jump_rule(chain_name: str) -> Rule:
+    """The one rule nodo adds to a FORWARD chain it does not own: a jump to its own.
+
+    At the head, because what it has to get in front of is a policy DROP, and a
+    policy applies after every rule in the chain. Being first is not about winning
+    against other people's rules -- it is about being reachable at all.
+    """
+    return Rule(
+        chain=Chain.FORWARD,
+        comment=COMPAT_JUMP_COMMENT,
+        verdict=Verdict.JUMP,
+        jump_to=str(chain_name),
+        at_head=True,
+    )
+
+
+def compat_rules(bridge: str) -> List[Rule]:
+    """The four guest paths that a foreign FORWARD policy would otherwise swallow.
+
+    They live in nodo's own chain in the compatibility table (``NODO_FWD``), which
+    is reached by ``compat_jump_rule``. Each one names a single path, rather than
+    one blanket accept for the bridge: an operator reading ``iptables -S NODO_FWD``
+    should be able to see exactly what nodo asked for and nothing more.
+
+    * ``guests``    -- parent to child, the path that is routed through the host on
+      purpose so nodo's policy can see it (``_ensure_guest_l2_isolation``).
+    * ``egress``    -- a guest reaching off this box. Whether it is *allowed* is
+      decided in ``inet nodo``, whose drop is terminal; this only keeps someone
+      else's policy from deciding it first.
+    * ``replies``   -- return traffic for a connection a guest opened. Deliberately
+      conntrack-bound rather than a bare ``-o <bridge>``: unsolicited inbound to a
+      guest is not a path nodo needs, so it is not one it asks for.
+    * ``published`` -- inbound to a published port, which arrives DNAT'd from
+      ``ip nodo`` prerouting and is therefore NEW on the forward hook. Matched on
+      the DNAT state so it stays as narrow as the reply rule.
+
+    None of this weakens isolation. nodo's own filter runs at priority -5 in a
+    different table, and a drop there is terminal for the whole hook -- an accept
+    here is never consulted.
+    """
+    name = str(bridge or "").strip()
+    if not name:
+        raise RuleError("The compatibility rules need a bridge name.")
+
+    def rule(suffix: str, **kwargs) -> Rule:
+        return Rule(chain=Chain.FORWARD_COMPAT, comment=f"{COMPAT_COMMENT_PREFIX}{suffix}", **kwargs)
+
+    return [
+        rule("guests", in_interface=name, out_interface=name),
+        rule("egress", in_interface=name, out_interface=name, out_interface_is_negated=True),
+        rule("replies", out_interface=name, ct_states=("RELATED", "ESTABLISHED")),
+        rule("published", out_interface=name, ct_states=("DNAT",)),
+    ]
 
 
 def block_all_rules(vmachine_id: str, vm_ip: str) -> List[Rule]:

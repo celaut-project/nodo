@@ -910,10 +910,12 @@ def _doctor_guest_to_guest_forwarding():
     outside is indistinguishable from a child that died on boot -- a node has been
     accused of shortchanging a guest's memory on exactly this evidence.
 
-    nodo cannot fix it from here and does not try. ``inet nodo`` accepts at priority
-    -5, a foreign ``drop`` later on the same hook is terminal, and punching a hole in
-    a table nodo does not own would override the operator's own rules and leave a
-    rule behind with nobody to remove it. What doctor owes is the name of the chain.
+    doctor changes nothing here. It sends the packet, reports what nodo has in the
+    compatibility table (``NODO_FWD``, see ``firewall/compat.py``), and names the
+    chain that is dropping it -- including the case ``NODO_FWD`` cannot reach, which
+    is a firewall with a native nftables table of its own. Applying or removing
+    those rules is ``nodo firewall-compat``, because a change to the host's firewall
+    should be something the operator asked for.
     """
     print("\nGuest-to-guest forwarding:", flush=True)
 
@@ -936,10 +938,19 @@ def _doctor_guest_to_guest_forwarding():
         return
 
     probe = probe_tcp_between_guests(bridge=bridge, subnet=subnet, gateway_ip=gateway_ip)
+    compat = _compat_state(bridge)
 
     if probe.reachable is True:
         print(f"[OK] A guest on {bridge} can reach another guest through the host.", flush=True)
+        # Worth one line even on success: these are the rules nodo put in a table it
+        # does not own, and an operator who does not know they are there cannot
+        # decide whether to keep them.
+        if compat is not None and compat.complete:
+            print(f"  {compat.detail}", flush=True)
         return
+
+    if compat is not None and compat.partial:
+        print(f"[WARN] {compat.detail}", flush=True)
 
     if probe.reachable is None:
         print(f"[WARN] Could not test it: {probe.detail}", flush=True)
@@ -971,13 +982,62 @@ def _doctor_guest_to_guest_forwarding():
             "chain on the same hook still wins whatever the priority.",
             flush=True
         )
+
+    if compat is None:
         print(
-            "  This is host configuration, not a node setting. Docker sets FORWARD's "
-            "policy to DROP, ufw defaults DEFAULT_FORWARD_POLICY to DROP, and firewalld "
-            f"rejects forwarded traffic by zone. Allow forwarding for {bridge} in "
-            "whichever of those owns the chain above.",
+            "  What nodo has in the compatibility table could not be read; "
+            "'nodo firewall-compat status' as root will say.",
             flush=True
         )
+    elif not compat.available:
+        print(f"  {compat.detail}", flush=True)
+    elif compat.mode.value == "off":
+        print(
+            "  virtualizers.ch.FORWARD_COMPAT is off, so nodo has not asked for these "
+            "paths back. Set it to auto to let nodo add its own NODO_FWD chain.",
+            flush=True
+        )
+    elif compat.complete:
+        # The rules are in and it still fails, so whatever drops this is somewhere
+        # NODO_FWD cannot reach. Naming the usual one saves a long afternoon.
+        print(
+            f"  {compat.detail} Since that is in place and this still fails, the drop "
+            "is in a table iptables does not write to -- firewalld's own inet firewalld "
+            "is the usual answer, and its filter_FORWARD rejects by zone. Allow "
+            f"forwarding for {bridge} in firewalld itself "
+            f"('firewall-cmd --permanent --zone=trusted --change-interface={bridge}').",
+            flush=True
+        )
+    else:
+        print(
+            f"  {compat.detail} Run 'nodo firewall-compat apply' as root, or start the "
+            "node, to have nodo ask for those paths back.",
+            flush=True
+        )
+
+
+def _compat_state(bridge):
+    """What nodo has in the compatibility table, or None if that cannot be read.
+
+    None rather than an empty state: doctor's whole contract on this page is that
+    "I could not look" never prints as "there is nothing there".
+
+    Read straight from ``firewall.compat`` rather than through the virtualizer
+    wrapper, which pulls in the database and the whole instance stack for two
+    config values. doctor is run on nodes too broken to load those.
+    """
+    try:
+        from src.utils.config import ConfigManager
+        from src.utils.firewall.compat import CompatMode, compat_state
+
+        configured = ConfigManager().get("virtualizers.ch.FORWARD_COMPAT", "auto")
+        try:
+            mode = CompatMode.parse(configured)
+        except ValueError:
+            mode = CompatMode.AUTO
+        return compat_state(bridge, mode)
+    except Exception:
+        return None
 
 
 def doctor_command(main_dir):

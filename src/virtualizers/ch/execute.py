@@ -360,9 +360,32 @@ def _network_preflight() -> ipaddress.IPv4Network:
 
     _run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
     _ensure_guest_l2_isolation()
+    # Not fatal, on purpose. This is the one thing nodo writes into a table it does
+    # not own, and a host that refuses it -- or an operator who turned it off -- has
+    # a node that still boots guests. What must not happen is booting them while
+    # claiming the network is fine: 'nodo doctor' settles that with a real packet.
+    _ensure_forward_compat()
     _ensure_masquerade(network)
 
     return network
+
+def _ensure_forward_compat() -> None:
+    """Ask for the guest paths back from whatever else filters this host's FORWARD.
+
+    See ``src/utils/firewall/compat.py`` for what this does and, just as important,
+    what it cannot reach -- firewalld's own table is out of its range, and saying so
+    is better than a rule that looks like it should have worked.
+    """
+    from src.virtualizers.firewall import ensure_forward_compat
+
+    try:
+        state = ensure_forward_compat(NETWORK_BRIDGE_NAME)
+    except Exception as e:
+        log.LOGGER(f"[CH][FW] Could not evaluate the forward compatibility rules: {e}")
+        return
+    if state.error:
+        log.LOGGER(f"[CH][FW] {state.detail} {state.error}")
+
 
 def _ensure_guest_l2_isolation() -> None:
     """Route guest-to-guest traffic through the host, where the policy lives.

@@ -95,6 +95,7 @@ COMMANDS = sorted(
         "tui",
         "ggconf",
         "nat-guide",
+        "firewall-compat",
         "prune_containers",
         "refresh_clients",
         "tx_history",
