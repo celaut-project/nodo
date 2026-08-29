@@ -28,10 +28,16 @@ from src.utils.firewall.gateway import (
     withdraw_gateway_port,
 )
 from src.utils.firewall.frontend import Frontend, detect_frontend, open_port_advice
-from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
+from src.utils.firewall.reachability import (
+    GUEST_PROBE_PORT,
+    ProbeResult,
+    probe_tcp_between_guests,
+    probe_tcp_from_bridge,
+)
 
 __all__ = [
     "AppliedRule",
+    "GUEST_PROBE_PORT",
     "Chain",
     "Rule",
     "RuleError",
@@ -60,6 +66,7 @@ __all__ = [
     "gateway_comment",
     "open_port_advice",
     "operator_notice",
+    "probe_tcp_between_guests",
     "probe_tcp_from_bridge",
     "unassigned_port_error",
     "withdraw_gateway_port",

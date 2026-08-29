@@ -1,4 +1,10 @@
-"""Prove a host port is reachable from the guest subnet, instead of assuming it.
+"""Prove the guest paths work, instead of assuming they do.
+
+Two questions, both answered with a real packet: can a guest reach the gateway on
+this host (``probe_tcp_from_bridge``), and can a guest reach another guest
+(``probe_tcp_between_guests``). Both cross a netfilter hook nodo shares with every
+other firewall on the box, and on both an ``accept`` in nodo's own table settles
+nothing -- see the module docstring of ``backends.py``.
 
 The incident this exists for: a correct ``iptables ... -j ACCEPT`` rule for the
 gateway port sat in the ruleset for two days while every guest's gRPC call was
@@ -204,19 +210,33 @@ def _addresses_in_use(run: Runner, bridge: str) -> Set[str]:
     return in_use
 
 
-def _pick_source_ip(subnet: str, gateway_ip: str, in_use: Set[str]) -> tuple:
+def _pick_source_ips(subnet: str, gateway_ip: str, in_use: Set[str], count: int = 1) -> tuple:
+    """``count`` free addresses in ``subnet``, plus the prefix length they share.
+
+    From the top of the range down: the node hands guests addresses from the
+    bottom, so the high end is where a transient probe collides least. That
+    matters more than it looks -- a probe that lands on the address of a VM whose
+    per-VM drop rules are still in the ruleset would measure nodo's own isolation
+    policy and report it as a broken host.
+    """
     network = ipaddress.ip_network(subnet, strict=False)
     hosts: List = list(network.hosts())
     if not hosts:
         raise RuntimeError(f"Subnet {subnet} has no usable host address.")
-    # From the top of the range down: the node hands guests addresses from the
-    # bottom, so the high end is where a transient probe collides least.
+    picked: List[str] = []
     for candidate in reversed(hosts):
         text = str(candidate)
         if text == gateway_ip or text in in_use:
             continue
-        return text, network.prefixlen
-    raise RuntimeError(f"No free address available in {subnet} for the probe.")
+        picked.append(text)
+        if len(picked) == count:
+            return tuple(picked), network.prefixlen
+    raise RuntimeError(
+        f"No {count} free addresses available in {subnet} for the probe."
+        if count > 1
+        else f"No free address available in {subnet} for the probe."
+    )
+
 
 
 def probe_tcp_from_bridge(
@@ -276,7 +296,7 @@ def probe_tcp_from_bridge(
             )
 
     try:
-        source_ip, prefix_len = _pick_source_ip(
+        (source_ip,), prefix_len = _pick_source_ips(
             subnet=subnet, gateway_ip=target_ip, in_use=_addresses_in_use(runner, bridge)
         )
     except RuntimeError as e:
@@ -353,6 +373,272 @@ def probe_tcp_from_bridge(
             runner(["ip", "netns", "del", namespace])
         if created_link:
             runner(["ip", "link", "del", host_veth])
+
+
+# A port nothing on this host is expected to use, high enough to stay clear of the
+# range the node hands out. The guest-to-guest probe owns both ends, so the number
+# only has to be free inside two throwaway namespaces.
+GUEST_PROBE_PORT = 47653
+
+# The listener binds before it prints, so a process still alive after this has
+# bound. A connect that fails is re-checked against the listener anyway.
+LISTENER_SETTLE_S = 0.3
+
+_LISTEN_SNIPPET = (
+    "import socket,sys\n"
+    "s=socket.socket()\n"
+    "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n"
+    "s.bind((sys.argv[1], int(sys.argv[2])))\n"
+    "s.listen(8)\n"
+    "s.settimeout(float(sys.argv[3]))\n"
+    "print('listening', flush=True)\n"
+    "try:\n"
+    "    while True:\n"
+    "        c,_ = s.accept()\n"
+    "        c.close()\n"
+    "except Exception:\n"
+    "    pass\n"
+    "finally:\n"
+    "    s.close()\n"
+)
+
+
+class _ProbeUnknown(Exception):
+    """The probe could not be performed. Never reported as "not reachable"."""
+
+
+@dataclass(frozen=True)
+class _Endpoint:
+    """One throwaway guest: a namespace on the bridge, wired like a real tap."""
+
+    namespace: str
+    host_veth: str
+    guest_veth: str
+    ip: str
+    entry: NamespaceEntry
+
+
+def _default_spawn(command: Sequence[str]) -> subprocess.Popen:
+    return subprocess.Popen(
+        list(command), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
+
+
+def _open_endpoint(
+    stack: contextlib.ExitStack,
+    runner: Runner,
+    *,
+    bridge: str,
+    tag: str,
+    suffix: str,
+    ip: str,
+    prefix_len: int,
+) -> _Endpoint:
+    """Build one probe endpoint on ``bridge``, or raise ``_ProbeUnknown``.
+
+    Wired exactly like ``_create_tap`` does it for a real guest, isolation
+    included. That is not decoration: an ordinary bridge port would let the two
+    endpoints switch frames tap to tap and never reach the forward hook, so the
+    probe would report success on precisely the host where every real guest fails.
+    A host that will not set ``isolated on`` therefore yields "unknown", not "fine".
+    """
+    namespace = f"nodofw{tag}{suffix}"
+    host_veth = f"nodofw{tag}h{suffix}"   # 14 chars, within the 15-char IFNAMSIZ limit
+    guest_veth = f"nodofw{tag}g{suffix}"
+
+    add_ns = runner(["ip", "netns", "add", namespace])
+    if add_ns.returncode != 0:
+        raise _ProbeUnknown(f"could not create netns: {_text(add_ns)}")
+    stack.callback(lambda: runner(["ip", "netns", "del", namespace]))
+
+    add_link = runner(["ip", "link", "add", host_veth, "type", "veth", "peer", "name", guest_veth])
+    if add_link.returncode != 0:
+        raise _ProbeUnknown(f"could not create veth pair: {_text(add_link)}")
+    # Deleting the namespace destroys the peer inside it, which normally takes the
+    # host side with it; the explicit delete covers the case where the pair was
+    # created but never moved.
+    stack.callback(lambda: runner(["ip", "link", "del", host_veth]))
+
+    # Resolved once the namespace exists, because nsenter needs a path to it.
+    entry = _namespace_entry(namespace)
+
+    for args in (
+        ["ip", "link", "set", host_veth, "master", bridge],
+        ["ip", "link", "set", "dev", host_veth, "type", "bridge_slave", "isolated", "on"],
+        ["ip", "link", "set", host_veth, "up"],
+        ["ip", "link", "set", guest_veth, "netns", namespace],
+        [*entry.ip_prefix, "link", "set", "lo", "up"],
+        [*entry.ip_prefix, "addr", "add", f"{ip}/{prefix_len}", "dev", guest_veth],
+        [*entry.ip_prefix, "link", "set", guest_veth, "up"],
+    ):
+        proc = runner(args)
+        if proc.returncode != 0:
+            raise _ProbeUnknown(
+                f"could not set up the probe interface (via {entry.name}): {_text(proc)}"
+            )
+
+    return _Endpoint(
+        namespace=namespace, host_veth=host_veth, guest_veth=guest_veth, ip=ip, entry=entry
+    )
+
+
+def probe_tcp_between_guests(
+    *,
+    bridge: str,
+    subnet: str,
+    gateway_ip: str,
+    port: int = GUEST_PROBE_PORT,
+    run: Optional[Runner] = None,
+    spawn: Optional[Callable[[Sequence[str]], subprocess.Popen]] = None,
+    attempts: int = PROBE_ATTEMPTS,
+    connect_timeout_s: float = PROBE_CONNECT_TIMEOUT_S,
+    retry_delay_s: float = PROBE_RETRY_DELAY_S,
+    sleep: Callable[[float], None] = time.sleep,
+) -> ProbeResult:
+    """Can one guest on this bridge reach another one? Tried, not assumed.
+
+    The parent-to-child path. A service that launches a dependency talks to it over
+    this exact route, and when a foreign forward chain drops it the failure arrives
+    disguised: the parent sees a connect timeout, which reads from the outside like
+    a child that died rather than a packet the host discarded. So the answer comes
+    from sending the packet, the way ``probe_tcp_from_bridge`` does for the gateway.
+
+    Two throwaway namespaces, both wired like a real guest -- same bridge, same
+    subnet, isolated ports -- so the traffic is routed by the host and crosses the
+    forward hook rather than being switched inside the bridge.
+
+    What this does *not* measure is nodo's own per-VM policy: those rules match on a
+    registered VM's address and the probe's addresses are not one, so a failure here
+    is host configuration, not isolation working as intended.
+
+    Peer reachability is pinned with an explicit host route through the gateway in
+    both directions, rather than relying on the proxy-ARP half of
+    ``_ensure_guest_l2_isolation``: that is re-applied on every launch and may not be
+    in place when doctor runs on a stopped node, and it is not what this is asking
+    about. ``net.ipv4.ip_forward`` is the one prerequisite left, and it is reported
+    rather than assumed -- or set.
+    """
+    runner = run or _default_runner
+    spawner = spawn or _default_spawn
+
+    if os.geteuid() != 0:
+        return ProbeResult(None, "needs root to create a network namespace")
+
+    link = runner(["ip", "link", "show", bridge])
+    if link.returncode != 0:
+        return ProbeResult(
+            None,
+            f"bridge {bridge} does not exist yet; it is created on the first instance launch",
+        )
+
+    forwarding = runner(["sysctl", "-n", "net.ipv4.ip_forward"])
+    if forwarding.returncode == 0 and (forwarding.stdout or "").strip() == "0":
+        return ProbeResult(
+            None,
+            "net.ipv4.ip_forward is 0, so this host routes nothing between guests yet; "
+            "the node sets it on the first instance launch",
+        )
+
+    try:
+        (source_ip, peer_ip), prefix_len = _pick_source_ips(
+            subnet=subnet,
+            gateway_ip=gateway_ip,
+            in_use=_addresses_in_use(runner, bridge),
+            count=2,
+        )
+    except RuntimeError as e:
+        return ProbeResult(None, str(e))
+
+    suffix = f"{random.randrange(16 ** 5):05x}"
+    listener: Optional[subprocess.Popen] = None
+
+    try:
+        with contextlib.ExitStack() as stack:
+            client = _open_endpoint(
+                stack, runner, bridge=bridge, tag="c", suffix=suffix,
+                ip=source_ip, prefix_len=prefix_len,
+            )
+            peer = _open_endpoint(
+                stack, runner, bridge=bridge, tag="p", suffix=suffix,
+                ip=peer_ip, prefix_len=prefix_len,
+            )
+
+            for endpoint, other in ((client, peer), (peer, client)):
+                route = runner([
+                    *endpoint.entry.ip_prefix, "route", "add", f"{other.ip}/32",
+                    "via", gateway_ip, "dev", endpoint.guest_veth,
+                ])
+                if route.returncode != 0:
+                    return ProbeResult(
+                        None, f"could not route {endpoint.ip} to {other.ip}: {_text(route)}"
+                    )
+
+            listener = spawner([
+                *peer.entry.exec_prefix,
+                sys.executable, "-c", _LISTEN_SNIPPET,
+                peer.ip, str(port), str(connect_timeout_s * max(1, attempts) + 5),
+            ])
+            stack.callback(lambda: _stop_listener(listener))
+
+            sleep(LISTENER_SETTLE_S)
+            if listener.poll() is not None:
+                return ProbeResult(
+                    None,
+                    f"the probe listener could not start on {peer.ip}:{port}: "
+                    f"{_listener_output(listener)}",
+                )
+
+            last = ""
+            for attempt in range(1, max(1, attempts) + 1):
+                connect = runner([
+                    *client.entry.exec_prefix,
+                    sys.executable, "-c", _CONNECT_SNIPPET,
+                    peer.ip, str(port), str(connect_timeout_s),
+                ])
+                last = _text(connect)
+                if connect.returncode == 0:
+                    return ProbeResult(
+                        True,
+                        f"TCP connect from {source_ip} to {peer_ip}:{port} across {bridge} "
+                        "succeeded, so the host forwards guest to guest",
+                        source_ip=source_ip,
+                    )
+                if attempt < attempts:
+                    sleep(retry_delay_s)
+
+            if listener.poll() is not None:
+                return ProbeResult(
+                    None,
+                    f"the probe listener on {peer.ip}:{port} exited mid-probe, so the "
+                    f"failed connect proves nothing: {_listener_output(listener)}",
+                )
+
+            return ProbeResult(
+                False,
+                f"TCP connect from {source_ip} to {peer_ip}:{port} across {bridge} failed "
+                f"after {attempts} attempt(s): {last}",
+                source_ip=source_ip,
+            )
+    except _ProbeUnknown as e:
+        return ProbeResult(None, str(e))
+
+
+def _stop_listener(listener: Optional[subprocess.Popen]) -> None:
+    if listener is None or listener.poll() is not None:
+        return
+    listener.terminate()
+    try:
+        listener.wait(timeout=2)
+    except Exception:
+        listener.kill()
+
+
+def _listener_output(listener: subprocess.Popen) -> str:
+    try:
+        out = (listener.communicate(timeout=2)[0] or "").strip()
+    except Exception:
+        out = ""
+    return out or f"exit status {listener.returncode}"
 
 
 def _text(proc: subprocess.CompletedProcess) -> str:

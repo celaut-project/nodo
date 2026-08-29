@@ -35,6 +35,19 @@ than it was through the compatibility table, because it now runs at -5, ahead of
 anything a host firewall might accept. That is the intended behaviour, and it is
 the reason isolation must be verified rather than assumed too.
 
+That cuts both ways and on both hooks. On ``input`` it decides whether a guest can
+reach the gateway; on ``forward`` -- which guest-to-guest traffic crosses, because
+``_ensure_guest_l2_isolation`` routes it through the host on purpose -- it decides
+whether a service can reach the dependency it just launched. A foreign ``drop``
+there (Docker's ``ip filter FORWARD`` policy, ufw's default forward policy,
+firewalld's ``filter_FORWARD``) is beyond nodo's reach whatever it accepts.
+
+nodo does not write into those tables. It is not nodo's job to undo one host's
+particular mix of software, and a rule punched into a table nodo does not own has
+no owner, no teardown, and overrides whatever the operator put there. What nodo
+owes the operator is a straight answer about what is happening: ``foreign_rejectors``
+names the chains, and ``reachability`` settles the question with an actual packet.
+
 Nothing in this package may import ``src.utils.config`` or ``src.utils.logger``
 (both build a ``ConfigManager``), because ``ConfigManager`` imports this package.
 Callers pass their own values and their own ``log`` callable.
@@ -95,21 +108,28 @@ _IPTABLES_CHAINS: Dict[Chain, str] = {
 
 @dataclass(frozen=True)
 class ForeignRejector:
-    """A base chain, not owned by nodo, that can reject inbound packets."""
+    """A base chain, not owned by nodo, that can stop packets on one hook.
+
+    ``hook`` is part of the finding, not context the caller is expected to
+    remember: the same scan answers for ``input`` (can a guest reach the gateway)
+    and for ``forward`` (can a guest reach another guest), and a line that does not
+    say which one it is about sends the operator to the wrong chain.
+    """
 
     table: str
     chain: str
     priority: Optional[int]
     reason: str
+    hook: str = "input"
 
     def __str__(self) -> str:
         priority = "?" if self.priority is None else str(self.priority)
-        return f"{self.table} / {self.chain} (hook input, priority {priority}): {self.reason}"
+        return f"{self.table} / {self.chain} (hook {self.hook}, priority {priority}): {self.reason}"
 
 
 @dataclass(frozen=True)
 class RejectorScan:
-    """What was found on the input hook outside nodo's own tables -- or that nobody looked.
+    """What was found on one hook outside nodo's own tables -- or that nobody looked.
 
     Three states, not two. "No rejecting chains" and "the ruleset could not be read"
     used to arrive as the same empty list, and that ambiguity was load-bearing at
@@ -126,17 +146,19 @@ class RejectorScan:
     rejectors: Tuple[ForeignRejector, ...] = ()
     readable: bool = True
     reason: str = ""
+    hook: str = "input"
 
     def describe(self) -> List[str]:
         """The finding, as lines for an operator-facing message."""
+        subject = "this port" if self.hook == "input" else "this traffic"
         if not self.readable:
             return [
-                "Whether anything else on the input hook rejects this port could not "
+                f"Whether anything else on the {self.hook} hook rejects {subject} could not "
                 f"be determined: {self.reason}",
             ]
         if not self.rejectors:
             return [
-                "Nothing outside nodo's own ruleset rejects on the input hook, as far "
+                f"Nothing outside nodo's own ruleset rejects on the {self.hook} hook, as far "
                 "as the live ruleset shows.",
             ]
         return ["Rejecting chains, outside nodo's own ruleset:"] + [
@@ -199,8 +221,8 @@ class FirewallBackend(ABC):
     def delete(self, applied: AppliedRule) -> None:
         """Delete a rule previously returned by ``list_rules``."""
 
-    def foreign_input_rejectors(self) -> RejectorScan:
-        """Base chains outside nodo's tables that could reject inbound packets.
+    def foreign_rejectors(self, hook: str = "input") -> RejectorScan:
+        """Base chains outside nodo's tables that could stop packets on ``hook``.
 
         Unreadable by default, which is the honest answer for a backend that cannot
         see other tables: ``iptables -S`` lists iptables' own chains, so on a host
@@ -209,8 +231,26 @@ class FirewallBackend(ABC):
         """
         return RejectorScan(
             readable=False,
+            hook=hook,
             reason=f"the {self.name} backend cannot read chains outside its own tables",
         )
+
+    def foreign_input_rejectors(self) -> RejectorScan:
+        """Input-hook rejectors: what can stop a guest from reaching the gateway."""
+        return self.foreign_rejectors("input")
+
+    def foreign_forward_rejectors(self) -> RejectorScan:
+        """Forward-hook rejectors: what can stop a guest from reaching another guest.
+
+        The counterpart of ``foreign_input_rejectors`` for the hook nodo's own guest
+        traffic crosses. ``_ensure_guest_l2_isolation`` routes guest-to-guest through
+        the host on purpose, so that nodo's policy can see it -- which also puts
+        parent-to-child in front of every other forward base chain on the box. A
+        ``drop`` in any of them is terminal, whatever nodo accepted at priority -5,
+        and a node whose children are unreachable looks from the inside like a child
+        that died. This is how the operator gets told which chain to look at instead.
+        """
+        return self.foreign_rejectors("forward")
 
     # --- the operations callers actually use -------------------------------
 
@@ -406,8 +446,8 @@ class NftBackend(FirewallBackend):
                 f"Could not delete nft rule {applied.handle} in {name}: {_failure_text(proc)}"
             )
 
-    def foreign_input_rejectors(self) -> RejectorScan:
-        """Read the live ruleset and report the input-hook chains that can reject.
+    def foreign_rejectors(self, hook: str = "input") -> RejectorScan:
+        """Read the live ruleset and report the chains on ``hook`` that can stop packets.
 
         A read that fails comes back as *unreadable*, never as "nothing found". The
         JSON listing is the fragile part here: a host whose ruleset includes tables
@@ -420,6 +460,7 @@ class NftBackend(FirewallBackend):
         if proc.returncode != 0:
             return RejectorScan(
                 readable=False,
+                hook=hook,
                 reason=f"'nft -j list ruleset' failed: {_failure_text(proc)}",
             )
         try:
@@ -427,6 +468,7 @@ class NftBackend(FirewallBackend):
         except ValueError as e:
             return RejectorScan(
                 readable=False,
+                hook=hook,
                 reason=f"the JSON from 'nft -j list ruleset' could not be parsed: {e}",
             )
 
@@ -435,7 +477,7 @@ class NftBackend(FirewallBackend):
             if not isinstance(item, dict):
                 continue
             chain = item.get("chain")
-            if isinstance(chain, dict) and chain.get("hook") == "input":
+            if isinstance(chain, dict) and chain.get("hook") == hook:
                 if chain.get("table") == NFT_TABLE and chain.get("family") == NFT_FILTER_FAMILY:
                     continue
                 key = (chain.get("family"), chain.get("table"), chain.get("name"))
@@ -478,10 +520,11 @@ class NftBackend(FirewallBackend):
                     chain=str(name),
                     priority=priority if isinstance(priority, int) else None,
                     reason=", ".join(reasons),
+                    hook=hook,
                 )
             )
         rejectors.sort(key=lambda r: (r.priority if r.priority is not None else 0, r.table))
-        return RejectorScan(rejectors=tuple(rejectors))
+        return RejectorScan(rejectors=tuple(rejectors), hook=hook)
 
 
 def _render_nft(rule: Rule) -> str:
