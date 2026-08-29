@@ -54,6 +54,22 @@ virtualizers:
     NETWORK_BRIDGE_NAME: "nodo-br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"
     NETWORK_GATEWAY_IP: "192.168.200.1"
+    # Whether nodo may write into the iptables compatibility table when something
+    # else on this host filters the forward hook. nodo accepts guest traffic in its
+    # own nftables table at priority -5, which does not survive a later DROP: with
+    # Docker installed (FORWARD policy DROP) or ufw's default forward policy, a
+    # parent cannot reach the child it just launched.
+    #
+    #   auto  (default) add nodo's own NODO_FWD chain only when the live ruleset
+    #         shows something on the forward hook that would drop this traffic
+    #   on    always add it, for a host whose ruleset cannot be read
+    #   off   never write outside nodo's own tables
+    #
+    # Inspect or undo it with 'nodo firewall-compat status|apply|remove'. It cannot
+    # reach a firewall with a native nftables table of its own -- firewalld, which
+    # is the default on Fedora and RHEL -- where forwarding has to be allowed for
+    # the bridge in firewalld itself.
+    FORWARD_COMPAT: "auto"
     # Guest interface used by the kernel ip=... cmdline.
     # Use "auto" to avoid hardcoding (recommended), or set e.g. "eth0".
     GUEST_NET_DEVICE: "auto"

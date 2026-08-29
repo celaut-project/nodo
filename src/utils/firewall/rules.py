@@ -21,12 +21,21 @@ MAX_COMMENT_LENGTH = 127
 
 
 class Chain(Enum):
-    """The hooks nodo writes to."""
+    """The hooks nodo writes to, plus the one chain it owns off to the side.
+
+    ``FORWARD_COMPAT`` is not a hook. It is ``NODO_FWD``, a regular chain in the
+    ``ip filter`` compatibility table that FORWARD jumps to -- the single place
+    nodo writes outside its own nft tables, and the reason it is a named chain
+    rather than loose rules is that a named chain has an owner and a teardown.
+    See ``compat.py``. It exists only under ``IptablesBackend``; asking
+    ``NftBackend`` for it is an error, not a silent no-op.
+    """
 
     INPUT = "input"
     FORWARD = "forward"
     PREROUTING = "prerouting"
     POSTROUTING = "postrouting"
+    FORWARD_COMPAT = "forward_compat"
 
     @property
     def is_nat(self) -> bool:
@@ -38,6 +47,34 @@ class Verdict(Enum):
     DROP = "drop"
     MASQUERADE = "masquerade"
     DNAT = "dnat"
+    JUMP = "jump"
+
+
+# IFNAMSIZ leaves 15 usable characters.
+MAX_INTERFACE_LENGTH = 15
+_UNSAFE_INTERFACE_CHARS = " \t\n\"';`$|&<>*?!"
+
+
+def _validate_interface(value: Optional[str], label: str) -> Optional[str]:
+    """An interface name, checked here rather than at each call site.
+
+    Every rule goes through this model, so this is the one place that sees them
+    all. Kept strict: these are handed to iptables as argv, and a name carrying a
+    wildcard would silently widen the match rather than fail.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        raise RuleError(f"{label} is empty.")
+    if len(text) > MAX_INTERFACE_LENGTH:
+        raise RuleError(
+            f"{label} {text!r} is longer than the {MAX_INTERFACE_LENGTH} characters "
+            "an interface name can have."
+        )
+    if any(ch in text for ch in _UNSAFE_INTERFACE_CHARS):
+        raise RuleError(f"{label} {text!r} is not a safe interface name.")
+    return text
 
 
 def _validate_port(value: Optional[int], label: str) -> Optional[int]:
@@ -69,8 +106,12 @@ class Rule:
     protocol: Optional[str] = None
     dport: Optional[int] = None
     sport: Optional[int] = None
+    in_interface: Optional[str] = None
+    out_interface: Optional[str] = None
+    out_interface_is_negated: bool = False
     ct_states: Tuple[str, ...] = field(default_factory=tuple)
     dnat_to: Optional[str] = None
+    jump_to: Optional[str] = None
     at_head: bool = False
 
     def __post_init__(self):
@@ -97,6 +138,14 @@ class Rule:
             raise RuleError("DNAT only belongs in prerouting.")
         if self.destination_is_negated and not self.destination:
             raise RuleError("A negated destination needs a destination.")
+        _validate_interface(self.in_interface, "in_interface")
+        _validate_interface(self.out_interface, "out_interface")
+        if self.out_interface_is_negated and not self.out_interface:
+            raise RuleError("A negated out_interface needs an out_interface.")
+        if self.verdict is Verdict.JUMP and not self.jump_to:
+            raise RuleError("A JUMP rule needs jump_to.")
+        if self.verdict is not Verdict.JUMP and self.jump_to:
+            raise RuleError("jump_to only applies to a JUMP rule.")
 
 
 def truncate_comment(comment: str) -> str:

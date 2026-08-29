@@ -3,6 +3,7 @@
 from src.utils.firewall.backends import (
     AppliedRule,
     FirewallBackend,
+    COMPAT_CHAIN,
     ForeignRejector,
     InputRule,
     IptablesBackend,
@@ -11,6 +12,13 @@ from src.utils.firewall.backends import (
     detect_backend,
 )
 from src.utils.firewall.errors import FirewallError, FirewallUnavailable, RuleError
+from src.utils.firewall.compat import (
+    CompatMode,
+    CompatState,
+    compat_state,
+    ensure_compat,
+    remove_compat,
+)
 from src.utils.firewall.rules import Chain, Rule, Verdict
 from src.utils.firewall.gateway import (
     GATEWAY_COMMENT_PREFIX,
@@ -37,6 +45,9 @@ from src.utils.firewall.reachability import (
 
 __all__ = [
     "AppliedRule",
+    "COMPAT_CHAIN",
+    "CompatMode",
+    "CompatState",
     "GUEST_PROBE_PORT",
     "Chain",
     "Rule",
@@ -57,6 +68,8 @@ __all__ = [
     "RejectorScan",
     "assign_gateway_port",
     "cleanup_legacy_rules",
+    "compat_state",
+    "ensure_compat",
     "defer_operator_notice",
     "detect_backend",
     "drain_operator_notices",
@@ -67,6 +80,7 @@ __all__ = [
     "open_port_advice",
     "operator_notice",
     "probe_tcp_between_guests",
+    "remove_compat",
     "probe_tcp_from_bridge",
     "unassigned_port_error",
     "withdraw_gateway_port",

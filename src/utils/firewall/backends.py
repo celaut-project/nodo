@@ -42,11 +42,14 @@ whether a service can reach the dependency it just launched. A foreign ``drop``
 there (Docker's ``ip filter FORWARD`` policy, ufw's default forward policy,
 firewalld's ``filter_FORWARD``) is beyond nodo's reach whatever it accepts.
 
-nodo does not write into those tables. It is not nodo's job to undo one host's
-particular mix of software, and a rule punched into a table nodo does not own has
-no owner, no teardown, and overrides whatever the operator put there. What nodo
-owes the operator is a straight answer about what is happening: ``foreign_rejectors``
-names the chains, and ``reachability`` settles the question with an actual packet.
+What nodo owes the operator first is a straight answer about what is happening:
+``foreign_rejectors`` names the chains, and ``reachability`` settles the question
+with an actual packet. Beyond that it writes in exactly one place it does not own
+-- ``NODO_FWD`` in the ``ip filter`` compatibility table, reached by a jump from
+FORWARD, holding one narrow accept per guest path (``compat.py``). A named chain
+because a rule with no owner and no teardown is not something to leave on someone
+else's host; only when the live ruleset shows it is needed; and never for
+firewalld, whose own table is out of reach whatever is written here.
 
 Nothing in this package may import ``src.utils.config`` or ``src.utils.logger``
 (both build a ``ConfigManager``), because ``ConfigManager`` imports this package.
@@ -98,11 +101,16 @@ _NFT_CHAINS: Dict[Chain, Tuple[str, str, str]] = {
     ),
 }
 
+# The name of nodo's own chain in the compatibility table. Not a hook: FORWARD
+# jumps to it. See compat.py for why it is a chain and not loose rules.
+COMPAT_CHAIN = "NODO_FWD"
+
 _IPTABLES_CHAINS: Dict[Chain, str] = {
     Chain.INPUT: "INPUT",
     Chain.FORWARD: "FORWARD",
     Chain.PREROUTING: "PREROUTING",
     Chain.POSTROUTING: "POSTROUTING",
+    Chain.FORWARD_COMPAT: COMPAT_CHAIN,
 }
 
 
@@ -530,6 +538,11 @@ class NftBackend(FirewallBackend):
 def _render_nft(rule: Rule) -> str:
     """The nft expression for ``rule``, matches first, then verdict, then comment."""
     parts: List[str] = []
+    if rule.in_interface:
+        parts.append(f'iifname "{rule.in_interface}"')
+    if rule.out_interface:
+        operator = "!= " if rule.out_interface_is_negated else ""
+        parts.append(f'oifname {operator}"{rule.out_interface}"')
     if rule.source:
         parts.append(f"ip saddr {rule.source}")
     if rule.destination:
@@ -547,6 +560,8 @@ def _render_nft(rule: Rule) -> str:
 
     if rule.verdict is Verdict.DNAT:
         parts.append(f"dnat to {rule.dnat_to}")
+    elif rule.verdict is Verdict.JUMP:
+        parts.append(f"jump {rule.jump_to}")
     else:
         parts.append(rule.verdict.value)
 
@@ -627,6 +642,49 @@ class IptablesBackend(FirewallBackend):
                 f"Could not add iptables rule in {name} ({rule.comment}): {_failure_text(proc)}"
             )
 
+    def own_chain_exists(self, chain: Chain) -> bool:
+        """Whether nodo's own chain is present.
+
+        Asked before listing it, so that "the chain is not there" -- the ordinary
+        state of a host that never needed it -- is never confused with "the chain
+        could not be read", which is a fault worth reporting.
+        """
+        if chain is not Chain.FORWARD_COMPAT:
+            raise FirewallError(f"{chain} is a built-in chain, not one nodo owns.")
+        return self._iptables(chain, "-L", _IPTABLES_CHAINS[chain], "-n").returncode == 0
+
+    def ensure_own_chain(self, chain: Chain) -> bool:
+        """Create the chain nodo owns in the compatibility table. True when created.
+
+        Only ``FORWARD_COMPAT``: the built-in chains are the kernel's and creating
+        one is a bug worth hearing about rather than a no-op.
+        """
+        name = _IPTABLES_CHAINS[chain]
+        if self.own_chain_exists(chain):
+            return False
+        proc = self._iptables(chain, "-N", name)
+        if proc.returncode != 0:
+            raise FirewallError(f"Could not create the {name} chain: {_failure_text(proc)}")
+        return True
+
+    def delete_own_chain(self, chain: Chain) -> bool:
+        """Flush and delete nodo's own chain. True when it was there to delete.
+
+        The jump into it has to be gone first, which is the caller's job: iptables
+        refuses to delete a chain something still references, and that refusal is
+        the safety net rather than something to work around.
+        """
+        name = _IPTABLES_CHAINS[chain]
+        if not self.own_chain_exists(chain):
+            return False
+        flush = self._iptables(chain, "-F", name)
+        if flush.returncode != 0:
+            raise FirewallError(f"Could not flush the {name} chain: {_failure_text(flush)}")
+        proc = self._iptables(chain, "-X", name)
+        if proc.returncode != 0:
+            raise FirewallError(f"Could not delete the {name} chain: {_failure_text(proc)}")
+        return True
+
     def delete(self, applied: AppliedRule) -> None:
         if not applied.tokens:
             raise FirewallError(
@@ -650,6 +708,13 @@ def _render_iptables(rule: Rule) -> List[str]:
     protocol match and iptables rejects them otherwise.
     """
     args: List[str] = []
+    if rule.in_interface:
+        args += ["-i", rule.in_interface]
+    if rule.out_interface:
+        if rule.out_interface_is_negated:
+            args += ["!", "-o", rule.out_interface]
+        else:
+            args += ["-o", rule.out_interface]
     if rule.protocol:
         args += ["-p", rule.protocol]
     if rule.source:
@@ -670,6 +735,8 @@ def _render_iptables(rule: Rule) -> List[str]:
         args += ["-j", "DNAT", "--to-destination", str(rule.dnat_to)]
     elif rule.verdict is Verdict.MASQUERADE:
         args += ["-j", "MASQUERADE"]
+    elif rule.verdict is Verdict.JUMP:
+        args += ["-j", str(rule.jump_to)]
     else:
         args += ["-j", rule.verdict.value.upper()]
 

@@ -232,6 +232,94 @@ class NftBackendTests(unittest.TestCase):
         self.assertIn("Nothing outside nodo", " ".join(scan.describe()))
 
 
+class OwnCompatChainTests(unittest.TestCase):
+    """NODO_FWD: the chain nodo owns inside a table it does not.
+
+    A chain rather than loose rules, because a chain has an owner. ``iptables -S
+    NODO_FWD`` is a complete answer to "what did nodo add here", and taking it back
+    out is one operation instead of reconstructing four rules.
+    """
+
+    def _backend(self, exists):
+        listing = _proc(0) if exists else _proc(1, "", "No chain/target/match by that name")
+        return IptablesBackend(run=FakeRunner({("iptables", "-L", "NODO_FWD"): listing}))
+
+    def test_an_absent_chain_is_created_once(self):
+        backend = self._backend(exists=False)
+        self.assertTrue(backend.ensure_own_chain(Chain.FORWARD_COMPAT))
+
+    def test_an_existing_chain_is_left_alone(self):
+        backend = self._backend(exists=True)
+        self.assertFalse(backend.ensure_own_chain(Chain.FORWARD_COMPAT))
+
+    def test_an_absent_chain_is_not_confused_with_an_unreadable_one(self):
+        # list_rules raises on any non-zero exit, so asking first is what keeps the
+        # ordinary state of a host that never needed the chain from reading as a fault.
+        self.assertFalse(self._backend(exists=False).own_chain_exists(Chain.FORWARD_COMPAT))
+        self.assertTrue(self._backend(exists=True).own_chain_exists(Chain.FORWARD_COMPAT))
+
+    def test_deleting_flushes_first(self):
+        runner = FakeRunner({("iptables", "-L", "NODO_FWD"): _proc(0)})
+        self.assertTrue(IptablesBackend(run=runner).delete_own_chain(Chain.FORWARD_COMPAT))
+        commands = runner.commands()
+        self.assertLess(
+            commands.index("iptables -F NODO_FWD"), commands.index("iptables -X NODO_FWD")
+        )
+
+    def test_deleting_what_is_not_there_is_not_an_error(self):
+        backend = self._backend(exists=False)
+        self.assertFalse(backend.delete_own_chain(Chain.FORWARD_COMPAT))
+
+    def test_the_builtin_chains_are_not_nodos_to_create_or_destroy(self):
+        backend = self._backend(exists=True)
+        for chain in (Chain.FORWARD, Chain.INPUT):
+            with self.assertRaises(FirewallError):
+                backend.ensure_own_chain(chain)
+            with self.assertRaises(FirewallError):
+                backend.delete_own_chain(chain)
+
+    def test_nft_refuses_the_compatibility_chain_outright(self):
+        # It lives in ip filter by definition; a silent no-op here would leave the
+        # rules unwritten on exactly the hosts that need them.
+        backend = NftBackend(run=FakeRunner())
+        with self.assertRaises(FirewallError):
+            backend.add(Rule(chain=Chain.FORWARD_COMPAT, comment="nodo;forward;compat;guests"))
+
+
+class InterfaceAndJumpRenderingTests(unittest.TestCase):
+    def _iptables(self, rule):
+        from src.utils.firewall.backends import _render_iptables
+
+        return " ".join(_render_iptables(rule))
+
+    def _nft(self, rule):
+        from src.utils.firewall.backends import _render_nft
+
+        return _render_nft(rule)
+
+    def test_an_interface_pair_renders_on_both_backends(self):
+        rule = Rule(chain=Chain.FORWARD_COMPAT, comment="c", in_interface="br", out_interface="br")
+        self.assertEqual(self._iptables(rule), "-i br -o br -j ACCEPT -m comment --comment c")
+        self.assertEqual(self._nft(rule), 'iifname "br" oifname "br" accept comment "c"')
+
+    def test_a_negated_out_interface_keeps_its_negation(self):
+        # Silently dropping the '!' would turn "leaving the bridge" into "anything
+        # on the bridge", which is a wider rule than nodo asked for.
+        rule = Rule(
+            chain=Chain.FORWARD_COMPAT, comment="c",
+            in_interface="br", out_interface="br", out_interface_is_negated=True,
+        )
+        self.assertEqual(self._iptables(rule), "-i br ! -o br -j ACCEPT -m comment --comment c")
+        self.assertEqual(self._nft(rule), 'iifname "br" oifname != "br" accept comment "c"')
+
+    def test_a_jump_names_its_target(self):
+        rule = Rule(
+            chain=Chain.FORWARD, comment="c", verdict=Verdict.JUMP, jump_to="NODO_FWD",
+        )
+        self.assertEqual(self._iptables(rule), "-j NODO_FWD -m comment --comment c")
+        self.assertEqual(self._nft(rule), 'jump NODO_FWD comment "c"')
+
+
 class ForeignForwardRejectorTests(unittest.TestCase):
     """The same scan, aimed at the hook parent-to-child traffic actually crosses.
 

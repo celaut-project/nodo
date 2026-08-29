@@ -131,6 +131,55 @@ def ensure_forward_related_established_rule() -> bool:
     return True
 
 
+def _compat_mode():
+    """``virtualizers.ch.FORWARD_COMPAT``, defaulting to auto on an unreadable value.
+
+    A typo here must not stop a node from booting: the key decides whether nodo
+    compensates for someone else's forward policy, and refusing to start over it
+    would be a worse outcome than either answer it can hold.
+    """
+    from src.utils.firewall.compat import CompatMode
+
+    raw = env_manager.get("virtualizers.ch.FORWARD_COMPAT", "auto")
+    try:
+        return CompatMode.parse(raw)
+    except ValueError as e:
+        logger(f"[FW] {e} Falling back to auto.")
+        return CompatMode.AUTO
+
+
+def _compat_bridge(bridge: Optional[str] = None) -> str:
+    name = (bridge or env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch") or "")
+    return str(name).strip()
+
+
+def ensure_forward_compat(bridge: Optional[str] = None):
+    """Put nodo's compatibility chain in place, if this host turns out to need one.
+
+    Deliberately not folded into ``ensure_forward_related_established_rule``: that
+    writes a rule nodo owns outright, this one writes into a table it does not, and
+    a failure of the second must never take down the first. Never raises -- see
+    ``compat.ensure_compat`` for why this is not fatal.
+    """
+    from src.utils.firewall.compat import ensure_compat
+
+    return ensure_compat(_compat_bridge(bridge), _compat_mode(), log=logger)
+
+
+def remove_forward_compat(bridge: Optional[str] = None):
+    """Take nodo's compatibility chain back out of the host's FORWARD chain."""
+    from src.utils.firewall.compat import remove_compat
+
+    return remove_compat(_compat_bridge(bridge), log=logger)
+
+
+def forward_compat_state(bridge: Optional[str] = None):
+    """What is in the compatibility table right now. Writes nothing."""
+    from src.utils.firewall.compat import compat_state
+
+    return compat_state(_compat_bridge(bridge), _compat_mode())
+
+
 # There is no ``allow_connection`` here on purpose. A bare "let this guest reach
 # this ip:port" had two callers, both of them host destinations, and both now go
 # through ``allow_host_connection`` below. What remains of the routed case is

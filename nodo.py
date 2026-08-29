@@ -248,6 +248,7 @@ if __name__ == '__main__':
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
                     "\n- nat-guide  (how to forward the gateway port on your router so this node is reachable)"
+                    "\n- firewall-compat status|apply|remove  (the FORWARD rules nodo needs from another firewall on this host)"
                     "\n\n",
                     flush=True)
                 try:
@@ -878,6 +879,11 @@ if __name__ == '__main__':
             case "nat-guide":
                 from src.commands.nat_guide import nat_guide
                 nat_guide()
+
+            case "firewall-compat":
+                from src.commands.firewall_compat import firewall_compat_command
+                subcommand = sys.argv[2] if len(sys.argv) > 2 else None
+                firewall_compat_command(subcommand=subcommand)
 
             case "completion":
                 # Shell tab-completion for commands and service/instance/peer ids.
