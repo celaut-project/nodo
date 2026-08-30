@@ -189,12 +189,25 @@ def hotplug(
                 requested=int(sysreq.mem_limit),
             )
         else:
+            # `mem_limit` is what the *service* is to be able to use; memory.max
+            # bounds the hypervisor process, which also holds the guest kernel's own
+            # footprint. Capping it at the usable figure would leave the service that
+            # much minus a kernel -- the shortfall the reserve exists to close -- and
+            # would put the cap below RAM the VM already has mapped. The reserve is
+            # the one this guest was booted with, read from its runtime state rather
+            # than recomputed, so an operator editing the reserve cannot move the cap
+            # of a guest already running under the old figure.
+            reserve_bytes = max(0, int(state.get("guest_kernel_reserve_bytes") or 0))
+            allocation = int(sysreq.mem_limit) + reserve_bytes
             try:
                 assert vm_cgroup is not None  # guarded by supported_requested
-                apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=int(sysreq.mem_limit))
+                apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=allocation)
                 report["results"]["mem_limit"] = _field_result(
                     status="applied",
-                    detail=f"Applied memory.max in {cgroup_path}",
+                    detail=(
+                        f"Applied memory.max={allocation} in {cgroup_path} "
+                        f"({int(sysreq.mem_limit)} usable + {reserve_bytes} guest kernel reserve)"
+                    ),
                     requested=int(sysreq.mem_limit),
                 )
             except Exception as e:

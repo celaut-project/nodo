@@ -43,9 +43,76 @@ OVERHEAD_BYTES = 64 * 1024 * 1024
 MIN_ROOTFS_BYTES = 128 * 1024 * 1024
 MKFS_GROWTH_FACTOR = 2
 
+# Guest kernel overhead: the memory counterpart of OVERHEAD_BYTES above.
+#
+# A manifest's `mem_limit` is a promise to the *service*: memory the service may
+# use. The hypervisor's `-m` is not that figure. The guest kernel takes its text,
+# its rodata/rwdata, its percpu areas and -- growing with the size of the guest --
+# one `struct page` per 4 KiB frame, all before init runs. What is left is what the
+# service can actually allocate, and it is materially less.
+#
+# Booting a guest at exactly `mem_limit` therefore hands the service less RAM than
+# its manifest declared. Measured on the 6.12 arm64 guest kernel this node ships,
+# from the `Memory: <avail>K/<total>K available` boot line:
+#
+#     -m 128 MiB  ->  102.7 MiB usable  (25.3 MiB overhead)
+#     -m 256 MiB  ->  228.1 MiB usable  (27.9 MiB overhead)
+#
+# i.e. a fixed cost of ~23 MiB plus ~2% of the guest's RAM (the `struct page`
+# array, 64 bytes per 4 KiB page). A service declaring `at_most 256 MiB` is
+# OOM-killed at ~228 MiB -- below its own declared ceiling.
+#
+# Disk already works this way: `initial_rootfs_size_bytes` grows the image by
+# OVERHEAD_BYTES so a service asking for N bytes of disk can store N bytes rather
+# than N minus the filesystem's metadata. Memory simply never got the same
+# treatment. The defaults carry margin over the measured figures because the
+# overhead varies with kernel version, architecture and config, and the failure
+# mode of too little is a guest OOM. Both settings at zero restores the previous
+# behaviour exactly.
+GUEST_KERNEL_RESERVE_BYTES = max(0, _env_int("virtualizers.ch.GUEST_KERNEL_RESERVE_MIB", 32)) * 1024 * 1024
+try:
+    GUEST_KERNEL_RESERVE_RATIO = max(
+        0.0, float(env_manager.get("virtualizers.ch.GUEST_KERNEL_RESERVE_RATIO", 0.05))
+    )
+except Exception:
+    GUEST_KERNEL_RESERVE_RATIO = 0.05
+
+
+def guest_boot_memory_bytes(usable_bytes: int) -> int:
+    """Hypervisor allocation so a guest can really offer ``usable_bytes`` to userspace.
+
+    Deliberately NOT part of :func:`resolve_initial_resources`, and so not part of
+    what :func:`billable_resources` returns. Two separate figures are wanted and
+    conflating them breaks something either way:
+
+    * ``resolve_initial_resources`` answers "what does this instance hold", which is
+      what the ``local_instances`` row records and the maintenance tick charges. It
+      has to stay idempotent -- it is applied to the manifest at launch and re-applied
+      to the already-resolved row when pricing it, and a figure that grew on each
+      application would make a quote and its charge disagree.
+    * this answers "how big must the VM be for that to be true", which only the two
+      backends need, at the one point where they build the hypervisor argument.
+
+    Keeping the overhead out of the billable figure also means the node absorbs it
+    rather than the client: a client is charged for the RAM it asked for and can use,
+    never for the kernel underneath it.
+    """
+    usable_bytes = int(usable_bytes)
+    if usable_bytes <= 0:
+        return usable_bytes
+    reserve = GUEST_KERNEL_RESERVE_BYTES + int(
+        math.ceil(usable_bytes * GUEST_KERNEL_RESERVE_RATIO)
+    )
+    return usable_bytes + reserve
+
 
 def resolve_initial_resources(resources: celaut_pb2.Sysresources) -> Tuple[int, int, int, int]:
-    """(vcpus, mem_bytes, cpu_quota, cpu_period) the guest is given for `resources`."""
+    """(vcpus, mem_bytes, cpu_quota, cpu_period) the instance holds for `resources`.
+
+    ``mem_bytes`` is memory the *service* may use -- what the row records and what it
+    is billed for. The VM is booted somewhat larger than this so that figure is actually
+    deliverable; see :func:`guest_boot_memory_bytes`.
+    """
     vcpus = DEFAULT_VCPUS
     mem_b = DEFAULT_MEM_MIB * (1024 * 1024)  # Convert MiB to bytes
 
