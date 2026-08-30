@@ -255,6 +255,7 @@ def _apply_memory_balloon(
     boot_mem_bytes: int,
     vm_cgroup,
     cgroup_path: str,
+    reserve_bytes: int = 0,
 ) -> Dict[str, Any]:
     """Resize guest memory via the balloon, keeping the cgroup a safe ceiling.
 
@@ -264,12 +265,22 @@ def _apply_memory_balloon(
     up (bounded by the boot ``-m``; QEMU cannot exceed its boot allocation, so a
     request above it is clamped and reported).
 
+    ``target_bytes`` is what the *service* is to be left able to use, which is not
+    what the balloon speaks: a balloon target is a guest allocation, and the guest
+    kernel's own footprint comes out of it first. ``reserve_bytes`` is that
+    footprint, measured for this guest at boot and carried in its runtime state, so
+    a grow to a declared ceiling really leaves the service that much to allocate
+    instead of that much minus a kernel. Everything reported back is in usable
+    bytes, the unit the request arrived in and the unit the row is priced in.
+
     The shrink is additionally bounded by what the guest reports it can spare;
     see :func:`_safe_balloon_target`. A request below that bound is honoured as
     far as it safely can be and reported as ``clamped``, because the alternative
     -- delivering it exactly -- kills the guest.
     """
-    clamped = max(MIN_BALLOON_BYTES, min(int(target_bytes), int(boot_mem_bytes)))
+    reserve_bytes = max(0, int(reserve_bytes))
+    allocation = int(target_bytes) + reserve_bytes
+    clamped = max(MIN_BALLOON_BYTES, min(allocation, int(boot_mem_bytes)))
     safety_note = None
     try:
         with QMPClient(qmp_socket) as qmp:
@@ -280,13 +291,14 @@ def _apply_memory_balloon(
         # QEMU, so we never do that here.
         apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=int(boot_mem_bytes))
         detail = (
-            f"virtio-balloon target set to {clamped} bytes via QMP; cgroup "
-            f"memory.max held at boot allocation {int(boot_mem_bytes)} in {cgroup_path}"
+            f"virtio-balloon target set to {clamped} bytes via QMP "
+            f"({int(target_bytes)} usable + {reserve_bytes} guest kernel reserve); "
+            f"cgroup memory.max held at boot allocation {int(boot_mem_bytes)} in {cgroup_path}"
         )
-        if int(target_bytes) > int(boot_mem_bytes):
+        if allocation > int(boot_mem_bytes):
             detail += (
-                f" (requested {int(target_bytes)} exceeds boot -m; clamped -- QEMU "
-                f"cannot grow a guest above its boot allocation)"
+                f" (requested {int(target_bytes)} usable needs {allocation} and exceeds "
+                f"boot -m; clamped -- QEMU cannot grow a guest above its boot allocation)"
             )
         if safety_note:
             # Reported as its own status so a caller can tell "you got what you
@@ -296,7 +308,7 @@ def _apply_memory_balloon(
                 detail=f"{detail} ({safety_note})",
                 requested=int(target_bytes),
             )
-            result["delivered"] = int(clamped)
+            result["delivered"] = max(0, int(clamped) - reserve_bytes)
             return result
         return _field_result(status="applied", detail=detail, requested=int(target_bytes))
     except QMPError as e:
@@ -324,6 +336,12 @@ def hotplug(
     pid = int(state.get("pid") or 0)
     qmp_socket = str(state.get("qmp_socket") or "")
     boot_mem_bytes = int(state.get("boot_mem_bytes") or 0)
+    # Measured for this guest at boot and persisted, not re-derived: it is what the
+    # kernel actually took, and an operator editing the reserve mid-life must not
+    # change the arithmetic for guests already running under the old figure. Absent
+    # on an instance launched before the reserve existed, which booted at exactly
+    # its usable figure and so has none.
+    reserve_bytes = max(0, int(state.get("guest_kernel_reserve_bytes") or 0))
 
     report: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -371,16 +389,24 @@ def hotplug(
             report["results"]["mem_limit"] = _apply_memory_balloon(
                 qmp_socket=qmp_socket, target_bytes=target, boot_mem_bytes=boot_mem_bytes,
                 vm_cgroup=vm_cgroup, cgroup_path=cgroup_path,
+                reserve_bytes=reserve_bytes,
             )
         else:
             # Legacy instance without a QMP socket: cgroup-only, and honestly
             # flagged as best-effort because a shrink below the guest's resident
             # set can swap or OOM the qemu process (the guest is not resized).
+            #
+            # The cgroup bounds the qemu *process*, so it is set to the guest
+            # allocation the target implies, reserve included -- capping it at the
+            # usable figure would have the host kill the VM for holding RAM the node
+            # itself handed it at boot.
+            allocation = target + reserve_bytes
             try:
-                apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=target)
+                apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=allocation)
                 report["results"]["mem_limit"] = _field_result(
                     "applied",
-                    f"cgroup memory.max set to {target} in {cgroup_path} "
+                    f"cgroup memory.max set to {allocation} in {cgroup_path} "
+                    f"({target} usable + {reserve_bytes} guest kernel reserve) "
                     f"(best-effort: no QMP balloon; a shrink below the guest RSS may swap/OOM qemu)",
                     target,
                 )
