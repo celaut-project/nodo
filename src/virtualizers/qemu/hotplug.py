@@ -41,6 +41,16 @@ from src.virtualizers.qemu.qmp import QMPClient, QMPError
 # the guest to surrender everything. Keep a conservative floor.
 MIN_BALLOON_BYTES = 64 * 1024 * 1024
 
+# Headroom left to the guest on top of what it reports as in use. The guest is
+# still running while the balloon inflates -- an allocation between the reading
+# and the resize must not be the one that pushes it over. 64 MiB is the same
+# order as the floor above and is small next to any realistic service.
+BALLOON_SAFETY_MARGIN_BYTES = 64 * 1024 * 1024
+
+# Floor used when the guest cannot say how much it has free. Reclaiming nothing
+# is always survivable; guessing is not.
+BALLOON_BLIND_FLOOR_BYTES = 256 * 1024 * 1024
+
 
 def _field_result(status: str, detail: str, requested: Any = None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"status": status, "detail": detail}
@@ -67,6 +77,55 @@ def _persist_report(vmachine_id: str, state: Dict[str, Any], report: Dict[str, A
     save_runtime_state(vmachine_id, new_state)
 
 
+def _safe_balloon_target(qmp, requested: int, boot_mem_bytes: int) -> tuple:
+    """The smallest balloon target that does not starve a running guest.
+
+    The balloon's documented safety -- "the guest only surrenders free pages" --
+    holds for the *pages*, not for the target. Asking a guest to shrink below
+    what it is actually using does not fail politely: the guest driver keeps
+    allocating to satisfy the request until its own allocator gives up, and the
+    guest kernel panics with "Out of memory and no killable processes". Observed
+    exactly that on a live arm64 guest: a caller asked for 64 MiB against a
+    954 MiB boot allocation and the guest died mid-request.
+
+    So clamp the request to what the guest says it can spare -- its free memory,
+    less a margin for what it allocates while we are resizing. When the guest
+    cannot report (no stats, no driver), reclaim nothing below a conservative
+    floor: a resize that under-delivers is a priced-wrong instance, while one
+    that over-delivers is a dead one.
+
+    Returns ``(target, note)`` where ``note`` is None when the request was
+    honoured as-is, and otherwise explains what was clamped and why.
+    """
+    requested = max(MIN_BALLOON_BYTES, min(int(requested), int(boot_mem_bytes)))
+
+    free = qmp.guest_free_bytes()
+    if free is None:
+        floor = min(int(boot_mem_bytes), BALLOON_BLIND_FLOOR_BYTES)
+        if requested >= floor:
+            return requested, None
+        return floor, (
+            f"guest does not report balloon statistics, so the memory it is using is "
+            f"unknown; held at {floor} bytes instead of the requested {requested} "
+            f"rather than risk inflating into the guest's working set"
+        )
+
+    # in_use = everything the guest has not told us is free.
+    safe_floor = int(boot_mem_bytes) - int(free) + BALLOON_SAFETY_MARGIN_BYTES
+    safe_floor = max(MIN_BALLOON_BYTES, min(safe_floor, int(boot_mem_bytes)))
+
+    if requested >= safe_floor:
+        return requested, None
+
+    return safe_floor, (
+        f"requested {requested} bytes is below what the guest is using "
+        f"({int(boot_mem_bytes) - int(free)} bytes in use, {int(free)} free of "
+        f"{int(boot_mem_bytes)}); clamped to {safe_floor} bytes "
+        f"(+{BALLOON_SAFETY_MARGIN_BYTES} margin) so the guest is not OOM-panicked "
+        f"by the resize"
+    )
+
+
 def _apply_memory_balloon(
     *,
     qmp_socket: str,
@@ -77,15 +136,22 @@ def _apply_memory_balloon(
 ) -> Dict[str, Any]:
     """Resize guest memory via the balloon, keeping the cgroup a safe ceiling.
 
-    Shrink: inflate the balloon to ``target`` first (guest returns pages), then
+    Shrink: inflate the balloon toward ``target`` (guest returns pages), then
     the cgroup cap can stay at the boot allocation -- never shrunk below it, so
     the qemu process is never squeezed into OOM. Grow: deflate the balloon back
     up (bounded by the boot ``-m``; QEMU cannot exceed its boot allocation, so a
     request above it is clamped and reported).
+
+    The shrink is additionally bounded by what the guest reports it can spare;
+    see :func:`_safe_balloon_target`. A request below that bound is honoured as
+    far as it safely can be and reported as ``clamped``, because the alternative
+    -- delivering it exactly -- kills the guest.
     """
     clamped = max(MIN_BALLOON_BYTES, min(int(target_bytes), int(boot_mem_bytes)))
+    safety_note = None
     try:
         with QMPClient(qmp_socket) as qmp:
+            clamped, safety_note = _safe_balloon_target(qmp, clamped, boot_mem_bytes)
             qmp.set_balloon(clamped)
         # Keep memory.max pinned at the boot allocation: it is a hard ceiling,
         # not the resize knob. Shrinking it below boot alloc is exactly what OOMs
@@ -100,6 +166,16 @@ def _apply_memory_balloon(
                 f" (requested {int(target_bytes)} exceeds boot -m; clamped -- QEMU "
                 f"cannot grow a guest above its boot allocation)"
             )
+        if safety_note:
+            # Reported as its own status so a caller can tell "you got what you
+            # asked for" from "you got as much as was survivable".
+            result = _field_result(
+                status="clamped",
+                detail=f"{detail} ({safety_note})",
+                requested=int(target_bytes),
+            )
+            result["delivered"] = int(clamped)
+            return result
         return _field_result(status="applied", detail=detail, requested=int(target_bytes))
     except QMPError as e:
         return _field_result(status="failed", detail=f"QMP balloon failed: {e}", requested=int(target_bytes))
@@ -207,10 +283,18 @@ def hotplug(
         report["results"]["cpu"] = _field_result("ignored", "cpu_period/cpu_quota not requested.")
 
     strict_ok = True
-    if mem_requested and report["results"]["mem_limit"]["status"] != "applied":
+    if mem_requested and report["results"]["mem_limit"]["status"] not in ("applied", "clamped"):
         strict_ok = False
     if cpu_requested and report["results"]["cpu"]["status"] != "applied":
         strict_ok = False
+
+    # A clamped shrink is a real resize, just not the requested one, so the
+    # instance must be priced at what it actually holds. Recording the request
+    # instead would bill a guest for less memory than it still has.
+    if report["results"].get("mem_limit", {}).get("status") == "clamped":
+        delivered = report["results"]["mem_limit"].get("delivered")
+        if delivered:
+            sysreq.mem_limit = int(delivered)
 
     if strict_ok:
         if not modify_sysreq(id=vmachine_id, sys_req=sysreq):
