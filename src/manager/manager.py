@@ -714,6 +714,37 @@ def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
     )
 
 
+def credit_father(father_id: str, amount_mu: int) -> bool:
+    """Give ``amount_mu`` back to whoever funded an instance, client or instance alike.
+
+    The exact reverse of :func:`spend_mu`, and the one operation a stop needs: the
+    father of a local instance is either a client row or another local instance, and
+    a refund path that knows only one of the two silently drops the money for the
+    other. ``modify_deposit`` already branches this way for a negative difference;
+    this is that branch, named, so a stop can reuse it instead of re-deriving it.
+
+    Returns False (and says so) when the father is neither, which is a bookkeeping
+    fault worth a log line: the MU has left the child's row by then.
+    """
+    amount_mu = int(amount_mu)
+    if amount_mu <= 0:
+        return True
+    if sc.internal_instance_exists(id=father_id):
+        sc.update_instance_balance(
+            id=father_id,
+            balance_mu=sc.get_instance_balance(id=father_id) + amount_mu,
+        )
+        return True
+    if sc.client_exists(client_id=father_id):
+        sc.add_balance(client_id=father_id, balance_mu=amount_mu)
+        return True
+    log.LOGGER(
+        f"Cannot return {format_mu(amount_mu)} left by a stopped instance: its father "
+        f"{father_id!r} is neither a client nor a local instance."
+    )
+    return False
+
+
 def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     token = resolve_instance_token(token) or token
     log.LOGGER('Kill service ' + token)
@@ -742,6 +773,27 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
                 IOBigData().log_snapshot(
                     context=f"stop-instance:after-unlock token={token} released_mem_limit={reserved_mem_limit}"
                 )
+            # The child's unspent deposit goes back to whoever paid it in, *before*
+            # the row is deleted -- after the DELETE the amount is unrecoverable.
+            #
+            # This is the whole reason a father's balance fell without bound. A
+            # father is charged the child's full `initial_mu` at StartService
+            # (`modify_deposit` -> `spend_mu`), the child then spends only the part
+            # it actually lived through, and the remainder was dropped on the floor
+            # by `purge_internal`. A parent that starts and stops children in a loop
+            # -- which is exactly what an orchestrator service does -- therefore pays
+            # the full deposit again on every iteration and is never given the change
+            # back, so its balance falls at the rate it *provisions*, not at the rate
+            # anything is *consumed*, and goes negative however much it is funded with.
+            #
+            # `refund` was already read, and already returned to the caller, as if
+            # this had been happening all along; only the credit was missing.
+            if refund and int(refund) > 0 and father_id:
+                if credit_father(father_id=father_id, amount_mu=int(refund)):
+                    log.LOGGER(
+                        f"Returned {format_mu(int(refund))} unspent by {token} to its "
+                        f"father {father_id}."
+                    )
             sc.purge_internal(id=token)
             
         except Exception as e:
@@ -876,14 +928,7 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         # The reverse of spend_mu(): what the instance gives back goes to its father.
         log.LOGGER(f"Credit father {father_id}")
 
-        if sc.internal_instance_exists(id=father_id):
-            father_balance = sc.get_instance_balance(id=father_id) + abs(amount_mu)
-            sc.update_instance_balance(id=father_id, balance_mu=father_balance)
-
-        elif sc.client_exists(client_id=father_id):
-            sc.add_balance(client_id=father_id, balance_mu=abs(amount_mu))
-
-        else:
+        if not credit_father(father_id=father_id, amount_mu=abs(amount_mu)):
             return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
 
     else:
