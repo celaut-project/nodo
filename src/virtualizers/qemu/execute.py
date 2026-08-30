@@ -35,6 +35,7 @@ import subprocess
 import time
 import traceback
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -159,6 +160,80 @@ def build_virtiofs_args(
     return args
 
 
+# Balloon options nodo wants, in the order they should be tried, keyed by the
+# property name QEMU exposes. The polling interval was renamed across releases
+# (6.x: `guest-stats-polling-interval`, later: `stats-polling-interval`), and
+# naming one QEMU does not know is fatal at launch, not ignored -- an emulator
+# that exits with "Property ... not found" takes the whole instance with it.
+_BALLOON_STATS_INTERVAL_PROPERTIES = (
+    "guest-stats-polling-interval",
+    "stats-polling-interval",
+)
+
+# Polling seconds. Only needs to be frequent enough that a resize arriving after
+# boot sees a fresh reading.
+_BALLOON_STATS_INTERVAL_SECONDS = 2
+
+
+@lru_cache(maxsize=8)
+def _balloon_properties(qemu_binary: str) -> frozenset:
+    """Property names this QEMU's ``virtio-balloon-pci`` accepts.
+
+    Asked once per binary and cached: the answer cannot change under a running
+    node, and every guest launch would otherwise pay for the probe.
+    """
+    try:
+        proc = subprocess.run(
+            [qemu_binary, "-machine", "virt", "-device", "virtio-balloon-pci,help"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except Exception:
+        return frozenset()
+
+    names = set()
+    for line in (proc.stdout or "") .splitlines() + (proc.stderr or "").splitlines():
+        line = line.strip()
+        if "=" not in line:
+            continue
+        name = line.split("=", 1)[0].strip()
+        if name:
+            names.add(name)
+    return frozenset(names)
+
+
+def _balloon_device_arg(qemu_binary: str) -> str:
+    """``-device`` argument for the balloon, using only properties this QEMU has.
+
+    ``id`` is fixed so hotplug can address the device by QOM path. The optional
+    extras are what make a shrink safe rather than fatal:
+
+    * a stats polling interval is what lets the guest report its free memory, so
+      a resize can be clamped to what the guest can actually spare instead of
+      OOM-panicking it;
+    * ``free-page-reporting`` lets the guest return pages it frees on its own;
+    * ``deflate-on-oom`` makes the guest give itself memory back rather than die
+      if it is ever squeezed too far anyway -- the last line of defence.
+
+    Each is included only when this QEMU advertises it, because an unknown
+    property is a launch failure, not a warning.
+    """
+    available = _balloon_properties(qemu_binary)
+    parts = ["virtio-balloon-pci", "id=nodo-balloon"]
+
+    for prop in _BALLOON_STATS_INTERVAL_PROPERTIES:
+        if prop in available:
+            parts.append(f"{prop}={_BALLOON_STATS_INTERVAL_SECONDS}")
+            break
+
+    for prop in ("free-page-reporting", "deflate-on-oom"):
+        if prop in available:
+            parts.append(f"{prop}=on")
+
+    return ",".join(parts)
+
+
 def build_qemu_command(
     *,
     qemu_binary: str,
@@ -233,7 +308,7 @@ def build_qemu_command(
     # hotplug drives the balloon over this socket (src/virtualizers/qemu/hotplug.py)
     # so the guest actually returns pages, instead of the cgroup squeezing the
     # qemu process into swap/OOM. Harmless when hotplug is never called.
-    command.extend(["-device", "virtio-balloon-pci"])
+    command.extend(["-device", _balloon_device_arg(qemu_binary)])
     if qmp_socket_path:
         command.extend(["-qmp", f"unix:{qmp_socket_path},server=on,wait=off"])
 
