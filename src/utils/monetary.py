@@ -28,10 +28,11 @@ the two scales still meet.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Union
+from typing import Any, Dict, Mapping, Optional, Union
 
+from src.utils.arch_guard import normalize_arch_tag
 from src.utils.config import ConfigManager
 
 
@@ -206,7 +207,8 @@ class Prices:
     A price of 0 makes that dimension free.
     """
 
-    # Recurring, charged for as long as an instance holds the resource.
+    # Recurring, charged for as long as an instance holds the resource. Memory has a
+    # per-architecture override too; see `ram_mu_per_gib_hour_by_arch` below.
     ram_mu_per_gib_hour: int
     cpu_mu_per_vcpu_hour: int
     disk_mu_per_gib_hour: int
@@ -221,6 +223,40 @@ class Prices:
     # stays flat until the resource is genuinely scarce).
     scarcity_max_multiplier: int
     scarcity_curve: float
+    # Per-architecture memory price, overriding `ram_mu_per_gib_hour` for guests of
+    # that architecture. Empty means every arch pays the scalar above, which is what a
+    # config written before this existed says, so nothing has to be migrated -- and it
+    # is last, with a default, for the same reason: every existing construction of this
+    # vector keeps working untouched.
+    #
+    # Memory is the one resource whose real cost to the node genuinely depends on the
+    # guest's architecture. A guest kernel's own footprint comes out of the VM's RAM
+    # before the service sees any of it, and that footprint differs per arch (~31 MiB
+    # + 1.8% on amd64, ~22.8 MiB + 2.2% on arm64 for the kernels nodo ships). The node
+    # deliberately absorbs it -- a client pays for the RAM it declared and can use,
+    # never for the kernel underneath it -- so an operator who wants that cost covered
+    # has to price it into the memory rate, and one rate cannot cover it correctly on
+    # both arches at once. See `virtualizers.ch.limits.guest_kernel_reserve_bytes`, and
+    # the TUI's pricing page, which shows the effective figure per arch.
+    #
+    # Only memory is per-arch. CPU and disk are not: the node hands a guest the vCPUs
+    # and the image it asked for whatever architecture it is. (Emulated CPU is far more
+    # expensive in wall-clock terms, but that is a throughput argument about what a
+    # vCPU is worth, not a claim that the node reserves more of them -- a different
+    # decision, and not one to smuggle in here.)
+    ram_mu_per_gib_hour_by_arch: Mapping[str, int] = field(default_factory=dict)
+
+    def ram_for_arch(self, arch: Optional[str]) -> int:
+        """The memory price a guest of ``arch`` pays, per GiB-hour.
+
+        Falls back to the scalar price, so an unpriced arch is charged the node's
+        ordinary rate rather than nothing. An arch the node cannot name at all (an
+        instance whose row predates the column) is in exactly that position.
+        """
+        canonical = normalize_arch_tag(arch)
+        if canonical is None:
+            return self.ram_mu_per_gib_hour
+        return int(self.ram_mu_per_gib_hour_by_arch.get(canonical, self.ram_mu_per_gib_hour))
 
 
 @dataclass(frozen=True)
@@ -251,6 +287,58 @@ def _price_mu(key: str) -> int:
     return int(value)
 
 
+# Where a per-architecture price override lives:
+#   pricing:
+#     RAM_MU_PER_GIB_HOUR: 1000000        # every arch, unless overridden below
+#     BY_ARCH:
+#       linux/amd64:
+#         RAM_MU_PER_GIB_HOUR: 1100000
+#       linux/arm64:
+#         RAM_MU_PER_GIB_HOUR: 1400000
+#
+# A nested block rather than a flattened `RAM_MU_PER_GIB_HOUR_LINUX_AMD64`: the arch
+# tag contains a slash, it is the same string the rest of the node uses to name an
+# architecture (`linux/amd64`), and keeping it verbatim is what lets a reader match a
+# price to a service without a second naming convention to learn.
+PRICING_BY_ARCH_KEY = "BY_ARCH"
+
+
+def _prices_by_arch(key: str) -> Dict[str, int]:
+    """Per-arch overrides for one price key, canonicalised and validated.
+
+    Absent, malformed-as-a-whole, or empty gives ``{}`` -- i.e. every arch pays the
+    scalar price. An individual *price* that is malformed still raises, exactly as a
+    malformed scalar price does: a price nobody can read is a configuration error, and
+    reading it as 0 gives the node's memory away.
+    """
+    block = _config().get(f"pricing.{PRICING_BY_ARCH_KEY}", None)
+    if not isinstance(block, dict):
+        return {}
+
+    overrides: Dict[str, int] = {}
+    for raw_arch, entry in block.items():
+        if not isinstance(entry, dict) or key not in entry:
+            continue
+        canonical = normalize_arch_tag(raw_arch)
+        if canonical is None:
+            raise ValueError(
+                f"pricing.{PRICING_BY_ARCH_KEY}.{raw_arch} names an architecture this "
+                f"node does not know. Use a canonical tag (linux/amd64, linux/arm64)."
+            )
+        what = f"pricing.{PRICING_BY_ARCH_KEY}.{raw_arch}.{key}"
+        raw = entry[key]
+        value = _decimal(raw if raw not in (None, "") else 0, what=what)
+        if value < 0:
+            raise ValueError(f"{what} must not be negative, got {value}.")
+        if value != value.to_integral_value():
+            raise ValueError(
+                f"{what} must be a whole number of MU, got {value}. Prices are in MU, "
+                "the node's unit of account; there is nothing smaller to express."
+            )
+        overrides[canonical] = int(value)
+    return overrides
+
+
 def prices() -> Prices:
     """This node's current price vector.
 
@@ -269,6 +357,7 @@ def prices() -> Prices:
 
     return Prices(
         ram_mu_per_gib_hour=_price_mu("RAM_MU_PER_GIB_HOUR"),
+        ram_mu_per_gib_hour_by_arch=_prices_by_arch("RAM_MU_PER_GIB_HOUR"),
         cpu_mu_per_vcpu_hour=_price_mu("CPU_MU_PER_VCPU_HOUR"),
         disk_mu_per_gib_hour=_price_mu("DISK_MU_PER_GIB_HOUR"),
         net_mu_per_gib=_price_mu("NET_MU_PER_GIB"),

@@ -671,6 +671,7 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
 def default_initial_balance(
     system_resources: celaut_pb2.Sysresources = None,
     service_hash: Optional[str] = None,
+    arch: Optional[str] = None,
 ) -> int:
     """MU to fund a new instance with when nobody asked for a specific amount.
 
@@ -683,7 +684,10 @@ def default_initial_balance(
     ticks that spend this balance charge the resolved row, so the balance is computed
     from those same figures or it funds fewer hours than INITIAL_RUNTIME_HOURS.
     `service_hash`, when known, prices an already-built service's real rootfs image
-    instead of the floor.
+    instead of the floor. `arch` is the guest's architecture, which selects the memory
+    price when the operator prices memory per arch -- the same rate the ticks that
+    spend this balance will charge, or the balance funds a different number of hours
+    than INITIAL_RUNTIME_HOURS says.
     """
     hours = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0))
     if hours <= 0 or system_resources is None:
@@ -693,6 +697,7 @@ def default_initial_balance(
     return maintenance_charge_mu(
         system_resources=resolve_billable_resources(system_resources, service_hash),
         seconds=hours * 3600,
+        arch=arch,
     )
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:

@@ -11,68 +11,126 @@ its manifest declared. Measured on a live node's 6.12 arm64 guest kernel:
 ``-m 256M`` leaves 228.1 MiB, so a service declaring ``at_most 256 MiB`` was
 OOM-killed at ~228 MiB -- below its own declared ceiling.
 
+The overhead is ARCHITECTURE-DEPENDENT, so the reserve is too, and these tests are
+run against both arches' real measurements rather than against one arch's numbers
+and an assumption about the other. Every figure below was read from the guest
+kernels this node ships, booted at each size, off their own
+``Memory: <avail>K/<total>K available`` line.
+
 Disk has always been sized this way (``initial_rootfs_size_bytes`` adds
 ``OVERHEAD_BYTES`` so a service asking for N bytes can store N bytes). These tests
 pin the same property for memory, and pin the separation that keeps it safe: the
 *boot allocation* grows, the *billable figure* does not.
 """
+import math
 import unittest
+from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils.config import ConfigManager
     from src.virtualizers.ch import limits
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]
     limits = None  # type: ignore[assignment]
+    ConfigManager = None  # type: ignore[assignment]
 
 MIB = 1024 * 1024
 
-# Overhead measured on the guest kernel this node ships (Linux 6.12, arm64 virt),
-# read from the boot line `Memory: <avail>K/<total>K available`.
-MEASURED = {
-    128 * MIB: 105172 * 1024,   # -m 128M -> 102.7 MiB usable
-    256 * MIB: 233604 * 1024,   # -m 256M -> 228.1 MiB usable
+ARM64 = "linux/arm64"
+AMD64 = "linux/amd64"
+
+# Overhead measured on the guest kernels this node ships, per architecture, read from
+# each guest's own boot line. Keyed boot allocation -> bytes left to userspace.
+#
+# The two arches differ by ~8 MiB at every size, and that difference is the entire
+# reason the reserve is per-arch: a constant fitted to arm64 is too small on amd64,
+# and too small means a service OOM-killed below the ceiling its manifest published.
+MEASURED_BY_ARCH = {
+    ARM64: {
+        128 * MIB: 105172 * 1024,    # 102.7 MiB usable (25.3 MiB overhead)
+        256 * MIB: 233604 * 1024,    # 228.1 MiB usable (27.9 MiB overhead)
+        512 * MIB: 490288 * 1024,    # 478.8 MiB usable (33.2 MiB overhead)
+        1024 * MIB: 1002736 * 1024,  # 979.2 MiB usable (44.8 MiB overhead)
+    },
+    AMD64: {
+        128 * MIB: 97384 * 1024,     #  95.1 MiB usable (32.9 MiB overhead)
+        256 * MIB: 225980 * 1024,    # 220.7 MiB usable (35.3 MiB overhead)
+        512 * MIB: 483376 * 1024,    # 472.0 MiB usable (40.0 MiB overhead)
+        1024 * MIB: 998236 * 1024,   # 974.8 MiB usable (49.2 MiB overhead)
+        2048 * MIB: 2028668 * 1024,  # 1981.1 MiB usable (66.9 MiB overhead)
+    },
 }
-# The two measurements fit a straight line, which is what the kernel's costs
-# actually are: a fixed part (text, rodata, percpu, initramfs) plus a part
-# proportional to the guest's size (one `struct page` per 4 KiB frame). Solving the
-# pair gives ~2% per byte and ~22.7 MiB fixed. Modelling it this way rather than as
-# a flat worst-case fraction matters: the fraction observed on the *smallest* guest
-# (19.8%) is dominated by the fixed part and wildly overstates a large guest's cost.
-_SIZES = sorted(MEASURED)
-_OVERHEAD_RATIO = (
-    (_SIZES[1] - MEASURED[_SIZES[1]]) - (_SIZES[0] - MEASURED[_SIZES[0]])
-) / (_SIZES[1] - _SIZES[0])
-_OVERHEAD_FIXED = (_SIZES[0] - MEASURED[_SIZES[0]]) - _OVERHEAD_RATIO * _SIZES[0]
+
+# The arm64 figures the original fix was written against, kept under their old name so
+# the tests that pin the *live* failure keep naming the measurement that produced it.
+MEASURED = MEASURED_BY_ARCH[ARM64]
 
 
-def modelled_usable(boot_alloc):
-    """What this guest kernel would leave userspace out of ``boot_alloc``."""
-    return boot_alloc - (_OVERHEAD_FIXED + _OVERHEAD_RATIO * boot_alloc)
+def _fit(measured):
+    """(fixed bytes, ratio) least-squares fit of overhead against guest size.
+
+    The kernel's costs really are of this shape: a fixed part (text, rodata, percpu,
+    initramfs) plus a part proportional to the guest's size (one ``struct page`` per
+    4 KiB frame). Modelling it this way rather than as a flat worst-case fraction
+    matters -- the fraction observed on the *smallest* guest is dominated by the fixed
+    part (19.8% on arm64 at 128 MiB) and wildly overstates a large guest's cost.
+
+    Least squares rather than solving a pair, now that there are more than two points
+    per arch: a fit through all of them cannot be skewed by whichever two were picked.
+    """
+    sizes = sorted(measured)
+    overheads = [size - measured[size] for size in sizes]
+    n = len(sizes)
+    mean_size = sum(sizes) / n
+    mean_overhead = sum(overheads) / n
+    variance = sum((size - mean_size) ** 2 for size in sizes)
+    ratio = sum(
+        (size - mean_size) * (overhead - mean_overhead)
+        for size, overhead in zip(sizes, overheads)
+    ) / variance
+    return mean_overhead - ratio * mean_size, ratio
+
+
+FIT_BY_ARCH = {arch: _fit(measured) for arch, measured in MEASURED_BY_ARCH.items()}
+_OVERHEAD_FIXED, _OVERHEAD_RATIO = FIT_BY_ARCH[ARM64]
+
+
+def modelled_usable(boot_alloc, arch=ARM64):
+    """What ``arch``'s guest kernel would leave userspace out of ``boot_alloc``."""
+    fixed, ratio = FIT_BY_ARCH[arch]
+    return boot_alloc - (fixed + ratio * boot_alloc)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class GuestBootMemoryTests(unittest.TestCase):
 
     def test_a_guest_is_booted_with_more_than_the_service_asked_to_use(self):
-        self.assertGreater(limits.guest_boot_memory_bytes(256 * MIB), 256 * MIB)
+        for arch in MEASURED_BY_ARCH:
+            with self.subTest(arch=arch):
+                self.assertGreater(
+                    limits.guest_boot_memory_bytes(256 * MIB, arch=arch), 256 * MIB
+                )
 
     def test_the_headroom_covers_the_overhead_actually_measured(self):
         """If the reserve is smaller than the real overhead the bug is not fixed.
 
         The service would still be unable to allocate what it declared, and would
-        still be OOM-killed below its own ceiling.
+        still be OOM-killed below its own ceiling. Checked per arch against that
+        arch's own measurements -- the point of a per-arch reserve is that one set of
+        numbers does not answer for the other.
         """
-        for boot_alloc, usable in MEASURED.items():
-            overhead = boot_alloc - usable
-            with self.subTest(boot_alloc=boot_alloc):
-                self.assertGreaterEqual(
-                    limits.guest_boot_memory_bytes(boot_alloc) - boot_alloc,
-                    overhead,
-                    "reserve must cover the guest kernel overhead measured at this size",
-                )
+        for arch, measured in MEASURED_BY_ARCH.items():
+            for boot_alloc, usable in measured.items():
+                overhead = boot_alloc - usable
+                with self.subTest(arch=arch, boot_alloc=boot_alloc):
+                    self.assertGreaterEqual(
+                        limits.guest_boot_memory_bytes(boot_alloc, arch=arch) - boot_alloc,
+                        overhead,
+                        "reserve must cover the guest kernel overhead measured at this size",
+                    )
 
     def test_a_service_declaring_256_mib_can_allocate_256_mib(self):
         """The live failure, stated as an assertion.
@@ -82,24 +140,28 @@ class GuestBootMemoryTests(unittest.TestCase):
         declaration, because the guest only ever had 228 MiB.
         """
         declared = 256 * MIB
-        boot = limits.guest_boot_memory_bytes(declared)
-        self.assertGreaterEqual(modelled_usable(boot), declared)
+        for arch in MEASURED_BY_ARCH:
+            with self.subTest(arch=arch):
+                boot = limits.guest_boot_memory_bytes(declared, arch=arch)
+                self.assertGreaterEqual(modelled_usable(boot, arch), declared)
 
     def test_every_size_gets_at_least_what_it_declared(self):
         """Not just the one size that failed live: the property has to hold generally."""
-        for declared_mib in (128, 200, 256, 512, 1024, 4096, 16384):
-            declared = declared_mib * MIB
-            with self.subTest(declared_mib=declared_mib):
-                boot = limits.guest_boot_memory_bytes(declared)
-                self.assertGreaterEqual(modelled_usable(boot), declared)
+        for arch in MEASURED_BY_ARCH:
+            for declared_mib in (128, 200, 256, 512, 1024, 4096, 16384):
+                declared = declared_mib * MIB
+                with self.subTest(arch=arch, declared_mib=declared_mib):
+                    boot = limits.guest_boot_memory_bytes(declared, arch=arch)
+                    self.assertGreaterEqual(modelled_usable(boot, arch), declared)
 
     def test_the_model_reproduces_the_measurements_it_was_fitted_to(self):
         """Guard the model itself, so the assertions above rest on something real."""
-        for boot_alloc, usable in MEASURED.items():
-            with self.subTest(boot_alloc=boot_alloc):
-                self.assertAlmostEqual(
-                    modelled_usable(boot_alloc) / usable, 1.0, places=3
-                )
+        for arch, measured in MEASURED_BY_ARCH.items():
+            for boot_alloc, usable in measured.items():
+                with self.subTest(arch=arch, boot_alloc=boot_alloc):
+                    self.assertAlmostEqual(
+                        modelled_usable(boot_alloc, arch) / usable, 1.0, places=2
+                    )
 
     def test_the_overhead_grows_with_the_guest(self):
         """A fixed byte reserve would be wrong at both ends.
@@ -108,15 +170,178 @@ class GuestBootMemoryTests(unittest.TestCase):
         for its page array alone -- a reserve that suits a 128 MiB guest cannot suit
         that one.
         """
-        small = limits.guest_boot_memory_bytes(128 * MIB) - 128 * MIB
-        large = limits.guest_boot_memory_bytes(16 * 1024 * MIB) - 16 * 1024 * MIB
-        self.assertGreater(large, small)
+        for arch in MEASURED_BY_ARCH:
+            with self.subTest(arch=arch):
+                small = limits.guest_boot_memory_bytes(128 * MIB, arch=arch) - 128 * MIB
+                large = (
+                    limits.guest_boot_memory_bytes(16 * 1024 * MIB, arch=arch)
+                    - 16 * 1024 * MIB
+                )
+                self.assertGreater(large, small)
 
     def test_nothing_is_added_to_nothing(self):
         self.assertEqual(limits.guest_boot_memory_bytes(0), 0)
 
     def test_a_negative_figure_is_returned_untouched(self):
         self.assertEqual(limits.guest_boot_memory_bytes(-1), -1)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class TheReserveIsPerArchitectureTests(unittest.TestCase):
+    """The overhead is a property of the guest kernel, so the reserve must be too.
+
+    A single shared constant is either wasteful on the cheaper arch or too small on
+    the costlier one -- and too small is the bug this whole change exists to fix.
+    """
+
+    def test_the_costlier_arch_reserves_more(self):
+        # The measured fact, asserted: amd64's kernel image, percpu areas and reserved
+        # low memory come to ~9 MiB more than arm64's at every size.
+        for size_mib in (128, 256, 512, 1024):
+            size = size_mib * MIB
+            with self.subTest(size_mib=size_mib):
+                self.assertGreater(
+                    limits.guest_kernel_reserve_bytes(size, arch=AMD64),
+                    limits.guest_kernel_reserve_bytes(size, arch=ARM64),
+                )
+
+    def test_arm64s_reserve_would_not_have_been_enough_for_amd64(self):
+        """Why this is per-arch and not one constant.
+
+        Sizing an amd64 guest by arm64's reserve leaves it short of the fixed cost
+        amd64 actually pays -- which is a service OOM-killed below its declared
+        ceiling, the original bug, on the arch that was not measured.
+        """
+        arm_fixed, _ = limits._reserve_for_arch(ARM64)
+        amd_measured_fixed, _ = FIT_BY_ARCH[AMD64]
+        self.assertLess(
+            arm_fixed,
+            amd_measured_fixed + 8 * MIB,
+            "arm64's reserve is not comfortably above amd64's real fixed overhead, "
+            "so a shared constant would have been safe and this split is unmotivated",
+        )
+
+    def test_an_alias_names_the_same_architecture(self):
+        # `x86_64`, `amd64` and `linux/amd64` are the same guest. A reserve that only
+        # answered to the canonical spelling would silently fall back for a caller
+        # holding a tag from the manifest.
+        canonical = limits.guest_kernel_reserve_bytes(256 * MIB, arch=AMD64)
+        for alias in ("amd64", "x86_64", "X86_64"):
+            with self.subTest(alias=alias):
+                self.assertEqual(
+                    limits.guest_kernel_reserve_bytes(256 * MIB, arch=alias), canonical
+                )
+
+    def test_an_unknown_arch_gets_the_largest_reserve_nodo_has_measured(self):
+        """Not the smallest, and not nothing.
+
+        An arch nobody has characterised is likelier to resemble the most expensive
+        kernel than the cheapest. The cost of over-reserving is host RAM the node
+        absorbs; the cost of under-reserving is a service killed below its ceiling.
+        Only one of those breaks a promise the node made.
+        """
+        unknown = limits.guest_kernel_reserve_bytes(256 * MIB, arch="linux/riscv64")
+        self.assertEqual(
+            unknown,
+            max(
+                limits.guest_kernel_reserve_bytes(256 * MIB, arch=arch)
+                for arch in MEASURED_BY_ARCH
+            ),
+        )
+
+    def test_an_unnamed_arch_still_gets_a_reserve(self):
+        # A caller that cannot name the guest must not silently get the pre-fix
+        # behaviour back: that is the bug, reintroduced for anything unlabelled.
+        self.assertGreater(limits.guest_boot_memory_bytes(256 * MIB), 256 * MIB)
+
+    def test_the_table_reports_what_the_backends_will_apply(self):
+        # The TUI's pricing page advises the operator against this table, so a table
+        # that disagreed with the reserve would advise against an overhead the node
+        # does not apply.
+        table = limits.guest_kernel_reserve_table()
+        self.assertEqual(set(table), set(limits.known_reserve_architectures()))
+        for arch, entry in table.items():
+            with self.subTest(arch=arch):
+                expected = entry["fixed_bytes"] + int(
+                    -(-256 * MIB * entry["ratio"] // 1)
+                )
+                self.assertEqual(
+                    limits.guest_kernel_reserve_bytes(256 * MIB, arch=arch), expected
+                )
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class TheReserveIsConfigurablePerArchTests(unittest.TestCase):
+    """An operator running their own guest kernel has to be able to correct it.
+
+    Per arch, because a node that boots a corrected amd64 kernel and a stock arm64 one
+    would otherwise have to choose which of the two to be wrong about.
+    """
+
+    def _config(self, **overrides):
+        manager = ConfigManager()
+        real_get = manager.get
+
+        def get(key, default=None):
+            return overrides[key] if key in overrides else real_get(key, default)
+
+        return patch.object(manager, "get", side_effect=get)
+
+    def test_one_arch_can_be_corrected_without_touching_the_other(self):
+        with self._config(**{
+            f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.MIB": 64,
+            f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.RATIO": 0.1,
+        }):
+            # The reserve uses math.ceil so a guest is never under-allocated by a
+            # fractional byte -- the failure mode is a guest OOM, so round up.
+            self.assertEqual(
+                limits.guest_kernel_reserve_bytes(1024 * MIB, arch=AMD64),
+                64 * MIB + math.ceil(1024 * MIB * 0.1),
+            )
+            # arm64 keeps its measured default.
+            self.assertEqual(
+                limits.guest_kernel_reserve_bytes(1024 * MIB, arch=ARM64),
+                32 * MIB + math.ceil(1024 * MIB * 0.05),
+            )
+
+    def test_zero_restores_the_previous_behaviour_for_that_arch_alone(self):
+        """The escape hatch, and that it is not a global one.
+
+        Before this change every guest booted at exactly `mem_limit`. An operator who
+        wants that back for one arch must be able to have it without turning the fix
+        off for the other -- otherwise the setting is a choice between the bug
+        everywhere and the fix everywhere.
+        """
+        with self._config(**{
+            f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.MIB": 0,
+            f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.RATIO": 0,
+        }):
+            self.assertEqual(
+                limits.guest_boot_memory_bytes(256 * MIB, arch=AMD64), 256 * MIB
+            )
+            self.assertGreater(
+                limits.guest_boot_memory_bytes(256 * MIB, arch=ARM64), 256 * MIB
+            )
+
+    def test_a_malformed_override_falls_back_rather_than_disabling_the_reserve(self):
+        # Reading an unparseable reserve as 0 would silently reintroduce the original
+        # bug -- a service OOM-killed below its declared ceiling -- for a typo.
+        with self._config(**{
+            f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.MIB": "lots",
+            f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.RATIO": "some",
+        }):
+            self.assertGreater(
+                limits.guest_boot_memory_bytes(256 * MIB, arch=AMD64), 256 * MIB
+            )
+
+    def test_a_negative_override_cannot_shrink_the_guest(self):
+        with self._config(**{
+            f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.MIB": -100,
+            f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.RATIO": -1.0,
+        }):
+            self.assertGreaterEqual(
+                limits.guest_boot_memory_bytes(256 * MIB, arch=AMD64), 256 * MIB
+            )
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

@@ -129,8 +129,17 @@ def execution_balancer(
         configuration: celaut_pb2.Configuration,
         ignore_network: str = None,
         recursion_guard_token: str = None,
+        arch: Optional[str] = None,
 ) -> Generator[tuple[str, celaut_pb2.EstimatedCost], None, None]:
-    
+    """Every candidate's price for this service, cheapest first.
+
+    ``arch`` is the service's architecture, and only affects the LOCAL quote: it
+    selects this node's memory price when the operator prices memory per arch, so the
+    figure the balancer compares against its peers is the one this node would
+    actually charge. A peer prices the same service by its own policy and answers
+    with the result, so nothing has to be told to it.
+    """
+
     # sorted by cost, tuple of celaut.Instances or 'local' and cost
     peers: Dict[str, celaut_pb2.EstimatedCost] = {}
     
@@ -140,7 +149,8 @@ def execution_balancer(
         _local = generate_estimated_cost(
             resources=resources,
             metadata=metadata,
-            config=configuration
+            config=configuration,
+            arch=arch,
         )
         if _local:
             peers['local'] = _local

@@ -525,7 +525,12 @@ def execute(
         # the service less than its manifest promised. Only the boot allocation
         # grows: every figure the node records or prices stays in usable bytes, so
         # the node absorbs the kernel rather than billing the client for it.
-        boot_mem_b = limits.guest_boot_memory_bytes(usable_ceiling_b)
+        #
+        # `arch` is the GUEST's, which on this backend is by definition not the
+        # host's: this is the emulated path. The reserve is a property of the guest
+        # kernel, so an arm64 guest on an x86_64 node must be sized by arm64's figure
+        # -- passing the host's would be wrong on every launch this backend makes.
+        boot_mem_b = limits.guest_boot_memory_bytes(usable_ceiling_b, arch=arch)
         # Fixed for the life of the guest: the kernel sized its `struct page` array
         # for the whole of `-m` at boot, and a balloon inflating later hands none of
         # it back. It is the constant that converts between the two units in play --
@@ -576,8 +581,8 @@ def execute(
         log.LOGGER(
             f"[QEMU][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib} "
             f"(usable ceiling {math.ceil(usable_ceiling_b / (1024 * 1024))} MiB + "
-            f"{math.ceil(guest_kernel_reserve_b / (1024 * 1024))} MiB guest kernel reserve; "
-            f"at_init is {init_mem_b} bytes), cmdline={cmdline}"
+            f"{math.ceil(guest_kernel_reserve_b / (1024 * 1024))} MiB {arch} guest kernel "
+            f"reserve; at_init is {init_mem_b} bytes), cmdline={cmdline}"
         )
         log.LOGGER(f"[QEMU][{vmachine_id}] launching qemu: {' '.join(start_command)}")
 
