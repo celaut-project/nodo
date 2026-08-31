@@ -1122,7 +1122,12 @@ def execute(
         # OOM-kills it below its own ceiling. Only the boot argument grows; the row
         # and the price stay at `mem_b`, so the node absorbs the kernel rather than
         # billing the client for it.
-        boot_mem_b = limits.guest_boot_memory_bytes(mem_b)
+        #
+        # The reserve is per-architecture: `arch` here is the guest's, resolved above
+        # from the service's own manifest, not the host's. On the CH path they are
+        # always the same (KVM cannot run a foreign guest), but passing it explicitly
+        # keeps the two backends reading the same figure from the same place.
+        boot_mem_b = limits.guest_boot_memory_bytes(mem_b, arch=arch)
         # What separates the VM's RAM size from the usable bytes the row records.
         # Persisted in the runtime state below: this backend's resize knob is the
         # cgroup, so every later memory change has to add the same figure back to
@@ -1134,7 +1139,7 @@ def execute(
         log.LOGGER(
             f"[CH][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib} "
             f"(usable target {math.ceil(mem_b / (1024 * 1024))} MiB + "
-            f"{math.ceil(guest_kernel_reserve_b / (1024 * 1024))} MiB guest kernel reserve), "
+            f"{math.ceil(guest_kernel_reserve_b / (1024 * 1024))} MiB {arch} guest kernel reserve), "
             f"guest_net_device={GUEST_NET_DEVICE}, kernel_cmdline={kernel_cmdline}"
         )
 

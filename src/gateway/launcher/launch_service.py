@@ -15,7 +15,7 @@ from src.utils.cost_functions.generate_estimated_cost import (
     generate_estimated_cost,
     get_resource_availability,
 )
-from src.virtualizers.architecture import UnsupportedArchitectureException
+from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.utils.network_policy import enforce_network_policy
 from src.utils.shared_filesystems import service_requires_parent_colocation
 
@@ -32,6 +32,7 @@ def _detect_local_preflight_failure(
             resources=service.container.resources,
             metadata=metadata,
             config=configuration,
+            arch=get_arch_tag(service=service, metadata=metadata),
         )
         if estimated_cost:
             return None
@@ -176,6 +177,7 @@ def launch_service(
                 default_initial_balance(
                     system_resources=service.container.resources.at_init,
                     service_hash=service_id,
+                    arch=get_arch_tag(service=service, metadata=metadata),
                 )
             ))
 
@@ -237,7 +239,8 @@ def launch_service(
                 metadata=metadata,
                 ignore_network=utils.get_network_name(direction=father_ip),
                 configuration=configuration,
-                recursion_guard_token=recursion_guard_token
+                recursion_guard_token=recursion_guard_token,
+                arch=get_arch_tag(service=service, metadata=metadata),
         ):
             try:
                 if require_parent_colocation and peer != 'local':
