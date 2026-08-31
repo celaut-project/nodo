@@ -13,11 +13,13 @@ below the guest's resident set killed ``qemu-system-aarch64`` outright.
 
 The correct primitive is ``virtio-balloon`` over QMP: inflating the balloon makes
 the *guest* return its free pages to the host (host RSS drops, proven live:
-~600MB -> ~194MB), and it only ever surrenders free pages, so it never OOMs a
-guest that is actually using its RAM. So memory is driven through the balloon and
-the cgroup ``memory.max`` is kept as a *ceiling at the boot allocation*, never as
-the shrink knob. CPU is unchanged: cgroup ``cpu.max`` throttles the vCPU threads
-correctly for both backends, so that reuses CH's helper directly.
+~600MB -> ~194MB). It only ever surrenders free pages -- but that bounds which
+pages move, not which target is legal, so the target itself must be bounded by
+what the guest can spare (:func:`_safe_balloon_target`). So memory is driven
+through the balloon and the cgroup ``memory.max`` is kept as a *ceiling at the
+boot allocation*, never as the shrink knob. CPU is unchanged: cgroup ``cpu.max``
+throttles the vCPU threads correctly for both backends, so that reuses CH's
+helper directly.
 
 Falls back to CH's cgroup-only behaviour (with an explicit best-effort caveat)
 for instances launched before the QMP socket existed.
@@ -47,10 +49,6 @@ MIN_BALLOON_BYTES = 64 * 1024 * 1024
 # order as the floor above and is small next to any realistic service.
 BALLOON_SAFETY_MARGIN_BYTES = 64 * 1024 * 1024
 
-# Floor used when the guest cannot say how much it has free. Reclaiming nothing
-# is always survivable; guessing is not.
-BALLOON_BLIND_FLOOR_BYTES = 256 * 1024 * 1024
-
 
 def _field_result(status: str, detail: str, requested: Any = None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {"status": status, "detail": detail}
@@ -77,6 +75,21 @@ def _persist_report(vmachine_id: str, state: Dict[str, Any], report: Dict[str, A
     save_runtime_state(vmachine_id, new_state)
 
 
+def _optional_reading(qmp, name: str) -> Optional[int]:
+    """A reading the QMP client may not be able to give.
+
+    A client that predates these helpers (or a stub) simply has no such method,
+    and QEMU may have nothing to report even when it does. Both answers are the
+    same one -- "cannot tell" -- and neither is a failed resize, so neither may
+    raise out of here.
+    """
+    reader = getattr(qmp, name, None)
+    if not callable(reader):
+        return None
+    value = reader()
+    return int(value) if value else None
+
+
 def _safe_balloon_target(qmp, requested: int, boot_mem_bytes: int) -> tuple:
     """The smallest balloon target that does not starve a running guest.
 
@@ -89,40 +102,51 @@ def _safe_balloon_target(qmp, requested: int, boot_mem_bytes: int) -> tuple:
     954 MiB boot allocation and the guest died mid-request.
 
     So clamp the request to what the guest says it can spare -- its free memory,
-    less a margin for what it allocates while we are resizing. When the guest
-    cannot report (no stats, no driver), reclaim nothing below a conservative
-    floor: a resize that under-delivers is a priced-wrong instance, while one
-    that over-delivers is a dead one.
+    less a margin for what it allocates while we are resizing -- measured against
+    what the guest *currently* has rather than its boot allocation, since the
+    balloon may already hold part of the difference.
+
+    When the guest cannot report, reclaim nothing: leave it the memory it already
+    has. A guest that cannot publish statistics is typically one with no balloon
+    driver, which would not return the pages anyway; and of the two ways to be
+    wrong, an under-delivered resize is a mispriced instance while an
+    over-delivered one is a dead guest.
 
     Returns ``(target, note)`` where ``note`` is None when the request was
     honoured as-is, and otherwise explains what was clamped and why.
     """
     requested = max(MIN_BALLOON_BYTES, min(int(requested), int(boot_mem_bytes)))
 
-    free = qmp.guest_free_bytes()
+    # What the guest has right now: the boot allocation less whatever the balloon
+    # already holds. Its free-memory figure is relative to this, not to boot -m.
+    current = _optional_reading(qmp, "balloon_actual_bytes") or int(boot_mem_bytes)
+    current = max(MIN_BALLOON_BYTES, min(current, int(boot_mem_bytes)))
+
+    # A grow is bounded only by the boot -m, already applied above. Nothing below
+    # may raise the target: a clamp exists to protect the guest from a shrink,
+    # never to hand it memory it did not ask for.
+    if requested >= current:
+        return requested, None
+
+    free = _optional_reading(qmp, "guest_free_bytes")
     if free is None:
-        floor = min(int(boot_mem_bytes), BALLOON_BLIND_FLOOR_BYTES)
-        if requested >= floor:
-            return requested, None
-        return floor, (
-            f"guest does not report balloon statistics, so the memory it is using is "
-            f"unknown; held at {floor} bytes instead of the requested {requested} "
-            f"rather than risk inflating into the guest's working set"
+        return current, (
+            f"guest does not report balloon statistics, so the memory it is using "
+            f"is unknown; held at the {current} bytes it already has rather than "
+            f"the requested {requested}, since a guest that cannot report is "
+            f"typically one with no balloon driver to reclaim from anyway"
         )
 
-    # in_use = everything the guest has not told us is free.
-    safe_floor = int(boot_mem_bytes) - int(free) + BALLOON_SAFETY_MARGIN_BYTES
-    safe_floor = max(MIN_BALLOON_BYTES, min(safe_floor, int(boot_mem_bytes)))
+    in_use = max(0, current - int(free))
+    safe_floor = max(MIN_BALLOON_BYTES, min(in_use + BALLOON_SAFETY_MARGIN_BYTES, current))
 
     if requested >= safe_floor:
         return requested, None
 
     return safe_floor, (
         f"requested {requested} bytes is below what the guest is using "
-        f"({int(boot_mem_bytes) - int(free)} bytes in use, {int(free)} free of "
-        f"{int(boot_mem_bytes)}); clamped to {safe_floor} bytes "
-        f"(+{BALLOON_SAFETY_MARGIN_BYTES} margin) so the guest is not OOM-panicked "
-        f"by the resize"
+        f"({in_use} bytes in use, {int(free)} free of {current}); clamped to "
+        f"{safe_floor} bytes so the guest is not OOM-panicked by the resize"
     )
 
 

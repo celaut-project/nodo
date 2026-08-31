@@ -26,9 +26,15 @@ MIB = 1024 * 1024
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class SafeBalloonTargetTests(unittest.TestCase):
-    def _qmp(self, free_bytes):
+    def _qmp(self, free_bytes, actual_bytes=None):
+        """A QMP client reporting `free_bytes` free of `actual_bytes` it holds.
+
+        `actual_bytes=None` is a guest whose current allocation QEMU cannot
+        report, which must fall back to the boot allocation.
+        """
         qmp = MagicMock()
         qmp.guest_free_bytes.return_value = free_bytes
+        qmp.balloon_actual_bytes.return_value = actual_bytes
         return qmp
 
     def test_the_reproducer_is_clamped_instead_of_killing_the_guest(self):
@@ -56,26 +62,86 @@ class SafeBalloonTargetTests(unittest.TestCase):
         self.assertEqual(target, 1024 * MIB)
         self.assertIsNone(note)
 
-    def test_a_guest_that_cannot_report_is_not_shrunk_below_a_blind_floor(self):
+    def test_the_bound_is_measured_against_what_the_guest_has_not_its_boot_alloc(self):
+        # Already inflated: 954 MiB boot, but the guest only holds 600 MiB, of
+        # which 100 MiB is free => 500 MiB in use. Measuring against the boot
+        # allocation instead would count the 354 MiB the balloon already holds as
+        # "in use" and compute a floor of 918 MiB -- above what the guest has.
+        target, note = qemu_hotplug._safe_balloon_target(
+            self._qmp(100 * MIB, actual_bytes=600 * MIB),
+            requested=500 * MIB,
+            boot_mem_bytes=954 * MIB,
+        )
+        self.assertEqual(target, 500 * MIB + qemu_hotplug.BALLOON_SAFETY_MARGIN_BYTES)
+        self.assertIn("clamped", note)
+
+    def test_a_clamp_never_raises_the_target_above_what_the_guest_has(self):
+        # A shrink request against a guest with almost nothing free: the floor
+        # would land above the current allocation, which would *deflate* the
+        # balloon -- a shrink request must never hand the guest more memory.
+        target, _ = qemu_hotplug._safe_balloon_target(
+            self._qmp(1 * MIB, actual_bytes=600 * MIB),
+            requested=500 * MIB,
+            boot_mem_bytes=954 * MIB,
+        )
+        self.assertLessEqual(target, 600 * MIB)
+
+    def test_a_partial_grow_is_honoured_rather_than_clamped(self):
+        # Requesting more than the guest currently holds is a grow; the safety
+        # floor has no business touching it, however little the guest has free.
+        target, note = qemu_hotplug._safe_balloon_target(
+            self._qmp(1 * MIB, actual_bytes=600 * MIB),
+            requested=700 * MIB,
+            boot_mem_bytes=954 * MIB,
+        )
+        self.assertEqual(target, 700 * MIB)
+        self.assertIsNone(note)
+
+    def test_a_guest_that_cannot_report_is_not_shrunk_at_all(self):
+        # Unknown usage means no safe amount to reclaim. A guest that cannot
+        # publish statistics is typically one with no balloon driver, which would
+        # not return the pages anyway -- so leave it what it has.
         target, note = qemu_hotplug._safe_balloon_target(
             self._qmp(None), requested=64 * MIB, boot_mem_bytes=954 * MIB
         )
-        self.assertEqual(target, qemu_hotplug.BALLOON_BLIND_FLOOR_BYTES)
+        self.assertEqual(target, 954 * MIB)
         self.assertIn("does not report", note)
 
-    def test_the_blind_floor_never_exceeds_the_boot_allocation(self):
-        # A guest smaller than the floor must not be "grown" by the clamp.
+    def test_a_blind_guest_is_held_at_what_it_has_not_at_its_boot_alloc(self):
+        target, _ = qemu_hotplug._safe_balloon_target(
+            self._qmp(None, actual_bytes=600 * MIB),
+            requested=64 * MIB,
+            boot_mem_bytes=954 * MIB,
+        )
+        self.assertEqual(target, 600 * MIB)
+
+    def test_the_blind_target_never_exceeds_the_boot_allocation(self):
         target, _ = qemu_hotplug._safe_balloon_target(
             self._qmp(None), requested=64 * MIB, boot_mem_bytes=128 * MIB
         )
         self.assertLessEqual(target, 128 * MIB)
 
-    def test_a_blind_guest_still_honours_a_request_above_the_floor(self):
+    def test_a_blind_guest_still_honours_a_grow(self):
         target, note = qemu_hotplug._safe_balloon_target(
-            self._qmp(None), requested=512 * MIB, boot_mem_bytes=954 * MIB
+            self._qmp(None, actual_bytes=512 * MIB),
+            requested=700 * MIB,
+            boot_mem_bytes=954 * MIB,
         )
-        self.assertEqual(target, 512 * MIB)
+        self.assertEqual(target, 700 * MIB)
         self.assertIsNone(note)
+
+    def test_a_client_that_cannot_be_asked_is_not_an_error(self):
+        # A QMP client from before these readings existed has no such methods.
+        # That is "cannot tell", not a failed resize -- it must not raise.
+        class _OldClient:
+            def set_balloon(self, target_bytes):
+                pass
+
+        target, note = qemu_hotplug._safe_balloon_target(
+            _OldClient(), requested=64 * MIB, boot_mem_bytes=954 * MIB
+        )
+        self.assertEqual(target, 954 * MIB)
+        self.assertIn("does not report", note)
 
     def test_the_request_is_never_taken_below_the_absolute_floor(self):
         target, _ = qemu_hotplug._safe_balloon_target(
@@ -128,16 +194,30 @@ class BalloonStatsReadingTests(unittest.TestCase):
             self._client({"stats": {"stat-free-memory": "not-a-number"}}).guest_free_bytes()
         )
 
+    def test_reports_the_memory_the_guest_currently_holds(self):
+        # `actual` is boot -m less the inflated balloon: what free memory is
+        # relative to, and what a shrink must be measured against.
+        self.assertEqual(self._client({"actual": 600 * MIB}).balloon_actual_bytes(), 600 * MIB)
+
+    def test_an_unreportable_current_allocation_is_unknown(self):
+        from src.virtualizers.qemu.qmp import QMPError
+
+        self.assertIsNone(self._client({}).balloon_actual_bytes())
+        self.assertIsNone(self._client({"actual": 0}).balloon_actual_bytes())
+        self.assertIsNone(self._client({"actual": "nope"}).balloon_actual_bytes())
+        self.assertIsNone(self._client(raises=QMPError("no balloon")).balloon_actual_bytes())
+
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class BalloonDeviceArgTests(unittest.TestCase):
     """An unknown -device property is a launch failure, so only offer real ones.
 
-    QEMU renamed the balloon's stats interval across releases
-    (``guest-stats-polling-interval`` in 6.x, ``stats-polling-interval`` later).
-    Naming the wrong one does not degrade gracefully: the emulator exits with
-    "Property ... not found" and the instance never starts. Reproduced on QEMU
-    6.2.0, where the newer name killed every launch.
+    Naming a property the binary does not have does not degrade gracefully: the
+    emulator exits with "Property ... not found" and the instance never starts.
+    Every QEMU checked spells the stats interval ``guest-stats-polling-interval``
+    (6.2 on Ubuntu 22.04 through 8.2); ``stats-polling-interval`` is only a
+    fallback for a build that does not, which is why the name is read off
+    ``-device virtio-balloon-pci,help`` instead of assumed either way.
     """
 
     def _arg(self, properties):
@@ -158,13 +238,13 @@ class BalloonDeviceArgTests(unittest.TestCase):
     def test_a_qemu_with_no_optional_properties_gets_a_bare_device(self):
         self.assertEqual(self._arg([]), "virtio-balloon-pci,id=nodo-balloon")
 
-    def test_the_qemu_6_property_name_is_used_when_that_is_what_exists(self):
+    def test_the_usual_property_name_is_used_when_that_is_what_exists(self):
         arg = self._arg(["guest-stats-polling-interval"])
         self.assertIn("guest-stats-polling-interval=2", arg)
-        # Exactly one interval option, and it is the 6.x spelling.
+        # Exactly one interval option.
         self.assertEqual(arg.count("polling-interval"), 1)
 
-    def test_the_newer_property_name_is_used_when_that_is_what_exists(self):
+    def test_the_fallback_name_is_used_when_that_is_all_there_is(self):
         arg = self._arg(["stats-polling-interval"])
         self.assertIn("stats-polling-interval=2", arg)
         self.assertNotIn("guest-stats-polling-interval", arg)
