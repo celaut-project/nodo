@@ -160,11 +160,13 @@ def build_virtiofs_args(
     return args
 
 
-# Balloon options nodo wants, in the order they should be tried, keyed by the
-# property name QEMU exposes. The polling interval was renamed across releases
-# (6.x: `guest-stats-polling-interval`, later: `stats-polling-interval`), and
-# naming one QEMU does not know is fatal at launch, not ignored -- an emulator
-# that exits with "Property ... not found" takes the whole instance with it.
+# Names the stats polling interval may go by, most likely first. Every QEMU
+# checked spells it `guest-stats-polling-interval` (6.2 on Ubuntu 22.04 through
+# 8.2); `stats-polling-interval` is carried only as a fallback for a build that
+# does not, and is never assumed. The list exists because naming a property the
+# binary does not have is fatal at launch rather than ignored -- an emulator that
+# exits with "Property ... not found" takes the whole instance with it -- so the
+# name is picked from what the binary advertises, never guessed.
 _BALLOON_STATS_INTERVAL_PROPERTIES = (
     "guest-stats-polling-interval",
     "stats-polling-interval",
@@ -193,7 +195,7 @@ def _balloon_properties(qemu_binary: str) -> frozenset:
         return frozenset()
 
     names = set()
-    for line in (proc.stdout or "") .splitlines() + (proc.stderr or "").splitlines():
+    for line in (proc.stdout or "").splitlines() + (proc.stderr or "").splitlines():
         line = line.strip()
         if "=" not in line:
             continue
