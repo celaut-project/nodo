@@ -7,8 +7,43 @@ from src.virtualizers.ch.kill import kill as kill_ch_vm
 from src.virtualizers.ch.process import pid_alive
 from src.virtualizers.ch.runtime_state import load_runtime_state
 from src.virtualizers.ch.runtime_state import list_runtime_states
+from src.virtualizers.selection import QEMU
 
 sc = SQLConnection()
+
+
+def _liveness_for(state) -> Callable[..., bool]:
+    """The ``pid_alive`` belonging to the backend that launched this VM.
+
+    Both backends share this runtime-state directory, and every entry records
+    which one wrote it. Liveness, however, is not backend-agnostic: it confirms
+    the PID still belongs to *this* VM by matching the launcher's visible process
+    name, and those names differ (``nodo-ch-<id8>`` vs ``nodo-qemu-<id8>``). So a
+    QEMU guest checked with CH's matcher fails the name test while perfectly
+    alive, and the janitor reaps a healthy VM as ``stale_runtime_process_dead``.
+
+    Dispatch on the recorded ``virtualizer`` instead. The import is local because
+    the QEMU backend imports this module's package at import time.
+    """
+    if str((state or {}).get("virtualizer") or "").strip().lower() == QEMU:
+        from src.virtualizers.qemu.process import pid_alive as qemu_pid_alive
+
+        return qemu_pid_alive
+    return pid_alive
+
+
+def _kill_for(state) -> Callable[..., bool]:
+    """The teardown belonging to the backend that launched this VM.
+
+    Same reason as :func:`_liveness_for`: CH's kill looks for CH's process and
+    CH's api socket, so pointing it at a QEMU guest leaves the emulator running
+    and its QMP socket behind while the state file disappears.
+    """
+    if str((state or {}).get("virtualizer") or "").strip().lower() == QEMU:
+        from src.virtualizers.qemu.kill import kill as qemu_kill
+
+        return qemu_kill
+    return kill_ch_vm
 
 
 def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
@@ -52,7 +87,8 @@ def janitor_cleanup_orphans(debug_mode: bool = False) -> None:
     for vmachine_id, state in states.items():
         pid = int((state or {}).get("pid") or 0)
         in_db = sc.internal_instance_exists(id=vmachine_id)
-        alive = pid_alive(pid, vmachine_id=vmachine_id) if pid > 0 else False
+        is_alive = _liveness_for(state)
+        alive = is_alive(pid, vmachine_id=vmachine_id) if pid > 0 else False
         # `execute` writes the state file the instant the hypervisor process exists
         # and registers the instance immediately after (see `save_booting_state`),
         # so for the width of those two writes a live VM legitimately has no row
@@ -75,7 +111,7 @@ def janitor_cleanup_orphans(debug_mode: bool = False) -> None:
             f"reason={reason} in_db={in_db} pid={pid} alive={alive}"
         )
         try:
-            kill_ch_vm(vmachine_id=vmachine_id)
+            _kill_for(state)(vmachine_id=vmachine_id)
             log.LOGGER(
                 f"[CH][{vmachine_id}] event=janitor cleanup_done "
                 f"reason={reason}"
