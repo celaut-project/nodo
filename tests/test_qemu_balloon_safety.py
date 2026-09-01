@@ -253,14 +253,18 @@ class BalloonDeviceArgTests(unittest.TestCase):
         arg = self._arg(["guest-stats-polling-interval", "stats-polling-interval"])
         self.assertEqual(arg.count("polling-interval"), 1)
 
-    def test_optional_safety_properties_are_included_when_available(self):
+    def test_free_page_reporting_is_included_when_available(self):
+        self.assertIn("free-page-reporting=on", self._arg(["free-page-reporting"]))
+
+    def test_deflate_on_oom_is_never_offered_even_where_qemu_has_it(self):
+        # Not an oversight: it lets a guest under its own pressure take balloon
+        # pages back, silently voiding a reclaim the node already recorded and
+        # charged for, and QEMU raises no event when it happens.
         arg = self._arg(["free-page-reporting", "deflate-on-oom"])
-        self.assertIn("free-page-reporting=on", arg)
-        self.assertIn("deflate-on-oom=on", arg)
+        self.assertNotIn("deflate-on-oom", arg)
 
     def test_an_unavailable_property_is_never_named(self):
-        arg = self._arg(["free-page-reporting"])
-        self.assertNotIn("deflate-on-oom", arg)
+        self.assertNotIn("free-page-reporting", self._arg([]))
 
     def test_a_probe_failure_degrades_to_the_bare_device_rather_than_guessing(self):
         from src.virtualizers.qemu import execute as qemu_execute

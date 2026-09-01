@@ -166,17 +166,28 @@ def execute(
         service_id: str,
         service: celaut_pb2.Service,
         config: Optional[celaut_pb2.Configuration],
-        initial_system_resources: celaut_pb2.Sysresources,
+        system_resources: celaut_pb2.Service.Container.Resources,
         father_id: str,
         register_instance: Optional[Callable[[str, str, celaut_pb2.Sysresources], None]] = None,
 ) -> Tuple[str, str, celaut_pb2.Sysresources]:
     """
     Execute a built service and return (vmachine_id, vmachine_ip, resolved_resources).
 
+    ``system_resources`` is the whole declared range, ``at_init`` *and* ``at_most``,
+    because which end a backend has to act on at launch is a property of the
+    backend, not of the manifest: CH resizes memory by moving the cgroup, so it
+    starts a guest at ``at_init`` and raises the ceiling whenever asked, while
+    QEMU's ``-m`` is fixed for the life of the process -- a QEMU guest that was not
+    *booted* with room for ``at_most`` can never be grown into it, so it reserves
+    the ceiling up front and has its balloon hold the difference.
+
     ``resolved_resources`` is what the virtualizer actually reserved for the guest --
     defaults and floors already applied -- so the launcher persists what the instance
     holds rather than what its manifest requested (#249). A field left at 0 means the
-    virtualizer does not resolve it, and the launcher falls back to the manifest.
+    virtualizer does not resolve it, and the launcher falls back to the manifest. Note
+    "holds", not "was booted with": a QEMU guest whose balloon has already taken the
+    headroom back resolves to ``at_init``, and only a guest that kept it resolves to
+    the ceiling it was booted with.
 
     ``register_instance`` is how the launcher gets those three values *before* this
     returns: every backend calls it the instant the guest starts running, which is
@@ -197,7 +208,7 @@ def execute(
             service_id=service_id,
             service=service,
             config=config,
-            initial_system_resources=initial_system_resources,
+            system_resources=system_resources,
             father_id=father_id,
             register_instance=register_instance,
         )
@@ -207,7 +218,7 @@ def execute(
         service_id=service_id,
         service=service,
         config=config,
-        initial_system_resources=initial_system_resources,
+        system_resources=system_resources,
         father_id=father_id,
         register_instance=register_instance,
     )

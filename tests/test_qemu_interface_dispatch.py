@@ -22,7 +22,7 @@ class InterfaceExecuteDispatchTests(unittest.TestCase):
             service_id="svc",
             service=celaut.Service(),
             config=None,
-            initial_system_resources=celaut.Sysresources(),
+            system_resources=celaut.Service.Container.Resources(),
             father_id="",
         )
 
