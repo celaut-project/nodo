@@ -75,6 +75,7 @@ COMMANDS = sorted(
         "increase_deposit",
         "decrease_deposit",
         "remove",
+        "prune",
         "inspect",
         "services",
         "tag",
