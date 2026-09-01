@@ -95,11 +95,67 @@ class QMPClient:
 
         Inflating (target < current) makes the guest return free pages to the
         host; deflating (target > current, up to boot ``-m``) hands them back.
-        The guest only ever surrenders *free* pages, so this never OOMs an
-        actively-using guest -- it just cannot reclaim the working set, which is
-        the correct, safe semantics.
+
+        The guest only ever surrenders *free* pages -- but that is a statement
+        about which pages move, **not** about which target is legal. A target
+        below the guest's working set does not fail politely: the balloon driver
+        keeps allocating to reach it until the guest allocator gives up and the
+        kernel panics with "Out of memory and no killable processes". Callers
+        must bound the target themselves; see
+        :func:`src.virtualizers.qemu.hotplug._safe_balloon_target`.
         """
         self._execute("balloon", {"value": int(target_bytes)})
 
     def query_balloon(self) -> Dict[str, Any]:
         return self._execute("query-balloon")
+
+    def balloon_actual_bytes(self) -> Optional[int]:
+        """Memory the guest currently has: boot ``-m`` less the inflated balloon.
+
+        This, not the boot allocation, is what the guest's free-memory figure is
+        relative to. Using the boot allocation instead counts the pages the
+        balloon already holds as "in use" and inflates every subsequent bound.
+
+        Returns None when QEMU cannot say (no balloon device), which callers must
+        read as "cannot tell".
+        """
+        try:
+            actual = int((self.query_balloon() or {}).get("actual"))
+        except (QMPError, TypeError, ValueError):
+            return None
+        return actual if actual > 0 else None
+
+    def guest_free_bytes(self) -> Optional[int]:
+        """Memory the guest currently has free, per its own balloon statistics.
+
+        This is the number that makes a shrink safe: the balloon can only take
+        pages the guest is not using, so asking it to go below
+        ``current - free`` is asking for memory that does not exist. QEMU
+        reports it through ``qom-get`` on the balloon device's ``guest-stats``,
+        populated only when the device was created with a polling interval
+        (``guest-stats-polling-interval``).
+
+        Returns None when the statistics are unavailable -- an old guest with no
+        balloon driver, a device without polling, or a VM launched before this
+        was wired up. Callers must treat None as "cannot tell" and fall back to a
+        conservative floor rather than assuming the guest is empty.
+        """
+        try:
+            stats = self._execute(
+                "qom-get",
+                {"path": "/machine/peripheral/nodo-balloon", "property": "guest-stats"},
+            )
+        except QMPError:
+            return None
+
+        values = (stats or {}).get("stats") or {}
+        free = values.get("stat-free-memory")
+        try:
+            free = int(free)
+        except (TypeError, ValueError):
+            return None
+
+        # A guest that has not reported yet answers 0 for every field. That is
+        # "no data", not "no free memory"; the two must not be confused, because
+        # the second one would justify an inflation that kills the guest.
+        return free if free > 0 else None

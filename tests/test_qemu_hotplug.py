@@ -35,7 +35,12 @@ def _mem_cpu_req():
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class QemuHotplugTests(unittest.TestCase):
-    def _run(self, state, req):
+    def _run(self, state, req, free=BOOT_MEM - 32 * 1024 * 1024, actual=BOOT_MEM):
+        """Run a hotplug against a stand-in guest holding `actual`, `free` of it.
+
+        The defaults are a mostly idle guest, so a shrink is affordable and lands
+        verbatim. Pass ``free=None`` for a guest that cannot report.
+        """
         persisted = {}
 
         class _FakeQMP:
@@ -44,6 +49,8 @@ class QemuHotplugTests(unittest.TestCase):
             def __enter__(self_): return self_
             def __exit__(self_, *a): return False
             def set_balloon(self_, target_bytes): _FakeQMP.last_target = int(target_bytes)
+            def balloon_actual_bytes(self_): return actual
+            def guest_free_bytes(self_): return free
 
         with patch.object(qemu_hotplug, "load_runtime_state", return_value=state), \
              patch.object(qemu_hotplug, "save_runtime_state", side_effect=lambda vid, p: persisted.update({"vid": vid, "payload": p})), \
@@ -86,6 +93,36 @@ class QemuHotplugTests(unittest.TestCase):
         self.assertEqual(amem.call_args.kwargs["mem_limit"], 200 * 1024 * 1024)
         detail = persisted["payload"]["last_hotplug_report"]["results"]["mem_limit"]["detail"]
         self.assertIn("best-effort", detail)
+
+    def test_an_unaffordable_shrink_is_clamped_but_still_a_success(self):
+        # The guest is using nearly all of its 640 MiB; the 128 MiB request would
+        # OOM-panic it. It must be bounded, reported as `clamped` rather than
+        # `applied`, and the DB priced at what the guest actually still holds.
+        state = {"vmachine_id": "vm-q", "pid": 4242, "qmp_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
+        ok, persisted, ecg, amem, acpu, mdb, fq = self._run(
+            state, _mem_cpu_req(), free=16 * 1024 * 1024
+        )
+
+        self.assertTrue(ok)
+        self.assertGreater(fq.last_target, 128 * 1024 * 1024)
+        report = persisted["payload"]["last_hotplug_report"]["results"]
+        self.assertEqual(report["mem_limit"]["status"], "clamped")
+        self.assertEqual(report["mem_limit"]["delivered"], fq.last_target)
+        self.assertEqual(mdb.call_args.kwargs["sys_req"].mem_limit, fq.last_target)
+
+    def test_a_guest_that_cannot_report_keeps_the_memory_it_has(self):
+        # No statistics => nothing safe to reclaim. Not an error, and not a
+        # silent `applied` either.
+        state = {"vmachine_id": "vm-q", "pid": 4242, "qmp_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
+        ok, persisted, ecg, amem, acpu, mdb, fq = self._run(
+            state, _mem_cpu_req(), free=None, actual=None
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(fq.last_target, BOOT_MEM)
+        report = persisted["payload"]["last_hotplug_report"]["results"]
+        self.assertEqual(report["mem_limit"]["status"], "clamped")
+        self.assertEqual(mdb.call_args.kwargs["sys_req"].mem_limit, BOOT_MEM)
 
     def test_invalid_pid_fails(self):
         state = {"vmachine_id": "vm-q", "pid": 0, "qmp_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
