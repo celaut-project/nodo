@@ -773,28 +773,49 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
                 IOBigData().log_snapshot(
                     context=f"stop-instance:after-unlock token={token} released_mem_limit={reserved_mem_limit}"
                 )
-            # The child's unspent deposit goes back to whoever paid it in, *before*
-            # the row is deleted -- after the DELETE the amount is unrecoverable.
+            sc.purge_internal(id=token)
+
+            # The child's unspent deposit goes back to whoever paid it in, and it goes
+            # back *after* the row is gone.
             #
-            # This is the whole reason a father's balance fell without bound. A
-            # father is charged the child's full `initial_mu` at StartService
-            # (`modify_deposit` -> `spend_mu`), the child then spends only the part
-            # it actually lived through, and the remainder was dropped on the floor
-            # by `purge_internal`. A parent that starts and stops children in a loop
-            # -- which is exactly what an orchestrator service does -- therefore pays
-            # the full deposit again on every iteration and is never given the change
-            # back, so its balance falls at the rate it *provisions*, not at the rate
-            # anything is *consumed*, and goes negative however much it is funded with.
+            # A father is charged the child's full `initial_mu` at StartService
+            # (`modify_deposit` -> `spend_mu`) and the child spends only the part it
+            # actually lives through, so whatever is left on the row is the father's
+            # money. Deleting the row without handing it back -- which is all it takes
+            # -- is what sends a parent's balance down without bound: one that starts
+            # and stops children in a loop, which is exactly what an orchestrator
+            # service does, pays the full deposit again on every iteration and never
+            # gets the change, so its balance falls at the rate it *provisions* rather
+            # than at the rate anything is *consumed*. Measured on a live node: 2.0e9
+            # MU charged for 20 children, 0.9e9 consumed by them, the orchestrator at
+            # -1.25e9 and still falling.
             #
-            # `refund` was already read, and already returned to the caller, as if
-            # this had been happening all along; only the credit was missing.
-            if refund and int(refund) > 0 and father_id:
-                if credit_father(father_id=father_id, amount_mu=int(refund)):
+            # Crediting first, before the DELETE, would look safer and is not: the
+            # amount is already in `refund`, a local read, so nothing about it depends
+            # on the row still existing. What does depend on the DELETE is whether this
+            # stop can happen twice. A `purge_internal` that raises leaves the row
+            # alive with its balance intact, and `maintain_vmachines` calls
+            # `stop_instance` again on the next tick -- so a credit issued before it
+            # would be issued again, and again, manufacturing MU out of a balance
+            # nobody ever spent. Crediting after means a failed purge credits nothing
+            # and the retry does the whole thing exactly once. The window that remains
+            # -- a crash between the DELETE and the credit -- loses the leftover, which
+            # is the direction to err in: the books may owe a father, they may never
+            # invent MU that no one paid in.
+            if refund and int(refund) > 0:
+                if not father_id:
+                    # The MU has left the child's row by now, so this is a real loss
+                    # rather than a no-op, and is worth the same log line an unknown
+                    # father gets in `credit_father`.
+                    log.LOGGER(
+                        f"Cannot return {format_mu(int(refund))} unspent by {token}: "
+                        f"it has no father on record."
+                    )
+                elif credit_father(father_id=father_id, amount_mu=int(refund)):
                     log.LOGGER(
                         f"Returned {format_mu(int(refund))} unspent by {token} to its "
                         f"father {father_id}."
                     )
-            sc.purge_internal(id=token)
             
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
@@ -888,8 +909,13 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
         except Exception as e:
             log.LOGGER(f"Exception removing rules for the father {father_id}")
 
-    # TODO refund the remaining balance to the parent.
-    #  env variable could be used.
+    # An internal instance's leftover has been credited to its father above. A
+    # delegated one's has not, and is not simply the same operation: that `refund` is
+    # a figure the peer computed, against a deposit this node holds *on the peer*
+    # (`balance_on_other_peer`), so crediting the local father from it would move MU
+    # on one side of the pair only. Which of the two ledgers settles it, and when, is
+    # not decided here.
+    # TODO reconcile a delegated instance's refund with the deposit held on the peer.
     return refund
 
 

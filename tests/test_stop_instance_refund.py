@@ -10,17 +10,29 @@ anything is *consumed*. That is unbounded: no amount of funding survives it.
 
 ``stop_instance`` already read the leftover into ``refund`` and already returned it
 to its caller, as though the credit were happening; only the credit itself was
-missing, and ``purge_internal``'s DELETE then made the amount unrecoverable.
+missing, and ``purge_internal``'s DELETE then dropped the row it was still sitting
+in.
+
+The credit is issued after that DELETE, and the ordering is load-bearing in the
+opposite direction to the intuitive one: a stop that fails part-way is retried on
+the next maintenance tick, so a credit issued before the DELETE is issued again
+every time the DELETE does not happen. See
+``test_a_purge_that_fails_credits_nothing_so_a_retry_cannot_pay_twice``.
 
 These tests stop at the database boundary on purpose: what is under test is that
-the money is handed to the right account, in the right amount, before the row is
-deleted -- not what SQLite does with it afterwards.
+the money is handed to the right account, in the right amount, at the right point
+in the sequence -- not what SQLite does with it afterwards.
 """
 
 import unittest
 from unittest.mock import MagicMock, patch
 
-import src.manager.manager as manager
+IMPORT_ERROR = None
+try:
+    import src.manager.manager as manager
+except Exception as import_exc:  # pragma: no cover - environment-dependent
+    IMPORT_ERROR = import_exc
+    manager = None  # type: ignore[assignment]
 
 
 CHILD = "child-instance-id"
@@ -32,9 +44,10 @@ LEFTOVER = 95_000_000
 class _Harness:
     """A stopped internal instance with ``LEFTOVER`` MU still on its row."""
 
-    def __init__(self, father_id, father_is_instance):
+    def __init__(self, father_id, father_is_instance, purge_raises=False):
         self.sc = MagicMock()
         self.father_id = father_id
+        self.purge_raises = purge_raises
         self.calls = []
 
         self.sc.internal_instance_exists.side_effect = lambda id: (
@@ -65,6 +78,8 @@ class _Harness:
 
     def _record_purge(self, id):
         self.calls.append(("purge", id))
+        if self.purge_raises:
+            raise RuntimeError("database is locked")
 
     def run(self):
         with patch.object(manager, "sc", self.sc), \
@@ -74,6 +89,7 @@ class _Harness:
             return manager.stop_instance(token=CHILD)
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class StopInstanceReturnsTheUnspentDepositTests(unittest.TestCase):
 
     def test_an_instance_father_is_credited_what_the_child_did_not_spend(self):
@@ -96,15 +112,41 @@ class StopInstanceReturnsTheUnspentDepositTests(unittest.TestCase):
         self.assertEqual(refund, LEFTOVER)
         self.assertIn(("credit_client", FATHER_CLIENT, LEFTOVER), harness.calls)
 
-    def test_the_credit_happens_before_the_row_is_deleted(self):
-        """Order matters: after `purge_internal` the balance is unrecoverable."""
+    def test_the_credit_happens_after_the_row_is_deleted(self):
+        """Order matters, and not in the direction it first looks.
+
+        The amount is already in hand -- `refund` is a local read taken before
+        anything is deleted -- so crediting first buys nothing. What the ordering
+        decides is what a *retry* does, and stops are retried: `maintain_vmachines`
+        calls `stop_instance` again on the next tick for an instance still on the
+        books. Credit first and a purge that fails hands the father the same
+        leftover on every tick thereafter.
+        """
         harness = _Harness(FATHER_INSTANCE, father_is_instance=True)
         harness.run()
 
         kinds = [call[0] for call in harness.calls]
         self.assertIn("credit_instance", kinds)
         self.assertIn("purge", kinds)
-        self.assertLess(kinds.index("credit_instance"), kinds.index("purge"))
+        self.assertLess(kinds.index("purge"), kinds.index("credit_instance"))
+
+    def test_a_purge_that_fails_credits_nothing_so_a_retry_cannot_pay_twice(self):
+        """A stop that does not delete the row must not have moved any money.
+
+        The row survives with its balance intact and the next maintenance tick
+        stops the instance again. Anything credited on the way through would be
+        credited again from a balance nobody ever spent -- MU invented by a retry
+        loop. Of the two ways to be wrong here, owing a father his leftover is
+        recoverable and printing MU is not.
+        """
+        harness = _Harness(FATHER_INSTANCE, father_is_instance=True, purge_raises=True)
+        self.assertIsNone(harness.run())
+
+        self.assertIn(("purge", CHILD), harness.calls)
+        self.assertEqual(
+            [call for call in harness.calls if call[0].startswith("credit")], []
+        )
+        self.assertEqual(harness.balances[FATHER_INSTANCE], 0)
 
     def test_an_exhausted_child_credits_nothing(self):
         """A child that spent its whole deposit must not manufacture MU."""
@@ -129,6 +171,7 @@ class StopInstanceReturnsTheUnspentDepositTests(unittest.TestCase):
         self.assertIn(("purge", CHILD), harness.calls)
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class CreditFatherTests(unittest.TestCase):
     """The refund primitive itself, used by both `stop_instance` and `modify_deposit`."""
 
