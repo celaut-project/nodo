@@ -19,8 +19,39 @@ def _runtime_dir() -> Path:
     return Path(CACHE) / "cloud_hypervisor" / "runtime"
 
 
+def runtime_root() -> Path:
+    """The directory holding every VM's runtime state file and runtime directory.
+
+    Public because more than the state file lives here: ``execute`` gives each VM
+    a ``runtime/<vmachine_id>/`` directory (its own copy of the rootfs image, its
+    serial log), and anything that reclaims disk has to walk those directories,
+    not just the ``*.json`` beside them.
+    """
+    return _runtime_dir()
+
+
 def _state_path(vmachine_id: str) -> Path:
     return _runtime_dir() / f"{vmachine_id}.json"
+
+
+def list_runtime_dirs() -> Dict[str, Path]:
+    """Every ``runtime/<vmachine_id>/`` directory on disk, by vmachine id.
+
+    Deliberately not derived from :func:`list_runtime_states`: the two can differ,
+    and the difference is the leak. ``kill`` removes the directory and then the
+    state file, so a teardown that dies between the two leaves a directory with no
+    state — invisible to every reader that starts from the state files, and
+    holding a full rootfs image.
+    """
+    runtime_dir = _runtime_dir()
+    if not runtime_dir.exists():
+        return {}
+
+    dirs: Dict[str, Path] = {}
+    for path in runtime_dir.iterdir():
+        if path.is_dir() and not path.is_symlink():
+            dirs[path.name] = path
+    return dirs
 
 
 def _lock_for(path: Path) -> threading.Lock:
