@@ -906,7 +906,7 @@ def execute(
     service_id: str,
     service: celaut.Service,
     config: Optional[celaut.Configuration],
-    initial_system_resources: celaut.Sysresources,
+    system_resources: celaut.Service.Container.Resources,
     father_id: str,
     register_instance: Optional[Callable[[str, str, celaut.Sysresources], None]] = None,
 ) -> Tuple[str, str, celaut.Sysresources]:
@@ -923,7 +923,13 @@ def execute(
     ``Error charging for the resource change of <ip>``, because the charge is where
     the missing row was first noticed. Hence the callback here rather than at the
     call site: only the backend knows when the guest becomes able to speak.
+
+    Only the ``at_init`` end of ``system_resources`` is read here. CH resizes a guest
+    by moving its cgroup, which can be raised at any point in the instance's life, so
+    there is nothing about the declared ceiling this backend needs to reserve while
+    booting -- unlike QEMU, whose ``-m`` is fixed once the process exists.
     """
+    initial_system_resources = system_resources.at_init
     vmachine_id = _generate_vmachine_id()
     runtime_dir = _runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []

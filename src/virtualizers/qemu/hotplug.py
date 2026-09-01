@@ -21,9 +21,16 @@ boot allocation*, never as the shrink knob. CPU is unchanged: cgroup ``cpu.max``
 throttles the vCPU threads correctly for both backends, so that reuses CH's
 helper directly.
 
+The boot allocation this is all bounded by is the guest's declared ``at_most``,
+not its ``at_init``: ``-m`` cannot be raised on a running QEMU, so a guest booted
+at ``at_init`` has no headroom for the grow half of a resize to reach into. The
+difference is held by the balloon from the moment the guest comes up
+(:func:`settle_boot_balloon`), so a guest still *has* only what it was granted.
+
 Falls back to CH's cgroup-only behaviour (with an explicit best-effort caveat)
 for instances launched before the QMP socket existed.
 """
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -48,6 +55,18 @@ MIN_BALLOON_BYTES = 64 * 1024 * 1024
 # and the resize must not be the one that pushes it over. 64 MiB is the same
 # order as the floor above and is small next to any realistic service.
 BALLOON_SAFETY_MARGIN_BYTES = 64 * 1024 * 1024
+
+# How long the boot-time squeeze waits for the guest to hand back the headroom it
+# was booted with. The guest driver fulfils a balloon target asynchronously, and
+# what it has actually returned is the figure the instance is billed for, so the
+# launch waits for the answer instead of assuming one. Generous because this runs
+# under TCG, where everything the guest does is an order of magnitude slower.
+BOOT_BALLOON_SETTLE_TIMEOUT_S = 30.0
+BOOT_BALLOON_POLL_INTERVAL_S = 0.5
+
+# The guest driver works in pages, so `actual` can land a hair off a target that is
+# not page-aligned. Close enough is reached, not still-in-progress.
+BOOT_BALLOON_TOLERANCE_BYTES = 1024 * 1024
 
 
 def _field_result(status: str, detail: str, requested: Any = None) -> Dict[str, Any]:
@@ -148,6 +167,85 @@ def _safe_balloon_target(qmp, requested: int, boot_mem_bytes: int) -> tuple:
         f"({in_use} bytes in use, {int(free)} free of {current}); clamped to "
         f"{safe_floor} bytes so the guest is not OOM-panicked by the resize"
     )
+
+
+def settle_boot_balloon(
+    *,
+    vmachine_id: str,
+    qmp_socket: str,
+    boot_mem_bytes: int,
+    target_bytes: int,
+    timeout_s: float = BOOT_BALLOON_SETTLE_TIMEOUT_S,
+) -> int:
+    """Take back the headroom a QEMU guest is booted with; return what it kept.
+
+    A QEMU guest is booted with its ``at_most`` allocation rather than its
+    ``at_init`` one, because ``-m`` is fixed for the life of the process: a guest
+    booted at ``at_init`` can never be grown to the ceiling its manifest declared,
+    whatever the balloon or the cgroup is told afterwards (see
+    :func:`src.virtualizers.ch.limits.resolve_boot_mem_bytes`). Reserving the
+    ceiling is only half of it -- the guest must not *keep* the difference, which
+    it was never granted and its balance was not funded for. So the balloon takes
+    it back as soon as the guest is up, leaving the guest holding ``at_init`` and
+    the host holding the rest until a hotplug hands it over.
+
+    The squeeze goes through :func:`_safe_balloon_target` like any other shrink,
+    for the same reason: a target below what the guest is using OOM-panics it. The
+    boot figure is affordable by construction -- ``at_init`` is what the service
+    declared it needs to start, and the guest has barely started -- but a target
+    that ought to be affordable is not an argument for skipping the clamp that
+    proves it is.
+
+    Returns the bytes the guest holds when this is done, which is what the caller
+    must price it at. Usually ``target_bytes``; ``boot_mem_bytes`` when the guest
+    did not return the headroom (no balloon driver, no statistics, a QMP failure,
+    or simply too slow). A guest that keeps memory is billed for it -- the rule a
+    clamped hotplug shrink already follows -- rather than being charged for an
+    intention nothing verified.
+    """
+    _id = vmachine_id[:6]
+    boot_mem_bytes = int(boot_mem_bytes)
+    target = max(MIN_BALLOON_BYTES, min(int(target_bytes), boot_mem_bytes))
+    if target >= boot_mem_bytes:
+        # No headroom was reserved: the guest was booted with what it was granted.
+        return boot_mem_bytes
+
+    held = boot_mem_bytes
+    deadline = time.monotonic() + float(timeout_s)
+    try:
+        with QMPClient(qmp_socket) as qmp:
+            while True:
+                safe, note = _safe_balloon_target(qmp, target, boot_mem_bytes)
+                if safe < held:
+                    qmp.set_balloon(safe)
+                time.sleep(BOOT_BALLOON_POLL_INTERVAL_S)
+
+                reading = _optional_reading(qmp, "balloon_actual_bytes")
+                held = min(int(reading), boot_mem_bytes) if reading else boot_mem_bytes
+                if held <= safe + BOOT_BALLOON_TOLERANCE_BYTES:
+                    # Reached what was asked for -- which is the boot allocation
+                    # itself when the clamp refused to reclaim anything.
+                    if note:
+                        log.LOGGER(f"[QEMU][{_id}] boot balloon: {note}")
+                    break
+                if time.monotonic() >= deadline:
+                    log.LOGGER(
+                        f"[QEMU][{_id}] boot balloon: guest still holds {held} bytes of its "
+                        f"{boot_mem_bytes} boot allocation after {timeout_s}s; billing what it holds"
+                    )
+                    break
+    except Exception as e:
+        log.LOGGER(
+            f"[QEMU][{_id}] boot balloon failed ({type(e).__name__}: {e}); the guest keeps its "
+            f"{boot_mem_bytes} byte boot allocation and is billed for it"
+        )
+        return boot_mem_bytes
+
+    log.LOGGER(
+        f"[QEMU][{_id}] boot balloon settled: guest holds {held} bytes of a {boot_mem_bytes} "
+        f"byte boot allocation (target {target})"
+    )
+    return held
 
 
 def _apply_memory_balloon(

@@ -78,6 +78,41 @@ def resolve_initial_resources(resources: celaut_pb2.Sysresources) -> Tuple[int, 
     return vcpus, mem_b, cpu_quota, cpu_period
 
 
+def resolve_boot_mem_bytes(resources: Optional[celaut_pb2.Service.Container.Resources]) -> int:
+    """RAM a guest must be *booted* with to be able to reach its declared ``at_most``.
+
+    Not the same question as :func:`resolve_initial_resources`, which answers "what
+    does the guest start out holding". A backend whose only memory knob is the cgroup
+    (Cloud Hypervisor) never needs this: it can raise ``memory.max`` at any point, so
+    booting at ``at_init`` costs it nothing. QEMU can not -- ``-m`` is fixed for the
+    life of the process and the balloon can only deflate back up to it -- so a guest
+    booted at ``at_init`` can never be grown, however much headroom its manifest
+    declared. Reserving ``at_most`` up front is what makes that headroom reachable;
+    the difference is then held by the balloon rather than by the guest, so what the
+    guest *has* is still ``at_init`` (see
+    :func:`src.virtualizers.qemu.hotplug.settle_boot_balloon`).
+
+    Never below the ``at_init`` figure, floors included: a manifest whose ``at_most``
+    is unset, zero, or smaller than its ``at_init`` declares no headroom, and a guest
+    with no headroom to reserve boots at exactly the figure it was granted.
+
+    Reserving the ceiling is not an over-commitment the node has not already vetted:
+    admission control quotes and rejects on ``at_most`` (see
+    ``get_resource_availability``), so a manifest that reaches a launch is one whose
+    ceiling the node already said it could afford.
+    """
+    _, init_mem_b, _, _ = resolve_initial_resources(resources.at_init if resources else None)
+
+    most_mem_b = 0
+    try:
+        if resources is not None and resources.HasField("at_most") and resources.at_most.HasField("mem_limit"):
+            most_mem_b = int(resources.at_most.mem_limit)
+    except Exception:
+        most_mem_b = 0
+
+    return max(init_mem_b, most_mem_b)
+
+
 def requested_disk_space_bytes(service: celaut_pb2.Service) -> Optional[int]:
     """The disk figure a service's manifest asks for, or None if it names none."""
     try:

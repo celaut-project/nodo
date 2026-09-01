@@ -156,6 +156,9 @@ def local_execution(
         if config.HasField("initial_mu") \
         else default_initial_balance(system_resources=resources.at_init, service_hash=service_id)
 
+    # The initial end of the declared range. The virtualizer is handed the whole
+    # `resources` (both ends): which of them it has to reserve at boot is the
+    # backend's business, not the launcher's -- see `virtualizers.interface.execute`.
     initial_system_resources: celaut.Sysresources = resources.at_init
 
     try:
@@ -358,7 +361,7 @@ def local_execution(
             service_id=service_id,
             service=service,
             config=config,
-            initial_system_resources=initial_system_resources,
+            system_resources=resources,
             father_id=father_id,
             register_instance=_register_instance,
         )
