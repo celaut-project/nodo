@@ -876,10 +876,19 @@ impl GuestKernelReserve {
     }
 }
 
+/// The ratio is the same on both arches because the physics is: one `struct page`
+/// per 4 KiB frame does not know what instruction set it describes. 2.5% clears the
+/// fitted measurements (1.80% amd64, 2.10% arm64) and the 1.5625% `struct page`
+/// floor with headroom, without scaling into hundreds of wasted MiB on a large guest
+/// -- margin on a multiplier is multiplied too, and the node absorbs it unbilled.
+/// The fixed part is what genuinely differs per arch, and is where margin is cheap.
 const DEFAULT_GUEST_KERNEL_RESERVE: [(&str, u64, f64); 2] = [
-    ("linux/amd64", 40, 0.05),
-    ("linux/arm64", 32, 0.05),
+    ("linux/amd64", 40, GUEST_KERNEL_RESERVE_RATIO),
+    ("linux/arm64", 32, GUEST_KERNEL_RESERVE_RATIO),
 ];
+
+/// Mirrors `_GUEST_KERNEL_RESERVE_RATIO` in `src/virtualizers/ch/limits.py`.
+const GUEST_KERNEL_RESERVE_RATIO: f64 = 0.025;
 
 /// The reserve for each priced architecture, config overrides applied.
 fn get_guest_kernel_reserves(config: &Path) -> Vec<(&'static str, GuestKernelReserve)> {

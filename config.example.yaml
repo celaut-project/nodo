@@ -106,9 +106,17 @@ virtualizers:
     #
     # amd64's kernel image, percpu areas and reserved low memory cost ~9 MiB more
     # than arm64's; the proportional part is the `struct page` array (64 bytes per
-    # 4 KiB frame) and is near-identical on both. The defaults below carry margin,
-    # because overhead also varies with kernel version and config and the failure
-    # mode of too little is a guest OOM.
+    # 4 KiB frame) and is near-identical on both.
+    #
+    # Both defaults carry margin -- overhead also varies with kernel version and
+    # config, and the failure mode of too little is a guest OOM -- but not in the
+    # same way, because margin on the two parts behaves differently. On MIB it is a
+    # constant (~8 MiB, whatever the guest's size), and that is also where
+    # kernel-version variance actually lives, so it is generous. On RATIO it is
+    # multiplied by the guest, so it is kept near the physics: 1.5625% is the
+    # `struct page` floor, the measurements fit at 1.8-2.1%, and 0.025 clears both
+    # with headroom. A flat 0.05 would reserve 450 MiB on an 8 GiB guest where the
+    # kernel takes ~180 -- host RAM the node commits and cannot bill.
     #
     # THE NODE ABSORBS THIS. It is never billed to the client: an instance is charged
     # for the RAM it declared and can use, never for the kernel underneath it. So it
@@ -122,10 +130,10 @@ virtualizers:
     # GUEST_KERNEL_RESERVE:
     #   linux/amd64:
     #     MIB: 40
-    #     RATIO: 0.05
+    #     RATIO: 0.025
     #   linux/arm64:
     #     MIB: 32
-    #     RATIO: 0.05
+    #     RATIO: 0.025
     # cgroup v2 root path for per-VM lifecycle hotplug controls.
     CGROUPS_BASE_DIR: "/sys/fs/cgroup"
     # Guest output streams for debug:

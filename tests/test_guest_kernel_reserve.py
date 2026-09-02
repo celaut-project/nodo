@@ -307,10 +307,14 @@ class TheReserveIsConfigurablePerArchTests(unittest.TestCase):
                 limits.guest_kernel_reserve_bytes(1024 * MIB, arch=AMD64),
                 64 * MIB + math.ceil(1024 * MIB * 0.1),
             )
-            # arm64 keeps its measured default.
+            # arm64 keeps its measured default. Read from the table rather than
+            # written out again: this test is about one arch's override not leaking
+            # into the other, not about what the other arch's default happens to be,
+            # and a literal here only rots when a measurement is corrected.
+            arm_mib, arm_ratio = limits._DEFAULT_GUEST_KERNEL_RESERVE[ARM64]
             self.assertEqual(
                 limits.guest_kernel_reserve_bytes(1024 * MIB, arch=ARM64),
-                32 * MIB + math.ceil(1024 * MIB * 0.05),
+                arm_mib * MIB + math.ceil(1024 * MIB * arm_ratio),
             )
 
     def test_zero_restores_the_previous_behaviour_for_that_arch_alone(self):

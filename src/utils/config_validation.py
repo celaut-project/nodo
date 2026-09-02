@@ -11,6 +11,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
 
+from src.utils.arch_guard import CANONICAL_ARCHITECTURES
 from src.utils.ergo_units import erg_to_nanoerg, is_valid_ergo_address
 
 # Keys that were removed. Their presence anywhere in the config means the file predates
@@ -288,11 +289,6 @@ PER_ARCH_PRICE_KEYS = (
     "RAM_MU_PER_GIB_HOUR",
 )
 
-# Arch tags a per-arch price may be keyed by, canonical form. Deliberately a literal
-# rather than `SUPPORTED_ARCHITECTURES`: config validation must not depend on what
-# this particular host can boot right now, or a config would validate on one machine
-# and be rejected on another.
-_CANONICAL_ARCH_TAGS = ("linux/amd64", "linux/arm64")
 
 
 def _validate_pricing_by_arch(pricing: Dict[str, Any]) -> None:
@@ -306,7 +302,10 @@ def _validate_pricing_by_arch(pricing: Dict[str, Any]) -> None:
     the node's memory away (read as 0) or refusing every client (read as huge).
     An unrecognised arch tag raises too: it is silently dead config otherwise, and the
     operator who wrote `amd64` instead of `linux/amd64` believes they have set a price
-    that never applies to anything.
+    that never applies to anything. The tags come from
+    :data:`src.utils.arch_guard.CANONICAL_ARCHITECTURES`, which is the node's whole
+    vocabulary of architectures rather than what this host happens to be able to boot
+    -- see there for why validation must not depend on the latter.
     """
     block = pricing.get("BY_ARCH")
     if block is None:
@@ -318,10 +317,10 @@ def _validate_pricing_by_arch(pricing: Dict[str, Any]) -> None:
         )
 
     for arch, entry in block.items():
-        if arch not in _CANONICAL_ARCH_TAGS:
+        if arch not in CANONICAL_ARCHITECTURES:
             raise ConfigValidationError(
                 f"pricing.BY_ARCH.{arch} is not an architecture this node knows. Use a "
-                f"canonical tag: {', '.join(_CANONICAL_ARCH_TAGS)}."
+                f"canonical tag: {', '.join(CANONICAL_ARCHITECTURES)}."
             )
         if not isinstance(entry, dict):
             raise ConfigValidationError(
