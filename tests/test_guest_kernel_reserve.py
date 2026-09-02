@@ -279,13 +279,22 @@ class TheReserveIsConfigurablePerArchTests(unittest.TestCase):
     """
 
     def _config(self, **overrides):
-        manager = ConfigManager()
-        real_get = manager.get
+        """Override config keys for the manager `limits` actually reads.
+
+        Patches `limits.env_manager` rather than a fresh `ConfigManager()`. The
+        module binds its manager once at import, and `tests/config_bootstrap`
+        drops the singleton to point later callers at a temporary config -- so
+        `ConfigManager()` here can hand back an instance `limits` has never
+        heard of, and the override would silently do nothing. Which is exactly
+        what it did: these two tests passed alone and read the defaults when the
+        suite ran in full.
+        """
+        real_get = limits.env_manager.get
 
         def get(key, default=None):
             return overrides[key] if key in overrides else real_get(key, default)
 
-        return patch.object(manager, "get", side_effect=get)
+        return patch.object(limits.env_manager, "get", side_effect=get)
 
     def test_one_arch_can_be_corrected_without_touching_the_other(self):
         with self._config(**{
