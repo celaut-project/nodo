@@ -1,4 +1,12 @@
-"""Architecture tags, and whether this host can BUILD for a foreign one.
+"""Architecture tags, their emulator names, and whether this host can BUILD for a
+foreign one.
+
+Deliberately stdlib-only -- ``os``, ``platform``, ``typing`` and nothing else. That
+is what lets this be the one place the per-architecture tables live: the config
+validator, the pricing layer, ``virtualizers.ch.limits`` (which goes out of its way
+to depend on protos and config alone) and ``commands.doctor`` (which has to stay
+runnable on a checkout too broken to import the node) can all read from here without
+any of them taking on a dependency they were built to avoid.
 
 The build side mirrors the philosophy the execution side already adopted in
 ``src/utils/architectures.py``: capability is *derived from what is installed*,
@@ -35,7 +43,37 @@ ARCH_ALIASES = {
     "aarch64": "linux/arm64",
 }
 
+# Every architecture nodo has a canonical tag for, in a stable order. Derived from
+# ARCH_ALIASES rather than written out again: the alias table is what decides which
+# tags exist, so a second list of them could only ever disagree with it.
+#
+# This is the node's vocabulary of architectures, not a claim about capability. What
+# THIS host can boot right now is `architectures.SUPPORTED_ARCHITECTURES` (emulator
+# installed, guest kernel on disk) and it is deliberately a different question: a
+# price or a guest-kernel reserve an operator set for an arch must not vanish because
+# an emulator was uninstalled, and a config file must validate the same way on every
+# machine rather than only on the one that can run what it mentions.
+#
+# Lives here because this module is the one that already owns what an arch tag *is*,
+# and it is pure stdlib -- no config, no protos, nothing that reads a disk at import.
+# That is what lets the config validator, the pricing layer and `virtualizers.ch.limits`
+# all share it without any of them growing a dependency it went out of its way to avoid.
+CANONICAL_ARCHITECTURES = tuple(dict.fromkeys(ARCH_ALIASES.values()))
+
 BINFMT_MISC_DIR = "/proc/sys/fs/binfmt_misc"
+
+# Canonical arch tag -> the ``qemu-system-*`` binary that emulates a full guest of
+# it. Lives here rather than in ``virtualizers.qemu.config`` because ``doctor`` needs
+# it and cannot import that module: it reads ConfigManager at import, and doctor's
+# whole job is to run on a node too broken for that. ``qemu.config`` re-exports it
+# under its original name, so the emulator lookup still reads from one table.
+#
+# This is BINFMT_HANDLERS' sibling: user-mode emulation for a cross-arch build below,
+# system emulation for a cross-arch guest here.
+QEMU_SYSTEM_BINARIES = {
+    "linux/amd64": "qemu-system-x86_64",
+    "linux/arm64": "qemu-system-aarch64",
+}
 
 # Canonical arch tag -> the binfmt_misc handler names that can run its binaries.
 # More than one name is accepted because the same emulator is registered under

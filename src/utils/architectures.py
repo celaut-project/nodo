@@ -23,19 +23,30 @@ that could, the node hid capacity it had. Capability is now *derived*:
 So the node advertises exactly what it can boot, and the only way to change that
 is to change what is installed (or turn ``virtualizers.qemu.ENABLE`` off).
 """
-from src.utils.arch_guard import host_arch_tag
+from src.utils.arch_guard import ARCH_ALIASES, CANONICAL_ARCHITECTURES, host_arch_tag
 from src.utils.config import ConfigManager
 
 config = ConfigManager()
 
-# Alias tables for each executable architecture (canonical form first).
-_ARM64_ALIASES = ["linux/arm64", "arm64", "arm_64", "aarch64"]
-_AMD64_ALIASES = ["linux/amd64", "x86_64", "amd64"]
 
-_ALIASES_BY_CANONICAL = {
-    "linux/arm64": _ARM64_ALIASES,
-    "linux/amd64": _AMD64_ALIASES,
-}
+def _aliases_by_canonical():
+    """Alias table per canonical architecture, canonical form first.
+
+    Inverted from ``arch_guard.ARCH_ALIASES`` rather than written out a second time.
+    The two copies had already drifted in ordering (`x86_64` before `amd64` here,
+    the other way round there), and a divergence that matters is only a matter of
+    time: this module's lists are what a peer is *told* nodo accepts, so an alias
+    present in one table and missing from the other is a tag a peer offers and this
+    node then fails to normalise.
+    """
+    table = {canonical: [canonical] for canonical in CANONICAL_ARCHITECTURES}
+    for alias, canonical in ARCH_ALIASES.items():
+        if alias != canonical:
+            table[canonical].append(alias)
+    return table
+
+
+_ALIASES_BY_CANONICAL = _aliases_by_canonical()
 
 # Architectures this node can BUILD/pack for. Retained for completeness; packing
 # itself is now delegated to the external packer-service. Unlike execution these
@@ -43,9 +54,9 @@ _ALIASES_BY_CANONICAL = {
 # not what the host is able to boot.
 PACKER_SUPPORTED_ARCHITECTURES = []
 if config.get("packer.ARM_PACKER_SUPPORT"):
-    PACKER_SUPPORTED_ARCHITECTURES.append(list(_ARM64_ALIASES))
+    PACKER_SUPPORTED_ARCHITECTURES.append(list(_ALIASES_BY_CANONICAL["linux/arm64"]))
 if config.get("packer.X86_PACKER_SUPPORT"):
-    PACKER_SUPPORTED_ARCHITECTURES.append(list(_AMD64_ALIASES))
+    PACKER_SUPPORTED_ARCHITECTURES.append(list(_ALIASES_BY_CANONICAL["linux/amd64"]))
 
 
 def resolve_supported_architectures(host_arch, emulation_ready):

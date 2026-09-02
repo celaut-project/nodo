@@ -14,7 +14,11 @@ import math
 from typing import Dict, Optional, Tuple
 
 from protos import celaut_pb2
-from src.utils.arch_guard import host_arch_tag, normalize_arch_tag
+from src.utils.arch_guard import (
+    CANONICAL_ARCHITECTURES,
+    host_arch_tag,
+    normalize_arch_tag,
+)
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -95,16 +99,64 @@ MKFS_GROWTH_FACTOR = 2
 # Disk already works this way: `initial_rootfs_size_bytes` grows the image by
 # OVERHEAD_BYTES so a service asking for N bytes of disk can store N bytes rather
 # than N minus the filesystem's metadata. Memory simply never got the same
-# treatment. The defaults carry margin over the measured figures because the
-# overhead also varies with kernel version and config, and the failure mode of too
-# little is a guest OOM. A reserve of zero restores the previous behaviour exactly.
+# treatment. A reserve of zero restores the previous behaviour exactly.
+#
+# WHERE THE MARGIN GOES. Both parts carry margin over the measurements, because the
+# overhead also varies with kernel version and config and the failure mode of too
+# little is a guest OOM. But the two parts must not carry it the same way, and an
+# earlier revision of this table gave both 5%:
+#
+#   * The FIXED part is a constant, so margin on it is a constant. ~8 MiB over the
+#     measured figure on either arch, and it stays ~8 MiB whatever the guest's size.
+#     This is where generosity is cheap, and it is where kernel-version variance
+#     actually lives: a different .config changes the image, the percpu areas and the
+#     reserved regions, none of which scale with the guest.
+#
+#   * The RATIO part is multiplied by the guest, so margin on it is multiplied too. A
+#     flat 5% against a measured ~1.8-2.1% is not caution, it is a growing tax the
+#     node pays itself: on an 8 GiB guest it reserves 450 MiB where the kernel takes
+#     ~180, and the node absorbs the difference as host RAM it committed and cannot
+#     bill. The reserve is deliberately not billed (see `guest_boot_memory_bytes`),
+#     so every over-reserved byte comes straight off what the operator earns per GiB
+#     of RAM they own -- which is exactly the figure the TUI's pricing page exists to
+#     show them.
+#
+# So the ratio is set near the physics instead. One `struct page` per 4 KiB frame at
+# 64 bytes is 1.5625% of any guest and is the floor; the fitted measurements land at
+# 1.80% (amd64) and 2.10% (arm64), the rest being early page tables and vmemmap
+# alignment. 2.5% clears both with ~20-35% headroom -- room for a kernel built with a
+# fatter `struct page` -- without scaling into hundreds of wasted MiB. An operator who
+# has measured their own kernel can still tighten or widen it per arch.
 
-# (fixed MiB, ratio) per canonical arch tag: the measurements above, rounded up to a
-# margin. Overridable per arch under `virtualizers.ch.GUEST_KERNEL_RESERVE.<arch>`.
+# (fixed MiB, ratio) per canonical arch tag. Fitted against `usable` (what this
+# function is given), not against `-m`: overhead = f + r*(usable + overhead), so the
+# per-`-m` fits quoted above become 31.4 MiB + 1.80% and 23.1 MiB + 2.10% here.
+# Overridable per arch under `virtualizers.ch.GUEST_KERNEL_RESERVE.<arch>`.
+#
+# The ratio is the same on both arches because the physics is: `struct page` per frame
+# does not know what instruction set it is describing. It stays a per-arch *setting*
+# only so an operator running one corrected kernel can fix it without touching the
+# other. The fixed part is what genuinely differs -- amd64's kernel image, percpu
+# areas and reserved low memory come to ~8 MiB more than arm64's.
+_GUEST_KERNEL_RESERVE_RATIO = 0.025
+
 _DEFAULT_GUEST_KERNEL_RESERVE = {
-    "linux/arm64": (32, 0.05),
-    "linux/amd64": (40, 0.05),
+    # measured 23.1 MiB + 2.10%
+    "linux/arm64": (32, _GUEST_KERNEL_RESERVE_RATIO),
+    # measured 31.4 MiB + 1.80%
+    "linux/amd64": (40, _GUEST_KERNEL_RESERVE_RATIO),
 }
+
+# Every arch nodo can name should have a measured reserve here, and
+# `tests/test_tui_mirrors_the_node.py` fails if one does not: adding a tag to
+# `arch_guard.ARCH_ALIASES` without measuring its guest kernel is a thing to notice.
+#
+# Deliberately a test rather than an import-time assert. The fallback below is safe --
+# it over-reserves, it cannot under-reserve -- so an unmeasured arch is "please
+# measure this", not "refuse to start". An assert here would take the node down at
+# import for a table it could have degraded past, and it takes every *test* that
+# imports this module down with it, as a skip labelled "missing runtime dependencies"
+# rather than a failure. A guard that hides the other guards is worse than none.
 
 # What an unknown arch gets: the largest reserve nodo has measured. An arch nobody
 # has characterised here is more likely to resemble the most expensive kernel than
