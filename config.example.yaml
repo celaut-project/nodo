@@ -89,6 +89,51 @@ virtualizers:
     # - Services requiring more memory must request it explicitly in sysresources.
     MIN_MEM_MIB: 128
     DEFAULT_MEM_MIB: 256
+    # Guest kernel reserve: how much MORE than a service's declared mem_limit the VM
+    # is booted with, so the service really gets what it declared.
+    #
+    # The guest kernel's own footprint comes out of the VM's RAM before init runs.
+    # Booting at exactly mem_limit therefore hands the service LESS than its manifest
+    # declared -- a service declaring 256 MiB was OOM-killed at ~228 MiB, below its
+    # own published ceiling. This is the memory counterpart of the OVERHEAD_BYTES the
+    # rootfs image has always been grown by.
+    #
+    # The reserve is ARCHITECTURE-DEPENDENT because the overhead is. Measured from the
+    # guest kernels' own `Memory: <avail>K/<total>K available` boot line:
+    #
+    #   linux/arm64   ~22.8 MiB + ~2.2% of the guest
+    #   linux/amd64   ~31.4 MiB + ~1.8% of the guest
+    #
+    # amd64's kernel image, percpu areas and reserved low memory cost ~9 MiB more
+    # than arm64's; the proportional part is the `struct page` array (64 bytes per
+    # 4 KiB frame) and is near-identical on both.
+    #
+    # Both defaults carry margin -- overhead also varies with kernel version and
+    # config, and the failure mode of too little is a guest OOM -- but not in the
+    # same way, because margin on the two parts behaves differently. On MIB it is a
+    # constant (~8 MiB, whatever the guest's size), and that is also where
+    # kernel-version variance actually lives, so it is generous. On RATIO it is
+    # multiplied by the guest, so it is kept near the physics: 1.5625% is the
+    # `struct page` floor, the measurements fit at 1.8-2.1%, and 0.025 clears both
+    # with headroom. A flat 0.05 would reserve 450 MiB on an 8 GiB guest where the
+    # kernel takes ~180 -- host RAM the node commits and cannot bill.
+    #
+    # THE NODE ABSORBS THIS. It is never billed to the client: an instance is charged
+    # for the RAM it declared and can use, never for the kernel underneath it. So it
+    # is a real cost to the operator, and `pricing.RAM_MU_PER_GIB_HOUR` (or the
+    # per-arch override under `pricing.BY_ARCH`) is what has to cover it. The TUI's
+    # pricing page shows the effective per-arch figure -- what the node earns per GiB
+    # actually committed, once the reserve is accounted for.
+    #
+    # Uncomment to override a measurement with your own. MIB and RATIO both at 0
+    # size the VM at exactly the usable figure, for that architecture alone.
+    # GUEST_KERNEL_RESERVE:
+    #   linux/amd64:
+    #     MIB: 40
+    #     RATIO: 0.025
+    #   linux/arm64:
+    #     MIB: 32
+    #     RATIO: 0.025
     # cgroup v2 root path for per-VM lifecycle hotplug controls.
     CGROUPS_BASE_DIR: "/sys/fs/cgroup"
     # Guest output streams for debug:
@@ -401,6 +446,28 @@ pricing:
   RAM_MU_PER_GIB_HOUR: 1000000
   CPU_MU_PER_VCPU_HOUR: 4000000
   DISK_MU_PER_GIB_HOUR: 100000
+  # Per-architecture memory price, overriding RAM_MU_PER_GIB_HOUR for guests of that
+  # architecture. Absent, every arch pays the scalar price above, so a config that
+  # never mentions it needs no migration.
+  #
+  # Memory is the one resource whose real cost to this node depends on the guest's
+  # architecture: the guest kernel reserve the node absorbs and never bills differs
+  # per arch (see virtualizers.ch.GUEST_KERNEL_RESERVE), so one rate cannot cover it
+  # correctly on both at once. An emulated guest is also far slower per vCPU, which
+  # some operators price for; that judgement belongs to the operator, which is why
+  # this is a setting and not a derived number.
+  #
+  # CPU and disk are deliberately NOT per-arch: the node hands a guest the vCPUs and
+  # the image it asked for whatever architecture it is.
+  #
+  # Keys are canonical arch tags, verbatim -- the same strings the rest of the node
+  # names architectures by. Edit these from the TUI's pricing page, which shows the
+  # effective rate per arch beside the reserve it has to cover.
+  # BY_ARCH:
+  #   linux/amd64:
+  #     RAM_MU_PER_GIB_HOUR: 1000000
+  #   linux/arm64:
+  #     RAM_MU_PER_GIB_HOUR: 1400000
   # Tunnelled traffic, counting both directions (see docs/TUNNELING.md).
   NET_MU_PER_GIB: 2000000
   # One-off operations, charged once each. Not scaled by scarcity: they price work done

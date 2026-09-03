@@ -6,6 +6,7 @@ import netifaces as ni
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
+from src.virtualizers.architecture import get_arch_tag
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
 from src.virtualizers.selection import select_virtualizer
 from src.manager.manager import (
@@ -152,9 +153,19 @@ def local_execution(
     father_id = father_id if father_id else ""
     father_ip = father_ip if father_ip else ""
 
+    # Resolved before the balance is derived, because it selects the memory price the
+    # ticks that spend that balance will charge: funding an instance at the scalar
+    # rate and then charging it a per-arch one buys a different number of hours than
+    # `deposits.INITIAL_RUNTIME_HOURS` promises.
+    service_arch = get_arch_tag(service=service, metadata=metadata)
+
     initial_mu: int = from_amount(config.initial_mu) \
         if config.HasField("initial_mu") \
-        else default_initial_balance(system_resources=resources.at_init, service_hash=service_id)
+        else default_initial_balance(
+            system_resources=resources.at_init,
+            service_hash=service_id,
+            arch=service_arch,
+        )
 
     # The initial end of the declared range. The virtualizer is handed the whole
     # `resources` (both ends): which of them it has to reserve at boot is the
@@ -282,9 +293,16 @@ def local_execution(
     # (kill/maintain/firewall) route by that column.
     configured_virtualizer = select_virtualizer(service=service, metadata=metadata)
 
+    # `service_arch` (resolved above, where the initial balance needed it) is
+    # persisted on the row below. It selects the memory price when the operator has
+    # set one per arch: the maintenance tick prices the *row*, and re-deriving the
+    # arch there would mean reading the service off disk once per instance per tick --
+    # for a service the instance may well outlive. None when the manifest names an
+    # arch this node has no tag for, which is charged the scalar memory price rather
+    # than nothing.
     log.LOGGER(
         f"Invoking virtualizer execute: virtualizer={configured_virtualizer}, "
-        f"service_id={service_id}, father_id={father_id}"
+        f"arch={service_arch}, service_id={service_id}, father_id={father_id}"
     )
 
     # A manifest that names no disk is rejected -- and it is rejected here, before a
@@ -350,6 +368,7 @@ def local_execution(
             mem_limit=int(resolved_resources.mem_limit),
             cpu_period=int(resolved_resources.cpu_period),
             cpu_quota=int(resolved_resources.cpu_quota),
+            arch=service_arch,
         )
         registered_id = vmachine_id
 

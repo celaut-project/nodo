@@ -9,10 +9,13 @@ import tempfile
 import time
 from pathlib import Path
 
-# The only project import here, and safe because that module is stdlib-only too:
-# doctor has to stay runnable on a checkout too broken to import the node, which is
-# exactly when it is worth running. Anything that pulls in config or the logger
-# (which creates the storage directory on import) does not belong in this file.
+# The only project imports here, and every one of them is stdlib-only too: doctor
+# has to stay runnable on a checkout too broken to import the node, which is exactly
+# when it is worth running. Anything that pulls in config or the logger (which
+# creates the storage directory on import) does not belong in this file -- which is
+# why the per-arch tables below come from `utils.arch_guard` and not from
+# `virtualizers.qemu.config`, where the emulator lookup that uses them lives.
+from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
 from src.virtualizers.ch import initramfs as ch_initramfs
 from src.virtualizers.ch import guest as ch_guest
 
@@ -264,12 +267,19 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
 
 
 def _get_host_arch_tag() -> str:
-    machine = platform.machine().lower()
-    if machine in ("x86_64", "amd64"):
-        return "linux/amd64"
-    if machine in ("aarch64", "arm64"):
-        return "linux/arm64"
-    return f"linux/{machine}"
+    """This host's canonical arch tag, for display and for keying config lookups.
+
+    Normalisation comes from `arch_guard`, which owns the alias table. A second copy
+    of that table here has no way to stay in step with it: one such copy drifted by a
+    full alias (`arm_64`) with nothing to notice.
+
+    The fallback is this function's own, and is why it is not simply
+    `host_arch_tag()`: an arch nodo has no tag for reads as `linux/ppc64le` here
+    rather than as None, because every use below is a message to an operator or a
+    config key to look up, and "linux/ppc64le" tells them which architecture went
+    unrecognised while "None" tells them nothing.
+    """
+    return host_arch_tag() or f"linux/{platform.machine().lower()}"
 
 
 def _parse_kernel_version(release: str):
@@ -631,10 +641,9 @@ def _doctor_emulated_architectures(cfg: dict, host_arch_tag: str):
         )
         return []
 
-    binaries = {"linux/amd64": "qemu-system-x86_64", "linux/arm64": "qemu-system-aarch64"}
     executable = []
 
-    for arch, default_binary in binaries.items():
+    for arch, default_binary in QEMU_SYSTEM_BINARIES.items():
         if arch == host_arch_tag:
             continue
 

@@ -146,11 +146,18 @@ def maintenance_charge_mu(
     system_resources: celaut.Sysresources,
     seconds: float,
     scarcity: Optional[Dict[str, float]] = None,
+    arch: Optional[str] = None,
 ) -> int:
     """MU owed for holding the requested resources for `seconds`.
 
     This is the recurring charge: the manager calls it once per iteration with that
     iteration's length, so the price of an hour is the same however often the node ticks.
+
+    ``arch`` is the guest's architecture, which selects the memory price when the
+    operator has set one per arch (`pricing.BY_ARCH.<arch>.RAM_MU_PER_GIB_HOUR`).
+    Omitted -- or naming an arch with no price of its own -- charges the node's scalar
+    memory price, so a caller that does not know the arch bills the ordinary rate
+    rather than nothing.
     """
     current = scarcity if scarcity is not None else system_scarcity()
     if is_free(current):
@@ -160,7 +167,7 @@ def maintenance_charge_mu(
     units = requested_units(system_resources)
     return sum(
         (
-            per_time_charge(p.ram_mu_per_gib_hour, units[MEM], seconds, scarcity_bp(current.get(MEM, 1.0), p)),
+            per_time_charge(p.ram_for_arch(arch), units[MEM], seconds, scarcity_bp(current.get(MEM, 1.0), p)),
             per_time_charge(p.cpu_mu_per_vcpu_hour, units[CPU], seconds, scarcity_bp(current.get(CPU, 1.0), p)),
             per_time_charge(p.disk_mu_per_gib_hour, units[DISK], seconds, scarcity_bp(current.get(DISK, 1.0), p)),
         )
