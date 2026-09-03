@@ -344,6 +344,19 @@ message EstimatedCost {
     float variance = 5;
 }
 
+// Answer to "could you run an instance shaped like this right now?" — the
+// same admission check a real StartService/GetServiceEstimatedCost request
+// would run (see get_resource_availability), asked in isolation for a
+// resource shape that may not correspond to any packed service on either
+// side. Used to evaluate Service.PossibleEnvironmentWorkload scenarios: a
+// descendant workload group can declare only `resources`, with no `hash`/
+// embedded `service` to ask GetServiceEstimatedCost about.
+message ResourceAvailability {
+    bool can_execute = 1;
+    // Empty when can_execute is true. Human-readable, not meant to be parsed.
+    string reason = 2;
+}
+
 message Refund {
     Amount amount = 1;
 }
@@ -639,6 +652,7 @@ service Gateway {
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Payment -> Empty
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> ModifyServiceSystemResourcesOutput
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash & Service -> EstimatedCost
+    rpc GetResourceAvailability(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Service.Container.Resources -> ResourceAvailability
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Metadata.HashTag.Hash -> Service
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage | bytes -> bytes

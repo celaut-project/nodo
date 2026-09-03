@@ -558,8 +558,29 @@ one `hash` or an embedded `service`:
 
 `dependency: null` and an omitted `dependency` both leave the protobuf message absent.
 The booleans are independent: a service may be embedded, stored on the filesystem, both, or
-neither. The packer serializes these declarations; scheduler/runtime enforcement remains
-future work.
+neither.
+
+At launch, every scenario's workload groups that declare `resources` are checked for
+existence — is there a place, right now, that could run one instance shaped like this? — using
+the same admission gate a service's own `resources.at_most` goes through: first locally, then,
+if `network.DELEGATE_EXECUTION` is on, by asking known peers (`GetResourceAvailability`). A
+service is refused if any group has nowhere that could take it. Every limit the group declares
+is checked, not just memory: `mem_limit` and `disk_space` against what is free right now,
+`cpu_quota`/`cpu_period` against how many cores the host has at all (a quota is a share of
+time, so a momentary spike is not a reason to refuse), and `blkio_weight` against the
+10–1000 range cgroups accept.
+
+This is an existence check, not a capacity reservation: it does not prove `count` concurrent
+instances of a group could all run at once, locally or spread across peers, and it does not
+hold the capacity it found for later — by the time the service actually spawns that
+descendant, the answer could have changed.
+
+Two settings under `workload_admission` in `config.yaml` govern it. `POLICY` decides how much
+is probed — `fail_fast` (default) stops at the first group that fits nowhere, `full` probes
+all of them so the error names each one — and never changes *what* is admitted; every group
+must fit either way. `ON_UNSATISFIABLE` decides what a group that fits nowhere means:
+`reject` (default) refuses the launch, `warn` logs it and launches anyway, for an operator
+who would rather risk it than lose a launch to a reading taken at a busy instant.
 
 **Hash-only dependency — resolve by content identity:**
 
@@ -651,8 +672,6 @@ future work.
 The special `dependency.hash` values are hexadecimal for operator convenience. Other
 protobuf `bytes` fields inside `dependency.service` (such as `container.filesystem`) use
 standard protobuf JSON base64 encoding.
-
-> **Spec-only:** the field is declared and serialized, but nodo's scheduler does **not** yet interpret or enforce it. Scheduler interpretation is future work (celaut-project/nodo#163).
 
 **Example — two independent scenarios (`2×5 GB + 1×40 GB`, or `4×16 GB`):**
 ```json

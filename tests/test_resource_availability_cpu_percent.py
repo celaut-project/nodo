@@ -1,8 +1,8 @@
 """Issue #288: ``get_resource_availability`` must not sleep on ``cpu_percent``.
 
 Parsed from source so the assertion does not depend on bee_rpc / ConfigManager.
-The sample is write-only today, but it still has to be cheap: this function
-runs on every local launch and, once #286 lands, also answers peers.
+The sample is write-only, but it still has to be cheap: this function runs on
+every local launch and also answers peers over GetResourceAvailability.
 """
 import ast
 import unittest
@@ -13,7 +13,7 @@ _SRC = (
     / "src"
     / "utils"
     / "cost_functions"
-    / "generate_estimated_cost.py"
+    / "resource_availability.py"
 )
 
 

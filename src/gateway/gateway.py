@@ -5,6 +5,7 @@ from protos import celaut_pb2_grpc, celaut_pb2
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
+from src.gateway.iterables.resource_availability_iterable import GetResourceAvailabilityIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
@@ -27,6 +28,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         print("DEBUG. GET SERVICE ESTIMATED COST")
         log.LOGGER("DEBUG. GET SERVICE ESTIMATED COST")
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
+
+    def GetResourceAvailability(self, request_iterator, context, **kwargs):
+        yield from GetResourceAvailabilityIterable(request_iterator, context)
 
     def StartService(self, request_iterator, context, **kwargs):
         yield from StartServiceIterable(request_iterator, context)
