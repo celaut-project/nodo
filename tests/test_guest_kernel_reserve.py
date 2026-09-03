@@ -64,8 +64,8 @@ MEASURED_BY_ARCH = {
     },
 }
 
-# The arm64 figures the original fix was written against, kept under their old name so
-# the tests that pin the *live* failure keep naming the measurement that produced it.
+# The arm64 measurements under a bare name: the tests that pin the live failure were
+# taken on an arm64 guest, so they read against the arch that produced them.
 MEASURED = MEASURED_BY_ARCH[ARM64]
 
 
@@ -78,8 +78,8 @@ def _fit(measured):
     matters -- the fraction observed on the *smallest* guest is dominated by the fixed
     part (19.8% on arm64 at 128 MiB) and wildly overstates a large guest's cost.
 
-    Least squares rather than solving a pair, now that there are more than two points
-    per arch: a fit through all of them cannot be skewed by whichever two were picked.
+    Least squares rather than solving a pair, since there are more than two points per
+    arch: a fit through all of them cannot be skewed by whichever two were picked.
     """
     sizes = sorted(measured)
     overheads = [size - measured[size] for size in sizes]
@@ -115,7 +115,7 @@ class GuestBootMemoryTests(unittest.TestCase):
                 )
 
     def test_the_headroom_covers_the_overhead_actually_measured(self):
-        """If the reserve is smaller than the real overhead the bug is not fixed.
+        """A reserve smaller than the real overhead leaves the shortfall in place.
 
         The service would still be unable to allocate what it declared, and would
         still be OOM-killed below its own ceiling. Checked per arch against that
@@ -191,7 +191,7 @@ class TheReserveIsPerArchitectureTests(unittest.TestCase):
     """The overhead is a property of the guest kernel, so the reserve must be too.
 
     A single shared constant is either wasteful on the cheaper arch or too small on
-    the costlier one -- and too small is the bug this whole change exists to fix.
+    the costlier one -- and too small is the shortfall the reserve exists to close.
     """
 
     def test_the_costlier_arch_reserves_more(self):
@@ -210,7 +210,8 @@ class TheReserveIsPerArchitectureTests(unittest.TestCase):
 
         Sizing an amd64 guest by arm64's reserve leaves it short of the fixed cost
         amd64 actually pays -- which is a service OOM-killed below its declared
-        ceiling, the original bug, on the arch that was not measured.
+        ceiling, the shortfall this reserve exists to close, on the arch that was not
+        measured.
         """
         arm_fixed, _ = limits._reserve_for_arch(ARM64)
         amd_measured_fixed, _ = FIT_BY_ARCH[AMD64]
@@ -250,8 +251,8 @@ class TheReserveIsPerArchitectureTests(unittest.TestCase):
         )
 
     def test_an_unnamed_arch_still_gets_a_reserve(self):
-        # A caller that cannot name the guest must not silently get the pre-fix
-        # behaviour back: that is the bug, reintroduced for anything unlabelled.
+        # A caller that cannot name the guest must not silently get a VM sized at
+        # exactly the usable figure: that is the shortfall, for anything unlabelled.
         self.assertGreater(limits.guest_boot_memory_bytes(256 * MIB), 256 * MIB)
 
     def test_the_table_reports_what_the_backends_will_apply(self):
@@ -317,13 +318,12 @@ class TheReserveIsConfigurablePerArchTests(unittest.TestCase):
                 arm_mib * MIB + math.ceil(1024 * MIB * arm_ratio),
             )
 
-    def test_zero_restores_the_previous_behaviour_for_that_arch_alone(self):
+    def test_zero_boots_at_exactly_the_usable_figure_for_that_arch_alone(self):
         """The escape hatch, and that it is not a global one.
 
-        Before this change every guest booted at exactly `mem_limit`. An operator who
-        wants that back for one arch must be able to have it without turning the fix
-        off for the other -- otherwise the setting is a choice between the bug
-        everywhere and the fix everywhere.
+        An operator who wants a guest booted at exactly `mem_limit` must be able to
+        have it for one arch without giving up the reserve on the other -- otherwise
+        the setting is a choice between no reserve anywhere and a reserve everywhere.
         """
         with self._config(**{
             f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.MIB": 0,
@@ -337,8 +337,8 @@ class TheReserveIsConfigurablePerArchTests(unittest.TestCase):
             )
 
     def test_a_malformed_override_falls_back_rather_than_disabling_the_reserve(self):
-        # Reading an unparseable reserve as 0 would silently reintroduce the original
-        # bug -- a service OOM-killed below its declared ceiling -- for a typo.
+        # Reading an unparseable reserve as 0 would trade a typo for a service
+        # OOM-killed below its declared ceiling.
         with self._config(**{
             f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.MIB": "lots",
             f"virtualizers.ch.GUEST_KERNEL_RESERVE.{AMD64}.RATIO": "some",
@@ -358,7 +358,7 @@ class TheReserveIsConfigurablePerArchTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class TheBillableFigureIsUnchangedTests(unittest.TestCase):
+class TheBillableFigureExcludesTheReserveTests(unittest.TestCase):
     """The reserve must not leak into what the row records or the client pays.
 
     `resolve_initial_resources` is applied to a manifest at launch and re-applied to

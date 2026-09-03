@@ -224,10 +224,9 @@ class Prices:
     scarcity_max_multiplier: int
     scarcity_curve: float
     # Per-architecture memory price, overriding `ram_mu_per_gib_hour` for guests of
-    # that architecture. Empty means every arch pays the scalar above, which is what a
-    # config written before this existed says, so nothing has to be migrated -- and it
-    # is last, with a default, for the same reason: every existing construction of this
-    # vector keeps working untouched.
+    # that architecture. Empty means every arch pays the scalar above, so a config that
+    # never mentions it needs no migration -- and it is last, with a default, for the
+    # same reason: a construction of this vector that omits it is valid.
     #
     # Memory is the one resource whose real cost to the node genuinely depends on the
     # guest's architecture. A guest kernel's own footprint comes out of the VM's RAM

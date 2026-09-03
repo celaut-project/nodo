@@ -297,8 +297,8 @@ def create_tables(cursor):
     # must be back-filled here. Each entry is idempotent (skipped when present).
     # `arch` is the guest's architecture, which selects the memory price when the
     # operator has set one per arch. NULL on every row written before this column
-    # existed, and NULL is charged the node's scalar memory price -- so an existing
-    # database keeps billing exactly as it did, and nothing has to be back-filled.
+    # existed, and NULL is charged the node's scalar memory price, so an existing
+    # database needs no back-fill.
     ensure_columns(cursor, "local_instances", {
         "envs": "TEXT DEFAULT NULL",
         "arch": "TEXT DEFAULT NULL",

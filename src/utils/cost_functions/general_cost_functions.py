@@ -29,8 +29,8 @@ RATE_RAM_PER_GIB_SECOND = "ram_mu_per_gib_second"
 # It rides in the SAME `Peer.mu_per_call` map every other rate does, which is why this
 # needs no protobuf change: the map is <string, Amount>, its keys are already an open
 # vocabulary, and a peer running an older nodo simply does not find the suffixed key
-# and falls back to the scalar one -- the behaviour it has today. See
-# `node_advertised_rates`.
+# and falls back to the scalar one, which is what it does with any key it cannot
+# name. See `node_advertised_rates`.
 RATE_RAM_PER_GIB_SECOND_ARCH_PREFIX = f"{RATE_RAM_PER_GIB_SECOND}:"
 RATE_CPU_PER_VCPU_SECOND = "cpu_mu_per_vcpu_second"
 RATE_DISK_PER_GIB_SECOND = "disk_mu_per_gib_second"
@@ -118,7 +118,7 @@ def node_advertised_rates() -> Dict[str, int]:
 
     # A node that prices memory per architecture advertises one entry per priced arch,
     # alongside (never instead of) the scalar rate: a peer that does not know about
-    # per-arch pricing keeps reading exactly what it reads today. A peer that does can
+    # per-arch pricing reads the scalar key and ignores the rest. A peer that does can
     # find the rate for the arch it wants to run and, when the node prices that arch
     # differently, know before asking for a quote.
     #
