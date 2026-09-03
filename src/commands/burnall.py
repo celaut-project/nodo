@@ -17,6 +17,12 @@ nothing outlives the thing that would ask for it again.
 Every instance is still stopped through ``stop_instance``, exactly as ``kill``
 does: the deposit is refunded to whoever paid it in, the memory is released and
 the row is purged. This is bulk, not a shortcut.
+
+Nothing is stopped without a typed confirmation, because the blast radius is not
+this operator's own work. An instance a client asked for is stopped like any
+other, and from that client's side it simply stops answering -- which is the
+part a node's reputation is built out of. The prompt therefore reports how many
+of the instances were asked for by a client, not just how many exist.
 """
 
 import os
@@ -27,6 +33,37 @@ from src.database.sql_connection import SQLConnection
 from src.manager.manager import stop_instance
 
 sc = SQLConnection()
+
+# The one gesture that starts a burn. A y/n would be reached by muscle memory --
+# this is the whole node, so it asks for something nobody types by accident.
+CONFIRMATION = "BURN ALL"
+
+THRONE = """
+       ▲   ▲    ▲    ▲   ▲                        ▲   ▲    ▲    ▲   ▲
+       ╲╲   ╲    ╲   │   ╱        ╱╲     ╱╲       │   ╱    ╱   ╱╱   ╱╱
+        ╲╲   ╲    ╲  │  ╱        ╱  ╲   ╱  ╲      │  ╱    ╱   ╱╱   ╱╱
+         ╲╲   ╲    ╲ │ ╱        │ ▒▒ │ │ ▒▒ │     │ ╱    ╱   ╱╱   ╱╱
+          ╲╲   ╲    ╲│╱          ╲▒▒╱   ╲▒▒╱      │╱    ╱   ╱╱   ╱╱
+     ══════╧════╧════╧═           ╲╲▁▁▁▁▁╱╱        ═╧════╧════╧══════
+           ▓    ▓    ▓          ╱▔▔       ▔▔╲       ▓    ▓    ▓
+           ▓    ▓    ▓         │  ▔▔╲   ╱▔▔  │      ▓    ▓    ▓
+           ▓    ▓    ▓         │  ▐█▌   ▐█▌  │      ▓    ▓    ▓
+           ▓    ▓    ▓         │             │      ▓    ▓    ▓
+           ▓    ▓    ▓          ╲   ╱▔▔╲    ╱       ▓    ▓    ▓
+           ▓    ▓    ▓           ╲ │ ▪▪ │  ╱   ╭─────────────────────────╮
+           ▓    ▓    ▓            ╲ ╲▁▁╱  ╱  ◄─┤  " B U R N    A L L "   │
+           ▓    ▓    ▓             ╲▁▁▁▁▁╱      ╰─────────────────────────╯
+           ▓    ▓    ▓               ║ ║            ▓    ▓    ▓
+     ┌─────┴────┴────┴──┐            ║ ║         ┌──┴────┴────┴─────┐
+     │╞═══╡ ╞═══╡ ╞═══╡ │        ╱▔▔▔▔▔▔▔▔▔╲     │ ╞═══╡ ╞═══╡ ╞═══╡│
+     └──────────────────┤      ╱▒▒▒▒▒▒▒▒▒▒▒▒▒╲   ├──────────────────┘
+                        │     │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│  │
+                        └─────┤▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒├──┘
+                              │▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒│
+                       ╔══════╧═══════════════╧══════╗
+                       ║ ╞══╡ ╞══╡  ╞══╡  ╞══╡  ╞══╡ ║
+                       ╚═════════════════════════════╝
+"""
 
 
 def _depth(vmachine_id: str, fathers: Dict[str, str], internal: Sequence[str]) -> int:
@@ -47,13 +84,47 @@ def _depth(vmachine_id: str, fathers: Dict[str, str], internal: Sequence[str]) -
         current, depth = father, depth + 1
 
 
+def _confirmed(total: int, roots: int) -> bool:
+    """Ask, and only accept the exact phrase.
+
+    A closed stdin is a refusal, not an assent: the one thing this must never do
+    is read "no answer available" as permission to empty the node. Scripts that
+    mean it pass --yes.
+    """
+    print("─" * 75)
+    print(f"  This stops ALL {total} running instance(s) on this node. There is no undo.")
+    if roots:
+        print(f"  {roots} of them were asked for by a client.")
+        print("  Stopping one is indistinguishable, from that client's side, from a")
+        print("  node that dropped the work it was paid for -- and that is what this")
+        print("  node's reputation is made of. Expect to lose some.")
+    print("  Unspent deposits are refunded; MU already spent provisioning is not.")
+    print("─" * 75)
+
+    if not sys.stdin.isatty():
+        print("\nRefusing to burn without a confirmation. Pass --yes to mean it.")
+        return False
+
+    try:
+        answer = input(f"\nType {CONFIRMATION!r} to proceed, anything else to abort: ")
+    except (EOFError, KeyboardInterrupt):
+        print("\nAborted.")
+        return False
+
+    if answer.strip() != CONFIRMATION:
+        print("Aborted. Nothing was stopped.")
+        return False
+    return True
+
+
 def burnall(argv: List[str] = None) -> None:
     argv = list(argv or [])
     dry_run = "--dry-run" in argv
-    unknown = [a for a in argv if a != "--dry-run"]
+    assume_yes = "--yes" in argv
+    unknown = [a for a in argv if a not in ("--dry-run", "--yes")]
     if unknown:
         print(f"burnall: unrecognised argument(s): {' '.join(unknown)}")
-        print("usage: nodo burnall [--dry-run]")
+        print("usage: nodo burnall [--dry-run] [--yes]")
         return
 
     # Only the dry run is readable without privileges; stopping needs the same
@@ -80,15 +151,20 @@ def burnall(argv: List[str] = None) -> None:
         except Exception:
             fathers[i] = ""
 
-    ordered = sorted(ids, key=lambda i: _depth(i, fathers, ids))
+    depths = {i: _depth(i, fathers, ids) for i in ids}
+    ordered = sorted(ids, key=lambda i: depths[i])
+    roots = sum(1 for i in ids if depths[i] == 0)
 
+    print(THRONE)
     print(f"{len(ordered)} instance(s), parents first:")
     for i in ordered:
-        depth = _depth(i, fathers, ids)
-        print(f"  {'  ' * depth}{i[:16]}  (depth {depth})")
+        print(f"  {'  ' * depths[i]}{i[:16]}  (depth {depths[i]})")
 
     if dry_run:
         print("\n--dry-run: nothing stopped.")
+        return
+
+    if not assume_yes and not _confirmed(total=len(ordered), roots=roots):
         return
 
     stopped, failed = 0, []
