@@ -1,0 +1,148 @@
+name: guest-kernel
+
+# Builds the whole guest every Nodo service microVM boots -- kernel, busybox
+# userspace and initramfs, both architectures -- and publishes it to the single
+# `guest-kernel` release. Deliberately decoupled from nodo releases: a kernel CVE
+# should be shippable without cutting a node release.
+#
+# There are no versioned tags. One mutable tag, made safe by the digests committed
+# in bash/guest-kernel/SHA256SUMS.pinned: those are what turn the tag into a content
+# reference, so install.sh selects the tag and the pin decides what is acceptable.
+#
+# The consequence is load-bearing and worth stating: neither the kernel nor the
+# busybox build is reproducible (no KBUILD_BUILD_TIMESTAMP, no SOURCE_DATE_EPOCH),
+# so every run of this workflow changes their bytes. Any commit still naming the
+# previous digests -- `stable`, until it gets the new ones -- will refuse to install
+# until its pin is updated. So run this when you mean to move the guest forward, and
+# update all six digests in the same change. To republish only the initramfs, which
+# IS reproducible and leaves the other assets untouched, use guest-initramfs.yml.
+#
+# Run it with:
+#   gh workflow run guest-kernel -f tag=guest-kernel
+# or by pushing the guest-kernel tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish the guest under (normally guest-kernel)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "guest-kernel"
+
+# Least privilege per job: `build` compiles third-party sources (kernel.org,
+# busybox.net tarballs) for ~30 minutes, so it must not have a token that can write
+# to this repo. Only the release job publishes.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners only — build.sh refuses to cross-build, so the kernel
+          # is always compiled by the toolchain of the architecture it targets.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            tag: linux-arm64
+          - arch: x86_64
+            runner: ubuntu-24.04
+            tag: linux-amd64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc libelf-dev libssl-dev dwarves \
+            xz-utils bzip2 curl ca-certificates
+
+      - name: Build guest kernel
+        run: bash bash/guest-kernel/build.sh ${{ matrix.arch }} "$GITHUB_WORKSPACE/out"
+
+      # The guest's userspace: distros compile different busybox applet sets, so a
+      # host-provided one made the guest differ per node.
+      - name: Build guest busybox
+        run: bash bash/guest-kernel/build-busybox.sh ${{ matrix.arch }} "$GITHUB_WORKSPACE/out"
+
+      # The initramfs ships too, so that every node boots the *same* guest rather
+      # than one assembled by whatever cpio/gzip/busybox its host happened to have.
+      # Built from the busybox produced right above, so the two assets published
+      # under this tag agree: the image contains exactly the binary next to it.
+      #
+      # Its /init is a contract with src/virtualizers/ch/execute.py (the entrypoint
+      # and virtiofs plan files it reads), so a pinned initramfs could in principle
+      # lag the code. That is handled by the version in
+      # etc/nodo-ch-initramfs.marker, which execute.py asserts at launch: a skew
+      # fails loudly and precisely instead of hanging the guest. To republish only
+      # this asset onto an existing tag, use guest-initramfs.yml.
+      - name: Build guest initramfs
+        run: |
+          bash bash/guest-kernel/build-initramfs.sh ${{ matrix.arch }} \
+            "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/out/busybox-${{ matrix.tag }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-assets-${{ matrix.tag }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Assemble SHA256SUMS
+        run: |
+          cd artifacts
+          cat ./*.sha256 | sort -k2 > SHA256SUMS
+          rm -f ./*.sha256
+          cat SHA256SUMS
+          # Six assets (kernel, busybox, initramfs x 2 arches), or something
+          # silently did not build.
+          test "$(wc -l < SHA256SUMS)" -eq 6
+
+      # Updates the release in place when it already exists, because with a single
+      # unversioned tag there is nowhere else to publish. `create` alone would fail
+      # on every run after the first.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          NOTES: "Guest kernel, busybox userspace and initramfs for Cloud Hypervisor microVMs, built from bash/guest-kernel/. Together they are the whole guest, so every node boots the same one. Verify downloads against bash/guest-kernel/SHA256SUMS.pinned in the checkout you are installing, not against the SHA256SUMS here: this tag is mutable and that file lives in it."
+        run: |
+          set -euo pipefail
+          ASSETS=(
+            artifacts/vmlinuz-linux-arm64
+            artifacts/vmlinuz-linux-amd64
+            artifacts/busybox-linux-arm64
+            artifacts/busybox-linux-amd64
+            artifacts/initramfs-linux-arm64
+            artifacts/initramfs-linux-amd64
+            artifacts/SHA256SUMS
+          )
+
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG exists; replacing its assets."
+            gh release upload "$TAG" --repo "${{ github.repository }}" --clobber "${ASSETS[@]}"
+            gh release edit "$TAG" --repo "${{ github.repository }}" \
+              --title "Nodo guest $TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" --repo "${{ github.repository }}" \
+              --title "Nodo guest $TAG" --notes "$NOTES" "${ASSETS[@]}"
+          fi
+
+          echo "Published. Record all six digests in bash/guest-kernel/SHA256SUMS.pinned:"
+          cat artifacts/SHA256SUMS

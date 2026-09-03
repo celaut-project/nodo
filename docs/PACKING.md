@@ -21,8 +21,8 @@
 > `packer.PACKER_SERVICE_URL` only to override with an out-of-band packer.
 >
 > Setting `packer.local: true` in `config.yaml` switches to a **local** backend
-> that builds on this host with nodo's own isolated Docker toolchain (provisioned
-> on demand via `bash/install_docker.sh`, independent of any host Docker). Either
+> that builds on this host with nodo's own rootless BuildKit toolchain (provisioned
+> on demand via `bash/install_buildkit.sh`, independent of any host Docker). Either
 > way you author the `Dockerfile`/`service.json` exactly as described below — the
 > `docker buildx` mechanics in *Service Preparation Process* run inside the
 > packer-service microVM (default) or the isolated local toolchain (`packer.local`).
@@ -558,8 +558,29 @@ one `hash` or an embedded `service`:
 
 `dependency: null` and an omitted `dependency` both leave the protobuf message absent.
 The booleans are independent: a service may be embedded, stored on the filesystem, both, or
-neither. The packer serializes these declarations; scheduler/runtime enforcement remains
-future work.
+neither.
+
+At launch, every scenario's workload groups that declare `resources` are checked for
+existence — is there a place, right now, that could run one instance shaped like this? — using
+the same admission gate a service's own `resources.at_most` goes through: first locally, then,
+if `network.DELEGATE_EXECUTION` is on, by asking known peers (`GetResourceAvailability`). A
+service is refused if any group has nowhere that could take it. Every limit the group declares
+is checked, not just memory: `mem_limit` and `disk_space` against what is free right now,
+`cpu_quota`/`cpu_period` against how many cores the host has at all (a quota is a share of
+time, so a momentary spike is not a reason to refuse), and `blkio_weight` against the
+10–1000 range cgroups accept.
+
+This is an existence check, not a capacity reservation: it does not prove `count` concurrent
+instances of a group could all run at once, locally or spread across peers, and it does not
+hold the capacity it found for later — by the time the service actually spawns that
+descendant, the answer could have changed.
+
+Two settings under `workload_admission` in `config.yaml` govern it. `POLICY` decides how much
+is probed — `fail_fast` (default) stops at the first group that fits nowhere, `full` probes
+all of them so the error names each one — and never changes *what* is admitted; every group
+must fit either way. `ON_UNSATISFIABLE` decides what a group that fits nowhere means:
+`reject` (default) refuses the launch, `warn` logs it and launches anyway, for an operator
+who would rather risk it than lose a launch to a reading taken at a busy instant.
 
 **Hash-only dependency — resolve by content identity:**
 
@@ -651,8 +672,6 @@ future work.
 The special `dependency.hash` values are hexadecimal for operator convenience. Other
 protobuf `bytes` fields inside `dependency.service` (such as `container.filesystem`) use
 standard protobuf JSON base64 encoding.
-
-> **Spec-only:** the field is declared and serialized, but nodo's scheduler does **not** yet interpret or enforce it. Scheduler interpretation is future work (celaut-project/nodo#163).
 
 **Example — two independent scenarios (`2×5 GB + 1×40 GB`, or `4×16 GB`):**
 ```json
@@ -956,7 +975,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
 
 ## Dockerfile - Complete Reference
 
-The Dockerfile plays a critical role in the service packing process. Unlike a typical Docker deployment where the image is run directly, here **the Docker build is used solely to produce a filesystem snapshot** — the container is never actually run. The packer uses `docker buildx build` with `--output type=tar` to export the full filesystem of the built image, which is then parsed, hashed, and stored as the service specification.
+The Dockerfile plays a critical role in the service packing process. Unlike a typical Docker deployment where the image is run directly, here **the build is used solely to produce a filesystem snapshot** — the container is never actually run. The packer uses `buildctl build` with `--output type=tar` to export the full filesystem of the built image, which is then parsed, hashed, and stored as the service specification. BuildKit is driven directly rather than through `docker buildx` (which is only a front end for it), because the standalone daemon runs rootless: a local pack therefore needs no privileges at all.
 
 ### How the Dockerfile is Used
 
@@ -964,8 +983,9 @@ The Dockerfile plays a critical role in the service packing process. Unlike a ty
 Dockerfile
     │
     ▼
-docker buildx build
---platform <architecture>    ← from service.json "architecture"
+buildctl build
+--frontend dockerfile.v0     ← builds the Dockerfile
+--opt platform=<arch>        ← from service.json "architecture"
 --output type=tar,dest=...   ← exports raw filesystem, not an image
     │
     ▼
@@ -1835,10 +1855,10 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
              │
              ▼
 ┌─────────────────────────────┐
-│     DOCKER BUILD            │
+│     BUILDKIT BUILD          │
 │                             │
-│  docker buildx build        │
-│  --platform <arch>          │
+│  buildctl build             │
+│  --opt platform=<arch>      │
 │  --output type=tar          │
 │                             │
 │  Streams build logs         │
@@ -2023,10 +2043,10 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 The zip is unpacked into an isolated temporary directory unique to this packing job, preventing collisions between concurrent packing processes.
 
 **Validation**
-The `architecture` field from `service.json` is matched against the list of supported platforms. If no match is found, or if the host machine's architecture does not match the target, the process is aborted immediately before any Docker build is attempted.
+The `architecture` field from `service.json` is matched against the list of supported platforms. If no match is found, or if the host machine's architecture does not match the target, the process is aborted immediately before any build is attempted.
 
-**Docker Build**
-The build is executed using `docker buildx` in a dedicated builder instance configured with host networking. The output is not a Docker image — it is a raw filesystem tar archive. Build logs are streamed line by line in real time. If the build fails for any reason, the full log output is captured and returned as the error message.
+**BuildKit Build**
+The build is executed with `buildctl` against nodo's own rootless BuildKit builder, which nodo starts around the pack with the host network. The output is not a container image — it is a raw filesystem tar archive. Build logs are streamed line by line in real time. If the build fails for any reason, the full log output is captured and returned as the error message.
 
 **Filesystem Export**
 The tar archive is extracted to a local directory. The total size of all exported files is measured at this point and used to calculate how much RAM to reserve for the parsing stage, based on a configurable memory size factor.

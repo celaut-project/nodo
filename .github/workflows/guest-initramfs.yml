@@ -1,0 +1,149 @@
+name: guest-initramfs
+
+# Publishes the guest initramfs onto the existing guest-kernel release, without
+# touching the kernel or busybox already there.
+#
+# Why this exists separately from guest-kernel.yml:
+#
+#   * Adding the initramfs to a release that predates it (or shipping a new /init)
+#     must not disturb the other assets. Rebuilding the whole guest would: neither
+#     the kernel nor the busybox build is reproducible, so their bytes -- and their
+#     digests -- change, and every commit pinning the old ones stops installing,
+#     `stable` included.
+#   * The initramfs is the only part of the guest that changes at code speed, since
+#     /init is a contract with src/virtualizers/ch/execute.py. Republishing it
+#     should not cost a ~30 minute kernel build.
+#
+# The busybox that goes inside comes from the release itself, verified against
+# bash/guest-kernel/SHA256SUMS.pinned in this checkout -- never rebuilt here. That
+# is what keeps the audit story true: rebuilding this commit against the pinned
+# busybox has to reproduce the published image byte for byte, which only holds if
+# the image contains exactly the binary published beside it.
+#
+# Run it with:
+#   gh workflow run guest-initramfs -f tag=guest-kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing guest-kernel release tag to publish the initramfs onto"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners, even though this job only repacks a binary it did not
+          # compile: build_ch_initramfs.sh verifies the applets /init needs by
+          # running `busybox --list`, and an arm64 binary does not execute on x86_64.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            tag: linux-arm64
+          - arch: x86_64
+            runner: ubuntu-24.04
+            tag: linux-amd64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # cpio and gzip only: no compiler and no kernel source, since nothing here is
+      # built from source.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cpio gzip curl ca-certificates
+
+      - name: Fetch the published busybox and verify it against the in-tree pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          ASSET: busybox-${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          PIN=bash/guest-kernel/SHA256SUMS.pinned
+
+          # The digest committed in-tree, not the SHA256SUMS published next to the
+          # artifact: that one lives in the same mutable release, so it proves only
+          # that the download was not truncated. Anyone able to edit the release
+          # swaps artifact and checksum together.
+          expected="$(awk -v n="$ASSET" '$2 == n { print $1; exit }' "$PIN")"
+          [ -n "$expected" ] || { echo "No pinned digest for $ASSET in $PIN"; exit 1; }
+
+          pinned_tag="$(awk '$1 == "TAG" { print $2; exit }' "$PIN")"
+          [ "$pinned_tag" = "$TAG" ] || {
+            echo "Pin is for '$pinned_tag' but this run targets '$TAG'."
+            echo "The busybox in the initramfs must be the one pinned by this commit."
+            exit 1
+          }
+
+          mkdir -p busybox
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            --pattern "$ASSET" --dir busybox --clobber
+
+          actual="$(sha256sum "busybox/$ASSET" | awk '{print $1}')"
+          [ "$expected" = "$actual" ] || {
+            echo "SHA256 mismatch for $ASSET: pinned $expected, got $actual."
+            echo "The release asset does not match this commit -- refusing to build."
+            exit 1
+          }
+          echo "$ASSET matches its pinned digest."
+
+      - name: Build guest initramfs
+        run: |
+          bash bash/guest-kernel/build-initramfs.sh ${{ matrix.arch }} \
+            "$GITHUB_WORKSPACE/out" "$GITHUB_WORKSPACE/busybox/busybox-${{ matrix.tag }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-initramfs-${{ matrix.tag }}
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish onto the existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          cd artifacts
+          test -f initramfs-linux-arm64 && test -f initramfs-linux-amd64
+
+          # Refresh the release's SHA256SUMS in place: fetch it, drop any stale
+          # initramfs lines, append the new ones, re-sort. Leaving it listing only
+          # the kernel and busybox would make it quietly wrong about what the
+          # release contains.
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            --pattern SHA256SUMS --dir . --clobber
+          grep -v ' initramfs-linux-' SHA256SUMS > sums.keep || true
+          cat ./*.sha256 sums.keep | sort -k2 > SHA256SUMS.new
+          mv SHA256SUMS.new SHA256SUMS
+          rm -f ./*.sha256 sums.keep
+          cat SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 6
+
+          # --clobber so re-running this replaces the assets instead of failing.
+          gh release upload "$TAG" --repo "${{ github.repository }}" --clobber \
+            initramfs-linux-arm64 \
+            initramfs-linux-amd64 \
+            SHA256SUMS
+
+          echo "Published. Now record these digests in bash/guest-kernel/SHA256SUMS.pinned:"
+          grep ' initramfs-linux-' SHA256SUMS

@@ -1,40 +1,35 @@
-import hashlib
 from typing import Generator, List
 
-from src.utils.hashing import SHA3_256_ID, SHA3_256, SHAKE_256_ID, SHAKE_256, get_configured_hash_id
+from src.utils.hashing import (
+    BLAKE2B_ID,
+    HASH_SPECS,
+    SHA3_256_ID,
+    SHAKE_256_ID,
+    get_configured_hash_id,
+    hash_stream_many,
+)
 from protos.celaut_pb2 import Metadata
+
+# Every algorithm a packed service carries a digest for, regardless of which one
+# is configured for its main id (hashing.HASH). SHA3_256 and SHAKE_256 are the
+# two the format has always shipped; BLAKE2B joins them so a service is
+# verifiable under it too without a repack, should hashing.HASH ever be set to
+# it on some node.
+_RECORDED_HASH_IDS = (SHA3_256_ID, SHAKE_256_ID, BLAKE2B_ID)
 
 
 def calculate_hashes_by_stream(value: Generator[bytes, None, None]) -> List[Metadata.HashTag.Hash]:
-    sha3_256 = hashlib.sha3_256()
-    shake_256 = hashlib.shake_256()
-    for chunk in value:
-        sha3_256.update(chunk)
-        shake_256.update(chunk)
-
+    digests = hash_stream_many(
+        value, [HASH_SPECS[hash_id] for hash_id in _RECORDED_HASH_IDS]
+    )
     return [
-        Metadata.HashTag.Hash(
-            type=SHA3_256_ID,
-            value=sha3_256.digest()
-        ),
-        Metadata.HashTag.Hash(
-            type=SHAKE_256_ID,
-            value=shake_256.digest(32)
-        )
+        Metadata.HashTag.Hash(type=hash_id, value=digests[hash_id])
+        for hash_id in _RECORDED_HASH_IDS
     ]
 
 
 def calculate_hashes(value: bytes) -> List[Metadata.HashTag.Hash]:
-    return [
-        Metadata.HashTag.Hash(
-            type=SHA3_256_ID,
-            value=SHA3_256(value)
-        ),
-        Metadata.HashTag.Hash(
-            type=SHAKE_256_ID,
-            value=SHAKE_256(value)
-        )
-    ]
+    return calculate_hashes_by_stream([value])
 
 
 # Return the configured main service hash on hexadecimal format.

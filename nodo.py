@@ -9,7 +9,6 @@ from src.utils.network import get_local_ip
 
 env_manager = ConfigManager(log=log.LOGGER)
 
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 MEMORY_LOGS = env_manager.get("MEMORY_LOGS")
 REGISTRY = env_manager.get("REGISTRY")
 CACHE = env_manager.get("CACHE")
@@ -18,16 +17,32 @@ METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MAIN_DIR = env_manager.get("MAIN_DIR")
 
+def gateway_port():
+    """The assigned gateway port, or None -- resolved on demand, never at import.
+
+    An unassigned port is a hard error carrying instructions (see
+    src/utils/firewall/gateway.py), which is right for anything that talks to the
+    node and wrong as a module-level constant: reading it here made *every*
+    command abort before dispatch, including `nodo migrate` (which the installer
+    runs, so a fresh install could not finish) and `nodo doctor` (which that very
+    error message tells the operator to run next).
+    """
+    return env_manager.gateway_port_or_none()
+
+
 def is_nodo_service_running():
-    """Check if the nodo service is running by verifying if GATEWAY_PORT is in use."""
+    """Check if the nodo service is running by verifying if the gateway port is in use."""
     import socket
+    port = gateway_port()
+    if not port:
+        return False  # No port assigned means nothing can be serving on one.
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(1)
-            result = s.connect_ex(('localhost', int(GATEWAY_PORT)))
+            result = s.connect_ex(('localhost', int(port)))
             return result == 0  # Port is in use (connection successful)
     except Exception as e:
-        print(f"Error checking if GATEWAY_PORT is in use: {e}", flush=True)
+        print(f"Error checking if the gateway port is in use: {e}", flush=True)
         return False
 
 
@@ -184,7 +199,9 @@ if __name__ == '__main__':
                     "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
                     "\n- inspect <service id> | <service tag>"
                     "\n- remove <service id> | <service tag>"
+                    "\n- prune [--all] [--dry-run]   (reclaim orphaned runtime dirs and preserved launch failures)"
                     "\n- kill <instance id>"
+                    "\n- burnall [--dry-run] [--yes]   (stop every instance, parents first; asks first)"
                     "\n- observe <instance id> [--save <path>]"
                     "\n- tunnel <instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]"
                     "\n- increase_deposit <instance id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
@@ -229,10 +246,11 @@ if __name__ == '__main__':
                     "\n- debit_client <client id> <amount>"
                     "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
                     "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your balance on that peer afterward)"
-                    "\n- local_docker_packer <docker args>  (runs docker commands in nodo's isolated context; local packer only)"
+                    "\n- local_builder <buildctl args>  (runs buildctl against nodo's rootless builder; local packer only)"
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
                     "\n- nat-guide  (how to forward the gateway port on your router so this node is reachable)"
+                    "\n- firewall-compat status|apply|remove  (the FORWARD rules nodo needs from another firewall on this host)"
                     "\n\n",
                     flush=True)
                 try:
@@ -250,7 +268,16 @@ if __name__ == '__main__':
 
                 print(f"Nodo version: {get_git_commit()}", flush=True)
 
-                print(f"Nodo address: {get_local_ip()}:{GATEWAY_PORT}", flush=True)
+                port = gateway_port()
+                if port:
+                    print(f"Nodo address: {get_local_ip()}:{port}", flush=True)
+                else:
+                    print(
+                        "Nodo address: unavailable -- network.GATEWAY_PORT is not "
+                        "assigned yet. Start the node once as root ('sudo nodo serve') "
+                        "so it can pick a port and open it, then run 'nodo doctor'.",
+                        flush=True
+                    )
 
                 try:
                     from src.manager.ddns import status as ddns_status
@@ -262,15 +289,15 @@ if __name__ == '__main__':
                             f"({ddns_info['provider']}) -> {resolves}",
                             flush=True
                         )
-                        if ddns_info["resolves_to"]:
+                        if ddns_info["resolves_to"] and port:
                             from src.utils.network import resolve_public_port
                             public_port = resolve_public_port(
-                                env_manager.get("network.PUBLIC_TCP_PORT", ""), GATEWAY_PORT
+                                env_manager.get("network.PUBLIC_TCP_PORT", ""), port
                             )
                             print(
                                 f"  Reachable from outside only if your router forwards "
                                 f"{ddns_info['resolves_to']}:{public_port} to this host's "
-                                f"port {GATEWAY_PORT}.",
+                                f"port {port}.",
                                 flush=True
                             )
                         print("  Run 'nodo nat-guide' for the router steps.", flush=True)
@@ -516,6 +543,10 @@ if __name__ == '__main__':
                 from src.commands.kill import kill
                 kill(instance=sys.argv[2])
 
+            case "burnall":
+                from src.commands.burnall import burnall
+                burnall(argv=sys.argv[2:])
+
             case "observe":
                 from src.commands.observe import observe
                 import sys
@@ -610,9 +641,16 @@ if __name__ == '__main__':
                 from src.commands.remove import remove
                 remove(service=sys.argv[2])
 
+            case "prune":
+                from src.commands.prune import prune
+                prune(argv=sys.argv[2:])
+
             case "inspect":
-                from src.commands.inspect import inspect
-                inspect(service=sys.argv[2])
+                from src.commands.inspect_service import inspect
+                try:
+                    inspect(service=sys.argv[2])
+                except:  # Control the ServiceRegistryError exception, don't show to the user.
+                    pass
 
             case "services":
                 from src.commands.services import list_services
@@ -819,25 +857,22 @@ if __name__ == '__main__':
                     os._exit(1)
                 os._exit(0 if ok else 1)
 
-            case "local_docker_packer":
-                # Run docker commands in nodo's isolated Docker context (the
-                # optional local packer's toolchain). Import lazily so this never
-                # loads on CH-only nodes that don't have Docker installed.
-                if os.geteuid() != 0:
-                    print("This script requires superuser privileges. Please run with sudo.")
-                    exit()
-
-                from src.utils.docker_env import DOCKER_COMMAND, DOCKER_ENV
-                docker_args = sys.argv[2:] if len(sys.argv) > 2 else []
-                if not docker_args:
-                    print("Usage: nodo docker <docker command>", flush=True)
-                    print("Example: nodo docker ps", flush=True)
-                    print("Example: nodo docker images", flush=True)
-                    print("\nThis uses nodo's isolated Docker daemon.", flush=True)
+            case "local_builder":
+                # Run buildctl against nodo's rootless builder (the optional local
+                # packer's toolchain). Import lazily so this never loads on CH-only
+                # nodes that have no builder installed. No privilege check: the
+                # builder runs as the invoking user, so sudo would be wrong here.
+                from src.utils.buildkit_env import BUILDCTL_COMMAND, BUILDKIT_ENV
+                builder_args = sys.argv[2:] if len(sys.argv) > 2 else []
+                if not builder_args:
+                    print("Usage: nodo local_builder <buildctl command>", flush=True)
+                    print("Example: nodo local_builder debug workers", flush=True)
+                    print("Example: nodo local_builder du", flush=True)
+                    print("\nThis uses nodo's rootless BuildKit builder.", flush=True)
                 else:
                     result = subprocess.run(
-                        DOCKER_COMMAND + docker_args,
-                        env=DOCKER_ENV,
+                        BUILDCTL_COMMAND + builder_args,
+                        env=BUILDKIT_ENV,
                     )
                     if result.returncode != 0:
                         sys.exit(result.returncode)
@@ -854,6 +889,11 @@ if __name__ == '__main__':
             case "nat-guide":
                 from src.commands.nat_guide import nat_guide
                 nat_guide()
+
+            case "firewall-compat":
+                from src.commands.firewall_compat import firewall_compat_command
+                subcommand = sys.argv[2] if len(sys.argv) > 2 else None
+                firewall_compat_command(subcommand=subcommand)
 
             case "completion":
                 # Shell tab-completion for commands and service/instance/peer ids.

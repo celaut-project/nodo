@@ -20,7 +20,7 @@ class VerifyReputationCommandTests(unittest.TestCase):
     def _patch(self, **overrides):
         # Sensible "happy path" defaults; individual tests override one piece.
         defaults = dict(
-            _peer_reputation_proof_id=lambda peer_id: "proof-token-1",
+            _peer_reputation_proof_ids=lambda peer_id: ["proof-token-1"],
             _get_unspent_boxes_by_token=lambda proof_id: [{"box": 1}],
             _boxes_off_canonical_contract=lambda boxes: [],
             _validate_box_structure=lambda box: True,
@@ -42,8 +42,30 @@ class VerifyReputationCommandTests(unittest.TestCase):
     def test_pass_when_all_checks_succeed(self):
         self.assertTrue(self._run())
 
-    def test_fail_when_peer_has_no_proof_id(self):
-        self.assertFalse(self._run(_peer_reputation_proof_id=lambda peer_id: None))
+    def test_fail_when_peer_announced_no_proof(self):
+        self.assertFalse(self._run(_peer_reputation_proof_ids=lambda peer_id: []))
+
+    def test_every_announced_proof_is_checked(self):
+        # A peer can announce several proofs, and each is one of its published opinion
+        # sets (issue #281). Verifying only the first would let a peer hide a proof it
+        # does not own behind one it does.
+        checked = []
+
+        def boxes(proof_id):
+            checked.append(proof_id)
+            return [{"box": 1}]
+
+        self.assertTrue(self._run(
+            _peer_reputation_proof_ids=lambda peer_id: ["proof-a", "proof-b"],
+            _get_unspent_boxes_by_token=boxes,
+        ))
+        self.assertEqual(checked, ["proof-a", "proof-b"])
+
+    def test_one_unowned_proof_fails_the_peer(self):
+        self.assertFalse(self._run(
+            _peer_reputation_proof_ids=lambda peer_id: ["proof-a", "proof-b"],
+            _get_unspent_boxes_by_token=lambda proof_id: [] if proof_id == "proof-b" else [{"box": 1}],
+        ))
 
     def test_fail_when_no_unspent_boxes(self):
         self.assertFalse(self._run(_get_unspent_boxes_by_token=lambda proof_id: []))

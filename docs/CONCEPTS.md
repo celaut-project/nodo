@@ -130,6 +130,8 @@ request services from their peers, so a node can run a workload locally or hand 
 to a peer. **Clients** are the entities (nodes or external callers) that have
 registered with this node and pay it. `nodo peers` / `nodo clients` list them.
 
+A peer is named by its identity public key — see [Node identity](#node-identity).
+
 ## Transport security
 
 Every gRPC hop is TLS. A node's certificate is self-signed and carries the node's
@@ -168,6 +170,98 @@ Practical consequences: a node with no identity keypair cannot serve, and a peer
 a version from before this cannot be dialled — peer channels have no plaintext fallback.
 See `src/utils/tls_identity.py` and `src/utils/grpc_transport.py`.
 
+## Node identity
+
+A node's **id is its identity public key**; there is no other name for it. Every
+announcement (`Peer`, in `celaut.proto`) carries that key, a signature over everything
+the peer advertises, and the cryptography those two are in. A peer that carries no
+key, or whose signature does not verify, is refused outright — there is nothing else
+to register it under. The key is derived from the node's single mnemonic
+(`ledgers.ergo.WALLET_MNEMONIC`), which is also its wallet, so an identity cannot
+change underneath the peers that recorded it.
+
+### The signature scheme is declared, not assumed
+
+`Peer.signature_scheme` is an open, unordered stack of components
+(`Peer.SignatureScheme.components`) — one per building block (curve, signature
+algorithm, challenge hash, ledger convention, ...) — rather than four fixed named
+fields, so a future scheme with a different shape (hash-based, threshold, no curve at
+all) needs no proto migration to be expressed, only a different-length stack. Each
+component is a `tags` / `prose` / `formal` descriptor, the same shape a ledger
+(`Contract.Ledger`), an address's transport (`Peer.Uri.Protocol`) or a container
+architecture is declared with. Nothing derives an id from it, here or anywhere else in
+celaut: a hash algorithm can name itself as `H("")` because hashing is keyless and
+unary, but verification takes a key, a message and a signature and has no such
+canonical output. **The descriptor is the name**, and whether two of them mean the same
+cryptography is a comparison — `node_identity.same_signature_scheme`, which is also the
+single place an equivalence service of the shape `(scheme_a, scheme_b) -> bool` would
+be asked instead.
+
+How a node compares two schemes on its own, until such a service is asked, is a
+one-to-one pairing between their components — every component on each side paired with
+exactly one on the other, order carrying no meaning — where each pair is decided by:
+
+* **`formal` first.** A machine-readable specification is the strictest identity for
+  that one component. Nothing publishes one yet, so every component of this node's own
+  scheme has an empty `formal` — exactly as the Ergo ledger's is.
+* **The tags as an exact set** when neither side of the pair has a `formal`. Not an
+  intersection: the tags within one component are *meant* to be synonyms for the one
+  thing it names (`["secp256k1", "K-256"]`), but nothing in the message says so, and a
+  node cannot tell a restatement from a second, different claim — `["schnorr",
+  "bip340"]` looks exactly like `["secp256k1", "K-256"]` from here. One of the two
+  guesses accepts a signer whose signatures this node cannot verify, so an extra tag
+  makes it a different component. `formal` is the way out of that rigidity: a component
+  that points at a specification is decided by the specification, and its vocabulary
+  stops mattering.
+* **Nothing at all, never.** A component must carry `tags`, `formal` or both. One
+  holding only `prose` — or nothing — is not a building block this node can reason
+  about, so the scheme is refused rather than half-compared.
+* **`prose`, never.** It is human text with no agreed wording, and making it decisive
+  would refuse a peer for rewording a sentence. What it is for is being read: while
+  `formal` is empty, that paragraph *is* the specification of that building block,
+  written to be enough to implement the verification from.
+
+The search for that pairing is factorial in the number of components, which is a number
+the *peer* chooses, so `communication.MAX_SIGNATURE_SCHEME_COMPONENTS` (5 by default)
+caps it: a longer scheme is refused rather than computed. Comparing against this node's
+own four-component scheme is bounded by the cardinality check regardless; the cap is
+what keeps that true if two peers' schemes are ever compared to each other.
+
+Across the whole scheme, though, the pairing must be total: a peer declaring
+`["secp256k1"]` and `["bip340"]` as two components shares the curve component with a
+node declaring `["secp256k1"]`, `["schnorr"]`, `["blake2b256"]` and `["ergo"]`, and still
+produces signatures that node cannot read — same cardinality or not, a partial match is
+not a shared scheme.
+
+An empty descriptor (no components at all) means the sender's default, so an
+announcement predating the field still verifies. This node speaks Schnorr over
+secp256k1 in Ergo's off-chain encoding and nothing else: an announcement declaring
+another scheme is refused unread, rather than reported as a bad signature.
+
+### One identity, many ways to pay
+
+What is singular and what is plural is deliberate, and the two do not conflict:
+
+| Field | Count | Why |
+|---|---|---|
+| `public_key`, `signature`, `signature_scheme` | one | The key is what **names** the node, so a second one is a second identity: reputation, deposits and payment attribution all split in two. Cross-signing the two keys does not heal the split — whoever needs the link speaks only one of the schemes, so they can verify only half of the proof. |
+| `payment_contracts` | many | What a node accepts is a **menu the payer picks one item from**, so a longer one costs nothing. Identifying under Ergo while accepting ERG, bitcoin and anything else that settles is the expected shape, not a contradiction. See [Balances and prices](#balances-and-prices). |
+| `reputation_proofs` | many | A node holds as many proofs as it has published opinions under. See [Reputation proof](#reputation-proof). |
+
+A scheme that genuinely needs two keypairs — a classical/post-quantum hybrid — is *one*
+scheme, whose key and signature encodings carry both, and not two schemes on one peer.
+
+Advertising several payment contracts is not the same as settling in several: which
+one pays for a given interaction is matched per payment, and a pair of nodes that
+happens to share more than one is refused as ambiguous rather than chosen between
+(`mu_conversion.matching_payment_system`) — picking is policy nobody has written yet.
+
+Only *signing* is singular, though. What a node can **verify** is a local capability:
+the way to reach a peer that signs differently is to plug a verifier for that scheme
+into the reader, never to ask the peer to carry more keys. Nothing plugs one in today,
+so in practice two nodes must speak the same scheme to register each other, and a node
+that changes its scheme becomes a new peer, with the reputation of one.
+
 ## Service composition (dependencies)
 
 Services can depend on other services. In `pack_config.json` you declare
@@ -187,11 +281,20 @@ WIP). See [`CONFIG.md`](CONFIG.md).
 
 ## Reputation proof
 
-An on-chain record (an Ergo token held in a "reputation box") that carries a
-node's opinions about other nodes' reputation proofs. It lets peers assign each
-other trust in a decentralized, transparent way. Nodes generate and submit these
-proofs; publishing skill/coverage/benchmark/result entities uses the same
-reputation-box machinery. Model: [`ERGO.md`](ERGO.md).
+An on-chain record (an Ergo token held in "reputation boxes") through which a node
+publishes **its own opinions about other nodes**. Each box is one opinion: register
+R5 names the node it is about — by that node's **identity public key**, the same key
+that is its `peer_id` — and the token amount in the box is the weight behind it.
+
+Read the direction carefully: a proof belongs to its *author*. `Peer.reputation_proofs`
+in an announcement is what that peer thinks of others, never a rating of the peer
+itself, and a single identity key may hold several proofs at once (issue #281). What
+we think of a peer is separate and local: `peer.reputation_score` plus the
+`reputation_events` that explain it, keyed by the peer's public key.
+
+It lets peers assign each other trust in a decentralized, transparent way. Nodes
+generate and submit these proofs; publishing celaut-node/service entities
+uses the same reputation-box machinery. Model: [`ERGO.md`](ERGO.md).
 
 ## Coverage / Benchmark / Result / Skill
 

@@ -6,7 +6,9 @@ import netifaces as ni
 
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
+from src.virtualizers.architecture import get_arch_tag
 from src.virtualizers.interface import build, execute, get_configured_virtualizer
+from src.virtualizers.selection import select_virtualizer
 from src.manager.manager import (
     default_initial_balance,
     is_external_execute_client,
@@ -151,10 +153,23 @@ def local_execution(
     father_id = father_id if father_id else ""
     father_ip = father_ip if father_ip else ""
 
+    # Resolved before the balance is derived, because it selects the memory price the
+    # ticks that spend that balance will charge: funding an instance at the scalar
+    # rate and then charging it a per-arch one buys a different number of hours than
+    # `deposits.INITIAL_RUNTIME_HOURS` promises.
+    service_arch = get_arch_tag(service=service, metadata=metadata)
+
     initial_mu: int = from_amount(config.initial_mu) \
         if config.HasField("initial_mu") \
-        else default_initial_balance(system_resources=resources.at_init, service_hash=service_id)
+        else default_initial_balance(
+            system_resources=resources.at_init,
+            service_hash=service_id,
+            arch=service_arch,
+        )
 
+    # The initial end of the declared range. The virtualizer is handed the whole
+    # `resources` (both ends): which of them it has to reserve at boot is the
+    # backend's business, not the launcher's -- see `virtualizers.interface.execute`.
     initial_system_resources: celaut.Sysresources = resources.at_init
 
     try:
@@ -271,21 +286,112 @@ def local_execution(
         f"assigment_ports={assigment_ports}"
     )
 
+    # The backend is chosen per service by architecture (native -> CH under KVM,
+    # foreign-arch -> QEMU/TCG when emulation is enabled). Resolve it here from the
+    # same `service` interface.execute() dispatches on, so the `virtualizer` column
+    # persisted below matches the backend that actually runs -- lifecycle calls
+    # (kill/maintain/firewall) route by that column.
+    configured_virtualizer = select_virtualizer(service=service, metadata=metadata)
+
+    # `service_arch` (resolved above, where the initial balance needed it) is
+    # persisted on the row below. It selects the memory price when the operator has
+    # set one per arch: the maintenance tick prices the *row*, and re-deriving the
+    # arch there would mean reading the service off disk once per instance per tick --
+    # for a service the instance may well outlive. None when the manifest names an
+    # arch this node has no tag for, which is charged the scalar memory price rather
+    # than nothing.
     log.LOGGER(
         f"Invoking virtualizer execute: virtualizer={configured_virtualizer}, "
-        f"service_id={service_id}, father_id={father_id}"
+        f"arch={service_arch}, service_id={service_id}, father_id={father_id}"
     )
 
+    # A manifest that names no disk is rejected -- and it is rejected here, before a
+    # VM is built and booted for it, rather than after.
+    declared_disk_space = int(initial_system_resources.disk_space) \
+        if initial_system_resources.HasField("disk_space") else 0
+    if not declared_disk_space:
+        raise Exception("Disk space is not specified in the system requirements range.")
+
+    # The instance goes into the database while the guest is starting, not when the
+    # launch finishes. A guest runs code -- and calls back into the node -- while
+    # `execute` is still waiting for its network and applying its firewall rules,
+    # and every node_controller call is attributed to its caller by source address.
+    # An instance that is not on record yet is a caller the node cannot name, and
+    # it used to answer that first call with
+    # `Error charging for the resource change of <ip>`: the charge was simply where
+    # the missing row surfaced first. The backend calls this the instant the guest
+    # becomes able to speak; see `src/virtualizers/ch/execute.py`.
+    #
+    # `serialized_instance` is the one column that cannot be filled this early: the
+    # published URI slots depend on the address the guest was given, which is an
+    # argument to this callback. It is stored right after the launch returns.
+    #
+    # A backend calls this at most once -- `execute` launches exactly one VM per
+    # call -- so what it needs to remember is "was it called, and with which id",
+    # not a collection.
+    registered_id: Optional[str] = None
+
+    def _register_instance(
+            vmachine_id: str,
+            vmachine_ip: str,
+            resolved_resources: celaut_pb2.Sysresources,
+    ) -> None:
+        nonlocal registered_id
+        # Disk follows the resolved figure: the manifest has to declare it, but what
+        # gets persisted is the size of the image the virtualizer actually handed the
+        # instance, which is >= the declared one once the build's floors and mkfs
+        # growth are applied. The manifest is only the fallback for a virtualizer
+        # that does not report disk back.
+        disk_space = int(resolved_resources.disk_space) or declared_disk_space
+        if disk_space != declared_disk_space:
+            log.LOGGER(
+                f"Instance {vmachine_id} holds {disk_space} bytes of disk against a declared "
+                f"{declared_disk_space}; billing the resolved figure."
+            )
+        # Every resource the instance holds, not just its disk: these columns are
+        # what the maintenance tick prices it by, so a field left unrecorded is a
+        # resource billed as zero for the instance's whole life. The compute and
+        # memory figures come from `resolved_resources` -- what the virtualizer
+        # actually reserved, floors applied -- never from a second, defaults-free
+        # re-read of the manifest (#249).
+        sc.add_local_instance(
+            father_id=father_id,
+            container_id=vmachine_id,
+            name=instance_name,
+            container_ip=vmachine_ip,
+            balance_mu=initial_mu,
+            serialized_instance=None,
+            service_id=service_id,
+            virtualizer=configured_virtualizer,
+            disk_space=disk_space,
+            envs=_serialize_envs(config),
+            mem_limit=int(resolved_resources.mem_limit),
+            cpu_period=int(resolved_resources.cpu_period),
+            cpu_quota=int(resolved_resources.cpu_quota),
+            arch=service_arch,
+        )
+        registered_id = vmachine_id
+
     # Execute virtualizer process.
-    vmachine_id, vmachine_ip, resolved_resources = execute(
-        assigment_ports=assigment_ports,
-        by_local=not expose_outside,
-        service_id=service_id,
-        service=service,
-        config=config,
-        initial_system_resources=initial_system_resources,
-        father_id=father_id
-    )
+    try:
+        vmachine_id, vmachine_ip, resolved_resources = execute(
+            assigment_ports=assigment_ports,
+            by_local=not expose_outside,
+            service_id=service_id,
+            service=service,
+            config=config,
+            system_resources=resources,
+            father_id=father_id,
+            register_instance=_register_instance,
+        )
+    except Exception:
+        # A launch that failed after the guest started leaves a row for an instance
+        # that is not running: the backend has already torn the VM down, so the row
+        # would be billed for a machine nobody can reach.
+        if registered_id:
+            log.LOGGER(f"Launch failed after registering {registered_id}; purging its row.")
+            sc.purge_internal(id=registered_id)
+        raise
     log.LOGGER(f"Virtualizer execute returned: vmachine_id={vmachine_id}, vmachine_ip={vmachine_ip}")
 
     # Resolve slots
@@ -348,45 +454,18 @@ def local_execution(
             uri_slot=uri_slots
         )
 
-    # Store the instance in the database with every resource it holds, not just its
-    # disk: these columns are what the maintenance tick prices it by, so a field left
-    # unrecorded is a resource billed as zero for the instance's whole life.
-    # The compute/memory figures come from ``resolved_resources`` -- the values the
-    # virtualizer actually reserved (defaults and the MIN_MEM_MIB floor already
-    # applied) -- never from a second, defaults-free re-read of the manifest. That
-    # divergence is exactly what billed instances for what they asked rather than
-    # what they hold (#249).
-    #
-    # Disk follows the same rule: the manifest still has to declare it (a service that
-    # names no disk is rejected), but what gets persisted is the size of the image the
-    # virtualizer actually handed the instance, which is >= the declared figure once
-    # the build's floors and mkfs growth are applied. The manifest is only the fallback
-    # for a virtualizer that does not report disk back.
-    declared_disk_space = int(initial_system_resources.disk_space) \
-        if initial_system_resources.HasField("disk_space") else 0
-    if not declared_disk_space:
-        raise Exception("Disk space is not specified in the system requirements range.")
-    disk_space = int(resolved_resources.disk_space) or declared_disk_space
-    if disk_space != declared_disk_space:
+    # The row itself was written while the guest was booting (`_register_instance`);
+    # what is left is the definition, which needed the address the guest got.
+    if registered_id != vmachine_id:
+        # A backend that ignored the callback -- there is none today, but the
+        # parameter is optional. Late is better than never, and it keeps one insert
+        # in one place.
         log.LOGGER(
-            f"Instance {vmachine_id} holds {disk_space} bytes of disk against a declared "
-            f"{declared_disk_space}; billing the resolved figure."
+            f"Virtualizer did not register {vmachine_id} while it booted; recording it now."
         )
-
-    sc.add_local_instance(
-        father_id=father_id,
-        container_id=vmachine_id,
-        name=instance_name,
-        container_ip=vmachine_ip,
-        balance_mu=initial_mu,
-        serialized_instance=instance.SerializeToString(),
-        service_id=service_id,
-        virtualizer=configured_virtualizer,
-        disk_space=disk_space,
-        envs=_serialize_envs(config),
-        mem_limit=int(resolved_resources.mem_limit),
-        cpu_period=int(resolved_resources.cpu_period),
-        cpu_quota=int(resolved_resources.cpu_quota),
+        _register_instance(vmachine_id, vmachine_ip, resolved_resources)
+    sc.set_local_instance_definition(
+        id=vmachine_id, serialized_instance=instance.SerializeToString()
     )
     log.LOGGER(
         f"Instance provisioned in DB: vmachine_id={vmachine_id}, virtualizer={configured_virtualizer}, "

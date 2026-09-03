@@ -78,7 +78,7 @@ is concrete rather than hand-wavy.
 - **CPU:** `psutil.cpu_percent(...)` is already used in several places:
   `src/manager/power.py:48` (`get_system_metrics` returns `cpu_percent` and
   `memory_usage` = `memory.percent`), and in the cost functions
-  (`src/utils/cost_functions/generate_estimated_cost.py:32`,
+  (`src/utils/cost_functions/resource_availability.py:123`,
   `src/utils/cost_functions/execution_cost.py:145`). CPU availability is
   computed as `100 - psutil.cpu_percent(...)`.
 - **"How busy is the node" (running workloads):**

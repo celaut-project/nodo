@@ -11,11 +11,11 @@ from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
-from src.utils.cost_functions.generate_estimated_cost import (
-    generate_estimated_cost,
-    get_resource_availability,
-)
-from src.virtualizers.architecture import UnsupportedArchitectureException
+from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
+from src.utils.cost_functions.resource_availability import get_resource_availability
+from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
+from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
+from src.utils.network_policy import enforce_network_policy
 from src.utils.shared_filesystems import service_requires_parent_colocation
 
 sc = SQLConnection()
@@ -31,6 +31,7 @@ def _detect_local_preflight_failure(
             resources=service.container.resources,
             metadata=metadata,
             config=configuration,
+            arch=get_arch_tag(service=service, metadata=metadata),
         )
         if estimated_cost:
             return None
@@ -175,8 +176,36 @@ def launch_service(
                 default_initial_balance(
                     system_resources=service.container.resources.at_init,
                     service_hash=service_id,
+                    arch=get_arch_tag(service=service, metadata=metadata),
                 )
             ))
+
+        # The operator's network policy, before the balancer -- and before the
+        # force_execution bypass below, which overrides peer *selection* and not
+        # what this node is willing to have reached on its behalf. Enforced here
+        # rather than in the local branch because a node that refuses to reach a
+        # domain itself and then pays a peer to reach it has not applied a policy,
+        # it has outsourced one. The raise carries the report the client reads:
+        # being told which pattern refused which tag is the point (#280).
+        enforce_network_policy(
+            networks=service.network,
+            subject=f"service {service_id}" if service_id else "this service",
+        )
+
+        # Refuse admission when a declared descendant workload scenario
+        # (service.json's `possible_environment_workload`) has no shape that
+        # fits anywhere -- neither here nor on any known peer -- right now.
+        # Ahead of `forced_peer` on purpose: forcing which peer runs *this*
+        # instance doesn't change whether its descendants could ever run.
+        workload_admission_failure = evaluate_possible_environment_workloads(
+            service=service,
+            ignore_network=utils.get_network_name(direction=father_ip),
+        )
+        if workload_admission_failure:
+            log.LOGGER(f"Refusing to launch service {service_id}: {workload_admission_failure}")
+            raise Exception(
+                f"Unable to launch service {service_id}: {workload_admission_failure}"
+            )
 
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never
@@ -224,7 +253,8 @@ def launch_service(
                 metadata=metadata,
                 ignore_network=utils.get_network_name(direction=father_ip),
                 configuration=configuration,
-                recursion_guard_token=recursion_guard_token
+                recursion_guard_token=recursion_guard_token,
+                arch=get_arch_tag(service=service, metadata=metadata),
         ):
             try:
                 if require_parent_colocation and peer != 'local':

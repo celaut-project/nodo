@@ -19,8 +19,8 @@ system_requirements:
  - node
  - npm
  # Note: docker and java are NOT host requirements. Nodo auto-provisions both
- # under MAIN_DIR (bash/install_docker.sh, bash/install_java.sh) and drives an
- # isolated Docker daemon; the host's Docker is never used.
+ # under MAIN_DIR (bash/install_buildkit.sh, bash/install_java.sh) and drives a
+ # rootless BuildKit builder; the host's Docker is never used.
 ---
 
 # Celaut Bridge Skill
@@ -85,8 +85,8 @@ Understand these before running anything. Full glossary:
 ## 1. Celaut Node Installation & Management
 
 The Celaut node (`nodo`) orchestrates service execution across decentralized peer
-networks. **Supported platform:** Ubuntu 22.04 LTS (or a compatible Debian-based
-distro) on **x86_64 or aarch64**. Installation root is `TARGET_DIR` (default
+networks. **Supported platform:** any Linux with `apt` or `dnf` (tested on Ubuntu
+22.04/24.04 and Fedora 44) on **x86_64 or aarch64**. Installation root is `TARGET_DIR` (default
 `/nodo`), where `config.yaml` and local runtimes live.
 
 Before installing, check whether nodo is already present (see §6, rule 2):
@@ -168,7 +168,7 @@ core_services:
 ```
 
 ```yaml
-# OPT-IN — build locally with nodo's isolated Docker toolchain:
+# OPT-IN — build locally with nodo's rootless BuildKit toolchain:
 packer:
   local: true
 ```
@@ -195,7 +195,7 @@ executable:
 ```
 
 **Dockerfile rule.** The Dockerfile only produces a **filesystem snapshot — the
-container is never run** (the build is `docker buildx build --output type=tar`, a
+container is never run** (the build is `buildctl build --output type=tar`, a
 filesystem export). `CMD`, `ENTRYPOINT`, and `EXPOSE` are simply **ignored** — no
 error, nothing irreversible; the entrypoint comes from `service.json →
 init.entry_path` and ports come from `service.json → api`. Make the
@@ -412,7 +412,7 @@ sudo nodo update
 > `prune_containers`, `submit_reputation`, `sync_reputation_proof`,
 > `refresh_ergo_nodes`, `refresh_clients`, `tx_history`, `increase_peer_deposit`,
 > `disconnect`, `envs`, `test`, `ggconf`, `pay`, `verify_reputation`,
-> `local_docker_packer`, `completion`) are intentionally out of scope here. Note
+> `local_builder`, `completion`) are intentionally out of scope here. Note
 > that [`../USAGE.md`](../USAGE.md) does not document these either; consult
 > `nodo --help` for the development-command surface.
 

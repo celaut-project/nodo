@@ -38,7 +38,6 @@ TABLES = {
             remote_client_id TEXT,
             balance_mu TEXT,
             balance_last_update DATETIME DEFAULT NULL,
-            reputation_proof_id TEXT,
             reputation_score INTEGER,
             reputation_index INTEGER,
             last_index_on_ledger INTEGER,
@@ -111,7 +110,8 @@ TABLES = {
             serialized_instance TEXT,
             service_id TEXT,
             virtualizer TEXT DEFAULT NULL,
-            envs TEXT DEFAULT NULL
+            envs TEXT DEFAULT NULL,
+            arch TEXT DEFAULT NULL
         )
     ''',
     "delegated_instances": '''
@@ -295,7 +295,14 @@ def create_tables(cursor):
     # Additive column migrations for databases created before a column existed.
     # `CREATE TABLE IF NOT EXISTS` never alters an existing table, so new columns
     # must be back-filled here. Each entry is idempotent (skipped when present).
-    ensure_columns(cursor, "local_instances", {"envs": "TEXT DEFAULT NULL"})
+    # `arch` is the guest's architecture, which selects the memory price when the
+    # operator has set one per arch. NULL on every row written before this column
+    # existed, and NULL is charged the node's scalar memory price, so an existing
+    # database needs no back-fill.
+    ensure_columns(cursor, "local_instances", {
+        "envs": "TEXT DEFAULT NULL",
+        "arch": "TEXT DEFAULT NULL",
+    })
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",
         "advertisement": "BLOB DEFAULT NULL",

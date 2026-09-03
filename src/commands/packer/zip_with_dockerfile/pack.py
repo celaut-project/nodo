@@ -51,7 +51,6 @@ from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
 # Optional out-of-band packer override (an already-running packer reachable at a

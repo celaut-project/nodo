@@ -1,6 +1,9 @@
 requests<2.31.0
 tabulate==0.9.0
-psutil==5.9.5
+# >=6.0.0 is where the manylinux aarch64 wheel appears. Below it pip builds psutil
+# from source on ARM, and the portable CPython records CC=clang in sysconfig, so an
+# install with only gcc dies with "No such file or directory: 'clang'".
+psutil==6.1.1
 netifaces2==0.0.16
 ecdsa==0.19.0
 # X.509 for the node's TLS identity (issue #257): generating the self-signed
@@ -10,5 +13,5 @@ python-dotenv==1.0.0
 mnemonic==0.21
 bip32==4.0
 PyYAML==6.0.1
-git+https://github.com/bee-rpc-protocol/bee-rpc-over-grpc-py
+git+https://github.com/bee-rpc-protocol/bee-rpc-over-grpc-py@feat/nested-block-write
 git+https://github.com/reputation-systems/ergpy

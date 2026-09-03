@@ -9,6 +9,16 @@ import tempfile
 import time
 from pathlib import Path
 
+# The only project imports here, and every one of them is stdlib-only too: doctor
+# has to stay runnable on a checkout too broken to import the node, which is exactly
+# when it is worth running. Anything that pulls in config or the logger (which
+# creates the storage directory on import) does not belong in this file -- which is
+# why the per-arch tables below come from `utils.arch_guard` and not from
+# `virtualizers.qemu.config`, where the emulator lookup that uses them lives.
+from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
+from src.virtualizers.ch import initramfs as ch_initramfs
+from src.virtualizers.ch import guest as ch_guest
+
 
 def _parse_unit_user(unit_content: str) -> str:
     match = re.search(r"^\s*User\s*=\s*(\S+)\s*$", unit_content, flags=re.MULTILINE)
@@ -145,6 +155,8 @@ def _resolve_config_paths(main_dir: str):
             return value
         return value.replace("${main.MAIN_DIR}", str(main_dir_cfg))
 
+    qemu_cfg = raw.get("virtualizers", {}).get("qemu", {}) or {}
+
     return {
         "binary_path": _interpolate(ch_cfg.get("BINARY_PATH", "")),
         "kernel_paths": {
@@ -154,6 +166,11 @@ def _resolve_config_paths(main_dir: str):
         "initramfs_paths": {
             k: _interpolate(v)
             for k, v in (ch_cfg.get("INITRAMFS_PATHS") or {}).items()
+        },
+        "qemu_enabled": bool(qemu_cfg.get("ENABLE", False)),
+        "qemu_binary_paths": {
+            k: _interpolate(v)
+            for k, v in (qemu_cfg.get("BINARY_PATHS") or {}).items()
         },
         "main_dir": str(main_dir_cfg),
     }
@@ -172,6 +189,25 @@ def _expand_main_dir_placeholder(value, main_dir: str):
     if not isinstance(value, str):
         return value
     return value.replace("${main.MAIN_DIR}", main_dir)
+
+
+def _resolve_admin_group() -> str:
+    """Pick the unit's Group the same way install.sh does.
+
+    The admin group is distro-specific — `sudo` on Debian, `wheel` on Fedora/RHEL —
+    and systemd refuses to start a unit whose Group cannot be resolved. Must stay in
+    sync with create_service_file() in install.sh, or doctor rewrites the unit on
+    every run (and leaves the service stopped).
+    """
+    import grp
+
+    for name in ("sudo", "wheel"):
+        try:
+            grp.getgrnam(name)
+            return name
+        except KeyError:
+            continue
+    return "root"
 
 
 def _render_service_template(template_content: str, main_dir: str) -> str:
@@ -214,6 +250,7 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
         "{{JAVA_HOME}}": java_home,
         "{{PYTHON_RUNTIME_BIN_DIR}}": os.path.dirname(python_runtime_bin),
         "{{PYTHON_VENV_BIN}}": python_venv_bin,
+        "{{ADMIN_GROUP}}": _resolve_admin_group(),
     }
 
     rendered = template_content
@@ -230,12 +267,19 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
 
 
 def _get_host_arch_tag() -> str:
-    machine = platform.machine().lower()
-    if machine in ("x86_64", "amd64"):
-        return "linux/amd64"
-    if machine in ("aarch64", "arm64"):
-        return "linux/arm64"
-    return f"linux/{machine}"
+    """This host's canonical arch tag, for display and for keying config lookups.
+
+    Normalisation comes from `arch_guard`, which owns the alias table. A second copy
+    of that table here has no way to stay in step with it: one such copy drifted by a
+    full alias (`arm_64`) with nothing to notice.
+
+    The fallback is this function's own, and is why it is not simply
+    `host_arch_tag()`: an arch nodo has no tag for reads as `linux/ppc64le` here
+    rather than as None, because every use below is a message to an operator or a
+    config key to look up, and "linux/ppc64le" tells them which architecture went
+    unrecognised while "None" tells them nothing.
+    """
+    return host_arch_tag() or f"linux/{platform.machine().lower()}"
 
 
 def _parse_kernel_version(release: str):
@@ -244,6 +288,24 @@ def _parse_kernel_version(release: str):
     if match:
         return int(match.group(1)), int(match.group(2))
     return None, None
+
+
+def _classify_ch_smoke_failure(stderr: str) -> str:
+    """Name why the smoke-test VM died: 'vcpu', 'kernel_load' or 'unknown'.
+
+    Matched loosely on purpose. Cloud Hypervisor wraps the same underlying failure
+    in different call paths -- a kernel it cannot read surfaces as
+    `Vmm(VmCreate(KernelLoad(...` or `VmBoot(VmBoot(KernelLoad(...` depending on
+    where it gave up, and on arm64 a non-raw Image is rejected by the PE loader and
+    retried as UEFI, arriving as `UefiLoad(UefiTooBig)`. Matching one exact spelling
+    sent every other shape to the generic branch, which prints the stderr and no
+    diagnosis.
+    """
+    if "VcpuRun" in stderr or "InternalError" in stderr:
+        return "vcpu"
+    if "KernelLoad" in stderr or "UefiLoad" in stderr or "ReadKernelImage" in stderr:
+        return "kernel_load"
+    return "unknown"
 
 
 def _doctor_ch_binary(ch_binary: str):
@@ -297,15 +359,23 @@ def _doctor_host_kernel():
         # Kernels >= 6.13 may introduce KVM exit reason changes that break
         # older Cloud Hypervisor builds.  6.17+ is experimentally bleeding-edge.
         if major > 6 or (major == 6 and minor >= 17):
+            # Deliberately not a verdict: this runs before the smoke test, which is
+            # the only thing here that actually exercises KVM. Saying "bleeding-edge"
+            # and recommending an LTS downgrade read as a diagnosis, and on hosts
+            # whose kernel is the platform -- Apple Silicon under Asahi is 7.x, with
+            # no LTS track to fall back to -- it recommended something impossible on
+            # a machine where CH in fact works.
             print(
-                f"[WARN] Kernel {major}.{minor} is bleeding-edge. Cloud Hypervisor may fail with "
-                "'VcpuRun InternalError' if the CH binary does not support the KVM changes "
-                "introduced in this kernel.",
+                f"[INFO] Kernel {major}.{minor} is newer than the versions Cloud Hypervisor "
+                "is most tested against. If the CH binary predates this kernel's KVM "
+                "changes, guests fail with 'VcpuRun InternalError'.",
                 flush=True,
             )
             print(
-                "  Suggestion: Upgrade Cloud Hypervisor to the latest release, or "
-                "use a stable kernel (e.g. 6.8, 6.11, 6.12 LTS).",
+                "  The KVM smoke test below is the actual check; a pass here means this "
+                "note does not apply. If it fails, upgrade Cloud Hypervisor first, and "
+                "only consider an LTS kernel (6.8, 6.11, 6.12) where your platform "
+                "offers one.",
                 flush=True,
             )
         elif major == 6 and minor >= 13:
@@ -373,42 +443,39 @@ def _doctor_initramfs(initramfs_paths: dict, host_arch_tag: str):
     size = os.path.getsize(initramfs_path)
     print(f"[OK] Initramfs found: {initramfs_path} ({size} bytes)", flush=True)
 
-    # Verify contents with lsinitramfs if available
-    lsinitramfs = shutil.which("lsinitramfs")
-    if lsinitramfs:
-        try:
-            result = subprocess.run(
-                [lsinitramfs, initramfs_path], capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                entries = {
-                    line.strip().lstrip("./")
-                    for line in (result.stdout or "").splitlines()
-                    if line.strip()
-                }
-                required = {"init", "bin/busybox", "etc/nodo-ch-initramfs.marker"}
-                missing = sorted(required - entries)
-                if missing:
-                    print(
-                        f"[FAIL] Initramfs is missing required entries: {missing}",
-                        flush=True,
-                    )
-                    print(
-                        "  Suggestion: Re-run the installer to regenerate the initramfs.",
-                        flush=True,
-                    )
-                else:
-                    print("[OK] Initramfs contains all required entries (init, busybox, marker).", flush=True)
-            else:
-                print(
-                    f"[WARN] lsinitramfs returned error ({result.returncode}). "
-                    "Cannot verify initramfs contents.",
-                    flush=True,
-                )
-        except Exception as e:
-            print(f"[WARN] Could not inspect initramfs: {e}", flush=True)
+    # Read through src.virtualizers.ch.initramfs so that doctor checks exactly what
+    # execute.py refuses to launch on -- including the contract version, which is
+    # the one failure a pinned release asset can develop on its own and the one an
+    # operator has no other way to see before a launch hangs.
+    try:
+        entries, version = ch_initramfs.read(initramfs_path)
+    except ch_initramfs.InitramfsReadError as e:
+        print(f"[WARN] Could not inspect initramfs: {e}", flush=True)
+        return initramfs_path
+
+    missing = ch_initramfs.missing_entries(entries)
+    if missing:
+        print(f"[FAIL] Initramfs is missing required entries: {missing}", flush=True)
+        print(
+            "  Suggestion: Re-run the installer to regenerate the initramfs.",
+            flush=True,
+        )
     else:
-        print("[WARN] lsinitramfs not found; skipping content verification.", flush=True)
+        print("[OK] Initramfs contains all required entries (init, busybox, marker).", flush=True)
+
+    if version == ch_initramfs.CONTRACT_VERSION:
+        print(f"[OK] Initramfs contract version is {version}.", flush=True)
+    else:
+        print(
+            f"[FAIL] Initramfs speaks contract version '{version or '<unknown>'}', "
+            f"but this checkout needs '{ch_initramfs.CONTRACT_VERSION}'. "
+            "Services will refuse to launch.",
+            flush=True,
+        )
+        print(
+            "  Suggestion: Re-run the installer to fetch the initramfs matching this code.",
+            flush=True,
+        )
 
     return initramfs_path
 
@@ -451,7 +518,7 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
             print(f"[SKIP] Cannot create test rootfs: {e}", flush=True)
             return
 
-        cmdline = "root=/dev/vda rw console=ttyS0"
+        cmdline = f"root=/dev/vda rw console={ch_guest.serial_device()}"
 
         cmd = [
             ch_binary,
@@ -493,7 +560,8 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
 
         if poll is not None:
             # Process exited — this is a problem
-            if "VcpuRun" in stderr_content or "InternalError" in stderr_content:
+            failure = _classify_ch_smoke_failure(stderr_content)
+            if failure == "vcpu":
                 print(
                     "[FAIL] Cloud Hypervisor vCPU failed to execute. The CH binary is "
                     "incompatible with this host kernel's KVM implementation.",
@@ -501,11 +569,12 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
                 )
                 print(f"  stderr: {stderr_content.strip()[:500]}", flush=True)
                 print(
-                    "  Suggestion: Update Cloud Hypervisor to the latest version, or "
-                    "downgrade the host kernel to a stable release (e.g. 6.8, 6.11, 6.12 LTS).",
+                    "  Suggestion: Update Cloud Hypervisor to the latest version. Where "
+                    "your platform offers one, an LTS kernel (6.8, 6.11, 6.12) is the "
+                    "other way out.",
                     flush=True,
                 )
-            elif "Vmm(VmCreate(KernelLoad" in stderr_content:
+            elif failure == "kernel_load":
                 print(
                     "[FAIL] Cloud Hypervisor could not load the guest kernel. "
                     "The vmlinuz file may be incompatible or corrupt.",
@@ -513,8 +582,9 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
                 )
                 print(f"  stderr: {stderr_content.strip()[:500]}", flush=True)
                 print(
-                    "  Suggestion: Re-install Nodo or replace the guest kernel with a "
-                    "known-good vmlinuz for this architecture.",
+                    "  Suggestion: Re-run the installer to fetch the pinned guest kernel. "
+                    "On arm64 Cloud Hypervisor only loads a raw Image (magic 'ARM\\x64' at "
+                    "offset 56); a distro's CONFIG_EFI_ZBOOT vmlinuz is rejected here.",
                     flush=True,
                 )
             else:
@@ -551,6 +621,64 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+def _doctor_emulated_architectures(cfg: dict, host_arch_tag: str):
+    """Report which FOREIGN architecture this node can execute, and why not if none.
+
+    Nothing here can fail the node: a missing emulator or missing guest assets mean
+    the arch is simply not advertised (src/utils/architectures.py), so this reports
+    capacity rather than health. It is worth reporting because the alternative is an
+    operator guessing why the node never receives arm64 work.
+    """
+    import shutil
+
+    print("\nEmulated (foreign) architectures:", flush=True)
+
+    if not cfg.get("qemu_enabled"):
+        print(
+            "[INFO] virtualizers.qemu.ENABLE is false: this node serves only "
+            f"{host_arch_tag}.",
+            flush=True,
+        )
+        return []
+
+    executable = []
+
+    for arch, default_binary in QEMU_SYSTEM_BINARIES.items():
+        if arch == host_arch_tag:
+            continue
+
+        configured = (cfg.get("qemu_binary_paths") or {}).get(arch) or ""
+        emulator = configured if configured else shutil.which(default_binary)
+        kernel = (cfg.get("kernel_paths") or {}).get(arch, "")
+        initramfs = (cfg.get("initramfs_paths") or {}).get(arch, "")
+
+        missing = []
+        if not emulator or not os.path.isfile(emulator):
+            missing.append(f"emulator ({configured or default_binary})")
+        if not kernel or not os.path.isfile(kernel):
+            missing.append(f"guest kernel ({kernel or 'unconfigured'})")
+        if not initramfs or not os.path.isfile(initramfs):
+            missing.append(f"initramfs ({initramfs or 'unconfigured'})")
+
+        if missing:
+            print(f"[INFO] {arch} is NOT executable here; missing: {', '.join(missing)}.", flush=True)
+            print(
+                "  Suggestion: re-run the installer for the guest assets, or install "
+                f"{default_binary} (qemu-system-arm / qemu-system-x86 on Debian).",
+                flush=True,
+            )
+            continue
+
+        executable.append(arch)
+        print(f"[OK] {arch} is executable under emulation ({emulator}).", flush=True)
+        print(
+            "  Note: TCG emulation is an order of magnitude slower than KVM.",
+            flush=True,
+        )
+
+    return executable
+
+
 def _doctor_cloud_hypervisor(main_dir: str):
     """Run all Cloud Hypervisor compatibility checks."""
     cfg = _resolve_config_paths(main_dir)
@@ -566,6 +694,7 @@ def _doctor_cloud_hypervisor(main_dir: str):
     guest_kernel = _doctor_guest_kernel(cfg.get("kernel_paths", {}), host_arch_tag)
     initramfs = _doctor_initramfs(cfg.get("initramfs_paths", {}), host_arch_tag)
     _doctor_ch_smoke_test(ch_binary, guest_kernel, initramfs)
+    _doctor_emulated_architectures(cfg, host_arch_tag)
 
 
 def _doctor_network_checks():
@@ -636,6 +765,288 @@ def _doctor_network_checks():
         "Run 'nodo nat-guide' for the steps, then test from outside your network.",
         flush=True
     )
+
+    _doctor_guest_gateway_reachability()
+    _doctor_guest_to_guest_forwarding()
+
+
+def _doctor_guest_gateway_reachability():
+    """Can a guest actually reach the gateway port? Tried, not assumed.
+
+    Everything else about the gateway can look right while this is broken: the
+    daemon listens, the accept rule is in the ruleset, and every guest's gRPC call
+    is still rejected by a higher-priority chain in a table nodo does not own. That
+    is not a hypothetical -- it is what this check was written after. So the answer
+    comes from sending a packet down the path a guest uses, not from reading rules.
+    """
+    print("\nGuest-facing gateway:", flush=True)
+
+    # Imported here, not at module scope: see the note on this file's imports.
+    try:
+        from src.utils.config import ConfigManager
+        from src.utils.firewall.backends import FirewallError, detect_backend
+        from src.utils.firewall.gateway import gateway_comment
+        from src.utils.firewall.reachability import probe_tcp_from_bridge
+    except Exception as e:
+        print(f"[WARN] Could not load the firewall helpers: {e}", flush=True)
+        return
+
+    # doctor must survive a checkout too broken to load config: that is exactly
+    # when it is worth running.
+    try:
+        env_manager = ConfigManager()
+        port = env_manager.gateway_port_or_none()
+    except Exception as e:
+        print(f"[WARN] Could not read the node config: {e}", flush=True)
+        return
+
+    if not port:
+        print(
+            "[FAIL] network.GATEWAY_PORT is not assigned, so no guest can call back "
+            "into this node. Start the node once as root to have it assigned and "
+            "opened, or set the key to a port you opened yourself.",
+            flush=True
+        )
+        return
+
+    try:
+        backend = detect_backend()
+    except Exception as e:
+        print(f"[FAIL] No usable firewall backend: {e}", flush=True)
+        return
+    print(f"[OK] Firewall backend in use: {backend.name}.", flush=True)
+
+    comment = gateway_comment(port)
+    try:
+        owned = [rule for rule in backend.list_input_accepts(comment) if rule.comment == comment]
+    except FirewallError as e:
+        # Unknown, so say nothing about presence: claiming the rule is missing
+        # when the chain simply could not be read is worse than staying quiet.
+        owned = None
+        print(f"[WARN] Could not list nodo's own input rules: {e}", flush=True)
+    if owned:
+        print(f"[OK] nodo's accept rule for TCP {port} is present.", flush=True)
+    elif owned is not None:
+        print(
+            f"[WARN] nodo has no accept rule for TCP {port} in {backend.name}. "
+            "Starting the node re-applies it.",
+            flush=True
+        )
+
+    try:
+        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch"))
+        gateway_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
+        subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
+    except Exception as e:
+        print(f"[WARN] Could not read the guest network settings: {e}", flush=True)
+        return
+
+    # provide_listener: doctor is usually run with the node stopped, and a connect to
+    # a port with no listener fails whatever the firewall says. Supplying one turns
+    # "could not test it" into an actual verdict, which is the whole point of running
+    # doctor after a launch failure.
+    probe = probe_tcp_from_bridge(
+        bridge=bridge,
+        target_ip=gateway_ip,
+        port=port,
+        subnet=subnet,
+        provide_listener=True,
+    )
+
+    if probe.reachable is True:
+        print(f"[OK] A guest on {bridge} can reach {gateway_ip}:{port}.", flush=True)
+        return
+
+    if probe.reachable is None:
+        print(f"[WARN] Could not test it: {probe.detail}", flush=True)
+        return
+
+    print(
+        f"[FAIL] A guest on {bridge} CANNOT reach {gateway_ip}:{port}. Every service "
+        "this node runs would fail to launch dependencies, modify its resources or "
+        "observe traffic.",
+        flush=True
+    )
+    print(f"  {probe.detail}", flush=True)
+
+    # Three outcomes, all worth saying out loud: chains that can reject, a hook that
+    # is clear, or a ruleset nobody could read. The last one used to print as the
+    # middle one, which told the operator to go looking somewhere else entirely.
+    try:
+        scan = backend.foreign_input_rejectors()
+    except Exception as e:
+        from src.utils.firewall.backends import RejectorScan
+
+        scan = RejectorScan(readable=False, reason=f"reading the ruleset raised {e!r}")
+    for line in scan.describe():
+        print(f"  {line}", flush=True)
+    if scan.rejectors:
+        print(
+            "  An accept rule cannot override those: in nftables 'accept' ends its own "
+            "chain only, and a reject in another base chain on the same hook still wins "
+            "whatever the priority.",
+            flush=True
+        )
+    # The one thing worth adding: the command for the front-end actually running
+    # here, rather than a description of the property the operator must establish.
+    try:
+        from src.utils.firewall.frontend import open_port_advice
+
+        advice_lines = open_port_advice(port, bridge=bridge, subnet=subnet)
+    except Exception:
+        advice_lines = []
+    if advice_lines:
+        # Blank line plus the "Suggestion:" label used elsewhere in this command:
+        # otherwise this reads as more diagnostic narrative instead of the one
+        # actionable step, and gets lost after the reject-chain scan output above.
+        print(flush=True)
+        print(f"  Suggestion: {advice_lines[0]}", flush=True)
+        for line in advice_lines[1:]:
+            print(f"  {line}", flush=True)
+    print(
+        "  This tests the guest subnet only. Whether peers OUTSIDE this LAN can reach "
+        "the port is a separate question no check on this host can answer -- run "
+        "'nodo nat-guide'.",
+        flush=True
+    )
+
+
+def _doctor_guest_to_guest_forwarding():
+    """Can one guest reach another? The parent-to-child path, tried rather than assumed.
+
+    Every service that launches a dependency uses this path, and when it is broken
+    the failure arrives disguised: the parent gets a connect timeout, which from the
+    outside is indistinguishable from a child that died on boot -- a node has been
+    accused of shortchanging a guest's memory on exactly this evidence.
+
+    doctor changes nothing here. It sends the packet, reports what nodo has in the
+    compatibility table (``NODO_FWD``, see ``firewall/compat.py``), and names the
+    chain that is dropping it -- including the case ``NODO_FWD`` cannot reach, which
+    is a firewall with a native nftables table of its own. Applying or removing
+    those rules is ``nodo firewall-compat``, because a change to the host's firewall
+    should be something the operator asked for.
+    """
+    print("\nGuest-to-guest forwarding:", flush=True)
+
+    # Imported here, not at module scope: see the note on this file's imports.
+    try:
+        from src.utils.config import ConfigManager
+        from src.utils.firewall.backends import detect_backend
+        from src.utils.firewall.reachability import probe_tcp_between_guests
+    except Exception as e:
+        print(f"[WARN] Could not load the firewall helpers: {e}", flush=True)
+        return
+
+    try:
+        env_manager = ConfigManager()
+        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch"))
+        gateway_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
+        subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
+    except Exception as e:
+        print(f"[WARN] Could not read the guest network settings: {e}", flush=True)
+        return
+
+    probe = probe_tcp_between_guests(bridge=bridge, subnet=subnet, gateway_ip=gateway_ip)
+    compat = _compat_state(bridge)
+
+    if probe.reachable is True:
+        print(f"[OK] A guest on {bridge} can reach another guest through the host.", flush=True)
+        # Worth one line even on success: these are the rules nodo put in a table it
+        # does not own, and an operator who does not know they are there cannot
+        # decide whether to keep them.
+        if compat is not None and compat.complete:
+            print(f"  {compat.detail}", flush=True)
+        return
+
+    if compat is not None and compat.partial:
+        print(f"[WARN] {compat.detail}", flush=True)
+
+    if probe.reachable is None:
+        print(f"[WARN] Could not test it: {probe.detail}", flush=True)
+        return
+
+    print(
+        f"[FAIL] Guests on {bridge} CANNOT reach each other. Any service that launches "
+        "a dependency would report it as unreachable or dead, whatever the child is "
+        "actually doing.",
+        flush=True
+    )
+    print(f"  {probe.detail}", flush=True)
+
+    try:
+        backend = detect_backend()
+        scan = backend.foreign_forward_rejectors()
+    except Exception as e:
+        from src.utils.firewall.backends import RejectorScan
+
+        scan = RejectorScan(
+            readable=False, hook="forward", reason=f"reading the ruleset raised {e!r}"
+        )
+    for line in scan.describe():
+        print(f"  {line}", flush=True)
+    if scan.rejectors:
+        print(
+            "  nodo accepts this traffic in its own table at priority -5, which those "
+            "cannot see: 'accept' ends its own chain only, and a drop in another base "
+            "chain on the same hook still wins whatever the priority.",
+            flush=True
+        )
+
+    if compat is None:
+        print(
+            "  What nodo has in the compatibility table could not be read; "
+            "'nodo firewall-compat status' as root will say.",
+            flush=True
+        )
+    elif not compat.available:
+        print(f"  {compat.detail}", flush=True)
+    elif compat.mode.value == "off":
+        print(
+            "  virtualizers.ch.FORWARD_COMPAT is off, so nodo has not asked for these "
+            "paths back. Set it to auto to let nodo add its own NODO_FWD chain.",
+            flush=True
+        )
+    elif compat.complete:
+        # The rules are in and it still fails, so whatever drops this is somewhere
+        # NODO_FWD cannot reach. Naming the usual one saves a long afternoon.
+        print(
+            f"  {compat.detail} Since that is in place and this still fails, the drop "
+            "is in a table iptables does not write to -- firewalld's own inet firewalld "
+            "is the usual answer, and its filter_FORWARD rejects by zone. Allow "
+            f"forwarding for {bridge} in firewalld itself "
+            f"('firewall-cmd --permanent --zone=trusted --change-interface={bridge}').",
+            flush=True
+        )
+    else:
+        print(
+            f"  {compat.detail} Run 'nodo firewall-compat apply' as root, or start the "
+            "node, to have nodo ask for those paths back.",
+            flush=True
+        )
+
+
+def _compat_state(bridge):
+    """What nodo has in the compatibility table, or None if that cannot be read.
+
+    None rather than an empty state: doctor's whole contract on this page is that
+    "I could not look" never prints as "there is nothing there".
+
+    Read straight from ``firewall.compat`` rather than through the virtualizer
+    wrapper, which pulls in the database and the whole instance stack for two
+    config values. doctor is run on nodes too broken to load those.
+    """
+    try:
+        from src.utils.config import ConfigManager
+        from src.utils.firewall.compat import CompatMode, compat_state
+
+        configured = ConfigManager().get("virtualizers.ch.FORWARD_COMPAT", "auto")
+        try:
+            mode = CompatMode.parse(configured)
+        except ValueError:
+            mode = CompatMode.AUTO
+        return compat_state(bridge, mode)
+    except Exception:
+        return None
 
 
 def doctor_command(main_dir):

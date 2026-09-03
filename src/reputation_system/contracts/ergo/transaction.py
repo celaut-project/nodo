@@ -187,6 +187,7 @@ def _self_network_data() -> str:
     from src.reputation_system.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
+        declare_signature_scheme,
         get_node_public_key_hex,
         sign_peer_payload,
     )
@@ -206,7 +207,7 @@ def _self_network_data() -> str:
         LOGGER("No public address to advertise (set network.PUBLIC_IP if the node is behind NAT).")
         return NO_NETWORK_ADDRESS
 
-    internal_port = int(env_manager.get("GATEWAY_PORT"))
+    internal_port = env_manager.get_gateway_port()
     public_port = resolve_public_port(env_manager.get("network.PUBLIC_TCP_PORT", ""), internal_port)
     peer = celaut_pb2.Peer()
     uri = peer.uri.add()
@@ -227,6 +228,12 @@ def _self_network_data() -> str:
             peer.public_key = public_key_hex
             peer.signature = signature
             peer.ts = ts
+            # This one is read off the ledger by people who never contacted the node,
+            # so it is the announcement that most needs to say which cryptography it
+            # is asking them to verify -- but the tags say it. Spelling the scheme out
+            # in prose as well would be a third of this register, paid for in storage
+            # rent by every box that carries it.
+            declare_signature_scheme(peer, prose=False)
     else:
         LOGGER("No node identity available; publishing the address unsigned.")
 
@@ -316,6 +323,22 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
 
     outputs = []
 
+    # An opinion is about a node, and a node *is* its public key (issue #236), so R5
+    # carries the target's key. It used to carry a reputation proof's token id, which
+    # made every opinion an opinion about one of that node's proofs rather than about
+    # the node -- a single key can hold several proofs, and minting a fresh one shed
+    # the accumulated on-chain reputation (issue #281). Our own key comes from the same
+    # identity keypair the R7 owner does, so a self-opinion is addressed exactly like
+    # any peer's.
+    from src.reputation_system.node_identity import get_node_public_key_hex
+
+    node_public_key = get_node_public_key_hex()
+    if not node_public_key:
+        raise Exception(
+            "No node identity public key available (ledgers.ergo.WALLET_MNEMONIC); "
+            "cannot address a reputation opinion."
+        )
+
     for obj in objects:
         self_info = not obj[0]
         if self_info:
@@ -329,7 +352,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
             sender_address=sender_address,
             assigned_object=ProofObject(
                 type=CELAUT_NODE_TYPE_NFT_ID,
-                value=obj[0] if not self_info and obj[0] else proof_id
+                value=node_public_key if self_info else obj[0]
             ),
             token_amount=int(obj[1]),
             data=data or ""

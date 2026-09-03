@@ -23,40 +23,6 @@ env_manager = ConfigManager()
 CACHE = env_manager.get("CACHE")
 CH_API_SOCKET_DIR = env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch")
 
-def _runtime_vm_dir(vmachine_id: str) -> Path:
-    return Path(CACHE) / "cloud_hypervisor" / "runtime" / vmachine_id
-
-
-def _service_bundle_dir(service_id: str) -> Path:
-    return Path(CACHE) / "cloud_hypervisor" / service_id
-
-
-def _remove(vmachine_id: str) -> bool:
-    if not CACHE:
-        log.LOGGER(f"[CH][{vmachine_id}] remove failed: CACHE path is not configured.")
-        return False
-
-    # Dual mode: runtime VM cleanup if state/runtime exists; otherwise remove service bundle.
-    if load_runtime_state(vmachine_id) is not None or _runtime_vm_dir(vmachine_id).exists():
-        log.LOGGER(f"[CH][{vmachine_id}] event=remove mode=runtime")
-        return kill(vmachine_id=vmachine_id)
-
-    bundle_dir = _service_bundle_dir(vmachine_id)
-    if not bundle_dir.exists():
-        log.LOGGER(
-            f"[CH][{vmachine_id}] remove requested but no runtime state nor service bundle directory found."
-        )
-        return True
-
-    try:
-        shutil.rmtree(bundle_dir, ignore_errors=True)
-        log.LOGGER(f"[CH][{vmachine_id}] event=remove mode=bundle bundle_removed={bundle_dir}")
-        return True
-    except Exception as e:
-        log.LOGGER(f"[CH][{vmachine_id}] remove bundle failed ({bundle_dir}): {e}")
-        return False
-
-
 def _runtime_dir(vmachine_id: str) -> Optional[Path]:
     if not CACHE:
         return None
@@ -103,6 +69,18 @@ def _cleanup_dnat_rules(vmachine_id: str, cleanup_rules: List[List[str]]) -> Non
             log.LOGGER(f"[CH][{vmachine_id}] error cleaning DNAT rule {rule}: {e}")
 
 
+def _cleanup_vm_firewall_rules(vmachine_id: str) -> None:
+    """Delete every rule nodo wrote for this VM, by its comment prefix."""
+    try:
+        from src.virtualizers.firewall import remove_vm_rules
+
+        removed = remove_vm_rules(vmachine_id=vmachine_id)
+        if removed:
+            log.LOGGER(f"[CH][{vmachine_id}] removed {removed} firewall rule(s)")
+    except Exception as e:
+        log.LOGGER(f"[CH][{vmachine_id}] error removing firewall rules: {e}")
+
+
 def _cleanup_tap(vmachine_id: str, tap_name: Optional[str]) -> None:
     if not tap_name:
         return
@@ -144,7 +122,12 @@ def kill(vmachine_id: str) -> bool:
 
     log.LOGGER(f"[CH][{vmachine_id}] event=kill requested")
     _kill_pid(vmachine_id=vmachine_id, pid=pid)
+    # Two paths on purpose. cleanup_rules is what pre-nftables versions recorded
+    # and is empty for anything this version launched; the prefix sweep is what
+    # removes the rules by the comment they carry, so a teardown cannot leave an
+    # orphan DNAT behind because the recorded command no longer matches.
     _cleanup_dnat_rules(vmachine_id=vmachine_id, cleanup_rules=cleanup_rules)
+    _cleanup_vm_firewall_rules(vmachine_id=vmachine_id)
     _cleanup_tap(vmachine_id=vmachine_id, tap_name=tap_name)
     remove_vm_cgroup(vmachine_id=vmachine_id, cgroup_path=cgroup_path)
 
@@ -185,8 +168,6 @@ def kill(vmachine_id: str) -> bool:
 
     delete_runtime_state(vmachine_id)
     log.LOGGER(f"[CH][{vmachine_id}] event=cleanup runtime_state_removed")
-
-    _remove(vmachine_id=vmachine_id)
     log.LOGGER(f"[CH][{vmachine_id}] event=kill completed")
 
     return True

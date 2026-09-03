@@ -4,7 +4,6 @@ set -euo pipefail
 TARGET_DIR="${1:-}"
 ARCH_TAG="${2:-}"
 OUTPUT_PATH="${3:-}"
-KERNEL_PATH="${4:-}"
 
 fail() {
     echo "Error: $1" >&2
@@ -12,7 +11,7 @@ fail() {
 }
 
 if [ -z "$TARGET_DIR" ] || [ -z "$ARCH_TAG" ] || [ -z "$OUTPUT_PATH" ]; then
-    fail "Usage: $0 <TARGET_DIR> <ARCH_TAG> <OUTPUT_PATH> [KERNEL_PATH]"
+    fail "Usage: $0 <TARGET_DIR> <ARCH_TAG> <OUTPUT_PATH>"
 fi
 if [ ! -d "$TARGET_DIR" ]; then
     fail "TARGET_DIR does not exist: $TARGET_DIR"
@@ -26,9 +25,27 @@ case "$ARCH_TAG" in
         ;;
 esac
 
-BUSYBOX_BIN="$(command -v busybox || true)"
-if [ -z "$BUSYBOX_BIN" ]; then
-    fail "busybox binary not found in PATH. Install busybox-static."
+# busybox is the guest's entire userspace, and the only input to this initramfs
+# that could still come from the host. It must not: distros compile different
+# applet sets and link against different libc behaviour, so a host busybox means
+# every node runs services on a subtly different guest. The release-provisioned
+# binary is therefore the only accepted source.
+#
+# NODO_ALLOW_HOST_BUSYBOX=1 exists for developers rebuilding an initramfs by hand
+# on a machine with no provisioned asset. The installer never sets it, and what it
+# produces is explicitly not what nodes run.
+PROVISIONED_BUSYBOX="$TARGET_DIR/cloud_hypervisor/busybox/${ARCH_TAG}/busybox"
+if [ -x "$PROVISIONED_BUSYBOX" ]; then
+    BUSYBOX_BIN="$PROVISIONED_BUSYBOX"
+elif [ "${NODO_ALLOW_HOST_BUSYBOX:-0}" = "1" ]; then
+    BUSYBOX_BIN="$(command -v busybox || true)"
+    if [ -z "$BUSYBOX_BIN" ]; then
+        fail "NODO_ALLOW_HOST_BUSYBOX=1 but no busybox in PATH."
+    fi
+    echo "Warning: NODO_ALLOW_HOST_BUSYBOX=1, using the host's busybox (${BUSYBOX_BIN})." >&2
+    echo "Warning: the resulting initramfs is a local dev build, not the one nodes run." >&2
+else
+    fail "No provisioned busybox at ${PROVISIONED_BUSYBOX}. Re-run the installer to provision it, or set NODO_ALLOW_HOST_BUSYBOX=1 for a local dev build."
 fi
 if ! command -v ldd >/dev/null 2>&1; then
     fail "ldd is required to validate that busybox is static."
@@ -38,16 +55,33 @@ if ldd "$BUSYBOX_BIN" 2>&1 | grep -vq "not a dynamic executable"; then
     fail "busybox must be static for initramfs usage. Install busybox-static."
 fi
 
+# Every applet /init calls. The provisioned busybox is built from a known config,
+# but this check still earns its place: it guards the NODO_ALLOW_HOST_BUSYBOX dev
+# path, where distros compile different applet sets. Symlinking blindly would
+# defer the failure to guest boot ("applet not found"), where it looks like a nodo
+# bug. `ip` is the sharp edge: without it the guest never configures its network
+# from the ip= kernel argument.
+APPLET_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/guest-kernel/applets.txt"
+[ -f "$APPLET_FILE" ] || fail "Missing applet list at ${APPLET_FILE}"
+mapfile -t BUSYBOX_APPLETS < <(grep -vE '^[[:space:]]*(#|$)' "$APPLET_FILE")
+BUSYBOX_APPLET_LIST="$("$BUSYBOX_BIN" --list 2>/dev/null || true)"
+if [ -z "$BUSYBOX_APPLET_LIST" ]; then
+    fail "'$BUSYBOX_BIN --list' produced no output; cannot verify the applets /init needs."
+fi
+missing_applets=()
+for applet in "${BUSYBOX_APPLETS[@]}"; do
+    printf '%s\n' "$BUSYBOX_APPLET_LIST" | grep -qx "$applet" || missing_applets+=("$applet")
+done
+if [ "${#missing_applets[@]}" -gt 0 ]; then
+    fail "busybox at ${BUSYBOX_BIN} lacks applets required by the guest init: ${missing_applets[*]}"
+fi
+
 if ! command -v cpio >/dev/null 2>&1; then
     fail "cpio is required to build initramfs."
 fi
 if ! command -v gzip >/dev/null 2>&1; then
     fail "gzip is required to build initramfs."
 fi
-if ! command -v modprobe >/dev/null 2>&1; then
-    fail "modprobe is required to discover guest kernel module dependencies."
-fi
-
 WORKDIR="$(mktemp -d)"
 ROOT="$WORKDIR/root"
 cleanup() {
@@ -58,141 +92,9 @@ trap cleanup EXIT
 mkdir -p "$ROOT/bin" "$ROOT/dev" "$ROOT/etc" "$ROOT/newroot" "$ROOT/proc" "$ROOT/sys"
 
 install -m 0755 "$BUSYBOX_BIN" "$ROOT/bin/busybox"
-for applet in sh mount switch_root sleep cat echo mkdir ln test chmod ip insmod; do
+for applet in "${BUSYBOX_APPLETS[@]}"; do
     ln -sf /bin/busybox "$ROOT/bin/$applet"
 done
-
-kernel_release_from_path() {
-    local kernel_path="$1"
-    local resolved
-    local base
-
-    if [ -n "$kernel_path" ]; then
-        resolved="$(readlink -f "$kernel_path" 2>/dev/null || printf '%s' "$kernel_path")"
-        base="${resolved##*/}"
-        case "$base" in
-            vmlinuz-*) printf '%s\n' "${base#vmlinuz-}"; return 0 ;;
-            vmlinux-*) printf '%s\n' "${base#vmlinux-}"; return 0 ;;
-        esac
-    fi
-
-    uname -r
-}
-
-is_builtin_module() {
-    local kernel_release="$1"
-    local module_name="$2"
-    local module_file_underscore="${module_name}.ko"
-    local module_file_hyphen="${module_name//_/-}.ko"
-
-    for modules_dir in "/lib/modules/$kernel_release" "/usr/lib/modules/$kernel_release"; do
-        if [ -f "$modules_dir/modules.builtin" ] \
-            && grep -Eq "(^|/)(${module_file_underscore}|${module_file_hyphen})(\.xz|\.gz|\.zst)?$" "$modules_dir/modules.builtin"; then
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-copy_kernel_module() {
-    local source_path="$1"
-    local rel_path="${source_path#/}"
-    local dest_path
-
-    case "$rel_path" in
-        *.ko)
-            dest_path="$ROOT/$rel_path"
-            mkdir -p "$(dirname "$dest_path")"
-            cp -f "$source_path" "$dest_path"
-            ;;
-        *.ko.xz)
-            command -v xz >/dev/null 2>&1 || fail "xz is required to decompress $source_path"
-            dest_path="$ROOT/${rel_path%.xz}"
-            mkdir -p "$(dirname "$dest_path")"
-            xz -dc "$source_path" > "$dest_path"
-            ;;
-        *.ko.gz)
-            dest_path="$ROOT/${rel_path%.gz}"
-            mkdir -p "$(dirname "$dest_path")"
-            gzip -dc "$source_path" > "$dest_path"
-            ;;
-        *.ko.zst)
-            command -v zstd >/dev/null 2>&1 || fail "zstd is required to decompress $source_path"
-            dest_path="$ROOT/${rel_path%.zst}"
-            mkdir -p "$(dirname "$dest_path")"
-            zstd -dc "$source_path" > "$dest_path"
-            ;;
-        *)
-            fail "Unsupported kernel module compression for $source_path"
-            ;;
-    esac
-
-    chmod 0644 "$dest_path"
-    printf '/%s\n' "${dest_path#$ROOT/}"
-}
-
-install_virtio_modules() {
-    local kernel_release
-    local required_module
-    local deps
-    local source_path
-    local initramfs_path
-    local module_list="$ROOT/etc/nodo-virtio-modules.list"
-
-    kernel_release="$(kernel_release_from_path "$KERNEL_PATH")"
-    [ -n "$kernel_release" ] || fail "Unable to determine guest kernel release."
-
-    : > "$module_list"
-
-    # virtiofs (+ its fuse dependency, pulled in by --show-depends) is needed for
-    # parent -> child shared filesystems. Harmless when unused: it is only loaded,
-    # never auto-mounted.
-    # overlay is needed so a service that boots its own Docker daemon inside the
-    # guest can use the overlay2 storage driver. Without it dockerd falls back to
-    # vfs (full-copy layers), which makes an image build take ~150s instead of ~8s.
-    for required_module in virtio_blk virtio_net virtiofs overlay; do
-        deps="$(modprobe --set-version "$kernel_release" --show-depends "$required_module" 2>/dev/null || true)"
-        if [ -z "$deps" ]; then
-            if is_builtin_module "$kernel_release" "$required_module"; then
-                continue
-            fi
-            fail "Unable to find $required_module for guest kernel $kernel_release. Install matching linux-modules for the copied guest kernel."
-        fi
-
-        while IFS= read -r dep_line; do
-            case "$dep_line" in
-                insmod\ *)
-                    source_path="${dep_line#insmod }"
-                    # modprobe --show-depends on Ubuntu 22.04 emits a trailing space after
-                    # the .ko path; strip trailing whitespace so the [ -f ] test sees the
-                    # real file instead of failing on "<path> " with a phantom trailing space.
-                    source_path="${source_path%"${source_path##*[![:space:]]}"}"
-                    [ -f "$source_path" ] || fail "modprobe returned missing module path: $source_path"
-                    initramfs_path="$(copy_kernel_module "$source_path")"
-                    if ! grep -Fxq "$initramfs_path" "$module_list"; then
-                        printf '%s\n' "$initramfs_path" >> "$module_list"
-                    fi
-                    ;;
-                builtin\ *)
-                    ;;
-            esac
-        done <<EOF
-$deps
-EOF
-    done
-
-    if [ ! -s "$module_list" ]; then
-        rm -f "$module_list"
-        echo "Guest kernel $kernel_release has virtio block/net built in; no initramfs modules needed."
-        return
-    fi
-
-    echo "Included Cloud Hypervisor virtio modules for guest kernel $kernel_release:"
-    sed 's/^/  /' "$module_list"
-}
-
-install_virtio_modules
 
 cat > "$ROOT/init" <<'INIT_EOF'
 #!/bin/sh
@@ -357,15 +259,6 @@ mount -t devtmpfs devtmpfs /dev || mount -t tmpfs tmpfs /dev || fatal "cannot mo
 mkdir -p /dev/shm
 mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /dev/shm || fatal "cannot mount /dev/shm"
 
-if [ -f /etc/nodo-virtio-modules.list ]; then
-    while IFS= read -r module_path; do
-        [ -n "$module_path" ] || continue
-        [ -f "$module_path" ] || fatal "missing initramfs module '$module_path'"
-        insmod "$module_path" || fatal "cannot load initramfs module '$module_path'"
-        log "loaded module $module_path"
-    done < /etc/nodo-virtio-modules.list
-fi
-
 WAIT_SECONDS=20
 i=0
 while [ "$i" -lt "$WAIT_SECONDS" ]; do
@@ -460,36 +353,42 @@ chmod 0755 "$ROOT/init"
 
 printf 'nodo-ch-initramfs:v1\narch:%s\n' "$ARCH_TAG" > "$ROOT/etc/nodo-ch-initramfs.marker"
 
+# Byte-reproducible output, so CI's published artifact can be checked against a
+# local rebuild of the same commit — which is what makes the pinned digest in
+# guest-kernel/SHA256SUMS.pinned auditable rather than just a checksum.
+#
+# The newc format records mode, mtime, uid, gid and inode numbers per entry, and
+# the tree is staged in a fresh mktemp dir, so without all of these the same
+# inputs produce a different file on every single run: the chmods pin the modes
+# (`mkdir` and `printf >` inherit the caller's umask, so root's 022 and a
+# developer's 077 archived different bytes), `touch` pins the mtimes, --owner
+# pins ownership (CI runners are not root, installers are), --reproducible drops
+# device/inode numbers, and `gzip -n` keeps the build timestamp out of the gzip
+# header. `sort -z` already pinned the entry order.
+find "$ROOT" -mindepth 1 -type d -exec chmod 0755 {} +
+find "$ROOT" -mindepth 1 -type f -exec chmod 0644 {} +
+chmod 0755 "$ROOT/init" "$ROOT/bin/busybox"
+find "$ROOT" -mindepth 1 -exec touch -h -d @0 {} +
+
 mkdir -p "$(dirname "$OUTPUT_PATH")"
 (
     cd "$ROOT"
     find . -mindepth 1 -print0 \
         | sort -z \
-        | cpio --null -o --format=newc 2>/dev/null \
-        | gzip -9 > "$OUTPUT_PATH"
+        | cpio --null -o --format=newc --reproducible --owner 0:0 2>/dev/null \
+        | gzip -9n > "$OUTPUT_PATH"
 )
 chmod 0644 "$OUTPUT_PATH"
 
-if command -v lsinitramfs >/dev/null 2>&1; then
-    listing="$(lsinitramfs "$OUTPUT_PATH")"
-    printf '%s\n' "$listing" | grep -qx 'init' || fail "generated initramfs misses /init"
-    printf '%s\n' "$listing" | grep -qx 'bin/busybox' || fail "generated initramfs misses /bin/busybox"
-    printf '%s\n' "$listing" | grep -qx 'etc/nodo-ch-initramfs.marker' || fail "generated initramfs misses marker"
-    if printf '%s\n' "$listing" | grep -qx 'etc/nodo-virtio-modules.list'; then
-        # Validate that every module actually recorded in the list is packed into
-        # the initramfs. Do NOT hard-require both virtio_blk and virtio_net: a guest
-        # kernel may have one built in (=y, no .ko emitted) and the other as a
-        # loadable module (=m). install_virtio_modules only records the loadable
-        # ones and skips built-ins, so the list is the source of truth. Hard-coding
-        # both names false-failed the build when a virtio_blk=y / virtio_net=m guest
-        # kernel emitted only virtio_net.ko into the list.
-        while IFS= read -r module_path; do
-            [ -n "$module_path" ] || continue
-            module_rel="${module_path#/}"
-            printf '%s\n' "$listing" | grep -qx "$module_rel" \
-                || fail "generated initramfs is missing listed module: $module_rel"
-        done < "$ROOT/etc/nodo-virtio-modules.list"
-    fi
-fi
+# Verified with cpio, never lsinitramfs/lsinitrd. The gzip'd newc cpio layout is
+# a kernel ABI, but every distro brands its own inspector for it (initramfs-tools
+# ships lsinitramfs, dracut lsinitrd, mkinitcpio lsinitcpio), so gating this check
+# on one of them skipped it silently everywhere else — including on the host that
+# built the artifact. cpio is already a hard requirement above.
+listing="$(gzip -dc "$OUTPUT_PATH" | cpio -t --quiet 2>/dev/null)"
+for required in init bin/busybox etc/nodo-ch-initramfs.marker; do
+    printf '%s\n' "$listing" | grep -qx "$required" \
+        || fail "generated initramfs misses /${required}"
+done
 
 echo "Generated Cloud Hypervisor initramfs: $OUTPUT_PATH"

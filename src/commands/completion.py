@@ -70,11 +70,13 @@ COMMANDS = sorted(
         "estimate",
         "update",
         "kill",
+        "burnall",
         "observe",
         "tunnel",
         "increase_deposit",
         "decrease_deposit",
         "remove",
+        "prune",
         "inspect",
         "services",
         "tag",
@@ -95,6 +97,7 @@ COMMANDS = sorted(
         "tui",
         "ggconf",
         "nat-guide",
+        "firewall-compat",
         "prune_containers",
         "refresh_clients",
         "tx_history",
@@ -103,7 +106,7 @@ COMMANDS = sorted(
         "pay",
         "credit_client",
         "debit_client",
-        "local_docker_packer",
+        "local_builder",
         "daemon",
         "doctor",
         "completion",
@@ -467,5 +470,21 @@ def main(argv: List[str]) -> int:
     return 0 if action == "help" else 1
 
 
+def _drop_own_directory_from_path() -> None:
+    """Stop this directory from shadowing standard-library modules.
+
+    Running a script puts its own directory first on ``sys.path``, so every module
+    beside this one would take precedence over a stdlib module of the same name --
+    for anything we import, and for anything the stdlib imports internally. That
+    already cost us once (``src/commands/inspect.py``, since renamed), and the
+    shell runs this file on every Tab keypress, so it is the most exposed script
+    in the tree. The repository root is added explicitly in ``config_paths``;
+    this directory is never needed on the path at all.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path[:] = [entry for entry in sys.path if os.path.abspath(entry or os.curdir) != here]
+
+
 if __name__ == "__main__":
+    _drop_own_directory_from_path()
     raise SystemExit(main(sys.argv[1:]))
