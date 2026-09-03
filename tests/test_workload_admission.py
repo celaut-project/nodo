@@ -306,5 +306,71 @@ class EvaluatePossibleEnvironmentWorkloadsTests(unittest.TestCase):
         self.assertIsNone(evaluate_possible_environment_workloads(service))
 
 
+class RefusalMessageTests(unittest.TestCase):
+    """What the refused group is described by.
+
+    The operator reading a refusal has to be able to see which declaration caused it,
+    so the message names every limit the group declares -- not a fixed three of them.
+    """
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_every_declared_limit_is_named(self, peer_check, peers, local):
+        service = celaut.Service()
+        workload = service.possible_environment_workload.add().workloads.add()
+        workload.count = 3
+        workload.resources.mem_limit = 1024
+        workload.resources.disk_space = 2048
+        workload.resources.cpu_quota = 200000
+        workload.resources.cpu_period = 50000
+        workload.resources.blkio_weight = 500
+
+        with _config():
+            failure = evaluate_possible_environment_workloads(service)
+
+        self.assertIsNotNone(failure)
+        for declaration in (
+                "count=3", "mem_limit=1024", "disk_space=2048",
+                "cpu_quota=200000", "cpu_period=50000", "blkio_weight=500",
+        ):
+            self.assertIn(declaration, failure)
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_a_group_refused_over_blkio_weight_says_blkio_weight(self, peer_check, peers, local):
+        # 5 is outside the 10-1000 range cgroups accept, and it is the only thing
+        # wrong with this group: a message listing memory/disk/cpu would describe it
+        # entirely by fields that are fine.
+        service = celaut.Service()
+        workload = service.possible_environment_workload.add().workloads.add()
+        workload.count = 1
+        workload.resources.blkio_weight = 5
+
+        with _config():
+            failure = evaluate_possible_environment_workloads(service)
+
+        self.assertIn("blkio_weight=5", failure)
+
+    @_NOTHING_FITS
+    @_TWO_PEERS
+    @_NO_PEER_TAKES_IT
+    def test_undeclared_limits_are_left_out_rather_than_reported_as_zero(self, peer_check, peers, local):
+        service = celaut.Service()
+        workload = service.possible_environment_workload.add().workloads.add()
+        workload.count = 1
+        workload.resources.mem_limit = 1024
+
+        with _config():
+            failure = evaluate_possible_environment_workloads(service)
+
+        self.assertIn("mem_limit=1024", failure)
+        # A limit the declaration never made is not a limit the operator has to read
+        # past to find the one that matters.
+        for undeclared in ("disk_space", "cpu_quota", "cpu_period", "blkio_weight"):
+            self.assertNotIn(undeclared, failure)
+
+
 if __name__ == "__main__":
     unittest.main()
