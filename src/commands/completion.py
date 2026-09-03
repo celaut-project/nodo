@@ -70,6 +70,7 @@ COMMANDS = sorted(
         "estimate",
         "update",
         "kill",
+        "burnall",
         "observe",
         "tunnel",
         "increase_deposit",
