@@ -199,6 +199,7 @@ if __name__ == '__main__':
                     "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
                     "\n- inspect <service id> | <service tag>"
                     "\n- remove <service id> | <service tag>"
+                    "\n- prune [--all] [--dry-run]   (reclaim orphaned runtime dirs and preserved launch failures)"
                     "\n- kill <instance id>"
                     "\n- observe <instance id> [--save <path>]"
                     "\n- tunnel <instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]"
@@ -634,6 +635,10 @@ if __name__ == '__main__':
             case "remove":
                 from src.commands.remove import remove
                 remove(service=sys.argv[2])
+
+            case "prune":
+                from src.commands.prune import prune
+                prune(argv=sys.argv[2:])
 
             case "inspect":
                 from src.commands.inspect_service import inspect

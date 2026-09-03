@@ -141,7 +141,13 @@ virtualizers:
     # CONSOLE_MODE: off|null|tty|file=/custom/path.log
     SERIAL_MODE: "file"
     CONSOLE_MODE: "off"
+    # Keep the runtime directory of a failed launch under CACHE/cloud_hypervisor/
+    # failures/<vmachine_id>/ for debugging. Nothing reclaims those automatically:
+    # run 'nodo prune' to drop the ones older than FAILURE_RETENTION_DAYS.
     CONSERVE_RUNTIME_DIR_ON_FAILURE: true
+    # How long 'nodo prune' keeps a preserved launch failure before it is
+    # reclaimable. 'nodo prune --all' ignores this window.
+    FAILURE_RETENTION_DAYS: 7
     SECURITY:
       # Enforce rootfs destination confinement for all filesystem paths.
       PATH_CONFINEMENT: true
