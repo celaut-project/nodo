@@ -5,10 +5,10 @@ itself, so it has to know the same config keys, the same architecture tags and t
 same guest-kernel reserve the Python side reads -- and it is a separate Rust binary,
 so it cannot import any of them. Those constants are duplicated by necessity.
 
-`src/commands/tui/build.rs` already states the rule this file enforces, about the
-proto schema the TUI used to keep its own copy of: *"A second copy of a wire
-contract has no way to stay honest; there is now only one."* A config key or an arch
-tag is the same kind of contract. Where a second copy genuinely cannot be removed,
+`src/commands/tui/build.rs` states the rule this file enforces, for the proto schema
+it generates rather than duplicates: *"A second copy of a wire contract has no way to
+stay honest; there is now only one."* A config key or an arch tag is the same kind of
+contract. Where a second copy genuinely cannot be removed,
 the next best thing is that it cannot drift in silence -- and the failure mode is
 quiet in both directions. The TUI writes `pricing.BY_ARCH.<arch>.<key>` and the node
 reads it back: a key that disagrees means the operator sets a price on a page that

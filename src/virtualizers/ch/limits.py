@@ -88,8 +88,8 @@ MKFS_GROWTH_FACTOR = 2
 #     and its reserved low memory come to ~9 MiB more than arm64's. This is the
 #     constant that has to depend on the architecture -- one shared value is either
 #     wasteful on arm64 or too small on amd64, and too small means a guest OOM-killed
-#     below the ceiling its manifest published, which is the bug this whole change
-#     exists to fix.
+#     below the ceiling its manifest published, which is the shortfall this reserve
+#     exists to close.
 #
 #   * The RATIO part is shared physics, not architecture: one `struct page` per 4 KiB
 #     frame is 64 bytes, i.e. 1.56% of any guest, on both arches. Both measure near
@@ -98,13 +98,12 @@ MKFS_GROWTH_FACTOR = 2
 #
 # Disk already works this way: `initial_rootfs_size_bytes` grows the image by
 # OVERHEAD_BYTES so a service asking for N bytes of disk can store N bytes rather
-# than N minus the filesystem's metadata. Memory simply never got the same
-# treatment. A reserve of zero restores the previous behaviour exactly.
+# than N minus the filesystem's metadata. Memory is sized the same way here. A
+# reserve of zero sizes the VM at exactly the usable figure.
 #
 # WHERE THE MARGIN GOES. Both parts carry margin over the measurements, because the
 # overhead also varies with kernel version and config and the failure mode of too
-# little is a guest OOM. But the two parts must not carry it the same way, and an
-# earlier revision of this table gave both 5%:
+# little is a guest OOM. But the two parts must not carry it the same way:
 #
 #   * The FIXED part is a constant, so margin on it is a constant. ~8 MiB over the
 #     measured figure on either arch, and it stays ~8 MiB whatever the guest's size.
@@ -172,8 +171,8 @@ def _reserve_for_arch(arch: Optional[str]) -> Tuple[int, float]:
 
     Config overrides live under ``virtualizers.ch.GUEST_KERNEL_RESERVE.<arch>`` with
     ``MIB`` and ``RATIO`` keys, so an operator who has measured their own guest kernel
-    can correct one architecture without touching the other. Both at zero restores the
-    pre-reserve behaviour for that arch alone.
+    can correct one architecture without touching the other. Both at zero size the VM
+    at exactly the usable figure, for that arch alone.
     """
     canonical = normalize_arch_tag(arch) or arch
     default_mib, default_ratio = _DEFAULT_GUEST_KERNEL_RESERVE.get(

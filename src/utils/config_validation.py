@@ -294,8 +294,8 @@ PER_ARCH_PRICE_KEYS = (
 def _validate_pricing_by_arch(pricing: Dict[str, Any]) -> None:
     """Validate ``pricing.BY_ARCH``: per-architecture price overrides.
 
-    Absent is valid and means every arch pays the scalar prices -- which is what every
-    config written before this block existed says, so none of them have to change.
+    Absent is valid and means every arch pays the scalar prices, so a config that never
+    mentions the block needs no change.
 
     A malformed entry raises, exactly as a malformed scalar price does. A price nobody
     can read is a configuration error, and the two ways of "handling" one are giving

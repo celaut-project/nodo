@@ -22,10 +22,9 @@ runtime state, and added back by both backends' resize paths. Read from the stat
 rather than recomputed on purpose: an operator who edits the reserve must not move
 the arithmetic of guests already running under the old figure.
 
-An instance launched before the reserve existed has no such key. It was booted at
-exactly its usable figure, so its reserve is zero and every figure below collapses
-to the behaviour it had -- which is what makes this safe to deploy over a node with
-guests already running.
+An instance whose runtime state carries no such key was booted at exactly its usable
+figure. Its reserve reads as zero and every figure below collapses to the plain
+usable target, so a node can pick up guests launched without one.
 """
 import unittest
 from pathlib import Path
@@ -44,7 +43,8 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 MIB = 1024 * 1024
 
-# A guest booted for a 512 MiB usable ceiling on amd64: 512 + 40 fixed + 5%.
+# A guest booted for a 512 MiB usable ceiling on amd64, with the reserve its runtime
+# state records: the arch's fixed part plus a share of the guest.
 USABLE_CEILING = 512 * MIB
 RESERVE = 40 * MIB + 26 * MIB
 BOOT_MEM = USABLE_CEILING + RESERVE
@@ -181,7 +181,7 @@ class TheQemuBalloonSpeaksAllocationsTests(unittest.TestCase):
 
         return _FakeQMP
 
-    def test_an_instance_from_before_the_reserve_resizes_exactly_as_it_did(self):
+    def test_an_instance_with_no_recorded_reserve_takes_the_target_verbatim(self):
         # No `guest_kernel_reserve_bytes` in its state: it was booted at its usable
         # figure, so there is nothing to add back and the target is verbatim.
         state = self._state()
@@ -218,7 +218,7 @@ class TheChCgroupBoundsTheBootAllocationTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(apply_mem.call_args.kwargs["mem_limit"], 256 * MIB + RESERVE)
 
-    def test_an_instance_from_before_the_reserve_is_capped_exactly_as_it_was(self):
+    def test_an_instance_with_no_recorded_reserve_is_capped_at_its_usable_figure(self):
         ok, apply_mem = self._run({"vmachine_id": "vm-1", "pid": 111}, 256 * MIB)
         self.assertTrue(ok)
         self.assertEqual(apply_mem.call_args.kwargs["mem_limit"], 256 * MIB)

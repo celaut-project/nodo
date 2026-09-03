@@ -269,8 +269,9 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
 def _get_host_arch_tag() -> str:
     """This host's canonical arch tag, for display and for keying config lookups.
 
-    Normalisation comes from `arch_guard`, which owns the alias table -- the copy
-    that used to live here had already fallen behind it by one alias (`arm_64`).
+    Normalisation comes from `arch_guard`, which owns the alias table. A second copy
+    of that table here has no way to stay in step with it: one such copy drifted by a
+    full alias (`arm_64`) with nothing to notice.
 
     The fallback is this function's own, and is why it is not simply
     `host_arch_tag()`: an arch nodo has no tag for reads as `linux/ppc64le` here

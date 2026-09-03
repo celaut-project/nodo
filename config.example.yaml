@@ -126,7 +126,7 @@ virtualizers:
     # actually committed, once the reserve is accounted for.
     #
     # Uncomment to override a measurement with your own. MIB and RATIO both at 0
-    # restore the pre-reserve behaviour for that architecture alone.
+    # size the VM at exactly the usable figure, for that architecture alone.
     # GUEST_KERNEL_RESERVE:
     #   linux/amd64:
     #     MIB: 40
@@ -447,8 +447,8 @@ pricing:
   CPU_MU_PER_VCPU_HOUR: 4000000
   DISK_MU_PER_GIB_HOUR: 100000
   # Per-architecture memory price, overriding RAM_MU_PER_GIB_HOUR for guests of that
-  # architecture. Absent -- as in every config written before this existed -- every
-  # arch pays the scalar price above, so nothing has to be migrated.
+  # architecture. Absent, every arch pays the scalar price above, so a config that
+  # never mentions it needs no migration.
   #
   # Memory is the one resource whose real cost to this node depends on the guest's
   # architecture: the guest kernel reserve the node absorbs and never bills differs

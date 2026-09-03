@@ -33,9 +33,9 @@ def _aliases_by_canonical():
     """Alias table per canonical architecture, canonical form first.
 
     Inverted from ``arch_guard.ARCH_ALIASES`` rather than written out a second time.
-    The two copies had already drifted in ordering (`x86_64` before `amd64` here,
-    the other way round there), and a divergence that matters is only a matter of
-    time: this module's lists are what a peer is *told* nodo accepts, so an alias
+    A hand-maintained copy drifts -- in ordering first, which is harmless, and then
+    in membership, which is not: this module's lists are what a peer is *told* nodo
+    accepts, so an alias
     present in one table and missing from the other is a tag a peer offers and this
     node then fails to normalise.
     """

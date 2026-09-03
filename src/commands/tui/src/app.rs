@@ -778,7 +778,7 @@ pub struct PriceEntry {
     pub arch: Option<&'static str>,
     /// True when this row is a per-arch override that is NOT written in config.yaml:
     /// it shows the scalar price it inherits, so the operator can see what an arch is
-    /// charged today and edit it in place, rather than having to know the block exists.
+    /// charged and edit it in place, rather than having to know the block exists.
     pub inherited: bool,
     pub mu: u64,
 }
