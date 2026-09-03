@@ -1,10 +1,15 @@
 """The one way this node opens a gRPC channel or serves one (issue #257).
 
-Every channel is TLS, and every certificate is verified against the ``peer_id`` it
-belongs to before a single byte of gRPC is spoken -- there is no plaintext path left,
-not even for the local CLI: the node has a single listener that serves peers and the
-CLI alike, so an exception for loopback would mean a second listener and a second
-policy to keep in step.
+Every channel opened here is TLS, and every certificate is verified against the
+``peer_id`` it belongs to before a single byte of gRPC is spoken. There is no plaintext
+path through this module at all -- not for peers, not for the local CLI, which reach
+the gateway on the same TLS port, so an exception for loopback would only mean a second
+policy to keep in step with the first.
+
+The node does serve that same gateway in plain gRPC on a second port
+(``network.GATEWAY_PLAINTEXT_PORT``), for the services it executes and for external
+callers that decline TLS. Nothing here can dial it and it is never announced: TLS is
+what the node offers, plaintext is what it tolerates.
 
 Verification cannot happen during the handshake, because gRPC Python exposes no
 certificate-verification callback (grpc/grpc#10701, closed as stale; still absent in

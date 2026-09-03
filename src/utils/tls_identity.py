@@ -3,19 +3,25 @@
 Every gRPC hop used to be plaintext, so a peer could prove *what it said* (the signed
 ``Peer`` of issue #236) but never *who it was talking to*: an active MITM could sit
 between two nodes and swap traffic. This module gives the node a TLS certificate tied
-to the same secp256k1 identity key that already is its ``peer_id``, so the channel
-authenticates the same fact the application layer does -- with no CA, no PKI and no
-system trust store (see ``grpc_transport``, which pins the certificate explicitly).
+to the identity key that already is its ``peer_id``, so the channel authenticates the
+same fact the application layer does -- with no CA, no PKI and no system trust store
+(see ``grpc_transport``, which pins the certificate explicitly).
 
-The certificate cannot *be* the identity key: the ``grpcio`` wheels ship BoringSSL,
-whose ``ec.h`` only knows the NIST curves, so a secp256k1 certificate is impossible --
-not merely unnegotiated. The indirection libp2p uses for exactly this reason is applied
-instead (https://github.com/libp2p/specs/blob/master/tls/tls.md): the certificate holds
-a throwaway P-256 key, and an X.509 extension carries the node's real identity public
-key plus a signature over that certificate's own ``SubjectPublicKeyInfo``. Verifying
-the extension proves the holder of the identity key authorised this certificate, so a
-bare ``ip:port`` can be confirmed to be the peer we meant to reach with no previously
+The certificate does not hold the identity key itself. It holds a throwaway P-256 key,
+and an X.509 extension carries the node's identity public key plus a signature over
+that certificate's own ``SubjectPublicKeyInfo`` -- the indirection libp2p uses
+(https://github.com/libp2p/specs/blob/master/tls/tls.md). Verifying the extension
+proves the holder of the identity key authorised this certificate, so a bare
+``ip:port`` can be confirmed to be the peer we meant to reach with no previously
 received ``Peer`` message and no trust-on-first-use.
+
+The indirection is what the design wants regardless of which cryptography the identity
+is in: the identity key never enters a handshake, never sits in the memory of the
+process doing one, and could one day live offline or in an HSM, while the key that does
+the negotiating stays disposable. It also happens to be the only option available --
+the ``grpcio`` wheels ship BoringSSL, whose ``ec.h`` only knows the NIST curves, so a
+secp256k1 certificate is impossible rather than merely unnegotiated -- but that is the
+lesser reason, and it is not the one to reach for when the identity scheme changes.
 
 The extension format is ours, not libp2p's: their ``peer_id`` is a multihash of a
 protobuf-encoded key while ours is the raw compressed public key, so reusing their
@@ -26,6 +32,13 @@ UUID without registering anything.
 The P-256 key is generated per process and never touches disk. Trust comes from the
 extension, not from the certificate being stable, so there is nothing to persist,
 rotate or back up -- and no second private key on the filesystem.
+
+Nothing here is specific to the identity's signature scheme. The payload signed, the
+extension's ``<public key hex>:<signature hex>`` encoding and the verification path all
+go through ``node_identity`` (``sign_peer_payload`` / ``verify_peer_payload`` /
+``normalize_public_key_hex``) and read both halves as hex of whatever length that
+module defines, so an identity in a different curve or algorithm changes what those
+functions do internally and leaves this format untouched.
 """
 import datetime
 from functools import lru_cache
@@ -79,6 +92,12 @@ def _host_key_payload(certificate_spki: bytes) -> str:
     Signing the SubjectPublicKeyInfo -- not the whole certificate -- is what lets the
     signature be produced before the certificate exists, and what makes the binding
     survive anything else in the certificate changing.
+
+    The payload names no curve, no algorithm and no key length: it is a domain-separated
+    prefix over the SPKI's own bytes. Which cryptography signs it is
+    ``sign_peer_payload``'s business, and which one verifies it is
+    ``verify_peer_payload``'s, so changing the node's identity scheme does not reopen
+    this format.
     """
     return _SIGNATURE_PREFIX + certificate_spki.hex()
 
@@ -110,7 +129,8 @@ def _build_certificate(public_key_hex: str) -> Tuple[bytes, bytes]:
             x509.SubjectAlternativeName([x509.DNSName(TLS_SERVER_NAME)]), critical=False
         )
         # `public_key_hex:signature_hex` in ASCII. The OID is ours, so the contents are
-        # ours to define, and two fixed-length hex fields need no ASN.1 of their own.
+        # ours to define, and two colon-separated hex fields need no ASN.1 of their own
+        # -- neither side is read by length, so neither constrains the identity scheme.
         .add_extension(
             x509.UnrecognizedExtension(
                 HOST_KEY_EXTENSION_OID, f"{public_key_hex}:{signature}".encode("ascii")
