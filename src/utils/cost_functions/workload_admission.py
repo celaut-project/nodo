@@ -190,6 +190,22 @@ def _workload_group_is_satisfiable(
     return False
 
 
+def _declared_limits(resources: celaut.Sysresources) -> str:
+    """The limits a group actually declares, for the message that refuses it.
+
+    Read off the descriptor instead of named one at a time. Naming them by hand
+    described a group by three fields regardless of which one refused it, so a group
+    turned away over `blkio_weight` or `cpu_period` was reported with a `mem_limit`,
+    a `disk_space` and a `cpu_quota` that all looked perfectly fine -- and a limit
+    added to Sysresources later would have gone unmentioned until someone remembered
+    this string. `ListFields` lists the fields that are set, in field-number order,
+    so an undeclared limit stays out rather than showing up as a `0` the operator has
+    to discount.
+    """
+    declared = ", ".join(f"{field.name}={value}" for field, value in resources.ListFields())
+    return declared or "no declared limits"
+
+
 def _unsatisfiable_groups(
         service: celaut.Service,
         ignore_network: Optional[str],
@@ -215,9 +231,7 @@ def _unsatisfiable_groups(
 
             failures.append(
                 f"possible_environment_workload[{scenario_index}].workloads[{workload_index}] "
-                f"(count={workload.count}, mem_limit={workload.resources.mem_limit}, "
-                f"disk_space={workload.resources.disk_space}, "
-                f"cpu_quota={workload.resources.cpu_quota}) "
+                f"(count={workload.count}, {_declared_limits(workload.resources)}) "
                 "cannot be satisfied locally or by any known peer."
             )
             if stop_at_first:
