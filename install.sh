@@ -20,6 +20,9 @@ USE_LOCAL_SOURCE=false
 BRANCH="stable"
 BRANCH_EXPLICIT=false
 CH_VERSION="v51.1"
+# Guest kernel + busybox published by .github/workflows/guest-kernel.yml; bumped independently
+# of nodo releases so a kernel fix does not require cutting a node release.
+GUEST_KERNEL_VERSION="guest-kernel"
 
 print_usage() {
   cat <<EOF
@@ -237,8 +240,8 @@ sync_config_main_paths
 
 # Apply custom architecture-specific setup
 case "$(uname -m)" in
-  aarch64|arm64)  SETUP_SCRIPT="bash/setup_ubuntu_arm.sh" ;;
-  x86_64|amd64)   SETUP_SCRIPT="bash/setup_ubuntu_x86.sh" ;;
+  aarch64|arm64)  SETUP_SCRIPT="bash/setup_linux_arm.sh" ;;
+  x86_64|amd64)   SETUP_SCRIPT="bash/setup_linux_x86.sh" ;;
   *)
     printf "Error: unsupported architecture '%s'. Supported: x86_64/amd64, aarch64/arm64.\n" "$(uname -m)" >&2
     exit 1
@@ -246,7 +249,7 @@ case "$(uname -m)" in
 esac
 
 printf "Running setup script $SETUP_SCRIPT...\n"
-if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION"; then
+if ! /bin/bash "$SETUP_SCRIPT" "$TARGET_DIR" "$CH_VERSION" "$GUEST_KERNEL_VERSION"; then
   printf "Error: The setup script %s failed to execute.\nPlease try running it at least once more. If the issue persists, contact the developers.\n" "$SETUP_SCRIPT" >&2
   exit 1
 fi
@@ -286,6 +289,16 @@ PYTHON_RUNTIME_BIN_PATH="$(read_config_path_or_default '.dependencies.python.RUN
 PYTHON_VENV_BIN_PATH="$(read_config_path_or_default '.dependencies.python.VENV_BIN' "$TARGET_DIR/venv/bin/python")"
 PYTHON_RUNTIME_BIN_DIR_PATH="$(dirname "$PYTHON_RUNTIME_BIN_PATH")"
 
+# resolve_admin_group() lives in bash/lib_pkg.sh so that install.sh and the setup
+# scripts cannot disagree about it -- they both render nodo.service.template, and
+# when only two of the three renderers knew about {{ADMIN_GROUP}} the third shipped
+# a unit systemd could not load. Sourced here rather than at the top of the file:
+# the repo only exists under TARGET_DIR after the checkout above.
+# shellcheck source=bash/lib_pkg.sh
+. "$TARGET_DIR/bash/lib_pkg.sh"
+
+ADMIN_GROUP="$(resolve_admin_group)"
+
 create_service_file() {
   local expected_file
   local escaped_target
@@ -304,6 +317,7 @@ create_service_file() {
     -e "s|{{JAVA_HOME}}|$escaped_java_home|g" \
     -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|$escaped_python_runtime_bin_dir|g" \
     -e "s|{{PYTHON_VENV_BIN}}|$escaped_python_venv_bin|g" \
+    -e "s|{{ADMIN_GROUP}}|$ADMIN_GROUP|g" \
     "$TARGET_DIR/bash/nodo.service.template" > "$expected_file"
   if grep -q '{{[A-Z_][A-Z_]*}}' "$expected_file"; then
     printf "Error: Unresolved placeholders remain in generated service file:\n" >&2
@@ -389,6 +403,19 @@ install_shell_completion() {
 
 install_shell_completion
 
+assign_gateway_port() {
+  # Explicitly, here: this is the last moment in an install that has root AND an
+  # operator watching the terminal, and opening the port is something only they can
+  # finish. Before the chown, so the config.yaml this writes ends up owned like
+  # every other file. Invoked directly, not through the nodo wrapper, so it does not
+  # pull in the heavy import graph or the KYA prompt. Non-fatal by construction.
+  printf "Assigning the gateway port...\n"
+  "$PYTHON_VENV_BIN_PATH" "$TARGET_DIR/src/commands/assign_gateway_port.py" "$TARGET_DIR" \
+    || printf "Gateway port not assigned; 'sudo nodo serve' will report why.\n"
+}
+
+assign_gateway_port
+
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
 
 if systemctl list-unit-files --type=service | grep -Fq "nodo.service"; then
@@ -400,3 +427,13 @@ fi
 
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
 printf "********** You can now use the 'nodo' command. **********\n"
+
+# Last, deliberately. The gateway port is the one thing the node cannot work
+# without, and its alert is written while a helper above loads the config -- so
+# everything printed since (completion, chown, systemctl, the two lines above)
+# stood between the operator and the only message here that asks them to do
+# something. In a terminal the last line is the one that gets read.
+GATEWAY_NOTICE="$TARGET_DIR/.gateway_notice"
+if [ -s "$GATEWAY_NOTICE" ]; then
+  cat "$GATEWAY_NOTICE"
+fi

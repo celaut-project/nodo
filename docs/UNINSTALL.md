@@ -6,7 +6,7 @@ It is aligned with the current runtime model:
 
 - Python/JRE/yq can be local to `MAIN_DIR`.
 - `nodo.service` exports `JAVA_HOME` and `PATH` from configured local paths.
-- No local Docker (services run under Cloud Hypervisor); QEMU/binfmt are not part of the install profile.
+- No local Docker: services run under Cloud Hypervisor natively, or under QEMU when their architecture is not the host's. binfmt is not part of the install profile.
 
 ## 1) Automatic uninstall (`uninstall.sh`)
 
@@ -22,7 +22,8 @@ What it does (best effort):
 
 - Stops/disables `nodo.service`.
 - Stops any systemd `--type=service` units whose `ExecStart` references `/nodo`,
-  kills any embedded `dockerd` left running, and unmounts everything under `/nodo`.
+  stops the rootless BuildKit builder (and any `dockerd` left over from the
+  retired Docker toolchain), and unmounts everything under `/nodo`.
 - Removes `/etc/systemd/system/nodo.service`, `/usr/local/bin/nodo`, and `/nodo`.
 
 > **Note:** the script does **not** clean up running Cloud Hypervisor microVMs.

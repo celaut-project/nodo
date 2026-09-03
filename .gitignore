@@ -10,6 +10,7 @@ dataset.bin
 *.log
 app.log
 config.yaml
+config-*.yaml
 venv
 .venv
 tests/script_data.json
@@ -17,3 +18,4 @@ storage/*
 /docker/
 .codex
 .claude
+.gateway_notice

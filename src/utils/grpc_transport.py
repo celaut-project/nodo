@@ -164,7 +164,7 @@ def local_channel(port: Optional[int] = None) -> grpc.Channel:
         raise CertificateError(
             "This node has no identity keypair, so its own gateway cannot be verified."
         )
-    gateway_port = port if port is not None else ConfigManager().get("GATEWAY_PORT")
+    gateway_port = port if port is not None else ConfigManager().get_gateway_port()
     return node_channel(
         format_uri("127.0.0.1", int(gateway_port)), expected_peer_id=public_key
     )

@@ -2,7 +2,7 @@ import copy
 import os
 import re
 import shutil
-import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -14,6 +14,56 @@ from mnemonic import Mnemonic
 
 from src.utils.network import get_free_port
 from src.utils.singleton import Singleton
+
+
+# "not assigned yet". Defined here, next to the only code that reads it, so that
+# comparing a config string needs nothing but this module: src.utils.config is
+# imported by the shell-completion helper, which the shell runs on every Tab
+# keypress, so the firewall package is imported lazily below rather than pulled
+# in on every CLI invocation.
+GATEWAY_PORT_AUTO = "auto"
+
+# Where "this port has been proven reachable" is recorded, so the daemon does not
+# rebuild a network namespace on every start to re-answer a question it already
+# answered. Two lines: the port, and the boot it was proven in.
+#
+# The boot id is what keeps this honest. An operator who opens the port with
+# `firewall-cmd --add-port` and no `--permanent` loses that rule on the next
+# reboot, and a marker that outlived the rule would skip the one check that would
+# have caught it. Netfilter state does not survive a reboot, so neither does the
+# verdict about it. Deleting the file only costs one probe.
+GATEWAY_PORT_PASSED_FILE = "gateway_port_passed"
+
+# The last gateway-port alert, kept on disk so a caller that prints *after* this
+# process can put it last. install.sh does exactly that: the notice is emitted
+# while a helper loads the config, and everything the installer prints afterwards
+# (chown, systemctl, "completed successfully") would otherwise bury it.
+#
+# Beside config.yaml rather than in the cache, because install.sh has to find it
+# with nothing but $TARGET_DIR -- resolving ${main.STORAGE} from bash is exactly
+# the kind of thing that silently stops working.
+GATEWAY_NOTICE_FILE = ".gateway_notice"
+
+
+def coerce_gateway_port(value: Any) -> Optional[int]:
+    """The gateway port as an int, or None when it is unassigned or unusable.
+
+    ``auto`` is the sentinel meaning "not assigned yet"; anything unparseable or
+    out of range is treated the same way, because a bad value must stop the node
+    rather than be silently rounded into something plausible.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 1 <= value <= 65535 else None
+    text = str(value).strip()
+    if not text or text.lower() == GATEWAY_PORT_AUTO:
+        return None
+    try:
+        port = int(text)
+    except ValueError:
+        return None
+    return port if 1 <= port <= 65535 else None
 
 
 def to_yaml_safe(value: Any) -> Any:
@@ -138,14 +188,26 @@ class ConfigManager(metaclass=Singleton):
     interface to access configuration values.
     """
 
-    def __init__(self, config_path: str = "config.yaml", log: Callable[[str], None] = lambda msg: None):
+    def __init__(self, config_path: str = "config.yaml", log: Optional[Callable[[str], None]] = None):
         self.config_path = config_path
         self._config: Dict[str, Any] = {}
         self._lock = threading.RLock()
         self._loaded = False
         self._config_mtime_ns: Optional[int] = None
         self._last_reload_check: float = 0.0
-        self.log = log
+        # Set while a freshly opened gateway port is still only in memory; see
+        # _withdraw_unsaved_gateway_port.
+        self._assigned_gateway_port: Optional[int] = None
+        # ConfigManager is a Singleton: whichever module constructs it first wins,
+        # and every later ``ConfigManager(log=...)`` call -- including nodo.py's own,
+        # intended to route this through log.LOGGER -- is silently ignored (Singleton
+        # only runs __init__ once). A caller-supplied logger can still lose the race,
+        # so the fallback must never be a no-op: it is the only thing that has ever
+        # surfaced *why* an auto-assigned gateway port failed (see
+        # docs/TROUBLESHOOTING.md -> "Gateway port unreachable, or never assigned").
+        self.log = log if log is not None else (
+            lambda msg: print(msg, file=sys.stderr, flush=True)
+        )
 
     def _get_nested(self, data: Dict[str, Any], keys: List[str]) -> Any:
         """Access a nested dictionary value using a list of keys."""
@@ -205,43 +267,309 @@ class ConfigManager(metaclass=Singleton):
 
         self.log(f"Reloaded {self.config_path} after an external change.")
 
-    def _allow_gateway_port_with_iptables(self, port: int):
-        rule = [
-            "-p",
-            "tcp",
-            "--dport",
-            str(port),
-            "-j",
-            "ACCEPT",
-            "-m",
-            "comment",
-            "--comment",
-            "nodo;gateway;auto_port",
-        ]
-        try:
-            check_result = subprocess.run(
-                ["iptables", "-C", "INPUT", *rule],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if check_result.returncode == 0:
-                return
+    def _guest_network_unlocked(self) -> Dict[str, Optional[str]]:
+        """Where guests reach this node, for the reachability probe.
 
-            subprocess.run(
-                ["iptables", "-I", "INPUT", *rule],
-                check=True,
-                capture_output=True,
-                text=True,
+        Read straight from the loaded tree: this runs mid-load, before path
+        interpolation, and these are plain strings rather than paths.
+        """
+        def _text(keys: List[str], fallback: str) -> str:
+            value = self._get_nested(self._config, keys)
+            text = str(value).strip() if value is not None else ""
+            return text or fallback
+
+        return {
+            "bridge": _text(["virtualizers", "ch", "NETWORK_BRIDGE_NAME"], "nodo-br-ch"),
+            "gateway_ip": _text(["virtualizers", "ch", "NETWORK_GATEWAY_IP"], "192.168.200.1"),
+            "subnet": _text(["virtualizers", "ch", "NETWORK_SUBNET"], "192.168.200.0/24"),
+        }
+
+    def _cache_path_unlocked(self, filename: str) -> str:
+        """A path inside ``main.CACHE``, resolved without the loaded interpolation.
+
+        These run mid-load, before ``_interpolate_paths``, so ``main.CACHE`` is still
+        ``${main.STORAGE}/__cache__/`` and has to be resolved here. If it cannot be
+        (a trimmed-down config, a missing key), the file goes beside config.yaml:
+        having the file somewhere is what matters, not where.
+        """
+        raw = str(self._get_nested(self._config, ["main", "CACHE"]) or "").strip()
+        resolved = self._interpolate_paths(raw) if raw else ""
+        if not resolved or "${" in resolved:
+            resolved = self._config_dir()
+        return os.path.join(resolved, filename)
+
+    def _config_dir(self) -> str:
+        return os.path.dirname(os.path.realpath(self.config_path)) or "."
+
+    @staticmethod
+    def _boot_id() -> str:
+        """This boot, so a verdict about netfilter cannot outlive the netfilter state.
+
+        Empty when the kernel does not offer one, which is treated as "cannot tell
+        which boot this was" and therefore as a marker that does not apply.
+        """
+        try:
+            with open("/proc/sys/kernel/random/boot_id", "r") as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+
+    def gateway_port_passed(self, port: int) -> bool:
+        """Has ``port`` already been proven reachable, in this boot?
+
+        The daemon asks this before probing: a verified port does not need a network
+        namespace built on every restart. Anything unreadable, unparseable, about a
+        different port or from a different boot is a no -- the expensive answer is
+        the safe one.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            try:
+                with open(self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE), "r") as f:
+                    lines = f.read().split()
+            except OSError:
+                return False
+            if len(lines) != 2:
+                return False
+            boot = self._boot_id()
+            return bool(boot) and coerce_gateway_port(lines[0]) == port and lines[1] == boot
+
+    def mark_gateway_port_passed(self, port: int) -> None:
+        """Record that ``port`` was proven reachable. Best-effort.
+
+        A failure to write costs one probe on the next start, so it is logged and
+        never raised.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            path = self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE)
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w") as f:
+                    f.write(f"{port}\n{self._boot_id()}\n")
+            except OSError as e:
+                self.log(f"Could not record the verified gateway port in {path}: {e}")
+                return
+            self._clear_gateway_notice_unlocked()
+
+    def clear_gateway_port_passed(self) -> None:
+        """Forget the verdict, so the next start proves the port again.
+
+        Called whenever network.GATEWAY_PORT is written: a verdict about the old port
+        says nothing about the new one. The TUI does the same thing on its own side
+        (src/commands/tui/src/app.rs), because it edits config.yaml through yq
+        without going through this class.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            self._clear_gateway_port_passed_unlocked()
+
+    def _clear_gateway_port_passed_unlocked(self) -> None:
+        # The pending alert goes with it: it names the old port, so whatever it asked
+        # the operator to do is no longer the thing to do.
+        for path in (
+            self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE),
+            os.path.join(self._config_dir(), GATEWAY_NOTICE_FILE),
+        ):
+            try:
+                os.unlink(path)
+            except OSError:
+                continue
+
+    def _clear_gateway_notice_unlocked(self) -> None:
+        try:
+            os.unlink(os.path.join(self._config_dir(), GATEWAY_NOTICE_FILE))
+        except OSError:
+            pass
+
+    def _withdraw_unsaved_gateway_port(self) -> None:
+        """Take back the rule for a port that was opened but never persisted."""
+        port, self._assigned_gateway_port = self._assigned_gateway_port, None
+        if port is None:
+            return
+        from src.utils.firewall.gateway import withdraw_gateway_port
+
+        self.log(
+            f"Gateway port {port} was opened but could not be saved to "
+            f"{self.config_path}; taking its accept rule back out."
+        )
+        withdraw_gateway_port(port, log=self.log)
+
+    def _gateway_notice_unlocked(self, title: str, body: str) -> None:
+        """Emit a gateway alert: to the log now, to the terminal last, to disk for later.
+
+        Deferred rather than printed, because these are emitted while the config
+        loads -- which on a fresh install is during nodo.py's imports -- and in a
+        terminal the last thing printed is the first thing read. An alert in the
+        middle of the scrollback is an alert nobody acts on.
+        """
+        from src.utils.firewall.gateway import defer_operator_notice, operator_notice
+
+        notice = operator_notice(title, body)
+        path = os.path.join(self._config_dir(), GATEWAY_NOTICE_FILE)
+        try:
+            with open(path, "w") as f:
+                f.write(notice)
+        except OSError:
+            path = ""
+
+        # A one-liner through the log and the framed block at the end, rather than
+        # the block twice: the fallback logger prints straight to stderr, so logging
+        # the whole thing here would put the alert in the middle of the output as
+        # well as at the end -- and two copies of an alert read as noise, which is
+        # the problem being fixed. The full text survives in the file above, and in
+        # app.log wherever a real logger was handed in.
+        self.log(
+            f"{title} -- full notice at the end of this run"
+            + (f", and in {path}" if path else "")
+        )
+        defer_operator_notice(notice)
+
+    def assign_gateway_port_if_unset(self) -> Optional[int]:
+        """Assign the gateway port if there is none. Returns the port in force, or None.
+
+        The only entry point for it, and called from exactly two places: the
+        installer (once, as root, with the operator watching) and the daemon's start
+        path. Both are moments where assigning is the intent, rather than a
+        consequence of some unrelated command having imported this module.
+
+        Idempotent and safe to call when a port is already assigned.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            before = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
+            self._resolve_gateway_port_unlocked()
+            after = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
+            if after != before:
+                try:
+                    self._save_config_unlocked()
+                except Exception:
+                    self._withdraw_unsaved_gateway_port()
+                    raise
+                self._assigned_gateway_port = None
+            return coerce_gateway_port(after)
+
+    def _resolve_gateway_port_unlocked(self):
+        """Pick THE gateway port when there is none, and open it in nodo's ruleset.
+
+        What this deliberately does *not* do is decide whether the port is reachable.
+        That question is answered once, in the daemon's start path, where the guest
+        bridge exists and where a negative answer can do the only useful thing about
+        it: refuse to serve. Verifying here instead is what produced a node that
+        could never assign a port at all -- on a host with firewalld and no guest
+        bridge yet, nothing could ever be proven and nothing was ever stored, so the
+        operator's only way forward was to pin a port by hand, which is the one path
+        with no verification on it whatsoever.
+
+        So the port is stored before it is proven, and the protection moved: the node
+        does not *serve* on an unproven port. What the operator gets in exchange is
+        the one thing the old candidate cache was for -- a port that stays the same
+        between runs, so "open TCP 52285" is still true tomorrow.
+
+        Assignment still needs root, because it writes a firewall rule. An
+        unprivileged run leaves the sentinel alone rather than consuming it.
+        """
+        stored = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
+        if coerce_gateway_port(stored) is not None:
+            return
+
+        if os.geteuid() != 0:
+            self._gateway_notice_unlocked(
+                "gateway port not assigned",
+                "network.GATEWAY_PORT is unassigned and this process is not root, so it\n"
+                "cannot open the port in the host firewall. Leaving it unassigned rather\n"
+                "than storing a port nothing can reach: run 'sudo nodo serve' once, or\n"
+                "set network.GATEWAY_PORT to a port you have opened yourself.",
             )
-        except subprocess.CalledProcessError as e:
-            raise Exception(
-                f"Error attempting to open port {port} in the firewall (iptables): {e.stderr}"
+            return
+
+        free_port_ranges = self._get_nested(self._config, ["network", "FREE_PORTS_RANGE"]) or []
+        try:
+            port = get_free_port(free_port_ranges=free_port_ranges)
+        except Exception as e:
+            self.log(f"Could not pick a free gateway port: {e}")
+            return
+        if not port:
+            self.log("Could not pick a free gateway port: none available in FREE_PORTS_RANGE.")
+            return
+
+        # Imported here, not at module scope: see GATEWAY_PORT_AUTO above. Only a
+        # privileged start ever reaches this point.
+        from src.utils.firewall.gateway import (
+            GatewayPortUnavailable,
+            assign_gateway_port,
+        )
+
+        try:
+            assign_gateway_port(port=port, config_path=self.config_path, log=self.log)
+        except GatewayPortUnavailable as e:
+            self._gateway_notice_unlocked(f"gateway port {port} not assigned", str(e))
+            return
+
+        self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
+        # Written down here, undone by load_config if the file cannot be saved: a
+        # rule with no stored port is a hole in the host's ruleset for a port nobody
+        # will ever use, and nothing would ever clean it up -- the pruning that
+        # removes stale gateway rules keys off the port in config.yaml, which in that
+        # case is still `auto`.
+        self._assigned_gateway_port = port
+        self._clear_gateway_port_passed_unlocked()
+        self.log(
+            f"Assigned gateway port {port} and opened it in nodo's ruleset. It is "
+            "verified on the next start, before the node serves anything."
+        )
+
+    def _require_gateway_port(self, value: Any) -> int:
+        port = coerce_gateway_port(value)
+        if port is None:
+            from src.utils.firewall.gateway import unassigned_port_error
+
+            raise unassigned_port_error(self.config_path)
+        return port
+
+    def get_gateway_port(self) -> int:
+        """The assigned gateway port, or a ``GatewayPortUnavailable`` with instructions."""
+        with self._lock:
+            self.ensure_loaded()
+            return self._require_gateway_port(
+                self._get_nested(self._config, ["network", "GATEWAY_PORT"])
             )
-        except FileNotFoundError:
-            raise Exception(
-                "iptables command not found. Ensure iptables is installed if you intend to open ports."
+
+    def gateway_port_or_none(self) -> Optional[int]:
+        """The assigned gateway port, or None. For diagnostics that must not raise."""
+        with self._lock:
+            self.ensure_loaded()
+            return coerce_gateway_port(
+                self._get_nested(self._config, ["network", "GATEWAY_PORT"])
             )
+
+    def get_plaintext_gateway_port(self) -> int:
+        """The plain-gRPC gateway port, or 0 when the node serves TLS only.
+
+        This is the port handed to the services this node runs -- they speak plain gRPC
+        and read it from ``__config__.gateway`` -- and the one an external caller that
+        declines TLS can use. Peers and the CLI always get the TLS port instead (see
+        ``src/utils/grpc_transport.py``).
+
+        ``auto`` resolves to ``GATEWAY_PORT + 1`` rather than to a free port picked at
+        random, so it is deterministic: a restart does not move the address a long-lived
+        service was handed. Resolved on use rather than at load, since the TLS port it
+        is derived from is assigned by the daemon and may still be ``auto`` when the
+        config is first read.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            configured = self._get_nested(
+                self._config, ["network", "GATEWAY_PLAINTEXT_PORT"]
+            )
+        if configured is None or str(configured).strip() == "":
+            return 0
+        if str(configured).strip().lower() == "auto":
+            return self.get_gateway_port() + 1
+        try:
+            return int(configured)
+        except (TypeError, ValueError):
+            return 0
 
     def load_config(self, force_reload: bool = False):
         """
@@ -294,33 +622,17 @@ class ConfigManager(metaclass=Singleton):
             # failure the gas model shipped with -- are logged instead.
             validate_pricing_config(self._config, warn=lambda message: self.log(f"[PRICING] {message}"))
 
-            # Process dynamic values.
-            gateway_port = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
-            if gateway_port == "auto":
-                free_port_ranges = self._get_nested(self._config, ["network", "FREE_PORTS_RANGE"]) or []
-                port = get_free_port(free_port_ranges=free_port_ranges)
-                if port and os.geteuid() == 0:
-                    self._allow_gateway_port_with_iptables(port=port)
-                self._set_nested(self._config, ["network", "GATEWAY_PORT"], port)
-                self.log(f"Dynamically assigned Gateway Port: {port}")
+            # Note what is NOT here: the gateway port. Picking one writes a rule
+            # into the host's firewall and a value into this file, and that used to
+            # happen as a side effect of loading the config -- so any privileged
+            # `nodo <anything>`, down to the shell-completion helper the terminal
+            # runs on a Tab keypress, could do it. It is now an explicit step, asked
+            # for by the installer and by the daemon: see assign_gateway_port_if_unset.
 
-            # The plaintext gateway port, for the services this node runs (they get it
-            # in __config__.gateway) and for any external caller that does not want TLS.
-            # Peers and the CLI always use the TLS port instead -- see
-            # src/utils/grpc_transport.py. Resolved as GATEWAY_PORT + 1 rather than by
-            # picking a free port, because it is deterministic: a node restart does not
-            # move the address a long-lived service was handed. `0` (or empty) disables
-            # it, leaving TLS as the only way in.
-            plaintext_port = self._get_nested(
-                self._config, ["network", "GATEWAY_PLAINTEXT_PORT"]
-            )
-            if plaintext_port == "auto":
-                gateway_port = self._get_nested(self._config, ["network", "GATEWAY_PORT"])
-                plaintext_port = int(gateway_port) + 1
-                self._set_nested(
-                    self._config, ["network", "GATEWAY_PLAINTEXT_PORT"], plaintext_port
-                )
-                self.log(f"Plaintext Gateway Port: {plaintext_port}")
+            # Note what is NOT here either: the plaintext gateway port. `auto` means
+            # GATEWAY_PORT + 1, and GATEWAY_PORT is itself assigned later, so resolving
+            # it at load time would have to read a port that does not exist yet. See
+            # get_plaintext_gateway_port.
 
             # Each ledger owns exactly ONE wallet (WALLET_MNEMONIC) -- there is no
             # auxiliary/receiver wallet -- and that same key is the node's identity
@@ -432,18 +744,25 @@ class ConfigManager(metaclass=Singleton):
         with self._lock:
             self.ensure_loaded()
 
-            value = self._get_nested(self._config, key.split("."))
-            if value is not None:
-                return value
+            resolved = self._get_nested(self._config, key.split("."))
 
-            if "." not in key:
+            if resolved is None and "." not in key:
                 if key in self._config:
-                    return self._config[key]
-                for section in self._config.values():
-                    if isinstance(section, dict) and key in section:
-                        return section[key]
+                    resolved = self._config[key]
+                else:
+                    for section in self._config.values():
+                        if isinstance(section, dict) and key in section:
+                            resolved = section[key]
+                            break
 
-            return default
+            # GATEWAY_PORT never comes back as the 'auto' sentinel. A caller that
+            # formatted it into an address would bind '[::]:auto', and one that
+            # cast it would raise an opaque ValueError; both hide the real problem.
+            # No assigned port is a hard stop carrying instructions instead.
+            if key.split(".")[-1] == "GATEWAY_PORT":
+                return self._require_gateway_port(resolved)
+
+            return resolved if resolved is not None else default
 
     def set(self, key: str, value: Any):
         """
@@ -459,7 +778,15 @@ class ConfigManager(metaclass=Singleton):
             self._reload_if_file_changed(force_check=True)
             # Normalize now so in-memory reads also get a native value, not a
             # Java/foreign object that would later poison the YAML file.
-            self._set_nested(self._config, key.split("."), to_yaml_safe(value))
+            keys = key.split(".")
+            # A verdict about the old port says nothing about a new one, so writing
+            # the key throws the verdict away. Here rather than in the callers
+            # because every Python-side write funnels through this method; the TUI
+            # edits config.yaml with yq and clears it on its own side.
+            previous = self._get_nested(self._config, keys)
+            self._set_nested(self._config, keys, to_yaml_safe(value))
+            if keys[-1] == "GATEWAY_PORT" and self._get_nested(self._config, keys) != previous:
+                self._clear_gateway_port_passed_unlocked()
             self._save_config_unlocked()
 
     def _interpolate_paths(self, data: Any, context: Optional[Dict[str, Any]] = None):

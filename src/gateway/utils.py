@@ -18,11 +18,19 @@ from src.utils.utils import (
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
-# The plain-gRPC port, when the node serves one (see src/serve.py). Services get
-# this one rather than the TLS port: they speak plain gRPC over a hop that never
-# leaves the host.
-GATEWAY_PLAINTEXT_PORT = env_manager.get("network.GATEWAY_PLAINTEXT_PORT", 0)
+# Both read on use rather than at import: neither port may be assigned yet when this
+# module loads, and an unassigned TLS one must raise where it is needed, not here.
+def _gateway_port() -> int:
+    return env_manager.get_gateway_port()
+
+
+# The plain-gRPC port, when the node serves one (see src/serve.py). Services get this
+# one rather than the TLS port: they speak plain gRPC over a hop that never leaves the
+# host. 0 when the node serves TLS only.
+def _plaintext_gateway_port() -> int:
+    return env_manager.get_plaintext_gateway_port()
+
+
 REGISTRY = env_manager.get("REGISTRY")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 
@@ -76,7 +84,7 @@ def _uri_for_network(network: str) -> celaut.Instance.Uri:
             raise Exception('Error generating gateway instance --> ' + str(e))
     else:
         raise ValueError('Network interface name cannot be None')
-    uri.port = GATEWAY_PORT
+    uri.port = _gateway_port()
     return uri
 
 
@@ -147,8 +155,9 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     public_host = _public_host()
     if public_host:
         seen_ips.add(public_host)
-        uris.append(celaut.Instance.Uri(ip=public_host, port=GATEWAY_PORT))
-        log.LOGGER(f'Announcing public host {public_host}:{GATEWAY_PORT}')
+        gateway_port = _gateway_port()
+        uris.append(celaut.Instance.Uri(ip=public_host, port=gateway_port))
+        log.LOGGER(f'Announcing public host {public_host}:{gateway_port}')
     else:
         log.LOGGER('No public address to announce (set network.PUBLIC_IP if behind NAT).')
 
@@ -165,9 +174,9 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
             continue
         seen_ips.add(ip)
         if _is_globally_routable(ip):
-            uris.append(celaut.Instance.Uri(ip=ip, port=GATEWAY_PORT))
+            uris.append(celaut.Instance.Uri(ip=ip, port=_gateway_port()))
         else:
-            private.append(celaut.Instance.Uri(ip=ip, port=GATEWAY_PORT))
+            private.append(celaut.Instance.Uri(ip=ip, port=_gateway_port()))
 
     if announce_private:
         uris.extend(private)
@@ -203,6 +212,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     from src.reputation_system.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
+        declare_signature_scheme,
         get_node_public_key_hex,
         sign_peer_payload,
     )
@@ -234,6 +244,9 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     peer.public_key = public_key_hex
     peer.signature = signature
     peer.ts = ts
+    # Declared alongside the signature, never without one: the field says what this
+    # signature is, so on an unsigned announcement it would state a fact about nothing.
+    declare_signature_scheme(peer)
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
@@ -294,7 +307,7 @@ def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     nothing for it to guess -- and nothing to pin. With the plaintext port disabled it
     falls back to the TLS port, and then a service does have to speak TLS.
     """
-    port = GATEWAY_PLAINTEXT_PORT or GATEWAY_PORT
+    port = _plaintext_gateway_port() or _gateway_port()
     instance = celaut.Instance()
 
     slot = instance.api.slot.add()
@@ -331,7 +344,7 @@ def plaintext_gateway_host() -> str:
     virtualizer that never created it): the local hop still works, and a caller off-host
     is refused by the kernel rather than by an ACL nobody wrote.
     """
-    network = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")
+    network = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch")
     try:
         host = _uri_for_network(network).ip
     except Exception as e:

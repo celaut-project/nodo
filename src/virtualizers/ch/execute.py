@@ -11,17 +11,13 @@ import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
-from src.gateway.utils import (
-    GATEWAY_PLAINTEXT_PORT,
-    GATEWAY_PORT,
-    generate_node_peer_info,
-    peer_gateway_instance,
-)
+from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
+from src.utils.network_policy import enforce_network_policy
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.hashing import get_configured_hash_spec, hash_bytes
@@ -30,7 +26,19 @@ from src.virtualizers.ch.cgroups import apply_cpu_limit, apply_memory_limit, ens
 # The guest floors live in `limits`: the pricing side applies the same ones to quote an
 # instance before it exists, so both sides read one definition.
 from src.virtualizers.ch import limits
-from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state, list_runtime_states
+# What a nodo initramfs is (required entries, marker, contract version) lives in
+# one place, because doctor.py reports on the same image this module refuses to
+# launch on.
+from src.virtualizers.ch import initramfs as ch_initramfs
+# Which serial device the guest exposes is architecture-determined; doctor.py builds
+# a cmdline too, and the two must not disagree.
+from src.virtualizers.ch import guest as ch_guest
+from src.virtualizers.ch.runtime_state import (
+    save_runtime_state,
+    save_booting_state,
+    delete_runtime_state,
+    list_runtime_states,
+)
 from src.virtualizers.ch.virtiofs import (
     attach_virtiofs_backends,
     build_guest_mount_plan,
@@ -39,14 +47,15 @@ from src.virtualizers.ch.virtiofs import (
     shared_fs_base_dir,
     GUEST_MOUNT_PLAN_PATH,
 )
-from src.utils.shared_filesystems import exported_dirs, share_id
 from src.virtualizers.entry_path import resolve_entrypoint_path
+from src.utils.firewall import policy as fw_policy
 from src.virtualizers.firewall import (
     TransportProtocol,
-    allow_connection as vm_allow_connection,
     allow_connection_to_instance as vm_allow_connection_to_instance,
+    allow_host_connection as vm_allow_host_connection,
     block_all as vm_block_all,
     allow_all_egress as vm_allow_all_egress,
+    remove_vm_rules as vm_remove_vm_rules,
     resolve_slot_transport_protocols,
 )
 
@@ -57,11 +66,13 @@ HASH_SPEC = get_configured_hash_spec(env_manager)
 CACHE = env_manager.get("CACHE")
 CH_BINARY_PATH = env_manager.get("virtualizers.ch.BINARY_PATH")
 NETWORK_MODE = env_manager.get("virtualizers.ch.NETWORK_MODE", "tap_bridge")
-NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")
+NETWORK_BRIDGE_NAME = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch")
 NETWORK_SUBNET = env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24")
 NETWORK_GATEWAY_IP = env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1")
 GUEST_NET_DEVICE = env_manager.get("virtualizers.ch.GUEST_NET_DEVICE", "auto")
-KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "console=ttyS0")
+# No console here: _kernel_cmdline() derives it from the architecture. Defaulting it
+# to console=ttyS0 is what made arm64 guests panic before /init printed anything.
+KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "")
 CH_SERIAL_MODE = env_manager.get("virtualizers.ch.SERIAL_MODE", "file")
 CH_CONSOLE_MODE = env_manager.get("virtualizers.ch.CONSOLE_MODE", "off")
 CH_API_SOCKET_DIR = env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch")
@@ -177,30 +188,33 @@ def _load_bundle(service_id: str, arch: str) -> Dict[str, str]:
 
 
 def _validate_custom_initramfs(initramfs_path: str) -> None:
-    _ensure_command_available("lsinitramfs")
-    result = _run(["lsinitramfs", initramfs_path], check=False)
-    if result.returncode != 0:
+    try:
+        entries, version = ch_initramfs.read(initramfs_path)
+    except ch_initramfs.InitramfsReadError as e:
         raise CHExecuteError(
-            f"Unable to inspect initramfs with lsinitramfs: {initramfs_path}. "
-            f"stderr={((result.stderr or '').strip() or '<empty>')}"
-        )
+            f"Unable to inspect CH initramfs {initramfs_path}: {e}"
+        ) from e
 
-    entries = {
-        line.strip().lstrip("./")
-        for line in (result.stdout or "").splitlines()
-        if line.strip()
-    }
-    required_entries = {
-        "init",
-        "bin/busybox",
-        "etc/nodo-ch-initramfs.marker",
-    }
-    missing = sorted(required_entries.difference(entries))
+    missing = ch_initramfs.missing_entries(entries)
     if missing:
         raise CHExecuteError(
             "Invalid Cloud Hypervisor initramfs. Missing required custom entries: "
             f"{missing}. initramfs={initramfs_path}. Re-run installation to regenerate "
             "the custom CH initramfs."
+        )
+
+    # The image is pinned by digest, while /init's half of its contract with this
+    # module lives in the code, so the two can be bumped out of step. Checking the
+    # version turns that skew into one precise error here, instead of a guest that
+    # boots and then parks forever in /init's fatal() loop while the launch times
+    # out with nothing useful to show.
+    if version != ch_initramfs.CONTRACT_VERSION:
+        raise CHExecuteError(
+            "Cloud Hypervisor initramfs speaks contract version "
+            f"'{version or '<unknown>'}', but this node needs "
+            f"'{ch_initramfs.CONTRACT_VERSION}'. initramfs={initramfs_path}. The "
+            "pinned guest asset and this checkout disagree: re-run installation to "
+            "fetch the initramfs matching this code."
         )
 
 
@@ -296,79 +310,128 @@ def _ensure_command_available(command: str) -> None:
         raise CHExecuteError(f"Required command not found in PATH: {command}")
 
 
-def _network_preflight() -> ipaddress.IPv4Network:
-    if NETWORK_MODE != "tap_bridge":
-        raise CHExecuteError(
-            f"Unsupported NETWORK_MODE '{NETWORK_MODE}'. This phase supports only 'tap_bridge'."
-        )
+def ensure_guest_bridge() -> ipaddress.IPv4Network:
+    """Create the guest bridge with its gateway address, idempotently. Root only.
 
-    for command in ("ip", "sysctl", "iptables", "debugfs", "ping"):
-        _ensure_command_available(command)
+    Split out of ``_network_preflight`` because the bridge is needed before any
+    instance runs: it is the only vantage point from which the gateway port can be
+    probed the way a guest reaches it (``src.utils.firewall.reachability``), and
+    creating it lazily on the first launch meant that at every moment the node
+    actually had to decide something about that port -- assigning it, verifying it
+    at startup -- the bridge did not exist and nothing could be proven.
 
+    Only the link, its address and its state. Forwarding, masquerading and guest
+    isolation stay in ``_network_preflight``: they are about carrying guest traffic,
+    which is the virtualizer's business and not the gateway's.
+    """
     network = _ip_network()
-    prefix_len = network.prefixlen
 
     link_exists = _run(["ip", "link", "show", NETWORK_BRIDGE_NAME], check=False)
     if link_exists.returncode != 0:
         _run(["ip", "link", "add", NETWORK_BRIDGE_NAME, "type", "bridge"])
 
     addr_show = _run(["ip", "-4", "addr", "show", "dev", NETWORK_BRIDGE_NAME], check=False)
-    expected_cidr = f"{NETWORK_GATEWAY_IP}/{prefix_len}"
+    expected_cidr = f"{NETWORK_GATEWAY_IP}/{network.prefixlen}"
     if expected_cidr not in (addr_show.stdout or ""):
         _run(["ip", "addr", "add", expected_cidr, "dev", NETWORK_BRIDGE_NAME])
 
     _run(["ip", "link", "set", NETWORK_BRIDGE_NAME, "up"])
+    return network
+
+
+def _network_preflight() -> ipaddress.IPv4Network:
+    if NETWORK_MODE != "tap_bridge":
+        raise CHExecuteError(
+            f"Unsupported NETWORK_MODE '{NETWORK_MODE}'. This phase supports only 'tap_bridge'."
+        )
+
+    for command in ("ip", "sysctl", "debugfs", "ping"):
+        _ensure_command_available(command)
+
+    # Either netfilter front-end will do; the backend picks whichever this host
+    # actually speaks, so demanding iptables specifically would fail an
+    # nftables-only host that works perfectly well.
+    if not any(shutil.which(command) for command in ("nft", "iptables")):
+        raise CHExecuteError(
+            "No netfilter tool found in PATH: install nftables (preferred) or iptables."
+        )
+
+    network = ensure_guest_bridge()
+
     _run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
+    _ensure_guest_l2_isolation()
+    # Not fatal, on purpose. This is the one thing nodo writes into a table it does
+    # not own, and a host that refuses it -- or an operator who turned it off -- has
+    # a node that still boots guests. What must not happen is booting them while
+    # claiming the network is fine: 'nodo doctor' settles that with a real packet.
+    _ensure_forward_compat()
     _ensure_masquerade(network)
 
     return network
 
-# TODO Use firewall.py
-def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
-    # The MASQUERADE rule is shared across all VMs in the NETWORK_SUBNET.
-    # It should NOT be added to 'cleanup_rules' or removed when shutting down a single VM,
-    # as doing so could break connectivity for other active machines.
-    # Only DNAT / port-forwarding rules are VM-specific and safe to clean up
-    # when the instance terminates.
-    subnet = network.with_prefixlen
-    check_cmd = [
-        "iptables",
-        "-t",
-        "nat",
-        "-C",
-        "POSTROUTING",
-        "-s",
-        subnet,
-        "!",
-        "-d",
-        subnet,
-        "-j",
-        "MASQUERADE",
-        "-m", "comment",
-        "--comment", f"nodo;masquerade;subnet={subnet}",
-    ]
-    exists = _run(check_cmd, check=False)
-    if exists.returncode == 0:
-        return
+def _ensure_forward_compat() -> None:
+    """Ask for the guest paths back from whatever else filters this host's FORWARD.
 
-    _run(
-        [
-            "iptables",
-            "-t",
-            "nat",
-            "-A",
-            "POSTROUTING",
-            "-s",
-            subnet,
-            "!",
-            "-d",
-            subnet,
-            "-j",
-            "MASQUERADE",
-            "-m", "comment",
-            "--comment", f"nodo;masquerade;subnet={subnet}",
-        ]
-    )
+    See ``src/utils/firewall/compat.py`` for what this does and, just as important,
+    what it cannot reach -- firewalld's own table is out of its range, and saying so
+    is better than a rule that looks like it should have worked.
+    """
+    from src.virtualizers.firewall import ensure_forward_compat
+
+    try:
+        state = ensure_forward_compat(NETWORK_BRIDGE_NAME)
+    except Exception as e:
+        log.LOGGER(f"[CH][FW] Could not evaluate the forward compatibility rules: {e}")
+        return
+    if state.error:
+        log.LOGGER(f"[CH][FW] {state.detail} {state.error}")
+
+
+def _ensure_guest_l2_isolation() -> None:
+    """Route guest-to-guest traffic through the host, where the policy lives.
+
+    ``block_all`` and every ``allow`` nodo writes sit on the *forward* hook, which
+    only sees packets the host routes. Two guests on this bridge share one L2
+    domain: they ARP each other directly and their frames are switched tap to
+    tap, never reaching that hook. So the allow-list is a no-op for the one class
+    of destination that matters most -- the other instances on this node.
+
+    Isolating the ports (see ``_create_tap``) alone only breaks things: the
+    neighbour stops answering ARP, so a service cannot reach its own dependency
+    either. Proxy ARP is the other half. The host answers on the neighbour's
+    behalf, the guest hands it the frame, and the host routes it -- which is
+    exactly what puts the packet in front of the forward chain. ``proxy_arp_pvlan``
+    is the variant that replies on the interface the request arrived on; plain
+    ``proxy_arp`` stays silent in that case, which is the case we have. And
+    redirects have to go: otherwise the host helpfully tells the guest to talk to
+    the neighbour directly, which isolation has just made impossible.
+
+    Failing here is deliberate. A half-applied setup is the worst outcome: either
+    guests reach each other unfiltered while the rules claim otherwise, or
+    dependencies break with no ARP answer and no route.
+    """
+    for key, value in (
+        (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.proxy_arp", "1"),
+        (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.proxy_arp_pvlan", "1"),
+        (f"net.ipv4.conf.{NETWORK_BRIDGE_NAME}.send_redirects", "0"),
+    ):
+        _run(["sysctl", "-w", f"{key}={value}"])
+
+
+def _ensure_masquerade(network: ipaddress.IPv4Network) -> None:
+    """Source-NAT the guest subnet on its way off this host.
+
+    Shared by every VM in NETWORK_SUBNET, so it is never part of a single
+    instance's teardown: removing it would cut connectivity for the others.
+    """
+    from src.virtualizers.ch.firewall import backend
+
+    rule = fw_policy.masquerade_rule(network.with_prefixlen)
+    try:
+        if backend().ensure(rule):
+            log.LOGGER(f"[CH][FW] Masquerading {network.with_prefixlen} on egress.")
+    except Exception as e:
+        raise CHExecuteError(f"Could not ensure the guest subnet masquerade: {e}") from e
 
 
 def _create_tap(vmachine_id: str) -> str:
@@ -381,6 +444,11 @@ def _create_tap(vmachine_id: str) -> str:
 
     _run(["ip", "tuntap", "add", "dev", tap_name, "mode", "tap"])
     _run(["ip", "link", "set", tap_name, "master", NETWORK_BRIDGE_NAME])
+    # An isolated bridge port can only exchange frames with the bridge itself,
+    # never with another isolated port, so a guest reaches its neighbours through
+    # the host -- and through the firewall. See _ensure_guest_l2_isolation for the
+    # proxy-ARP half this depends on.
+    _run(["ip", "link", "set", "dev", tap_name, "type", "bridge_slave", "isolated", "on"])
     _run(["ip", "link", "set", tap_name, "up"])
 
     return tap_name
@@ -419,6 +487,15 @@ def _build_network_resolution(
     networks = service.network
     if father_id and sc.internal_instance_exists(id=father_id):
         networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
+
+    # Defence in depth for the operator's network policy (#280). The launcher and the
+    # cost path already refuse a service whose declaration the policy rejects, so
+    # what is judged here is the narrower set that survived the ancestor chain --
+    # what is actually about to be opened. It aborts the launch instead of dropping
+    # the network, because reaching this line at all means an earlier check did not
+    # run, and a guest silently started without the egress it asked for is the
+    # unexplained rejection this policy exists to replace.
+    enforce_network_policy(networks=networks, subject="this instance")
 
     # The requesting instance's own environment values drive Network peer
     # filtering (Service.Network.environment_variable).
@@ -480,101 +557,42 @@ def _run_debugfs_write(image_path: Path, host_file: Path, guest_target: str) -> 
     _run(["debugfs", "-w", "-R", write_cmd, str(image_path)])
 
 
-# TODO Use firewall.py
-def _add_dnat_rule(vmachine_id: str, protocol: str, external_port: int, vm_ip: str, internal_port: int) -> List[List[str]]:
+def _add_dnat_rule(
+    vmachine_id: str, protocol: str, external_port: int, vm_ip: str, internal_port: int
+) -> None:
+    """Publish a guest port on the host.
+
+    PREROUTING does the translation; the FORWARD pair lets the translated packet
+    and its replies past the guest policy. OUTPUT is not involved because it only
+    sees traffic the host itself originates.
+
+    Nothing is returned: the rules carry this VM's comment prefix, so teardown
+    deletes them by prefix instead of replaying the arguments that created them.
     """
-    Forwards a host port to a VM.
+    from src.virtualizers.ch.firewall import backend
 
-    - PREROUTING: redirects incoming traffic from outside.
-    - FORWARD: allows new connections to the VM and the return of the session.
-    - OUTPUT is not used because it only affects traffic originating locally on the host.
-
-    Note:
-    - Each iptables rule includes a comment with the VM ID (`vmachine_id`) to allow
-      filtering, coloring, or later removal specific to this VM.
-    """
-    protocol = protocol.lower().strip()
-    if protocol not in {"tcp", "udp"}:
-        raise ValueError(f"Unsupported protocol: {protocol}")
-
-    external_port_s = str(int(external_port))
-    internal_port_s = str(int(internal_port))
-
-    # Add DNAT and FORWARD rules with VM-specific comments for easier identification
-    add_commands = [
-        [
-            "iptables", "-t", "nat", "-A", "PREROUTING",
-            "-p", protocol,
-            "--dport", external_port_s,
-            "-j", "DNAT",
-            "--to-destination", f"{vm_ip}:{internal_port_s}",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-        [
-            "iptables", "-A", "FORWARD",
-            "-p", protocol,
-            "-d", vm_ip,
-            "--dport", internal_port_s,
-            "-m", "conntrack",
-            "--ctstate", "NEW,ESTABLISHED,RELATED",
-            "-j", "ACCEPT",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-        [
-            "iptables", "-A", "FORWARD",
-            "-p", protocol,
-            "-s", vm_ip,
-            "--sport", internal_port_s,
-            "-m", "conntrack",
-            "--ctstate", "ESTABLISHED,RELATED",
-            "-j", "ACCEPT",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-    ]
-
-    for command in add_commands:
-        _run(command)
-
-    # Return the commands to remove the rules later (also including the comment)
-    return [
-        [
-            "iptables", "-t", "nat", "-D", "PREROUTING",
-            "-p", protocol,
-            "--dport", external_port_s,
-            "-j", "DNAT",
-            "--to-destination", f"{vm_ip}:{internal_port_s}",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-        [
-            "iptables", "-D", "FORWARD",
-            "-p", protocol,
-            "-d", vm_ip,
-            "--dport", internal_port_s,
-            "-m", "conntrack",
-            "--ctstate", "NEW,ESTABLISHED,RELATED",
-            "-j", "ACCEPT",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-        [
-            "iptables", "-D", "FORWARD",
-            "-p", protocol,
-            "-s", vm_ip,
-            "--sport", internal_port_s,
-            "-m", "conntrack",
-            "--ctstate", "ESTABLISHED,RELATED",
-            "-j", "ACCEPT",
-            "-m", "comment",
-            "--comment", f"nodo;vm_id={vmachine_id}"
-        ],
-    ]
+    active = backend()
+    for rule in fw_policy.port_forward_rules(
+        vmachine_id=vmachine_id,
+        vm_ip=vm_ip,
+        protocol=protocol,
+        external_port=external_port,
+        internal_port=internal_port,
+    ):
+        try:
+            active.ensure(rule)
+        except Exception as e:
+            raise CHExecuteError(
+                f"Could not publish {protocol} port {external_port} for {vmachine_id}: {e}"
+            ) from e
 
 
 def _remove_rules(commands: List[List[str]]) -> None:
+    """Replay the removal commands stored by pre-nftables versions of nodo.
+
+    Kept for runtime state written before rules were deleted by comment. New
+    instances persist an empty list and are torn down by comment prefix instead.
+    """
     for command in commands:
         _run(command, check=False)
 
@@ -724,67 +742,32 @@ def _resolve_guest_config_targets(service: celaut.Service) -> List[str]:
     return ["/__config__"]
 
 
-def _is_domain_tag(tag: str) -> bool:
-    text = str(tag).strip().lower()
-    if not text or "." not in text or " " in text:
-        return False
-    return all(ch.isalnum() or ch in {"-", "."} for ch in text)
-
-
-def _resolve_domain_allowlist_records(
-    network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
-) -> List[Tuple[str, str]]:
-    records: set[Tuple[str, str]] = set()
-
-    for net_res in network_resolution:
-        domains = [str(tag).strip().lower() for tag in net_res.tags if _is_domain_tag(tag)]
-        if not domains:
-            continue
-
-        ips: set[str] = set()
-        for instance in net_res.peer_instances:
-            for slot in instance.uri_slot:
-                for uri in slot.uri:
-                    ip_text = str(uri.ip).strip()
-                    if not ip_text:
-                        continue
-                    try:
-                        parsed = ipaddress.ip_address(ip_text)
-                    except ValueError:
-                        continue
-                    if parsed.version != 4:
-                        continue
-                    ips.add(ip_text)
-
-        for domain in domains:
-            for ip in ips:
-                records.add((domain, ip))
-
-    return sorted(records, key=lambda item: (item[0], item[1]))
-
-
-def _prepare_guest_dns_files(
-    runtime_dir: Path,
-    network_resolution: List[celaut.ConfigurationFile.NetworkResolution],
-) -> Tuple[Path, Path, List[Tuple[str, str]]]:
-    domain_records = _resolve_domain_allowlist_records(network_resolution)
-
-    hosts_lines = ["127.0.0.1 localhost"]
-    for domain, ip in domain_records:
-        hosts_lines.append(f"{ip} {domain}")
-    hosts_content = "\n".join(hosts_lines) + "\n"
-
-    resolv_content = f"nameserver {NETWORK_GATEWAY_IP}\noptions ndots:1\n"
-
-    hosts_host_path = runtime_dir / ".__nodo_hosts"
-    resolv_host_path = runtime_dir / ".__nodo_resolv.conf"
-
-    with open(hosts_host_path, "w", encoding="utf-8") as f:
-        f.write(hosts_content)
-    with open(resolv_host_path, "w", encoding="utf-8") as f:
-        f.write(resolv_content)
-
-    return hosts_host_path, resolv_host_path, domain_records
+# Name resolution is deliberately not nodo's business.
+#
+# This module used to resolve every network tag that looked like a domain and write
+# the answers into the guest's own /etc/hosts, plus an /etc/resolv.conf naming the
+# bridge address as the guest's nameserver. Both are gone, because both were wrong
+# in the same way: the node reached into a filesystem it does not own to install a
+# glibc-specific convention that the service could neither declare, refuse, nor
+# receive in a format of its choosing -- which is precisely what
+# `Container.ConfigDeclaration` exists to avoid.
+#
+# What the node owes a guest is the DATA, and it already delivers it the declared
+# way: `ConfigurationFile.network_resolution` (tags -> peer Instances, each with its
+# uri_slot and protocol stack) inside `__config__`, at the path and format the
+# service declared. That is strictly richer than a hosts file -- it carries ports,
+# protocols and env-filtered peers, and it is not frozen at launch the way a
+# resolved A record is.
+#
+# Name resolution on top of that is a service's job, and the ecosystem already does
+# it: a service reads `network_resolution` from its own `__config__` and serves DNS
+# from it for whatever inside the guest wants `getaddrinfo`. The injected
+# resolv.conf actively broke that -- it pointed the guest at the bridge address,
+# where nodo listens for gRPC and nothing answers on 53, instead of leaving the
+# guest's own resolver reachable.
+#
+# A `Network` in the spec is "a logical communication domain", identified by tags.
+# Reading a tag as a DNS hostname was nodo's invention, not the model's.
 
 
 def _configure_guest_firewall_policy(
@@ -797,43 +780,47 @@ def _configure_guest_firewall_policy(
             f"Failed to apply default deny firewall policy for VM {vmachine_id} ({vm_ip})."
         )
 
-    # Both gateway ports: the plaintext one is what this guest's __config__ names
-    # (a service speaks plain gRPC), and the TLS one stays reachable so a service that
-    # wants to pin the node's certificate can (issue #257).
+    # NETWORK_GATEWAY_IP is one of this host's own addresses, so this allow goes on
+    # the *input* hook. Written as an ordinary egress allow -- which is what it was
+    # -- it landed in FORWARD, which a packet addressed to the host never traverses:
+    # the rule could not match anything, while the log announced it as granted
+    # access. See `policy.allow_host_connection_rule`.
+    #
+    # The gateway is the only service of the node's own that a guest is given access
+    # to. There is no rule for port 53: nodo does not serve DNS, and a guest that wants
+    # name resolution gets it from a service (see the note above
+    # `_configure_guest_firewall_policy`), reached through the ordinary peer-instance
+    # allows or inside its own container.
+    #
+    # Both of the gateway's ports are opened: the plaintext one is what this guest's
+    # __config__ names (a service speaks plain gRPC), and the TLS one stays reachable
+    # so a service that wants to pin the node's certificate can (issue #257).
+    #
+    # Both are read here rather than at import: they are assigned by the daemon, which
+    # may well happen after this module was first loaded.
     for gateway_port in dict.fromkeys(
-        port for port in (GATEWAY_PLAINTEXT_PORT, GATEWAY_PORT) if port
+        port
+        for port in (
+            env_manager.get_plaintext_gateway_port(),
+            env_manager.get_gateway_port(),
+        )
+        if port
     ):
-        if not vm_allow_connection(
+        if not vm_allow_host_connection(
             vmachine_id=vmachine_id,
-            ip=NETWORK_GATEWAY_IP,
+            host_ip=NETWORK_GATEWAY_IP,
             port=gateway_port,
             protocol=TransportProtocol.TCP,
             source_ip=vm_ip,
         ):
             raise CHExecuteError(
-                f"Failed to allow gateway egress for VM {vmachine_id}: "
+                f"Failed to allow gateway access for VM {vmachine_id}: "
                 f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
             )
         log.LOGGER(
             f"[CH][{vmachine_id}] firewall allow gateway: "
             f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
         )
-
-    for dns_protocol in (TransportProtocol.UDP, TransportProtocol.TCP):
-        if not vm_allow_connection(
-            vmachine_id=vmachine_id,
-            ip=NETWORK_GATEWAY_IP,
-            port=53,
-            protocol=dns_protocol,
-            source_ip=vm_ip,
-        ):
-            raise CHExecuteError(
-                f"Failed to allow DNS egress for VM {vmachine_id}: "
-                f"{vm_ip} -> {NETWORK_GATEWAY_IP}:53/{dns_protocol.value}"
-            )
-    log.LOGGER(
-        f"[CH][{vmachine_id}] firewall allow DNS: {vm_ip} -> {NETWORK_GATEWAY_IP}:53/tcp,udp"
-    )
 
     # Network tag "*" => open-internet egress. Allow-all is inserted at the head
     # of FORWARD so it takes precedence over the default-deny block_all rule.
@@ -875,10 +862,31 @@ def _kernel_cmdline(vm_ip: str, netmask: str) -> str:
     else:
         ip_param = f"ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}::{guest_dev}:off"
 
-    cmdline_parts = ["root=/dev/vda", "rw", ip_param]
+    # The console is derived, never configured. It is determined by the architecture
+    # (see ch.guest.serial_device), and naming the wrong one does not degrade the
+    # guest, it kills it: /init's first statement redirects to /dev/console, so on
+    # arm64 a `console=ttyS0` panics PID 1 before it prints anything.
+    #
+    # A console= in KERNEL_CMDLINE_EXTRA is therefore dropped rather than honoured.
+    # config.example.yaml shipped `console=ttyS0` with a comment telling operators to
+    # keep it, so it is in the config of every node installed before this, and those
+    # nodes cannot launch anything until it stops taking effect.
+    console = ch_guest.serial_device()
+    cmdline_parts = ["root=/dev/vda", "rw", ip_param, f"console={console}"]
+
     extra = str(KERNEL_CMDLINE_EXTRA).strip() if KERNEL_CMDLINE_EXTRA is not None else ""
     if extra:
-        cmdline_parts.append(extra)
+        kept = [tok for tok in extra.split() if not tok.startswith("console=")]
+        dropped = [tok for tok in extra.split() if tok.startswith("console=")]
+        for tok in dropped:
+            if tok != f"console={console}":
+                log.LOGGER(
+                    f"[CH] ignoring '{tok}' from virtualizers.ch.KERNEL_CMDLINE_EXTRA: "
+                    f"this architecture's guest console is {console}."
+                )
+        if kept:
+            cmdline_parts.extend(kept)
+
     return " ".join(cmdline_parts)
 
 
@@ -910,9 +918,30 @@ def execute(
     service_id: str,
     service: celaut.Service,
     config: Optional[celaut.Configuration],
-    initial_system_resources: celaut.Sysresources,
+    system_resources: celaut.Service.Container.Resources,
     father_id: str,
+    register_instance: Optional[Callable[[str, str, celaut.Sysresources], None]] = None,
 ) -> Tuple[str, str, celaut.Sysresources]:
+    """Boot ``service`` as a microVM and return (vmachine_id, vm_ip, resolved).
+
+    ``register_instance`` is called once, with those same three values, the instant
+    the hypervisor process exists -- not when this function returns. A guest starts
+    running code while the rest of this function is still waiting for its network,
+    applying firewall rules and recording DNAT, and a service's first act is often
+    a call back to the node: an observed one asked for ModifyServiceSystemResources
+    less than a second after boot. Everything the node knows about a caller it looks
+    up by source address, so an instance it has not recorded yet is a caller it
+    cannot identify -- and it answered that first call with
+    ``Error charging for the resource change of <ip>``, because the charge is where
+    the missing row was first noticed. Hence the callback here rather than at the
+    call site: only the backend knows when the guest becomes able to speak.
+
+    Only the ``at_init`` end of ``system_resources`` is read here. CH resizes a guest
+    by moving its cgroup, which can be raised at any point in the instance's life, so
+    there is nothing about the declared ceiling this backend needs to reserve while
+    booting -- unlike QEMU, whose ``-m`` is fixed once the process exists.
+    """
+    initial_system_resources = system_resources.at_init
     vmachine_id = _generate_vmachine_id()
     runtime_dir = _runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []
@@ -1002,25 +1031,6 @@ def execute(
             )
         log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed for {len(config_targets)} target(s)")
 
-        hosts_host_path, resolv_host_path, domain_records = _prepare_guest_dns_files(
-            runtime_dir=runtime_dir,
-            network_resolution=network_resolution,
-        )
-        _run_debugfs_write(
-            image_path=rootfs_path,
-            host_file=hosts_host_path,
-            guest_target="/etc/hosts",
-        )
-        _run_debugfs_write(
-            image_path=rootfs_path,
-            host_file=resolv_host_path,
-            guest_target="/etc/resolv.conf",
-        )
-        log.LOGGER(
-            f"[CH][{vmachine_id}] guest DNS metadata injected: /etc/hosts + /etc/resolv.conf "
-            f"(allowed_domains={len(domain_records)}, resolver={NETWORK_GATEWAY_IP})"
-        )
-
         with open(entrypoint_host_path, "w", encoding="utf-8") as f:
             f.write(f"{resolved_entrypoint}\n")
         log.LOGGER(f"[CH][{vmachine_id}] entrypoint metadata serialized: {entrypoint_host_path}")
@@ -1080,6 +1090,23 @@ def execute(
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
 
+        # Committed to the FORWARD chain before the guest exists, not after it
+        # starts pinging. Nothing this needs -- vm_ip, the gateway's address and
+        # port, network_resolution -- depends on the guest being alive; every one
+        # of them was already resolved above, to build this VM's own config. The
+        # tap is enslaved to the bridge as of the line above, so it is already
+        # forwarding-capable: a policy applied any later (this used to run after
+        # `_wait_guest_network_ready`, seconds from now) left a real window in
+        # which a booting guest's traffic answered only to the host's own default
+        # FORWARD policy -- unrestricted on a plain install -- instead of nodo's
+        # allow-list. This is that policy's only chance to be in place before a
+        # single packet could have been forwarded.
+        _configure_guest_firewall_policy(
+            vmachine_id=vmachine_id,
+            vm_ip=vm_ip,
+            network_resolution=network_resolution,
+        )
+
         vcpus, mem_b, cpu_quota, cpu_period = limits.resolve_initial_resources(initial_system_resources)
         # The row must record what was resolved here -- the values actually enforced
         # on the guest (cgroup cpu.max + VM memory size) below -- not what the
@@ -1100,11 +1127,31 @@ def execute(
             mem_limit=mem_b,
             disk_space=disk_b,
         )
-        mem_mib = math.ceil(mem_b / (1024 * 1024))
+        # The VM is booted larger than the figure above: `mem_b` is memory the
+        # *service* may use, and the guest kernel's own footprint (text, percpu, one
+        # struct page per frame) comes out of the VM's RAM before init runs. Sizing
+        # the VM at `mem_b` hands the service less than its manifest declared and
+        # OOM-kills it below its own ceiling. Only the boot argument grows; the row
+        # and the price stay at `mem_b`, so the node absorbs the kernel rather than
+        # billing the client for it.
+        #
+        # The reserve is per-architecture: `arch` here is the guest's, resolved above
+        # from the service's own manifest, not the host's. On the CH path they are
+        # always the same (KVM cannot run a foreign guest), but passing it explicitly
+        # keeps the two backends reading the same figure from the same place.
+        boot_mem_b = limits.guest_boot_memory_bytes(mem_b, arch=arch)
+        # What separates the VM's RAM size from the usable bytes the row records.
+        # Persisted in the runtime state below: this backend's resize knob is the
+        # cgroup, so every later memory change has to add the same figure back to
+        # keep bounding the boot allocation rather than the usable one.
+        guest_kernel_reserve_b = boot_mem_b - mem_b
+        mem_mib = math.ceil(boot_mem_b / (1024 * 1024))
         netmask = str(network.netmask)
         kernel_cmdline = _kernel_cmdline(vm_ip=vm_ip, netmask=netmask)
         log.LOGGER(
-            f"[CH][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib}, "
+            f"[CH][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib} "
+            f"(usable target {math.ceil(mem_b / (1024 * 1024))} MiB + "
+            f"{math.ceil(guest_kernel_reserve_b / (1024 * 1024))} MiB {arch} guest kernel reserve), "
             f"guest_net_device={GUEST_NET_DEVICE}, kernel_cmdline={kernel_cmdline}"
         )
 
@@ -1160,6 +1207,26 @@ def execute(
             f"stdout={stdout_path}, stderr={stderr_path}"
         )
 
+        # From here the guest is running: the kernel is booting and the service on
+        # it can reach the gateway before this function does anything else. So the
+        # node's two records of it are written now, before the health check's own
+        # second of sleep, and not at the end of the launch.
+        save_booting_state(
+            vmachine_id,
+            virtualizer="ch",
+            service_id=service_id,
+            pid=process.pid,
+            ip=vm_ip,
+            mac=mac,
+            tap=tap_name,
+            bridge=NETWORK_BRIDGE_NAME,
+            cleanup_rules=cleanup_rules,
+            rule_comment_prefix=fw_policy.vm_comment_prefix(vmachine_id),
+        )
+        if register_instance:
+            register_instance(vmachine_id, vm_ip, resolved_resources)
+            log.LOGGER(f"[CH][{vmachine_id}] instance registered before the guest could call in")
+
         time.sleep(1.0)
         if process.poll() is not None:
             raise CHExecuteError(
@@ -1170,7 +1237,11 @@ def execute(
 
         # Set cgroup limits
         vm_cgroup: Path = ensure_vm_cgroup(vmachine_id=vmachine_id, pid=process.pid)
-        apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=mem_b)
+        # The cgroup caps the hypervisor *process*, so it has to bound what the VM
+        # was actually booted with. Capping it at `mem_b` while the guest holds
+        # `boot_mem_b` would have the host kill the VM for using the RAM the node
+        # itself gave it.
+        apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=boot_mem_b)
         apply_cpu_limit(vm_cgroup=vm_cgroup, cpu_quota=cpu_quota, cpu_period=cpu_period)
 
         # Network
@@ -1183,11 +1254,6 @@ def execute(
             vm_ip=vm_ip,
             timeout_s=network_timeout_s,
             serial_log_path=serial_log_path,
-        )
-        _configure_guest_firewall_policy(
-            vmachine_id=vmachine_id,
-            vm_ip=vm_ip,
-            network_resolution=network_resolution,
         )
         log.LOGGER(f"[CH][{vmachine_id}] event=ready")
         _log_host_network_probe(vmachine_id=vmachine_id, vm_ip=vm_ip, tap_name=tap_name)
@@ -1216,14 +1282,13 @@ def execute(
                     )
                     continue
 
-                removal_commands = _add_dnat_rule(
+                _add_dnat_rule(
                     vmachine_id=vmachine_id,
                     protocol=protocol.value,
                     external_port=external_port,
                     vm_ip=vm_ip,
                     internal_port=internal_port,
                 )
-                cleanup_rules.extend(removal_commands)
                 dnat_rules_state.append(
                     {
                         "protocol": protocol.value,
@@ -1252,11 +1317,14 @@ def execute(
                 "entrypoint": resolved_entrypoint,
                 "dnat_rules": dnat_rules_state,
                 "cleanup_rules": cleanup_rules,
-                "dns_allowlist": [
-                    {"domain": domain, "ip": ip}
-                    for domain, ip in domain_records
-                ],
+                "rule_comment_prefix": fw_policy.vm_comment_prefix(vmachine_id),
                 "cgroup_path": vm_cgroup.as_posix(),
+                # The guest kernel's footprint inside this VM's RAM size, measured at
+                # boot. A memory resize adds it back to the usable figure it is asked
+                # for, so memory.max keeps bounding what the VM was booted with.
+                # Absent on an instance launched before the reserve existed, which was
+                # booted at exactly its usable figure and so has none.
+                "guest_kernel_reserve_bytes": guest_kernel_reserve_b,
                 "virtiofs": virtiofs_mounts,
                 "exported_shares": exported_share_ids,
                 "bridge": NETWORK_BRIDGE_NAME,
@@ -1290,6 +1358,11 @@ def execute(
         if cleanup_rules:
             log.LOGGER(f"[CH][{vmachine_id}] removing {len(cleanup_rules)} cleanup firewall rules")
         _remove_rules(cleanup_rules)
+        # Whatever was applied before the failure carries this VM's prefix.
+        try:
+            vm_remove_vm_rules(vmachine_id)
+        except Exception as e:
+            log.LOGGER(f"[CH][{vmachine_id}] could not remove this VM's firewall rules: {e}")
 
         if process and process.poll() is None:
             log.LOGGER(f"[CH][{vmachine_id}] terminating cloud-hypervisor process pid={process.pid}")

@@ -1,5 +1,5 @@
 from protos import celaut_pb2
-from src.manager.resources import IOBigData, could_ve_this_sysreq
+from src.manager.resources import IOBigData, could_ve_this_extra_memory
 from src.database.sql_connection import SQLConnection
 from src.utils import logger as log
 
@@ -23,8 +23,23 @@ def modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
             context=f"modify-sysreq:before id={id} current={current_mem_limit} target={sys_req.mem_limit}"
         )
 
-        if not could_ve_this_sysreq(sysreq=sys_req):
-            log.LOGGER("Insufficient memory.")
+        # Only growth has to be found in the pool. The instance already holds
+        # `current_mem_limit`, so a resize that shrinks it -- or that re-states the
+        # limit it already has -- can never fail for lack of memory.
+        #
+        # This used to ask `could_ve_this_sysreq` about the absolute `mem_limit`, as
+        # if the whole figure were a fresh allocation on top of what the instance
+        # was already given. With the host's pool low that rejected requests asking
+        # for nothing: a service re-affirming its 64 MiB ceiling (which is how
+        # node_controller's modify_resources reads back a balance) got
+        # "Insufficient memory." and the caller got `Exception on service modify
+        # method.`, and so did a request to *release* memory -- the one operation
+        # that makes memory available.
+        if not could_ve_this_extra_memory(extra_mem_bytes=variation):
+            log.LOGGER(
+                f"Insufficient memory: growing {id} by "
+                f"{IOBigData.convert_size(variation)} does not fit in the service pool."
+            )
             return False
         
         # if variation > 0:

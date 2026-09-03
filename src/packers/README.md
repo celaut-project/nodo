@@ -96,9 +96,15 @@
   `workloads[]` item is `count` (number of concurrent descendant instances) × `resources`
   (a `Sysresources`: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`;
   bytes / microseconds; an omitted field defaults to `0` = no limit). Unlike `resources`
-  (this instance's own needs), these describe its descendants. Spec-only for now: the field
-  is declared and serialized, but nodo's scheduler does not yet interpret or enforce it
-  (see celaut-project/nodo#163).
+  (this instance's own needs), these describe its descendants. At launch (`launch_service`),
+  every group that declares `resources` is checked for existence — every limit it declares,
+  not just memory — with local admission first, then known peers via
+  `GetResourceAvailability` if `network.DELEGATE_EXECUTION` is on, and the service is refused
+  if a group has nowhere that could take it
+  (`src/utils/cost_functions/workload_admission.py`). This proves existence, not a capacity
+  reservation for `count` concurrent instances. How much is probed, and whether a group that
+  fits nowhere refuses the launch or only warns, are the two `workload_admission` settings in
+  `config.yaml`.
 - `workloads[].dependency` is optional (or may be `null`). It can identify the descendant
   with `hash`, embed a full or partial protobuf-shaped `service`, and independently declare
   whether the embedded service is complete (`is_completed`) or whether the complete artifact

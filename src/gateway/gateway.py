@@ -5,6 +5,7 @@ from protos import celaut_pb2_grpc, celaut_pb2
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
+from src.gateway.iterables.resource_availability_iterable import GetResourceAvailabilityIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
@@ -27,6 +28,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         print("DEBUG. GET SERVICE ESTIMATED COST")
         log.LOGGER("DEBUG. GET SERVICE ESTIMATED COST")
         yield from GetServiceEstimatedCostIterable(request_iterator, context)
+
+    def GetResourceAvailability(self, request_iterator, context, **kwargs):
+        yield from GetResourceAvailabilityIterable(request_iterator, context)
 
     def StartService(self, request_iterator, context, **kwargs):
         yield from StartServiceIterable(request_iterator, context)
@@ -123,7 +127,19 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for modify service system resources.')
-        token = get_internal_service_id_by_uri(uri=get_only_the_ip_from_context(context_peer=context.peer()))
+        caller_ip = get_only_the_ip_from_context(context_peer=context.peer())
+        token = get_internal_service_id_by_uri(uri=caller_ip)
+        # Two different failures used to share one message. Charging an unknown
+        # caller fails because there is nobody to charge, and reporting that as
+        # "Error charging" pointed at the price of the call instead of at the fact
+        # that the node did not recognise the address it came from -- which is what
+        # the caller and the operator need to know, and what they were told for a
+        # guest that called in before its instance was registered.
+        if not token:
+            raise Exception(
+                f'No local instance is registered at {caller_ip}, so this node cannot tell '
+                f'which instance is asking to change its resources ({context.peer()}).'
+            )
         refund_container = []
         if not spend_mu(
                 id=token,

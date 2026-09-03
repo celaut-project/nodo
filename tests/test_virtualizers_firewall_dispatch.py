@@ -25,18 +25,19 @@ class VirtualizerFirewallDispatchTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unknown virtualizer"):
                 vm_firewall._resolve_virtualizer("vm-no-db")
 
-    def test_allow_connection_dispatches_to_cloud_hypervisor(self):
+    def test_allow_host_connection_dispatches_to_cloud_hypervisor(self):
+        # No `ensure_forward_related_established_rule` patch here: this entry point
+        # deliberately does not depend on it, because its rule is on the input hook
+        # and carries no conntrack state of its own.
         with patch.object(
             vm_firewall.sc, "get_internal_virtualizer", return_value="cloud_hypervisor"
-        ), patch.object(
-            vm_firewall, "ensure_forward_related_established_rule", return_value=True
         ), patch(
-            "src.virtualizers.ch.firewall.allow_connection",
+            "src.virtualizers.ch.firewall.allow_host_connection",
             return_value=True,
         ) as ch_allow:
-            result = vm_firewall.allow_connection(
+            result = vm_firewall.allow_host_connection(
                 vmachine_id="vm-123",
-                ip="192.168.200.10",
+                host_ip="192.168.200.1",
                 port=5000,
                 protocol=vm_firewall.TransportProtocol.TCP,
             )
@@ -44,24 +45,11 @@ class VirtualizerFirewallDispatchTests(unittest.TestCase):
         self.assertTrue(result)
         ch_allow.assert_called_once_with(
             vmachine_id="vm-123",
-            ip="192.168.200.10",
+            host_ip="192.168.200.1",
             port=5000,
             protocol=vm_firewall.TransportProtocol.TCP,
             source_ip=None,
         )
-
-    def test_allow_connection_rejects_removed_docker_virtualizer(self):
-        # The Docker virtualizer was removed; a stored "docker" value must raise.
-        with patch.object(vm_firewall.sc, "get_internal_virtualizer", return_value="docker"), patch.object(
-            vm_firewall, "ensure_forward_related_established_rule", return_value=True
-        ):
-            with self.assertRaisesRegex(ValueError, "Unknown virtualizer"):
-                vm_firewall.allow_connection(
-                    vmachine_id="container-123",
-                    ip="10.0.0.5",
-                    port=8080,
-                    protocol=vm_firewall.TransportProtocol.TCP,
-                )
 
     def test_allow_connection_to_instance_dispatches_to_cloud_hypervisor_with_source_ip(self):
         with patch.object(

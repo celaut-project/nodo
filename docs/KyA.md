@@ -1,6 +1,6 @@
 # Know Your Assumptions (KyA) for **Nodo**
 
-**Nodo** is P2P software that follows the [CELAUT](https://github.com/celaut-project/paradigm) paradigm, allowing nodes to offer and request services. All payments, reputation submissions, and service remunerations are handled decentralized on the Ergo blockchain.
+**Nodo** is P2P software that follows the [CELAUT](https://celaut-project.github.io/paradigm) paradigm, allowing nodes to offer and request services. All payments, reputation submissions, and service remunerations are handled decentralized on the Ergo blockchain.
 
 ## By accepting this KyA, you acknowledge and agree that:
 

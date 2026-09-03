@@ -1,32 +1,38 @@
 import base64
 import fcntl
+import posixpath
+import stat
 from typing import Generator, List, Tuple
 
 from src.utils import logger as log
 import json
-import os, subprocess, platform, sys, uuid
+import os, shutil, subprocess, platform, sys, uuid
 import src.manager.resources as resources
 from bee_rpc import client as grpcbb
-from bee_rpc.utils import modify_env
+from bee_rpc.utils import Enviroment, modify_env, block_pointer, hash_types_for_packing
 from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
 from src.packers.service_json import populate_possible_environment_workloads
-from src.utils.hashing import SHA3_256_ID, get_configured_hash_spec, hash_stream
+from src.utils.hashing import (
+    BLAKE2B_ID, HASH_SPECS, SHA3_256_ID, get_configured_hash_spec, hash_stream_many,
+)
 from src.utils.arch_guard import ensure_native_arch
-# PACKER_SUPPORTED_ARCHITECTURES lives in the Docker-free architectures module.
-# DOCKER_COMMAND/DOCKER_ENV point this worker at nodo's isolated Docker daemon and
-# come from the Docker-free docker_env helper (no docker-py import), so importing
-# this worker never drags Docker into the CH-only runtime.
+# PACKER_SUPPORTED_ARCHITECTURES lives in the container-free architectures module.
+# BUILDCTL_COMMAND/BUILDKIT_ENV point this worker at nodo's own rootless BuildKit
+# builder and come from the buildkit_env helper (no container library import), so
+# importing this worker never drags a builder into the CH-only runtime.
 from src.utils.architectures import PACKER_SUPPORTED_ARCHITECTURES
-from src.utils.docker_env import DOCKER_COMMAND, DOCKER_ENV
+from src.utils.buildkit_env import BUILDCTL_COMMAND, BUILDKIT_ENV
 from src.utils.filesystem_xattrs import (
     describe_mode_type,
     encode_filesystem_metadata_xattrs,
+    implicit_directory_metadata,
     is_supported_filesystem_entry_mode,
     metadata_from_lstat,
+    metadata_from_tarinfo,
 )
-from src.utils.verify import calculate_hashes, calculate_hashes_by_stream
+from src.utils.verify import calculate_hashes_by_stream
 from src.utils.config import ConfigManager
 from src.manager.resources import IOBigData
 
@@ -37,11 +43,24 @@ BLOCKDIR = env_manager.get("BLOCKDIR")
 # Defaults keep the local packer working on configs that predate these keys
 # (e.g. nodes upgraded from a Docker-free build) — packer.local is opt-in and its
 # config section may not exist yet.
-PACKER_MEMORY_SIZE_FACTOR = env_manager.get("PACKER_MEMORY_SIZE_FACTOR", 2.0) or 2.0
+# Measured, not guessed. Peak memory has three parts, and the reservation needs
+# all three because the block threshold decides which one dominates:
+#   * the inlined bytes, at ~5.9x (a real 1.2 GB image: 886 MB inlined, 4950 MB
+#     peak). Against the *total* exported size the same measurements ranged from
+#     0.6x to 6.3x, which is why nothing here is proportional to that;
+#   * ~7 kB per block, which is what a low threshold turns almost every file
+#     into (100/400/1600 blocks with nothing inlined: 4.1/6.7/14.4 MB);
+#   * a fixed ~30 MB, the worker interpreter itself.
+PACKER_MEMORY_SIZE_FACTOR = env_manager.get("PACKER_MEMORY_SIZE_FACTOR", 6.0) or 6.0
+PACKER_MEMORY_PER_BLOCK = env_manager.get("PACKER_MEMORY_PER_BLOCK", 10_000) or 10_000
+PACKER_MEMORY_OVERHEAD = env_manager.get("PACKER_MEMORY_OVERHEAD", 40_000_000) or 40_000_000
+# How long a pack waits for that memory before giving up.
+WAIT_FOR_UNLOCK_MEMORY = env_manager.get("packer.WAIT_FOR_UNLOCK_MEMORY", 300) or 300
 SAVE_ALL = env_manager.get("SAVE_ALL", False)
-MIN_BUFFER_BLOCK_SIZE = env_manager.get("MIN_BUFFER_BLOCK_SIZE")
-BUILDX_NETWORK = env_manager.get("packer.docker.BUILDX_NETWORK", "host")
-BUILDX_BUILDER = env_manager.get("packer.docker.BUILDX_BUILDER", "nodo-hostnet")
+MIN_BUFFER_BLOCK_SIZE = env_manager.get("packer.MIN_BUFFER_BLOCK_SIZE")
+# Name of the Dockerfile inside the project directory. BuildKit's dockerfile
+# frontend defaults to "Dockerfile" too; this only exists to make it overridable.
+DOCKERFILE_NAME = env_manager.get("packer.buildkit.DOCKERFILE_NAME", "Dockerfile") or "Dockerfile"
 
 # Ensure bee_rpc uses the configured cache and block directories.
 if CACHE:
@@ -51,15 +70,92 @@ if BLOCKDIR:
     modify_env(cache_dir=CACHE, block_dir=BLOCKDIR)
 
 
+def _normalize_tar_member_path(name: str) -> str:
+    # Tar member names are posix paths, sometimes "./bin/bash", sometimes
+    # "bin/bash", sometimes "bin/" for a directory. Normalize to the same
+    # "bin/bash" shape recursive_parsing's own (directory + b_name) builds, so
+    # a lookup by path always hits. The root entry ("." or "./") normalizes to
+    # "" and is filtered out by the caller — it has no corresponding branch.
+    normalized = posixpath.normpath(name).lstrip("/")
+    return "" if normalized == "." else normalized
+
+
+# Every service carries these digests regardless of `hashing.HASH`, so any
+# node -- whatever algorithm it is configured with -- can resolve or verify a
+# service it did not pack itself (get_service_hex_main_hash falls back to
+# SHA3_256; a peer whose hashing.HASH is BLAKE2B needs that entry the same
+# way). SHA3_256 is bee-rpc's own block-addressing hash (Enviroment.hash_type)
+# and hashing.py's DEFAULT_HASH_NAME; BLAKE2B joins it for the same reason
+# verify.py's calculate_hashes does -- so a service stays resolvable if some
+# node's hashing.HASH is ever set to it, without a repack.
+COMPANION_HASH_IDS = (SHA3_256_ID, BLAKE2B_ID)
+
+
+def packing_memory_estimate(inline_len: int, block_count: int = 0) -> int:
+    """RAM to reserve for a pack, from what it will actually hold.
+
+    An inlined byte is expensive: the filesystem message, its serializations and
+    the buffer built from them all coexist at the peak, so each one costs
+    several times over. A file stored as a block is streamed to disk and costs
+    only its bookkeeping. So an image of mostly large files packs in a fraction
+    of what its size suggests, and one of mostly small files in several times
+    it -- which is why neither the exported size nor a single factor over it
+    predicts anything.
+
+    Both terms are needed because packer.MIN_BUFFER_BLOCK_SIZE decides which one
+    dominates: raise it and almost everything is inlined, lower it and almost
+    everything is a block.
+    """
+    return (
+        int(float(PACKER_MEMORY_SIZE_FACTOR) * inline_len)
+        + int(PACKER_MEMORY_PER_BLOCK) * block_count
+        + int(PACKER_MEMORY_OVERHEAD)
+    )
+
+
+def _install_as_block(block_id: bytes, directory: str) -> bytes:
+    """Move a freshly built multiblock directory into the block registry.
+
+    Blocks are content-addressed, so an identical filesystem packed twice lands
+    on a name that is already there and the second copy is simply dropped. The
+    move goes through a temporary name inside the registry so the block appears
+    under its own id only once every part of it is in place: a reader that found
+    a half-moved directory would expand it into short content with no error.
+    """
+    destination: str = os.path.join(BLOCKDIR, block_id.hex())
+    source: str = directory.rstrip(os.sep)
+
+    if os.path.exists(destination):
+        shutil.rmtree(source, ignore_errors=True)
+        return block_id
+
+    staging: str = destination + '.tmp-' + uuid.uuid4().hex
+    shutil.move(source, staging)
+    try:
+        os.rename(staging, destination)
+    except OSError:
+        # Lost the race against another packer storing the same filesystem.
+        shutil.rmtree(staging, ignore_errors=True)
+        if not os.path.exists(destination):
+            raise
+    return block_id
+
+
 class ZipContainerPacker:
     def __init__(self, path, aux_id):
         self.blocks: List[bytes] = []
+        # The block the container filesystem is stored as; see parseFilesys.
+        self.filesystem_block: bytes = b''
+        self.buffer_len: int = 0
+        self.inline_len: int = 0
+        self.block_count: int = 0
         self.service = pack_pb2.Service()
         self.metadata = celaut.Metadata()
         self.path = path
         self.json = json.load(open(self.path + "service.json", "r"))
         self.aux_id = aux_id
         self.error_msg = None
+        self._tar_metadata_by_path = {}
         self._validate_service_json_shape()
 
         arch = None
@@ -79,57 +175,22 @@ class ZipContainerPacker:
         tar_path = os.path.join(CACHE, self.aux_id, "filesystem.tar")
 
         # 3. Construct secure command
-        # Ensure a buildx builder with host network is available when requested.
-        if BUILDX_BUILDER and str(BUILDX_NETWORK).lower() == "host":
-            try:
-                inspect_cmd = DOCKER_COMMAND + ["buildx", "inspect", BUILDX_BUILDER]
-                inspect = subprocess.run(
-                    inspect_cmd,
-                    cwd=self.path,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    env=DOCKER_ENV,
-                    check=False
-                )
-                if inspect.returncode != 0:
-                    create_cmd = DOCKER_COMMAND + [
-                        "buildx", "create",
-                        "--name", BUILDX_BUILDER,
-                        "--driver", "docker-container",
-                        "--driver-opt", "network=host"
-                    ]
-                    subprocess.run(
-                        create_cmd,
-                        cwd=self.path,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        env=DOCKER_ENV,
-                        check=False
-                    )
-                bootstrap_cmd = DOCKER_COMMAND + ["buildx", "inspect", BUILDX_BUILDER, "--bootstrap"]
-                subprocess.run(
-                    bootstrap_cmd,
-                    cwd=self.path,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    env=DOCKER_ENV,
-                    check=False
-                )
-            except Exception as e:
-                log.LOGGER(f"Warning: failed to prepare buildx builder '{BUILDX_BUILDER}': {e}")
-
-        build_cmd = DOCKER_COMMAND + [
-            "buildx", "build",
-            "--platform", target_arch,
+        # BuildKit is driven directly instead of through `docker buildx`: buildx is
+        # only a front end for it, and the standalone daemon runs rootless as our
+        # own user, so no step of a pack needs sudo. There is no builder to create
+        # or bootstrap either — nodo starts buildkitd around the pack
+        # (bash/start_buildkit_daemon.sh) with the host network, which is what the
+        # old `--network host` buildx builder existed to provide.
+        build_cmd = BUILDCTL_COMMAND + [
+            "build",
+            "--frontend", "dockerfile.v0",
+            "--local", f"context={self.path}",
+            "--local", f"dockerfile={self.path}",
+            "--opt", f"filename={DOCKERFILE_NAME}",
+            "--opt", f"platform={target_arch}",
             "--progress", "plain",
             "--no-cache",
-            "--builder", str(BUILDX_BUILDER),
-            "--network", str(BUILDX_NETWORK),
             "--output", f"type=tar,dest={tar_path}",
-            self.path
         ]
 
         # 4. Secure execution
@@ -142,7 +203,7 @@ class ZipContainerPacker:
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.STDOUT, 
                 text=True,
-                env=DOCKER_ENV,
+                env=BUILDKIT_ENV,
                 bufsize=1,
                 universal_newlines=True
             )
@@ -165,19 +226,45 @@ class ZipContainerPacker:
             log.LOGGER(f"Extracting {tar_path} to {dest_path}...")
             import tarfile
             with tarfile.open(tar_path) as tar:
-                tar.extractall(path=dest_path)
+                members = tar.getmembers()
+                tar.extractall(path=dest_path, members=members)
+                # `tarfile.extractall` only chowns to the tar's uid/gid when run as
+                # root; unprivileged (our case, always, now that the builder is
+                # rootless) every entry lands owned by us regardless of what the
+                # tar says. Those uid/gid values feed the content-addressed service
+                # hash, so hashing what's on disk after extraction would make the
+                # id depend on who ran the pack. Keep the tar's own metadata
+                # instead, keyed by the path as parseContainer will look it up.
+                self._tar_metadata_by_path = {
+                    _normalize_tar_member_path(member.name): metadata_from_tarinfo(member)
+                    for member in members
+                    if _normalize_tar_member_path(member.name)
+                }
             os.remove(tar_path)
 
             log.LOGGER("Filesystem export completed successfully.")
             
-            # Calculate buffer length from the exported files
+            # Two sizes, because they answer different questions. `buffer_len`
+            # is everything the image holds; `inline_len` is only the part that
+            # ends up inside the filesystem message, which is what the pack
+            # costs in memory. A file at or over MIN_BUFFER_BLOCK_SIZE is
+            # streamed into a block on disk by parseFilesys and never held.
             total_size = 0
+            inline_size = 0
+            block_count = 0
             for dirpath, _, filenames in os.walk(dest_path):
                 for f in filenames:
                     fp = os.path.join(dirpath, f)
                     if not os.path.islink(fp):
-                        total_size += os.path.getsize(fp)
+                        size = os.path.getsize(fp)
+                        total_size += size
+                        if size < MIN_BUFFER_BLOCK_SIZE:
+                            inline_size += size
+                        else:
+                            block_count += 1
             self.buffer_len = total_size
+            self.inline_len = inline_size
+            self.block_count = block_count
 
         except Exception as e:
             self.error_msg = f"Unexpected error during build: {str(e)}"
@@ -206,7 +293,7 @@ class ZipContainerPacker:
             return normalized
 
         def parseFilesys() -> celaut.Metadata.HashTag:
-            # File system is already exported to filesystem/ by buildx
+            # File system is already exported to filesystem/ by BuildKit
             # Add filesystem data to filesystem buffer object.
             def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
                 host_dir = CACHE + self.aux_id + "/filesystem"
@@ -232,7 +319,23 @@ class ZipContainerPacker:
                             f"{describe_mode_type(branch_stat.st_mode)} "
                             f"(mode={oct(branch_stat.st_mode)})"
                         )
-                    branch_metadata = metadata_from_lstat(branch_stat)
+                    # Prefer the tar's own record of this entry over the extracted
+                    # copy on disk: extractall only restores uid/gid from the tar
+                    # when run as root, so an unprivileged extraction (always, now
+                    # that the builder is rootless) would otherwise stamp the
+                    # content-addressed hash with the packer's own uid/gid instead
+                    # of the image's. A directory tarfile only created implicitly,
+                    # as a deeper entry's parent, has no member of its own; every
+                    # packer fabricates the same synthetic metadata for it. Anything
+                    # else missing from the tar (there should be nothing) falls back
+                    # to the previous, best-effort behavior.
+                    tar_metadata = self._tar_metadata_by_path.get((directory + b_name).lstrip("/"))
+                    if tar_metadata is not None:
+                        branch_metadata = tar_metadata
+                    elif stat.S_ISDIR(branch_stat.st_mode):
+                        branch_metadata = implicit_directory_metadata()
+                    else:
+                        branch_metadata = metadata_from_lstat(branch_stat)
                     encode_filesystem_metadata_xattrs(branch.xattrs, branch_metadata)
 
                     # It's a link.
@@ -250,11 +353,18 @@ class ZipContainerPacker:
                             with open(branch_host_path, 'rb') as file:
                                 branch.file = file.read()
                         else:
-                            block_hash, block = block_builder.create_block(
+                            block_hash, _ = block_builder.create_block(
                                 file_path=branch_host_path,
                                 copy=True
                             )
-                            branch.file = block.SerializeToString()
+                            # No hash type in the pointer: the filesystem is stored as
+                            # a block of its own, so these sit one level down and take
+                            # their types from the pointer that names it. An image of
+                            # a few thousand large files would otherwise repeat the
+                            # same 32 bytes a few thousand times for no information.
+                            branch.file = block_pointer(
+                                block_id=block_hash, omit_types=True
+                            ).SerializeToString()
                             if block_hash not in self.blocks:
                                 self.blocks.append(block_hash)
                     # It's a folder.
@@ -269,19 +379,38 @@ class ZipContainerPacker:
                         )
                     filesystem.branch.append(branch)
                 return filesystem
-            self.service.container.filesystem.CopyFrom(recursive_parsing(directory="/"))
+            # The filesystem is stored as one block of its own rather than
+            # inlined into the spec, so that reading the spec -- to answer what
+            # ports it exposes, what it costs, whether it needs a parent-exported
+            # directory -- does not mean reading the whole rootfs. Only the build
+            # expands it. Both shapes expand to the same bytes, so this does not
+            # change the service id (see src/utils/container_filesystem.py).
+            #
+            # The multiblock directory built here is the one that used to be
+            # built purely to hash the filesystem and then thrown away
+            # (delete_directory=True): its id already *is* that hash, so keeping
+            # it costs nothing and the metadata hash below is unchanged. A
+            # filesystem with no file over the block threshold takes this path
+            # too -- with no blocks to substitute, the object's id is the plain
+            # sha3_256 of its serialization, exactly what the old
+            # `calculate_hashes` branch produced.
+            # `inherited` tells the builder what the pointers above leave unsaid, so
+            # it can read them at all. It does not change what this block expands to
+            # -- a pointer is replaced by its block's content either way -- so the
+            # filesystem block's id, and the service id above it, are the same as
+            # they would be with every type spelled out.
+            self.filesystem_block = _install_as_block(
+                *block_builder.build_multiblock(
+                    pf_object_with_block_pointers=recursive_parsing(directory="/"),
+                    blocks=self.blocks,
+                    inherited=hash_types_for_packing()
+                )
+            )
 
             return celaut.Metadata.HashTag(
-                hash=calculate_hashes(
-                    value=self.service.container.filesystem.SerializeToString()
-                ) if not self.blocks else
-                calculate_hashes_by_stream(
-                    value=grpcbb.read_multiblock_directory(
-                        directory=block_builder.build_multiblock(
-                            pf_object_with_block_pointers=self.service.container.filesystem,
-                            blocks=self.blocks
-                        )[1],
-                        delete_directory=True,
+                hash=calculate_hashes_by_stream(
+                    value=grpcbb.read_block(
+                        block_id=self.filesystem_block.hex(),
                         ignore_blocks=True
                     )
                 )
@@ -325,8 +454,9 @@ class ZipContainerPacker:
 
         # Possible descendant workloads. Each scenario is one independent
         # worst-case concurrent execution the service may trigger through its
-        # descendants (not cumulative, no ordering). Spec-only: nodo does not
-        # interpret/validate these here — that is future scheduler work (#163).
+        # descendants (not cumulative, no ordering). Interpreted at launch time
+        # by src.utils.cost_functions.workload_admission, not here -- this only
+        # serializes the declaration.
         populate_possible_environment_workloads(
             self.service,
             self.json.get("possible_environment_workload", []),
@@ -440,16 +570,50 @@ class ZipContainerPacker:
                 self.service.network.append(network)
 
     def save(self) -> Tuple[str, celaut.Metadata, str]:
+        # What gets stored is a `celaut.Service`, the schema every reader of a
+        # packed service already uses. `pack.Service` exists so that bee-rpc can
+        # see *into* the filesystem while it is being built -- a message field is
+        # walked for the block pointers of individual large files, an opaque
+        # bytes field is not. That visibility is what the filesystem block needed
+        # one level down, in parseFilesys; here the opposite is required, since
+        # the spec must carry the filesystem as a pointer and bee-rpc only treats
+        # a whole `bytes` field as one. The two schemas are wire-compatible, so
+        # this re-reads the same bytes under the schema that says `bytes`.
+        spec = celaut.Service()
+        spec.ParseFromString(self.service.SerializeToString())
+        # The top of what gets written to disk, so it states the hash type outright:
+        # there is nothing above it to inherit from, and this is the pointer another
+        # node has to be able to read without sharing this one's configuration.
+        # Everything below it -- the per-file pointers in parseFilesys -- inherits
+        # from here and leaves the type out.
+        spec.container.filesystem = block_pointer(
+            block_id=self.filesystem_block
+        ).SerializeToString()
+
         # Always build a multiblock directory so the service is returned as a path.
-        bytes_id, service_directory = block_builder.build_multiblock(
-            pf_object_with_block_pointers=self.service,
-            blocks=self.blocks
+        _, service_directory = block_builder.build_multiblock(
+            pf_object_with_block_pointers=spec,
+            blocks=[self.filesystem_block]
         )
+
+        # Every digest this node has to record, hashed here from the service's
+        # expanded content rather than taken from the id build_multiblock
+        # returns. That id is always sha3_256 -- bee-rpc has no notion of the
+        # `hashing.HASH` this node is configured with -- so borrowing it as a
+        # companion entry below only happened to be right, and would have gone
+        # on looking right while labelling whatever the library hashed with.
+        # The content is the whole service, so it is read once and fed to
+        # every hasher this needs -- the configured algorithm plus whichever
+        # companions it is not already one of.
         hash_spec = get_configured_hash_spec(env_manager)
-        configured_digest = hash_stream(
+        required_specs = {hash_spec.id_bytes: hash_spec}
+        for companion_id in COMPANION_HASH_IDS:
+            required_specs.setdefault(companion_id, HASH_SPECS[companion_id])
+        digests = hash_stream_many(
             grpcbb.read_multiblock_directory(directory=service_directory),
-            hash_spec
+            list(required_specs.values())
         )
+        configured_digest = digests[hash_spec.id_bytes]
         service_id: str = configured_digest.hex()
 
         updated = False
@@ -466,28 +630,18 @@ class ZipContainerPacker:
                 )]
             )
 
-        if (
-            hash_spec.id_bytes != SHA3_256_ID
-            and not any(item.type == SHA3_256_ID for item in self.metadata.hashtag.hash)
-        ):
-            self.metadata.hashtag.hash.extend(
-                [celaut.Metadata.HashTag.Hash(
-                    type=SHA3_256_ID,
-                    value=bytes_id
-                )]
-            )
+        for companion_id in COMPANION_HASH_IDS:
+            if (
+                companion_id != hash_spec.id_bytes
+                and not any(item.type == companion_id for item in self.metadata.hashtag.hash)
+            ):
+                self.metadata.hashtag.hash.extend(
+                    [celaut.Metadata.HashTag.Hash(
+                        type=companion_id,
+                        value=digests[companion_id]
+                    )]
+                )
 
-        """  <!-- Validation don't needed here -->
-        
-            from hashlib import sha3_256
-            validate_content = sha3_256()
-            for i in grpcbb.read_multiblock_directory(directory=service_directory):
-                validate_content.update(i)
-            if validate_content.digest() != bytes_id:
-                raise Exception(f"Invalid packing, wrong validated content {validate_content.hexdigest()}, but should be {bytes.hex(bytes_id)}")
-
-        """
-            
         service = service_directory
         # Add the tag attribute as the first tag or tag list in the metadata. This could be used as the name of the service for better human identification.
         if self.tag and type(self.tag) is str: 
@@ -515,20 +669,38 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
 
     iobd = IOBigData()
     iobd.log_snapshot(context=f"pack-worker:start aux_id={aux_id}")
-    _memory = int(PACKER_MEMORY_SIZE_FACTOR) * spec_file.buffer_len
-    log.LOGGER(f"Try to lock {_memory / (1024**2):.2f} MB of RAM for packing process (filesystem size: {spec_file.buffer_len / (1024**2):.2f} MB). RAM avaliable before locking: {iobd.get_ram_avaliable() / (1024**2):.2f} MB")
-    with resources.mem_manager(len=_memory):
-        # TODO Check Try to lock 57.98 MB of RAM for packing process (filesystem size: 28.99 MB). RAM avaliable before locking: 8506.90 MB
-        iobd.log_snapshot(context=f"pack-worker:after-lock aux_id={aux_id} requested={_memory}")
-        log.LOGGER(f"RAM locked successfully for packing process. RAM avaliable after locking: {iobd.get_ram_avaliable() / (1024**2):.2f} MB")
-        spec_file.parseContainer()
-        spec_file.parseApi()
-        spec_file.parseNetwork()
+    _memory = packing_memory_estimate(
+        inline_len=spec_file.inline_len, block_count=spec_file.block_count)
+    log.LOGGER(
+        f"Try to lock {_memory / (1024**2):.2f} MB of RAM for packing process "
+        f"(inlined: {spec_file.inline_len / (1024**2):.2f} MB of "
+        f"{spec_file.buffer_len / (1024**2):.2f} MB exported, in "
+        f"{spec_file.block_count} blocks). "
+        f"RAM avaliable before locking: {iobd.get_ram_avaliable() / (1024**2):.2f} MB"
+    )
+    try:
+        with resources.mem_manager(len=_memory, timeout=WAIT_FOR_UNLOCK_MEMORY):
+            iobd.log_snapshot(context=f"pack-worker:after-lock aux_id={aux_id} requested={_memory}")
+            log.LOGGER(f"RAM locked successfully for packing process. RAM avaliable after locking: {iobd.get_ram_avaliable() / (1024**2):.2f} MB")
+            spec_file.parseContainer()
+            spec_file.parseApi()
+            spec_file.parseNetwork()
 
-        identifier, metadata, service = spec_file.save()
-        iobd.log_snapshot(context=f"pack-worker:before-unlock aux_id={aux_id} service_id={identifier}")
+            identifier, metadata, service = spec_file.save()
+            iobd.log_snapshot(context=f"pack-worker:before-unlock aux_id={aux_id} service_id={identifier}")
+    except TimeoutError:
+        # Without a deadline this waited forever, and a pack that never returns
+        # is indistinguishable from one that is still working: the parent's
+        # subprocess.run() simply never comes back. Say so instead.
+        message = (
+            f"Timed out after {WAIT_FOR_UNLOCK_MEMORY}s waiting for "
+            f"{_memory / (1024**2):.2f} MB of RAM to pack this service."
+        )
+        log.LOGGER(message)
+        iobd.log_snapshot(context=f"pack-worker:timeout aux_id={aux_id} requested={_memory}")
+        os.system('rm -rf ' + CACHE + aux_id + '/')
+        return "", None, message
 
-    # os.system(DOCKER_COMMAND+' tag builder' + aux_id + ' ' + identifier + '.docker')  <-- This avoids rebuilding the container on the first run, but it causes file permission issues since it inherits them as they were on the host. Preferably, if using Docker, it is better to rebuild it.
     iobd.log_snapshot(context=f"pack-worker:after-unlock aux_id={aux_id} service_id={identifier}")
     os.system('rm -rf ' + CACHE + aux_id + '/')
     return identifier, metadata, service

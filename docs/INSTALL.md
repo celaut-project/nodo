@@ -13,7 +13,9 @@ It follows the current runtime model:
 
 ## 1) Scope and assumptions
 
-- OS: Ubuntu 22.04 LTS (or compatible Debian-based distro).
+- OS: any Linux with `apt` or `dnf` (tested on Ubuntu 22.04/24.04 and Fedora 44,
+  x86_64 and aarch64 — including Fedora Asahi Remix on Apple Silicon). What differs
+  on non-Debian and ARM hosts is collected in [`FEDORA_ARM.md`](FEDORA_ARM.md).
 - Architecture: `x86_64` or `aarch64`.
 - You have `sudo` access.
 - Installation root: `TARGET_DIR` (default `/nodo`).
@@ -24,24 +26,51 @@ export TARGET_DIR=/nodo
 
 ## 2) Install base system packages
 
-These are host-level packages used by setup/build tools. Python/JRE runtimes for Nodo are installed locally in later steps.
+Host-level tools only. Nodo installs its own Python, JRE, yq, cloud-hypervisor and
+guest assets (kernel, initramfs, busybox) in later steps, so nothing here is a
+build dependency of CPython.
+These are the same packages `bash/lib_pkg.sh` installs for you when you run
+`install.sh`.
+
+**Debian / Ubuntu:**
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y \
-  build-essential zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev \
-  libssl-dev libreadline-dev libffi-dev libsqlite3-dev \
-  wget libbz2-dev busybox-static cpio gzip initramfs-tools-core iputils-ping \
-  ca-certificates curl gnupg lsb-release git procps locales \
-  iproute2 zip iptables e2fsprogs
+sudo apt-get install -y --no-install-recommends \
+  build-essential clang cpio gzip zip \
+  curl ca-certificates git procps iproute2 iputils-ping \
+  iptables e2fsprogs locales
 ```
 
-`iproute2` and `zip` are load-bearing at runtime: `ip` is a hard preflight
-requirement for `execute` (CH networking), and `zip` is invoked when packing —
-without them the first `execute`/`pack` fails. `iptables`/`e2fsprogs` provide
-the `iptables`/`debugfs` tools also checked by the execute preflight.
-`protobuf-compiler` is not installed by the setup script and is only needed for
-development (regenerating protobufs), so it is omitted here.
+**Fedora / RHEL:**
+
+```bash
+sudo dnf install -y \
+  gcc make clang cpio gzip zip \
+  curl ca-certificates git procps-ng iproute iputils \
+  iptables-nft e2fsprogs glibc-langpack-en
+```
+
+Why these:
+
+- `clang` — the portable CPython records `CC=clang` in its `sysconfig`, and
+  `psutil` has no `linux-aarch64` wheel, so pip compiles it from source. Without a
+  compiler the install fails at `pip install -r requirements.txt`. (`gcc` works
+  too if you `export CC=gcc CXX=g++`.)
+- `cpio`, `gzip` — inspect the Cloud Hypervisor initramfs before each launch
+  (`src/virtualizers/ch/execute.py`). The image itself is built by CI and
+  downloaded from the Nodo release in step 10, along with the static busybox that
+  is its only binary, so neither a busybox package nor `initramfs-tools`/`dracut`
+  is needed here.
+- `iproute2`/`iproute` and `zip` are load-bearing at runtime: `ip` is a hard
+  preflight requirement for `execute` (CH networking), and `zip` is invoked when
+  packing — without them the first `execute`/`pack` fails. `iptables` and
+  `e2fsprogs` provide the `iptables`/`debugfs` tools also checked by that preflight.
+- `protobuf-compiler` is not installed by the setup script and is only needed for
+  development (regenerating protobufs), so it is omitted here.
+
+If your distro uses neither `apt` nor `dnf`, install the equivalents by hand and
+add a branch to `pkg_for()` in `bash/lib_pkg.sh` so `install.sh` works there too.
 
 ## 3) Get source and create config
 
@@ -245,13 +274,15 @@ it — services run as **Cloud Hypervisor** microVMs. Docker is only relevant to
   service. To point at an out-of-band packer instead, set
   `packer.PACKER_SERVICE_URL` to its `ip:8080` as an override.
 
-- **Opt-in (`packer.local: true`) — isolated local Docker toolchain.** If you set
+- **Opt-in (`packer.local: true`) — rootless local builder.** If you set
   `packer.local: true`, `nodo pack` builds on this host instead. Docker is still
-  not installed by the node installer; the first local pack provisions an
-  **isolated** toolchain on demand via `bash/install_docker.sh` (independent of
-  any Docker already on the host, mirroring `install_java.sh`) and drives its own
-  daemon under `MAIN_DIR` — never the host's Docker. See `dependencies.docker.*`
-  and `packer.docker.*` in `config.yaml`. Full packing reference:
+  never installed; the first local pack provisions a **rootless BuildKit**
+  toolchain on demand via `bash/install_buildkit.sh` (mirroring `install_java.sh`)
+  and drives its own builder under `MAIN_DIR`. The builder runs as the invoking
+  user, so packing needs no privileges; provisioning the host prerequisites for
+  rootless builds (`uidmap`, `rootlesskit`, subordinate id ranges) may ask for
+  sudo once, on that first install. See `dependencies.buildkit.*` and
+  `packer.buildkit.*` in `config.yaml`. Full packing reference:
   [`PACKING.md`](PACKING.md).
 
 ## 10) Install Cloud Hypervisor assets
@@ -287,43 +318,84 @@ done
 [ -n "$CH_OK" ] || { echo "Unable to download cloud-hypervisor"; exit 1; }
 rm -f /tmp/cloud-hypervisor.bin
 
-KERNEL_SOURCE="$(readlink -f /boot/vmlinuz 2>/dev/null || true)"
-if [ -z "$KERNEL_SOURCE" ] || [ ! -f "$KERNEL_SOURCE" ]; then
-  KERNEL_SOURCE="$(find /boot -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
-fi
-[ -f "$KERNEL_SOURCE" ] || { echo "Kernel not found in /boot"; exit 1; }
+# Guest assets: Nodo release assets, never the host's /boot kernel and never built
+# here. The kernel, initramfs and busybox are all built by
+# .github/workflows/guest-kernel.yml from bash/guest-kernel/ and
+# bash/build_ch_initramfs.sh, under the tag pinned in install.sh as
+# GUEST_KERNEL_VERSION.
+GUEST_KERNEL_VERSION="guest-kernel"
+GUEST_KERNEL_BASE="https://github.com/celaut-project/nodo/releases/download/${GUEST_KERNEL_VERSION}"
 
-CH_KERNEL_TARGET="$TARGET_DIR/cloud_hypervisor/kernels/${CH_ARCH_TAG}/vmlinuz"
-CH_INITRAMFS_TARGET="$TARGET_DIR/cloud_hypervisor/initramfs/${CH_ARCH_TAG}/initramfs"
-mkdir -p "$(dirname "$CH_KERNEL_TARGET")" "$(dirname "$CH_INITRAMFS_TARGET")"
-cp -f "$KERNEL_SOURCE" "$CH_KERNEL_TARGET"
-chmod 0644 "$CH_KERNEL_TARGET"
+# Expected digests come from bash/guest-kernel/SHA256SUMS.pinned in this checkout,
+# NOT from the SHA256SUMS published next to the artifact: that one lives in the same
+# mutable release, so it would only prove the download was not truncated.
+GUEST_SUMS="$TARGET_DIR/bash/guest-kernel/SHA256SUMS.pinned"
+PINNED_TAG="$(awk '$1 == "TAG" { print $2; exit }' "$GUEST_SUMS")"
+[ "$PINNED_TAG" = "$GUEST_KERNEL_VERSION" ] \
+  || { echo "Pin is for $PINNED_TAG, not $GUEST_KERNEL_VERSION"; exit 1; }
 
-bash "$TARGET_DIR/bash/build_ch_initramfs.sh" "$TARGET_DIR" "$CH_ARCH_TAG" "$CH_INITRAMFS_TARGET"
+fetch_guest_asset() {  # <asset-name> <destination> <mode>
+  EXPECTED="$(awk -v n="$1" '$2 == n { print $1; exit }' "$GUEST_SUMS")"
+  [ -n "$EXPECTED" ] || { echo "no pinned digest for $1"; exit 1; }
+  curl -fsSL "${GUEST_KERNEL_BASE}/$1" -o /tmp/nodo-guest-asset
+  ACTUAL="$(sha256sum /tmp/nodo-guest-asset | awk '{print $1}')"
+  [ "$EXPECTED" = "$ACTUAL" ] || { echo "$1 does not match the pinned digest"; exit 1; }
+  install -m "$3" /tmp/nodo-guest-asset "$2"
+  rm -f /tmp/nodo-guest-asset
+}
 
 CH_BINARY_PATH="$CH_BINARY_PATH" "$YQ_BIN" -i '.virtualizers.ch.BINARY_PATH = strenv(CH_BINARY_PATH)' "$TARGET_DIR/config.yaml"
-CH_ARCH_TAG="$CH_ARCH_TAG" CH_KERNEL_TARGET="$CH_KERNEL_TARGET" "$YQ_BIN" -i \
-  '.virtualizers.ch.KERNEL_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_KERNEL_TARGET)' \
-  "$TARGET_DIR/config.yaml"
-CH_ARCH_TAG="$CH_ARCH_TAG" CH_INITRAMFS_TARGET="$CH_INITRAMFS_TARGET" "$YQ_BIN" -i \
-  '.virtualizers.ch.INITRAMFS_PATHS[strenv(CH_ARCH_TAG)] = strenv(CH_INITRAMFS_TARGET)' \
-  "$TARGET_DIR/config.yaml"
+
+# The whole guest comes from the release: kernel, initramfs, and the static busybox
+# that is the initramfs' only binary. The initramfs is not built here — building it
+# on the host would make the guest depend on the host's cpio, gzip and umask.
+# busybox is still installed so you can rebuild the initramfs from this commit and
+# diff it against the shipped one (`bash/build_ch_initramfs.sh` is byte-reproducible).
+#
+# Both architectures, not just this host's: the foreign one is what QEMU boots under
+# emulation, and the node decides whether to advertise that arch by looking for
+# exactly these files (src/utils/architectures.py). Installing only the host's arch
+# is what used to make an arm64 launch on x86_64 die inside the CH build.
+for ARCH_TAG in linux/amd64 linux/arm64; do
+  SUFFIX="${ARCH_TAG/\//-}"   # linux/arm64 -> linux-arm64
+  KERNEL_TARGET="$TARGET_DIR/cloud_hypervisor/kernels/${ARCH_TAG}/vmlinuz"
+  INITRAMFS_TARGET="$TARGET_DIR/cloud_hypervisor/initramfs/${ARCH_TAG}/initramfs"
+  BUSYBOX_TARGET="$TARGET_DIR/cloud_hypervisor/busybox/${ARCH_TAG}/busybox"
+  mkdir -p "$(dirname "$KERNEL_TARGET")" "$(dirname "$INITRAMFS_TARGET")" "$(dirname "$BUSYBOX_TARGET")"
+
+  fetch_guest_asset "vmlinuz-${SUFFIX}" "$KERNEL_TARGET" 0644
+  fetch_guest_asset "initramfs-${SUFFIX}" "$INITRAMFS_TARGET" 0644
+  fetch_guest_asset "busybox-${SUFFIX}" "$BUSYBOX_TARGET" 0755
+
+  ARCH_TAG="$ARCH_TAG" KERNEL_TARGET="$KERNEL_TARGET" "$YQ_BIN" -i \
+    '.virtualizers.ch.KERNEL_PATHS[strenv(ARCH_TAG)] = strenv(KERNEL_TARGET)' \
+    "$TARGET_DIR/config.yaml"
+  ARCH_TAG="$ARCH_TAG" INITRAMFS_TARGET="$INITRAMFS_TARGET" "$YQ_BIN" -i \
+    '.virtualizers.ch.INITRAMFS_PATHS[strenv(ARCH_TAG)] = strenv(INITRAMFS_TARGET)' \
+    "$TARGET_DIR/config.yaml"
+done
+
+# The emulator for the arch this host does NOT run natively. Optional: without it
+# the node simply serves only its own arch.
+#   Debian/Ubuntu:  apt-get install -y qemu-system-arm   # or qemu-system-x86
+#   Fedora/RHEL:    dnf install -y qemu-system-aarch64   # or qemu-system-x86
 ```
 
-## 11) Isolated local Docker daemon directories
+## 11) Rootless local builder directories
 
-Nodo does not use the host Docker daemon. When packing with `packer.local: true`,
-the first local pack lazily starts a private, isolated Docker daemon and creates
-its state under `$TARGET_DIR/docker`:
+Nodo never uses the host Docker daemon. When packing with `packer.local: true`,
+the first local pack lazily starts a private, rootless BuildKit builder and
+creates its state under `$TARGET_DIR/buildkit`:
 
-- `$TARGET_DIR/docker/data` — data-root
-- `$TARGET_DIR/docker/config` — daemon config
-- `$TARGET_DIR/docker/exec` — exec root
-- `$TARGET_DIR/docker/docker.sock` — the daemon's private socket
+- `$TARGET_DIR/buildkit/data` — builder state (`--root`)
+- `$TARGET_DIR/buildkit/run` — the worker's `XDG_RUNTIME_DIR`
+- `$TARGET_DIR/buildkit/buildkitd.sock` — the builder's private socket
+- `$TARGET_DIR/buildkit/buildkitd.log` — daemon log, dumped on a failed start
 
 These are created automatically on the first local pack (nothing to do here at
-install time) and the daemon is stopped again after each pack. `uninstall.sh`
-removes this tree during teardown.
+install time) and the builder is stopped again after each pack. Because it runs
+as the invoking user, nodo can always stop it — no privileged signal involved.
+`uninstall.sh` removes this tree during teardown.
 
 ## 12) Run DB migration
 
@@ -338,11 +410,19 @@ Create the `systemd` unit from template:
 ```bash
 PY_RUNTIME_DIR="$(dirname "$PY_RUNTIME_BIN")"
 
+# The admin group is distro-specific (`sudo` on Debian, `wheel` on Fedora/RHEL) and
+# systemd refuses to start a unit whose Group does not resolve. install.sh and
+# `nodo doctor` pick it the same way, so keep this in sync or doctor will rewrite
+# the unit — and stop the service — on every run.
+ADMIN_GROUP=root
+for g in sudo wheel; do getent group "$g" >/dev/null 2>&1 && { ADMIN_GROUP="$g"; break; }; done
+
 sudo sed \
   -e "s|{{MAIN_DIR}}|$TARGET_DIR|g" \
   -e "s|{{JAVA_HOME}}|$JAVA_HOME_PATH|g" \
   -e "s|{{PYTHON_RUNTIME_BIN_DIR}}|$PY_RUNTIME_DIR|g" \
   -e "s|{{PYTHON_VENV_BIN}}|$PY_VENV_BIN|g" \
+  -e "s|{{ADMIN_GROUP}}|$ADMIN_GROUP|g" \
   "$TARGET_DIR/bash/nodo.service.template" > /tmp/nodo.service
 
 sudo install -m 0644 /tmp/nodo.service /etc/systemd/system/nodo.service
@@ -376,12 +456,15 @@ Cloud Hypervisor checks:
 
 ```bash
 test -x "$CH_BINARY_PATH"
-test -f "$CH_KERNEL_TARGET"
-test -f "$CH_INITRAMFS_TARGET"
+# Both arches, since both were provisioned above.
+for ARCH_TAG in linux/amd64 linux/arm64; do
+  test -f "$TARGET_DIR/cloud_hypervisor/kernels/${ARCH_TAG}/vmlinuz"
+  test -f "$TARGET_DIR/cloud_hypervisor/initramfs/${ARCH_TAG}/initramfs"
+done
 ```
 
 ## 15) Operational notes
 
-- Cross-arch builds are disabled in this profile. If target architecture differs from host architecture, build/pack flows fail early with an explicit message.
-- QEMU/binfmt are intentionally not installed.
+- Cross-arch *packing* is disabled in this profile: a local build runs the target's own toolchain, so if the target architecture differs from the host's, pack flows fail early with an explicit message. binfmt is intentionally not installed.
+- Cross-arch *execution* is supported and on by default. The installer provisions the guest kernel/initramfs for **both** architectures and installs `qemu-system-<foreign arch>`, so this node executes its own arch under Cloud Hypervisor/KVM and the other under QEMU/TCG. Emulation is an order of magnitude slower than KVM; set `virtualizers.qemu.ENABLE: false` to serve only the host's arch. If the emulator package cannot be installed, the install still succeeds and the node just does not advertise the foreign arch.
 - Keep `config.yaml` and actual installed paths aligned. If you move runtimes/binaries, update `dependencies.*` and restart `nodo.service`.

@@ -11,7 +11,7 @@ import grpc
 from bee_rpc.client import client_grpc
 from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
 
-from src.commands.inspect import inspect as inspect_service
+from src.commands.inspect_service import inspect as inspect_service
 from src.commands.__by_tag import get_id
 from src.core_services.source_application import acquire_service
 from src.manager.manager import get_execute_client
@@ -19,10 +19,10 @@ from src.utils.grpc_transport import local_channel
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.instance_names import inject_instance_name
+from src.utils.registry_errors import ServiceRegistryError
 
 env_manager = ConfigManager()
 
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 REGISTRY = env_manager.get("REGISTRY")
 CONFIGURED_HASH_ID = get_configured_hash_id(env_manager)
@@ -146,10 +146,17 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
         daemon=True,
     )
     try:
-        channel = local_channel(GATEWAY_PORT)
+        channel = local_channel()
         g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
-        inspect_service(service)
+        try:
+            inspect_service(service)
+        except ServiceRegistryError as e:
+            stop_event.set()
+            print("❌ Failed to read service data during launch service.")
+            print(f"Reason: {e}")
+            return None
+    
         animation_thread.start()
 
         response = next(client_grpc(
@@ -200,7 +207,38 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
             channel.close()
 
 
-def print_endpoints(response) -> None:
+def _dim(text: str) -> str:
+    """Dim, but only where something will render it -- never escape noise in a pipe."""
+    if not sys.stdout.isatty():
+        return text
+    return f"\033[2m{text}\033[0m"
+
+
+def print_lan_reachability_note(response) -> None:
+    """Footnote for `--remote`: the address handed out is the node's LAN address.
+
+    That is the point of the flag -- an external client gets the address the node
+    is reachable at on its own network, not the guest-internal one -- and it is
+    exactly what an operator connected over SSH from somewhere else cannot use.
+    Nothing has gone wrong when that happens, so this stays a footnote.
+    """
+    slot = next(
+        (uri_slot.internal_port for uri_slot in response.instance.uri_slot),
+        "<slot>",
+    )
+    token = response.token or "<instance>"
+
+    print(_dim(
+        "\n  Note: that address is the one the node is reachable at on its own local\n"
+        "  network, so it only answers from a machine on that network. Over the\n"
+        "  internet it is unroutable, whatever you forward on your side. To reach the\n"
+        "  instance from elsewhere, run a node where you are and tunnel in through\n"
+        "  this one:\n"
+        f"      nodo tunnel {token} {slot} --peer <node address>:<gateway port>"
+    ))
+
+
+def print_endpoints(response, remote: bool = False) -> None:
     """Print the HTTP endpoints (if any) a `ServiceInstance` response exposes."""
     endpoints: list[str] = []
     for slot in response.instance.api.slot:
@@ -223,6 +261,9 @@ def print_endpoints(response) -> None:
             print(f"  • {endpoint}")
     else:
         print("No endpoints available")
+
+    if remote:
+        print_lan_reachability_note(response)
 
 
 def execute(
@@ -264,7 +305,7 @@ def execute(
         if response is None:
             return
 
-        print_endpoints(response)
+        print_endpoints(response, remote=external)
 
     finally:
         if sink:

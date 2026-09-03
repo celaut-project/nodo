@@ -352,6 +352,7 @@ class SQLConnection(metaclass=Singleton):
         mem_limit: int = 0,
         cpu_period: int = 0,
         cpu_quota: int = 0,
+        arch: Optional[str] = None,
     ):
         """
         Adds an internal container to the database.
@@ -379,14 +380,39 @@ class SQLConnection(metaclass=Singleton):
             mem_limit (int): Memory the instance holds, in bytes.
             cpu_period (int): CFS period, as the hypervisor expresses vCPUs.
             cpu_quota (int): CFS quota; quota/period is the vCPU count.
+            arch (Optional[str]): The guest's architecture, canonical tag
+                (``linux/amd64``). Recorded because it is what selects the memory
+                price when the operator has set one per arch, and the tick prices
+                this row rather than re-reading the service's manifest -- a
+                resolution that needs the service on disk, which an instance can
+                outlive. NULL is charged the node's scalar memory price.
         """
         self._execute('''
-            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
               disk_space, int(cpu_period or 0), int(cpu_quota or 0),
-              serialized_instance, service_id, virtualizer, envs))
+              serialized_instance, service_id, virtualizer, envs, arch))
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
+
+    def set_local_instance_definition(self, id: str, serialized_instance) -> bool:
+        """Store the celaut ``Instance`` of an already-registered local instance.
+
+        An instance is registered the moment its guest starts running, which is
+        before the launcher can know the instance definition: the published URI
+        slots depend on the address the guest ended up with. The row is written
+        first (so the node can identify the guest the moment it calls in) and its
+        definition lands here right after, once the launch completes.
+        """
+        try:
+            self._execute(
+                "UPDATE local_instances SET serialized_instance = ? WHERE id = ?",
+                (serialized_instance, id),
+            )
+            return True
+        except Exception as e:
+            log.LOGGER(f"Could not store the instance definition of {id}: {e}")
+            return False
 
     def get_local_instance_envs(self, id: str) -> Optional[str]:
         """
@@ -528,6 +554,10 @@ class SQLConnection(metaclass=Singleton):
         instance by: memory and disk in bytes, plus the CFS pair from which the vCPU
         count is derived. Returning only memory and disk is what left compute unbilled.
 
+        ``arch`` rides along for the same reason: it is not a resource, but it selects
+        the memory *price* when the operator has set one per architecture, so the tick
+        needs it from the same read rather than from a second lookup per instance.
+
         Args:
             id (str): The id of the internal container.
 
@@ -535,7 +565,7 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances WHERE id = ?
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:
@@ -949,8 +979,9 @@ class SQLConnection(metaclass=Singleton):
 
         Args:
             submit (Callable[[List[Tuple[str, int, str]]], bool]): A function that submits the peer's reputation data
-                to the ledger. It takes a list of tuples where the first element is the reputation_proof_id (str),
-                the second element is the amount (int), and the third element is the peer's instance in JSON format (str).
+                to the ledger. It takes a list of tuples where the first element is the peer's public key -- the
+                target the opinion is about -- the second element is the amount (int), and the third
+                element is the peer's instance in JSON format (str). A first element of None means "ourselves".
 
         Returns:
             bool: True if the submission was successful, False otherwise.
@@ -961,7 +992,6 @@ class SQLConnection(metaclass=Singleton):
             result = self._execute('''
                 SELECT
                     p.id,
-                    p.reputation_proof_id,
                     p.reputation_score,
                     p.reputation_index,
                     p.last_index_on_ledger,
@@ -1015,7 +1045,6 @@ class SQLConnection(metaclass=Singleton):
                         # the peer signed, so only fill it in when we have no stored
                         # message at all (a peer migrated from before advertisements).
                         'needs_addresses': not stored,
-                        'reputation_proof_id': row['reputation_proof_id'],
                         'reputation_score': row['reputation_score'] or 0,
                         'reputation_index': row['reputation_index'] or 0,
                         'last_index_on_ledger': row['last_index_on_ledger'] or 0
@@ -1034,27 +1063,29 @@ class SQLConnection(metaclass=Singleton):
                 token_amount = TOTAL_REPUTATION_TOKEN_AMOUNT -1  # Subtract 1 to account for the node instance
 
                 for peer_id, data in peers_dict.items():
-                    reputation_proof_id = data['reputation_proof_id']
                     reputation_score = data['reputation_score']
                     reputation_index = data['reputation_index']
                     last_index_on_ledger = data['last_index_on_ledger']
 
-                    if reputation_proof_id:
-                        # Convert the peer object to JSON string
-                        instance_json = MessageToJson(data['peer'])
+                    # The opinion is about the peer itself, addressed by its public key
+                    # (issue #281), so every peer we hold a score on is publishable.
+                    # This used to be gated on knowing the peer's own proof id, which
+                    # silently dropped every peer whose proof we had never validated --
+                    # publishing an opinion set narrower than the one we actually held.
+                    instance_json = MessageToJson(data['peer'])
 
-                        # Calculate the percentage of the total reputation token amount
-                        if reputation_index - last_index_on_ledger >= env_manager.get("ledgers.ergo.reputation.LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
-                            logger.LOGGER(f'Peer {peer_id} with proof {reputation_proof_id} meets the submission threshold.')
-                            needs_submit = True
-                            percentage_amount = ((reputation_score / total_amount) * token_amount) if total_amount else 0
-                            to_submit.append((reputation_proof_id, percentage_amount, instance_json))
+                    # Calculate the percentage of the total reputation token amount
+                    if reputation_index - last_index_on_ledger >= env_manager.get("ledgers.ergo.reputation.LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
+                        logger.LOGGER(f'Peer {peer_id} meets the submission threshold.')
+                        needs_submit = True
+                        percentage_amount = ((reputation_score / total_amount) * token_amount) if total_amount else 0
+                        to_submit.append((peer_id, percentage_amount, instance_json))
 
-                        # Proof percentage doesn't need to be changed itself, but needs to be updated if others do.
-                        elif last_index_on_ledger > 0:
-                            logger.LOGGER(f'Peer {peer_id} with proof {reputation_proof_id} does not meet the submission threshold, but is included in the proof.')
-                            percentage_amount = ((reputation_score / total_amount) * token_amount) if total_amount else 0
-                            to_submit.append((reputation_proof_id, percentage_amount, instance_json))
+                    # Proof percentage doesn't need to be changed itself, but needs to be updated if others do.
+                    elif last_index_on_ledger > 0:
+                        logger.LOGGER(f'Peer {peer_id} does not meet the submission threshold, but is included in the proof.')
+                        percentage_amount = ((reputation_score / total_amount) * token_amount) if total_amount else 0
+                        to_submit.append((peer_id, percentage_amount, instance_json))
 
                 to_submit.append((None, 1, None))  # This will be treated as a pointer to itself, used to include the node instance in the proof
 
@@ -1070,8 +1101,7 @@ class SQLConnection(metaclass=Singleton):
                     logger.LOGGER('Reputation proofs submitted successfully.')
                     # Update the last index on ledger for all submitted peers
                     for peer_id, data in peers_dict.items():
-                        reputation_proof_id = data['reputation_proof_id']
-                        if reputation_proof_id and any(reputation_proof_id == _e[0] for _e in to_submit):
+                        if any(peer_id == _e[0] for _e in to_submit):
                             self._execute('UPDATE peer SET last_index_on_ledger = ? WHERE id = ?', (data['reputation_index'], peer_id))
                     return True
                 else:
@@ -1629,39 +1659,6 @@ class SQLConnection(metaclass=Singleton):
                 script = stored.encode('utf-8')
 
             yield script, ledger
-
-    def add_reputation_proof(self, contract: celaut_pb2.Contract, peer_id: str) -> bool:
-        """
-        Add or update the reputation_proof_id for a peer.
-
-        Args:
-            peer_id (str): The ID of the peer whose reputation_proof_id is to be updated.
-            contract (celaut_pb2.Contract): The reputation proof contract ledger.
-
-        Returns:
-            bool: True if the update was successful, False otherwise.
-        """
-
-        try:
-            new_proof_id = get_token_id(contract)
-
-            # Fetch the peer to ensure it exists
-            result = self._execute('SELECT id FROM peer WHERE id = ?', (peer_id,))
-            row: Any = result.fetchone()
-
-            if row:
-                # Update the reputation_proof_id for the peer
-                self._execute('''
-                    UPDATE peer SET reputation_proof_id = ? WHERE id = ?
-                ''', (new_proof_id, peer_id))
-
-                logger.LOGGER(f'Reputation proof ID updated for peer {peer_id}')
-                return True
-            else:
-                raise Exception(f'Peer not found: {peer_id}')
-        except Exception as e:
-            logger.LOGGER(f'Error updating reputation_proof_id for peer {peer_id}: {e}')
-            return False
 
     def peer_exists(self, peer_id: str) -> bool:
         """

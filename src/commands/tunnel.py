@@ -32,7 +32,6 @@ from src.tunneling.tunnel_client import (
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
-GATEWAY_PORT = env_manager.get("GATEWAY_PORT")
 
 DEFAULT_LISTEN_HOST = "127.0.0.1"
 
@@ -56,7 +55,7 @@ def tunnel(
     local node; with ``--peer`` it must be the token as the remote node knows it,
     since only that node can resolve it.
     """
-    gateway = peer or f"127.0.0.1:{GATEWAY_PORT}"
+    gateway = peer or f"127.0.0.1:{env_manager.get_gateway_port()}"
     # Without --peer the gateway is this node, whose identity we know, so the relay's
     # TLS channel is pinned to it. With --peer the address comes from a person and the
     # id is whatever the certificate proves (issue #257).

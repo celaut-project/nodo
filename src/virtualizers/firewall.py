@@ -1,29 +1,17 @@
 from enum import Enum
-import shlex
-import subprocess
 from typing import Callable, List, Optional
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
+from src.utils.firewall import policy
+from src.utils.firewall.errors import FirewallError
 from src.utils.logger import LOGGER as logger
 
 sc = SQLConnection()
 env_manager = ConfigManager()
 
-FORWARD_RELATED_ESTABLISHED_COMMENT = "nodo;forward;related_established"
-FORWARD_RELATED_ESTABLISHED_ARGS = [
-    "-m",
-    "conntrack",
-    "--ctstate",
-    "RELATED,ESTABLISHED",
-    "-j",
-    "ACCEPT",
-    "-m",
-    "comment",
-    "--comment",
-    FORWARD_RELATED_ESTABLISHED_COMMENT,
-]
+FORWARD_RELATED_ESTABLISHED_COMMENT = policy.FORWARD_RELATED_ESTABLISHED_COMMENT
 
 
 class TransportProtocol(Enum):
@@ -104,7 +92,9 @@ def _normalize_virtualizer(name: Optional[str]) -> str:
         raise ValueError("Virtualizer value is empty.")
     if v in {"ch", "cloud_hypervisor", "cloud-hypervisor"}:
         return "ch"
-    raise ValueError(f"Unknown virtualizer '{name}'. Supported: ch.")
+    if v == "qemu":
+        return "qemu"
+    raise ValueError(f"Unknown virtualizer '{name}'. Supported: ch, qemu.")
 
 
 def _resolve_virtualizer(vmachine_id: str) -> str:
@@ -118,119 +108,109 @@ def _resolve_virtualizer(vmachine_id: str) -> str:
     return _normalize_virtualizer(default_virtualizer)
 
 
-def _run_iptables(command: List[str], *, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["iptables"] + command,
-        capture_output=True,
-        text=True,
-        check=check,
-    )
-
-
-def _option_value(tokens: List[str], option: str) -> Optional[str]:
-    for index in range(len(tokens) - 1):
-        if tokens[index] == option:
-            return tokens[index + 1]
-    return None
-
-
-def _is_nodo_related_established_rule(tokens: List[str]) -> bool:
-    if len(tokens) < 3 or tokens[1] != "FORWARD":
-        return False
-
-    ctstate = _option_value(tokens, "--ctstate")
-    jump = _option_value(tokens, "-j")
-    comment = _option_value(tokens, "--comment") or ""
-
-    return (
-        ctstate == "RELATED,ESTABLISHED"
-        and jump == "ACCEPT"
-        and comment.startswith("nodo")
-    )
-
-
-def _is_exact_related_established_rule(tokens: List[str]) -> bool:
-    return _is_nodo_related_established_rule(tokens) and (
-        (_option_value(tokens, "--comment") == FORWARD_RELATED_ESTABLISHED_COMMENT)
-    )
-
-
 def ensure_forward_related_established_rule() -> bool:
-    """
-    Ensure canonical RELATED,ESTABLISHED rule exists at top of FORWARD chain.
+    """Ensure the blanket accept for return traffic is the first FORWARD rule.
 
-    Canonical rule:
-    iptables -I FORWARD 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-      -m comment --comment "nodo;forward;related_established"
+    It has to be first: everything below it is the per-VM policy, and return
+    traffic for an already-allowed connection must never be evaluated against
+    that. Duplicates left by an earlier start are collapsed rather than tolerated.
     """
+    from src.virtualizers.ch.firewall import backend
+
     try:
-        listed = _run_iptables(["-S", "FORWARD"], check=True)
-        lines = [line.strip() for line in (listed.stdout or "").splitlines() if line.strip()]
-
-        forward_rules: List[List[str]] = []
-        for line in lines:
-            if not line.startswith("-A FORWARD"):
-                continue
-            try:
-                forward_rules.append(shlex.split(line))
-            except ValueError:
-                logger(f"[FW] Unable to parse FORWARD rule: {line}")
-
-        matching = [rule for rule in forward_rules if _is_nodo_related_established_rule(rule)]
-
-        if (
-            len(matching) == 1
-            and len(forward_rules) > 0
-            and forward_rules[0] == matching[0]
-            and _is_exact_related_established_rule(matching[0])
-        ):
-            return True
-
-        # Remove existing nodo RELATED,ESTABLISHED entries first, then reinsert canonical at top.
-        for rule in reversed(matching):
-            delete_rule = rule.copy()
-            delete_rule[0] = "-D"
-            removed = _run_iptables(delete_rule, check=False)
-            if removed.returncode != 0:
-                logger(
-                    "[FW] Failed removing duplicate RELATED,ESTABLISHED rule: "
-                    f"{(removed.stderr or removed.stdout or '').strip()}"
-                )
-
-        inserted = _run_iptables(
-            ["-I", "FORWARD", "1", *FORWARD_RELATED_ESTABLISHED_ARGS],
-            check=True,
-        )
-        if inserted.returncode == 0:
-            logger("[FW] Ensured global FORWARD RELATED,ESTABLISHED rule in position 1.")
-        return inserted.returncode == 0
-
-    except subprocess.CalledProcessError as e:
-        stderr = (e.stderr or "").strip() or (e.stdout or "").strip() or str(e)
-        logger(f"[FW] Failed ensuring global FORWARD RELATED,ESTABLISHED rule: {stderr}")
+        added = backend().ensure_first(policy.forward_related_established_rule())
+    except FirewallError as e:
+        logger(f"[FW] Failed ensuring global FORWARD RELATED,ESTABLISHED rule: {e}")
         return False
     except Exception as e:
         logger(f"[FW] Unexpected error ensuring global FORWARD RELATED,ESTABLISHED rule: {e}")
         return False
 
+    if added:
+        logger("[FW] Ensured global FORWARD RELATED,ESTABLISHED rule in position 1.")
+    return True
 
-def allow_connection(
+
+def _compat_mode():
+    """``virtualizers.ch.FORWARD_COMPAT``, defaulting to auto on an unreadable value.
+
+    A typo here must not stop a node from booting: the key decides whether nodo
+    compensates for someone else's forward policy, and refusing to start over it
+    would be a worse outcome than either answer it can hold.
+    """
+    from src.utils.firewall.compat import CompatMode
+
+    raw = env_manager.get("virtualizers.ch.FORWARD_COMPAT", "auto")
+    try:
+        return CompatMode.parse(raw)
+    except ValueError as e:
+        logger(f"[FW] {e} Falling back to auto.")
+        return CompatMode.AUTO
+
+
+def _compat_bridge(bridge: Optional[str] = None) -> str:
+    name = (bridge or env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch") or "")
+    return str(name).strip()
+
+
+def ensure_forward_compat(bridge: Optional[str] = None):
+    """Put nodo's compatibility chain in place, if this host turns out to need one.
+
+    Deliberately not folded into ``ensure_forward_related_established_rule``: that
+    writes a rule nodo owns outright, this one writes into a table it does not, and
+    a failure of the second must never take down the first. Never raises -- see
+    ``compat.ensure_compat`` for why this is not fatal.
+    """
+    from src.utils.firewall.compat import ensure_compat
+
+    return ensure_compat(_compat_bridge(bridge), _compat_mode(), log=logger)
+
+
+def remove_forward_compat(bridge: Optional[str] = None):
+    """Take nodo's compatibility chain back out of the host's FORWARD chain."""
+    from src.utils.firewall.compat import remove_compat
+
+    return remove_compat(_compat_bridge(bridge), log=logger)
+
+
+def forward_compat_state(bridge: Optional[str] = None):
+    """What is in the compatibility table right now. Writes nothing."""
+    from src.utils.firewall.compat import compat_state
+
+    return compat_state(_compat_bridge(bridge), _compat_mode())
+
+
+# There is no ``allow_connection`` here on purpose. A bare "let this guest reach
+# this ip:port" had two callers, both of them host destinations, and both now go
+# through ``allow_host_connection`` below. What remains of the routed case is
+# ``allow_connection_to_instance``, which is the shape callers actually hold (an
+# Instance with its slots and protocols); it reaches the forward-hook allow inside
+# ``ch.firewall`` directly. A dispatcher wrapper nobody dispatches through is worse
+# than none: it is dead code that its own tests make look alive.
+def allow_host_connection(
     vmachine_id: str,
-    ip: str,
+    host_ip: str,
     port: Optional[int] = None,
     protocol: TransportProtocol = TransportProtocol.TCP,
     source_ip: Optional[str] = None,
 ) -> bool:
-    if not ensure_forward_related_established_rule():
-        return False
+    """A guest reaching a service on this host: an input-hook rule, not a forward one.
 
+    No ``ensure_forward_related_established_rule`` here, unlike the forward-side
+    allows: that accept exists so return traffic for an allowed *forwarded*
+    connection is not re-evaluated against the blanket drop. This rule carries no
+    conntrack state of its own, so it already matches every packet of the flow it
+    permits, and the host's reply leaves through output.
+    """
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
-        from src.virtualizers.ch.firewall import allow_connection as ch_allow_connection
+    if virtualizer in ("ch", "qemu"):
+        from src.virtualizers.ch.firewall import (
+            allow_host_connection as ch_allow_host_connection,
+        )
 
-        return ch_allow_connection(
+        return ch_allow_host_connection(
             vmachine_id=vmachine_id,
-            ip=ip,
+            host_ip=host_ip,
             port=port,
             protocol=protocol,
             source_ip=source_ip,
@@ -248,7 +228,7 @@ def allow_connection_to_instance(
         return False
 
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
+    if virtualizer in ("ch", "qemu"):
         from src.virtualizers.ch.firewall import (
             allow_connection_to_instance as ch_allow_connection_to_instance,
         )
@@ -267,7 +247,7 @@ def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
         return False
 
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
+    if virtualizer in ("ch", "qemu"):
         from src.virtualizers.ch.firewall import block_all as ch_block_all
 
         return ch_block_all(vmachine_id=vmachine_id, source_ip=source_ip)
@@ -277,7 +257,7 @@ def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
 
 def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
+    if virtualizer in ("ch", "qemu"):
         from src.virtualizers.ch.firewall import allow_all_egress as ch_allow_all_egress
 
         return ch_allow_all_egress(vmachine_id=vmachine_id, source_ip=source_ip)
@@ -292,7 +272,7 @@ def remove_rule(
     protocol: TransportProtocol = TransportProtocol.TCP,
 ) -> bool:
     virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer == "ch":
+    if virtualizer in ("ch", "qemu"):
         from src.virtualizers.ch.firewall import remove_rule as ch_remove_rule
 
         return ch_remove_rule(
@@ -301,5 +281,16 @@ def remove_rule(
             port=port,
             protocol=protocol,
         )
+
+    raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
+
+
+def remove_vm_rules(vmachine_id: str) -> int:
+    """Delete every rule nodo wrote for one VM, whatever the virtualizer."""
+    virtualizer = _resolve_virtualizer(vmachine_id)
+    if virtualizer in ("ch", "qemu"):
+        from src.virtualizers.ch.firewall import remove_vm_rules as ch_remove_vm_rules
+
+        return ch_remove_vm_rules(vmachine_id=vmachine_id)
 
     raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")

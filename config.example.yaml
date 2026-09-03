@@ -17,16 +17,16 @@ dependencies:
     RUNTIME_ROOT: "${main.MAIN_DIR}/runtime/python"
   yq:
     BIN: "${main.MAIN_DIR}/bin/yq"
-  # Docker is an OPTIONAL, node-local dependency used only by the local packer
+  # BuildKit is an OPTIONAL, node-local dependency used only by the local packer
   # (packer.local: true). It is NOT installed at node-install time; nodo runs
-  # bash/install_docker.sh on demand (like install_java.sh) and drives an
-  # ISOLATED daemon under MAIN_DIR — never the host's Docker. These paths are the
-  # portable defaults; override only to relocate the isolated toolchain.
-  docker:
-    BIN: "${main.MAIN_DIR}/bin/docker"
-    DAEMON_BIN: "${main.MAIN_DIR}/bin/dockerd"
-    BUILDX_BIN: "${main.MAIN_DIR}/libexec/docker/cli-plugins/docker-buildx"
-    DOCKER_SOCKET: "${main.MAIN_DIR}/docker/docker.sock"
+  # bash/install_buildkit.sh on demand (like install_java.sh) and drives its own
+  # ROOTLESS builder under MAIN_DIR — never a system-wide daemon. The builder runs
+  # as the invoking user, which is why `nodo pack` needs no sudo at all. These
+  # paths are the portable defaults; override only to relocate the toolchain.
+  buildkit:
+    BIN: "${main.MAIN_DIR}/bin/buildctl"
+    DAEMON_BIN: "${main.MAIN_DIR}/bin/buildkitd"
+    BUILDKIT_SOCKET: "${main.MAIN_DIR}/buildkit/buildkitd.sock"
 
 virtualizers:
   # Cloud Hypervisor is the only virtualizer. The Docker virtualizer was removed
@@ -34,12 +34,16 @@ virtualizers:
   DEFAULT_VIRTUALIZER: ch
   ch:
     BINARY_PATH: ""
+    # Guest kernel/initramfs per architecture. The installer provisions BOTH
+    # arches from the pinned guest-kernel release, not just the host's: the
+    # foreign one is what QEMU boots under emulation (see virtualizers.qemu), and
+    # an arch whose assets are missing from disk is simply never advertised.
     KERNEL_PATHS:
-      linux/amd64: "${main.MAIN_DIR}/ch/kernels/linux/amd64/vmlinuz"
-      linux/arm64: "${main.MAIN_DIR}/ch/kernels/linux/arm64/vmlinuz"
+      linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/amd64/vmlinuz"
+      linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/kernels/linux/arm64/vmlinuz"
     INITRAMFS_PATHS:
-      linux/amd64: "${main.MAIN_DIR}/ch/initramfs/linux/amd64/initramfs"
-      linux/arm64: "${main.MAIN_DIR}/ch/initramfs/linux/arm64/initramfs"
+      linux/amd64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/amd64/initramfs"
+      linux/arm64: "${main.MAIN_DIR}/cloud_hypervisor/initramfs/linux/arm64/initramfs"
     CACHE_DIR: "${main.CACHE}/ch"
     # Keep this path short to avoid Unix socket SUN_LEN limits.
     API_SOCKET_DIR: "/tmp/nodo-ch"
@@ -47,15 +51,37 @@ virtualizers:
     # Only invoked for services that declare shared/guest directories.
     VIRTIOFSD_BINARY: "virtiofsd"
     NETWORK_MODE: "tap_bridge"
-    NETWORK_BRIDGE_NAME: "br-ch"
+    NETWORK_BRIDGE_NAME: "nodo-br-ch"
     NETWORK_SUBNET: "192.168.200.0/24"
     NETWORK_GATEWAY_IP: "192.168.200.1"
+    # Whether nodo may write into the iptables compatibility table when something
+    # else on this host filters the forward hook. nodo accepts guest traffic in its
+    # own nftables table at priority -5, which does not survive a later DROP: with
+    # Docker installed (FORWARD policy DROP) or ufw's default forward policy, a
+    # parent cannot reach the child it just launched.
+    #
+    #   auto  (default) add nodo's own NODO_FWD chain only when the live ruleset
+    #         shows something on the forward hook that would drop this traffic
+    #   on    always add it, for a host whose ruleset cannot be read
+    #   off   never write outside nodo's own tables
+    #
+    # Inspect or undo it with 'nodo firewall-compat status|apply|remove'. It cannot
+    # reach a firewall with a native nftables table of its own -- firewalld, which
+    # is the default on Fedora and RHEL -- where forwarding has to be allowed for
+    # the bridge in firewalld itself.
+    FORWARD_COMPAT: "auto"
     # Guest interface used by the kernel ip=... cmdline.
     # Use "auto" to avoid hardcoding (recommended), or set e.g. "eth0".
     GUEST_NET_DEVICE: "auto"
-    # Extra kernel cmdline parameters for guest boot diagnostics.
-    # Keep console=ttyS0 so serial logs receive kernel/init output.
-    KERNEL_CMDLINE_EXTRA: "console=ttyS0"
+    # Extra kernel cmdline parameters for guest boot diagnostics. Empty by default.
+    #
+    # Do NOT put console= here. The guest console is architecture-determined and set
+    # automatically (ttyAMA0 on arm64, ttyS0 on x86_64); a console= in this field is
+    # dropped with a warning. This used to default to "console=ttyS0", which on arm64
+    # names a device the guest kernel has no driver for -- /dev/console never opens,
+    # /init dies on its first redirection, and every launch ends in
+    # "Kernel panic - not syncing: Attempted to kill init!".
+    KERNEL_CMDLINE_EXTRA: ""
     # Fail fast if the guest does not become reachable on the bridge network.
     GUEST_NETWORK_READY_TIMEOUT_S: 20
     # Memory policy for VM boot:
@@ -63,6 +89,51 @@ virtualizers:
     # - Services requiring more memory must request it explicitly in sysresources.
     MIN_MEM_MIB: 128
     DEFAULT_MEM_MIB: 256
+    # Guest kernel reserve: how much MORE than a service's declared mem_limit the VM
+    # is booted with, so the service really gets what it declared.
+    #
+    # The guest kernel's own footprint comes out of the VM's RAM before init runs.
+    # Booting at exactly mem_limit therefore hands the service LESS than its manifest
+    # declared -- a service declaring 256 MiB was OOM-killed at ~228 MiB, below its
+    # own published ceiling. This is the memory counterpart of the OVERHEAD_BYTES the
+    # rootfs image has always been grown by.
+    #
+    # The reserve is ARCHITECTURE-DEPENDENT because the overhead is. Measured from the
+    # guest kernels' own `Memory: <avail>K/<total>K available` boot line:
+    #
+    #   linux/arm64   ~22.8 MiB + ~2.2% of the guest
+    #   linux/amd64   ~31.4 MiB + ~1.8% of the guest
+    #
+    # amd64's kernel image, percpu areas and reserved low memory cost ~9 MiB more
+    # than arm64's; the proportional part is the `struct page` array (64 bytes per
+    # 4 KiB frame) and is near-identical on both.
+    #
+    # Both defaults carry margin -- overhead also varies with kernel version and
+    # config, and the failure mode of too little is a guest OOM -- but not in the
+    # same way, because margin on the two parts behaves differently. On MIB it is a
+    # constant (~8 MiB, whatever the guest's size), and that is also where
+    # kernel-version variance actually lives, so it is generous. On RATIO it is
+    # multiplied by the guest, so it is kept near the physics: 1.5625% is the
+    # `struct page` floor, the measurements fit at 1.8-2.1%, and 0.025 clears both
+    # with headroom. A flat 0.05 would reserve 450 MiB on an 8 GiB guest where the
+    # kernel takes ~180 -- host RAM the node commits and cannot bill.
+    #
+    # THE NODE ABSORBS THIS. It is never billed to the client: an instance is charged
+    # for the RAM it declared and can use, never for the kernel underneath it. So it
+    # is a real cost to the operator, and `pricing.RAM_MU_PER_GIB_HOUR` (or the
+    # per-arch override under `pricing.BY_ARCH`) is what has to cover it. The TUI's
+    # pricing page shows the effective per-arch figure -- what the node earns per GiB
+    # actually committed, once the reserve is accounted for.
+    #
+    # Uncomment to override a measurement with your own. MIB and RATIO both at 0
+    # size the VM at exactly the usable figure, for that architecture alone.
+    # GUEST_KERNEL_RESERVE:
+    #   linux/amd64:
+    #     MIB: 40
+    #     RATIO: 0.025
+    #   linux/arm64:
+    #     MIB: 32
+    #     RATIO: 0.025
     # cgroup v2 root path for per-VM lifecycle hotplug controls.
     CGROUPS_BASE_DIR: "/sys/fs/cgroup"
     # Guest output streams for debug:
@@ -70,7 +141,13 @@ virtualizers:
     # CONSOLE_MODE: off|null|tty|file=/custom/path.log
     SERIAL_MODE: "file"
     CONSOLE_MODE: "off"
+    # Keep the runtime directory of a failed launch under CACHE/cloud_hypervisor/
+    # failures/<vmachine_id>/ for debugging. Nothing reclaims those automatically:
+    # run 'nodo prune' to drop the ones older than FAILURE_RETENTION_DAYS.
     CONSERVE_RUNTIME_DIR_ON_FAILURE: true
+    # How long 'nodo prune' keeps a preserved launch failure before it is
+    # reclaimable. 'nodo prune --all' ignores this window.
+    FAILURE_RETENTION_DAYS: 7
     SECURITY:
       # Enforce rootfs destination confinement for all filesystem paths.
       PATH_CONFINEMENT: true
@@ -92,25 +169,64 @@ virtualizers:
       ROOTFS_BUILD_SANDBOX: "none"
       # When true, if a VM fails to boot or encounters an error, its runtime directory will be preserved for debugging instead of being deleted.
 
+  # QEMU is the cross-architecture execution backend, and it is what makes a node
+  # advertise a FOREIGN arch as executable at all. Cloud Hypervisor boots a
+  # service as a microVM under KVM, which can only run a guest of the host's OWN
+  # architecture; for anything else there is no KVM path, so nodo boots the same
+  # rootfs/kernel/initramfs under qemu-system-<arch> with `-accel tcg` (software
+  # emulation). Native services always take the CH path above and never regress.
+  #
+  # TCG is an order of magnitude slower than KVM. That is the trade this node
+  # accepts by default: it takes arm64 work on x86_64 (and vice versa) rather
+  # than rejecting it. Turn ENABLE off to serve only the host's own arch -- the
+  # node then stops advertising the foreign one, and a foreign-arch request gets
+  # UnsupportedArchitectureException.
+  qemu:
+    # Master switch for emulated execution. Even when true, an arch is only
+    # advertised (and only launchable) if BOTH the emulator binary and that
+    # arch's guest kernel/initramfs are present -- so a node never claims a
+    # capability it cannot deliver, and turning this on cannot break an install
+    # whose qemu-system-<arch> package is missing.
+    ENABLE: true
+    # Per-arch qemu-system binary. Leave empty to resolve `qemu-system-x86_64` /
+    # `qemu-system-aarch64` from PATH.
+    BINARY_PATHS:
+      linux/amd64: ""
+      linux/arm64: ""
+    # Guest kernel/initramfs for the EMULATED arch. Leave empty to reuse the CH
+    # assets above (virtualizers.ch.KERNEL_PATHS / INITRAMFS_PATHS), which the
+    # installer provisions for every arch, not only the host's. Override only to
+    # point QEMU at a different image than CH uses.
+    KERNEL_PATHS:
+      linux/amd64: ""
+      linux/arm64: ""
+    INITRAMFS_PATHS:
+      linux/amd64: ""
+      linux/arm64: ""
+    # QEMU -cpu model. "max" exposes the fullest feature set under TCG.
+    CPU_MODEL: "max"
+    # TCG reaches guest console much slower than KVM; allow more time than the CH
+    # readiness timeout before declaring the guest network dead.
+    GUEST_NETWORK_READY_TIMEOUT_S: 120
+
 builder:
   WAIT_FOR_CONTAINER: 60
   WAIT_FOR_UNLOCK_MEMORY: 60
   BUILD_CONTAINER_MEMORY_SIZE_FACTOR: 3.1
-  ARM_SUPPORT: true
-  X86_SUPPORT: true
   TRUST_METADATA_ARCHITECTURE: false
 
 packer:
   # local: choose the packer backend (default false).
   #   false -> `nodo pack` delegates to a packer-service (behaviour documented
   #            below): resolve the packer by its core_services id, falling back to
-  #            the PACKER_SERVICE_URL override. Docker is NEVER installed here.
-  #   true  -> `nodo pack` builds the service LOCALLY with nodo's own isolated
-  #            Docker toolchain. Docker is provisioned on demand via
-  #            bash/install_docker.sh (isolated to the node, independent of any
-  #            host Docker); nodo starts its isolated Docker daemon right before a
-  #            pack and stops it right after, and only one `nodo pack` runs at a
-  #            time. See dependencies.docker.* and packer.docker.* below.
+  #            the PACKER_SERVICE_URL override. No builder is installed here.
+  #   true  -> `nodo pack` builds the service LOCALLY with nodo's own rootless
+  #            BuildKit toolchain, provisioned on demand via
+  #            bash/install_buildkit.sh (node-local, independent of any host
+  #            Docker); nodo starts its builder right before a pack and stops it
+  #            right after, and only one `nodo pack` runs at a time. The builder
+  #            is unprivileged, so packing never asks for sudo. See
+  #            dependencies.buildkit.* and packer.buildkit.* below.
   local: false
   # nodo no longer builds services locally *by default*. `nodo pack` sends the
   # project to a packer-service microVM (it runs Docker/buildx inside a sealed VM,
@@ -139,17 +255,79 @@ packer:
   ARM_PACKER_SUPPORT: true
   X86_PACKER_SUPPORT: true
   # Local-packer tuning (only used when packer.local: true).
-  # Factor of the exported filesystem size to lock as RAM during a local build.
-  PACKER_MEMORY_SIZE_FACTOR: 2.0
+  #
+  # Inline/block threshold. A file at or over this size is stored as a
+  # content-addressed block under main.BLOCKDIR and referenced by a pointer;
+  # a smaller one is inlined into the service's filesystem message.
+  #
+  # It is the main lever on how much memory a service costs, because only the
+  # inlined part is ever held: the build streams a pointer straight to its place
+  # in the rootfs. Measured packing and building a real 1.17 GB service image
+  # (28,131 files):
+  #
+  #   threshold   blocks   inline retained   pack peak   pack time   build peak
+  #       10 MB       13         876.6 MB           -           -     2720.5 MB
+  #      256 kB      476         403.3 MB    2449.0 MB       61 s      856.6 MB
+  #       32 kB     3962         121.7 MB     802.4 MB      277 s      293.3 MB
+  #
+  # (10 MB row: inline/blocks measured, pack peak/time not re-measured under the
+  # current code -- the formula below estimates ~5.3 GB, consistent with the
+  # trend.) 256 kB looked like a middle ground and is not one: this image has
+  # 281 MB spread across the 3,486 files between 32 kB and 256 kB, so raising
+  # the threshold that far puts most of it back inline, at ~6x cost each. Time
+  # scales with block *count*, memory with the bytes still outside a block --
+  # in a Python-shaped image those move in opposite directions across most of
+  # the range, so there is no threshold that is cheap on both at once here.
+  #
+  # The cost of a low threshold is pack time and one file per block in
+  # main.BLOCKDIR instead of a handful. Identical files across services share a
+  # block, so a low threshold also deduplicates far more. Changing it does not
+  # change any service id: an object expands to the same bytes either way.
+  MIN_BUFFER_BLOCK_SIZE: 32768
+  # RAM to lock during a local build, as a factor of the *inlined* bytes -- the
+  # files under packer.MIN_BUFFER_BLOCK_SIZE above, which are the only ones held
+  # in memory. Files at or over that threshold are streamed into blocks on disk,
+  # so an image dominated by large files packs in far less than its size
+  # suggests. The default is measured: peak memory tracks the inlined bytes at
+  # ~5.9x.
+  PACKER_MEMORY_SIZE_FACTOR: 6.0
+  # Bytes added per block. With a low packer.MIN_BUFFER_BLOCK_SIZE almost every
+  # file becomes a block and nothing is inlined, so this is the term that
+  # decides the reservation. Measured at ~7 kB per block.
+  PACKER_MEMORY_PER_BLOCK: 10000
+  # Fixed cost on top: the worker interpreter itself, ~30 MB before it packs
+  # anything.
+  PACKER_MEMORY_OVERHEAD: 40000000
+  # Seconds a pack waits for that memory before failing. Without a deadline a
+  # busy node leaves the pack waiting indefinitely, and it cannot be told apart
+  # from one that is still working.
+  WAIT_FOR_UNLOCK_MEMORY: 300
   # Reserved: persist every packed artifact to the registry. Kept for parity.
   SAVE_ALL: false
-  docker:
-    # Network used for docker buildx builds. "host" helps ensure DNS is reachable.
-    BUILDX_NETWORK: "host"
-    # Buildx builder name used for builds (created if missing).
-    BUILDX_BUILDER: "nodo-hostnet"
+  buildkit:
+    # Name of the Dockerfile inside the project directory.
+    DOCKERFILE_NAME: "Dockerfile"
 
 network:
+  # The gRPC port guests and peers reach this node on. "auto" means "not assigned
+  # yet": the installer, and 'nodo serve', pick a free port from FREE_PORTS_RANGE,
+  # open it in nodo's own nftables (or iptables) ruleset and write the number back
+  # here. Only those two -- an ordinary nodo command never assigns one, even as root:
+  # opening a port is not something that should happen because some unrelated command
+  # imported a module. An unprivileged run leaves "auto" untouched.
+  #
+  # The number is stored before the port is proven reachable, and the protection is
+  # elsewhere: the node REFUSES TO SERVE on a port it has proven unreachable (see
+  # VERIFY_GATEWAY_REACHABILITY below). Proving it at assignment time was tried and
+  # was worse -- nothing can be probed before the guest bridge exists, so a host with
+  # firewalld and no bridge yet could never be assigned a port at all, and the only
+  # way forward was to pin one by hand, which was the one path with no check on it.
+  # Storing it early also keeps it stable: "open TCP 58443" is still true tomorrow.
+  #
+  # Pinning a port you have opened yourself is supported and does NOT skip the check.
+  # The accept rule is re-applied on every start (netfilter rules do not survive a
+  # reboot; this file does). Whether peers OUTSIDE this LAN can reach the port is a
+  # separate question no check here can answer: run 'nodo nat-guide'.
   GATEWAY_PORT: auto
   # Second gateway port, in plain gRPC (no TLS). GATEWAY_PORT itself is TLS,
   # authenticated against this node's identity key, and that is what peers and the CLI
@@ -162,6 +340,19 @@ network:
   # than every interface -- so reaching it from outside this host takes a port-forward
   # you set up yourself.
   GATEWAY_PLAINTEXT_PORT: auto
+  # Before serving anything, prove a guest can reach GATEWAY_PORT by connecting to it
+  # from a throwaway namespace on the guest bridge -- the bridge is brought up at
+  # start for this, rather than on the first instance launch, or there would be
+  # nowhere to probe from on a node that has never run anything. A conclusive failure
+  # stops the node: an unreachable gateway means every service it accepts is unable
+  # to call back into it, which is worse than not starting. An inconclusive probe
+  # only warns.
+  #
+  # A success is remembered in <main.CACHE>/gateway_port_passed, so a restart does not
+  # redo it; that record is dropped when the port changes and when the host reboots.
+  # Set to false only if this host's networking makes the probe unusable -- 'nodo
+  # doctor' still reports it either way.
+  VERIFY_GATEWAY_REACHABILITY: true
   LOCAL_NETWORK: "lo"
   # How long (seconds) this node expects to keep its current address -- typically the
   # ISP's DHCP lease for a dynamic public IP. Published (signed) alongside the
@@ -200,7 +391,42 @@ network:
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
-  TUNNEL_LOGS: false  # Log every tunnel handshake, relay close and billing tick under "[TUNNEL]". Off by default: it is one line per connection and per billed MiB, which buries the rest of the node log on a busy tunnel. Turn on to debug tunneling.
+
+# Which communication domains this node is willing to run a service for.
+#
+# A service declares the domains it wants to reach as Service.Network tags -- a
+# DNS name, "pow:bitcoin", "*" for open-internet egress (see docs/NETWORKS.md).
+# Two controls already narrowed that ask, and neither of them was yours: the
+# ancestor chain intersects a child's request with what its parents declared, and
+# the per-VM firewall opens only what got resolved. These two lists are yours.
+#
+# Both empty (the default) restricts nothing, which is how every node behaved
+# before this block existed. Patterns are globs, matched case-insensitively
+# against each tag -- glob over the tag and nothing more, so "google.com" does NOT
+# match "www.google.com": write "*google.com" when you mean the subdomains too.
+#
+# The blacklist is checked first and wins over the whitelist. A non-empty
+# whitelist has to cover EVERY tag a service declares, because each tag can open
+# egress on its own. A service that declares no network is always accepted, and
+# `blacklist: ["*"]` refuses every service that declares any -- that is how you
+# say "nothing beyond this node".
+#
+# A rejected client is told which tag, which list and which pattern refused it.
+# The policy applies to every service, the core services this node starts for
+# itself included (packer, source-application): their egress is egress from this
+# node too, so whitelist what they need rather than expecting an exemption.
+#
+# NOTE the name: `service_networks`, not `networks`. The `network:` block above is
+# this node's own ports and addresses; the two would be one letter apart, and a
+# typo between them would leave the node with no policy while looking configured.
+service_networks:
+  blacklist: []
+  whitelist: []
+  # blacklist:
+  #   - "*google.com"
+  # whitelist:
+  #   - "dns:*"
+  #   - "pow:bitcoin"
 
 # Dynamic DNS: keep a hostname pointing at this node's public IP, so peers can
 # find it by name when the address changes. Tunneling means only the gateway port
@@ -219,6 +445,7 @@ ddns:
 logs:
   MEMORY_LOGS: false
   DEBUG_MODE: false
+  TUNNEL_LOGS: false  # Log every tunnel handshake, relay close and billing tick under "[TUNNEL]". Off by default: it is one line per connection and per billed MiB, which buries the rest of the node log on a busy tunnel. Turn on to debug tunneling.
 
 # What this node charges, in MU (monetary unit) -- the node's own unit of account.
 # Full model and worked examples: docs/PRICING.md.
@@ -236,6 +463,28 @@ pricing:
   RAM_MU_PER_GIB_HOUR: 1000000
   CPU_MU_PER_VCPU_HOUR: 4000000
   DISK_MU_PER_GIB_HOUR: 100000
+  # Per-architecture memory price, overriding RAM_MU_PER_GIB_HOUR for guests of that
+  # architecture. Absent, every arch pays the scalar price above, so a config that
+  # never mentions it needs no migration.
+  #
+  # Memory is the one resource whose real cost to this node depends on the guest's
+  # architecture: the guest kernel reserve the node absorbs and never bills differs
+  # per arch (see virtualizers.ch.GUEST_KERNEL_RESERVE), so one rate cannot cover it
+  # correctly on both at once. An emulated guest is also far slower per vCPU, which
+  # some operators price for; that judgement belongs to the operator, which is why
+  # this is a setting and not a derived number.
+  #
+  # CPU and disk are deliberately NOT per-arch: the node hands a guest the vCPUs and
+  # the image it asked for whatever architecture it is.
+  #
+  # Keys are canonical arch tags, verbatim -- the same strings the rest of the node
+  # names architectures by. Edit these from the TUI's pricing page, which shows the
+  # effective rate per arch beside the reserve it has to cover.
+  # BY_ARCH:
+  #   linux/amd64:
+  #     RAM_MU_PER_GIB_HOUR: 1000000
+  #   linux/arm64:
+  #     RAM_MU_PER_GIB_HOUR: 1400000
   # Tunnelled traffic, counting both directions (see docs/TUNNELING.md).
   NET_MU_PER_GIB: 2000000
   # One-off operations, charged once each. Not scaled by scarcity: they price work done
@@ -306,7 +555,39 @@ costs:
   # an empty balance, larger costs less bookkeeping.
   TUNNEL_CHARGE_INTERVAL_KB: 1024
   # Let an instance keep running with a negative balance instead of being stopped.
-  ALLOW_DEBT: true
+  #
+  # An empty balance is the only thing that reaps an instance nobody stops: the
+  # maintenance tick charges every instance for the interval it just held, and
+  # stops the ones that cannot pay. Enabling debt makes `spend_mu` always
+  # succeed, so that branch never runs -- a service that leaks children leaks
+  # them until the node is restarted, each one still billing a balance with no
+  # floor. Enable it only where an instance outliving its funding is the lesser
+  # problem.
+  ALLOW_DEBT: false
+
+# Admission of a service's declared descendant workloads (`possible_environment_workload`
+# in service.json). At launch, every workload group that declares `resources` is checked
+# for existence -- is there a place, right now, that could run one instance shaped like
+# this? -- first locally, then, if network.DELEGATE_EXECUTION is on, by asking known peers
+# over GetResourceAvailability. This proves existence, never capacity: it does not show
+# that `count` concurrent instances could all run, and it holds nothing it finds.
+workload_admission:
+  # How much of the declaration to probe. Every group must fit under BOTH values; this
+  # only decides whether the node keeps asking once the answer is already settled.
+  #   fail_fast  Stop at the first group that fits nowhere. The launch is refused at that
+  #              point, and each further group costs a gRPC round-trip to every known
+  #              peer, so the rejection path is not the expensive one.
+  #   full       Probe every group, so the error names all of them. Useful when the
+  #              question is "which of my groups do not fit?" rather than "may this run?".
+  POLICY: fail_fast
+  # What a group that fits nowhere means.
+  #   reject     Refuse the launch. The declaration says these descendants may be
+  #              spawned; with nowhere to spawn them, starting the parent only defers
+  #              the failure to a worse moment.
+  #   warn       Log it and launch anyway. This check reads capacity at this instant and
+  #              reserves nothing, so a busy moment can refuse a service that would have
+  #              run a second later.
+  ON_UNSATISFIABLE: reject
 
 timing:
   GENERAL_WAIT_TIME: 2
@@ -320,6 +601,13 @@ timing:
   START_SERVICE_ON_PEER_TIMEOUT: 120
 
 communication:
+  # The most components a Peer.signature_scheme may declare before this node refuses
+  # to compare it (node_identity.same_signature_scheme). Comparing two schemes is a
+  # search for a one-to-one pairing between their components, which is factorial in a
+  # length the *peer* chooses: four components is 24 pairings, five is 120, twelve is
+  # 479 million. This node declares four, so five leaves room for a scheme with one
+  # more building block. Raise it only alongside a scheme that genuinely needs more.
+  MAX_SIGNATURE_SCHEME_COMPONENTS: 5
   SELF_ANNOUNCE_TO_CONNECTING_PEERS: false
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
@@ -338,7 +626,6 @@ client:
   ACCEPT_NEW_DEPOSITS: true
 
 misc:
-  MIN_BUFFER_BLOCK_SIZE: 1.0e+7
   MEMSWAP_FACTOR: 0
   USE_PRINT: false
   VALIDATE_ON_IMPORT: true
@@ -346,7 +633,8 @@ misc:
 
 hashing:
   # Main hash selector for service/file identification.
-  # Accepts hash aliases (sha3_256, sha256, shake_256, blake2b) or a hash-id in hex.
+  # Accepts sha2_256, sha3_256, shake_256, blake2b_256 (each also accepts its
+  # older/shorter alias: sha256, sha3, shake, blake2b, blake2) or a hash-id in hex.
   HASH: "sha3_256"
   # If true, run integrity check/migration automatically when starting `nodo serve`.
   CHECK_INTEGRITY_ON_SERVE: false

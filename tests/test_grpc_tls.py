@@ -231,14 +231,15 @@ class ServiceFacingGatewayTests(unittest.TestCase):
 
     def _peer(self):
         peer = celaut_pb2.Peer()
-        peer.uri.add(ip="192.168.200.1", port=gateway_utils.GATEWAY_PORT)
+        peer.uri.add(ip="192.168.200.1", port=6000)
         return peer
 
     def test_a_service_is_given_the_plaintext_port(self):
         # A service speaks plain gRPC and learns this address as data, so there is
         # nothing for it to guess and nothing to pin.
-        with unittest.mock.patch.object(gateway_utils, "GATEWAY_PLAINTEXT_PORT", 6001), \
-             unittest.mock.patch.object(gateway_utils, "GATEWAY_PORT", 6000):
+        with unittest.mock.patch.object(
+            gateway_utils, "_plaintext_gateway_port", lambda: 6001
+        ), unittest.mock.patch.object(gateway_utils, "_gateway_port", lambda: 6000):
             instance = gateway_utils.peer_gateway_instance(self._peer())
 
         self.assertEqual([slot.port for slot in instance.api.slot], [6001])
@@ -250,8 +251,9 @@ class ServiceFacingGatewayTests(unittest.TestCase):
     def test_falls_back_to_the_tls_port_when_plaintext_is_disabled(self):
         # Then a service does have to speak TLS -- but nothing is left pointing at a
         # port the node does not serve.
-        with unittest.mock.patch.object(gateway_utils, "GATEWAY_PLAINTEXT_PORT", 0), \
-             unittest.mock.patch.object(gateway_utils, "GATEWAY_PORT", 6000):
+        with unittest.mock.patch.object(
+            gateway_utils, "_plaintext_gateway_port", lambda: 0
+        ), unittest.mock.patch.object(gateway_utils, "_gateway_port", lambda: 6000):
             instance = gateway_utils.peer_gateway_instance(self._peer())
 
         self.assertEqual([slot.port for slot in instance.api.slot], [6000])
@@ -279,7 +281,10 @@ class PlaintextGatewayBindTests(unittest.TestCase):
         ) as resolved:
             self.assertEqual(gateway_utils.plaintext_gateway_host(), "192.168.200.1")
 
-        self.assertEqual(resolved.call_args.args, ("br-ch",))
+        self.assertEqual(
+            resolved.call_args.args,
+            (gateway_utils.env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME"),),
+        )
 
     def test_never_binds_every_interface(self):
         # Neither branch out of here may widen into a wildcard: an interface that

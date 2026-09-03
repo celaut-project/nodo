@@ -39,6 +39,21 @@ DEBUG_MODE = lambda: env_manager.get("DEBUG_MODE")
 
 sc = SQLConnection()
 
+
+def _row_arch(sys_req) -> str:
+    """The ``arch`` column of a ``get_sys_req`` row, or None.
+
+    Indexed defensively rather than as ``sys_req['arch']``: the row is a
+    ``sqlite3.Row``, but every test that fakes one hands this loop a plain dict, and
+    a KeyError here would stop the loop that charges *every* instance -- so a missing
+    column costs the per-arch price of one instance, never the whole tick. Absent, it
+    is charged the node's scalar memory price.
+    """
+    try:
+        return sys_req["arch"]
+    except (KeyError, IndexError, TypeError):
+        return None
+
 # It doesn't make sense to store this on disk (DB), as each of the elements in the set requires a search in the pairs to obtain a complete service. Therefore, the bottleneck is in the number of operations rather than the cost of the object in memory. Thus, what would make sense, as a control against attacks, is a maximum number of elements in the list, so that if it 'fills up,' no more elements can enter, and they are not searched until requested again at some other time when there is space.
 
 # The mechanism uses two in-memory sets to manage service retrieval requests. The primary set, wanted_services, holds new service IDs to be fetched immediately, while the secondary set, wanted_services_retry, collects IDs that failed retrieval attempts so they can be retried later. This dual-set approach ensures that new requests are processed promptly while providing a controlled way to handle and periodically retry failed requests.
@@ -174,6 +189,12 @@ def maintain_vmachines(debug_mode: bool=False):
         # Every resource the row records, including the CFS pair: passing only memory
         # and disk left `pricing.CPU_MU_PER_VCPU_HOUR` unbilled on the one path that
         # actually charges anybody, whatever it was set to.
+        #
+        # `arch` is not a resource -- it is what selects the memory price when the
+        # operator prices memory per architecture. It comes off the row, written at
+        # launch, so the tick never has to read a service off disk to price the
+        # instance running it. A row from before the column existed reports None and
+        # is charged the node's scalar memory price, exactly as it was.
         charge_mu = compute_maintenance_cost(
             system_resources=celaut.Sysresources(
                 mem_limit=sys_req['mem_limit'] or 0,
@@ -183,6 +204,7 @@ def maintain_vmachines(debug_mode: bool=False):
             ),
             seconds=MANAGER_ITERATION_TIME,
             scarcity=scarcity,
+            arch=_row_arch(sys_req),
         )
         if debug_mode:
             log.LOGGER(f"Charging {vmachine_id}: {format_mu(charge_mu)} for {MANAGER_ITERATION_TIME}s")

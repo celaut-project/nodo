@@ -90,10 +90,7 @@ def collect_facts() -> Dict[str, object]:
     """Everything the guide needs from this host. Undetected values stay None."""
     from src.manager.ddns import status as ddns_status
 
-    try:
-        port = int(env_manager.get("GATEWAY_PORT") or 0)
-    except (TypeError, ValueError):
-        port = 0
+    port = env_manager.gateway_port_or_none() or 0
 
     try:
         ddns = ddns_status()

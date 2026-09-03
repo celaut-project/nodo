@@ -49,41 +49,71 @@ it (see
 ## `dependencies` — local runtimes
 
 Portable runtimes installed under `MAIN_DIR` (not system-wide): `python`, `java`,
-`yq`, and `docker`. Override only to relocate the toolchain.
+`yq`, and `buildkit`. Override only to relocate the toolchain.
 
-`dependencies.docker.*` (`BIN`, `DAEMON_BIN`, `BUILDX_BIN`, `DOCKER_SOCKET`) is an
+`dependencies.buildkit.*` (`BIN`, `DAEMON_BIN`, `BUILDKIT_SOCKET`) is an
 **optional, node-local** toolchain used **only** by the local packer
 (`packer.local: true`). It is **not** installed at node-install time — nodo runs
-`bash/install_docker.sh` on demand and drives an **isolated** daemon under
-`MAIN_DIR`, never the host's Docker.
+`bash/install_buildkit.sh` on demand and drives its own **rootless** builder under
+`MAIN_DIR`, never a system-wide daemon. Because the builder runs as the invoking
+user, `nodo pack` needs no privileges at all.
 
 ## `virtualizers` — execution runtime
 
-Cloud Hypervisor (`ch`) is the only virtualizer; the Docker virtualizer was
-removed, so the node needs no local Docker install to *run* services.
+Cloud Hypervisor (`ch`) runs everything of the host's own architecture, under
+KVM; QEMU (`qemu`) runs the rest, under TCG software emulation. The Docker
+virtualizer was removed, so the node needs no local Docker install to *run*
+services. Which backend a given service takes is decided per service by
+`src/virtualizers/selection.py` — never configured.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `virtualizers.DEFAULT_VIRTUALIZER` | `ch` | Only `ch` is supported. |
+| `virtualizers.DEFAULT_VIRTUALIZER` | `ch` | Native backend. The per-service choice is derived, not read from here. |
+| `virtualizers.qemu.ENABLE` | `true` | Execute FOREIGN-arch services under emulation. Off = serve only the host's arch. See *Which architectures the node can execute* below. |
+| `virtualizers.qemu.BINARY_PATHS` | (from `PATH`) | Per-arch `qemu-system-<arch>`. Empty resolves the well-known name on `PATH`. |
+| `virtualizers.qemu.CPU_MODEL` | `max` | QEMU `-cpu` model under TCG. |
+| `virtualizers.qemu.GUEST_NETWORK_READY_TIMEOUT_S` | `120` | Emulated boots reach the console far slower than KVM ones; this is the CH timeout's looser twin. |
 | `virtualizers.ch.BINARY_PATH` | (set at install) | Cloud Hypervisor binary. |
-| `virtualizers.ch.KERNEL_PATHS` / `INITRAMFS_PATHS` | per-arch | Guest kernel/initramfs per `linux/amd64` \| `linux/arm64`. |
+| `virtualizers.ch.KERNEL_PATHS` / `INITRAMFS_PATHS` | per-arch | Guest kernel/initramfs per `linux/amd64` \| `linux/arm64`. Both are downloaded at install time from the `guest-kernel-vN` release (pinned as `GUEST_KERNEL_VERSION` in `install.sh`): the kernel is not taken from the host's `/boot`, and the initramfs is not built on the host — CI builds it from `bash/build_ch_initramfs.sh`, which is byte-reproducible, so the same commit and busybox reproduce the published image. |
 | `virtualizers.ch.NETWORK_MODE` | `tap_bridge` | Guest networking mode. |
 | `virtualizers.ch.MIN_MEM_MIB` / `DEFAULT_MEM_MIB` | `128` / `256` | Boot memory floor / default. |
 | `virtualizers.ch.SECURITY.*` | — | rootfs path confinement, device-node policy, trusted-service allowlists. |
 
-## `builder` — architectures the node can *execute*
+## Which architectures the node can *execute*
 
-These keys govern **which architectures the node can EXECUTE** — they drive
-`SUPPORTED_ARCHITECTURES` (`src/utils/architectures.py`). Setting **both** to
-`false` means the node executes nothing. Do **not** confuse them with the
-packer-side pair below (`packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT`), which
-only affect what `nodo pack` builds/announces: to limit *execution* architectures,
-edit these `builder.*` keys, not the packer pair.
+**There is no config key for this.** `SUPPORTED_ARCHITECTURES`
+(`src/utils/architectures.py`) is *derived*, from two things the node can check:
+
+1. the **host's own architecture**, which Cloud Hypervisor boots under KVM;
+2. plus every **foreign architecture QEMU can emulate here** — which needs
+   `virtualizers.qemu.ENABLE` (on by default), the `qemu-system-<arch>` binary,
+   and that arch's guest kernel/initramfs on disk. The installer provisions the
+   guest assets for *both* architectures and installs the foreign emulator, so a
+   default install executes both.
+
+So a node advertises exactly what it can boot, and the way to change that is to
+change what is installed — or set `virtualizers.qemu.ENABLE: false` to serve only
+the host's own arch. An arch whose emulator or guest assets are missing is
+silently not advertised, which is why a node never fails a launch on an arch it
+claimed.
+
+This replaces the old `builder.ARM_SUPPORT` / `builder.X86_SUPPORT` pair, which
+could disagree with reality in both directions — set to `true` on a host that
+could not run that arch, a service was accepted and then died deep inside the CH
+build looking for a guest kernel that was never installed. Both keys are now
+**rejected**: a config that still carries either one stops the node with a
+`ConfigValidationError` (`src/utils/config_validation.py`), so delete them.
+
+Do not confuse any of this with the packer-side pair below
+(`packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT`), which only affect what
+`nodo pack` builds/announces. Those stay explicit flags, and the installer *does*
+pin them to the host arch: a local build runs the target's own toolchain and nodo
+installs no binfmt handler, so cross-arch *packing* genuinely cannot work.
+
+## `builder` — build tuning
 
 | Key | Default | Meaning |
 |---|---|---|
-| `builder.ARM_SUPPORT` | `true` | Node can execute `linux/arm64` services. |
-| `builder.X86_SUPPORT` | `true` | Node can execute `linux/amd64` services. |
 | `builder.WAIT_FOR_UNLOCK_MEMORY` | `60` | Seconds to wait for a memory lock to release during a build (`src/utils/utils.py`). |
 
 ## `communication` — peer messaging policy
@@ -100,12 +130,16 @@ The most important choice for anyone packing services. Full authoring format:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `packer.local` | `false` | `false` → delegate the build to a **packer-service** microVM (no Docker on this host). `true` → build **locally** with nodo's isolated Docker toolchain (provisioned on demand). |
+| `packer.local` | `false` | `false` → delegate the build to a **packer-service** microVM (no builder on this host). `true` → build **locally** with nodo's rootless BuildKit toolchain (provisioned on demand, no sudo). |
 | `packer.PACKER_SOURCE_URL` | `""` | Manifest URL nodo downloads the packer service from directly when it needs to acquire it. Empty → resolve via the `source-application` core service. |
 | `packer.PACKER_SERVICE_URL` | `""` | Override: `ip:port` base URL of an out-of-band packer-service. Used only when no packer id is set / no running instance is found. |
 | `packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT` | `true` | Architectures `nodo pack` accepts/announces (**packer-side** — to limit what the node can *execute*, use `builder.*` instead). |
-| `packer.PACKER_MEMORY_SIZE_FACTOR` | `2.0` | Local-packer only: RAM to lock as a factor of the exported filesystem size. |
-| `packer.docker.BUILDX_NETWORK` / `BUILDX_BUILDER` | `host` / `nodo-hostnet` | Local-packer buildx settings. |
+| `packer.MIN_BUFFER_BLOCK_SIZE` | `32768` (32 kB) | Local-packer only: inline/block threshold. A file at or above this size is stored as a content-addressed block (`main.BLOCKDIR`); a smaller one is inlined into the service's filesystem message. The main lever on what a service costs in memory — a build streams a pointer straight to its place in the rootfs, so only the inlined part is ever held. Raising it trades memory for fewer, larger block files and faster packs; it never changes a service id. |
+| `packer.PACKER_MEMORY_SIZE_FACTOR` | `6.0` | Local-packer only: RAM to lock as a factor of the *inlined* bytes (files under `packer.MIN_BUFFER_BLOCK_SIZE`). Larger files are streamed into blocks and cost no memory. |
+| `packer.PACKER_MEMORY_PER_BLOCK` | `10000` | Local-packer only: bytes added per block. With a low `packer.MIN_BUFFER_BLOCK_SIZE` almost every file is a block and nothing is inlined, so this term decides the reservation. |
+| `packer.PACKER_MEMORY_OVERHEAD` | `40000000` | Local-packer only: fixed bytes on top — the worker interpreter itself. |
+| `packer.WAIT_FOR_UNLOCK_MEMORY` | `300` | Local-packer only: seconds a pack waits for memory before failing instead of waiting indefinitely. |
+| `packer.buildkit.DOCKERFILE_NAME` | `Dockerfile` | Local-packer only: name of the Dockerfile inside the project directory. |
 
 The **default-mode** packer is *not* configured here by URL — it is referenced by
 its published content hash (service id) in the `core_services` mapping (below), which
@@ -129,7 +163,7 @@ closed ("Service not allowed.").
 
 | Key | Default | Meaning |
 |---|---|---|
-| `hashing.HASH` | `sha3_256` | Service/file identification hash. Accepts `sha3_256`, `sha256`, `shake_256`, `blake2b`, or a hex hash-id. |
+| `hashing.HASH` | `sha3_256` | Service/file identification hash. Accepts `sha2_256`, `sha3_256`, `shake_256`, `blake2b_256` (each also its older/shorter alias: `sha256`, `sha3`, `shake`, `blake2b`, `blake2`), or a hex hash-id. |
 | `hashing.CHECK_INTEGRITY_ON_SERVE` | `false` | Run integrity/migration automatically on `nodo serve`. |
 
 ## `network`
@@ -161,6 +195,32 @@ The two directions are separate settings, and neither implies the other:
 | Don't run services **for** other peers (client-only) | `client.ACCEPT_NEW_DEPOSITS: false` |
 | Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
 | Keep delegating, but approve every outgoing payment yourself | `deposits.AUTOMATIC_REFILL: false` |
+
+## `service_networks`
+
+Which communication domains this node is willing to run a service for. A service
+declares them as `Service.Network` tags; these two glob lists are the operator's
+verdict on that declaration, checked at launch, when quoting a peer, and once more
+in the virtualizer.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `service_networks.blacklist` | `[]` | Tags this node refuses. Checked first, and it wins over the whitelist. `["*"]` refuses every service that declares any tagged network. |
+| `service_networks.whitelist` | `[]` | When non-empty, every tag of every declared network must match one of these. |
+
+Both empty — the default — restricts nothing. Patterns are globs matched
+case-insensitively against each tag, and glob over the tag only: `google.com` does
+not match `www.google.com`, so write `*google.com` for the subdomains too. A
+service declaring no network is always accepted. A rejected client is told which
+tag, which list and which pattern refused it.
+
+The name is `service_networks`, not `networks`: `network:` above is this node's own
+ports and addresses, and a `networks:` block carrying `blacklist`/`whitelist` is
+rejected as a config error rather than silently ignored. Full semantics and the
+enforcement points: [`NETWORKS.md`](NETWORKS.md).
+
+On the `nodo tui` Config page, `a` appends a pattern to the selected list and `d`
+removes the selected one.
 
 ## `ddns`
 
@@ -259,11 +319,11 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 ## `general_flags`, `misc`, `logs`, `low_demand`, `publisher`
 
 - `general_flags.SIMULATE_PAYMENTS` — dry-run payments (dev).
-- `misc.MIN_BUFFER_BLOCK_SIZE` (`1.0e+7` = 10 MB) — inline/block threshold: files
-  at or above this size are stored as content-addressed blocks (`main.BLOCKDIR`),
-  smaller ones inline.
 - `misc.VALIDATE_ON_IMPORT` (`true`), `misc.CONFIGURATION_REQUIRED`.
 - `logs.DEBUG_MODE`, `logs.MEMORY_LOGS`.
+- `logs.TUNNEL_LOGS` — log every tunnel handshake, relay close and billing tick
+  under `[TUNNEL]`. Off by default: one line per connection and per billed MiB
+  buries the rest of the node log on a busy tunnel. See [`TUNNELING.md`](TUNNELING.md).
 - `low_demand.*` — opportunistic idle scheduler (off by default; WIP).
 - `publisher.*` — how `nodo publish` uploads a service and how a freshly-published
   source gets registered (GitHub repo, chunking, auto-publish-tx settings).
