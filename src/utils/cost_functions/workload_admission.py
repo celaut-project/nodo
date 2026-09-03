@@ -1,9 +1,8 @@
 """Admission check for ``Service.possible_environment_workload``.
 
-The packer lets `service.json` declare the worst-case descendant workloads a
-service may spawn during its lifetime (issue #163). That issue deliberately
-scoped out interpreting the declaration: the spec and the packer were done,
-enforcement was left "future scheduler work". This module is that follow-up.
+`service.json` declares the worst-case descendant workloads a service may spawn
+during its lifetime (issue #163); the packer serializes that declaration
+without interpreting it. This module is where it is interpreted, at launch.
 
 For each declared scenario, every workload group inside it must be satisfiable
 *somewhere* -- locally, or by at least one known peer -- or the service is
@@ -130,7 +129,7 @@ def check_resource_availability_on_peer(
 ) -> Optional[bool]:
     """Ask exactly one peer whether it could run an instance shaped like
     `resources` right now. None means the peer could not be asked (unreachable,
-    timed out, or an old peer that doesn't implement the RPC yet) -- not a "no".
+    timed out, or running a version without the RPC) -- not a "no".
     """
     # Imported lazily: this is the only place in the module that talks to a
     # peer, and keeping the rest importable without bee_rpc/grpc installed is
@@ -141,10 +140,9 @@ def check_resource_availability_on_peer(
     from protos import celaut_pb2_grpc
     from src.utils.utils import generate_uris_by_peer_id
 
-    # TODO(#257): this is the one plaintext peer channel left once the TLS branch
-    # lands -- it must become `grpc_transport.peer_channel(peer_id)`, which also
-    # resolves the address, so `generate_uris_by_peer_id` disappears from here.
-    # Deliberately not done in this PR: the helper does not exist on this branch yet.
+    # TODO(#257): a plaintext channel, like every other peer call on this path. When
+    # `grpc_transport.peer_channel(peer_id)` exists it replaces this, and it resolves
+    # the address too, so `generate_uris_by_peer_id` goes with it.
 
     try:
         response = next(bee.client_grpc(
@@ -193,14 +191,14 @@ def _workload_group_is_satisfiable(
 def _declared_limits(resources: celaut.Sysresources) -> str:
     """The limits a group actually declares, for the message that refuses it.
 
-    Read off the descriptor instead of named one at a time. Naming them by hand
-    described a group by three fields regardless of which one refused it, so a group
-    turned away over `blkio_weight` or `cpu_period` was reported with a `mem_limit`,
-    a `disk_space` and a `cpu_quota` that all looked perfectly fine -- and a limit
-    added to Sysresources later would have gone unmentioned until someone remembered
-    this string. `ListFields` lists the fields that are set, in field-number order,
-    so an undeclared limit stays out rather than showing up as a `0` the operator has
-    to discount.
+    Read off the descriptor rather than named one at a time. A hand-written list
+    describes a group by a fixed few fields whichever one refused it, so a group
+    turned away over `blkio_weight` or `cpu_period` reads as a `mem_limit`, a
+    `disk_space` and a `cpu_quota` that all look perfectly fine, and a limit added to
+    Sysresources goes unmentioned until someone remembers this string. `ListFields`
+    lists the fields that are set, in field-number order, so every declared limit is
+    named and an undeclared one stays out rather than showing up as a `0` the
+    operator has to discount.
     """
     declared = ", ".join(f"{field.name}={value}" for field, value in resources.ListFields())
     return declared or "no declared limits"

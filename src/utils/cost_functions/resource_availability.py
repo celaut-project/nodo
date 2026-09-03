@@ -1,13 +1,13 @@
 """The local admission gate: "could this host run an instance shaped like this?".
 
-Split out of ``generate_estimated_cost`` deliberately. This is the one question three
-different callers ask -- ``launch_service``'s local preflight, ``generate_estimated_cost``
-before it quotes, and the ``GetResourceAvailability`` RPC a peer uses to evaluate a
-declared descendant workload -- and it needs nothing but psutil and the memory pool.
-Leaving it in ``generate_estimated_cost`` chained it to that module's imports of
-``src.utils.utils`` (netifaces) and ``src.virtualizers.interface`` (the CH build
-machinery, for unrelated billing helpers), so asking "does this shape fit?" pulled in a
-virtualizer, and testing it meant stubbing one.
+One question with three callers -- ``launch_service``'s local preflight,
+``generate_estimated_cost`` before it quotes, and the ``GetResourceAvailability`` RPC a
+peer uses to evaluate a declared descendant workload -- so it lives on its own, needing
+nothing but psutil and the memory pool. It is deliberately not part of
+``generate_estimated_cost``, whose own imports reach ``src.utils.utils`` (netifaces) and
+``src.virtualizers.interface`` (the CH build machinery, for unrelated billing helpers):
+asking "does this shape fit?" should not pull in a virtualizer, nor require stubbing one
+to test the answer.
 """
 from typing import Any, Dict, Final, List, Tuple
 
@@ -114,12 +114,12 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
     disk = psutil.disk_usage("/")
     cpu_total = psutil.cpu_count(logical=False) or 0
     # Non-blocking: `interval=None` is usage since the previous call. A blocking
-    # sample would cost 100 ms on every launch and, since this function is also the
-    # body of the GetResourceAvailability RPC, would let a peer make this host pay it
-    # (#288). Nothing reads `system_cpu_available_percent` -- the CPU check above is
-    # against total capacity, not instantaneous load, on purpose -- but the field is
-    # part of a payload that travels to peers, so dropping it is a separate decision
-    # from making it cheap.
+    # sample costs 100 ms on every launch and, since this function is also the body of
+    # the GetResourceAvailability RPC, lets a peer make this host pay it (#288).
+    # Nothing reads `system_cpu_available_percent` -- the CPU check above is against
+    # total capacity, not instantaneous load, on purpose -- but the field is part of a
+    # payload that travels to peers, so it is kept: what it costs to sample is a
+    # separate question from what removing a wire-visible field would break.
     cpu_available_percent = max(0.0, 100.0 - psutil.cpu_percent(interval=None))
 
     service_memory_pool_total, service_memory_pool_available = _get_service_memory_snapshot()

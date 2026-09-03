@@ -1,5 +1,5 @@
-"""Pins the ResourceAvailability message and GetResourceAvailability RPC added
-to celaut.proto for the possible_environment_workload admission check
+"""Pins the ResourceAvailability message and GetResourceAvailability RPC that
+celaut.proto declares for the possible_environment_workload admission check
 (src/utils/cost_functions/workload_admission.py). Regenerating protos/*_pb2.py
 from a stale celaut.proto, or dropping the RPC from the Gateway service,
 breaks silently until a real peer round-trip is attempted -- this catches it
