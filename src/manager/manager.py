@@ -37,7 +37,12 @@ env_manager = ConfigManager()
 # Namespaced, matching where it actually lives in config.yaml and how rpc_tunnel refers
 # to it. The bare name resolved to the same value only via ConfigManager's flat-key
 # fallback, which searches every section -- fine until two sections hold the name.
-ALLOW_DEBT = bool(env_manager.get("costs.ALLOW_DEBT", True))
+# Defaulted off, and matched by config.example.yaml. An empty balance is the
+# only thing that reaps an instance nobody stops -- see the maintenance tick in
+# `src/manager/maintain.py`, which charges each instance for the interval it just
+# held and stops the ones that cannot pay. Debt makes `spend_mu` always succeed,
+# which removes that reaper: a config that simply omits the key must not get it.
+ALLOW_DEBT = bool(env_manager.get("costs.ALLOW_DEBT", False))
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MIN_SLOTS_OPEN_PER_PEER = env_manager.get("MIN_SLOTS_OPEN_PER_PEER")
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
