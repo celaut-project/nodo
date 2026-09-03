@@ -32,6 +32,12 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    # Both hotplug modules read ConfigManager at import. Without a config in place
+    # first they raise, and the skip below would then report the whole file as
+    # missing runtime dependencies -- turning the only coverage of the resize half
+    # into nine tests that pass by never running.
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
     from protos import celaut_pb2 as celaut
     from src.virtualizers.ch import hotplug as ch_hotplug
     from src.virtualizers.qemu import hotplug as qemu_hotplug
