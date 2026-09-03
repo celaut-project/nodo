@@ -554,6 +554,30 @@ costs:
   # problem.
   ALLOW_DEBT: false
 
+# Admission of a service's declared descendant workloads (`possible_environment_workload`
+# in service.json). At launch, every workload group that declares `resources` is checked
+# for existence -- is there a place, right now, that could run one instance shaped like
+# this? -- first locally, then, if network.DELEGATE_EXECUTION is on, by asking known peers
+# over GetResourceAvailability. This proves existence, never capacity: it does not show
+# that `count` concurrent instances could all run, and it holds nothing it finds.
+workload_admission:
+  # How much of the declaration to probe. Every group must fit under BOTH values; this
+  # only decides whether the node keeps asking once the answer is already settled.
+  #   fail_fast  Stop at the first group that fits nowhere. The launch is refused at that
+  #              point, and each further group costs a gRPC round-trip to every known
+  #              peer, so the rejection path is not the expensive one.
+  #   full       Probe every group, so the error names all of them. Useful when the
+  #              question is "which of my groups do not fit?" rather than "may this run?".
+  POLICY: fail_fast
+  # What a group that fits nowhere means.
+  #   reject     Refuse the launch. The declaration says these descendants may be
+  #              spawned; with nowhere to spawn them, starting the parent only defers
+  #              the failure to a worse moment.
+  #   warn       Log it and launch anyway. This check reads capacity at this instant and
+  #              reserves nothing, so a busy moment can refuse a service that would have
+  #              run a second later.
+  ON_UNSATISFIABLE: reject
+
 timing:
   GENERAL_WAIT_TIME: 2
   GENERAL_ATTEMPTS: 10

@@ -11,10 +11,9 @@ from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.firewall import allow_connection_to_instance
-from src.utils.cost_functions.generate_estimated_cost import (
-    generate_estimated_cost,
-    get_resource_availability,
-)
+from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
+from src.utils.cost_functions.resource_availability import get_resource_availability
+from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.utils.network_policy import enforce_network_policy
 from src.utils.shared_filesystems import service_requires_parent_colocation
@@ -192,6 +191,21 @@ def launch_service(
             networks=service.network,
             subject=f"service {service_id}" if service_id else "this service",
         )
+
+        # Refuse admission when a declared descendant workload scenario
+        # (service.json's `possible_environment_workload`) has no shape that
+        # fits anywhere -- neither here nor on any known peer -- right now.
+        # Ahead of `forced_peer` on purpose: forcing which peer runs *this*
+        # instance doesn't change whether its descendants could ever run.
+        workload_admission_failure = evaluate_possible_environment_workloads(
+            service=service,
+            ignore_network=utils.get_network_name(direction=father_ip),
+        )
+        if workload_admission_failure:
+            log.LOGGER(f"Refusing to launch service {service_id}: {workload_admission_failure}")
+            raise Exception(
+                f"Unable to launch service {service_id}: {workload_admission_failure}"
+            )
 
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never

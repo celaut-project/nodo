@@ -454,8 +454,9 @@ class ZipContainerPacker:
 
         # Possible descendant workloads. Each scenario is one independent
         # worst-case concurrent execution the service may trigger through its
-        # descendants (not cumulative, no ordering). Spec-only: nodo does not
-        # interpret/validate these here — that is future scheduler work (#163).
+        # descendants (not cumulative, no ordering). Interpreted at launch time
+        # by src.utils.cost_functions.workload_admission, not here -- this only
+        # serializes the declaration.
         populate_possible_environment_workloads(
             self.service,
             self.json.get("possible_environment_workload", []),
