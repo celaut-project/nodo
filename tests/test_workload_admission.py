@@ -1,6 +1,5 @@
-"""Unit tests for the possible_environment_workload admission check (issue #163
-follow-up: the spec/packer side was done there; this is the scheduler side that
-issue explicitly deferred).
+"""Unit tests for the possible_environment_workload admission check -- the
+scheduler side of the declaration issue #163 specified and the packer serializes.
 
 ``src/utils/cost_functions/workload_admission.py`` only touches bee_rpc/grpc
 inside ``check_resource_availability_on_peer`` (imported lazily there), so the
@@ -310,7 +309,7 @@ class RefusalMessageTests(unittest.TestCase):
     """What the refused group is described by.
 
     The operator reading a refusal has to be able to see which declaration caused it,
-    so the message names every limit the group declares -- not a fixed three of them.
+    so the message names every limit the group declares.
     """
 
     @_NOTHING_FITS
@@ -341,8 +340,8 @@ class RefusalMessageTests(unittest.TestCase):
     @_NO_PEER_TAKES_IT
     def test_a_group_refused_over_blkio_weight_says_blkio_weight(self, peer_check, peers, local):
         # 5 is outside the 10-1000 range cgroups accept, and it is the only thing
-        # wrong with this group: a message listing memory/disk/cpu would describe it
-        # entirely by fields that are fine.
+        # wrong with this group: a fixed memory/disk/cpu list describes it entirely
+        # by fields that are fine.
         service = celaut.Service()
         workload = service.possible_environment_workload.add().workloads.add()
         workload.count = 1

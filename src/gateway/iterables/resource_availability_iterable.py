@@ -16,7 +16,7 @@ class GetResourceAvailabilityIterable:
     Service.PossibleEnvironmentWorkload scenario asks, since a descendant workload
     group may declare only `resources`, with no `hash` or embedded `service`.
 
-    The answer is `get_resource_availability`'s, unchanged: the same admission gate a
+    The answer is `get_resource_availability`'s, verbatim: the same admission gate a
     real StartService goes through locally, so a peer is told exactly what this node
     would decide about itself and nothing more.
     """
