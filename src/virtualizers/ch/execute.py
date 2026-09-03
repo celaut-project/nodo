@@ -1115,11 +1115,31 @@ def execute(
             mem_limit=mem_b,
             disk_space=disk_b,
         )
-        mem_mib = math.ceil(mem_b / (1024 * 1024))
+        # The VM is booted larger than the figure above: `mem_b` is memory the
+        # *service* may use, and the guest kernel's own footprint (text, percpu, one
+        # struct page per frame) comes out of the VM's RAM before init runs. Sizing
+        # the VM at `mem_b` hands the service less than its manifest declared and
+        # OOM-kills it below its own ceiling. Only the boot argument grows; the row
+        # and the price stay at `mem_b`, so the node absorbs the kernel rather than
+        # billing the client for it.
+        #
+        # The reserve is per-architecture: `arch` here is the guest's, resolved above
+        # from the service's own manifest, not the host's. On the CH path they are
+        # always the same (KVM cannot run a foreign guest), but passing it explicitly
+        # keeps the two backends reading the same figure from the same place.
+        boot_mem_b = limits.guest_boot_memory_bytes(mem_b, arch=arch)
+        # What separates the VM's RAM size from the usable bytes the row records.
+        # Persisted in the runtime state below: this backend's resize knob is the
+        # cgroup, so every later memory change has to add the same figure back to
+        # keep bounding the boot allocation rather than the usable one.
+        guest_kernel_reserve_b = boot_mem_b - mem_b
+        mem_mib = math.ceil(boot_mem_b / (1024 * 1024))
         netmask = str(network.netmask)
         kernel_cmdline = _kernel_cmdline(vm_ip=vm_ip, netmask=netmask)
         log.LOGGER(
-            f"[CH][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib}, "
+            f"[CH][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib} "
+            f"(usable target {math.ceil(mem_b / (1024 * 1024))} MiB + "
+            f"{math.ceil(guest_kernel_reserve_b / (1024 * 1024))} MiB {arch} guest kernel reserve), "
             f"guest_net_device={GUEST_NET_DEVICE}, kernel_cmdline={kernel_cmdline}"
         )
 
@@ -1205,7 +1225,11 @@ def execute(
 
         # Set cgroup limits
         vm_cgroup: Path = ensure_vm_cgroup(vmachine_id=vmachine_id, pid=process.pid)
-        apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=mem_b)
+        # The cgroup caps the hypervisor *process*, so it has to bound what the VM
+        # was actually booted with. Capping it at `mem_b` while the guest holds
+        # `boot_mem_b` would have the host kill the VM for using the RAM the node
+        # itself gave it.
+        apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=boot_mem_b)
         apply_cpu_limit(vm_cgroup=vm_cgroup, cpu_quota=cpu_quota, cpu_period=cpu_period)
 
         # Network
@@ -1283,6 +1307,12 @@ def execute(
                 "cleanup_rules": cleanup_rules,
                 "rule_comment_prefix": fw_policy.vm_comment_prefix(vmachine_id),
                 "cgroup_path": vm_cgroup.as_posix(),
+                # The guest kernel's footprint inside this VM's RAM size, measured at
+                # boot. A memory resize adds it back to the usable figure it is asked
+                # for, so memory.max keeps bounding what the VM was booted with.
+                # Absent on an instance launched before the reserve existed, which was
+                # booted at exactly its usable figure and so has none.
+                "guest_kernel_reserve_bytes": guest_kernel_reserve_b,
                 "virtiofs": virtiofs_mounts,
                 "exported_shares": exported_share_ids,
                 "bridge": NETWORK_BRIDGE_NAME,

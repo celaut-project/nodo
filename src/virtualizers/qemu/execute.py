@@ -515,21 +515,44 @@ def execute(
         )
 
         vcpus, init_mem_b, cpu_quota, cpu_period = limits.resolve_initial_resources(initial_system_resources)
-        # What the guest is booted with, which is its ceiling rather than its initial
-        # allocation -- see this function's docstring. The balloon gives the
-        # difference back below, once there is a guest to ask.
-        boot_mem_b = limits.resolve_boot_mem_bytes(system_resources)
+        # The ceiling the *service* may reach, rather than its initial allocation:
+        # `-m` is fixed for the life of the process, so a guest not booted with room
+        # for `at_most` can never be grown into it. The balloon gives the difference
+        # back below, once there is a guest to ask.
+        usable_ceiling_b = limits.resolve_boot_mem_bytes(system_resources)
+        # `-m` sits *above* that ceiling. The guest kernel's own footprint comes out
+        # of the VM's RAM before init runs, so booting at the declared figure hands
+        # the service less than its manifest promised. Only the boot allocation
+        # grows: every figure the node records or prices stays in usable bytes, so
+        # the node absorbs the kernel rather than billing the client for it.
+        #
+        # `arch` is the GUEST's, which on this backend is by definition not the
+        # host's: this is the emulated path. The reserve is a property of the guest
+        # kernel, so an arm64 guest on an x86_64 node must be sized by arm64's figure
+        # -- passing the host's would be wrong on every launch this backend makes.
+        boot_mem_b = limits.guest_boot_memory_bytes(usable_ceiling_b, arch=arch)
+        # Fixed for the life of the guest: the kernel sized its `struct page` array
+        # for the whole of `-m` at boot, and a balloon inflating later hands none of
+        # it back. It is the constant that converts between the two units in play --
+        # a guest *allocation*, which is what QEMU and the cgroup speak, and the
+        # *usable* bytes a row records. Carried in the runtime state below because
+        # every later resize has to use the same figure this boot did; re-deriving it
+        # from config would drift the moment an operator edits the reserve.
+        guest_kernel_reserve_b = boot_mem_b - usable_ceiling_b
         disk_b = ch_exec._runtime_disk_bytes(vmachine_id=vmachine_id, rootfs_path=rootfs_path)
-        # Registered as the boot allocation, not as `at_init`: until the balloon has
+        # Registered at the usable ceiling, not at `at_init`: until the balloon has
         # actually taken the headroom back, the guest holds all of it, and an
         # instance is priced by what it holds. The correction below is a *shrink* of
         # the recorded figure, which `modify_sysreq` can never refuse for want of
         # pool memory -- recording `at_init` first and correcting upwards could be
         # refused, and would leave the guest holding memory nothing bills for.
+        #
+        # The guest kernel reserve is deliberately *not* in this figure. It is the
+        # node's cost, not the client's.
         resolved_resources = celaut.Sysresources(
             cpu_period=cpu_period,
             cpu_quota=cpu_quota,
-            mem_limit=boot_mem_b,
+            mem_limit=usable_ceiling_b,
             disk_space=disk_b,
         )
         mem_mib = math.ceil(boot_mem_b / (1024 * 1024))
@@ -557,7 +580,9 @@ def execute(
         )
         log.LOGGER(
             f"[QEMU][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib} "
-            f"(boot ceiling; at_init is {init_mem_b} bytes), cmdline={cmdline}"
+            f"(usable ceiling {math.ceil(usable_ceiling_b / (1024 * 1024))} MiB + "
+            f"{math.ceil(guest_kernel_reserve_b / (1024 * 1024))} MiB {arch} guest kernel "
+            f"reserve; at_init is {init_mem_b} bytes), cmdline={cmdline}"
         )
         log.LOGGER(f"[QEMU][{vmachine_id}] launching qemu: {' '.join(start_command)}")
 
@@ -603,9 +628,10 @@ def execute(
             )
 
         vm_cgroup: Path = ensure_vm_cgroup(vmachine_id=vmachine_id, pid=process.pid)
-        # The ceiling the process was booted with, never the guest's current
-        # allocation: memory.max below what qemu has mapped is what OOM-kills it
-        # (nodo#274). The balloon, not this, is what makes the guest give RAM back.
+        # The allocation the process was booted with, never the guest's current one
+        # nor the usable figure a row records: memory.max below what qemu has mapped
+        # is what OOM-kills it (nodo#274), and the guest kernel reserve is mapped.
+        # The balloon, not this, is what makes the guest give RAM back.
         apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=boot_mem_b)
         apply_cpu_limit(vm_cgroup=vm_cgroup, cpu_quota=cpu_quota, cpu_period=cpu_period)
 
@@ -626,23 +652,31 @@ def execute(
         # was actually granted. Deliberately after the guest is up rather than at
         # launch: a target the guest cannot meet OOM-panics it (#296), and only a
         # running guest can say what it can spare.
+        #
+        # The target is a guest *allocation*, so `at_init` alone is the wrong figure
+        # to ask for: the kernel's footprint was sized for the whole of `-m` and does
+        # not shrink with the balloon, so squeezing the guest to exactly `at_init`
+        # would leave the service `at_init` minus that footprint -- the very shortfall
+        # this reserve exists to close, reintroduced one step later.
         held_mem_b = settle_boot_balloon(
             vmachine_id=vmachine_id,
             qmp_socket=str(qmp_socket_path),
             boot_mem_bytes=boot_mem_b,
-            target_bytes=init_mem_b,
+            target_bytes=init_mem_b + guest_kernel_reserve_b,
         )
-        if held_mem_b != int(resolved_resources.mem_limit):
-            # The row was registered at the boot allocation, so this only ever walks
+        # Back into usable bytes, the unit every row and every price is written in.
+        held_usable_b = max(0, held_mem_b - guest_kernel_reserve_b)
+        if held_usable_b != int(resolved_resources.mem_limit):
+            # The row was registered at the usable ceiling, so this only ever walks
             # it *down* to what the guest kept -- which `modify_sysreq` cannot refuse.
-            resolved_resources.mem_limit = held_mem_b
+            resolved_resources.mem_limit = held_usable_b
             if registered and not modify_sysreq(
-                id=vmachine_id, sys_req=celaut.Sysresources(mem_limit=held_mem_b)
+                id=vmachine_id, sys_req=celaut.Sysresources(mem_limit=held_usable_b)
             ):
                 log.LOGGER(
                     f"[QEMU][{vmachine_id}] could not record the settled memory "
-                    f"({held_mem_b} bytes); the row still prices the {boot_mem_b} byte "
-                    f"boot allocation"
+                    f"({held_usable_b} usable bytes); the row still prices the "
+                    f"{usable_ceiling_b} byte usable ceiling"
                 )
 
         dnat_rules_state: List[Dict[str, object]] = []
@@ -695,11 +729,17 @@ def execute(
                 "rule_comment_prefix": fw_policy.vm_comment_prefix(vmachine_id),
                 "cgroup_path": vm_cgroup.as_posix(),
                 "qmp_socket": str(qmp_socket_path),
-                # The `-m` the process was started with: the declared `at_most`, and
-                # the hard ceiling every later resize is bounded by. Recording the
-                # guest's current allocation here instead would cap every grow at
-                # whatever the balloon happened to be holding.
+                # The `-m` the process was started with: the declared `at_most`
+                # plus the guest kernel reserve, and the hard ceiling every later
+                # resize is bounded by. Recording the guest's current allocation
+                # here instead would cap every grow at whatever the balloon
+                # happened to be holding.
                 "boot_mem_bytes": boot_mem_b,
+                # What separates that allocation from the usable bytes a resize
+                # request is expressed in. Hotplug adds it back to turn a target
+                # into a guest allocation, so a grow to the declared ceiling really
+                # leaves the service that much to allocate.
+                "guest_kernel_reserve_bytes": guest_kernel_reserve_b,
                 "virtiofs": virtiofs_mounts,
                 "exported_shares": exported_share_ids,
                 "bridge": NETWORK_BRIDGE_NAME,

@@ -48,6 +48,17 @@ class BillableResourcesTests(unittest.TestCase):
         billable = limits.billable_resources(celaut.Sysresources())
         self.assertEqual(billable.mem_limit, limits.DEFAULT_MEM_MIB * MIB)
 
+    def test_the_guest_kernel_reserve_is_not_billed_to_the_client(self):
+        """The VM is booted larger than this figure; the client is not charged for it.
+
+        The extra RAM exists so the service can allocate what it declared -- it is the
+        node's cost of delivering the promise, not something the client asked for.
+        """
+        declared = 256 * MIB
+        billable = limits.billable_resources(celaut.Sysresources(mem_limit=declared))
+        self.assertEqual(billable.mem_limit, declared)
+        self.assertGreater(limits.guest_boot_memory_bytes(declared), billable.mem_limit)
+
     def test_disk_under_the_image_floor_is_billed_at_the_floor(self):
         billable = limits.billable_resources(celaut.Sysresources(disk_space=10 * MIB))
         self.assertEqual(billable.disk_space, limits.MIN_ROOTFS_BYTES)

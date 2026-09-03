@@ -11,9 +11,14 @@ proper -- so the pricing layer can import this without importing a hypervisor, a
 so it stays unit-testable on a bare checkout.
 """
 import math
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from protos import celaut_pb2
+from src.utils.arch_guard import (
+    CANONICAL_ARCHITECTURES,
+    host_arch_tag,
+    normalize_arch_tag,
+)
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
@@ -24,6 +29,13 @@ def _env_int(key: str, default: int) -> int:
         return int(env_manager.get(key, default))
     except Exception:
         return int(default)
+
+
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(env_manager.get(key, default))
+    except Exception:
+        return float(default)
 
 
 # Guest CPU/RAM. A service that declares no CPU gets one vCPU, and one that declares
@@ -43,9 +55,217 @@ OVERHEAD_BYTES = 64 * 1024 * 1024
 MIN_ROOTFS_BYTES = 128 * 1024 * 1024
 MKFS_GROWTH_FACTOR = 2
 
+# Guest kernel overhead: the memory counterpart of OVERHEAD_BYTES above.
+#
+# A manifest's `mem_limit` is a promise to the *service*: memory the service may
+# use. The hypervisor's `-m` is not that figure. The guest kernel takes its text,
+# its rodata/rwdata, its percpu areas and -- growing with the size of the guest --
+# one `struct page` per 4 KiB frame, all before init runs. What is left is what the
+# service can actually allocate, and it is materially less.
+#
+# Booting a guest at exactly `mem_limit` therefore hands the service less RAM than
+# its manifest declared.
+#
+# The overhead is ARCHITECTURE-DEPENDENT, so the reserve is too. Two guest kernels
+# of the same version built for different architectures do not cost the same: the
+# kernel image differs, and so do percpu layout, the early fixmap/identity mappings
+# and how much firmware-reserved memory the platform hands back. Measured by booting
+# the guest kernels this node ships and reading their own
+# `Memory: <avail>K/<total>K available` line:
+#
+#   linux/arm64 (`virt`, QEMU/TCG)          linux/amd64 (Cloud Hypervisor/KVM)
+#     -m  128 MiB -> 102.7 MiB  (25.3)        -m  128 MiB ->  95.1 MiB  (32.9)
+#     -m  256 MiB -> 228.1 MiB  (27.9)        -m  256 MiB -> 220.7 MiB  (35.3)
+#     -m  512 MiB -> 478.8 MiB  (33.2)        -m  512 MiB -> 472.0 MiB  (40.0)
+#                                             -m 1024 MiB -> 974.8 MiB  (49.2)
+#                                             -m 2048 MiB -> 1981.1 MiB (66.9)
+#
+#   fitted:  ~22.8 MiB + ~2.2% of the guest   fitted: ~31.4 MiB + ~1.8% of the guest
+#
+# Two parts, and only one of them is architectural:
+#
+#   * The FIXED part is what the arch costs. amd64's kernel image, its percpu areas
+#     and its reserved low memory come to ~9 MiB more than arm64's. This is the
+#     constant that has to depend on the architecture -- one shared value is either
+#     wasteful on arm64 or too small on amd64, and too small means a guest OOM-killed
+#     below the ceiling its manifest published, which is the shortfall this reserve
+#     exists to close.
+#
+#   * The RATIO part is shared physics, not architecture: one `struct page` per 4 KiB
+#     frame is 64 bytes, i.e. 1.56% of any guest, on both arches. Both measure near
+#     2%. It is still settable per arch, because an operator running a kernel with a
+#     different page size or `struct page` layout has no other way to correct it.
+#
+# Disk already works this way: `initial_rootfs_size_bytes` grows the image by
+# OVERHEAD_BYTES so a service asking for N bytes of disk can store N bytes rather
+# than N minus the filesystem's metadata. Memory is sized the same way here. A
+# reserve of zero sizes the VM at exactly the usable figure.
+#
+# WHERE THE MARGIN GOES. Both parts carry margin over the measurements, because the
+# overhead also varies with kernel version and config and the failure mode of too
+# little is a guest OOM. But the two parts must not carry it the same way:
+#
+#   * The FIXED part is a constant, so margin on it is a constant. ~8 MiB over the
+#     measured figure on either arch, and it stays ~8 MiB whatever the guest's size.
+#     This is where generosity is cheap, and it is where kernel-version variance
+#     actually lives: a different .config changes the image, the percpu areas and the
+#     reserved regions, none of which scale with the guest.
+#
+#   * The RATIO part is multiplied by the guest, so margin on it is multiplied too. A
+#     flat 5% against a measured ~1.8-2.1% is not caution, it is a growing tax the
+#     node pays itself: on an 8 GiB guest it reserves 450 MiB where the kernel takes
+#     ~180, and the node absorbs the difference as host RAM it committed and cannot
+#     bill. The reserve is deliberately not billed (see `guest_boot_memory_bytes`),
+#     so every over-reserved byte comes straight off what the operator earns per GiB
+#     of RAM they own -- which is exactly the figure the TUI's pricing page exists to
+#     show them.
+#
+# So the ratio is set near the physics instead. One `struct page` per 4 KiB frame at
+# 64 bytes is 1.5625% of any guest and is the floor; the fitted measurements land at
+# 1.80% (amd64) and 2.10% (arm64), the rest being early page tables and vmemmap
+# alignment. 2.5% clears both with ~20-35% headroom -- room for a kernel built with a
+# fatter `struct page` -- without scaling into hundreds of wasted MiB. An operator who
+# has measured their own kernel can still tighten or widen it per arch.
+
+# (fixed MiB, ratio) per canonical arch tag. Fitted against `usable` (what this
+# function is given), not against `-m`: overhead = f + r*(usable + overhead), so the
+# per-`-m` fits quoted above become 31.4 MiB + 1.80% and 23.1 MiB + 2.10% here.
+# Overridable per arch under `virtualizers.ch.GUEST_KERNEL_RESERVE.<arch>`.
+#
+# The ratio is the same on both arches because the physics is: `struct page` per frame
+# does not know what instruction set it is describing. It stays a per-arch *setting*
+# only so an operator running one corrected kernel can fix it without touching the
+# other. The fixed part is what genuinely differs -- amd64's kernel image, percpu
+# areas and reserved low memory come to ~8 MiB more than arm64's.
+_GUEST_KERNEL_RESERVE_RATIO = 0.025
+
+_DEFAULT_GUEST_KERNEL_RESERVE = {
+    # measured 23.1 MiB + 2.10%
+    "linux/arm64": (32, _GUEST_KERNEL_RESERVE_RATIO),
+    # measured 31.4 MiB + 1.80%
+    "linux/amd64": (40, _GUEST_KERNEL_RESERVE_RATIO),
+}
+
+# Every arch nodo can name should have a measured reserve here, and
+# `tests/test_tui_mirrors_the_node.py` fails if one does not: adding a tag to
+# `arch_guard.ARCH_ALIASES` without measuring its guest kernel is a thing to notice.
+#
+# Deliberately a test rather than an import-time assert. The fallback below is safe --
+# it over-reserves, it cannot under-reserve -- so an unmeasured arch is "please
+# measure this", not "refuse to start". An assert here would take the node down at
+# import for a table it could have degraded past, and it takes every *test* that
+# imports this module down with it, as a skip labelled "missing runtime dependencies"
+# rather than a failure. A guard that hides the other guards is worse than none.
+
+# What an unknown arch gets: the largest reserve nodo has measured. An arch nobody
+# has characterised here is more likely to resemble the most expensive kernel than
+# the cheapest, and the cost of over-reserving is host RAM the node absorbs, while
+# the cost of under-reserving is a service OOM-killed below its declared ceiling.
+_FALLBACK_GUEST_KERNEL_RESERVE = max(
+    _DEFAULT_GUEST_KERNEL_RESERVE.values(), key=lambda pair: (pair[0], pair[1])
+)
+
+
+def _reserve_for_arch(arch: Optional[str]) -> Tuple[int, float]:
+    """(fixed bytes, ratio) reserved for a guest of ``arch``.
+
+    Config overrides live under ``virtualizers.ch.GUEST_KERNEL_RESERVE.<arch>`` with
+    ``MIB`` and ``RATIO`` keys, so an operator who has measured their own guest kernel
+    can correct one architecture without touching the other. Both at zero size the VM
+    at exactly the usable figure, for that arch alone.
+    """
+    canonical = normalize_arch_tag(arch) or arch
+    default_mib, default_ratio = _DEFAULT_GUEST_KERNEL_RESERVE.get(
+        canonical, _FALLBACK_GUEST_KERNEL_RESERVE
+    )
+    prefix = f"virtualizers.ch.GUEST_KERNEL_RESERVE.{canonical}"
+    fixed_mib = max(0, _env_int(f"{prefix}.MIB", default_mib))
+    ratio = max(0.0, _env_float(f"{prefix}.RATIO", default_ratio))
+    return fixed_mib * 1024 * 1024, ratio
+
+
+def guest_kernel_reserve_bytes(usable_bytes: int, arch: Optional[str] = None) -> int:
+    """The overhead a guest of ``arch`` needs on top of ``usable_bytes``.
+
+    Split out from :func:`guest_boot_memory_bytes` because the operator-facing side
+    (the TUI's pricing page, `nodo`'s config docs) wants the overhead on its own: it
+    is what the node absorbs and never bills, so it is what a memory price has to be
+    set high enough to cover.
+    """
+    usable_bytes = int(usable_bytes)
+    if usable_bytes <= 0:
+        return 0
+    fixed, ratio = _reserve_for_arch(arch)
+    return fixed + int(math.ceil(usable_bytes * ratio))
+
+
+def guest_kernel_reserve_table() -> Dict[str, Dict[str, float]]:
+    """Every arch's reserve, for whoever has to show or quote it.
+
+    Read live from config rather than captured at import, so the TUI and the node
+    agree after an operator edits one.
+    """
+    table = {}
+    for arch in _DEFAULT_GUEST_KERNEL_RESERVE:
+        fixed, ratio = _reserve_for_arch(arch)
+        table[arch] = {"fixed_bytes": fixed, "ratio": ratio}
+    return table
+
+
+def known_reserve_architectures() -> Tuple[str, ...]:
+    """Arch tags nodo has a measured guest-kernel reserve for.
+
+    The list the operator-facing surfaces enumerate -- the pricing page's per-arch
+    rows, `config.example.yaml`'s commented block. Deliberately not
+    `SUPPORTED_ARCHITECTURES`: that answers what this host can boot *right now*
+    (emulator installed, guest kernel on disk), which is a different question from
+    what nodo can quote an overhead for, and a price the operator set for an arch
+    should not vanish from the editor because an emulator was uninstalled.
+    """
+    return tuple(_DEFAULT_GUEST_KERNEL_RESERVE)
+
+
+def guest_boot_memory_bytes(usable_bytes: int, arch: Optional[str] = None) -> int:
+    """Hypervisor allocation so a guest can really offer ``usable_bytes`` to userspace.
+
+    ``arch`` is the canonical tag of the guest being booted (``linux/amd64``,
+    ``linux/arm64``); omitted, the host's own arch is assumed, which is what a caller
+    that has not resolved a service is booting. It selects the reserve, because the
+    overhead is a property of the guest kernel, not of the node.
+
+    Deliberately NOT part of :func:`resolve_initial_resources`, and so not part of
+    what :func:`billable_resources` returns. Two separate figures are wanted and
+    conflating them breaks something either way:
+
+    * ``resolve_initial_resources`` answers "what does this instance hold", which is
+      what the ``local_instances`` row records and the maintenance tick charges. It
+      has to stay idempotent -- it is applied to the manifest at launch and re-applied
+      to the already-resolved row when pricing it, and a figure that grew on each
+      application would make a quote and its charge disagree.
+    * this answers "how big must the VM be for that to be true", which only the two
+      backends need, at the one point where they build the hypervisor argument.
+
+    Keeping the overhead out of the billable figure also means the node absorbs it
+    rather than the client: a client is charged for the RAM it asked for and can use,
+    never for the kernel underneath it. What that costs the node is exactly
+    :func:`guest_kernel_reserve_bytes`, which the TUI's pricing page shows so the
+    operator can price memory with it in view.
+    """
+    usable_bytes = int(usable_bytes)
+    if usable_bytes <= 0:
+        return usable_bytes
+    return usable_bytes + guest_kernel_reserve_bytes(
+        usable_bytes, arch if arch is not None else host_arch_tag()
+    )
+
 
 def resolve_initial_resources(resources: celaut_pb2.Sysresources) -> Tuple[int, int, int, int]:
-    """(vcpus, mem_bytes, cpu_quota, cpu_period) the guest is given for `resources`."""
+    """(vcpus, mem_bytes, cpu_quota, cpu_period) the instance holds for `resources`.
+
+    ``mem_bytes`` is memory the *service* may use -- what the row records and what it
+    is billed for. The VM is booted somewhat larger than this so that figure is actually
+    deliverable; see :func:`guest_boot_memory_bytes`.
+    """
     vcpus = DEFAULT_VCPUS
     mem_b = DEFAULT_MEM_MIB * (1024 * 1024)  # Convert MiB to bytes
 
