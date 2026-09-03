@@ -351,6 +351,7 @@ class SQLConnection(metaclass=Singleton):
         mem_limit: int = 0,
         cpu_period: int = 0,
         cpu_quota: int = 0,
+        arch: Optional[str] = None,
     ):
         """
         Adds an internal container to the database.
@@ -378,14 +379,39 @@ class SQLConnection(metaclass=Singleton):
             mem_limit (int): Memory the instance holds, in bytes.
             cpu_period (int): CFS period, as the hypervisor expresses vCPUs.
             cpu_quota (int): CFS quota; quota/period is the vCPU count.
+            arch (Optional[str]): The guest's architecture, canonical tag
+                (``linux/amd64``). Recorded because it is what selects the memory
+                price when the operator has set one per arch, and the tick prices
+                this row rather than re-reading the service's manifest -- a
+                resolution that needs the service on disk, which an instance can
+                outlive. NULL is charged the node's scalar memory price.
         """
         self._execute('''
-            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
               disk_space, int(cpu_period or 0), int(cpu_quota or 0),
-              serialized_instance, service_id, virtualizer, envs))
+              serialized_instance, service_id, virtualizer, envs, arch))
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
+
+    def set_local_instance_definition(self, id: str, serialized_instance) -> bool:
+        """Store the celaut ``Instance`` of an already-registered local instance.
+
+        An instance is registered the moment its guest starts running, which is
+        before the launcher can know the instance definition: the published URI
+        slots depend on the address the guest ended up with. The row is written
+        first (so the node can identify the guest the moment it calls in) and its
+        definition lands here right after, once the launch completes.
+        """
+        try:
+            self._execute(
+                "UPDATE local_instances SET serialized_instance = ? WHERE id = ?",
+                (serialized_instance, id),
+            )
+            return True
+        except Exception as e:
+            log.LOGGER(f"Could not store the instance definition of {id}: {e}")
+            return False
 
     def get_local_instance_envs(self, id: str) -> Optional[str]:
         """
@@ -527,6 +553,10 @@ class SQLConnection(metaclass=Singleton):
         instance by: memory and disk in bytes, plus the CFS pair from which the vCPU
         count is derived. Returning only memory and disk is what left compute unbilled.
 
+        ``arch`` rides along for the same reason: it is not a resource, but it selects
+        the memory *price* when the operator has set one per architecture, so the tick
+        needs it from the same read rather than from a second lookup per instance.
+
         Args:
             id (str): The id of the internal container.
 
@@ -534,7 +564,7 @@ class SQLConnection(metaclass=Singleton):
             dict: A dictionary containing the system requirements.
         """
         result = self._execute('''
-            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances WHERE id = ?
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota, arch FROM local_instances WHERE id = ?
         ''', (id,))
         row = result.fetchone()
         if row:

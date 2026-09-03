@@ -2,6 +2,7 @@
 the process-identity helpers."""
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
@@ -135,6 +136,26 @@ class ProcessNameTests(unittest.TestCase):
     def test_visible_name_prefix(self):
         name = qemu_process.qemu_process_name("abcdef0123456789")
         self.assertEqual(name, "nodo-qemu-abcdef01")
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class QmpSocketPathTests(unittest.TestCase):
+    def test_qmp_socket_path_uses_short_tmp_path_for_long_hash_ids(self):
+        vmachine_id = "a" * 64
+        with patch.object(qemu_exec, "CH_API_SOCKET_DIR", "/tmp/nodo-ch"):
+            socket_path = qemu_exec._qmp_socket_path(vmachine_id)
+        self.assertEqual(str(socket_path), "/tmp/nodo-ch/qmp-aaaaaaaaaaaaaaaa.sock")
+        self.assertLess(len(str(socket_path)), 108)
+
+    def test_qmp_socket_path_independent_of_deep_cache_dir(self):
+        vmachine_id = "b" * 64
+        deep_cache = "/nodo/storage/" + ("x" * 80) + "/__cache__"
+        with patch.object(qemu_exec, "CACHE", deep_cache), \
+                patch.object(qemu_exec, "CH_API_SOCKET_DIR", "/tmp/nodo-ch"):
+            runtime_dir = qemu_exec._runtime_vm_dir(vmachine_id)
+            socket_path = qemu_exec._qmp_socket_path(vmachine_id)
+        self.assertGreater(len(str(runtime_dir / "qmp.sock")), 108)
+        self.assertLess(len(str(socket_path)), 108)
 
 
 if __name__ == "__main__":

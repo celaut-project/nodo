@@ -199,7 +199,9 @@ if __name__ == '__main__':
                     "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
                     "\n- inspect <service id> | <service tag>"
                     "\n- remove <service id> | <service tag>"
+                    "\n- prune [--all] [--dry-run]   (reclaim orphaned runtime dirs and preserved launch failures)"
                     "\n- kill <instance id>"
+                    "\n- burnall [--dry-run] [--yes]   (stop every instance, parents first; asks first)"
                     "\n- observe <instance id> [--save <path>]"
                     "\n- tunnel <instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]"
                     "\n- increase_deposit <instance id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
@@ -248,6 +250,7 @@ if __name__ == '__main__':
                     "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
                     "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
                     "\n- nat-guide  (how to forward the gateway port on your router so this node is reachable)"
+                    "\n- firewall-compat status|apply|remove  (the FORWARD rules nodo needs from another firewall on this host)"
                     "\n\n",
                     flush=True)
                 try:
@@ -540,6 +543,10 @@ if __name__ == '__main__':
                 from src.commands.kill import kill
                 kill(instance=sys.argv[2])
 
+            case "burnall":
+                from src.commands.burnall import burnall
+                burnall(argv=sys.argv[2:])
+
             case "observe":
                 from src.commands.observe import observe
                 import sys
@@ -634,9 +641,16 @@ if __name__ == '__main__':
                 from src.commands.remove import remove
                 remove(service=sys.argv[2])
 
+            case "prune":
+                from src.commands.prune import prune
+                prune(argv=sys.argv[2:])
+
             case "inspect":
                 from src.commands.inspect_service import inspect
-                inspect(service=sys.argv[2])
+                try:
+                    inspect(service=sys.argv[2])
+                except:  # Control the ServiceRegistryError exception, don't show to the user.
+                    pass
 
             case "services":
                 from src.commands.services import list_services
@@ -875,6 +889,11 @@ if __name__ == '__main__':
             case "nat-guide":
                 from src.commands.nat_guide import nat_guide
                 nat_guide()
+
+            case "firewall-compat":
+                from src.commands.firewall_compat import firewall_compat_command
+                subcommand = sys.argv[2] if len(sys.argv) > 2 else None
+                firewall_compat_command(subcommand=subcommand)
 
             case "completion":
                 # Shell tab-completion for commands and service/instance/peer ids.

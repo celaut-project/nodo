@@ -11,7 +11,12 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from src.utils.firewall.backends import ForeignRejector, InputRule, NftBackend
+from src.utils.firewall.backends import (
+    ForeignRejector,
+    InputRule,
+    NftBackend,
+    RejectorScan,
+)
 from src.utils.firewall.rules import Chain
 from src.utils.firewall.gateway import (
     GatewayPortUnavailable,
@@ -20,7 +25,7 @@ from src.utils.firewall.gateway import (
 )
 from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
 
-BRIDGE = "br-ch"
+BRIDGE = "nodo-br-ch"
 GATEWAY_IP = "192.168.200.1"
 SUBNET = "192.168.200.0/24"
 PORT = 58443
@@ -114,7 +119,7 @@ class ProbeTests(unittest.TestCase):
         runner = FakeRunner(
             {
                 ("ip", "neigh", "show"): _proc(
-                    0, "192.168.200.254 dev br-ch lladdr 02:aa:bb:cc:dd:ee REACHABLE\n"
+                    0, "192.168.200.254 dev nodo-br-ch lladdr 02:aa:bb:cc:dd:ee REACHABLE\n"
                 ),
             }
         )
@@ -180,20 +185,23 @@ class EnsureGatewayPortOpenTests(unittest.TestCase):
     def setUp(self):
         self.added = []
         self.removed = []
-        self.rejectors = []
+        self.rejectors = RejectorScan()
 
 
+    @patch("src.utils.firewall.frontend.detect_frontend", return_value=None)
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
-    def test_a_provably_closed_port_stops_the_node(self, mock_probe, _euid):
+    def test_a_provably_closed_port_stops_the_node(self, mock_probe, _frontend, _euid):
         mock_probe.return_value = ProbeResult(False, "connect refused", source_ip="192.168.200.254")
-        self.rejectors = [
-            ForeignRejector(
-                table="inet firewalld",
-                chain="filter_INPUT",
-                priority=10,
-                reason="contains a reject rule",
+        self.rejectors = RejectorScan(
+            rejectors=(
+                ForeignRejector(
+                    table="inet firewalld",
+                    chain="filter_INPUT",
+                    priority=10,
+                    reason="contains a reject rule",
+                ),
             )
-        ]
+        )
 
         with self.assertRaises(GatewayPortUnavailable) as ctx:
             ensure_gateway_port_open(
@@ -208,16 +216,14 @@ class EnsureGatewayPortOpenTests(unittest.TestCase):
         # It must say why an accept rule did not help, and name what is rejecting.
         self.assertIn("filter_INPUT", instructions)
         self.assertIn("accept", instructions)
-        # ...and state the property the host has to satisfy, without naming a
-        # firewall front-end: nodo speaks nftables/iptables and nothing above them.
-        self.assertIn(f"TCP {PORT} inbound must be accepted", instructions)
+        # ...and then say what to do about it: the command for the front-end running
+        # here, or -- as mocked below -- the property the host has to satisfy.
         self.assertIn(SUBNET, instructions)
-        self.assertNotIn("firewall-cmd", instructions)
         self.assertEqual(ctx.exception.port, PORT)
 
     @patch("src.utils.firewall.gateway.probe_tcp_from_bridge")
     def test_an_unknown_result_only_warns(self, mock_probe, _euid):
-        mock_probe.return_value = ProbeResult(None, "bridge br-ch does not exist yet")
+        mock_probe.return_value = ProbeResult(None, "bridge nodo-br-ch does not exist yet")
         logged = []
 
         result = ensure_gateway_port_open(
@@ -285,6 +291,75 @@ class EnsureGatewayPortPrivilegeTests(unittest.TestCase):
             ensure_gateway_port_open(port=PORT, verify=False)
         self.assertIn("root", str(ctx.exception))
         self.assertIn("sudo nodo serve", ctx.exception.instructions)
+
+
+@patch("src.utils.firewall.reachability.os.geteuid", return_value=0)
+class NamespaceEntryTests(unittest.TestCase):
+    """How the probe gets into its namespace decides whether it can run at all.
+
+    ``ip -n`` / ``ip netns exec`` remount /sys on their way in, and a host that
+    refuses that mount (SELinux denying ``mounton`` to ``ifconfig_t``, which is the
+    domain ``ip`` gets when the node runs as a systemd service) leaves the node
+    unable to verify its own gateway port. ``nsenter --net=`` needs no mount.
+    """
+
+    def setUp(self):
+        patcher = patch(
+            "src.utils.firewall.reachability._listener_present", return_value=True
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def _with_nsenter():
+        return (
+            patch("src.utils.firewall.reachability.shutil.which", return_value="/usr/bin/nsenter"),
+            patch("src.utils.firewall.reachability.os.path.exists", return_value=True),
+        )
+
+    def test_nsenter_is_preferred_and_nothing_remounts_sys(self, _euid):
+        which, exists = self._with_nsenter()
+        with which, exists:
+            runner = FakeRunner()
+            result = _probe(runner)
+        self.assertIs(result.reachable, True)
+        entered = [c for c in runner.calls if c[0] == "/usr/bin/nsenter"]
+        self.assertTrue(entered, "the namespace was never entered with nsenter")
+        self.assertTrue(all(c[1].startswith("--net=/run/netns/nodofw") for c in entered))
+        # The two iproute2 forms are the ones that mount /sys.
+        self.assertFalse(runner.ran("ip", "netns", "exec"))
+        self.assertFalse(any(c[:2] == ["ip", "-n"] for c in runner.calls))
+
+    def test_the_address_and_the_connect_both_run_inside_the_namespace(self, _euid):
+        which, exists = self._with_nsenter()
+        with which, exists:
+            runner = FakeRunner()
+            _probe(runner)
+        addr = [c for c in runner.calls if "addr" in c and "add" in c][0]
+        self.assertEqual(addr[0], "/usr/bin/nsenter")
+        self.assertEqual(addr[2], "ip")
+        connect = [c for c in runner.calls if "-c" in c][0]
+        self.assertEqual(connect[0], "/usr/bin/nsenter")
+
+    def test_without_nsenter_it_falls_back_to_iproute2(self, _euid):
+        with patch("src.utils.firewall.reachability.shutil.which", return_value=None):
+            runner = FakeRunner()
+            result = _probe(runner)
+        self.assertIs(result.reachable, True)
+        self.assertTrue(runner.ran("ip", "netns", "exec"))
+        self.assertTrue(any(c[:2] == ["ip", "-n"] for c in runner.calls))
+
+    def test_a_refused_sys_mount_is_unknown_and_names_the_mechanism(self, _euid):
+        # Verbatim iproute2 failure from the host that could not verify its port.
+        with patch("src.utils.firewall.reachability.shutil.which", return_value=None):
+            runner = FakeRunner(
+                {("ip", "-n"): _proc(1, "", "mount of /sys failed: Permission denied")}
+            )
+            result = _probe(runner)
+        self.assertIsNone(result.reachable, "an unusable probe is never a closed port")
+        self.assertIn("mount of /sys failed", result.detail)
+        self.assertIn("via ip netns exec", result.detail)
+        self.assertTrue(runner.ran("ip", "netns", "del"))
 
 
 if __name__ == "__main__":

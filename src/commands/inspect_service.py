@@ -12,7 +12,8 @@ from bee_rpc.utils import getsize
 from src.commands.__by_tag import get_id
 from src.utils.hashing import SHA3_256_ID, SHAKE_256_ID
 from src.utils.config import ConfigManager
-from src.utils.utils import read_metadata_from_disk, read_service_from_disk
+from src.utils.utils import read_metadata_from_disk, load_service_from_disk
+from src.utils.registry_errors import ServiceRegistryError
 from src.utils.contract_xattrs import get_address, get_script, get_token_id
 
 env_manager = ConfigManager()
@@ -72,10 +73,14 @@ def inspect(service: str):
 
     # Service Definition
     print_rule("📦 Service Definition", borders=True)
-    service_obj = read_service_from_disk(service_hash=service)
     service_path = os.path.join(REGISTRY, service)
     service_size = getsize(service_path)
     print(f"Size: {format_size(service_size)}")
+    try:
+        service_obj = load_service_from_disk(service_hash=service)
+    except ServiceRegistryError as e:
+        print(f"⚠️  Could not load the service definition: {e}\n")
+        raise
     print(f"Prose: {service_obj.prose}\n")
 
     print_rule("🔌 Service Interface")

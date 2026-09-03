@@ -35,18 +35,20 @@ import subprocess
 import time
 import traceback
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
+from src.manager.modify_resources import modify_sysreq
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.virtualizers.ch import execute as ch_exec
 from src.virtualizers.ch import limits
 from src.virtualizers.ch.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
-from src.virtualizers.ch.runtime_state import save_runtime_state, delete_runtime_state
+from src.virtualizers.ch.runtime_state import save_runtime_state, save_booting_state, delete_runtime_state
 from src.virtualizers.ch.virtiofs import (
     attach_virtiofs_backends,
     build_guest_mount_plan,
@@ -62,6 +64,7 @@ from src.virtualizers.qemu.config import (
     qemu_kernel_path,
     qemu_system_binary,
 )
+from src.virtualizers.qemu.hotplug import settle_boot_balloon
 from src.virtualizers.qemu.process import qemu_process_name
 from src.utils.firewall import policy as fw_policy
 from src.virtualizers.firewall import resolve_slot_transport_protocols
@@ -92,6 +95,13 @@ def _runtime_vm_dir(vmachine_id: str) -> Path:
     # Runtime dirs live under the shared cloud_hypervisor runtime tree so the
     # janitor and IP accounting see QEMU guests alongside CH ones.
     return Path(CACHE) / "cloud_hypervisor" / "runtime" / vmachine_id
+
+
+def _qmp_socket_path(vmachine_id: str) -> Path:
+    # Kept in the short CH API socket dir, not runtime_dir, to stay under the
+    # AF_UNIX SUN_LEN limit (runtime_dir is nested under CACHE and keyed by the
+    # full 64-hex vmachine_id, which alone can exceed the 108-byte limit).
+    return Path(CH_API_SOCKET_DIR) / f"qmp-{vmachine_id[:16]}.sock"
 
 
 # --------------------------------------------------------------------------- #
@@ -150,6 +160,98 @@ def build_virtiofs_args(
             ]
         )
     return args
+
+
+# Names the stats polling interval may go by, most likely first. Every QEMU
+# checked spells it `guest-stats-polling-interval` (6.2 on Ubuntu 22.04 through
+# 8.2); `stats-polling-interval` is carried only as a fallback for a build that
+# does not, and is never assumed. The list exists because naming a property the
+# binary does not have is fatal at launch rather than ignored -- an emulator that
+# exits with "Property ... not found" takes the whole instance with it -- so the
+# name is picked from what the binary advertises, never guessed.
+_BALLOON_STATS_INTERVAL_PROPERTIES = (
+    "guest-stats-polling-interval",
+    "stats-polling-interval",
+)
+
+# Polling seconds. Only needs to be frequent enough that a resize arriving after
+# boot sees a fresh reading.
+_BALLOON_STATS_INTERVAL_SECONDS = 2
+
+
+@lru_cache(maxsize=8)
+def _balloon_properties(qemu_binary: str) -> frozenset:
+    """Property names this QEMU's ``virtio-balloon-pci`` accepts.
+
+    Asked once per binary and cached: the answer cannot change under a running
+    node, and every guest launch would otherwise pay for the probe.
+    """
+    try:
+        proc = subprocess.run(
+            [qemu_binary, "-machine", "virt", "-device", "virtio-balloon-pci,help"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except Exception:
+        return frozenset()
+
+    names = set()
+    for line in (proc.stdout or "").splitlines() + (proc.stderr or "").splitlines():
+        line = line.strip()
+        if "=" not in line:
+            continue
+        name = line.split("=", 1)[0].strip()
+        if name:
+            names.add(name)
+    return frozenset(names)
+
+
+def _balloon_device_arg(qemu_binary: str) -> str:
+    """``-device`` argument for the balloon, using only properties this QEMU has.
+
+    ``id`` is fixed so hotplug can address the device by QOM path. Two optional
+    extras are added when present:
+
+    * a stats polling interval is what lets the guest report its free memory, so
+      a resize can be clamped to what the guest can actually spare instead of
+      OOM-panicking it;
+    * ``free-page-reporting`` lets the guest hand back pages it frees on its own.
+      It changes no total the node has promised anyone -- the guest may fault
+      those pages straight back in -- so it is a free win, not a reclaim.
+
+    ``deflate-on-oom`` is deliberately **not** among them, though QEMU offers it.
+    It lets a guest under its own memory pressure take balloon pages back, which
+    would silently void a reclaim the node has already recorded and charged for:
+    the row would say 64 MiB while the guest ran on 954 MiB, and nothing would
+    ever notice, since QEMU raises no event when it happens. That matters for
+    every guest here, not only a resized one -- the balloon holds the headroom
+    between ``at_init`` and ``at_most`` from boot
+    (:func:`src.virtualizers.qemu.hotplug.settle_boot_balloon`), so a guest
+    allowed to deflate on its own would quietly take back memory it was never
+    granted. The protection it offers -- surviving a target below the working
+    set -- is :func:`src.virtualizers.qemu.hotplug._safe_balloon_target`'s job
+    instead, and it does it before the guest is ever squeezed rather than after.
+    Leaving it off is also QEMU's own default. A guest that then
+    over-commits itself OOMs inside its own allocation, which is contained and
+    shows up in its serial log, rather than quietly reclaiming memory off the
+    books.
+
+    Each property is included only when this QEMU advertises it, because an
+    unknown property is a launch failure, not a warning.
+    """
+    available = _balloon_properties(qemu_binary)
+    parts = ["virtio-balloon-pci", "id=nodo-balloon"]
+
+    for prop in _BALLOON_STATS_INTERVAL_PROPERTIES:
+        if prop in available:
+            parts.append(f"{prop}={_BALLOON_STATS_INTERVAL_SECONDS}")
+            break
+
+    if "free-page-reporting" in available:
+        parts.append("free-page-reporting=on")
+
+    return ",".join(parts)
 
 
 def build_qemu_command(
@@ -226,7 +328,7 @@ def build_qemu_command(
     # hotplug drives the balloon over this socket (src/virtualizers/qemu/hotplug.py)
     # so the guest actually returns pages, instead of the cgroup squeezing the
     # qemu process into swap/OOM. Harmless when hotplug is never called.
-    command.extend(["-device", "virtio-balloon-pci"])
+    command.extend(["-device", _balloon_device_arg(qemu_binary)])
     if qmp_socket_path:
         command.extend(["-qmp", f"unix:{qmp_socket_path},server=on,wait=off"])
 
@@ -251,16 +353,35 @@ def execute(
     service_id: str,
     service: celaut.Service,
     config: Optional[celaut.Configuration],
-    initial_system_resources: celaut.Sysresources,
+    system_resources: celaut.Service.Container.Resources,
     father_id: str,
+    register_instance: Optional[Callable[[str, str, celaut.Sysresources], None]] = None,
 ) -> Tuple[str, str, celaut.Sysresources]:
     """Emulated counterpart of :func:`src.virtualizers.ch.execute.execute`.
 
     Same contract: build the guest from its bundle, wire host networking and
     firewall, boot it, wait for the guest to come up, and return
     ``(vmachine_id, vm_ip, resolved_resources)``. Only the hypervisor process
-    differs.
+    differs -- including ``register_instance``, which is called the instant the
+    emulator process exists so the node can identify the guest by its address
+    before the guest calls in.
+
+    **Memory is the one resource resolved differently from CH.** ``-m`` is fixed for
+    the life of a QEMU process: neither the balloon nor the cgroup can take a guest
+    above the allocation it booted with, so a guest booted at ``at_init`` can never
+    be grown into the ``at_most`` its manifest declared, and the grow half of every
+    resize is a no-op. The guest is therefore booted with -- and its cgroup ceiling
+    pinned at -- the declared ceiling, and the balloon takes the difference back as
+    soon as the guest is up, so what the guest *holds* is still ``at_init``.
+
+    vCPUs are sized from ``at_init`` instead. ``-smp`` is as fixed at boot as ``-m``
+    is, so a CPU grow past ``at_init`` runs into the same wall, but there is no
+    balloon to park the difference in: the only way to reserve the ceiling would be
+    to boot the guest with every vCPU it might ever be granted and leave the extra
+    threads throttled by ``cpu.max``, which is a different trade from parking unused
+    pages in a balloon and is not made here.
     """
+    initial_system_resources = system_resources.at_init
     vmachine_id = ch_exec._generate_vmachine_id()
     runtime_dir = _runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []
@@ -272,7 +393,7 @@ def execute(
     stdout_path = runtime_dir / "qemu.stdout.log"
     stderr_path = runtime_dir / "qemu.stderr.log"
     serial_log_path = runtime_dir / "qemu.serial.log"
-    qmp_socket_path = runtime_dir / "qmp.sock"
+    qmp_socket_path = _qmp_socket_path(vmachine_id)
     resolved_entrypoint: Optional[str] = None
 
     try:
@@ -313,6 +434,8 @@ def execute(
         log.LOGGER(f"[QEMU][{vmachine_id}] deterministic networking: ip={vm_ip}, mac={mac}")
 
         runtime_dir.mkdir(parents=True, exist_ok=True)
+        qmp_socket_path.parent.mkdir(parents=True, exist_ok=True)
+        log.LOGGER(f"[QEMU][{vmachine_id}] QMP socket dir prepared: {qmp_socket_path.parent}")
         shutil.copy2(bundle["rootfs_path"], rootfs_path)
         log.LOGGER(f"[QEMU][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
 
@@ -334,13 +457,6 @@ def execute(
                 guest_target=target_path,
             )
 
-        hosts_host_path, resolv_host_path, domain_records = ch_exec._prepare_guest_dns_files(
-            runtime_dir=runtime_dir,
-            network_resolution=network_resolution,
-        )
-        ch_exec._run_debugfs_write(image_path=rootfs_path, host_file=hosts_host_path, guest_target="/etc/hosts")
-        ch_exec._run_debugfs_write(image_path=rootfs_path, host_file=resolv_host_path, guest_target="/etc/resolv.conf")
-
         with open(entrypoint_host_path, "w", encoding="utf-8") as f:
             f.write(f"{resolved_entrypoint}\n")
         ch_exec._run_debugfs_write(
@@ -348,7 +464,10 @@ def execute(
             host_file=entrypoint_host_path,
             guest_target="/.__nodo_entrypoint",
         )
-        log.LOGGER(f"[QEMU][{vmachine_id}] guest metadata injected (config/dns/entrypoint)")
+        # No /etc/hosts nor /etc/resolv.conf: name resolution is not the node's to
+        # install in someone else's filesystem. See the note above
+        # `_configure_guest_firewall_policy` in src/virtualizers/ch/execute.py.
+        log.LOGGER(f"[QEMU][{vmachine_id}] guest metadata injected (config/entrypoint)")
 
         # Shared filesystems (parent -> child inheritance). Identical semantics to
         # CH; only the guest device wiring (vhost-user-fs vs CH --fs) differs.
@@ -386,15 +505,57 @@ def execute(
         tap_name = ch_exec._create_tap(vmachine_id)
         log.LOGGER(f"[QEMU][{vmachine_id}] TAP created and attached: {tap_name}")
 
-        vcpus, mem_b, cpu_quota, cpu_period = limits.resolve_initial_resources(initial_system_resources)
+        # Committed before the guest exists, not after it starts pinging. See
+        # src/virtualizers/ch/execute.py for why: none of this needs the guest to
+        # be alive, and the tap above is already forwarding-capable.
+        ch_exec._configure_guest_firewall_policy(
+            vmachine_id=vmachine_id,
+            vm_ip=vm_ip,
+            network_resolution=network_resolution,
+        )
+
+        vcpus, init_mem_b, cpu_quota, cpu_period = limits.resolve_initial_resources(initial_system_resources)
+        # The ceiling the *service* may reach, rather than its initial allocation:
+        # `-m` is fixed for the life of the process, so a guest not booted with room
+        # for `at_most` can never be grown into it. The balloon gives the difference
+        # back below, once there is a guest to ask.
+        usable_ceiling_b = limits.resolve_boot_mem_bytes(system_resources)
+        # `-m` sits *above* that ceiling. The guest kernel's own footprint comes out
+        # of the VM's RAM before init runs, so booting at the declared figure hands
+        # the service less than its manifest promised. Only the boot allocation
+        # grows: every figure the node records or prices stays in usable bytes, so
+        # the node absorbs the kernel rather than billing the client for it.
+        #
+        # `arch` is the GUEST's, which on this backend is by definition not the
+        # host's: this is the emulated path. The reserve is a property of the guest
+        # kernel, so an arm64 guest on an x86_64 node must be sized by arm64's figure
+        # -- passing the host's would be wrong on every launch this backend makes.
+        boot_mem_b = limits.guest_boot_memory_bytes(usable_ceiling_b, arch=arch)
+        # Fixed for the life of the guest: the kernel sized its `struct page` array
+        # for the whole of `-m` at boot, and a balloon inflating later hands none of
+        # it back. It is the constant that converts between the two units in play --
+        # a guest *allocation*, which is what QEMU and the cgroup speak, and the
+        # *usable* bytes a row records. Carried in the runtime state below because
+        # every later resize has to use the same figure this boot did; re-deriving it
+        # from config would drift the moment an operator edits the reserve.
+        guest_kernel_reserve_b = boot_mem_b - usable_ceiling_b
         disk_b = ch_exec._runtime_disk_bytes(vmachine_id=vmachine_id, rootfs_path=rootfs_path)
+        # Registered at the usable ceiling, not at `at_init`: until the balloon has
+        # actually taken the headroom back, the guest holds all of it, and an
+        # instance is priced by what it holds. The correction below is a *shrink* of
+        # the recorded figure, which `modify_sysreq` can never refuse for want of
+        # pool memory -- recording `at_init` first and correcting upwards could be
+        # refused, and would leave the guest holding memory nothing bills for.
+        #
+        # The guest kernel reserve is deliberately *not* in this figure. It is the
+        # node's cost, not the client's.
         resolved_resources = celaut.Sysresources(
             cpu_period=cpu_period,
             cpu_quota=cpu_quota,
-            mem_limit=mem_b,
+            mem_limit=usable_ceiling_b,
             disk_space=disk_b,
         )
-        mem_mib = math.ceil(mem_b / (1024 * 1024))
+        mem_mib = math.ceil(boot_mem_b / (1024 * 1024))
         netmask = str(network.netmask)
         cmdline = build_kernel_cmdline(arch=arch, vm_ip=vm_ip, netmask=netmask)
 
@@ -418,8 +579,10 @@ def execute(
             qmp_socket_path=str(qmp_socket_path),
         )
         log.LOGGER(
-            f"[QEMU][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib}, "
-            f"cmdline={cmdline}"
+            f"[QEMU][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib} "
+            f"(usable ceiling {math.ceil(usable_ceiling_b / (1024 * 1024))} MiB + "
+            f"{math.ceil(guest_kernel_reserve_b / (1024 * 1024))} MiB {arch} guest kernel "
+            f"reserve; at_init is {init_mem_b} bytes), cmdline={cmdline}"
         )
         log.LOGGER(f"[QEMU][{vmachine_id}] launching qemu: {' '.join(start_command)}")
 
@@ -437,6 +600,26 @@ def execute(
             f"[QEMU][{vmachine_id}] process started: pid={process.pid}, visible_name={process_args[0]}"
         )
 
+        # The guest is running from here; record it before it can call the node.
+        # See src/virtualizers/ch/execute.py for why this is not left to the end.
+        save_booting_state(
+            vmachine_id,
+            virtualizer="qemu",
+            service_id=service_id,
+            pid=process.pid,
+            ip=vm_ip,
+            mac=mac,
+            tap=tap_name,
+            bridge=NETWORK_BRIDGE_NAME,
+            cleanup_rules=cleanup_rules,
+            rule_comment_prefix=fw_policy.vm_comment_prefix(vmachine_id),
+        )
+        registered = False
+        if register_instance:
+            register_instance(vmachine_id, vm_ip, resolved_resources)
+            registered = True
+            log.LOGGER(f"[QEMU][{vmachine_id}] instance registered before the guest could call in")
+
         time.sleep(1.0)
         if process.poll() is not None:
             raise QEMUExecuteError(
@@ -445,7 +628,11 @@ def execute(
             )
 
         vm_cgroup: Path = ensure_vm_cgroup(vmachine_id=vmachine_id, pid=process.pid)
-        apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=mem_b)
+        # The allocation the process was booted with, never the guest's current one
+        # nor the usable figure a row records: memory.max below what qemu has mapped
+        # is what OOM-kills it (nodo#274), and the guest kernel reserve is mapped.
+        # The balloon, not this, is what makes the guest give RAM back.
+        apply_memory_limit(vm_cgroup=vm_cgroup, mem_limit=boot_mem_b)
         apply_cpu_limit(vm_cgroup=vm_cgroup, cpu_quota=cpu_quota, cpu_period=cpu_period)
 
         network_timeout_s = float(QEMU_NETWORK_READY_TIMEOUT_S)
@@ -458,12 +645,39 @@ def execute(
             timeout_s=network_timeout_s,
             serial_log_path=serial_log_path,
         )
-        ch_exec._configure_guest_firewall_policy(
-            vmachine_id=vmachine_id,
-            vm_ip=vm_ip,
-            network_resolution=network_resolution,
-        )
         log.LOGGER(f"[QEMU][{vmachine_id}] event=ready")
+
+        # The guest was booted with room for its declared ceiling; now that there is
+        # a guest to ask, the balloon takes back everything above what the service
+        # was actually granted. Deliberately after the guest is up rather than at
+        # launch: a target the guest cannot meet OOM-panics it (#296), and only a
+        # running guest can say what it can spare.
+        #
+        # The target is a guest *allocation*, so `at_init` alone is the wrong figure
+        # to ask for: the kernel's footprint was sized for the whole of `-m` and does
+        # not shrink with the balloon, so squeezing the guest to exactly `at_init`
+        # would leave the service `at_init` minus that footprint -- the very shortfall
+        # this reserve exists to close, reintroduced one step later.
+        held_mem_b = settle_boot_balloon(
+            vmachine_id=vmachine_id,
+            qmp_socket=str(qmp_socket_path),
+            boot_mem_bytes=boot_mem_b,
+            target_bytes=init_mem_b + guest_kernel_reserve_b,
+        )
+        # Back into usable bytes, the unit every row and every price is written in.
+        held_usable_b = max(0, held_mem_b - guest_kernel_reserve_b)
+        if held_usable_b != int(resolved_resources.mem_limit):
+            # The row was registered at the usable ceiling, so this only ever walks
+            # it *down* to what the guest kept -- which `modify_sysreq` cannot refuse.
+            resolved_resources.mem_limit = held_usable_b
+            if registered and not modify_sysreq(
+                id=vmachine_id, sys_req=celaut.Sysresources(mem_limit=held_usable_b)
+            ):
+                log.LOGGER(
+                    f"[QEMU][{vmachine_id}] could not record the settled memory "
+                    f"({held_usable_b} usable bytes); the row still prices the "
+                    f"{usable_ceiling_b} byte usable ceiling"
+                )
 
         dnat_rules_state: List[Dict[str, object]] = []
         if not by_local and assigment_ports:
@@ -513,12 +727,19 @@ def execute(
                 "dnat_rules": dnat_rules_state,
                 "cleanup_rules": cleanup_rules,
                 "rule_comment_prefix": fw_policy.vm_comment_prefix(vmachine_id),
-                "dns_allowlist": [
-                    {"domain": domain, "ip": ip} for domain, ip in domain_records
-                ],
                 "cgroup_path": vm_cgroup.as_posix(),
                 "qmp_socket": str(qmp_socket_path),
-                "boot_mem_bytes": mem_b,
+                # The `-m` the process was started with: the declared `at_most`
+                # plus the guest kernel reserve, and the hard ceiling every later
+                # resize is bounded by. Recording the guest's current allocation
+                # here instead would cap every grow at whatever the balloon
+                # happened to be holding.
+                "boot_mem_bytes": boot_mem_b,
+                # What separates that allocation from the usable bytes a resize
+                # request is expressed in. Hotplug adds it back to turn a target
+                # into a guest allocation, so a grow to the declared ceiling really
+                # leaves the service that much to allocate.
+                "guest_kernel_reserve_bytes": guest_kernel_reserve_b,
                 "virtiofs": virtiofs_mounts,
                 "exported_shares": exported_share_ids,
                 "bridge": NETWORK_BRIDGE_NAME,

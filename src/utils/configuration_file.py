@@ -17,7 +17,7 @@ env_manager = ConfigManager()
 
 # Network interface advertised as the local gateway in the generated config.
 # Defaults to the Cloud Hypervisor bridge.
-GATEWAY_NETWORK = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch")
+GATEWAY_NETWORK = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch")
 
 
 def get_config(

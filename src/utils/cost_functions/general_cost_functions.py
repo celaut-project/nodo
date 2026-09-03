@@ -21,6 +21,17 @@ env_manager = ConfigManager()
 # were denominated in "gas", which nothing anywhere declared a rate for, so they meant
 # nothing to the node reading them.
 RATE_RAM_PER_GIB_SECOND = "ram_mu_per_gib_second"
+# Per-architecture memory rate. The suffix is the canonical arch tag the rest of the
+# node names architectures by, verbatim -- `ram_mu_per_gib_second:linux/amd64` -- so a
+# reader that knows a service's arch can look its rate up without a second naming
+# convention, and one that does not still reads the un-suffixed key above.
+#
+# It rides in the SAME `Peer.mu_per_call` map every other rate does, which is why this
+# needs no protobuf change: the map is <string, Amount>, its keys are already an open
+# vocabulary, and a peer running an older nodo simply does not find the suffixed key
+# and falls back to the scalar one, which is what it does with any key it cannot
+# name. See `node_advertised_rates`.
+RATE_RAM_PER_GIB_SECOND_ARCH_PREFIX = f"{RATE_RAM_PER_GIB_SECOND}:"
 RATE_CPU_PER_VCPU_SECOND = "cpu_mu_per_vcpu_second"
 RATE_DISK_PER_GIB_SECOND = "disk_mu_per_gib_second"
 RATE_NET_PER_GIB = "net_mu_per_gib"
@@ -54,14 +65,18 @@ def compute_maintenance_cost(
     system_resources: celaut.Sysresources,
     seconds: float,
     scarcity: Optional[Dict[str, float]] = None,
+    arch: Optional[str] = None,
 ) -> int:
     """MU owed for holding `system_resources` for `seconds`.
 
     `scarcity` lets a caller sweeping many instances read system load once and price
     them all against the same snapshot; omitted, each call samples it itself.
+
+    `arch` selects the per-architecture memory price when one is configured; omitted,
+    the node's scalar memory price applies.
     """
     return maintenance_charge_mu(
-        system_resources=system_resources, seconds=seconds, scarcity=scarcity
+        system_resources=system_resources, seconds=seconds, scarcity=scarcity, arch=arch
     )
 
 
@@ -100,4 +115,19 @@ def node_advertised_rates() -> Dict[str, int]:
         RATE_MODIFY_RESOURCES: p.modify_resources_mu,
         RATE_SCARCITY_MAX_MULTIPLIER: p.scarcity_max_multiplier,
     }
+
+    # A node that prices memory per architecture advertises one entry per priced arch,
+    # alongside (never instead of) the scalar rate: a peer that does not know about
+    # per-arch pricing reads the scalar key and ignores the rest. A peer that does can
+    # find the rate for the arch it wants to run and, when the node prices that arch
+    # differently, know before asking for a quote.
+    #
+    # Only architectures the operator actually priced appear. Emitting one per
+    # supported arch, equal to the scalar, would advertise a per-arch policy the node
+    # does not have and grow every announcement for nothing.
+    for arch, price_mu_per_gib_hour in p.ram_mu_per_gib_hour_by_arch.items():
+        rates[f"{RATE_RAM_PER_GIB_SECOND_ARCH_PREFIX}{arch}"] = (
+            int(price_mu_per_gib_hour) // HOUR_SECONDS
+        )
+
     return {key: int(value) for key, value in rates.items() if int(value) > 0}

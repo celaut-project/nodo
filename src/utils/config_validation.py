@@ -11,6 +11,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
 
+from src.utils.arch_guard import CANONICAL_ARCHITECTURES
 from src.utils.ergo_units import erg_to_nanoerg, is_valid_ergo_address
 
 # Keys that were removed. Their presence anywhere in the config means the file predates
@@ -171,6 +172,7 @@ def validate_pricing_config(config: Dict[str, Any], *, warn=None) -> None:
         raise ConfigValidationError("Malformed 'pricing' mapping.")
     for key in PRICE_KEYS:
         _require_whole_mu(pricing, "pricing", key)
+    _validate_pricing_by_arch(pricing)
 
     if "SCARCITY_MAX_MULTIPLIER" in pricing:
         try:
@@ -277,6 +279,63 @@ def _validate_display_unit(config: Dict[str, Any], rate: Decimal) -> None:
             ) from exc
         if decimals < 0:
             raise ConfigValidationError(f"ui.UNITS.{name}.DECIMALS must not be negative, got {decimals}")
+
+
+# Prices that may be set per architecture. Only memory: it is the one resource whose
+# real cost to the node depends on the guest's arch (the guest kernel reserve the node
+# absorbs, which differs per arch). Adding a key here is all it takes to extend the
+# set -- `monetary._prices_by_arch` reads any key by name.
+PER_ARCH_PRICE_KEYS = (
+    "RAM_MU_PER_GIB_HOUR",
+)
+
+
+
+def _validate_pricing_by_arch(pricing: Dict[str, Any]) -> None:
+    """Validate ``pricing.BY_ARCH``: per-architecture price overrides.
+
+    Absent is valid and means every arch pays the scalar prices, so a config that never
+    mentions the block needs no change.
+
+    A malformed entry raises, exactly as a malformed scalar price does. A price nobody
+    can read is a configuration error, and the two ways of "handling" one are giving
+    the node's memory away (read as 0) or refusing every client (read as huge).
+    An unrecognised arch tag raises too: it is silently dead config otherwise, and the
+    operator who wrote `amd64` instead of `linux/amd64` believes they have set a price
+    that never applies to anything. The tags come from
+    :data:`src.utils.arch_guard.CANONICAL_ARCHITECTURES`, which is the node's whole
+    vocabulary of architectures rather than what this host happens to be able to boot
+    -- see there for why validation must not depend on the latter.
+    """
+    block = pricing.get("BY_ARCH")
+    if block is None:
+        return
+    if not isinstance(block, dict):
+        raise ConfigValidationError(
+            "Malformed 'pricing.BY_ARCH' mapping: expected one block per architecture, "
+            f"got {type(block).__name__}."
+        )
+
+    for arch, entry in block.items():
+        if arch not in CANONICAL_ARCHITECTURES:
+            raise ConfigValidationError(
+                f"pricing.BY_ARCH.{arch} is not an architecture this node knows. Use a "
+                f"canonical tag: {', '.join(CANONICAL_ARCHITECTURES)}."
+            )
+        if not isinstance(entry, dict):
+            raise ConfigValidationError(
+                f"Malformed 'pricing.BY_ARCH.{arch}' mapping: expected price keys, got "
+                f"{type(entry).__name__}."
+            )
+        for key in entry:
+            if key not in PER_ARCH_PRICE_KEYS:
+                raise ConfigValidationError(
+                    f"pricing.BY_ARCH.{arch}.{key} cannot be set per architecture. Only "
+                    f"{', '.join(PER_ARCH_PRICE_KEYS)} can: the node hands a guest the "
+                    "vCPUs and the image it asked for whatever architecture it is, so "
+                    "only memory has a per-arch cost to recover."
+                )
+            _require_whole_mu(entry, f"pricing.BY_ARCH.{arch}", key)
 
 
 def _warn_if_charges_cannot_settle(pricing: Dict[str, Any], rate: Decimal, warn) -> None:

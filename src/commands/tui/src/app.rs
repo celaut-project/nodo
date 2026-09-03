@@ -115,6 +115,8 @@ pub enum InputMode {
     Normal,
     Connect,
     EditConfig,
+    /// A new element for the list the Config page's selection points at.
+    AddConfigItem,
     FilterConfig,
     /// Amount entry for crediting/debiting the selected client's balance.
     CreditClient,
@@ -142,13 +144,20 @@ pub enum EditKind {
 }
 
 /// Fixed value sets for config keys whose comment in `config.example.yaml`
-/// documents a closed set of options. Deliberately small and explicit: a key
-/// like `hashing.HASH` documents aliases but also accepts an arbitrary hex
-/// hash-id, so it stays freeform text rather than a misleadingly restrictive
-/// picker. Add an entry here only when every accepted value is enumerable.
+/// documents a closed set of options. Deliberately small and explicit --
+/// listing a value here is a claim that it is a real, working setting.
+///
+/// This does not have to be the *complete* set a key accepts: `Enum` only adds
+/// an ↑/↓ cycle-through-these on top of ordinary typing (see `EditKind::Enum`
+/// and `adjust_edit_value`), and `save_config_edit` validates the typed value
+/// as YAML, never against this list. So `hashing.HASH` belongs here even
+/// though it also accepts an arbitrary hex hash-id: the picker offers the
+/// four canonical algorithm names (`src/utils/hashing.py`'s `HASH_SPECS`) as a
+/// fast path, and typing a hex id past it still works exactly as before.
 fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
     match path {
         "network.DELEGATION_TUNNEL_POLICY" => Some(&["auto", "always", "never"]),
+        "hashing.HASH" => Some(&["sha2_256", "sha3_256", "shake_256", "blake2b_256"]),
         _ => None,
     }
 }
@@ -159,24 +168,36 @@ pub enum PendingAction {
     DeleteService { id: String, label: String },
     KillInstance { id: String, label: String },
     DisconnectPeer { id: String, label: String },
+    /// Remove one element from a list in config.yaml. Confirmed like the others
+    /// because dropping an entry from, say, a network policy loosens it silently.
+    DeleteConfigItem {
+        path: Vec<ConfigPathSegment>,
+        label: String,
+    },
 }
 
 /// The `nodo` invocation a confirmed [`PendingAction`] turns into, plus the label its
-/// outcome is reported under. Every destructive action goes through the same CLI the
-/// operator would type, so the TUI can never do something `nodo` cannot.
-fn pending_command(action: PendingAction) -> (String, Vec<String>) {
+/// outcome is reported under. Every destructive action that has a CLI equivalent goes
+/// through the same CLI the operator would type, so the TUI can never do something
+/// `nodo` cannot.
+///
+/// `None` for the one action that has no such equivalent: no `nodo` subcommand edits a
+/// single config key, which is why the config editor writes through `yq` at all, so
+/// removing a list element takes that same path (`delete_config_list_item`).
+fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
     match action {
-        PendingAction::DeleteService { id, label } => (
+        PendingAction::DeleteService { id, label } => Some((
             format!("Delete service {label}"),
             vec!["remove".to_string(), id],
-        ),
+        )),
         PendingAction::KillInstance { id, label } => {
-            (format!("Kill instance {label}"), vec!["kill".to_string(), id])
+            Some((format!("Kill instance {label}"), vec!["kill".to_string(), id]))
         }
-        PendingAction::DisconnectPeer { id, label } => (
+        PendingAction::DisconnectPeer { id, label } => Some((
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
-        ),
+        )),
+        PendingAction::DeleteConfigItem { .. } => None,
     }
 }
 
@@ -525,6 +546,7 @@ pub struct Paths {
     pub metadata: PathBuf,
     pub log: PathBuf,
     pub cgroups: PathBuf,
+    pub cache: PathBuf,
     pub yq: PathBuf,
 }
 
@@ -561,6 +583,7 @@ impl Paths {
                 &["virtualizers", "ch", "CGROUPS_BASE_DIR"],
                 PathBuf::from("/sys/fs/cgroup"),
             ),
+            cache: resolve(&["main", "CACHE"], storage.join("__cache__")),
             yq: resolve(&["dependencies", "yq", "BIN"], PathBuf::from("yq")),
             storage,
         }
@@ -736,22 +759,54 @@ impl Money {
 /// editor for the real config rather than a decoration.
 #[derive(Debug, Clone)]
 pub struct PriceEntry {
-    /// Key under `pricing:` in config.yaml.
+    /// Unique row id. The config key for a node-wide price, and `<arch>/<key>` for a
+    /// per-architecture override -- the two would otherwise collide on the same key,
+    /// and the selection is tracked by id.
+    pub id: String,
+    /// Key under `pricing:` (or under `pricing.BY_ARCH.<arch>:`) in config.yaml.
     pub key: &'static str,
     /// Short label for the bar.
-    pub short: &'static str,
+    pub short: String,
     /// What the price is charged per, for the legend.
     pub per: &'static str,
     /// Recurring prices are charged for as long as a resource is held; one-off ones
     /// price an event. They are shown apart because their magnitudes are unrelated,
     /// and a shared axis would flatten one of the groups into nothing.
     pub recurring: bool,
+    /// The architecture this price applies to, for a per-arch override; `None` for the
+    /// node-wide price, which every arch pays unless overridden.
+    pub arch: Option<&'static str>,
+    /// True when this row is a per-arch override that is NOT written in config.yaml:
+    /// it shows the scalar price it inherits, so the operator can see what an arch is
+    /// charged and edit it in place, rather than having to know the block exists.
+    pub inherited: bool,
     pub mu: u64,
+}
+
+impl PriceEntry {
+    /// Where this price lives in config.yaml.
+    pub fn config_path(&self) -> Vec<ConfigPathSegment> {
+        let mut path = vec![ConfigPathSegment::Key("pricing".to_string())];
+        if let Some(arch) = self.arch {
+            path.push(ConfigPathSegment::Key(PRICING_BY_ARCH_KEY.to_string()));
+            path.push(ConfigPathSegment::Key(arch.to_string()));
+        }
+        path.push(ConfigPathSegment::Key(self.key.to_string()));
+        path
+    }
+
+    /// How this price is named in status lines and editor titles.
+    pub fn config_label(&self) -> String {
+        match self.arch {
+            Some(arch) => format!("pricing.{PRICING_BY_ARCH_KEY}.{arch}.{}", self.key),
+            None => format!("pricing.{}", self.key),
+        }
+    }
 }
 
 impl Identifiable for PriceEntry {
     fn id(&self) -> &str {
-        self.key
+        &self.id
     }
 }
 
@@ -764,6 +819,107 @@ const PRICE_CATALOGUE: [(&str, &str, &str, bool); 7] = [
     ("TUNNEL_OPEN_MU", "TUNNEL", "per tunnel opened", false),
     ("MODIFY_RESOURCES_MU", "RESIZE", "per resource change", false),
 ];
+
+/// The block under `pricing:` holding per-architecture overrides. Mirrors
+/// `PRICING_BY_ARCH_KEY` in `src/utils/monetary.py`.
+pub const PRICING_BY_ARCH_KEY: &str = "BY_ARCH";
+
+/// Prices that may be set per architecture, and the architectures they may be set for.
+/// Mirrors `PER_ARCH_PRICE_KEYS` in `src/utils/config_validation.py`.
+///
+/// Only memory. It is the one resource whose real cost to the node depends on the
+/// guest's architecture: the guest kernel reserve the node absorbs and never bills
+/// differs per arch. The node hands a guest the vCPUs and the image it asked for
+/// whatever architecture it is, so nothing else has a per-arch cost to recover.
+const PER_ARCH_PRICE_KEYS: [&str; 1] = ["RAM_MU_PER_GIB_HOUR"];
+pub const PRICED_ARCHITECTURES: [&str; 2] = ["linux/amd64", "linux/arm64"];
+
+/// The guest kernel reserve, per architecture: how much MORE than a service's declared
+/// memory the VM is booted with, so the service really gets what it declared.
+///
+/// Mirrors `_DEFAULT_GUEST_KERNEL_RESERVE` in `src/virtualizers/ch/limits.py`, and is
+/// overridden from the same config keys the node reads, so what the operator is shown
+/// here is what the node will actually reserve.
+///
+/// This matters on the PRICING page because **the node absorbs it**. An instance is
+/// billed for the memory it declared and can use, never for the kernel underneath it,
+/// so every GiB sold commits more than a GiB of host RAM -- and by a different amount
+/// per architecture. A memory price set without it in view under-recovers, silently.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GuestKernelReserve {
+    pub fixed_mib: u64,
+    pub ratio: f64,
+}
+
+impl GuestKernelReserve {
+    /// Bytes reserved on top of `usable_bytes`. The same model as
+    /// `limits.guest_kernel_reserve_bytes`: a fixed part (the kernel image, percpu
+    /// areas, reserved low memory -- what actually differs per arch) plus a share of
+    /// the guest (one `struct page` per 4 KiB frame, near-identical on both).
+    pub fn bytes_for(&self, usable_bytes: u64) -> u64 {
+        if usable_bytes == 0 {
+            return 0;
+        }
+        self.fixed_mib * 1024 * 1024 + (usable_bytes as f64 * self.ratio).ceil() as u64
+    }
+
+    /// What one GiB sold actually costs the node in host RAM, as a multiplier.
+    ///
+    /// The figure a memory price has to be multiplied by to recover the overhead: at
+    /// 1.18, a node earning `p` per GiB-hour declared earns `p / 1.18` per GiB-hour of
+    /// host RAM it committed.
+    pub fn commitment_multiplier(&self, usable_bytes: u64) -> f64 {
+        if usable_bytes == 0 {
+            return 1.0;
+        }
+        (usable_bytes + self.bytes_for(usable_bytes)) as f64 / usable_bytes as f64
+    }
+}
+
+/// The ratio is the same on both arches because the physics is: one `struct page`
+/// per 4 KiB frame does not know what instruction set it describes. 2.5% clears the
+/// fitted measurements (1.80% amd64, 2.10% arm64) and the 1.5625% `struct page`
+/// floor with headroom, without scaling into hundreds of wasted MiB on a large guest
+/// -- margin on a multiplier is multiplied too, and the node absorbs it unbilled.
+/// The fixed part is what genuinely differs per arch, and is where margin is cheap.
+const DEFAULT_GUEST_KERNEL_RESERVE: [(&str, u64, f64); 2] = [
+    ("linux/amd64", 40, GUEST_KERNEL_RESERVE_RATIO),
+    ("linux/arm64", 32, GUEST_KERNEL_RESERVE_RATIO),
+];
+
+/// Mirrors `_GUEST_KERNEL_RESERVE_RATIO` in `src/virtualizers/ch/limits.py`.
+const GUEST_KERNEL_RESERVE_RATIO: f64 = 0.025;
+
+/// The reserve for each priced architecture, config overrides applied.
+fn get_guest_kernel_reserves(config: &Path) -> Vec<(&'static str, GuestKernelReserve)> {
+    let document = read_yaml(config).ok();
+    PRICED_ARCHITECTURES
+        .iter()
+        .map(|arch| {
+            let (_, default_mib, default_ratio) = DEFAULT_GUEST_KERNEL_RESERVE
+                .iter()
+                .find(|(tag, ..)| tag == arch)
+                .copied()
+                .unwrap_or(("", 0, 0.0));
+            let read = |leaf: &str| -> Option<String> {
+                yaml_scalar(
+                    document.as_ref(),
+                    &["virtualizers", "ch", "GUEST_KERNEL_RESERVE", arch, leaf],
+                )
+            };
+            let reserve = GuestKernelReserve {
+                fixed_mib: read("MIB")
+                    .and_then(|value| value.trim().parse::<u64>().ok())
+                    .unwrap_or(default_mib),
+                ratio: read("RATIO")
+                    .and_then(|value| value.trim().parse::<f64>().ok())
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                    .unwrap_or(default_ratio),
+            };
+            (*arch, reserve)
+        })
+        .collect()
+}
 
 /// The scarcity surcharge, which bounds what any of these prices can become.
 #[derive(Debug, Clone, Copy)]
@@ -790,16 +946,53 @@ fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
             .map(|value| value as u64)
             .unwrap_or(0)
     };
-    let entries = PRICE_CATALOGUE
+    let mut entries: Vec<PriceEntry> = PRICE_CATALOGUE
         .iter()
         .map(|(key, short, per, recurring)| PriceEntry {
+            id: (*key).to_string(),
             key,
-            short,
+            short: (*short).to_string(),
             per,
             recurring: *recurring,
+            arch: None,
+            inherited: false,
             mu: read(key),
         })
         .collect();
+
+    // One row per (architecture, per-arch-priceable key), always -- including the
+    // architectures the operator has not written a price for, which show the scalar
+    // they inherit. An arch that only appeared once it was already configured would
+    // need the operator to know the block exists before they could reach it, and the
+    // whole point of the page is that a price is editable where it is displayed.
+    for arch in PRICED_ARCHITECTURES {
+        for key in PER_ARCH_PRICE_KEYS {
+            let (short, per, recurring) = PRICE_CATALOGUE
+                .iter()
+                .find(|(catalogue_key, ..)| *catalogue_key == key)
+                .map(|(_, short, per, recurring)| (*short, *per, *recurring))
+                .unwrap_or((key, "", true));
+            let configured = yaml_scalar(
+                document.as_ref(),
+                &["pricing", PRICING_BY_ARCH_KEY, arch, key],
+            )
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(|value| value as u64);
+            entries.push(PriceEntry {
+                id: format!("{arch}/{key}"),
+                key,
+                // The arch after the resource, so the per-arch rows sort and read as
+                // variations of the price above them rather than as separate prices.
+                short: format!("{short}·{}", arch.rsplit('/').next().unwrap_or(arch)),
+                per,
+                recurring,
+                arch: Some(arch),
+                inherited: configured.is_none(),
+                mu: configured.unwrap_or_else(|| read(key)),
+            });
+        }
+    }
     let scarcity = Scarcity {
         max_multiplier: yaml_scalar(document.as_ref(), &["pricing", "SCARCITY_MAX_MULTIPLIER"])
             .and_then(|value| value.trim().parse::<u64>().ok())
@@ -844,6 +1037,16 @@ fn yaml_scalar(document: Option<&Value>, keys: &[&str]) -> Option<String> {
         Value::Bool(flag) => Some(flag.to_string()),
         _ => None,
     }
+}
+
+/// `network.GATEWAY_PORT` as written, or None when the file cannot be read.
+///
+/// The sentinel `auto` and a real port are both just text here: what matters is
+/// whether the value changed, not what it means.
+fn read_gateway_port(config: &Path) -> Option<String> {
+    read_yaml(config)
+        .ok()
+        .and_then(|document| yaml_scalar(Some(&document), &["network", "GATEWAY_PORT"]))
 }
 
 fn resolve_config_path(value: &str, main_dir: &Path, storage: Option<&Path>) -> PathBuf {
@@ -981,6 +1184,10 @@ pub struct App {
     pub prices: StatefulList<PriceEntry>,
     pub scarcity: Scarcity,
     pub money: Money,
+    /// The guest kernel reserve per architecture, as the node will apply it. Shown on
+    /// the pricing page because the node absorbs it: it is the gap between memory sold
+    /// and host RAM committed, and it is what a memory price has to cover.
+    pub guest_kernel_reserves: Vec<(&'static str, GuestKernelReserve)>,
     /// Detail for the selected peer / client, reloaded when the selection moves or the
     /// data refreshes — never per frame, since drawing must not touch the database.
     pub peer_detail: Option<PeerDetail>,
@@ -1049,6 +1256,7 @@ impl Default for App {
             prices: StatefulList::with_items(prices),
             scarcity,
             money: Money::load(&paths.config),
+            guest_kernel_reserves: get_guest_kernel_reserves(&paths.config),
             peer_detail: None,
             client_detail: None,
             service_detail: None,
@@ -1335,6 +1543,153 @@ impl App {
             .cloned()
     }
 
+    /// The config path the tree selection points at, section or leaf alike.
+    ///
+    /// A section has no [`ConfigEntry`] of its own, so the segments come from the
+    /// first leaf underneath it, truncated to the selection's depth: the path is read
+    /// back out of the data rather than parsed out of the tree's `[1]`-style tokens,
+    /// which a mapping key could otherwise imitate.
+    fn selected_config_path(&self) -> Option<Vec<ConfigPathSegment>> {
+        let selected = self.config_tree_state.selected();
+        if selected.is_empty() {
+            return None;
+        }
+        self.config_all.iter().find_map(|entry| {
+            let tokens = entry_tokens(entry);
+            (tokens.len() >= selected.len() && tokens[..selected.len()] == selected[..])
+                .then(|| entry.path_segments[..selected.len()].to_vec())
+        })
+    }
+
+    /// Whether `path` names a list.
+    ///
+    /// An empty list is a leaf that says so (`flatten_yaml` stops there), a populated
+    /// one has no entry of its own and is recognised by its children being indexed.
+    fn is_list_at(&self, path: &[ConfigPathSegment]) -> bool {
+        self.config_all.iter().any(|entry| {
+            if entry.path_segments == path {
+                return entry.value_type == "list";
+            }
+            entry.path_segments.len() > path.len()
+                && entry.path_segments[..path.len()] == *path
+                && matches!(entry.path_segments[path.len()], ConfigPathSegment::Index(_))
+        })
+    }
+
+    /// The list the selection can append to: itself when it is one, or its parent
+    /// when the selection is an element of one -- so `a` works both on the list and
+    /// with an element highlighted, which is where the cursor already is after
+    /// adding one.
+    fn selected_list_path(&self) -> Option<Vec<ConfigPathSegment>> {
+        let path = self.selected_config_path()?;
+        if self.is_list_at(&path) {
+            return Some(path);
+        }
+        match path.last() {
+            Some(ConfigPathSegment::Index(_)) => Some(path[..path.len() - 1].to_vec()),
+            _ => None,
+        }
+    }
+
+    /// The list element the selection points at: any path ending in an index, a
+    /// scalar element and a whole object in a list alike.
+    ///
+    /// A leaf *inside* such an object (`network.FREE_PORTS_RANGE[0].START`) is not
+    /// one: removing the element a key belongs to is not what selecting that key
+    /// asks for, so the operator is told to select the element itself.
+    fn selected_list_item(&self) -> Option<Vec<ConfigPathSegment>> {
+        let path = self.selected_config_path()?;
+        matches!(path.last(), Some(ConfigPathSegment::Index(_))).then_some(path)
+    }
+
+    /// Start appending an element to the list the selection points at.
+    pub fn open_config_list_add(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        let Some(path) = self.selected_list_path() else {
+            self.status = "Select a list, or one of its elements, to add to".to_string();
+            return;
+        };
+        self.input_mode = InputMode::AddConfigItem;
+        self.input_title = format!("Add to {}", config_path_display(&path));
+        self.input.clear();
+        self.edit_config_path = Some(path);
+        self.edit_config_secret = false;
+        self.edit_kind = EditKind::Text;
+    }
+
+    /// Append what was typed to the list, as one more element.
+    ///
+    /// The value is parsed as YAML exactly as an ordinary edit is, so a number stays
+    /// a number and an object stays an object; a glob has to be quoted (`"*.foo"`),
+    /// because a bare leading `*` is a YAML alias and not a string.
+    async fn save_config_list_add(&mut self) {
+        let Some(path) = self.edit_config_path.clone() else {
+            self.status = "No list selected".to_string();
+            self.close_input();
+            return;
+        };
+        if self.input.trim().is_empty() {
+            self.status = "Nothing to add: type a value".to_string();
+            return;
+        }
+        if let Err(error) = serde_yaml::from_str::<Value>(&self.input) {
+            self.status = format!("Invalid YAML value: {error}");
+            return;
+        }
+
+        let value = self.input.clone();
+        let expression = format!("{} += [env(NODO_TUI_VALUE)]", yq_path_expression(&path));
+        match self.run_yq(expression, Some(&value)).await {
+            Ok(()) => {
+                self.reload_after_config_write();
+                self.close_input();
+                // A list that was empty was a leaf and is now a section: open it, or
+                // the element just added would be written but invisible.
+                self.config_tree_state.open(path_tokens(&path));
+                self.status = format!(
+                    "Added to {} • restart nodo to apply runtime changes",
+                    config_path_display(&path)
+                );
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// Confirm removing the list element the selection points at.
+    pub fn open_delete_config_item_confirm(&mut self) {
+        if self.page() != Page::Config {
+            return;
+        }
+        let Some(path) = self.selected_list_item() else {
+            self.status = "Select a list element ([0], [1], ...) to remove".to_string();
+            return;
+        };
+        let label = config_path_display(&path);
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Remove {label}? (y/N)");
+        self.pending_action = Some(PendingAction::DeleteConfigItem { path, label });
+    }
+
+    /// Remove one element from a list in config.yaml.
+    async fn delete_config_list_item(&mut self, path: &[ConfigPathSegment], label: &str) {
+        let expression = format!("del({})", yq_path_expression(path));
+        match self.run_yq(expression, None).await {
+            Ok(()) => {
+                self.reload_after_config_write();
+                // Every index after the removed one shifts down, so the selection is
+                // moved to the list rather than left on a position that now holds a
+                // different element than the one that was on screen.
+                self.config_tree_state
+                    .select(path_tokens(&path[..path.len().saturating_sub(1)]));
+                self.status =
+                    format!("Removed {label} • restart nodo to apply runtime changes");
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
     pub fn open_config_editor(&mut self) {
         let Some(entry) = self.selected_config_entry() else {
             self.status =
@@ -1396,7 +1751,13 @@ impl App {
                     .position(|option| option == self.input.trim())
                     .unwrap_or(0) as i32;
                 let len = options.len() as i32;
-                let next_index = (current_index + delta).rem_euclid(len) as usize;
+                // Minus, where the number branch above adds: `delta` is the screen
+                // direction the arrow points (+1 for Up, see the handler), and the
+                // options are drawn as a vertical list in declaration order, so Up
+                // has to reach the option *above* -- the one at a lower index. The
+                // sign that makes Up increment a number is the opposite of the one
+                // that walks a list upwards.
+                let next_index = (current_index - delta).rem_euclid(len) as usize;
                 self.input = options[next_index].clone();
             }
             EditKind::Text => {}
@@ -1470,6 +1831,7 @@ impl App {
             InputMode::Connect => self.connect(),
             InputMode::CreditClient => self.submit_credit_client(),
             InputMode::EditConfig => self.save_config_edit().await,
+            InputMode::AddConfigItem => self.save_config_list_add().await,
             InputMode::FilterConfig => {
                 self.config_filter = self.input.trim().to_string();
                 self.apply_config_filter();
@@ -1606,21 +1968,48 @@ impl App {
         value: &str,
     ) -> Result<(), String> {
         let expression = format!("{} = env(NODO_TUI_VALUE)", yq_path_expression(path));
+        self.run_yq(expression, Some(value)).await
+    }
+
+    /// Apply one in-place `yq` expression to config.yaml, backing the file up first.
+    ///
+    /// Every config write lands here -- a scalar edit, a price, an appended list
+    /// element, a removed one -- so they cannot drift into several sets of quoting,
+    /// backup and failure-reporting rules. A value is handed over through the
+    /// environment rather than interpolated into the expression, so nothing an
+    /// operator types can be read as yq syntax.
+    /// Apply one `yq` expression to config.yaml, with a backup first.
+    ///
+    /// Also the single place that invalidates the gateway-port verdict. The node
+    /// records "this port was proven reachable" in `<CACHE>/gateway_port_passed`
+    /// (`src/utils/config.py`) and skips its startup probe while that holds; a port
+    /// edited here has never been proven, so the file has to go or the next start
+    /// would serve on an unchecked port. Compared before and after rather than
+    /// matched against the expression, because an expression that touches the key
+    /// can be shaped many ways and only the value actually matters.
+    async fn run_yq(&mut self, expression: String, value: Option<&str>) -> Result<(), String> {
         backup_config(&self.paths.config)
             .map_err(|error| format!("Could not create config backup: {error}"))?;
+        let gateway_port_before = read_gateway_port(&self.paths.config);
 
-        let output = Command::new(&self.paths.yq)
+        let mut command = Command::new(&self.paths.yq);
+        command
             .arg("e")
             .arg("-i")
             .arg(expression)
-            .arg(&self.paths.config)
-            .env("NODO_TUI_VALUE", value)
-            .output()
-            .await;
+            .arg(&self.paths.config);
+        if let Some(value) = value {
+            command.env("NODO_TUI_VALUE", value);
+        }
+        let output = command.output().await;
 
         match output {
             Ok(output) if output.status.success() => {
                 self.paths = Paths::discover();
+                if read_gateway_port(&self.paths.config) != gateway_port_before {
+                    let marker = self.paths.cache.join("gateway_port_passed");
+                    let _ = fs::remove_file(marker);
+                }
                 Ok(())
             }
             Ok(output) => Err(format!(
@@ -1662,7 +2051,7 @@ impl App {
             return;
         }
 
-        self.write_price(entry.key, next.to_string()).await;
+        self.write_price(&entry, next.to_string()).await;
     }
 
     /// Open the ordinary config editor on the selected price, for an exact value.
@@ -1675,23 +2064,24 @@ impl App {
             return;
         };
         self.input_mode = InputMode::EditConfig;
-        self.input_title = format!("Edit pricing.{} (MU, {})", entry.key, entry.per);
+        self.input_title = format!("Edit {} (MU, {})", entry.config_label(), entry.per);
         self.input = entry.mu.to_string();
-        self.edit_config_path = Some(vec![
-            ConfigPathSegment::Key("pricing".to_string()),
-            ConfigPathSegment::Key(entry.key.to_string()),
-        ]);
+        self.edit_config_path = Some(entry.config_path());
         self.edit_config_secret = false;
         self.edit_kind = EditKind::Number;
     }
 
     /// Persist one price and reload, so the bars always show what is on disk rather
     /// than what the TUI hoped it wrote.
-    async fn write_price(&mut self, key: &str, value: String) {
-        let path = vec![
-            ConfigPathSegment::Key("pricing".to_string()),
-            ConfigPathSegment::Key(key.to_string()),
-        ];
+    ///
+    /// A per-arch row writes under `pricing.BY_ARCH.<arch>`, which materialises the
+    /// block on first edit -- so an operator who has never seen the block can still
+    /// give one architecture its own price by nudging the row that shows what it
+    /// currently inherits.
+    async fn write_price(&mut self, entry: &PriceEntry, value: String) {
+        let path = entry.config_path();
+        let label = entry.config_label();
+        let id = entry.id.clone();
         match self.write_config_value(&path, &value).await {
             Ok(()) => {
                 self.reload_after_config_write();
@@ -1699,10 +2089,11 @@ impl App {
                     .prices
                     .items
                     .iter()
-                    .find(|entry| entry.key == key)
-                    .map(|entry| self.money.format_mu(entry.mu))
+                    .find(|candidate| candidate.id == id)
+                    .map(|candidate| self.money.format_mu(candidate.mu))
                     .unwrap_or_default();
-                self.status = format!("pricing.{key} = {value} MU ({shown}) • restart nodo to apply");
+                self.status =
+                    format!("{label} = {value} MU ({shown}) • restart nodo to apply");
             }
             Err(error) => self.status = error,
         }
@@ -1722,6 +2113,7 @@ impl App {
         }
         self.scarcity = scarcity;
         self.money = Money::load(&self.paths.config);
+        self.guest_kernel_reserves = get_guest_kernel_reserves(&self.paths.config);
     }
 
     /// Everything a config write invalidates: the money view and the config table.
@@ -1739,12 +2131,54 @@ impl App {
             self.prices
                 .items
                 .iter()
-                .find(|entry| entry.key == key)
+                .find(|entry| entry.arch.is_none() && entry.key == key)
                 .map(|entry| entry.mu)
                 .unwrap_or(0)
         };
         // 256 MiB of memory, one vCPU, 10 GiB of disk -- the example in docs/PRICING.md.
         price("RAM_MU_PER_GIB_HOUR") / 4 + price("CPU_MU_PER_VCPU_HOUR") + price("DISK_MU_PER_GIB_HOUR") * 10
+    }
+
+    /// The reserve the node will apply to a guest of `arch`, if it prices that arch.
+    pub fn reserve_for(&self, arch: &str) -> Option<GuestKernelReserve> {
+        self.guest_kernel_reserves
+            .iter()
+            .find(|(tag, _)| *tag == arch)
+            .map(|(_, reserve)| *reserve)
+    }
+
+    /// What a memory price actually earns the node, per GiB of HOST RAM committed.
+    ///
+    /// This is the number the operator is really setting and cannot see from the price
+    /// alone. A service declaring one GiB is billed for one GiB, but the node had to
+    /// boot its VM larger so the kernel's own footprint did not come out of the
+    /// service's share -- and the node absorbs that difference deliberately, so a
+    /// client never pays for the kernel underneath it. The price therefore has to
+    /// cover it, and by a different amount on each architecture.
+    ///
+    /// Quoted against a 1 GiB guest: the ratio part of the reserve is scale-free, and
+    /// the fixed part is not, so the effective rate depends on the size of the guest
+    /// it is quoted for. One reference size, stated, beats a figure that silently
+    /// means something different for every service.
+    pub fn effective_memory_mu(&self, entry: &PriceEntry) -> Option<(f64, f64)> {
+        if entry.key != "RAM_MU_PER_GIB_HOUR" {
+            return None;
+        }
+        let arch = entry.arch?;
+        let reserve = self.reserve_for(arch)?;
+        let multiplier = reserve.commitment_multiplier(1024 * 1024 * 1024);
+        if multiplier <= 0.0 {
+            return None;
+        }
+        Some((entry.mu as f64 / multiplier, multiplier))
+    }
+
+    /// The memory price to set so the node earns `target` per GiB of host RAM it
+    /// commits on `arch` -- i.e. the price that makes the overhead break even.
+    pub fn suggested_memory_mu(&self, arch: &str, target_mu: u64) -> Option<u64> {
+        let reserve = self.reserve_for(arch)?;
+        let multiplier = reserve.commitment_multiplier(1024 * 1024 * 1024);
+        Some((target_mu as f64 * multiplier).ceil() as u64)
     }
 
     pub fn execute_selected_service(&mut self) {
@@ -1864,14 +2298,22 @@ impl App {
     }
 
     /// Run the pending destructive action (called on `y` in a Confirm modal).
-    pub fn confirm_pending(&mut self) {
+    pub async fn confirm_pending(&mut self) {
         let Some(action) = self.pending_action.take() else {
             self.close_input();
             return;
         };
-        let (label, args) = pending_command(action);
         self.close_input();
-        self.spawn_command(CommandKind::Generic, label, args);
+        match action {
+            PendingAction::DeleteConfigItem { path, label } => {
+                self.delete_config_list_item(&path, &label).await
+            }
+            other => {
+                if let Some((label, args)) = pending_command(other) {
+                    self.spawn_command(CommandKind::Generic, label, args);
+                }
+            }
+        }
     }
 
     /// Scroll the Details overlay by `delta` lines (clamped).
@@ -2744,7 +3186,12 @@ pub(crate) fn segment_token(segment: &ConfigPathSegment) -> String {
 }
 
 pub(crate) fn entry_tokens(entry: &ConfigEntry) -> Vec<String> {
-    entry.path_segments.iter().map(segment_token).collect()
+    path_tokens(&entry.path_segments)
+}
+
+/// The tree identifier for a path, whether or not a leaf sits at the end of it.
+pub(crate) fn path_tokens(path: &[ConfigPathSegment]) -> Vec<String> {
+    path.iter().map(segment_token).collect()
 }
 
 fn config_path_display(path: &[ConfigPathSegment]) -> String {
@@ -3828,18 +4275,182 @@ mod tests {
         .unwrap();
 
         let (prices, scarcity) = super::get_prices(&config);
-        let ram = prices.iter().find(|p| p.key == "RAM_MU_PER_GIB_HOUR").unwrap();
+        let node_wide = |key: &str| {
+            prices
+                .iter()
+                .find(|p| p.arch.is_none() && p.key == key)
+                .unwrap()
+        };
+        let ram = node_wide("RAM_MU_PER_GIB_HOUR");
         assert_eq!(ram.mu, 1_000_000);
         assert!(ram.recurring);
-        let build = prices.iter().find(|p| p.key == "BUILD_MU").unwrap();
+        let build = node_wide("BUILD_MU");
         assert_eq!(build.mu, 7);
         assert!(!build.recurring);
         // An absent key is a free resource, not a crash.
-        let net = prices.iter().find(|p| p.key == "NET_MU_PER_GIB").unwrap();
-        assert_eq!(net.mu, 0);
+        assert_eq!(node_wide("NET_MU_PER_GIB").mu, 0);
         assert_eq!(scarcity.max_multiplier, 4);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Per-architecture memory pricing, as the pricing page reads it out of config.yaml.
+    ///
+    /// The rows are an editor for the real file, so what matters is that an arch the
+    /// operator priced reads back its own price, an arch they did not is visibly
+    /// inheriting the scalar rather than absent, and each row writes to the place it
+    /// was read from.
+    mod per_arch_pricing {
+        use super::super::{get_prices, PriceEntry, PRICED_ARCHITECTURES};
+        use std::fs;
+
+        fn prices_for(name: &str, body: &str) -> Vec<PriceEntry> {
+            let dir = std::env::temp_dir()
+                .join(format!("nodo-tui-arch-{name}-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            let config = dir.join("config.yaml");
+            fs::write(&config, body).unwrap();
+            let (prices, _) = get_prices(&config);
+            let _ = fs::remove_dir_all(&dir);
+            prices
+        }
+
+        fn arch_row<'a>(prices: &'a [PriceEntry], arch: &str) -> &'a PriceEntry {
+            prices
+                .iter()
+                .find(|entry| entry.arch == Some(arch) && entry.key == "RAM_MU_PER_GIB_HOUR")
+                .unwrap_or_else(|| panic!("no memory row for {arch}"))
+        }
+
+        #[test]
+        fn every_priced_arch_gets_a_row_even_with_no_by_arch_block() {
+            // A config written before per-arch pricing existed is the common case, and
+            // it must not be the case where the feature is unreachable: an arch that
+            // only appeared once configured would need the operator to know the block
+            // exists before they could edit it anywhere.
+            let prices = prices_for("absent", "pricing:\n  RAM_MU_PER_GIB_HOUR: 1000000\n");
+            for arch in PRICED_ARCHITECTURES {
+                let row = arch_row(&prices, arch);
+                assert_eq!(row.mu, 1_000_000, "{arch} should show the scalar it inherits");
+                assert!(row.inherited, "{arch} is not configured, so it is inheriting");
+            }
+        }
+
+        #[test]
+        fn a_configured_arch_reads_back_its_own_price() {
+            let prices = prices_for(
+                "configured",
+                "pricing:\n  RAM_MU_PER_GIB_HOUR: 1000000\n  BY_ARCH:\n    linux/arm64:\n      RAM_MU_PER_GIB_HOUR: 1400000\n",
+            );
+            let arm = arch_row(&prices, "linux/arm64");
+            assert_eq!(arm.mu, 1_400_000);
+            assert!(!arm.inherited, "a price that is written is not inherited");
+
+            // And the arch that was NOT given one still inherits, rather than picking
+            // up its neighbour's.
+            let amd = arch_row(&prices, "linux/amd64");
+            assert_eq!(amd.mu, 1_000_000);
+            assert!(amd.inherited);
+        }
+
+        #[test]
+        fn a_per_arch_row_writes_under_its_own_architecture() {
+            // The row is read from `pricing.BY_ARCH.<arch>.<key>` and must be written
+            // back there. Writing to `pricing.<key>` instead would silently retune
+            // every architecture from a row labelled with one.
+            let prices = prices_for(
+                "paths",
+                "pricing:\n  RAM_MU_PER_GIB_HOUR: 1000000\n",
+            );
+            let arm = arch_row(&prices, "linux/arm64");
+            assert_eq!(
+                super::super::yq_path_expression(&arm.config_path()),
+                ".[\"pricing\"][\"BY_ARCH\"][\"linux/arm64\"][\"RAM_MU_PER_GIB_HOUR\"]"
+            );
+            assert_eq!(arm.config_label(), "pricing.BY_ARCH.linux/arm64.RAM_MU_PER_GIB_HOUR");
+
+            let scalar = prices
+                .iter()
+                .find(|entry| entry.arch.is_none() && entry.key == "RAM_MU_PER_GIB_HOUR")
+                .unwrap();
+            assert_eq!(
+                super::super::yq_path_expression(&scalar.config_path()),
+                ".[\"pricing\"][\"RAM_MU_PER_GIB_HOUR\"]"
+            );
+            assert_eq!(scalar.config_label(), "pricing.RAM_MU_PER_GIB_HOUR");
+        }
+
+        #[test]
+        fn only_memory_is_offered_per_architecture() {
+            // The node hands a guest the vCPUs and the image it asked for whatever
+            // architecture it is, so nothing else has a per-arch cost to recover.
+            // Offering a per-arch CPU price here would let an operator write config the
+            // node rejects (`config_validation._validate_pricing_by_arch`).
+            let prices = prices_for("scope", "pricing:\n  RAM_MU_PER_GIB_HOUR: 1000000\n");
+            let per_arch: Vec<&str> = prices
+                .iter()
+                .filter(|entry| entry.arch.is_some())
+                .map(|entry| entry.key)
+                .collect();
+            assert!(
+                per_arch.iter().all(|key| *key == "RAM_MU_PER_GIB_HOUR"),
+                "a non-memory price was offered per arch: {per_arch:?}"
+            );
+        }
+
+        #[test]
+        fn the_reserve_defaults_match_the_nodes_and_config_overrides_win() {
+            // The page advises against the overhead the node will ACTUALLY apply, so an
+            // operator who has measured their own guest kernel and corrected the config
+            // must be advised against their figure, not against the shipped default.
+            let dir = std::env::temp_dir()
+                .join(format!("nodo-tui-reserve-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            let config = dir.join("config.yaml");
+
+            fs::write(&config, "pricing:\n  RAM_MU_PER_GIB_HOUR: 1\n").unwrap();
+            let defaults = super::super::get_guest_kernel_reserves(&config);
+            let amd = defaults
+                .iter()
+                .find(|(arch, _)| *arch == "linux/amd64")
+                .unwrap()
+                .1;
+            let arm = defaults
+                .iter()
+                .find(|(arch, _)| *arch == "linux/arm64")
+                .unwrap()
+                .1;
+            // The measured difference: amd64's kernel image, percpu areas and reserved
+            // low memory cost more than arm64's. If these ever match, the per-arch
+            // constant has stopped being per-arch.
+            assert!(
+                amd.fixed_mib > arm.fixed_mib,
+                "amd64 measured costlier than arm64; the defaults must say so"
+            );
+
+            fs::write(
+                &config,
+                "virtualizers:\n  ch:\n    GUEST_KERNEL_RESERVE:\n      linux/amd64:\n        MIB: 64\n        RATIO: 0.1\n",
+            )
+            .unwrap();
+            let overridden = super::super::get_guest_kernel_reserves(&config);
+            let amd = overridden
+                .iter()
+                .find(|(arch, _)| *arch == "linux/amd64")
+                .unwrap()
+                .1;
+            assert_eq!(amd.fixed_mib, 64);
+            assert!((amd.ratio - 0.1).abs() < f64::EPSILON);
+            // The arch that was not overridden keeps its measured default.
+            let arm = overridden
+                .iter()
+                .find(|(arch, _)| *arch == "linux/arm64")
+                .unwrap()
+                .1;
+            assert_eq!(arm.fixed_mib, 32);
+
+            let _ = fs::remove_dir_all(&dir);
+        }
     }
 
     use super::*;
@@ -4034,11 +4645,188 @@ Cold Wallet: 9cold\n";
         app.config_all = vec![entry];
     }
 
+    /// An app on the Config page whose tree is the real `flatten_yaml` reading of
+    /// `yaml`, so a list is a leaf or a section here for exactly the reason it is one
+    /// on screen.
+    fn on_config_page(yaml: &str) -> App {
+        let document: Value = serde_yaml::from_str(yaml).unwrap();
+        let mut entries = Vec::new();
+        flatten_yaml(&document, &mut Vec::new(), &mut entries);
+        let mut app = App::default();
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Config)
+            .unwrap();
+        app.config_all = entries;
+        app
+    }
+
+    fn key(path: &str) -> Vec<String> {
+        path.split('.').map(ToString::to_string).collect()
+    }
+
     #[test]
-    fn known_enum_values_covers_the_documented_policy_and_nothing_else() {
+    fn an_empty_list_can_be_added_to_where_it_sits() {
+        // `service_networks.blacklist: []` is a leaf: there is no element to select,
+        // so `a` has to work on the list itself or the list can never be filled.
+        let mut app = on_config_page("service_networks:\n  blacklist: []\n");
+        app.config_tree_state
+            .select(key("service_networks.blacklist"));
+
+        assert_eq!(
+            app.selected_list_path(),
+            Some(vec![
+                ConfigPathSegment::Key("service_networks".to_string()),
+                ConfigPathSegment::Key("blacklist".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn a_populated_list_can_be_added_to_from_the_list_or_from_an_element() {
+        // Once it has elements the list is a section with no entry of its own, and
+        // the cursor sits on an element after every add -- both have to work.
+        let mut app = on_config_page("service_networks:\n  blacklist: [\"*.a\", \"*.b\"]\n");
+        let list = vec![
+            ConfigPathSegment::Key("service_networks".to_string()),
+            ConfigPathSegment::Key("blacklist".to_string()),
+        ];
+
+        app.config_tree_state
+            .select(key("service_networks.blacklist"));
+        assert_eq!(app.selected_list_path(), Some(list.clone()));
+
+        app.config_tree_state.select(vec![
+            "service_networks".to_string(),
+            "blacklist".to_string(),
+            "[1]".to_string(),
+        ]);
+        assert_eq!(app.selected_list_path(), Some(list));
+    }
+
+    #[test]
+    fn a_scalar_is_not_a_list_to_add_to() {
+        let mut app = on_config_page("network:\n  GATEWAY_PORT: 8080\n");
+        app.config_tree_state.select(key("network.GATEWAY_PORT"));
+
+        assert_eq!(app.selected_list_path(), None);
+
+        app.open_config_list_add();
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.status.contains("Select a list"), "{}", app.status);
+    }
+
+    #[test]
+    fn only_an_element_can_be_removed() {
+        let mut app = on_config_page(
+            "network:\n  FREE_PORTS_RANGE:\n    - START: 50000\n      END: 60000\n",
+        );
+
+        // The element itself: removing it takes the whole range with it.
+        app.config_tree_state.select(vec![
+            "network".to_string(),
+            "FREE_PORTS_RANGE".to_string(),
+            "[0]".to_string(),
+        ]);
+        assert_eq!(
+            app.selected_list_item(),
+            Some(vec![
+                ConfigPathSegment::Key("network".to_string()),
+                ConfigPathSegment::Key("FREE_PORTS_RANGE".to_string()),
+                ConfigPathSegment::Index(0),
+            ])
+        );
+
+        // A key inside it is not: selecting START does not ask for the range to go.
+        app.config_tree_state.select(vec![
+            "network".to_string(),
+            "FREE_PORTS_RANGE".to_string(),
+            "[0]".to_string(),
+            "START".to_string(),
+        ]);
+        assert_eq!(app.selected_list_item(), None);
+
+        app.open_delete_config_item_confirm();
+        assert_eq!(app.input_mode, InputMode::Normal);
+        assert!(app.pending_action.is_none());
+        assert!(app.status.contains("Select a list element"), "{}", app.status);
+    }
+
+    #[test]
+    fn removing_an_element_asks_first_and_names_it() {
+        let mut app = on_config_page("service_networks:\n  blacklist: [\"*.a\", \"*.b\"]\n");
+        app.config_tree_state.select(vec![
+            "service_networks".to_string(),
+            "blacklist".to_string(),
+            "[1]".to_string(),
+        ]);
+
+        app.open_delete_config_item_confirm();
+
+        assert_eq!(app.input_mode, InputMode::Confirm);
+        assert!(
+            app.input_title.contains("service_networks.blacklist[1]"),
+            "{}",
+            app.input_title
+        );
+        assert!(matches!(
+            app.pending_action,
+            Some(PendingAction::DeleteConfigItem { ref path, .. })
+                if path.last() == Some(&ConfigPathSegment::Index(1))
+        ));
+    }
+
+    #[test]
+    fn a_config_deletion_is_not_a_nodo_invocation() {
+        // Every other confirmable action turns into the CLI command the operator
+        // would type; this one goes through the same `yq` path as any config write,
+        // because no `nodo` subcommand edits one key.
+        assert!(pending_command(PendingAction::DeleteConfigItem {
+            path: vec![ConfigPathSegment::Index(0)],
+            label: "blacklist[0]".to_string(),
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn the_add_popup_appends_rather_than_overwriting() {
+        let mut app = on_config_page("service_networks:\n  blacklist: []\n");
+        app.config_tree_state
+            .select(key("service_networks.blacklist"));
+        app.open_config_list_add();
+
+        assert_eq!(app.input_mode, InputMode::AddConfigItem);
+        assert!(app.input.is_empty(), "the field starts blank, it is a new element");
+        assert!(app.input_title.starts_with("Add to "), "{}", app.input_title);
+        assert_eq!(
+            yq_path_expression(app.edit_config_path.as_ref().unwrap()),
+            ".[\"service_networks\"][\"blacklist\"]"
+        );
+    }
+
+    #[test]
+    fn a_leading_star_has_to_be_quoted_and_only_a_leading_one() {
+        // Why the add popup's hint singles out a leading `*`: there it is YAML's alias
+        // indicator, so the same check that keeps an ordinary edit well-formed rejects
+        // it before yq is ever run. Anywhere else a `*` is ordinary text, and a
+        // pattern like `dns:*` needs no quoting at all.
+        assert!(serde_yaml::from_str::<Value>("*google.com").is_err());
+        assert!(serde_yaml::from_str::<Value>("\"*google.com\"").is_ok());
+        assert_eq!(
+            serde_yaml::from_str::<Value>("dns:*").unwrap(),
+            Value::String("dns:*".to_string())
+        );
+    }
+
+    #[test]
+    fn known_enum_values_covers_only_the_documented_keys() {
         assert_eq!(
             known_enum_values("network.DELEGATION_TUNNEL_POLICY"),
             Some(["auto", "always", "never"].as_slice())
+        );
+        assert_eq!(
+            known_enum_values("hashing.HASH"),
+            Some(["sha2_256", "sha3_256", "shake_256", "blake2b_256"].as_slice())
         );
         assert_eq!(known_enum_values("packer.local"), None);
     }
@@ -4063,6 +4851,21 @@ Cold Wallet: 9cold\n";
         assert_eq!(
             app.edit_kind,
             EditKind::Enum(vec!["auto".to_string(), "always".to_string(), "never".to_string()])
+        );
+
+        select_config_entry(
+            &mut app,
+            config_entry("hashing.HASH", "sha3_256", "sha3_256", "string", false),
+        );
+        app.open_config_editor();
+        assert_eq!(
+            app.edit_kind,
+            EditKind::Enum(vec![
+                "sha2_256".to_string(),
+                "sha3_256".to_string(),
+                "shake_256".to_string(),
+                "blake2b_256".to_string(),
+            ])
         );
 
         select_config_entry(&mut app, config_entry("publisher.REPOSITORY", "owner/repo", "owner/repo", "string", false));
@@ -4108,19 +4911,63 @@ Cold Wallet: 9cold\n";
     }
 
     #[test]
-    fn arrow_keys_cycle_an_enum_and_wrap_at_both_ends() {
-        let mut app = App::default();
-        app.edit_kind = EditKind::Enum(vec!["auto".to_string(), "always".to_string(), "never".to_string()]);
+    fn the_enum_picker_walks_the_way_the_arrow_points_and_wraps_at_both_ends() {
+        // Up is `adjust_edit_value(1)` (see the handler) and the options are drawn as
+        // a vertical list in declaration order, so Up has to land on the option
+        // *above* the marker. It used to land on the one below: the picker was the
+        // only ↑/↓ in the TUI that moved against the key.
+        let mut app = App {
+            edit_kind: EditKind::Enum(vec![
+                "auto".to_string(),
+                "always".to_string(),
+                "never".to_string(),
+            ]),
+            ..Default::default()
+        };
 
-        app.input = "auto".to_string();
+        app.input = "always".to_string();
         app.adjust_edit_value(1);
-        assert_eq!(app.input, "always");
-        app.adjust_edit_value(1);
-        assert_eq!(app.input, "never");
-        app.adjust_edit_value(1);
-        assert_eq!(app.input, "auto", "cycling past the last option wraps to the first");
+        assert_eq!(app.input, "auto", "Up moves to the option above");
         app.adjust_edit_value(-1);
-        assert_eq!(app.input, "never", "cycling before the first option wraps to the last");
+        assert_eq!(app.input, "always", "Down moves to the option below");
+        app.adjust_edit_value(-1);
+        assert_eq!(app.input, "never");
+        app.adjust_edit_value(-1);
+        assert_eq!(app.input, "auto", "Down past the last option wraps to the first");
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "never", "Up before the first wraps to the last");
+    }
+
+    #[test]
+    fn the_hash_picker_does_not_discard_an_existing_hex_id() {
+        // hashing.HASH also accepts an arbitrary hex hash-id (see
+        // src/utils/hashing.py's resolve_hash_config), which the picker's four
+        // canonical names cannot represent. Opening the editor on a node
+        // already configured that way must show the hex id as-is, not snap it
+        // to one of the four -- and character typing is unrestricted for Enum
+        // (only Bool blocks it, in handler.rs), so it stays editable by hand.
+        let mut app = App::default();
+        let hex_id = "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a";
+        select_config_entry(
+            &mut app,
+            config_entry("hashing.HASH", hex_id, hex_id, "string", false),
+        );
+        app.open_config_editor();
+        assert_eq!(app.input, hex_id, "the existing value must survive opening the editor");
+        assert_eq!(
+            app.edit_kind,
+            EditKind::Enum(vec![
+                "sha2_256".to_string(),
+                "sha3_256".to_string(),
+                "shake_256".to_string(),
+                "blake2b_256".to_string(),
+            ])
+        );
+
+        // Cycling from a value the list does not contain must not panic --
+        // adjust_edit_value falls back to treating it as index 0.
+        app.adjust_edit_value(1);
+        assert_eq!(app.input, "blake2b_256");
     }
 
     #[test]
@@ -4321,7 +5168,8 @@ Cold Wallet: 9cold\n";
             let (label, args) = pending_command(PendingAction::DisconnectPeer {
                 id: "peer-abc".to_string(),
                 label: "peer-abc".to_string(),
-            });
+            })
+            .expect("a peer disconnect is a `nodo` invocation");
             assert_eq!(args, vec!["disconnect".to_string(), "peer-abc".to_string()]);
             assert_eq!(label, "Forget peer peer-abc");
         }

@@ -18,3 +18,4 @@ storage/*
 /docker/
 .codex
 .claude
+.gateway_notice

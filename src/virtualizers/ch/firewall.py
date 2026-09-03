@@ -109,6 +109,41 @@ def allow_connection(
     return True
 
 
+def allow_host_connection(
+    vmachine_id: str,
+    host_ip: str,
+    port: Optional[int] = None,
+    protocol: TransportProtocol = TransportProtocol.TCP,
+    source_ip: Optional[str] = None,
+) -> bool:
+    """Allow a guest to reach a service on this host (input hook, not forward).
+
+    See ``policy.allow_host_connection_rule``: traffic to the host's own address
+    never traverses the forward chain, so the ordinary ``allow_connection`` writes
+    a rule that can never match for these destinations.
+    """
+    try:
+        vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
+        rule = policy.allow_host_connection_rule(
+            vmachine_id=vmachine_id,
+            vm_ip=vm_ip,
+            host_ip=host_ip,
+            port=port,
+            protocol=protocol.value,
+        )
+    except Exception as e:
+        logger(f"[CH][FW] Failed to allow host connection for {vmachine_id}: {e}")
+        return False
+
+    target = f"{host_ip}:{port}" if port is not None else str(host_ip)
+    if not _apply([rule], context=f"allow_host {vm_ip} -> {target}/{protocol.value}"):
+        return False
+    logger(
+        f"[CH][FW] Allowed {protocol.value} from {vmachine_id} ({vm_ip}) to this host at {target}"
+    )
+    return True
+
+
 def allow_connection_to_instance(
     vmachine_id: str,
     instance: celaut.Instance,

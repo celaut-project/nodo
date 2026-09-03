@@ -37,7 +37,12 @@ env_manager = ConfigManager()
 # Namespaced, matching where it actually lives in config.yaml and how rpc_tunnel refers
 # to it. The bare name resolved to the same value only via ConfigManager's flat-key
 # fallback, which searches every section -- fine until two sections hold the name.
-ALLOW_DEBT = bool(env_manager.get("costs.ALLOW_DEBT", True))
+# Defaulted off, and matched by config.example.yaml. An empty balance is the
+# only thing that reaps an instance nobody stops -- see the maintenance tick in
+# `src/manager/maintain.py`, which charges each instance for the interval it just
+# held and stops the ones that cannot pay. Debt makes `spend_mu` always succeed,
+# which removes that reaper: a config that simply omits the key must not get it.
+ALLOW_DEBT = bool(env_manager.get("costs.ALLOW_DEBT", False))
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MIN_SLOTS_OPEN_PER_PEER = env_manager.get("MIN_SLOTS_OPEN_PER_PEER")
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
@@ -671,6 +676,7 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
 def default_initial_balance(
     system_resources: celaut_pb2.Sysresources = None,
     service_hash: Optional[str] = None,
+    arch: Optional[str] = None,
 ) -> int:
     """MU to fund a new instance with when nobody asked for a specific amount.
 
@@ -683,7 +689,10 @@ def default_initial_balance(
     ticks that spend this balance charge the resolved row, so the balance is computed
     from those same figures or it funds fewer hours than INITIAL_RUNTIME_HOURS.
     `service_hash`, when known, prices an already-built service's real rootfs image
-    instead of the floor.
+    instead of the floor. `arch` is the guest's architecture, which selects the memory
+    price when the operator prices memory per arch -- the same rate the ticks that
+    spend this balance will charge, or the balance funds a different number of hours
+    than INITIAL_RUNTIME_HOURS says.
     """
     hours = float(env_manager.get("deposits.INITIAL_RUNTIME_HOURS", 1.0))
     if hours <= 0 or system_resources is None:
@@ -693,6 +702,7 @@ def default_initial_balance(
     return maintenance_charge_mu(
         system_resources=resolve_billable_resources(system_resources, service_hash),
         seconds=hours * 3600,
+        arch=arch,
     )
 
 def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
@@ -712,6 +722,37 @@ def get_sysresources(id: str) -> celaut_pb2.ModifyServiceSystemResourcesOutput:
         ),
         balance=to_amount(sc.get_instance_balance(id=id))
     )
+
+
+def credit_father(father_id: str, amount_mu: int) -> bool:
+    """Give ``amount_mu`` back to whoever funded an instance, client or instance alike.
+
+    The exact reverse of :func:`spend_mu`, and the one operation a stop needs: the
+    father of a local instance is either a client row or another local instance, and
+    a refund path that knows only one of the two silently drops the money for the
+    other. ``modify_deposit`` already branches this way for a negative difference;
+    this is that branch, named, so a stop can reuse it instead of re-deriving it.
+
+    Returns False (and says so) when the father is neither, which is a bookkeeping
+    fault worth a log line: the MU has left the child's row by then.
+    """
+    amount_mu = int(amount_mu)
+    if amount_mu <= 0:
+        return True
+    if sc.internal_instance_exists(id=father_id):
+        sc.update_instance_balance(
+            id=father_id,
+            balance_mu=sc.get_instance_balance(id=father_id) + amount_mu,
+        )
+        return True
+    if sc.client_exists(client_id=father_id):
+        sc.add_balance(client_id=father_id, balance_mu=amount_mu)
+        return True
+    log.LOGGER(
+        f"Cannot return {format_mu(amount_mu)} left by a stopped instance: its father "
+        f"{father_id!r} is neither a client nor a local instance."
+    )
+    return False
 
 
 def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
@@ -743,6 +784,48 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
                     context=f"stop-instance:after-unlock token={token} released_mem_limit={reserved_mem_limit}"
                 )
             sc.purge_internal(id=token)
+
+            # The child's unspent deposit goes back to whoever paid it in, and it goes
+            # back *after* the row is gone.
+            #
+            # A father is charged the child's full `initial_mu` at StartService
+            # (`modify_deposit` -> `spend_mu`) and the child spends only the part it
+            # actually lives through, so whatever is left on the row is the father's
+            # money. Deleting the row without handing it back -- which is all it takes
+            # -- is what sends a parent's balance down without bound: one that starts
+            # and stops children in a loop, which is exactly what an orchestrator
+            # service does, pays the full deposit again on every iteration and never
+            # gets the change, so its balance falls at the rate it *provisions* rather
+            # than at the rate anything is *consumed*. Measured on a live node: 2.0e9
+            # MU charged for 20 children, 0.9e9 consumed by them, the orchestrator at
+            # -1.25e9 and still falling.
+            #
+            # Crediting first, before the DELETE, would look safer and is not: the
+            # amount is already in `refund`, a local read, so nothing about it depends
+            # on the row still existing. What does depend on the DELETE is whether this
+            # stop can happen twice. A `purge_internal` that raises leaves the row
+            # alive with its balance intact, and `maintain_vmachines` calls
+            # `stop_instance` again on the next tick -- so a credit issued before it
+            # would be issued again, and again, manufacturing MU out of a balance
+            # nobody ever spent. Crediting after means a failed purge credits nothing
+            # and the retry does the whole thing exactly once. The window that remains
+            # -- a crash between the DELETE and the credit -- loses the leftover, which
+            # is the direction to err in: the books may owe a father, they may never
+            # invent MU that no one paid in.
+            if refund and int(refund) > 0:
+                if not father_id:
+                    # The MU has left the child's row by now, so this is a real loss
+                    # rather than a no-op, and is worth the same log line an unknown
+                    # father gets in `credit_father`.
+                    log.LOGGER(
+                        f"Cannot return {format_mu(int(refund))} unspent by {token}: "
+                        f"it has no father on record."
+                    )
+                elif credit_father(father_id=father_id, amount_mu=int(refund)):
+                    log.LOGGER(
+                        f"Returned {format_mu(int(refund))} unspent by {token} to its "
+                        f"father {father_id}."
+                    )
             
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
@@ -836,8 +919,13 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
         except Exception as e:
             log.LOGGER(f"Exception removing rules for the father {father_id}")
 
-    # TODO refund the remaining balance to the parent.
-    #  env variable could be used.
+    # An internal instance's leftover has been credited to its father above. A
+    # delegated one's has not, and is not simply the same operation: that `refund` is
+    # a figure the peer computed, against a deposit this node holds *on the peer*
+    # (`balance_on_other_peer`), so crediting the local father from it would move MU
+    # on one side of the pair only. Which of the two ledgers settles it, and when, is
+    # not decided here.
+    # TODO reconcile a delegated instance's refund with the deposit held on the peer.
     return refund
 
 
@@ -876,14 +964,7 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
         # The reverse of spend_mu(): what the instance gives back goes to its father.
         log.LOGGER(f"Credit father {father_id}")
 
-        if sc.internal_instance_exists(id=father_id):
-            father_balance = sc.get_instance_balance(id=father_id) + abs(amount_mu)
-            sc.update_instance_balance(id=father_id, balance_mu=father_balance)
-
-        elif sc.client_exists(client_id=father_id):
-            sc.add_balance(client_id=father_id, balance_mu=abs(amount_mu))
-
-        else:
+        if not credit_father(father_id=father_id, amount_mu=abs(amount_mu)):
             return False, f'ERROR: The father ID {father_id} is neither a client nor an internal service.'
 
     else:

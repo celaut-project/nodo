@@ -113,15 +113,14 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
     cpu_total = psutil.cpu_count(logical=False) or 0
-    # NOTE: `interval=0.1` blocks for 100 ms on every call, and this function is now
-    # also the body of the GetResourceAvailability RPC, so a peer can make this host
-    # pay that. Nothing reads the `system_cpu_available_percent` it produces -- the CPU
-    # check above is against total capacity, not instantaneous load, on purpose. The
-    # sample is left in place regardless: it is part of what this function *returns*,
-    # that dict now travels to peers, and dropping a field from a wire-visible payload
-    # is a separate decision from fixing admission. Do not remove it here -- issue #288
-    # records the options and the evidence.
-    cpu_available_percent = max(0.0, 100.0 - psutil.cpu_percent(interval=0.1))
+    # Non-blocking: `interval=None` is usage since the previous call. A blocking
+    # sample would cost 100 ms on every launch and, since this function is also the
+    # body of the GetResourceAvailability RPC, would let a peer make this host pay it
+    # (#288). Nothing reads `system_cpu_available_percent` -- the CPU check above is
+    # against total capacity, not instantaneous load, on purpose -- but the field is
+    # part of a payload that travels to peers, so dropping it is a separate decision
+    # from making it cheap.
+    cpu_available_percent = max(0.0, 100.0 - psutil.cpu_percent(interval=None))
 
     service_memory_pool_total, service_memory_pool_available = _get_service_memory_snapshot()
 

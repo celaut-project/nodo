@@ -42,7 +42,7 @@ class DefaultGatewayParsingTests(unittest.TestCase):
 
     def test_the_default_route_is_found_among_other_routes(self):
         output = (
-            "10.0.0.0/24 dev br-ch proto kernel scope link src 10.0.0.1\n"
+            "10.0.0.0/24 dev nodo-br-ch proto kernel scope link src 10.0.0.1\n"
             "default via 10.9.9.254 dev eth0 proto static metric 100\n"
         )
         self.assertEqual(nat_guide.parse_default_gateway(output), "10.9.9.254")
@@ -50,7 +50,7 @@ class DefaultGatewayParsingTests(unittest.TestCase):
     def test_no_default_route_yields_none(self):
         self.assertIsNone(nat_guide.parse_default_gateway(""))
         self.assertIsNone(
-            nat_guide.parse_default_gateway("10.0.0.0/24 dev br-ch scope link")
+            nat_guide.parse_default_gateway("10.0.0.0/24 dev nodo-br-ch scope link")
         )
 
     def test_unexpected_output_yields_none_rather_than_a_wrong_address(self):

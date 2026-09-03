@@ -35,6 +35,22 @@ than it was through the compatibility table, because it now runs at -5, ahead of
 anything a host firewall might accept. That is the intended behaviour, and it is
 the reason isolation must be verified rather than assumed too.
 
+That cuts both ways and on both hooks. On ``input`` it decides whether a guest can
+reach the gateway; on ``forward`` -- which guest-to-guest traffic crosses, because
+``_ensure_guest_l2_isolation`` routes it through the host on purpose -- it decides
+whether a service can reach the dependency it just launched. A foreign ``drop``
+there (Docker's ``ip filter FORWARD`` policy, ufw's default forward policy,
+firewalld's ``filter_FORWARD``) is beyond nodo's reach whatever it accepts.
+
+What nodo owes the operator first is a straight answer about what is happening:
+``foreign_rejectors`` names the chains, and ``reachability`` settles the question
+with an actual packet. Beyond that it writes in exactly one place it does not own
+-- ``NODO_FWD`` in the ``ip filter`` compatibility table, reached by a jump from
+FORWARD, holding one narrow accept per guest path (``compat.py``). A named chain
+because a rule with no owner and no teardown is not something to leave on someone
+else's host; only when the live ruleset shows it is needed; and never for
+firewalld, whose own table is out of reach whatever is written here.
+
 Nothing in this package may import ``src.utils.config`` or ``src.utils.logger``
 (both build a ``ConfigManager``), because ``ConfigManager`` imports this package.
 Callers pass their own values and their own ``log`` callable.
@@ -85,26 +101,77 @@ _NFT_CHAINS: Dict[Chain, Tuple[str, str, str]] = {
     ),
 }
 
+# The name of nodo's own chain in the compatibility table. Not a hook: FORWARD
+# jumps to it. See compat.py for why it is a chain and not loose rules.
+COMPAT_CHAIN = "NODO_FWD"
+
 _IPTABLES_CHAINS: Dict[Chain, str] = {
     Chain.INPUT: "INPUT",
     Chain.FORWARD: "FORWARD",
     Chain.PREROUTING: "PREROUTING",
     Chain.POSTROUTING: "POSTROUTING",
+    Chain.FORWARD_COMPAT: COMPAT_CHAIN,
 }
 
 
 @dataclass(frozen=True)
 class ForeignRejector:
-    """A base chain, not owned by nodo, that can reject inbound packets."""
+    """A base chain, not owned by nodo, that can stop packets on one hook.
+
+    ``hook`` is part of the finding, not context the caller is expected to
+    remember: the same scan answers for ``input`` (can a guest reach the gateway)
+    and for ``forward`` (can a guest reach another guest), and a line that does not
+    say which one it is about sends the operator to the wrong chain.
+    """
 
     table: str
     chain: str
     priority: Optional[int]
     reason: str
+    hook: str = "input"
 
     def __str__(self) -> str:
         priority = "?" if self.priority is None else str(self.priority)
-        return f"{self.table} / {self.chain} (hook input, priority {priority}): {self.reason}"
+        return f"{self.table} / {self.chain} (hook {self.hook}, priority {priority}): {self.reason}"
+
+
+@dataclass(frozen=True)
+class RejectorScan:
+    """What was found on one hook outside nodo's own tables -- or that nobody looked.
+
+    Three states, not two. "No rejecting chains" and "the ruleset could not be read"
+    used to arrive as the same empty list, and that ambiguity was load-bearing at
+    the worst possible moment: it decided whether to assign a port, so a backend
+    that cannot read foreign chains at all (``IptablesBackend``) or an ``nft -j``
+    that failed silently both read as "nothing can reject this, go ahead".
+
+    Nothing decides on this any more -- reachability is settled by an actual packet
+    (``reachability.py``). But it is still what the operator is told, and telling
+    them "nothing outside nodo's ruleset rejects this" when nobody checked is its
+    own kind of wrong.
+    """
+
+    rejectors: Tuple[ForeignRejector, ...] = ()
+    readable: bool = True
+    reason: str = ""
+    hook: str = "input"
+
+    def describe(self) -> List[str]:
+        """The finding, as lines for an operator-facing message."""
+        subject = "this port" if self.hook == "input" else "this traffic"
+        if not self.readable:
+            return [
+                f"Whether anything else on the {self.hook} hook rejects {subject} could not "
+                f"be determined: {self.reason}",
+            ]
+        if not self.rejectors:
+            return [
+                f"Nothing outside nodo's own ruleset rejects on the {self.hook} hook, as far "
+                "as the live ruleset shows.",
+            ]
+        return ["Rejecting chains, outside nodo's own ruleset:"] + [
+            f"  - {rejector}" for rejector in self.rejectors
+        ]
 
 
 @dataclass(frozen=True)
@@ -162,12 +229,36 @@ class FirewallBackend(ABC):
     def delete(self, applied: AppliedRule) -> None:
         """Delete a rule previously returned by ``list_rules``."""
 
-    def foreign_input_rejectors(self) -> List[ForeignRejector]:
-        """Base chains outside nodo's tables that could reject inbound packets.
+    def foreign_rejectors(self, hook: str = "input") -> RejectorScan:
+        """Base chains outside nodo's tables that could stop packets on ``hook``.
 
-        Best-effort diagnosis for the operator: never used to decide anything.
+        Unreadable by default, which is the honest answer for a backend that cannot
+        see other tables: ``iptables -S`` lists iptables' own chains, so on a host
+        where firewalld owns a native nft table there is nothing for it to find and
+        "I found nothing" would be a lie. Only ``NftBackend`` can answer this.
         """
-        return []
+        return RejectorScan(
+            readable=False,
+            hook=hook,
+            reason=f"the {self.name} backend cannot read chains outside its own tables",
+        )
+
+    def foreign_input_rejectors(self) -> RejectorScan:
+        """Input-hook rejectors: what can stop a guest from reaching the gateway."""
+        return self.foreign_rejectors("input")
+
+    def foreign_forward_rejectors(self) -> RejectorScan:
+        """Forward-hook rejectors: what can stop a guest from reaching another guest.
+
+        The counterpart of ``foreign_input_rejectors`` for the hook nodo's own guest
+        traffic crosses. ``_ensure_guest_l2_isolation`` routes guest-to-guest through
+        the host on purpose, so that nodo's policy can see it -- which also puts
+        parent-to-child in front of every other forward base chain on the box. A
+        ``drop`` in any of them is terminal, whatever nodo accepted at priority -5,
+        and a node whose children are unreachable looks from the inside like a child
+        that died. This is how the operator gets told which chain to look at instead.
+        """
+        return self.foreign_rejectors("forward")
 
     # --- the operations callers actually use -------------------------------
 
@@ -363,21 +454,38 @@ class NftBackend(FirewallBackend):
                 f"Could not delete nft rule {applied.handle} in {name}: {_failure_text(proc)}"
             )
 
-    def foreign_input_rejectors(self) -> List[ForeignRejector]:
+    def foreign_rejectors(self, hook: str = "input") -> RejectorScan:
+        """Read the live ruleset and report the chains on ``hook`` that can stop packets.
+
+        A read that fails comes back as *unreadable*, never as "nothing found". The
+        JSON listing is the fragile part here: a host whose ruleset includes tables
+        managed by iptables-nft -- Docker's, typically -- can have `nft -j list
+        ruleset` fail or return something this cannot parse while plain `nft list
+        ruleset` works perfectly well. Reporting that as an empty result told the
+        operator the input hook was clear when nothing had been read at all.
+        """
         proc = self._nft("-j", "list", "ruleset")
         if proc.returncode != 0:
-            return []
+            return RejectorScan(
+                readable=False,
+                hook=hook,
+                reason=f"'nft -j list ruleset' failed: {_failure_text(proc)}",
+            )
         try:
             data = json.loads(proc.stdout or "{}")
-        except ValueError:
-            return []
+        except ValueError as e:
+            return RejectorScan(
+                readable=False,
+                hook=hook,
+                reason=f"the JSON from 'nft -j list ruleset' could not be parsed: {e}",
+            )
 
         chains: Dict[tuple, dict] = {}
         for item in data.get("nftables") or []:
             if not isinstance(item, dict):
                 continue
             chain = item.get("chain")
-            if isinstance(chain, dict) and chain.get("hook") == "input":
+            if isinstance(chain, dict) and chain.get("hook") == hook:
                 if chain.get("table") == NFT_TABLE and chain.get("family") == NFT_FILTER_FAMILY:
                     continue
                 key = (chain.get("family"), chain.get("table"), chain.get("name"))
@@ -420,15 +528,21 @@ class NftBackend(FirewallBackend):
                     chain=str(name),
                     priority=priority if isinstance(priority, int) else None,
                     reason=", ".join(reasons),
+                    hook=hook,
                 )
             )
         rejectors.sort(key=lambda r: (r.priority if r.priority is not None else 0, r.table))
-        return rejectors
+        return RejectorScan(rejectors=tuple(rejectors), hook=hook)
 
 
 def _render_nft(rule: Rule) -> str:
     """The nft expression for ``rule``, matches first, then verdict, then comment."""
     parts: List[str] = []
+    if rule.in_interface:
+        parts.append(f'iifname "{rule.in_interface}"')
+    if rule.out_interface:
+        operator = "!= " if rule.out_interface_is_negated else ""
+        parts.append(f'oifname {operator}"{rule.out_interface}"')
     if rule.source:
         parts.append(f"ip saddr {rule.source}")
     if rule.destination:
@@ -446,6 +560,8 @@ def _render_nft(rule: Rule) -> str:
 
     if rule.verdict is Verdict.DNAT:
         parts.append(f"dnat to {rule.dnat_to}")
+    elif rule.verdict is Verdict.JUMP:
+        parts.append(f"jump {rule.jump_to}")
     else:
         parts.append(rule.verdict.value)
 
@@ -526,6 +642,49 @@ class IptablesBackend(FirewallBackend):
                 f"Could not add iptables rule in {name} ({rule.comment}): {_failure_text(proc)}"
             )
 
+    def own_chain_exists(self, chain: Chain) -> bool:
+        """Whether nodo's own chain is present.
+
+        Asked before listing it, so that "the chain is not there" -- the ordinary
+        state of a host that never needed it -- is never confused with "the chain
+        could not be read", which is a fault worth reporting.
+        """
+        if chain is not Chain.FORWARD_COMPAT:
+            raise FirewallError(f"{chain} is a built-in chain, not one nodo owns.")
+        return self._iptables(chain, "-L", _IPTABLES_CHAINS[chain], "-n").returncode == 0
+
+    def ensure_own_chain(self, chain: Chain) -> bool:
+        """Create the chain nodo owns in the compatibility table. True when created.
+
+        Only ``FORWARD_COMPAT``: the built-in chains are the kernel's and creating
+        one is a bug worth hearing about rather than a no-op.
+        """
+        name = _IPTABLES_CHAINS[chain]
+        if self.own_chain_exists(chain):
+            return False
+        proc = self._iptables(chain, "-N", name)
+        if proc.returncode != 0:
+            raise FirewallError(f"Could not create the {name} chain: {_failure_text(proc)}")
+        return True
+
+    def delete_own_chain(self, chain: Chain) -> bool:
+        """Flush and delete nodo's own chain. True when it was there to delete.
+
+        The jump into it has to be gone first, which is the caller's job: iptables
+        refuses to delete a chain something still references, and that refusal is
+        the safety net rather than something to work around.
+        """
+        name = _IPTABLES_CHAINS[chain]
+        if not self.own_chain_exists(chain):
+            return False
+        flush = self._iptables(chain, "-F", name)
+        if flush.returncode != 0:
+            raise FirewallError(f"Could not flush the {name} chain: {_failure_text(flush)}")
+        proc = self._iptables(chain, "-X", name)
+        if proc.returncode != 0:
+            raise FirewallError(f"Could not delete the {name} chain: {_failure_text(proc)}")
+        return True
+
     def delete(self, applied: AppliedRule) -> None:
         if not applied.tokens:
             raise FirewallError(
@@ -549,6 +708,13 @@ def _render_iptables(rule: Rule) -> List[str]:
     protocol match and iptables rejects them otherwise.
     """
     args: List[str] = []
+    if rule.in_interface:
+        args += ["-i", rule.in_interface]
+    if rule.out_interface:
+        if rule.out_interface_is_negated:
+            args += ["!", "-o", rule.out_interface]
+        else:
+            args += ["-o", rule.out_interface]
     if rule.protocol:
         args += ["-p", rule.protocol]
     if rule.source:
@@ -569,6 +735,8 @@ def _render_iptables(rule: Rule) -> List[str]:
         args += ["-j", "DNAT", "--to-destination", str(rule.dnat_to)]
     elif rule.verdict is Verdict.MASQUERADE:
         args += ["-j", "MASQUERADE"]
+    elif rule.verdict is Verdict.JUMP:
+        args += ["-j", str(rule.jump_to)]
     else:
         args += ["-j", rule.verdict.value.upper()]
 

@@ -5,10 +5,11 @@ from bee_rpc import client as bee, buffer_pb2
 
 from protos import celaut_pb2
 from src.utils.tools.recursion_guard import RecursionGuard
-from src.virtualizers.architecture import UnsupportedArchitectureException
+from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
 from src.manager.manager import default_initial_balance
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
+from src.utils.network_policy import enforce_network_policy
 from src.utils.logger import LOGGER as logger
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 
@@ -43,6 +44,21 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 if not service:
                     raise Exception(f"Service {self.service_hash} not on local registry.")
 
+                # This node does not quote a service it would then refuse to run:
+                # a price is an offer, and answering one for a service whose
+                # networks the policy rejects only gets the peer's balancer to
+                # select us and fail at launch (#280).
+                enforce_network_policy(
+                    networks=service.network,
+                    subject=f"service {self.service_hash}",
+                )
+
+                # The service's architecture, which selects the memory price when the
+                # operator has set one per arch. Read before the service is dropped:
+                # the quote and the charge have to come from the same rate, or this
+                # node offers one price and bills another.
+                service_arch = get_arch_tag(service=service, metadata=self.metadata)
+
                 resources = service.container.resources
                 del service
 
@@ -53,6 +69,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                         to_amount(default_initial_balance(
                             system_resources=resources.at_init,
                             service_hash=self.service_hash,
+                            arch=service_arch,
                         ))
                     )
 
@@ -60,7 +77,8 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                     message_iterator=generate_estimated_cost(
                         metadata=self.metadata,
                         config=self.configuration,
-                        resources=resources
+                        resources=resources,
+                        arch=service_arch,
                     ),
                     indices=celaut_pb2.EstimatedCost
                 )

@@ -134,7 +134,11 @@ The most important choice for anyone packing services. Full authoring format:
 | `packer.PACKER_SOURCE_URL` | `""` | Manifest URL nodo downloads the packer service from directly when it needs to acquire it. Empty → resolve via the `source-application` core service. |
 | `packer.PACKER_SERVICE_URL` | `""` | Override: `ip:port` base URL of an out-of-band packer-service. Used only when no packer id is set / no running instance is found. |
 | `packer.ARM_PACKER_SUPPORT` / `X86_PACKER_SUPPORT` | `true` | Architectures `nodo pack` accepts/announces (**packer-side** — to limit what the node can *execute*, use `builder.*` instead). |
-| `packer.PACKER_MEMORY_SIZE_FACTOR` | `2.0` | Local-packer only: RAM to lock as a factor of the exported filesystem size. |
+| `packer.MIN_BUFFER_BLOCK_SIZE` | `32768` (32 kB) | Local-packer only: inline/block threshold. A file at or above this size is stored as a content-addressed block (`main.BLOCKDIR`); a smaller one is inlined into the service's filesystem message. The main lever on what a service costs in memory — a build streams a pointer straight to its place in the rootfs, so only the inlined part is ever held. Raising it trades memory for fewer, larger block files and faster packs; it never changes a service id. |
+| `packer.PACKER_MEMORY_SIZE_FACTOR` | `6.0` | Local-packer only: RAM to lock as a factor of the *inlined* bytes (files under `packer.MIN_BUFFER_BLOCK_SIZE`). Larger files are streamed into blocks and cost no memory. |
+| `packer.PACKER_MEMORY_PER_BLOCK` | `10000` | Local-packer only: bytes added per block. With a low `packer.MIN_BUFFER_BLOCK_SIZE` almost every file is a block and nothing is inlined, so this term decides the reservation. |
+| `packer.PACKER_MEMORY_OVERHEAD` | `40000000` | Local-packer only: fixed bytes on top — the worker interpreter itself. |
+| `packer.WAIT_FOR_UNLOCK_MEMORY` | `300` | Local-packer only: seconds a pack waits for memory before failing instead of waiting indefinitely. |
 | `packer.buildkit.DOCKERFILE_NAME` | `Dockerfile` | Local-packer only: name of the Dockerfile inside the project directory. |
 
 The **default-mode** packer is *not* configured here by URL — it is referenced by
@@ -159,7 +163,7 @@ closed ("Service not allowed.").
 
 | Key | Default | Meaning |
 |---|---|---|
-| `hashing.HASH` | `sha3_256` | Service/file identification hash. Accepts `sha3_256`, `sha256`, `shake_256`, `blake2b`, or a hex hash-id. |
+| `hashing.HASH` | `sha3_256` | Service/file identification hash. Accepts `sha2_256`, `sha3_256`, `shake_256`, `blake2b_256` (each also its older/shorter alias: `sha256`, `sha3`, `shake`, `blake2b`, `blake2`), or a hex hash-id. |
 | `hashing.CHECK_INTEGRITY_ON_SERVE` | `false` | Run integrity/migration automatically on `nodo serve`. |
 
 ## `network`
@@ -187,6 +191,32 @@ The two directions are separate settings, and neither implies the other:
 | Don't run services **for** other peers (client-only) | `client.ACCEPT_NEW_DEPOSITS: false` |
 | Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
 | Keep delegating, but approve every outgoing payment yourself | `deposits.AUTOMATIC_REFILL: false` |
+
+## `service_networks`
+
+Which communication domains this node is willing to run a service for. A service
+declares them as `Service.Network` tags; these two glob lists are the operator's
+verdict on that declaration, checked at launch, when quoting a peer, and once more
+in the virtualizer.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `service_networks.blacklist` | `[]` | Tags this node refuses. Checked first, and it wins over the whitelist. `["*"]` refuses every service that declares any tagged network. |
+| `service_networks.whitelist` | `[]` | When non-empty, every tag of every declared network must match one of these. |
+
+Both empty — the default — restricts nothing. Patterns are globs matched
+case-insensitively against each tag, and glob over the tag only: `google.com` does
+not match `www.google.com`, so write `*google.com` for the subdomains too. A
+service declaring no network is always accepted. A rejected client is told which
+tag, which list and which pattern refused it.
+
+The name is `service_networks`, not `networks`: `network:` above is this node's own
+ports and addresses, and a `networks:` block carrying `blacklist`/`whitelist` is
+rejected as a config error rather than silently ignored. Full semantics and the
+enforcement points: [`NETWORKS.md`](NETWORKS.md).
+
+On the `nodo tui` Config page, `a` appends a pattern to the selected list and `d`
+removes the selected one.
 
 ## `ddns`
 
@@ -285,9 +315,6 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 ## `general_flags`, `misc`, `logs`, `low_demand`, `publisher`
 
 - `general_flags.SIMULATE_PAYMENTS` — dry-run payments (dev).
-- `misc.MIN_BUFFER_BLOCK_SIZE` (`1.0e+7` = 10 MB) — inline/block threshold: files
-  at or above this size are stored as content-addressed blocks (`main.BLOCKDIR`),
-  smaller ones inline.
 - `misc.VALIDATE_ON_IMPORT` (`true`), `misc.CONFIGURATION_REQUIRED`.
 - `logs.DEBUG_MODE`, `logs.MEMORY_LOGS`.
 - `logs.TUNNEL_LOGS` — log every tunnel handshake, relay close and billing tick

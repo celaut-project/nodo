@@ -58,9 +58,17 @@ def _finalize_shake(hasher: "hashlib._Hash", digest_size: int) -> bytes:
     return hasher.digest(digest_size)
 
 
+# Canonical names are family_digestbits throughout, the same shape sha3_256 and
+# shake_256 already had -- "sha256" alone reads as the sha2 family only by
+# convention (there is no "sha256" in the sha3 family to confuse it with, but
+# there could be), and "blake2b" alone hides that this node only ever asks it
+# for a 256-bit digest (BLAKE2b supports others). HASH_NAME_TO_ID keeps the old
+# bare forms working as aliases -- an existing config.yaml naming "sha256" or
+# "blake2b" must keep resolving -- so this is a display/preference change, not
+# a compatibility break.
 HASH_SPECS: Final[Dict[bytes, HashSpec]] = {
     SHA256_ID: HashSpec(
-        name="sha256",
+        name="sha2_256",
         id_bytes=SHA256_ID,
         digest_size=32,
         hasher_factory=hashlib.sha256,
@@ -81,7 +89,7 @@ HASH_SPECS: Final[Dict[bytes, HashSpec]] = {
         finalize=_finalize_shake,
     ),
     BLAKE2B_ID: HashSpec(
-        name="blake2b",
+        name="blake2b_256",
         id_bytes=BLAKE2B_ID,
         digest_size=32,
         hasher_factory=lambda: hashlib.blake2b(digest_size=32),
@@ -89,15 +97,20 @@ HASH_SPECS: Final[Dict[bytes, HashSpec]] = {
     ),
 }
 
+# Every HASH_SPECS[...].name must be a key here too -- resolve_hash_config has
+# to accept back exactly what it hands out, or displaying the configured
+# algorithm's name (a report, an error message, the TUI) would show a value
+# that then fails to parse if typed back in.
 HASH_NAME_TO_ID: Final[Dict[str, bytes]] = {
-    "sha256": SHA256_ID,
     "sha2_256": SHA256_ID,
-    "sha3": SHA3_256_ID,
+    "sha256": SHA256_ID,
     "sha3_256": SHA3_256_ID,
-    "shake": SHAKE_256_ID,
+    "sha3": SHA3_256_ID,
     "shake_256": SHAKE_256_ID,
-    "blake2": BLAKE2B_ID,
+    "shake": SHAKE_256_ID,
+    "blake2b_256": BLAKE2B_ID,
     "blake2b": BLAKE2B_ID,
+    "blake2": BLAKE2B_ID,
 }
 
 HASH_ID_TO_NAME: Final[Dict[bytes, str]] = {
@@ -145,6 +158,24 @@ def hash_stream(chunks_iter: Iterable[bytes], spec: HashSpec) -> bytes:
     for chunk in chunks_iter:
         hasher.update(chunk)
     return spec.finalize(hasher, spec.digest_size)
+
+
+def hash_stream_many(
+    chunks_iter: Iterable[bytes], specs: Iterable[HashSpec]
+) -> Dict[bytes, bytes]:
+    """Every requested digest of one stream, in a single pass.
+
+    The stream is usually a service's whole expanded content, so it is read once
+    and fed to each hasher rather than walked once per algorithm.
+    """
+    hashers = [(spec, spec.hasher_factory()) for spec in specs]
+    for chunk in chunks_iter:
+        for _, hasher in hashers:
+            hasher.update(chunk)
+    return {
+        spec.id_bytes: spec.finalize(hasher, spec.digest_size)
+        for spec, hasher in hashers
+    }
 
 
 def hash_bytes(value: bytes, spec: HashSpec) -> bytes:
