@@ -403,6 +403,19 @@ install_shell_completion() {
 
 install_shell_completion
 
+assign_gateway_port() {
+  # Explicitly, here: this is the last moment in an install that has root AND an
+  # operator watching the terminal, and opening the port is something only they can
+  # finish. Before the chown, so the config.yaml this writes ends up owned like
+  # every other file. Invoked directly, not through the nodo wrapper, so it does not
+  # pull in the heavy import graph or the KYA prompt. Non-fatal by construction.
+  printf "Assigning the gateway port...\n"
+  "$PYTHON_VENV_BIN_PATH" "$TARGET_DIR/src/commands/assign_gateway_port.py" "$TARGET_DIR" \
+    || printf "Gateway port not assigned; 'sudo nodo serve' will report why.\n"
+}
+
+assign_gateway_port
+
 chown -R "$SCRIPT_USER:$SCRIPT_USER" "$TARGET_DIR"
 
 if systemctl list-unit-files --type=service | grep -Fq "nodo.service"; then
@@ -414,3 +427,13 @@ fi
 
 printf "Installation and service setup completed successfully. The repository is located at $TARGET_DIR.\n"
 printf "********** You can now use the 'nodo' command. **********\n"
+
+# Last, deliberately. The gateway port is the one thing the node cannot work
+# without, and its alert is written while a helper above loads the config -- so
+# everything printed since (completion, chown, systemctl, the two lines above)
+# stood between the operator and the only message here that asks them to do
+# something. In a terminal the last line is the one that gets read.
+GATEWAY_NOTICE="$TARGET_DIR/.gateway_notice"
+if [ -s "$GATEWAY_NOTICE" ]; then
+  cat "$GATEWAY_NOTICE"
+fi

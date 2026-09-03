@@ -17,15 +17,15 @@ import os
 import shutil
 from typing import Dict, Optional
 
+from src.utils.arch_guard import QEMU_SYSTEM_BINARIES as _QEMU_SYSTEM_BINARIES
 from src.utils.config import ConfigManager
 
 env_manager = ConfigManager()
 
-# Canonical host/guest arch tag -> qemu-system emulator binary name.
-QEMU_SYSTEM_BINARIES: Dict[str, str] = {
-    "linux/amd64": "qemu-system-x86_64",
-    "linux/arm64": "qemu-system-aarch64",
-}
+# Canonical host/guest arch tag -> qemu-system emulator binary name. Defined in
+# `src.utils.arch_guard`, which `commands.doctor` can import and this module cannot
+# be imported by, and re-exported here under the name every call site already uses.
+QEMU_SYSTEM_BINARIES: Dict[str, str] = _QEMU_SYSTEM_BINARIES
 
 # qemu ``-machine`` type and default serial console device per guest arch. The
 # console name has to match the kernel cmdline ``console=`` token or the guest

@@ -84,7 +84,7 @@ port-forwarding rewrite, not AppArmor.
 Roughly 30 privileged calls, 26 of them in a single file
 (`src/virtualizers/ch/execute.py`):
 
-- `_network_preflight()` (`:306`) — creates the `br-ch` bridge, assigns its
+- `_network_preflight()` (`:306`) — creates the `nodo-br-ch` bridge, assigns its
   address, brings it up, and runs `sysctl -w net.ipv4.ip_forward=1`.
 - `_create_tap()` (`:381`) — `ip tuntap add` plus attaching the tap to the
   bridge, once per microVM.

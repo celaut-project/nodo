@@ -171,13 +171,14 @@ class NftBackendTests(unittest.TestCase):
         backend = NftBackend(
             run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(0, json.dumps(ruleset))})
         )
-        rejectors = backend.foreign_input_rejectors()
+        scan = backend.foreign_input_rejectors()
 
-        self.assertEqual(len(rejectors), 1, rejectors)
-        self.assertEqual(rejectors[0].chain, "filter_INPUT")
-        self.assertIn("firewalld", rejectors[0].table)
-        self.assertEqual(rejectors[0].priority, 10)
-        self.assertIn("reject", rejectors[0].reason)
+        self.assertTrue(scan.readable)
+        self.assertEqual(len(scan.rejectors), 1, scan)
+        self.assertEqual(scan.rejectors[0].chain, "filter_INPUT")
+        self.assertIn("firewalld", scan.rejectors[0].table)
+        self.assertEqual(scan.rejectors[0].priority, 10)
+        self.assertIn("reject", scan.rejectors[0].reason)
 
     def test_a_chain_whose_policy_is_drop_counts_too(self):
         ruleset = {
@@ -189,9 +190,215 @@ class NftBackendTests(unittest.TestCase):
         backend = NftBackend(
             run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(0, json.dumps(ruleset))})
         )
-        rejectors = backend.foreign_input_rejectors()
-        self.assertEqual(len(rejectors), 1)
-        self.assertIn("policy is drop", rejectors[0].reason)
+        scan = backend.foreign_input_rejectors()
+        self.assertEqual(len(scan.rejectors), 1)
+        self.assertIn("policy is drop", scan.rejectors[0].reason)
+
+    def test_a_ruleset_that_could_not_be_read_is_not_a_clear_hook(self):
+        # The difference the third state exists for. Docker's iptables-nft tables can
+        # make the JSON listing fail while plain `nft list ruleset` works, and an
+        # empty result there told the operator the input hook was clear.
+        backend = NftBackend(
+            run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(1, "", "Error: no such file")})
+        )
+        scan = backend.foreign_input_rejectors()
+
+        self.assertFalse(scan.readable)
+        self.assertEqual(scan.rejectors, ())
+        self.assertIn("nft -j list ruleset", scan.reason)
+        self.assertIn("could not be determined", " ".join(scan.describe()))
+
+    def test_unparseable_json_is_not_a_clear_hook_either(self):
+        backend = NftBackend(
+            run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(0, "not json at all")})
+        )
+        scan = backend.foreign_input_rejectors()
+
+        self.assertFalse(scan.readable)
+        self.assertIn("could not be parsed", scan.reason)
+
+    def test_a_genuinely_clear_hook_says_so(self):
+        ruleset = {"nftables": [
+            {"chain": {"family": "inet", "table": "nodo", "name": "input",
+                       "type": "filter", "hook": "input", "prio": -5, "policy": "accept"}},
+        ]}
+        backend = NftBackend(
+            run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(0, json.dumps(ruleset))})
+        )
+        scan = backend.foreign_input_rejectors()
+
+        self.assertTrue(scan.readable)
+        self.assertEqual(scan.rejectors, ())
+        self.assertIn("Nothing outside nodo", " ".join(scan.describe()))
+
+
+class OwnCompatChainTests(unittest.TestCase):
+    """NODO_FWD: the chain nodo owns inside a table it does not.
+
+    A chain rather than loose rules, because a chain has an owner. ``iptables -S
+    NODO_FWD`` is a complete answer to "what did nodo add here", and taking it back
+    out is one operation instead of reconstructing four rules.
+    """
+
+    def _backend(self, exists):
+        listing = _proc(0) if exists else _proc(1, "", "No chain/target/match by that name")
+        return IptablesBackend(run=FakeRunner({("iptables", "-L", "NODO_FWD"): listing}))
+
+    def test_an_absent_chain_is_created_once(self):
+        backend = self._backend(exists=False)
+        self.assertTrue(backend.ensure_own_chain(Chain.FORWARD_COMPAT))
+
+    def test_an_existing_chain_is_left_alone(self):
+        backend = self._backend(exists=True)
+        self.assertFalse(backend.ensure_own_chain(Chain.FORWARD_COMPAT))
+
+    def test_an_absent_chain_is_not_confused_with_an_unreadable_one(self):
+        # list_rules raises on any non-zero exit, so asking first is what keeps the
+        # ordinary state of a host that never needed the chain from reading as a fault.
+        self.assertFalse(self._backend(exists=False).own_chain_exists(Chain.FORWARD_COMPAT))
+        self.assertTrue(self._backend(exists=True).own_chain_exists(Chain.FORWARD_COMPAT))
+
+    def test_deleting_flushes_first(self):
+        runner = FakeRunner({("iptables", "-L", "NODO_FWD"): _proc(0)})
+        self.assertTrue(IptablesBackend(run=runner).delete_own_chain(Chain.FORWARD_COMPAT))
+        commands = runner.commands()
+        self.assertLess(
+            commands.index("iptables -F NODO_FWD"), commands.index("iptables -X NODO_FWD")
+        )
+
+    def test_deleting_what_is_not_there_is_not_an_error(self):
+        backend = self._backend(exists=False)
+        self.assertFalse(backend.delete_own_chain(Chain.FORWARD_COMPAT))
+
+    def test_the_builtin_chains_are_not_nodos_to_create_or_destroy(self):
+        backend = self._backend(exists=True)
+        for chain in (Chain.FORWARD, Chain.INPUT):
+            with self.assertRaises(FirewallError):
+                backend.ensure_own_chain(chain)
+            with self.assertRaises(FirewallError):
+                backend.delete_own_chain(chain)
+
+    def test_nft_refuses_the_compatibility_chain_outright(self):
+        # It lives in ip filter by definition; a silent no-op here would leave the
+        # rules unwritten on exactly the hosts that need them.
+        backend = NftBackend(run=FakeRunner())
+        with self.assertRaises(FirewallError):
+            backend.add(Rule(chain=Chain.FORWARD_COMPAT, comment="nodo;forward;compat;guests"))
+
+
+class InterfaceAndJumpRenderingTests(unittest.TestCase):
+    def _iptables(self, rule):
+        from src.utils.firewall.backends import _render_iptables
+
+        return " ".join(_render_iptables(rule))
+
+    def _nft(self, rule):
+        from src.utils.firewall.backends import _render_nft
+
+        return _render_nft(rule)
+
+    def test_an_interface_pair_renders_on_both_backends(self):
+        rule = Rule(chain=Chain.FORWARD_COMPAT, comment="c", in_interface="br", out_interface="br")
+        self.assertEqual(self._iptables(rule), "-i br -o br -j ACCEPT -m comment --comment c")
+        self.assertEqual(self._nft(rule), 'iifname "br" oifname "br" accept comment "c"')
+
+    def test_a_negated_out_interface_keeps_its_negation(self):
+        # Silently dropping the '!' would turn "leaving the bridge" into "anything
+        # on the bridge", which is a wider rule than nodo asked for.
+        rule = Rule(
+            chain=Chain.FORWARD_COMPAT, comment="c",
+            in_interface="br", out_interface="br", out_interface_is_negated=True,
+        )
+        self.assertEqual(self._iptables(rule), "-i br ! -o br -j ACCEPT -m comment --comment c")
+        self.assertEqual(self._nft(rule), 'iifname "br" oifname != "br" accept comment "c"')
+
+    def test_a_jump_names_its_target(self):
+        rule = Rule(
+            chain=Chain.FORWARD, comment="c", verdict=Verdict.JUMP, jump_to="NODO_FWD",
+        )
+        self.assertEqual(self._iptables(rule), "-j NODO_FWD -m comment --comment c")
+        self.assertEqual(self._nft(rule), 'jump NODO_FWD comment "c"')
+
+
+class ForeignForwardRejectorTests(unittest.TestCase):
+    """The same scan, aimed at the hook parent-to-child traffic actually crosses.
+
+    Guest-to-guest is routed through the host on purpose (see
+    ``_ensure_guest_l2_isolation``), which puts it in front of every forward base
+    chain on the box. nodo cannot override a drop there and does not write into
+    those tables; naming them is the whole contribution.
+    """
+
+    RULESET = {
+        "nftables": [
+            {"chain": {"family": "ip", "table": "filter", "name": "FORWARD",
+                       "type": "filter", "hook": "forward", "prio": 0, "policy": "drop"}},
+            {"chain": {"family": "inet", "table": "nodo", "name": "forward",
+                       "type": "filter", "hook": "forward", "prio": -5, "policy": "accept"}},
+            {"chain": {"family": "inet", "table": "nodo", "name": "input",
+                       "type": "filter", "hook": "input", "prio": -5, "policy": "accept"}},
+            {"rule": {"family": "inet", "table": "nodo", "chain": "forward",
+                      "expr": [{"drop": None}]}},
+        ]
+    }
+
+    def _scan(self, ruleset=None):
+        backend = NftBackend(run=FakeRunner({
+            ("nft", "-j", "list", "ruleset"): _proc(0, json.dumps(ruleset or self.RULESET)),
+        }))
+        return backend.foreign_forward_rejectors()
+
+    def test_finds_the_forward_chain_whose_policy_swallows_guest_traffic(self):
+        scan = self._scan()
+
+        self.assertTrue(scan.readable)
+        self.assertEqual(len(scan.rejectors), 1, scan)
+        self.assertEqual(scan.rejectors[0].chain, "FORWARD")
+        self.assertIn("policy is drop", scan.rejectors[0].reason)
+
+    def test_nodos_own_drops_are_not_a_foreign_rejector(self):
+        # The per-VM isolation policy lives in inet nodo's forward chain and is
+        # supposed to drop. Reporting it here would send the operator after nodo.
+        scan = self._scan()
+
+        self.assertNotIn("nodo", " ".join(str(r) for r in scan.rejectors))
+
+    def test_the_finding_says_which_hook_it_is_about(self):
+        scan = self._scan()
+
+        self.assertEqual(scan.hook, "forward")
+        self.assertIn("hook forward", str(scan.rejectors[0]))
+
+    def test_a_clear_forward_hook_says_so_without_mentioning_the_input_one(self):
+        ruleset = {"nftables": [
+            {"chain": {"family": "ip", "table": "filter", "name": "INPUT",
+                       "type": "filter", "hook": "input", "prio": 0, "policy": "drop"}},
+        ]}
+        scan = self._scan(ruleset)
+
+        self.assertEqual(scan.rejectors, ())
+        described = " ".join(scan.describe())
+        self.assertIn("forward hook", described)
+        self.assertNotIn("input hook", described)
+
+    def test_an_unreadable_ruleset_is_still_not_a_clear_hook(self):
+        backend = NftBackend(
+            run=FakeRunner({("nft", "-j", "list", "ruleset"): _proc(1, "", "Operation not permitted")})
+        )
+        scan = backend.foreign_forward_rejectors()
+
+        self.assertFalse(scan.readable)
+        self.assertEqual(scan.hook, "forward")
+        self.assertIn("forward hook", " ".join(scan.describe()))
+
+    def test_iptables_does_not_pretend_to_see_other_tables(self):
+        # It writes into the compatibility table, so "I found nothing" would mean
+        # "I could not look" -- the exact ambiguity the third state exists for.
+        scan = IptablesBackend(run=FakeRunner()).foreign_forward_rejectors()
+
+        self.assertFalse(scan.readable)
+        self.assertEqual(scan.hook, "forward")
+        self.assertIn("outside its own tables", scan.reason)
 
 
 class IptablesBackendTests(unittest.TestCase):

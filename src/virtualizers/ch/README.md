@@ -108,7 +108,7 @@ Mapping of `src/virtualizers/interface.py` functions:
 ## Network Design (Final Decision)
 
 ### Model
-We reject NAT (user-mode/slirp) in favor of **TAP interfaces attached to a host bridge (`br-ch`)**. This maintains the current network contract and allows firewall rules via the VM's IP.
+We reject NAT (user-mode/slirp) in favor of **TAP interfaces attached to a host bridge (`nodo-br-ch`)**. This maintains the current network contract and allows firewall rules via the VM's IP.
 
 ### Deterministic IP Assignment
 IPs and MACs are derived from the `vmachine_id` without DHCP to ensure stability.

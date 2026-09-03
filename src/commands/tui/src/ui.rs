@@ -48,6 +48,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         InputMode::Details => draw_details_popup(frame, app),
         InputMode::Connect
         | InputMode::EditConfig
+        | InputMode::AddConfigItem
         | InputMode::FilterConfig
         | InputMode::CreditClient => draw_input_popup(frame, app),
     }
@@ -1392,9 +1393,12 @@ fn draw_price_bars(
         recurring,
         color,
     } = chart;
+    // Node-wide prices only. A per-arch override is a variation on the price above it,
+    // not a fourth resource, and charting both would show "RAM" three times and read as
+    // three times the memory revenue. The table below carries every per-arch figure.
     let group: Vec<&PriceEntry> = prices
         .iter()
-        .filter(|entry| entry.recurring == recurring)
+        .filter(|entry| entry.recurring == recurring && entry.arch.is_none())
         .collect();
     if group.is_empty() {
         return;
@@ -1463,7 +1467,7 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
 
     if let Some(entry) = selected {
         lines.push(Line::from(Span::styled(
-            format!("pricing.{}", entry.key),
+            entry.config_label(),
             Style::default().fg(Color::White).bold(),
         )));
         lines.push(metric_line("Price", format!("{} MU {}", entry.mu, entry.per)));
@@ -1472,6 +1476,35 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
             "At max load",
             money.format_mu(entry.mu.saturating_mul(app.scarcity.max_multiplier)),
         ));
+
+        // The whole reason this page has to mention the virtualizer at all: a memory
+        // price is not what the node earns per GiB it commits. The guest kernel's own
+        // footprint comes out of the VM's RAM before the service sees any of it, so
+        // the node boots the VM larger than the service declared -- and absorbs the
+        // difference, so a client never pays for the kernel underneath it. Set a
+        // memory price without that in view and it under-recovers, silently, by an
+        // amount that differs per architecture.
+        if let (Some(arch), Some((effective, multiplier))) =
+            (entry.arch, app.effective_memory_mu(entry))
+        {
+            if let Some(reserve) = app.reserve_for(arch) {
+                lines.push(Line::from(""));
+                lines.push(metric_line(
+                    "Guest kernel",
+                    format!("+{} MiB +{:.0}%", reserve.fixed_mib, reserve.ratio * 100.0),
+                ));
+                // "You set X, you keep Y" -- said in the same unit as the price above
+                // it, because the operator is choosing X and cares about Y.
+                lines.push(metric_line(
+                    "Node earns",
+                    format!("{} MU /GiB committed", effective.round() as u64),
+                ));
+                lines.push(metric_line(
+                    "…on 1GiB",
+                    format!("{:.0}% of the price set", 100.0 / multiplier),
+                ));
+            }
+        }
     }
 
     lines.push(Line::from(""));
@@ -1488,23 +1521,42 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let money = app.money.clone();
-    let rows = app.prices.items.iter().map(|entry| {
-        Row::new(vec![
-            entry.short.to_string(),
-            entry.mu.to_string(),
-            money.format_mu(entry.mu),
-        ])
-    });
+    let rows: Vec<Row> = app
+        .prices
+        .items
+        .iter()
+        .map(|entry| {
+            // A per-arch row that config.yaml does not set is showing the scalar price
+            // it inherits, not a price of its own. Saying so is the difference between
+            // "arm64 costs this" and "arm64 has been given its own rate" -- editing it
+            // is what turns the first into the second, and the operator should be able
+            // to tell which they are looking at before they nudge it.
+            let amount = if entry.inherited {
+                format!("{} (inherited)", money.format_mu(entry.mu))
+            } else {
+                money.format_mu(entry.mu)
+            };
+            let row = Row::new(vec![entry.short.clone(), entry.mu.to_string(), amount]);
+            if entry.arch.is_some() {
+                row.style(Style::default().fg(MUTED))
+            } else {
+                row
+            }
+        })
+        .collect();
     let table = Table::new(
         rows,
         [
-            Constraint::Length(8),
-            Constraint::Percentage(45),
-            Constraint::Percentage(45),
+            Constraint::Length(12),
+            Constraint::Percentage(40),
+            Constraint::Percentage(48),
         ],
     )
     .header(header_row(vec!["Price", "MU", money.symbol.as_str()]))
-    .block(section_block(" PRICES • +/- adjust, e exact ", Color::Yellow))
+    .block(section_block(
+        " PRICES • +/- adjust, e exact ".to_string(),
+        Color::Yellow,
+    ))
     .highlight_style(selected_style())
     .highlight_symbol("> ");
     app.list_area = area;
@@ -1725,7 +1777,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             "tab/shift+tab cycle  •  ↑/↓ select  •  +/- adjust 10%  •  e exact value  •  r refresh  •  q quit"
         }
         Page::Config => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  →/← branch  •  ⏎ toggle  •  e edit  •  / filter  •  x clear  •  q quit"
+            "tab/shift+tab cycle  •  ↑/↓ select  •  →/← branch  •  ⏎ toggle  •  e edit  •  a add to list  •  d remove element  •  / filter  •  q quit"
         }
         Page::Logs => "tab/shift+tab cycle  •  r refresh  •  q quit",
     };
@@ -1741,6 +1793,16 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
 /// original freeform text field (also used outside config editing, e.g. Connect
 /// and the filter box).
 fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
+    if app.input_mode == InputMode::AddConfigItem {
+        // The quoting note is not decoration: a leading `*` is YAML's alias
+        // indicator, so `*.example.com` unquoted is rejected as invalid YAML rather
+        // than stored. A `*` anywhere else needs no quoting.
+        return (
+            vec![Line::from(app.input.clone())],
+            "Enter appends • Esc cancels • a YAML literal, so quote a leading *: \"*.example.com\""
+                .to_string(),
+        );
+    }
     if app.input_mode != InputMode::EditConfig {
         return (
             vec![Line::from(app.input.clone())],
@@ -1943,10 +2005,33 @@ mod tests {
 
         fn entry(key: &'static str, short: &'static str, mu: u64, recurring: bool) -> PriceEntry {
             PriceEntry {
+                id: key.to_string(),
                 key,
-                short,
+                short: short.to_string(),
                 per: "per unit",
                 recurring,
+                arch: None,
+                inherited: false,
+                mu,
+            }
+        }
+
+        /// A per-architecture override of `key`, as `get_prices` builds one.
+        fn arch_entry(
+            key: &'static str,
+            short: &str,
+            arch: &'static str,
+            mu: u64,
+            inherited: bool,
+        ) -> PriceEntry {
+            PriceEntry {
+                id: format!("{arch}/{key}"),
+                key,
+                short: short.to_string(),
+                per: "per unit",
+                recurring: true,
+                arch: Some(arch),
+                inherited,
                 mu,
             }
         }
@@ -2054,6 +2139,296 @@ mod tests {
             let text = render(&prices, None);
             assert!(text.contains("RAM"));
             assert!(!text.contains("BUILD"));
+        }
+
+        #[test]
+        fn per_arch_overrides_do_not_get_their_own_bar() {
+            // A per-arch memory price is a variation on the memory price, not a fourth
+            // resource. Charting both would draw "RAM" three times and read as three
+            // times the memory revenue. The table is what carries the per-arch figures.
+            let prices = vec![
+                entry("RAM_MU_PER_GIB_HOUR", "RAM", 1_000_000, true),
+                arch_entry("RAM_MU_PER_GIB_HOUR", "RAM·amd64", "linux/amd64", 1_000_000, true),
+                arch_entry("RAM_MU_PER_GIB_HOUR", "RAM·arm64", "linux/arm64", 1_400_000, false),
+            ];
+            let text = render(&prices, None);
+            assert!(text.contains("RAM"), "the node-wide bar is missing in:\n{text}");
+            assert!(
+                !text.contains("amd64") && !text.contains("arm64"),
+                "a per-arch override was charted in:\n{text}"
+            );
+        }
+
+        #[test]
+        fn a_price_an_arch_only_inherits_says_so() {
+            // "arm64 costs this" and "arm64 has been given its own rate" are different
+            // facts, and the second is the one an edit creates. An operator has to be
+            // able to tell which they are looking at before they nudge it -- otherwise
+            // the page shows a per-arch pricing policy the node does not have.
+            let mut app = crate::app::App::default();
+            app.money = Money::default();
+            app.prices = crate::app::StatefulList::with_items(vec![
+                arch_entry("RAM_MU_PER_GIB_HOUR", "RAM·amd64", "linux/amd64", 1_000_000, true),
+                arch_entry("RAM_MU_PER_GIB_HOUR", "RAM·arm64", "linux/arm64", 1_400_000, false),
+            ]);
+
+            let mut terminal = Terminal::new(TestBackend::new(80, 8)).unwrap();
+            terminal
+                .draw(|frame| super::super::draw_price_table(frame, &mut app, frame.size()))
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+
+            assert!(text.contains("amd64"), "the arch row is missing in:\n{text}");
+            assert!(
+                text.contains("inherited"),
+                "an inherited price is not marked in:\n{text}"
+            );
+            // The configured one must NOT be, or the marker means nothing.
+            assert_eq!(
+                text.matches("inherited").count(),
+                1,
+                "a configured per-arch price was marked inherited in:\n{text}"
+            );
+        }
+
+        /// What the operator is actually deciding when they set a memory price.
+        ///
+        /// The node boots a guest larger than the service declared, so the guest
+        /// kernel's footprint does not come out of the service's share -- and absorbs
+        /// the difference deliberately, so a client never pays for the kernel underneath
+        /// it. A memory price therefore earns less per GiB of host RAM than it says,
+        /// by a different amount per architecture. These pin that the page says so.
+        mod overhead_guidance {
+            use crate::app::{App, GuestKernelReserve, Money, PriceEntry, StatefulList};
+            use ratatui::{backend::TestBackend, Terminal};
+
+            const GIB: u64 = 1024 * 1024 * 1024;
+
+            fn app_with(arch: &'static str, mu: u64, reserve: GuestKernelReserve) -> App {
+                let mut app = App::default();
+                app.money = Money::default();
+                app.guest_kernel_reserves = vec![(arch, reserve)];
+                app.prices = StatefulList::with_items(vec![PriceEntry {
+                    id: format!("{arch}/RAM_MU_PER_GIB_HOUR"),
+                    key: "RAM_MU_PER_GIB_HOUR",
+                    short: "RAM".to_string(),
+                    per: "per GiB-hour",
+                    recurring: true,
+                    arch: Some(arch),
+                    inherited: false,
+                    mu,
+                }]);
+                app.prices.state.select(Some(0));
+                app.prices.state_id = Some(format!("{arch}/RAM_MU_PER_GIB_HOUR"));
+                app
+            }
+
+            #[test]
+            fn the_reserve_matches_the_nodes_own_model() {
+                // The same arithmetic as `limits.guest_kernel_reserve_bytes`: a fixed
+                // part plus a share of the guest. If these drift, the page advises the
+                // operator about an overhead the node does not actually apply.
+                let reserve = GuestKernelReserve {
+                    fixed_mib: 40,
+                    ratio: 0.05,
+                };
+                // Rounded UP, like the node's `math.ceil`: a reserve short by a page is
+                // still a guest that can be OOM-killed below its declared ceiling, and
+                // rounding is the one place that is free to get right.
+                assert_eq!(
+                    reserve.bytes_for(GIB),
+                    40 * 1024 * 1024 + (GIB as f64 * 0.05).ceil() as u64,
+                    "the fixed and proportional parts must both apply"
+                );
+                assert!(
+                    reserve.bytes_for(GIB) > 40 * 1024 * 1024 + GIB / 20,
+                    "the proportional part must round up, not truncate"
+                );
+                assert_eq!(reserve.bytes_for(0), 0, "nothing is reserved for nothing");
+            }
+
+            #[test]
+            fn a_costlier_arch_earns_the_node_less_at_the_same_price() {
+                // This is the whole argument for per-arch pricing in one assertion: the
+                // same number in config.yaml is not the same amount of money, because
+                // the RAM the node has to commit to honour it differs per arch.
+                let amd64 = app_with(
+                    "linux/amd64",
+                    1_000_000,
+                    GuestKernelReserve {
+                        fixed_mib: 40,
+                        ratio: 0.05,
+                    },
+                );
+                let arm64 = app_with(
+                    "linux/arm64",
+                    1_000_000,
+                    GuestKernelReserve {
+                        fixed_mib: 32,
+                        ratio: 0.05,
+                    },
+                );
+                let (amd_effective, amd_multiplier) = amd64
+                    .effective_memory_mu(amd64.prices.selected().unwrap())
+                    .unwrap();
+                let (arm_effective, _) = arm64
+                    .effective_memory_mu(arm64.prices.selected().unwrap())
+                    .unwrap();
+
+                assert!(
+                    amd_effective < arm_effective,
+                    "amd64 reserves more, so the same price must earn less: \
+                     amd64={amd_effective} arm64={arm_effective}"
+                );
+                // And never more than the price itself -- the node cannot earn more
+                // than it charges by committing extra RAM.
+                assert!(amd_effective < 1_000_000.0);
+                assert!(amd_multiplier > 1.0);
+            }
+
+            #[test]
+            fn the_suggested_price_recovers_the_overhead_exactly() {
+                // The guidance has to be actionable, not just descriptive: a price set
+                // to the suggestion must earn the target per GiB of host RAM committed.
+                let reserve = GuestKernelReserve {
+                    fixed_mib: 40,
+                    ratio: 0.05,
+                };
+                let app = app_with("linux/amd64", 1_000_000, reserve);
+                let suggested = app.suggested_memory_mu("linux/amd64", 1_000_000).unwrap();
+                assert!(
+                    suggested > 1_000_000,
+                    "covering an overhead cannot cost less than not covering it"
+                );
+
+                let mut priced = app_with("linux/amd64", suggested, reserve);
+                priced.prices.state.select(Some(0));
+                let (effective, _) = priced
+                    .effective_memory_mu(priced.prices.selected().unwrap())
+                    .unwrap();
+                assert!(
+                    (effective - 1_000_000.0).abs() <= 1.0,
+                    "a price set to the suggestion should earn the target, got {effective}"
+                );
+            }
+
+            #[test]
+            fn an_unpriced_arch_is_not_guessed_at() {
+                // No measurement, no advice. Inventing an overhead figure for an
+                // architecture nodo has never characterised would have the operator
+                // price against a number nobody measured.
+                let app = app_with(
+                    "linux/amd64",
+                    1_000_000,
+                    GuestKernelReserve {
+                        fixed_mib: 40,
+                        ratio: 0.05,
+                    },
+                );
+                assert!(app.reserve_for("linux/riscv64").is_none());
+                assert!(app.suggested_memory_mu("linux/riscv64", 1_000_000).is_none());
+            }
+
+            #[test]
+            fn the_node_wide_price_is_not_given_a_per_arch_figure() {
+                // The scalar price applies to every arch, so there is no single
+                // overhead to quote against it. Picking one arch's would be a
+                // guess presented as a fact.
+                let mut app = app_with(
+                    "linux/amd64",
+                    1_000_000,
+                    GuestKernelReserve {
+                        fixed_mib: 40,
+                        ratio: 0.05,
+                    },
+                );
+                app.prices = StatefulList::with_items(vec![PriceEntry {
+                    id: "RAM_MU_PER_GIB_HOUR".to_string(),
+                    key: "RAM_MU_PER_GIB_HOUR",
+                    short: "RAM".to_string(),
+                    per: "per GiB-hour",
+                    recurring: true,
+                    arch: None,
+                    inherited: false,
+                    mu: 1_000_000,
+                }]);
+                assert!(app
+                    .effective_memory_mu(app.prices.items.first().unwrap())
+                    .is_none());
+            }
+
+            #[test]
+            fn a_non_memory_price_carries_no_overhead() {
+                // Only memory has a per-arch cost to recover: the node hands a guest
+                // the vCPUs and the image it asked for whatever arch it is.
+                let mut app = app_with(
+                    "linux/amd64",
+                    1_000_000,
+                    GuestKernelReserve {
+                        fixed_mib: 40,
+                        ratio: 0.05,
+                    },
+                );
+                app.prices = StatefulList::with_items(vec![PriceEntry {
+                    id: "linux/amd64/CPU_MU_PER_VCPU_HOUR".to_string(),
+                    key: "CPU_MU_PER_VCPU_HOUR",
+                    short: "CPU".to_string(),
+                    per: "per vCPU-hour",
+                    recurring: true,
+                    arch: Some("linux/amd64"),
+                    inherited: false,
+                    mu: 4_000_000,
+                }]);
+                assert!(app
+                    .effective_memory_mu(app.prices.items.first().unwrap())
+                    .is_none());
+            }
+
+            #[test]
+            fn the_money_card_states_what_the_node_keeps() {
+                // The operator has to be able to read the consequence off the screen,
+                // not derive it. A page that shows only the price teaches nothing about
+                // the overhead it has to cover.
+                let mut app = app_with(
+                    "linux/amd64",
+                    1_000_000,
+                    GuestKernelReserve {
+                        fixed_mib: 40,
+                        ratio: 0.05,
+                    },
+                );
+                let mut terminal = Terminal::new(TestBackend::new(46, 16)).unwrap();
+                terminal
+                    .draw(|frame| super::super::super::draw_money_card(frame, &app, frame.size()))
+                    .unwrap();
+                let text: String = terminal
+                    .backend()
+                    .buffer()
+                    .content()
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect();
+
+                assert!(
+                    text.contains("Guest kernel"),
+                    "the overhead is not named in:\n{text}"
+                );
+                assert!(
+                    text.contains("40"),
+                    "the arch's own reserve is not shown in:\n{text}"
+                );
+                assert!(
+                    text.contains("Node earns"),
+                    "what the price actually earns is not shown in:\n{text}"
+                );
+                let _ = &mut app;
+            }
         }
     }
 

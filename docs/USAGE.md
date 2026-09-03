@@ -57,10 +57,40 @@ These are the most commonly used commands for daily tasks:
   `nodo estimate my_service_tag`  
   `nodo estimate ./my-service.celaut.bee`
 
-- **remove `<service id>`** (requires root)  
-  Removes a service from the node using its ID.  
+- **remove `<service id | service tag>`** (requires root)  
+  Removes a service from the node: its registry entry, its metadata entry, and its
+  built image (the guest rootfs cached under `CACHE/cloud_hypervisor/<id>/<arch>`,
+  which is normally the bulk of the disk a service holds). Reports the bytes freed,
+  or that no image was cached. Running instances of the service are not stopped --
+  each already holds its own copy of the image -- and are counted in the output if any
+  exist; the next `nodo execute` of that service rebuilds it.  
   **Example:**  
   `sudo nodo remove 1234567890abcdef`
+
+- **prune `[--all] [--dry-run]`** (requires root, except `--dry-run`)  
+  Reclaims the cache disk that no other command owns. `nodo remove` frees the bundle
+  of a service you name; two directories under `CACHE/cloud_hypervisor/` grow with no
+  owner at all:
+
+  - `runtime/<vmachine_id>/` — an instance's own copy of its rootfs image. Normally
+    freed by `kill`, so what is left is what a teardown did not finish freeing: a VM
+    that died before `kill` ran, or a cleanup that errored partway through. Entries
+    whose state file is gone are invisible to the janitor (which iterates state
+    files) and are found here by walking the directory itself.
+  - `failures/<vmachine_id>/` — the runtime directory of a failed launch, preserved
+    for debugging by `virtualizers.ch.CONSERVE_RUNTIME_DIR_ON_FAILURE` and pruned by
+    nothing. Entries older than `virtualizers.ch.FAILURE_RETENTION_DAYS` (7 by
+    default) are reclaimable; `--all` takes them regardless of age.
+
+  Orphaned VMs are torn down through `kill`, not deleted outright, so the tap device,
+  cgroup, API socket and firewall rules go with the disk. Every entry is printed with
+  its size and its reason — including the ones that were **kept** and why — and the
+  reported total is what was actually freed, never what was attempted. `--dry-run`
+  lists what would be removed without touching anything, and needs no root.  
+  **Examples:**  
+  `nodo prune --dry-run`  
+  `sudo nodo prune`  
+  `sudo nodo prune --all`
 
 - **kill `<instance id>`** (requires root)  
   Stops a running service instance by ID.  
@@ -569,6 +599,7 @@ commands that take one, the identifier of the relevant object:
 
 - **Service id or tag** — `execute`, `estimate`, `inspect`, `remove`, `publish`, `tag`,
   `export`, `integrity`
+- **No argument** — `prune` (flags only: `--all`, `--dry-run`)
 - **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_deposit`, `decrease_deposit`
 - **Peer id** — `disconnect`, `increase_peer_deposit`
 - **Client id** — `credit_client`, `debit_client`

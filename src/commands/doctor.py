@@ -9,10 +9,13 @@ import tempfile
 import time
 from pathlib import Path
 
-# The only project import here, and safe because that module is stdlib-only too:
-# doctor has to stay runnable on a checkout too broken to import the node, which is
-# exactly when it is worth running. Anything that pulls in config or the logger
-# (which creates the storage directory on import) does not belong in this file.
+# The only project imports here, and every one of them is stdlib-only too: doctor
+# has to stay runnable on a checkout too broken to import the node, which is exactly
+# when it is worth running. Anything that pulls in config or the logger (which
+# creates the storage directory on import) does not belong in this file -- which is
+# why the per-arch tables below come from `utils.arch_guard` and not from
+# `virtualizers.qemu.config`, where the emulator lookup that uses them lives.
+from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
 from src.virtualizers.ch import initramfs as ch_initramfs
 from src.virtualizers.ch import guest as ch_guest
 
@@ -264,12 +267,19 @@ def _render_service_template(template_content: str, main_dir: str) -> str:
 
 
 def _get_host_arch_tag() -> str:
-    machine = platform.machine().lower()
-    if machine in ("x86_64", "amd64"):
-        return "linux/amd64"
-    if machine in ("aarch64", "arm64"):
-        return "linux/arm64"
-    return f"linux/{machine}"
+    """This host's canonical arch tag, for display and for keying config lookups.
+
+    Normalisation comes from `arch_guard`, which owns the alias table. A second copy
+    of that table here has no way to stay in step with it: one such copy drifted by a
+    full alias (`arm_64`) with nothing to notice.
+
+    The fallback is this function's own, and is why it is not simply
+    `host_arch_tag()`: an arch nodo has no tag for reads as `linux/ppc64le` here
+    rather than as None, because every use below is a message to an operator or a
+    config key to look up, and "linux/ppc64le" tells them which architecture went
+    unrecognised while "None" tells them nothing.
+    """
+    return host_arch_tag() or f"linux/{platform.machine().lower()}"
 
 
 def _parse_kernel_version(release: str):
@@ -631,10 +641,9 @@ def _doctor_emulated_architectures(cfg: dict, host_arch_tag: str):
         )
         return []
 
-    binaries = {"linux/amd64": "qemu-system-x86_64", "linux/arm64": "qemu-system-aarch64"}
     executable = []
 
-    for arch, default_binary in binaries.items():
+    for arch, default_binary in QEMU_SYSTEM_BINARIES.items():
         if arch == host_arch_tag:
             continue
 
@@ -758,6 +767,7 @@ def _doctor_network_checks():
     )
 
     _doctor_guest_gateway_reachability()
+    _doctor_guest_to_guest_forwarding()
 
 
 def _doctor_guest_gateway_reachability():
@@ -824,7 +834,7 @@ def _doctor_guest_gateway_reachability():
         )
 
     try:
-        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "br-ch"))
+        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch"))
         gateway_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
         subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
     except Exception as e:
@@ -859,26 +869,184 @@ def _doctor_guest_gateway_reachability():
     )
     print(f"  {probe.detail}", flush=True)
 
+    # Three outcomes, all worth saying out loud: chains that can reject, a hook that
+    # is clear, or a ruleset nobody could read. The last one used to print as the
+    # middle one, which told the operator to go looking somewhere else entirely.
     try:
-        rejectors = backend.foreign_input_rejectors()
-    except Exception:
-        rejectors = []
-    if rejectors:
-        print("  Chains on the input hook, outside nodo's own table, that can reject:", flush=True)
-        for rejector in rejectors:
-            print(f"    - {rejector}", flush=True)
+        scan = backend.foreign_input_rejectors()
+    except Exception as e:
+        from src.utils.firewall.backends import RejectorScan
+
+        scan = RejectorScan(readable=False, reason=f"reading the ruleset raised {e!r}")
+    for line in scan.describe():
+        print(f"  {line}", flush=True)
+    if scan.rejectors:
         print(
             "  An accept rule cannot override those: in nftables 'accept' ends its own "
-            "chain only, and a reject in another base chain on the same hook still "
-            "wins whatever the priority. Open the port where that ruleset is managed.",
+            "chain only, and a reject in another base chain on the same hook still wins "
+            "whatever the priority.",
             flush=True
         )
+    # The one thing worth adding: the command for the front-end actually running
+    # here, rather than a description of the property the operator must establish.
+    try:
+        from src.utils.firewall.frontend import open_port_advice
+
+        advice_lines = open_port_advice(port, bridge=bridge, subnet=subnet)
+    except Exception:
+        advice_lines = []
+    if advice_lines:
+        # Blank line plus the "Suggestion:" label used elsewhere in this command:
+        # otherwise this reads as more diagnostic narrative instead of the one
+        # actionable step, and gets lost after the reject-chain scan output above.
+        print(flush=True)
+        print(f"  Suggestion: {advice_lines[0]}", flush=True)
+        for line in advice_lines[1:]:
+            print(f"  {line}", flush=True)
     print(
         "  This tests the guest subnet only. Whether peers OUTSIDE this LAN can reach "
         "the port is a separate question no check on this host can answer -- run "
         "'nodo nat-guide'.",
         flush=True
     )
+
+
+def _doctor_guest_to_guest_forwarding():
+    """Can one guest reach another? The parent-to-child path, tried rather than assumed.
+
+    Every service that launches a dependency uses this path, and when it is broken
+    the failure arrives disguised: the parent gets a connect timeout, which from the
+    outside is indistinguishable from a child that died on boot -- a node has been
+    accused of shortchanging a guest's memory on exactly this evidence.
+
+    doctor changes nothing here. It sends the packet, reports what nodo has in the
+    compatibility table (``NODO_FWD``, see ``firewall/compat.py``), and names the
+    chain that is dropping it -- including the case ``NODO_FWD`` cannot reach, which
+    is a firewall with a native nftables table of its own. Applying or removing
+    those rules is ``nodo firewall-compat``, because a change to the host's firewall
+    should be something the operator asked for.
+    """
+    print("\nGuest-to-guest forwarding:", flush=True)
+
+    # Imported here, not at module scope: see the note on this file's imports.
+    try:
+        from src.utils.config import ConfigManager
+        from src.utils.firewall.backends import detect_backend
+        from src.utils.firewall.reachability import probe_tcp_between_guests
+    except Exception as e:
+        print(f"[WARN] Could not load the firewall helpers: {e}", flush=True)
+        return
+
+    try:
+        env_manager = ConfigManager()
+        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch"))
+        gateway_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
+        subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
+    except Exception as e:
+        print(f"[WARN] Could not read the guest network settings: {e}", flush=True)
+        return
+
+    probe = probe_tcp_between_guests(bridge=bridge, subnet=subnet, gateway_ip=gateway_ip)
+    compat = _compat_state(bridge)
+
+    if probe.reachable is True:
+        print(f"[OK] A guest on {bridge} can reach another guest through the host.", flush=True)
+        # Worth one line even on success: these are the rules nodo put in a table it
+        # does not own, and an operator who does not know they are there cannot
+        # decide whether to keep them.
+        if compat is not None and compat.complete:
+            print(f"  {compat.detail}", flush=True)
+        return
+
+    if compat is not None and compat.partial:
+        print(f"[WARN] {compat.detail}", flush=True)
+
+    if probe.reachable is None:
+        print(f"[WARN] Could not test it: {probe.detail}", flush=True)
+        return
+
+    print(
+        f"[FAIL] Guests on {bridge} CANNOT reach each other. Any service that launches "
+        "a dependency would report it as unreachable or dead, whatever the child is "
+        "actually doing.",
+        flush=True
+    )
+    print(f"  {probe.detail}", flush=True)
+
+    try:
+        backend = detect_backend()
+        scan = backend.foreign_forward_rejectors()
+    except Exception as e:
+        from src.utils.firewall.backends import RejectorScan
+
+        scan = RejectorScan(
+            readable=False, hook="forward", reason=f"reading the ruleset raised {e!r}"
+        )
+    for line in scan.describe():
+        print(f"  {line}", flush=True)
+    if scan.rejectors:
+        print(
+            "  nodo accepts this traffic in its own table at priority -5, which those "
+            "cannot see: 'accept' ends its own chain only, and a drop in another base "
+            "chain on the same hook still wins whatever the priority.",
+            flush=True
+        )
+
+    if compat is None:
+        print(
+            "  What nodo has in the compatibility table could not be read; "
+            "'nodo firewall-compat status' as root will say.",
+            flush=True
+        )
+    elif not compat.available:
+        print(f"  {compat.detail}", flush=True)
+    elif compat.mode.value == "off":
+        print(
+            "  virtualizers.ch.FORWARD_COMPAT is off, so nodo has not asked for these "
+            "paths back. Set it to auto to let nodo add its own NODO_FWD chain.",
+            flush=True
+        )
+    elif compat.complete:
+        # The rules are in and it still fails, so whatever drops this is somewhere
+        # NODO_FWD cannot reach. Naming the usual one saves a long afternoon.
+        print(
+            f"  {compat.detail} Since that is in place and this still fails, the drop "
+            "is in a table iptables does not write to -- firewalld's own inet firewalld "
+            "is the usual answer, and its filter_FORWARD rejects by zone. Allow "
+            f"forwarding for {bridge} in firewalld itself "
+            f"('firewall-cmd --permanent --zone=trusted --change-interface={bridge}').",
+            flush=True
+        )
+    else:
+        print(
+            f"  {compat.detail} Run 'nodo firewall-compat apply' as root, or start the "
+            "node, to have nodo ask for those paths back.",
+            flush=True
+        )
+
+
+def _compat_state(bridge):
+    """What nodo has in the compatibility table, or None if that cannot be read.
+
+    None rather than an empty state: doctor's whole contract on this page is that
+    "I could not look" never prints as "there is nothing there".
+
+    Read straight from ``firewall.compat`` rather than through the virtualizer
+    wrapper, which pulls in the database and the whole instance stack for two
+    config values. doctor is run on nodes too broken to load those.
+    """
+    try:
+        from src.utils.config import ConfigManager
+        from src.utils.firewall.compat import CompatMode, compat_state
+
+        configured = ConfigManager().get("virtualizers.ch.FORWARD_COMPAT", "auto")
+        try:
+            mode = CompatMode.parse(configured)
+        except ValueError:
+            mode = CompatMode.AUTO
+        return compat_state(bridge, mode)
+    except Exception:
+        return None
 
 
 def doctor_command(main_dir):

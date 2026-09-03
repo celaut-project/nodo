@@ -8,29 +8,113 @@ closed the node looks alive and is useless, so the rules here are strict:
 * The accept rule is (re)applied on **every** daemon start, not once when the port
   is first assigned. Netfilter rules do not survive a reboot; a port stored in
   config.yaml does.
-* A port is only ever persisted once it has been opened *and* proven reachable.
+* Reachability is proven **once per port per boot**, in the daemon's start path,
+  and the node refuses to serve on a port that is provably unreachable. The port
+  is stored before that happens, on purpose: verifying at assignment time meant a
+  host whose guest bridge did not exist yet could never assign anything, which
+  left pinning a port by hand -- the one path with no check on it -- as the only
+  way forward. The verdict is cached in ``<CACHE>/gateway_port_passed``.
+* A path that opens a port and then refuses to use it takes its rule back out.
+  An accept rule for a port nothing will ever answer on is a hole, not a leftover.
 * ``network.GATEWAY_PORT`` never resolves to the string ``auto``. No port means a
   clear exception and a stopped process, never a plausible-looking default.
+
+* A refusal ends with the single command that fixes it, when
+  ``firewall.frontend`` could detect which front-end is running here. nodo still
+  drives none of them -- it prints the command, the operator runs it.
 
 Nothing here imports ``ConfigManager``; callers pass the values in.
 """
 
+import atexit
 import os
-from typing import Callable, List, Optional, Sequence
+import sys
+import textwrap
+from typing import Callable, List, Optional
 
 from src.utils.firewall.backends import (
     FirewallBackend,
     FirewallError,
-    ForeignRejector,
+    RejectorScan,
     Runner,
     detect_backend,
 )
+from src.utils.firewall.frontend import open_port_advice
+from src.utils.firewall.rules import Chain
 from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
 
 GATEWAY_COMMENT_PREFIX = "nodo;gateway;port"
 # What nodo wrote before this module existed: same purpose, no port in the
 # comment, so it cannot be pruned when the port changes. Cleaned up on sight.
 LEGACY_GATEWAY_COMMENT = "nodo;gateway;auto_port"
+
+
+# Wide enough for a wrapped paragraph, narrow enough for an 80-column terminal.
+NOTICE_RULE = "-" * 78
+
+
+def operator_notice(title: str, body: str) -> str:
+    """Frame ``body`` so it survives landing in the middle of other output.
+
+    These messages are long, and the worst of them are emitted while ConfigManager
+    is loading -- which on a fresh install happens during ``nodo.py``'s imports, so
+    the next thing on the terminal is the KyA banner. Run together they read as one
+    wall of text and the instructions get lost. Blank lines top and bottom, and a
+    rule with a title, keep the block separate from whatever printed around it.
+    """
+    return "\n".join(["", NOTICE_RULE, f" nodo: {title}", NOTICE_RULE, body, NOTICE_RULE, ""])
+
+
+_DEFERRED_NOTICES: List[str] = []
+_FLUSH_REGISTERED = False
+
+
+def defer_operator_notice(notice: str) -> None:
+    """Hold ``notice`` back until this process is about to exit.
+
+    In a terminal the last thing printed is the first thing read, and these alerts
+    are emitted at the worst possible moment for that: while ConfigManager loads,
+    which on a fresh install is in the middle of nodo.py's imports, with the KyA
+    banner and everything else still to come. Printed in place, the one message the
+    operator has to act on ends up in the middle of the scrollback.
+
+    Registered with ``atexit``, so it survives the ``SystemExit`` that a refusal to
+    start raises. Duplicates are dropped: the same notice deferred twice in one
+    process is one alert, not two.
+    """
+    global _FLUSH_REGISTERED
+    if notice in _DEFERRED_NOTICES:
+        return
+    _DEFERRED_NOTICES.append(notice)
+    if not _FLUSH_REGISTERED:
+        atexit.register(flush_operator_notices)
+        _FLUSH_REGISTERED = True
+
+
+def drain_operator_notices() -> List[str]:
+    """Take the held-back notices, emptying the queue.
+
+    For a caller that is going to surface them some other way: the installer prints
+    ``.gateway_notice`` as its own last act, so the helper that triggered the alert
+    must not also print it -- that would put the same alert in the middle of the
+    install output as well as at the end, which is the problem being solved.
+    """
+    taken = list(_DEFERRED_NOTICES)
+    _DEFERRED_NOTICES.clear()
+    return taken
+
+
+def flush_operator_notices() -> None:
+    """Print the held-back notices to stderr, once. Also callable by hand."""
+    for notice in drain_operator_notices():
+        print(notice, file=sys.stderr, flush=True)
+
+
+def _para(text: str) -> List[str]:
+    """One prose paragraph, wrapped. These messages get read in a terminal and
+    pasted elsewhere, so they are wrapped here rather than left to whatever is
+    displaying them."""
+    return textwrap.wrap(text, width=78)
 
 
 def gateway_comment(port: int, protocol: str = "tcp") -> str:
@@ -80,35 +164,25 @@ def _blocked_port_error(
     subnet: str,
     bridge: str,
     probe: ProbeResult,
-    rejectors: Sequence[ForeignRejector],
+    rejectors: RejectorScan,
     config_path: str,
+    run: Optional[Runner] = None,
 ) -> GatewayPortUnavailable:
-    lines: List[str] = [
-        f"nodo added an accept rule for TCP {port} via {backend_name}, but the port is "
-        f"still not reachable from the guest subnet {subnet}.",
-        f"Probe: {probe.detail}",
-        "",
-        "An accept rule cannot fix this on its own. In nftables 'accept' ends the "
-        "evaluation of its own chain only; the packet still traverses every other base "
-        "chain on the same hook, and a reject there wins regardless of priority.",
-    ]
-
-    if rejectors:
-        lines.append("")
-        lines.append("Chains on the input hook, outside nodo's own table, that can reject:")
-        for rejector in rejectors:
-            lines.append(f"  - {rejector}")
-
+    lines: List[str] = _para(
+        f"nodo's accept rule for TCP {port} is in place ({backend_name}), but the port "
+        f"is still not reachable from the guest subnet {subnet}: {probe.detail} "
+        "Something else on the input hook rejects it, and an accept of nodo's cannot "
+        "override that: in nftables 'accept' ends the evaluation of its own chain only."
+    )
+    lines.extend(rejectors.describe())
     lines.append("")
-    lines.extend(_hook_contract(port, bridge, subnet))
-
+    lines.extend(open_port_advice(port, bridge=bridge, subnet=subnet, run=run))
+    lines.append("")
     lines.extend(
-        [
-            "",
-            f"Alternatively pin a port that is already open, in {config_path}:",
-            "  network:",
-            "    GATEWAY_PORT: <an open port>",
-        ]
+        _para(
+            f"Then start the node again -- or set network.GATEWAY_PORT in {config_path} "
+            "to a port you have already opened."
+        )
     )
 
     return GatewayPortUnavailable(
@@ -149,6 +223,31 @@ def cleanup_legacy_rules(
             continue
 
 
+def withdraw_gateway_port(
+    port: int,
+    *,
+    backend: Optional[FirewallBackend] = None,
+    log: Callable[[str], None] = lambda message: None,
+    run: Optional[Runner] = None,
+) -> bool:
+    """Take nodo's accept rule for ``port`` back out. True when something was removed.
+
+    The counterpart to opening one: any path that opens a port and then decides not
+    to use it has to undo that, or a refusal leaves the host with a hole for a port
+    nothing will ever answer on. Best-effort -- a failure here is untidy, and must
+    not replace the error that caused the withdrawal.
+    """
+    try:
+        active = backend or detect_backend(run=run)
+        removed = active.delete_by_comment(Chain.INPUT, gateway_comment(port))
+    except Exception as e:
+        log(f"[FW] Could not withdraw the accept rule for TCP {port}: {e}")
+        return False
+    if removed:
+        log(f"[FW] Withdrew nodo's accept rule for TCP {port} ({active.name}).")
+    return bool(removed)
+
+
 def ensure_gateway_port_open(
     port: int,
     *,
@@ -158,7 +257,6 @@ def ensure_gateway_port_open(
     backend: Optional[FirewallBackend] = None,
     verify: bool = True,
     strict: bool = True,
-    probe_with_listener: bool = False,
     config_path: str = "config.yaml",
     log: Callable[[str], None] = lambda message: None,
     run: Optional[Runner] = None,
@@ -170,9 +268,10 @@ def ensure_gateway_port_open(
     ``strict``; an *inconclusive* probe only warns, because "the guest bridge does
     not exist yet" is the normal state of a node that has never run an instance.
 
-    ``probe_with_listener`` lets the probe supply its own throwaway listener, so
-    the port can be checked before the gateway is up. Port assignment needs that;
-    the daemon start path does not, because by then the gateway is listening.
+    The probe is not asked to supply a listener: the only caller that verifies is
+    the daemon, after ``server.start()``, so the gateway is already answering. A
+    check on a *stopped* node is ``nodo doctor``'s job, and it drives
+    ``probe_tcp_from_bridge`` directly with ``provide_listener``.
     """
     if os.geteuid() != 0:
         raise GatewayPortUnavailable(
@@ -217,7 +316,6 @@ def ensure_gateway_port_open(
         port=port,
         subnet=subnet,
         run=run,
-        provide_listener=probe_with_listener,
     )
 
     if probe.reachable is True:
@@ -240,156 +338,58 @@ def ensure_gateway_port_open(
         probe=probe,
         rejectors=rejectors,
         config_path=config_path,
+        run=run,
     )
     if strict:
+        # Nothing is going to serve on this port now, so nodo's accept rule for it
+        # comes back out. It is re-applied by the next start, once the operator has
+        # opened the port where their firewall is actually managed.
+        withdraw_gateway_port(port, backend=active, log=log, run=run)
         raise error
     log(f"[FW] {error}")
     return probe
 
 
-def _hook_contract(port: int, bridge: str, subnet: str) -> List[str]:
-    """A formal statement of what the host must satisfy, with no tool named.
-
-    nodo speaks the two interfaces the kernel offers, nftables and iptables, and
-    nothing above them. Which program owns the rest of the ruleset -- a distro
-    front-end, a config-management template, a hand-written nft file -- is not
-    nodo's to know, let alone to write to. Naming one would also be a lie of
-    omission on every host that uses a different one.
-
-    So the node states the property that has to hold, in terms of the ruleset it can
-    actually read, and leaves the operator to establish it however their host is
-    managed. They know what owns their firewall; nodo does not.
-    """
-    return [
-        f"For this node to work, TCP {port} inbound must be accepted on the input",
-        "hook, and no other base chain on that hook may reject or drop it:",
-        f"  - from {subnet}, the guest subnet, reached over {bridge}: every",
-        "    node_controller call a service makes goes this way, so without it the",
-        "    node accepts services that cannot call back into it.",
-        "  - from wherever peers reach this host: without it the node is invisible to",
-        "    the network while looking healthy locally.",
-        "",
-        "How to establish that depends on what manages the ruleset on this host, which",
-        "nodo deliberately does not assume: it writes nftables (or iptables) rules and",
-        "reads the ruleset back, and does not drive any firewall front-end. Apply the",
-        "change wherever the chains listed above are managed, then start the node again.",
-    ]
-
-
-def _unverified_port_error(
-    *,
-    port: int,
-    probe: ProbeResult,
-    rejectors: Sequence[ForeignRejector],
-    bridge: str,
-    subnet: str,
-    config_path: str,
-) -> GatewayPortUnavailable:
-    """The port could not be proven reachable AND something else can reject it."""
-    lines = [
-        f"nodo opened TCP {port} in its own ruleset, but could not prove the port is "
-        "actually reachable, and this host has other firewall rules that can reject it.",
-        f"Probe: {probe.detail}",
-        "",
-        "Chains on the input hook, outside nodo's own table, that can reject:",
-    ]
-    lines.extend(f"  - {rejector}" for rejector in rejectors)
-    lines.extend(
-        [
-            "",
-            "An accept rule of nodo's does not overrule them: in nftables 'accept' ends "
-            "the evaluation of its own chain only, and a reject in another base chain on "
-            "the same hook wins regardless of priority.",
-            "",
-            "Rather than store a port that peers may not be able to reach, nodo left "
-            "network.GATEWAY_PORT unassigned.",
-            "",
-            *_hook_contract(port, bridge, subnet),
-            "",
-            f"Or pin a port you have already opened, in {config_path}:",
-            "  network:",
-            "    GATEWAY_PORT: <an open port>",
-            "",
-            "Note that reachability from OUTSIDE this LAN is a separate question that "
-            "nothing on this host can answer: run 'nodo nat-guide' for that.",
-        ]
-    )
-    return GatewayPortUnavailable(
-        summary=f"Gateway port {port} could not be verified as reachable.",
-        instructions="\n".join(lines),
-        port=port,
-    )
-
-
 def assign_gateway_port(
     port: int,
     *,
-    bridge: str,
-    gateway_ip: str,
-    subnet: str,
     config_path: str = "config.yaml",
     log: Callable[[str], None] = lambda message: None,
     run: Optional[Runner] = None,
-) -> ProbeResult:
-    """Clear ``port`` for use as THE gateway port, or raise rather than settle for it.
+) -> None:
+    """Claim ``port`` as THE gateway port: open it in nodo's ruleset, nothing more.
 
-    Assignment is stricter than the daemon's start path, because the port it picks
-    gets written to config.yaml and every peer is then told to use it. A port that
-    turns out to be blocked is not a transient failure there: it is a node that
-    looks alive and cannot be called, which is worse than a node that refused to
-    start. So:
+    Deliberately does not probe. Assignment happens while the config loads, which
+    is before the guest bridge exists on a fresh host -- and a probe that cannot
+    run is not a verdict. The previous version treated it as one: an inconclusive
+    probe plus any foreign chain that could reject meant *refuse*, so a host with
+    firewalld and no bridge yet could never be assigned a port at all, and the
+    operator's only remaining move was to pin one by hand, unverified, which is how
+    a node ends up serving on a port firewalld rejects.
 
-    * The port is probed for real, with a throwaway listener, instead of being
-      assumed reachable because a rule was accepted. Nothing is listening at
-      assignment time -- that is precisely why this used to skip verification and
-      persist a port no packet had ever traversed.
-    * An INCONCLUSIVE probe is not good enough either, if the host has foreign
-      chains that can reject. That combination is how a Fedora host ends up with an
-      assigned port that firewalld quietly rejects, and there is no reason to
-      commit to the port when the one thing that could have cleared it did not run.
-    * An inconclusive probe with nothing that can reject is fine: a fresh node whose
-      guest bridge does not exist yet is the ordinary case, and nodo's own accept
-      rule is then the only verdict on the hook.
+    Reachability is now proven once per boot in the start path, where the bridge
+    exists and where a negative answer can stop the node instead of just declining
+    to write a number. See ``ensure_gateway_port_open``.
 
-    Raises ``GatewayPortUnavailable`` in either failing case; the caller must leave
-    the port unassigned and surface the instructions.
+    Raises ``GatewayPortUnavailable`` if the rule cannot be applied at all; the
+    caller must then leave the port unassigned.
     """
-    probe = ensure_gateway_port_open(
+    ensure_gateway_port_open(
         port=port,
-        bridge=bridge,
-        gateway_ip=gateway_ip,
-        subnet=subnet,
-        verify=True,
-        strict=True,
-        probe_with_listener=True,
+        verify=False,
         config_path=config_path,
         log=log,
         run=run,
     )
 
-    if probe.reachable is True:
-        return probe
 
-    rejectors = _safe_rejectors(detect_backend(run=run))
-    if rejectors:
-        raise _unverified_port_error(
-            port=port,
-            probe=probe,
-            rejectors=rejectors,
-            bridge=bridge,
-            subnet=subnet,
-            config_path=config_path,
-        )
+def _safe_rejectors(backend: FirewallBackend) -> RejectorScan:
+    """The input-hook scan, with a raised exception folded into "could not read".
 
-    log(
-        f"[FW] Gateway port {port} could not be verified ({probe.detail}), but nothing "
-        "outside nodo's ruleset can reject it on the input hook. Assigning it."
-    )
-    return probe
-
-
-def _safe_rejectors(backend: FirewallBackend) -> List[ForeignRejector]:
+    Never an empty result on failure: that reads as "the hook is clear", which is
+    the opposite of what happened.
+    """
     try:
         return backend.foreign_input_rejectors()
-    except Exception:
-        return []
+    except Exception as e:
+        return RejectorScan(readable=False, reason=f"reading the ruleset raised {e!r}")

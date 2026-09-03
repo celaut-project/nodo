@@ -8,7 +8,7 @@ enforcement was left "future scheduler work". This module is that follow-up.
 For each declared scenario, every workload group inside it must be satisfiable
 *somewhere* -- locally, or by at least one known peer -- or the service is
 refused admission. This generalizes the exact same boolean admission gate
-`generate_estimated_cost.get_resource_availability` already runs for a
+`resource_availability.get_resource_availability` already runs for a
 service's own `at_most` resources, applied instead to each descendant group's
 `resources`.
 
@@ -16,7 +16,7 @@ Every limit a group declares is checked, not only `mem_limit`: memory and disk
 against what is free right now, a CPU quota against the number of cores the
 host has at all (a quota is a share of time, so refusing on instantaneous load
 would make admission flap), and `blkio_weight` against the range cgroups
-accept. See `generate_estimated_cost._sysreq_shortfalls`.
+accept. See `resource_availability._sysreq_shortfalls`.
 
 Two policies govern the rest, both in `config.yaml` under `workload_admission`
 and both read per call:

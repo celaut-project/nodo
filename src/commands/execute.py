@@ -18,6 +18,7 @@ from src.manager.manager import get_execute_client
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.instance_names import inject_instance_name
+from src.utils.registry_errors import ServiceRegistryError
 
 env_manager = ConfigManager()
 
@@ -147,7 +148,14 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
         channel = grpc.insecure_channel(f"localhost:{env_manager.get_gateway_port()}")
         g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
-        inspect_service(service)
+        try:
+            inspect_service(service)
+        except ServiceRegistryError as e:
+            stop_event.set()
+            print("❌ Failed to read service data during launch service.")
+            print(f"Reason: {e}")
+            return None
+    
         animation_thread.start()
 
         response = next(client_grpc(

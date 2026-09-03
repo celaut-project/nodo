@@ -13,9 +13,11 @@ IMPORT_ERROR = None
 try:
     from src.utils.firewall.errors import FirewallError
     from src.utils.firewall.rules import Chain, Verdict
+    from protos import celaut_pb2 as celaut
     from src.virtualizers import firewall as vm_firewall
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
+    celaut = None  # type: ignore[assignment]
     vm_firewall = None  # type: ignore[assignment]
 
 
@@ -57,7 +59,11 @@ class VirtualizerFirewallGlobalRuleTests(unittest.TestCase):
             vm_firewall, "ensure_forward_related_established_rule", return_value=False
         ):
             self.assertFalse(vm_firewall.block_all(vmachine_id="vm-1"))
-            self.assertFalse(vm_firewall.allow_connection(vmachine_id="vm-1", ip="10.0.0.1"))
+            self.assertFalse(
+                vm_firewall.allow_connection_to_instance(
+                    vmachine_id="vm-1", instance=celaut.Instance()
+                )
+            )
 
 
 if __name__ == "__main__":
