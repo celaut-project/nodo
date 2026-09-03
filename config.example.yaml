@@ -544,7 +544,15 @@ costs:
   # an empty balance, larger costs less bookkeeping.
   TUNNEL_CHARGE_INTERVAL_KB: 1024
   # Let an instance keep running with a negative balance instead of being stopped.
-  ALLOW_DEBT: true
+  #
+  # An empty balance is the only thing that reaps an instance nobody stops: the
+  # maintenance tick charges every instance for the interval it just held, and
+  # stops the ones that cannot pay. Enabling debt makes `spend_mu` always
+  # succeed, so that branch never runs -- a service that leaks children leaks
+  # them until the node is restarted, each one still billing a balance with no
+  # floor. Enable it only where an instance outliving its funding is the lesser
+  # problem.
+  ALLOW_DEBT: false
 
 timing:
   GENERAL_WAIT_TIME: 2
