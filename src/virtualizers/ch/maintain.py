@@ -7,6 +7,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from src.database.sql_connection import SQLConnection
 from src.utils import logger as log
+from src.virtualizers.ch.guest_panic import guest_panic_line
 from src.virtualizers.ch.kill import kill as kill_ch_vm
 from src.virtualizers.ch.process import pid_alive
 from src.virtualizers.ch.runtime_state import load_runtime_state
@@ -87,6 +88,26 @@ def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[
         remove_and_penalize(vmachine_id=vmachine_id)
         return
 
+    # Every test above asks about the hypervisor; a panicked kernel passes all of
+    # them. The process is alive, the socket answers, and the guest inside is
+    # gone -- holding its memory and, on an emulated CPU, a host core with it.
+    panic = guest_panic_line(state)
+    if panic:
+        log.LOGGER(
+            f"[CH][{vmachine_id}] event=maintain unhealthy reason=guest_panicked "
+            f"pid={pid} panic={panic!r}"
+        )
+        # Killed here rather than left to the teardown below: `stop_instance`
+        # only kills what it finds registered, and this branch exists precisely
+        # for a process no liveness test will flag again. A double kill is
+        # harmless; a missed one pins the resources for good.
+        try:
+            _kill_for(state)(vmachine_id=vmachine_id)
+        except Exception as e:
+            log.LOGGER(f"[CH][{vmachine_id}] event=maintain panic_kill_failed error={e}")
+        remove_and_penalize(vmachine_id=vmachine_id)
+        return
+
     if debug_mode:
         log.LOGGER(
             f"[CH][{vmachine_id}] event=maintain healthy pid={pid}, api_socket={api_socket or '<none>'}"
@@ -118,6 +139,12 @@ def orphan_reason(vmachine_id: str, state) -> Optional[str]:
         return "orphan_runtime_state"
     if not alive:
         return "stale_runtime_process_dead"
+    # A guest that panicked is dead weight whose process is still running, so it
+    # is invisible to every check above. Excluded while `booting` for the same
+    # reason as the row check: the launcher is still driving that VM, and it has
+    # its own readiness deadline for giving up on it.
+    if not booting and guest_panic_line(state):
+        return "guest_panicked"
     return None
 
 
