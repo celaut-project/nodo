@@ -201,7 +201,7 @@ if __name__ == '__main__':
                     "\n- remove <service id> | <service tag>"
                     "\n- prune [--all] [--dry-run]   (reclaim orphaned runtime dirs and preserved launch failures)"
                     "\n- kill <instance id>"
-                    "\n- burnall [--dry-run]   (stop every instance, parents first)"
+                    "\n- burnall [--dry-run] [--yes]   (stop every instance, parents first; asks first)"
                     "\n- observe <instance id> [--save <path>]"
                     "\n- tunnel <instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]"
                     "\n- increase_deposit <instance id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
