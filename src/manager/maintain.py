@@ -2,7 +2,6 @@ from time import sleep
 import os
 import time
 
-import grpc
 from bee_rpc import client as beerpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
@@ -15,7 +14,8 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
 from src.reputation_system.reasons import Reason
 from src.utils import logger as log
-from src.utils.utils import generate_uris_by_peer_id, peers_id_iterator
+from src.utils.grpc_transport import peer_channel
+from src.utils.utils import peers_id_iterator
 from src.utils.cost_functions.execution_cost import system_scarcity
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
 from src.utils.monetary import format_mu
@@ -101,9 +101,7 @@ def check_wanted_service(wanted: str):
         try:
             for b in beerpc.client_grpc(
                     method=celaut_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(
-                            next(generate_uris_by_peer_id(peer))
-                        )
+                        peer_channel(peer)
                     ).GetService,  # TODO An timeout should be implemented when requesting a service.
                     indices_serializer=celaut_pb2.Metadata.HashTag.Hash,
                     input=_hash,
@@ -337,9 +335,7 @@ def peer_deposits(debug_mode: bool = False):
             try:
                 peer = next(beerpc.client_grpc(
                     method=celaut_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(
-                            next(generate_uris_by_peer_id(peer_id=peer_id), "")
-                        )
+                        peer_channel(peer_id=peer_id)
                     ).GetPeerInfo,
                     indices_parser=celaut_pb2.Peer,
                     partitions_message_mode_parser=True

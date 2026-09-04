@@ -3,7 +3,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Generator, Tuple
 import secrets
 
-import grpc
 from bee_rpc import client as bee
 
 from src.manager.resources import IOBigData
@@ -16,6 +15,7 @@ from src.utils import logger as log
 from src.utils import utils
 from src.utils.config import ConfigManager
 from src.utils.instance_names import normalize_instance_name, random_instance_name
+from src.utils.grpc_transport import node_channel, peer_channel
 from src.utils.utils import (
     from_amount,
     to_amount,
@@ -443,7 +443,7 @@ def refresh_peer_instance(peer_id: str) -> bool:
     try:
         peer = next(bee.client_grpc(
             method=celaut_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(uri)
+                node_channel(uri, expected_peer_id=peer_id)
             ).GetPeerInfo,
             indices_parser=celaut_pb2.Peer,
             partitions_message_mode_parser=True
@@ -463,10 +463,11 @@ def accept_peer_refresh(peer: celaut_pb2.Peer, peer_id: str) -> bool:
     """Store a ``GetPeerInfo`` response we solicited from ``peer_id``, if it is genuinely theirs.
 
     Whoever answers at a stored address is not necessarily the peer we meant to reach:
-    the channel is plain ``grpc.insecure_channel`` with no TLS, and the address may have
-    been reassigned by the ISP. This path feeds ``payment_contracts`` straight into the
-    DB and runs immediately before ``pay`` sends money, so it must apply the same
-    signature check as an inbound IntroducePeer rather than trusting the response.
+    the address may have been reassigned by the ISP -- and while the channel is now TLS
+    pinned to ``peer_id`` (issue #257), a peer that legitimately holds the address can
+    still answer with somebody else's advertisement. This path feeds ``payment_contracts``
+    straight into the DB and runs immediately before ``pay`` sends money, so it must apply
+    the same signature check as an inbound IntroducePeer rather than trusting the response.
 
     Nothing but a signature from ``peer_id`` itself will do. Every peer id is a public
     key (``add_peer_instance`` registers no other kind), so there is no case left where
@@ -657,9 +658,7 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
     log.LOGGER('Generate new client for peer ' + peer_id)
     client_msg = next(bee.client_grpc(
         method=celaut_pb2_grpc.GatewayStub(
-            grpc.insecure_channel(
-                next(generate_uris_by_peer_id(peer_id=peer_id), "")
-            )
+            peer_channel(peer_id=peer_id)
         ).GenerateClient,
         indices_parser=celaut_pb2.Client,
         partitions_message_mode_parser=True
@@ -853,7 +852,7 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
             refund = utils.from_amount(
                 next(bee.client_grpc(
                     method=celaut_pb2_grpc.GatewayStub(
-                        grpc.insecure_channel(peer_uri)
+                        node_channel(peer_uri, expected_peer_id=peer_id)
                     ).StopService,
                         partitions_message_mode_parser=True,
                         # StopService answers with a Refund, whose field is `amount`.
@@ -991,9 +990,7 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
 
             _output = next(bee.client_grpc(
                 method=celaut_pb2_grpc.GatewayStub(
-                    grpc.insecure_channel(
-                        next(utils.generate_uris_by_peer_id(peer_id))
-                    )
+                    peer_channel(peer_id)
                 ).ModifyDeposit,
                 partitions_message_mode_parser=True,
                 indices_parser=celaut_pb2.ModifyDepositOutput,

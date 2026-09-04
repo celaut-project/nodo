@@ -23,6 +23,7 @@ import socket
 from typing import Optional
 
 from src.manager.manager import resolve_instance_token
+from src.reputation_system.node_identity import get_node_public_key_hex
 from src.tunneling.tunnel_client import (
     DEFAULT_UDP_IDLE_TIMEOUT_S,
     serve_tcp,
@@ -54,7 +55,11 @@ def tunnel(
     local node; with ``--peer`` it must be the token as the remote node knows it,
     since only that node can resolve it.
     """
-    gateway = peer or f"localhost:{env_manager.get_gateway_port()}"
+    gateway = peer or f"127.0.0.1:{env_manager.get_gateway_port()}"
+    # Without --peer the gateway is this node, whose identity we know, so the relay's
+    # TLS channel is pinned to it. With --peer the address comes from a person and the
+    # id is whatever the certificate proves (issue #257).
+    expected_peer_id = None if peer else get_node_public_key_hex()
 
     if peer:
         token = instance
@@ -91,6 +96,7 @@ def tunnel(
                 gateway=gateway,
                 idle_timeout=idle_timeout,
                 log=_print,
+                expected_peer_id=expected_peer_id,
             )
         else:
             serve_tcp(
@@ -99,6 +105,7 @@ def tunnel(
                 slot=slot,
                 gateway=gateway,
                 log=_print,
+                expected_peer_id=expected_peer_id,
             )
 
     except KeyboardInterrupt:

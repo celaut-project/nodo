@@ -368,7 +368,7 @@ def generate_uris_by_peer_id(peer_id: str) -> typing.Generator[str, None, None]:
     """Every address of ``peer_id`` that this node can open a gRPC channel to.
 
     Non-TCP addresses are skipped, not merely left unprobed: every consumer of this
-    feeds the result straight to ``grpc.insecure_channel``, so yielding a UDP endpoint
+    feeds the result straight to ``grpc_transport.node_channel``, so yielding a UDP endpoint
     would hand them an address that can never answer -- and, since callers take the
     *first* result, it would shadow the peer's working TCP address indefinitely.
     An empty transport is a row from before addresses declared one; those were all TCP

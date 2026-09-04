@@ -70,6 +70,17 @@ class PolicyHookTests(unittest.TestCase):
         gateway = (ch_execute.NETWORK_GATEWAY_IP, GATEWAY_PORT, "tcp", VM_IP)
         self.assertIn(gateway, calls["host"])
 
+    def test_both_gateway_ports_are_opened(self):
+        # A guest is handed the plaintext port in its `__config__` and may pin the TLS
+        # one instead (issue #257), so an allow for only one of them leaves a service
+        # pointed at a port its own firewall drops.
+        calls = self._configure()
+
+        self.assertEqual(
+            sorted(port for _, port, _, _ in calls["host"]),
+            [GATEWAY_PORT, GATEWAY_PORT + 1],
+        )
+
     def test_the_node_grants_no_dns_access_of_its_own(self):
         # nodo does not serve DNS: name resolution is a service's job, fed by the
         # `network_resolution` the node already hands over in `__config__`. A rule
@@ -82,13 +93,17 @@ class PolicyHookTests(unittest.TestCase):
 
     def test_the_forward_egress_helper_is_not_even_reachable_from_here(self):
         # `vm_allow_connection` (chain FORWARD) was imported by this module for the
-        # gateway and the resolver alone. Both are host destinations and now go
-        # through the host helper, so the forward one has no business here: an
-        # import of it is a sign someone wrote a host allow on the wrong hook again.
+        # gateway and the resolver alone. Both are host destinations and go through
+        # the host helper, so the forward one has no business here: an import of it
+        # is a sign someone wrote a host allow on the wrong hook again.
         self.assertFalse(hasattr(ch_execute, "vm_allow_connection"))
 
         calls = self._configure()
-        self.assertEqual(len(calls["host"]), 1)  # the gRPC gateway, and nothing else
+        # The gRPC gateway on its two ports, and no other host destination at all.
+        self.assertEqual(
+            {(host_ip, source_ip) for host_ip, _, _, source_ip in calls["host"]},
+            {(ch_execute.NETWORK_GATEWAY_IP, VM_IP)},
+        )
 
     def test_the_blanket_drop_is_still_applied_first(self):
         calls = self._configure()

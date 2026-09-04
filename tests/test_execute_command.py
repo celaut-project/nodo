@@ -49,7 +49,7 @@ class ExecuteCommandTests(unittest.TestCase):
         out = io.StringIO()
 
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
-            execute_cmd.grpc, "insecure_channel"
+            execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
             execute_cmd.celaut_pb2_grpc, "GatewayStub"
         ) as mock_stub_cls, patch.object(
@@ -69,7 +69,7 @@ class ExecuteCommandTests(unittest.TestCase):
         out = io.StringIO()
 
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
-            execute_cmd.grpc, "insecure_channel"
+            execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
             execute_cmd.celaut_pb2_grpc, "GatewayStub"
         ) as mock_stub_cls, patch.object(
@@ -88,7 +88,7 @@ class ExecuteCommandTests(unittest.TestCase):
         response = self._response_with_slot(transport_tags=["http"])
 
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
-            execute_cmd.grpc, "insecure_channel"
+            execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
             execute_cmd.celaut_pb2_grpc, "GatewayStub"
         ) as mock_stub_cls, patch.object(
@@ -119,7 +119,7 @@ class ExecuteCommandTests(unittest.TestCase):
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
             execute_cmd, "inspect_service", side_effect=fake_inspect
         ), patch.object(
-            execute_cmd.grpc, "insecure_channel"
+            execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
             execute_cmd.celaut_pb2_grpc, "GatewayStub"
         ) as mock_stub_cls, patch.object(

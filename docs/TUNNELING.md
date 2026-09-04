@@ -301,9 +301,23 @@ a socket to the service. They differ only in who runs the listener:
 
 ## Security notes
 
-* **In transit:** the tunnel inherits the gateway channel's transport security.
-  The channel is plain HTTP/2 unless the gateway is deployed behind TLS — the
-  tunnel adds no encryption of its own, so don't assume any.
+* **In transit, caller → node:** the gateway channel is TLS, pinned to the node's
+  identity key (issue #257), so the tunnel is encrypted and the node on the other
+  end is the one you meant to reach. The tunnel adds nothing of its own on top.
+* **In transit, node → service:** plaintext. TLS terminates at the node: it
+  decrypts, meters the bytes, checks the declared slot and relays to the service,
+  which speaks its own protocol and knows nothing about TLS. The relay operator can
+  therefore read the tunnelled traffic — already implied by per-byte metering.
+* **End to end, if you need it: the caller's business, and possible today.** A slot is
+  raw TCP or UDP, so whatever security the service and its client speak *above* that
+  transport rides inside the tunnel untouched — TLS, Noise, DTLS, anything. The relay
+  carries a faithful byte stream (TCP as a stream; UDP with datagram boundaries
+  preserved), so it does not have to understand it, and then it only ever sees the
+  volume, which is what it meters. Nothing in the node has to change for that, and no
+  per-service key has to exist.
+* **What that does *not* give you** is proof that the instance is running the binary
+  its hash claims. That is attestation, not transport: no amount of encryption at
+  either layer establishes it.
 * **Validated target:** the node checks the instance exists and the slot is
   declared before connecting anywhere.
 * **No direct routing:** callers never address the instance's internal IP; they

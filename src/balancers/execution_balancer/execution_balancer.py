@@ -11,8 +11,8 @@ from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
-from src.utils.utils import service_extended, peers_id_iterator, \
-    generate_uris_by_peer_id
+from src.utils.grpc_transport import peer_channel
+from src.utils.utils import service_extended, peers_id_iterator
 from src.utils.config import ConfigManager
 from src.payment_system.mu_conversion import (
     configuration_for_peer,
@@ -100,9 +100,7 @@ def estimate_cost_on_peer(
         )
         peer_cost = next(bee.client_grpc(
             method=celaut_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(
-                    next(generate_uris_by_peer_id(peer_id))
-                )
+                peer_channel(peer_id)
             ).GetServiceEstimatedCost,
             indices_parser=celaut_pb2.EstimatedCost,
             timeout=_timeout_for_cost_request(),

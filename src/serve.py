@@ -6,6 +6,7 @@ import grpc
 
 from protos import celaut_pb2, celaut_pb2_grpc
 from src.gateway.gateway import Gateway
+from src.gateway.utils import plaintext_gateway_host
 from src.manager.maintain import manager_thread
 from src.tunneling import delegated_endpoints
 from src.utils import logger as log
@@ -18,6 +19,7 @@ from src.utils.firewall.gateway import (
 )
 from src.utils.firewall.legacy import sweep_compat_tables
 from src.utils.firewall.reachability import ProbeResult
+from src.utils.grpc_transport import server_credentials
 from src.utils.network_policy import NetworkPolicy, NetworkPolicyConfigError
 
 env_manager = ConfigManager()
@@ -197,7 +199,48 @@ def serve():
         celaut_pb2.DESCRIPTOR.services_by_name['Gateway'].full_name,
     )
 
-    server.add_insecure_port('[::]:' + str(port))
+    # The peer- and CLI-facing port is TLS (issue #257): its certificate proves this
+    # node's identity key, so a caller can tell it reached us and not whoever holds the
+    # address now. This is the only port announced to peers, and the only one this
+    # node's own client code ever dials.
+    server.add_secure_port('[::]:' + str(port), server_credentials())
+
+    # ...and, optionally, the same servicer in plain gRPC on a second port, for the
+    # services this node runs -- they speak plain gRPC and are handed this port in
+    # their `__config__.gateway` -- and for external callers that do not want TLS.
+    # One `Gateway()` on two ports rather than a second server: same handlers, same
+    # threads, no duplicated path to keep in step. TLS is what we *offer*; requiring
+    # it of a service we execute would mean shipping certificate pinning into every
+    # service SDK for a hop that never leaves the host.
+    #
+    # It binds one address, never `[::]`: the very address the config file already
+    # names as this node's gateway -- `virtualizers.ch.NETWORK_BRIDGE_NAME`, resolved
+    # through the same `peer_gateway_instance` path that writes `__config__.gateway`.
+    # That is the proto contract talking, so the port answers exactly where a service
+    # was told to find it and nowhere else. Binding every interface would put the whole
+    # unauthenticated Gateway API on any network this host can be reached from, which
+    # the TLS port exists precisely to prevent; loopback is the fallback when the bridge
+    # is not up yet.
+    plaintext_port = env_manager.get_plaintext_gateway_port()
+    if plaintext_port:
+        host = plaintext_gateway_host()
+        # An IPv6 literal needs brackets to be told apart from the port separator.
+        address = f'[{host}]' if ':' in host else host
+        bound = server.add_insecure_port(f'{address}:{plaintext_port}')
+        if bound:
+            log.LOGGER(
+                f'Serving plain gRPC on {address}:{bound} (TLS on {port}).'
+            )
+        else:
+            # Not fatal for peers, but every service launched from now on is handed this
+            # port in its __config__ and will find nothing listening, so it must not be
+            # silent.
+            log.LOGGER(
+                f'Could not bind the plaintext gateway port {plaintext_port} '
+                f'on {host} -- services will be handed an address that answers nothing. '
+                'Free that port, or point network.GATEWAY_PLAINTEXT_PORT at another one '
+                '(0 makes services use the TLS port).'
+            )
 
     server.start()
 

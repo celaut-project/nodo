@@ -543,6 +543,34 @@ class ConfigManager(metaclass=Singleton):
                 self._get_nested(self._config, ["network", "GATEWAY_PORT"])
             )
 
+    def get_plaintext_gateway_port(self) -> int:
+        """The plain-gRPC gateway port, or 0 when the node serves TLS only.
+
+        This is the port handed to the services this node runs -- they speak plain gRPC
+        and read it from ``__config__.gateway`` -- and the one an external caller that
+        declines TLS can use. Peers and the CLI always get the TLS port instead (see
+        ``src/utils/grpc_transport.py``).
+
+        ``auto`` resolves to ``GATEWAY_PORT + 1`` rather than to a free port picked at
+        random, so it is deterministic: a restart does not move the address a long-lived
+        service was handed. Resolved on use rather than at load, since the TLS port it
+        is derived from is assigned by the daemon and may still be ``auto`` when the
+        config is first read.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            configured = self._get_nested(
+                self._config, ["network", "GATEWAY_PLAINTEXT_PORT"]
+            )
+        if configured is None or str(configured).strip() == "":
+            return 0
+        if str(configured).strip().lower() == "auto":
+            return self.get_gateway_port() + 1
+        try:
+            return int(configured)
+        except (TypeError, ValueError):
+            return 0
+
     def load_config(self, force_reload: bool = False):
         """
         Loads the YAML file, processes dynamic values, and interpolates paths.
@@ -600,6 +628,11 @@ class ConfigManager(metaclass=Singleton):
             # `nodo <anything>`, down to the shell-completion helper the terminal
             # runs on a Tab keypress, could do it. It is now an explicit step, asked
             # for by the installer and by the daemon: see assign_gateway_port_if_unset.
+
+            # Note what is NOT here either: the plaintext gateway port. `auto` means
+            # GATEWAY_PORT + 1, and GATEWAY_PORT is itself assigned later, so resolving
+            # it at load time would have to read a port that does not exist yet. See
+            # get_plaintext_gateway_port.
 
             # Each ledger owns exactly ONE wallet (WALLET_MNEMONIC) -- there is no
             # auxiliary/receiver wallet -- and that same key is the node's identity

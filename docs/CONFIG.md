@@ -121,7 +121,33 @@ installs no binfmt handler, so cross-arch *packing* genuinely cannot work.
 `communication.*` tunes peer-to-peer messaging behaviour —
 `SELF_ANNOUNCE_TO_CONNECTING_PEERS`, `SEND_ONLY_HASHES_ASKING_COST`, and
 `DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH` (read by `src/commands/connect.py` and
-the execution balancer).
+the execution balancer), plus `MAX_SIGNATURE_SCHEME_COMPONENTS`.
+
+### Where the prose travels
+
+An announcement declares what it means — its signature scheme, and the protocol stack of
+each address — in the three fields celaut declares every component with. `formal` and the
+tags are what a comparison reads; `prose` is the same thing written out, complete enough
+to implement from, at roughly **5 KB per announced address**. Dropping it costs a reader
+detail and never costs a verifier its answer, so where it travels is a cost decision:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `communication.SHARE_PROSE_ON_GET_PEER_INFO` | `true` | Prose in what `GetPeerInfo` serves. On: the bytes are transient, and a peer that cannot read what this node means by its tags is exactly the reader it is written for. |
+| `communication.SHARE_PROSE_ON_LEDGER` | `false` | Prose in what is written to a reputation box. Off: a box pays storage rent on every byte for as long as it exists. |
+
+The ledger setting also decides what happens to **peers' announcements**, which this node
+republishes so a reader can verify their signatures straight off the chain. Those are
+republished **exactly as received or not at all**: a peer's prose is inside what it
+signed, so editing one to save rent would break the signature that is the whole reason
+for carrying it — and a `Peer` that no longer matches what its author signed is not that
+peer's claim any more.
+
+So an announcement carrying prose is either published whole (setting `true`, and the rent
+paid) or left out. Leaving it out costs only R9: **the opinion is published either way**,
+since the opinion is the box's token, its sign and R5. An announcement that carries no
+prose is small already and is always republished whole — this decides about expensive
+announcements, not about peers.
 
 ## `packer` — how `nodo pack` builds
 
@@ -168,7 +194,11 @@ closed ("Service not allowed.").
 
 ## `network`
 
-Controls exposure and remote execution. Key entries: `GATEWAY_PORT` (`auto`),
+Controls exposure and remote execution. Key entries: `GATEWAY_PORT` (`auto`, TLS —
+authenticated against this node's identity key, and the only port announced to peers),
+`GATEWAY_PLAINTEXT_PORT` (`auto` = `GATEWAY_PORT + 1`; the same gateway in plain gRPC,
+for the services this node runs and for external callers that do not want TLS — `0`
+disables it, see [`CONCEPTS.md`](CONCEPTS.md)),
 `PUBLIC_IP` / `EXTERNAL_INTERFACE` (what `nodo execute --remote` advertises),
 `PUBLIC_TCP_PORT` / `PUBLIC_UDP_PORT` (the external port a router forwards, when it
 differs from the internal one — empty means "same as internal"; only

@@ -1,8 +1,9 @@
 import threading
 
 from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc, gateway_bee
-import grpc
 from bee_rpc.client import Dir, client_grpc
+
+from src.utils.grpc_transport import verified_channel
 
 from tests.main import SORTER, FRONTIER, WALL, WALK, REGRESION, RANDOM, GATEWAY, generator
 
@@ -12,7 +13,7 @@ def test_build():
     def build_method(hash: str):
         service = next(client_grpc(
             method=celaut_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(GATEWAY ),
+                verified_channel(GATEWAY),
             ).StartService,
             input=generator(_hash=hash),
             indices_parser=celaut_pb2.Instance,

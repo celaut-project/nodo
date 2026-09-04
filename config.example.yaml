@@ -329,6 +329,17 @@ network:
   # reboot; this file does). Whether peers OUTSIDE this LAN can reach the port is a
   # separate question no check here can answer: run 'nodo nat-guide'.
   GATEWAY_PORT: auto
+  # Second gateway port, in plain gRPC (no TLS). GATEWAY_PORT itself is TLS,
+  # authenticated against this node's identity key, and that is what peers and the CLI
+  # use -- always, with no exception. This one exists for the services this node runs,
+  # which speak plain gRPC and are handed this port in their `__config__.gateway`, and
+  # for external callers that do not want TLS. `auto` means GATEWAY_PORT + 1; `0`
+  # disables it, and then a service must speak TLS too. It is NOT announced to peers,
+  # no firewall rule is opened for it, and it binds only the gateway address itself
+  # (virtualizers.ch.NETWORK_BRIDGE_NAME, or loopback if that bridge is down) rather
+  # than every interface -- so reaching it from outside this host takes a port-forward
+  # you set up yourself.
+  GATEWAY_PLAINTEXT_PORT: auto
   # Before serving anything, prove a guest can reach GATEWAY_PORT by connecting to it
   # from a throwaway namespace on the guest bridge -- the bridge is brought up at
   # start for this, rather than on the first instance launch, or there would be
@@ -597,6 +608,30 @@ communication:
   # 479 million. This node declares four, so five leaves room for a scheme with one
   # more building block. Raise it only alongside a scheme that genuinely needs more.
   MAX_SIGNATURE_SCHEME_COMPONENTS: 5
+
+  # Whether an announcement carries the `prose` of what it declares -- the written-out
+  # specification of the signature scheme and of each address's protocol stack. It is
+  # what lets a reader holding nothing but the message implement the protocol, and it is
+  # ~5 KB per announced address. Nothing that decides a comparison lives in it: two
+  # nodes match on `formal` and on the tags, so dropping it costs a reader detail and
+  # never costs a verifier its answer (node_identity.same_component_stack).
+  #
+  # Over gRPC it is on: the bytes are transient, and a peer that cannot read what this
+  # node means by "tls, grpc" is exactly the reader the prose is written for.
+  SHARE_PROSE_ON_GET_PEER_INFO: true
+  # On a ledger it is off: a reputation box pays storage rent on every byte for as long
+  # as it exists, and these paragraphs are several times a register's whole budget.
+  #
+  # It also decides what happens to PEERS' announcements, which this node republishes
+  # so a reader can verify their signatures straight off the chain. Those are
+  # republished exactly as received or not at all: editing one to save rent would break
+  # the signature that is the whole reason for carrying it, and a Peer that no longer
+  # matches what its author signed is not that peer's claim any more. So an announcement
+  # that carries prose is either published whole (this set true, and the rent paid) or
+  # left out, in which case the opinion is still published -- the token, its sign and R5
+  # are the opinion; the announcement is extra. A peer whose announcement carries no
+  # prose is small already and is always republished whole.
+  SHARE_PROSE_ON_LEDGER: false
   SELF_ANNOUNCE_TO_CONNECTING_PEERS: false
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
