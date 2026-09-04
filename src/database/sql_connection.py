@@ -19,8 +19,8 @@ from src.utils import logger as log, logger
 from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
-from src.utils.grpc_transport import peer_channel
-from src.utils.transport_stack import carries_prose, share_prose_on_ledger
+from src.identity.grpc_transport import peer_channel
+from src.identity.transport_stack import carries_prose, share_prose_on_ledger
 from src.utils.utils import from_amount, generate_uris_by_peer_id
 from src.utils.monetary import format_mu
 

@@ -43,9 +43,9 @@ or removing an RPC changes what this node announces without anyone remembering t
 from typing import Dict, Final, Iterable, Tuple
 
 from protos import celaut_pb2
-from src.utils.node_identity import same_component_stack
+from src.identity.node_identity import same_component_stack
 from src.utils.config import ConfigManager
-from src.utils.tls_identity import (
+from src.identity.tls_identity import (
     HOST_KEY_EXTENSION_OID,
     TLS_SERVER_NAME,
     signature_prefix,

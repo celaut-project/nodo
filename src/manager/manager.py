@@ -15,7 +15,7 @@ from src.utils import logger as log
 from src.utils import utils
 from src.utils.config import ConfigManager
 from src.utils.instance_names import normalize_instance_name, random_instance_name
-from src.utils.grpc_transport import node_channel, peer_channel
+from src.identity.grpc_transport import node_channel, peer_channel
 from src.utils.utils import (
     from_amount,
     to_amount,
@@ -291,7 +291,7 @@ def verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
     if not peer.public_key or not peer.signature:
         return None
 
-    from src.utils.node_identity import (
+    from src.identity.node_identity import (
     canonical_peer_content_digest,
     canonical_peer_payload,
     normalize_public_key_hex,

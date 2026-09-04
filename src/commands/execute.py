@@ -15,7 +15,7 @@ from src.commands.inspect_service import inspect as inspect_service
 from src.commands.__by_tag import get_id
 from src.core_services.source_application import acquire_service
 from src.manager.manager import get_execute_client
-from src.utils.grpc_transport import local_channel
+from src.identity.grpc_transport import local_channel
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.instance_names import inject_instance_name
