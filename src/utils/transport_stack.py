@@ -246,28 +246,6 @@ def carries_prose(peer) -> bool:
     )
 
 
-def strip_prose(peer) -> None:
-    """Remove every description from ``peer``, in place.
-
-    Both declarations at once -- the signature scheme and each address's protocol stack
-    -- because they are one policy: what a reader is handed to *understand* the message,
-    as opposed to what a verifier reads to *decide* about it. Nothing here is compared
-    (``node_identity._same_component`` reads ``formal``, then the tags), so this is
-    always safe to do to a message this node is about to sign.
-
-    It is NOT safe to do to a message already signed by someone else: the prose is
-    inside their digest, so removing it leaves a signature that cannot verify. A caller
-    stripping a peer's announcement has to drop the signature with it -- see
-    ``sql_connection.submit_to_ledger``, which does exactly that.
-    """
-    for component in peer.signature_scheme.components:
-        component.ClearField("prose")
-    for uri in peer.uri:
-        for component in uri.protocol_stack:
-            component.ClearField("prose")
-        uri.transport.ClearField("prose")
-
-
 def speaks_our_transport_stack(protocol_stack: Iterable) -> bool:
     """Whether an announced stack is the one this node speaks.
 
