@@ -24,7 +24,7 @@ try:
     from protos import celaut_pb2_grpc
     from tests.config_bootstrap import load_example_config
     load_example_config()
-    from src.reputation_system.node_identity import get_node_public_key_hex
+    from src.utils.node_identity import get_node_public_key_hex
     from src.tunneling import tunnel_client
     from src.gateway.gateway import Gateway
     from src.tunneling import rpc_tunnel

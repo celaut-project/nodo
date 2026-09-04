@@ -18,7 +18,7 @@ try:
     from protos import celaut_pb2
     from src.database import migrate
     from src.database.sql_connection import SQLConnection
-    from src.reputation_system import node_identity as ni
+    from src.utils import node_identity as ni
     from src.reputation_system.bip_wallet_verification import (
         bip_schnorr_sign,
         derive_compressed_pubkey,

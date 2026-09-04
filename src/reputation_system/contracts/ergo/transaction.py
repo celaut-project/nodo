@@ -186,13 +186,13 @@ def _self_network_data() -> str:
     from google.protobuf.json_format import MessageToJson
 
     from protos import celaut_pb2
-    from src.reputation_system.node_identity import (
-        canonical_peer_content_digest,
-        canonical_peer_payload,
-        declare_signature_scheme,
-        get_node_public_key_hex,
-        sign_peer_payload,
-    )
+    from src.utils.node_identity import (
+    canonical_peer_content_digest,
+    canonical_peer_payload,
+    declare_signature_scheme,
+    get_node_public_key_hex,
+    sign_peer_payload,
+)
     from src.utils.network import get_local_ip, resolve_public_host, uri_expiry
     from src.utils.transport_stack import share_prose_on_ledger
 
@@ -347,7 +347,7 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     # to a node's identity whatever cryptography that identity is in. A self-opinion
     # goes to our own identity key, addressed exactly like any peer's, and the wallet
     # spending the box vouches for it through the attestation in R9's Peer envelope.
-    from src.reputation_system.node_identity import get_node_public_key_hex
+    from src.utils.node_identity import get_node_public_key_hex
 
     node_public_key = get_node_public_key_hex()
     if not node_public_key:

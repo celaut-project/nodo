@@ -42,7 +42,7 @@ from typing import Optional, Tuple
 
 import grpc
 
-from src.reputation_system.node_identity import (
+from src.utils.node_identity import (
     get_node_public_key_hex,
     normalize_public_key_hex,
 )

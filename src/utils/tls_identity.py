@@ -57,7 +57,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-from src.reputation_system.node_identity import (
+from src.utils.node_identity import (
     get_node_public_key_hex,
     normalize_public_key_hex,
     sign_peer_payload,

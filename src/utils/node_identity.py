@@ -27,6 +27,7 @@ first config load when unset. It never changes underneath the peers that recorde
 and it is independent of every ``ledgers.*.WALLET_MNEMONIC``: adding, removing or
 rotating a wallet leaves the node's name alone.
 """
+import hashlib
 import itertools
 import string
 from functools import lru_cache
@@ -38,19 +39,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from mnemonic import Mnemonic
 
 from protos import celaut_pb2
-from src.reputation_system.bip_wallet_verification import (
-    bip_schnorr_sign,
-    bip_schnorr_verify_proposition,
-    derive_compressed_pubkey,
-)
-from src.utils import ergo_schnorr
 from src.utils.config import ConfigManager
-
-# P2PK propositionBytes are `0008cd` + 33-byte SEC-compressed public key (see
-# bip_wallet_verification._P2PK_PREFIX). A reputation proof's R7 owner is stored in
-# exactly this form, so an attested Ergo wallet is compared against it as a plain
-# prefix + the wallet's public key hex -- no separate encoding of our own.
-_P2PK_PREFIX_HEX = "0008cd"
 
 # A raw Ed25519 public key is 32 bytes -> 64 hex characters.
 _PUBLIC_KEY_HEX_LENGTH = 64
@@ -386,17 +375,6 @@ def get_node_public_key_hex() -> Optional[str]:
     return _cached_keypair(mnemonic)[0]
 
 
-def node_proposition_hex(wallet_public_key_hex: str) -> str:
-    """The R7-shaped propositionBytes hex (``0008cd`` + pubkey) for an Ergo wallet key.
-
-    This describes a *wallet*, never the node's identity: R7 is the reputation
-    contract's spending clause, so only a key that can spend on Ergo belongs in it. A
-    node's identity reaches that comparison through the attestation its Ergo wallet
-    signed (:func:`attested_proof_owner`), not by being the same key.
-    """
-    return _P2PK_PREFIX_HEX + wallet_public_key_hex
-
-
 def _canonical_contract_message(contract) -> str:
     """Deterministic encoding of one ``Contract`` (a ledger plus its xattrs)."""
     xattrs = ";".join(
@@ -495,13 +473,12 @@ def canonical_peer_content_digest(peer) -> str:
         rates,
         scheme,
     ])
-    # Blake2b-256, the hash this node's own scheme names in its challenge and the one
-    # Ergo uses: the digest is what a signature commits to, so keeping it on a different
-    # hash family from everything else in the identity path would be the one remaining
-    # nodo-only primitive. Nothing outside this function reads the value -- it is
-    # recomputed by the verifier from the peer's own advertisement, never stored or
-    # transmitted.
-    return ergo_schnorr.blake2b256(canonical.encode("utf-8")).hex()
+    # Blake2b-256. Nothing outside this function reads the value -- a verifier
+    # recomputes it from the peer's own advertisement, and it is never stored or
+    # transmitted -- so what matters is only that both sides derive it the same way.
+    return hashlib.blake2b(
+        canonical.encode("utf-8"), digest_size=32
+    ).hexdigest()
 
 
 def canonical_peer_payload(public_key_hex: str, ts: int, content_digest: str) -> str:
@@ -553,81 +530,3 @@ def attestation_payload(peer_id: str) -> str:
     return _ATTESTATION_PREFIX + peer_id
 
 
-def attest_proof_ownership(contract, mnemonic: str) -> bool:
-    """Record on ``contract`` that the wallet behind ``mnemonic`` published it.
-
-    The wallet signs this node's ``peer_id`` and both halves go into the proof's own
-    xattrs, so the claim travels with the thing it is about. A reader then ties an
-    on-chain owner to a peer id without the two having to be the same key -- which is
-    what lets the identity be independent of every ledger while a proof is still
-    attributable.
-
-    Per proof rather than per peer: a node holds as many proofs as it likes (issue
-    #281) and nothing says they share an owner, so an attestation on the announcement
-    could not describe two proofs on one ledger under different wallets.
-
-    Returns whether anything was written. An unusable mnemonic, or a node with no
-    identity yet, leaves the proof unattested rather than failing: a reader then
-    declines to credit it, which is the right answer, and nothing else is affected.
-    """
-    peer_id = get_node_public_key_hex()
-    if not peer_id or not mnemonic:
-        return False
-    try:
-        signature = bip_schnorr_sign(mnemonic, attestation_payload(peer_id))
-        public_key_hex = _wallet_public_key_hex(mnemonic)
-    except Exception:
-        return False
-
-    from src.utils.contract_xattrs import set_owner_attestation
-
-    set_owner_attestation(contract, public_key_hex, signature)
-    return True
-
-
-def attested_proof_owner(contract, peer_id: str) -> Optional[str]:
-    """The wallet ``peer_id`` proved published ``contract``, or None.
-
-    The check a reader runs before crediting a proof to a peer: the attestation has to
-    be signed by the very wallet it names, over that peer's own id. A proof announcing
-    an owner it cannot prove is worth exactly as much as one announcing none -- naming
-    someone else's wallet is free, signing with it is not.
-    """
-    from src.utils.contract_xattrs import get_owner_attestation
-
-    peer_id = normalize_public_key_hex(peer_id)
-    if not peer_id:
-        return None
-
-    public_key, signature = get_owner_attestation(contract)
-    public_key = public_key.strip().lower()
-    if not public_key or not signature or not set(public_key) <= _HEX_DIGITS:
-        return None
-    try:
-        proposition_bytes = bytes.fromhex(node_proposition_hex(public_key))
-    except (ValueError, TypeError):
-        return None
-    if not bip_schnorr_verify_proposition(
-        proposition_bytes, attestation_payload(peer_id), signature
-    ):
-        return None
-    return public_key
-
-
-def _configured_wallets():
-    """``(ledger name, mnemonic)`` for every ledger this node holds a wallet on."""
-    ledgers = ConfigManager().get("ledgers", {}) or {}
-    if not isinstance(ledgers, dict):
-        return
-    for name, ledger in ledgers.items():
-        if not isinstance(ledger, dict):
-            continue
-        mnemonic = str(ledger.get("WALLET_MNEMONIC") or "").strip()
-        if mnemonic and mnemonic != "auto":
-            yield str(name), mnemonic
-
-
-@lru_cache(maxsize=4)
-def _wallet_public_key_hex(mnemonic: str) -> str:
-    """The 33-byte SEC-compressed wallet key for a mnemonic, hex. Cached like the identity."""
-    return derive_compressed_pubkey(mnemonic).hex()

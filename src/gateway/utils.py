@@ -213,13 +213,13 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     logs. The refusal itself is only ever logged by the *remote* peer, so staying quiet
     here would leave an unreachable node with nothing locally to explain why.
     """
-    from src.reputation_system.node_identity import (
-        canonical_peer_content_digest,
-        canonical_peer_payload,
-        declare_signature_scheme,
-        get_node_public_key_hex,
-        sign_peer_payload,
-    )
+    from src.utils.node_identity import (
+    canonical_peer_content_digest,
+    canonical_peer_payload,
+    declare_signature_scheme,
+    get_node_public_key_hex,
+    sign_peer_payload,
+)
 
     public_key_hex = get_node_public_key_hex()
     if not public_key_hex:

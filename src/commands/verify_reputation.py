@@ -38,7 +38,7 @@ from src.reputation_system.contracts.ergo.proof_validation import (
     _get_unspent_boxes_by_token,
     _validate_box_structure,
 )
-from src.reputation_system.node_identity import (
+from src.reputation_system.proof_attestation import (
     attested_proof_owner,
     node_proposition_hex,
 )
