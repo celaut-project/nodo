@@ -14,8 +14,8 @@ try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
     from protos import celaut_pb2
-    from src.utils import transport_stack
-    from src.utils.tls_identity import HOST_KEY_EXTENSION_OID, signature_prefix
+    from src.identity import transport_stack
+    from src.identity.tls_identity import HOST_KEY_EXTENSION_OID, signature_prefix
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 

@@ -13,7 +13,7 @@ from src.utils.ergo_units import erg_to_nanoerg, nanoerg_to_erg_str
 # also what `monetary.display_unit` resolves ERG through, and that runs on log lines, so
 # it must not pull in everything below.
 from src.payment_system.contracts.ergo import rate
-from src.utils.ergo_tree import (
+from src.payment_system.contracts.ergo.ergo_tree import (
     ergo_contract_from_proposition_bytes,
     proposition_bytes_from_address,
 )
@@ -407,7 +407,7 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
         assert LEDGER in ledger.tags, "Ledger does not match"
 
         # ``script`` is the raw propositionBytes; derive the readable address only here.
-        from src.utils.ergo_tree import address_from_proposition_bytes
+        from src.payment_system.contracts.ergo.ergo_tree import address_from_proposition_bytes
         address = str(address_from_proposition_bytes(script).toString())
         assert address == get_wallet_address(), "Contract address does not match the node wallet"
 

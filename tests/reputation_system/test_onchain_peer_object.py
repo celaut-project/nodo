@@ -14,7 +14,7 @@ try:
     from google.protobuf.json_format import Parse
 
     from protos import celaut_pb2
-    from src.utils import node_identity as ni
+    from src.identity import node_identity as ni
     import src.reputation_system.contracts.ergo.transaction as tx
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc

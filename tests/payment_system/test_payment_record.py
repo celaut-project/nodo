@@ -58,10 +58,24 @@ class _Envs:
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class OutgoingPaymentRecordTests(unittest.TestCase):
 
-    def _pay(self, communicated: bool, envs=None):
+    def _pay(self, communicated: bool, envs=None, amount=1000, peer_amount=2000):
+        """Run one outgoing payment and return ``(paid, the row it wrote)``.
+
+        ``amount`` and ``peer_amount`` are the same figure on two scales: MU is each
+        node's own unit of account, so what is spent here and what the peer is told to
+        credit are different numbers. They are kept distinct in this helper because the
+        row records one and the communication carries the other.
+        """
         ledger = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="Ergo chain", formal=b"")
         connection = mock.MagicMock()
         peer_payment_process = getattr(payment_process, "__peer_payment_process")
+        self.communicated_with = {}
+
+        def communicate(peer_id, communicated_amount, deposit_token, contract_ledger):
+            self.communicated_with = {
+                "peer_id": peer_id, "amount": communicated_amount,
+            }
+            return communicated
 
         with mock.patch.object(payment_process, "_payment_envs",
                                return_value=envs or _Envs()), \
@@ -74,8 +88,10 @@ class OutgoingPaymentRecordTests(unittest.TestCase):
                 mock.patch.object(payment_process, "__obtain_deposit_token",
                                   return_value="deposit-token-1", create=True), \
                 mock.patch.object(payment_process, "__attempt_payment_communication",
-                                  return_value=communicated, create=True):
-            paid = peer_payment_process(peer_id="peer-1", amount=1000)
+                                  side_effect=communicate, create=True):
+            paid = peer_payment_process(
+                peer_id="peer-1", amount=amount, peer_amount=peer_amount
+            )
 
         connection.record_payment.assert_called_once()
         return paid, connection.record_payment.call_args.kwargs
@@ -103,6 +119,17 @@ class OutgoingPaymentRecordTests(unittest.TestCase):
         self.assertEqual(row["status"], "unacknowledged")
         self.assertEqual(row["tx_id"], TX_ID)
         self.assertEqual(row["peer_id"], "peer-1")
+
+    def test_the_row_holds_our_mu_and_the_peer_is_told_its_own(self):
+        """MU is each node's own unit, so the two figures are not interchangeable.
+
+        Recording the peer's figure would make our own ledger read in a scale we do
+        not price anything in; telling the peer ours would credit it the wrong amount.
+        """
+        _, row = self._pay(communicated=True, amount=1000, peer_amount=2000)
+
+        self.assertEqual(row["amount_mu"], 1000)
+        self.assertEqual(self.communicated_with["amount"], 2000)
 
     def test_a_contract_that_reports_no_transaction_records_the_payment_anyway(self):
         """The simulated contract has no chain and no id. The payment still happened."""

@@ -21,7 +21,7 @@ from src.reputation_system.bip_wallet_verification import (
     bip_schnorr_sign,
     derive_compressed_pubkey,
 )
-from src.utils import node_identity as ni
+from src.identity import node_identity as ni
 from src.utils.contract_xattrs import set_owner_attestation
 
 MNEMONIC = Mnemonic("english").generate(strength=128)

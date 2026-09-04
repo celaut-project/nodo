@@ -14,7 +14,7 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
 from src.reputation_system.reasons import Reason
 from src.utils import logger as log
-from src.utils.grpc_transport import peer_channel
+from src.identity.grpc_transport import peer_channel
 from src.utils.utils import peers_id_iterator
 from src.utils.cost_functions.execution_cost import system_scarcity
 from src.utils.cost_functions.general_cost_functions import compute_maintenance_cost
