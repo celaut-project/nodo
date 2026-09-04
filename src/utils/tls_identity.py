@@ -32,9 +32,9 @@ registering anything.
 That OID and the signed payload's prefix are **protocol constants of the ``[tls, grpc]``
 stack**, not implementation details: a peer finds the extension by the OID and
 recomputes the payload to verify it, so both have to match byte for byte or the
-handshake is refused. A node that changes either speaks a different transport and must
-declare it as such in ``Peer.Uri.protocol_stack`` rather than announcing
-``["tls", "grpc"]``.
+handshake is refused. They are published as such, in the ``formal`` of what an address
+announces (``src/utils/transport_stack.py``), so a peer using other values is seen as
+speaking something else instead of failing an unexplained handshake.
 
 The P-256 key is generated per process and never touches disk. Trust comes from the
 extension, not from the certificate being stable, so there is nothing to persist,
@@ -78,11 +78,10 @@ TLS_SERVER_NAME = "celaut-node"
 #   * a verifier recomputes the signed payload from the certificate it received, so a
 #     different prefix makes every signature fail to verify.
 #
-# A node that changes either is speaking a different transport protocol, not a variant
-# of this one, and has to say so: `Peer.Uri.protocol_stack` is where an address declares
-# what it speaks, and it must then carry tags other than `["tls", "grpc"]`. Announcing
-# that stack while using other constants is mislabelling, exactly as reusing libp2p's
-# OID for our own contents would be.
+# A node that changes either is speaking a different transport protocol, and both values
+# are published in what its addresses announce (`transport_stack.tls_component`), so a
+# caller comparing the two declarations sees the difference rather than discovering it
+# as a handshake that fails for no stated reason.
 #
 # uuid.uuid5(uuid.NAMESPACE_OID, "CELAUT") as an integer, under the ITU-T X.667 UUID arc
 # -- an OID anyone may derive from a UUID without registering anything. The seed is the
@@ -106,6 +105,16 @@ _SIGNATURE_PREFIX = "CELAUT"
 # work). The window is therefore as wide as the format allows.
 _NOT_VALID_BEFORE = datetime.datetime(2000, 1, 1)
 _NOT_VALID_AFTER = datetime.datetime(9999, 12, 31)
+
+
+def signature_prefix() -> str:
+    """The domain-separation prefix, for the stack declaration to publish.
+
+    A reader has to know what the signature in the extension covers before it can check
+    one, so this constant is part of what ``["tls", "grpc"]`` names -- see
+    ``src/utils/transport_stack.py``, which reads it from here rather than restating it.
+    """
+    return _SIGNATURE_PREFIX
 
 
 class CertificateError(Exception):
