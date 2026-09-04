@@ -168,24 +168,47 @@ not gRPC.
 
 ### What `["tls", "grpc"]` names
 
-Each `Peer.Uri` declares the stack its address speaks, and for this one that tag pair is
-shorthand for two constants every peer must agree on byte for byte:
+A tag on its own says almost nothing: two nodes can both write `tls` and disagree on the
+extension OID, on what the signature covers, or on which RPCs exist — and neither could
+tell from the announcement. celaut has no conventions to fall back on, so an address that
+announces this stack declares what it means by it, in the three fields every replaceable
+component in celaut carries:
 
-| Constant | Value | Why it must match |
+| Field | Carries | Compared? |
 |---|---|---|
-| Host-key extension OID | `2.25.276125094420857322236898758448456352855` | A peer looks the extension up *by* this OID. Two nodes carrying different ones never find each other's, and the handshake is refused. |
-| Signed-payload prefix | `CELAUT` | The verifier recomputes the payload from the certificate it received. A different prefix makes every signature fail to verify. |
+| `tags` | The plain protocol name — `tls`, `grpc`. Not versioned: a variant is the same protocol with different parameters, and those go below. | Only when neither side declares `formal` |
+| `formal` | The parameters, as canonical `key=value` lines sorted by key. | **Yes — decides** |
+| `prose` | The same thing written out, with the detail an implementer needs. | **No** |
 
-The OID is `uuid.uuid5(uuid.NAMESPACE_OID, "CELAUT")` written under the ITU-T X.667 arc
-`2.25`, which anyone may derive from a UUID with nothing to register. The seed is the
-project name and nothing more, so the number can be recomputed in one line and audited —
-it is a name seed, never a resource, and only the number ever travels.
+So the announcement for `tls` carries, among others:
 
-A node is free to use other values, but then it is speaking a **different transport
-protocol**, not a variant of this one, and has to declare it: `protocol_stack` is exactly
-where an address says what it speaks, so it must carry other tags. Announcing
-`["tls", "grpc"]` while using different constants is mislabelling — the same reason we do
-not reuse libp2p's OID for our own contents.
+```
+host_key_oid=2.25.276125094420857322236898758448456352855
+host_key_signed=CELAUT<subject_public_key_info_der_hex>
+host_key_extension=ascii:<identity_public_key_hex>:<signature_hex>
+verification=read-certificate,verify-extension,pin-exact-certificate
+```
+
+and `grpc` carries the service and **every RPC the gateway answers**, read from the
+compiled descriptor rather than typed out — so adding or removing one changes what this
+node announces without anyone remembering to.
+
+That makes the claim checkable. `speaks_our_transport_stack` runs the same comparison a
+signature scheme gets (`node_identity.same_component_stack`): a peer differing in the
+OID, in the signed payload or by a single RPC is seen as speaking something else, while
+one that only worded its prose differently is not.
+
+**Prose is deliberately not compared.** Deciding that two differently-worded
+descriptions mean the same protocol is a judgement, and the service that could make it
+has the shape `(a, b) -> bool` over two texts — an LLM's job, not a node's. Prose travels
+so the descriptor can be *read*, not diffed. It is dropped from an announcement published
+to an Ergo register, where every byte pays storage rent forever; nothing is lost from a
+verification, because what a comparison reads is `formal` and the tags.
+
+The OID itself is `uuid.uuid5(uuid.NAMESPACE_OID, "CELAUT")` written under the ITU-T
+X.667 arc `2.25`, which anyone may derive from a UUID with nothing to register. The seed
+is the project name and nothing more, so the number can be recomputed in one line and
+audited — it is a name seed, never a resource, and only the number ever travels.
 
 Practical consequences: a node with no identity keypair cannot serve, and a peer running
 a version from before this cannot be dialled — peer channels have no plaintext fallback.
