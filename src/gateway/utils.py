@@ -11,6 +11,7 @@ from src.payment_system.ledgers import local_payment_methods, register_local_con
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import ConfigManager
+from src.utils.transport_stack import declare_transport_stack
 from src.utils.utils import (
     get_local_ip_from_network,
     is_virtual_interface
@@ -269,11 +270,14 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     for uri in uris:
         announced = peer.uri.add(ip=uri.ip, port=uri.port)
         announced.transport.tags.append("tcp")
-        # What the endpoint actually speaks. Since issue #257 there is no plaintext
-        # gateway, so saying so is now the truth rather than a hint -- and it is covered
-        # by the signature below, so a relay cannot strip the "tls" tag to make a peer
-        # look dialable in the clear.
-        announced.protocol_stack.add(tags=["tls", "grpc"])
+        # What the endpoint actually speaks, spelled out rather than named: the tags
+        # alone would let two nodes both write "tls" while disagreeing on the extension
+        # OID, on what the signature covers or on which RPCs exist, and neither could
+        # tell from the announcement. `formal` carries those parameters and is what a
+        # comparison reads; the prose is there so a reader can implement the thing (see
+        # src/utils/transport_stack.py). Covered by the signature below, so a relay can
+        # neither strip the declaration nor edit a parameter out of it.
+        declare_transport_stack(announced)
 
     # Advertise what this node charges on a recurring basis, so a peer knows the
     # rate before negotiating anything. The price of a *specific service* is not

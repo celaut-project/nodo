@@ -275,7 +275,20 @@ def same_signature_scheme(a, b) -> bool:
     * **A component that declares neither tags nor formal** on either side; see
       :func:`_component_is_declared`.
     """
-    a_components, b_components = list(a.components), list(b.components)
+    return same_component_stack(a.components, b.components)
+
+
+def same_component_stack(a_components, b_components) -> bool:
+    """Whether two unordered stacks of tags/prose/formal descriptors denote the same thing.
+
+    The comparison itself, separated from what is being compared: celaut declares every
+    replaceable component this way -- a signature scheme, an address's protocol stack, a
+    ledger, a container architecture -- so the rule for deciding whether two of them
+    match belongs in one place rather than being restated per field. See
+    :func:`same_signature_scheme` for the reasoning behind each clause, and
+    ``src/utils/transport_stack.py`` for the other caller.
+    """
+    a_components, b_components = list(a_components), list(b_components)
     if len(a_components) != len(b_components):
         return False
 
