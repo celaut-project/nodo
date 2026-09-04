@@ -585,6 +585,16 @@ removed because nodo does not use it.
 - On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
   preserved, and each write snapshots the previous file to `config-<timestamp>.yaml`.
+- On Cell, the node's policies are laid out as a cell: Right/Left move between organelles,
+  Up/Down between the decisions inside one, and Enter moves a decision to its next position
+  (after showing every key it would change). `p` applies a whole posture — "just me",
+  "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where
+  this node differs from the one it is closest to. `n` prints the router steps.
+- **Every configuration change from the TUI backs up `config.yaml`, writes it, and restarts
+  nodo — and puts the backup straight back if the node does not come up on it.** So the
+  file always describes the node that is running, and no change is left waiting for a
+  restart somebody has to remember. The restart drives `systemctl`, so editing
+  configuration on a serving node needs root.
 - `q`, Escape, or Ctrl+C exits.
 
 See [the TUI reference](../src/commands/tui/README.md) for page details, refresh behavior, and

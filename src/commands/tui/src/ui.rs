@@ -3,6 +3,7 @@ use crate::app::{
     Client, ClientDetail, ConfigEntry, EditKind, InputMode, Instance, Money, Page, PaymentRow, Peer,
     PeerDetail, PriceEntry, ReputationEvent, Service, ServiceDetail, HISTORY_POINTS,
 };
+use crate::cell::{self, Lever, LeverStatus, Organelle};
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
 use tui_tree_widget::{Tree, TreeItem};
@@ -36,6 +37,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Services => draw_services(frame, app, layout[1]),
         Page::Peers => draw_peers(frame, app, layout[1]),
         Page::Clients => draw_clients(frame, app, layout[1]),
+        Page::Cell => draw_cell(frame, app, layout[1]),
         Page::Pricing => draw_pricing(frame, app, layout[1]),
         Page::Config => draw_config(frame, app, layout[1]),
         Page::Logs => draw_logs(frame, app, layout[1]),
@@ -45,7 +47,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     match app.input_mode {
         InputMode::Normal => {}
         InputMode::Confirm => draw_confirm_popup(frame, app),
-        InputMode::Details => draw_details_popup(frame, app),
+        InputMode::Details | InputMode::ConfirmWrites => draw_details_popup(frame, app),
+        InputMode::PickProfile => draw_profile_popup(frame, app),
         InputMode::Connect
         | InputMode::EditConfig
         | InputMode::AddConfigItem
@@ -1328,6 +1331,358 @@ fn peer_detail_lines(
 /// flatten the whole one-off group to nothing on a shared axis. Exact figures live in
 /// the table below, which is also where the selection lives; the bars are for judging
 /// proportion at a glance while editing.
+/// The CELL page: the node drawn as a cell, and its policies as levers inside it.
+///
+/// The membrane is the page's own frame, and the organelles are boxes inside it: the
+/// three that face outward above the nucleus, the three that keep the node alive
+/// below. The anatomy is load-bearing, not decoration -- what an operator is looking
+/// for ("can anyone reach me?", "what do I let a stranger's service do?") is found by
+/// asking which part of a cell would be responsible for it.
+///
+/// Two layouts, one cursor: wide terminals get the grid, narrow ones an accordion
+/// where only the focused organelle opens. The keys behave identically in both, so
+/// there is one interaction to learn and one to keep correct.
+fn draw_cell(frame: &mut Frame, app: &mut App, area: Rect) {
+    let document = app.config_document.clone();
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(6)]).split(area);
+    draw_profile_bar(frame, app, rows[0]);
+
+    app.cell.organelle_areas.clear();
+    app.cell.lever_areas.clear();
+
+    // The membrane: everything inside it is this node, everything outside is not.
+    let membrane = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(MUTED))
+        .title(Span::styled(
+            " MEMBRANE · inside vs outside ",
+            Style::default().fg(MUTED),
+        ))
+        .title_alignment(Alignment::Center);
+    let inside = membrane.inner(rows[1]);
+    frame.render_widget(membrane, rows[1]);
+
+    // 3 columns of organelles need room for a label, a value and a gap; below that
+    // the boxes are narrower than their own titles and the grid stops being readable.
+    if inside.width >= 84 && inside.height >= 16 {
+        draw_cell_grid(frame, app, inside, document.as_ref());
+    } else {
+        draw_cell_accordion(frame, app, inside, document.as_ref());
+    }
+}
+
+/// Which posture this node is closest to, and how to see where it differs.
+fn draw_profile_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let report = app.cell_profile();
+    let colour = if report.deviations.is_empty() { GOOD } else { WARN };
+    let line = Line::from(vec![
+        Span::styled(" closest profile ", Style::default().fg(MUTED)),
+        Span::styled(report.summary(), Style::default().fg(colour).bold()),
+        Span::styled(
+            format!(" ({}/{} keys)", report.matched(), report.total),
+            Style::default().fg(MUTED),
+        ),
+        Span::styled(
+            if area.width >= 92 {
+                "   p apply a profile · d what differs"
+            } else {
+                ""
+            },
+            Style::default().fg(MUTED),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+/// Two rows of three organelles with the nucleus banded across the middle.
+///
+/// The nucleus is horizontal and central because it is what everything else depends
+/// on and the only part whose loss is permanent: a mnemonic is not recoverable, and
+/// a row of it beside "keep failures for 7 days" would read as equally routine.
+fn draw_cell_grid(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    document: Option<&serde_yaml::Value>,
+) {
+    let nucleus_height = (Organelle::Nucleus.levers().len() as u16 + 3).min(area.height / 3);
+    let bands = Layout::vertical([
+        Constraint::Min(5),
+        Constraint::Length(nucleus_height),
+        Constraint::Min(5),
+    ])
+    .split(area);
+    let top = Layout::horizontal([
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+    ])
+    .split(bands[0]);
+    let bottom = Layout::horizontal([
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+    ])
+    .split(bands[2]);
+
+    let placement = [
+        (Organelle::Channels, top[0]),
+        (Organelle::Ribosomes, top[1]),
+        (Organelle::Vesicles, top[2]),
+        (Organelle::Nucleus, bands[1]),
+        (Organelle::Immune, bottom[0]),
+        (Organelle::Mitochondria, bottom[1]),
+        (Organelle::Vacuole, bottom[2]),
+    ];
+    for (organelle, box_area) in placement {
+        draw_organelle(frame, app, organelle, box_area, document);
+    }
+}
+
+/// One column, with only the focused organelle open.
+///
+/// A narrow terminal cannot show six boxes of rows at once, and a grid squeezed into
+/// one would clip the values -- which on this page are the whole content. So the rest
+/// collapse to a single summary line each and stay one keypress away.
+fn draw_cell_accordion(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    document: Option<&serde_yaml::Value>,
+) {
+    let focused = app.cell.organelle();
+    let constraints: Vec<Constraint> = Organelle::ALL
+        .iter()
+        .map(|organelle| {
+            if *organelle == focused {
+                // Whatever the collapsed rows leave: a box shorter than its levers
+                // would hide the ones at the bottom with no way to reach them.
+                Constraint::Min(focused.levers().len() as u16 + 2)
+            } else {
+                Constraint::Length(1)
+            }
+        })
+        .collect();
+    let rows = Layout::vertical(constraints).split(area);
+    for (organelle, row) in Organelle::ALL.iter().zip(rows.iter()) {
+        if *organelle == focused {
+            draw_organelle(frame, app, *organelle, *row, document);
+        } else {
+            draw_collapsed_organelle(frame, app, *organelle, *row, document);
+        }
+    }
+}
+
+/// One organelle's box: its levers, each with the position it is currently in.
+fn draw_organelle(
+    frame: &mut Frame,
+    app: &mut App,
+    organelle: Organelle,
+    area: Rect,
+    document: Option<&serde_yaml::Value>,
+) {
+    let index = Organelle::ALL
+        .iter()
+        .position(|candidate| *candidate == organelle)
+        .unwrap_or(0);
+    let focused = app.cell.organelle == index;
+    let colour = organelle_colour(organelle);
+    app.cell.organelle_areas.push((index, area));
+
+    let block = Block::bordered()
+        .border_type(if organelle == Organelle::Nucleus {
+            // The nucleus is the one part of the cell whose loss cannot be undone.
+            BorderType::Double
+        } else {
+            BorderType::Rounded
+        })
+        .border_style(Style::default().fg(if focused { colour } else { MUTED }))
+        .title(Line::from(vec![
+            Span::styled(
+                format!(" {} ", organelle.title()),
+                Style::default().fg(colour).bold(),
+            ),
+            Span::styled(
+                format!("· {} ", organelle.subtitle()),
+                Style::default().fg(MUTED),
+            ),
+        ]));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height == 0 {
+        return;
+    }
+
+    let levers = organelle.levers();
+    let rows = Layout::vertical(
+        (0..inner.height)
+            .map(|_| Constraint::Length(1))
+            .collect::<Vec<_>>(),
+    )
+    .split(inner);
+    for (lever_index, (row, lever)) in rows.iter().zip(levers.iter()).enumerate() {
+        let selected = focused && app.cell.lever == lever_index;
+        app.cell.lever_areas.push((index, lever_index, *row));
+        frame.render_widget(
+            Paragraph::new(lever_line(lever, document, selected, row.width)),
+            *row,
+        );
+    }
+}
+
+/// A collapsed organelle: its name, and enough of its state to know whether to open
+/// it. A row that said only "IMMUNE" would make the operator open all six to find
+/// the one they want.
+fn draw_collapsed_organelle(
+    frame: &mut Frame,
+    app: &mut App,
+    organelle: Organelle,
+    area: Rect,
+    document: Option<&serde_yaml::Value>,
+) {
+    let index = Organelle::ALL
+        .iter()
+        .position(|candidate| *candidate == organelle)
+        .unwrap_or(0);
+    app.cell.organelle_areas.push((index, area));
+    let summary = organelle
+        .levers()
+        .iter()
+        .take(2)
+        .map(|lever| cell::status(lever, document).label(lever))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                format!("{:<14}", organelle.title()),
+                Style::default().fg(organelle_colour(organelle)),
+            ),
+            Span::styled(summary, Style::default().fg(MUTED)),
+        ])),
+        area,
+    );
+}
+
+/// One lever row: what it decides on the left, where it is set on the right.
+fn lever_line(
+    lever: &Lever,
+    document: Option<&serde_yaml::Value>,
+    selected: bool,
+    width: u16,
+) -> Line<'static> {
+    let status = cell::status(lever, document);
+    let marker = match &status {
+        // A filled marker is a position this page named; a hollow one is a value it
+        // is only reporting. `custom` and `not set` are called out because both mean
+        // "this page cannot describe what your node is doing here".
+        LeverStatus::State(_) => "●",
+        LeverStatus::Value(_) => "·",
+        LeverStatus::Custom | LeverStatus::Unset => "⁓",
+        LeverStatus::Link => "→",
+    };
+    let value = status.label(lever);
+    let value_colour = match &status {
+        LeverStatus::Custom | LeverStatus::Unset => WARN,
+        LeverStatus::Link => ACCENT,
+        _ if lever.warning.is_some() => BAD,
+        _ => Color::White,
+    };
+    // The label is padded to a fixed column so the values line up down the box: a
+    // ragged right edge on eight rows is what makes a panel hard to scan.
+    let label_width = (width.saturating_sub(14)).clamp(8, 18) as usize;
+    let label = shorten(lever.label, label_width);
+    Line::from(vec![
+        Span::styled(
+            if selected { "▸" } else { " " },
+            Style::default().fg(ACCENT).bold(),
+        ),
+        Span::styled(
+            format!("{label:<label_width$} "),
+            if selected {
+                Style::default().fg(Color::White).bold()
+            } else {
+                Style::default().fg(Color::Gray)
+            },
+        ),
+        Span::styled(format!("{marker} "), Style::default().fg(value_colour)),
+        Span::styled(value, Style::default().fg(value_colour)),
+    ])
+}
+
+fn organelle_colour(organelle: Organelle) -> Color {
+    match organelle {
+        Organelle::Channels => ACCENT,
+        Organelle::Ribosomes => Color::LightBlue,
+        Organelle::Vesicles => Color::LightMagenta,
+        Organelle::Nucleus => WARN,
+        Organelle::Immune => Color::Red,
+        Organelle::Mitochondria => GOOD,
+        Organelle::Vacuole => MUTED,
+    }
+}
+
+/// The profile picker: the postures, ordered from the most closed to the most open,
+/// with how far this node already is from each.
+fn draw_profile_popup(frame: &mut Frame, app: &App) {
+    let profiles = cell::profiles();
+    let area = centered_rect(70, profiles.len() as u16 * 2 + 6, frame.size());
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(ACCENT))
+        .title(Span::styled(
+            " APPLY A PROFILE ",
+            Style::default().fg(ACCENT).bold(),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (index, profile) in profiles.iter().enumerate() {
+        let report = cell::report(profile, app.config_document.as_ref());
+        let selected = index == app.cell.profile;
+        let distance = if report.deviations.is_empty() {
+            "you are here".to_string()
+        } else {
+            format!("{} keys would change", report.deviations.len())
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                if selected { "▸ " } else { "  " },
+                Style::default().fg(ACCENT).bold(),
+            ),
+            Span::styled(
+                format!("{:<18}", profile.label),
+                if selected {
+                    Style::default().fg(Color::White).bold()
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            ),
+            Span::styled(
+                distance,
+                Style::default().fg(if report.deviations.is_empty() { GOOD } else { MUTED }),
+            ),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("    {}", profile.blurb),
+            Style::default().fg(MUTED),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "A profile sets policy only — never an identity, a wallet or a path.",
+        Style::default().fg(MUTED),
+    )));
+    lines.push(Line::from(Span::styled(
+        "⏎ see exactly what changes  ·  Esc cancel",
+        Style::default().fg(WARN),
+    )));
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
     let columns = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
         .split(area);
@@ -1773,6 +2128,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Page::Clients => {
             "tab/shift+tab cycle  •  ↑/↓ select  •  + credit  •  - debit  •  r refresh  •  q quit"
         }
+        Page::Cell => {
+            "→/← organelle  •  ↑/↓ lever  •  ⏎ change  •  e keys behind it  •  p profiles  •  d deviations  •  n router guide"
+        }
         Page::Pricing => {
             "tab/shift+tab cycle  •  ↑/↓ select  •  +/- adjust 10%  •  e exact value  •  r refresh  •  q quit"
         }
@@ -1909,26 +2267,37 @@ fn draw_confirm_popup(frame: &mut Frame, app: &App) {
 }
 
 fn draw_details_popup(frame: &mut Frame, app: &App) {
-    let area = centered_rect(80, frame.size().height.saturating_sub(4).max(8), frame.size());
-    frame.render_widget(Clear, area);
-    let (title, text, scroll) = match &app.details {
+    let (title, text, scroll, lines) = match &app.details {
         Some(details) => (
             details.title.clone(),
             details.lines.join("\n"),
             details.scroll as u16,
+            details.lines.len() as u16,
         ),
-        None => (String::new(), String::new(), 0),
+        None => (String::new(), String::new(), 0, 0),
     };
+    // A diff of five keys in a box of thirty rows reads as if something is missing.
+    // The overlay is sized to what it holds, up to the room there is.
+    let height = (lines + 2).clamp(8, frame.size().height.saturating_sub(4).max(8));
+    let area = centered_rect(80, height, frame.size());
+    frame.render_widget(Clear, area);
+    let confirming = app.input_mode == InputMode::ConfirmWrites;
+    let keys = if confirming {
+        "y apply • n cancel • ↑/↓ scroll"
+    } else {
+        "↑/↓ scroll • Esc close"
+    };
+    let colour = if confirming { WARN } else { ACCENT };
     let popup = Paragraph::new(text)
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false })
         .block(
             Block::bordered()
                 .title(Span::styled(
-                    format!(" {title} • ↑/↓ scroll • Esc close "),
-                    Style::default().fg(ACCENT).bold(),
+                    format!(" {title} • {keys} "),
+                    Style::default().fg(colour).bold(),
                 ))
-                .border_style(Style::default().fg(ACCENT)),
+                .border_style(Style::default().fg(colour)),
         )
         .style(Style::default().fg(Color::White).bg(Color::Black));
     frame.render_widget(popup, area);
@@ -1994,6 +2363,143 @@ fn visible_tail(lines: &[String], count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The cell is a panel an operator reads to decide something, so what matters is
+    /// that the decision and where it is currently set are both legibly on screen --
+    /// at both layouts, and without a secret leaking into either.
+    mod cell_page {
+        use super::super::{draw_cell, lever_line};
+        use crate::app::App;
+        use crate::cell::{self, LeverKind};
+        use ratatui::{backend::TestBackend, Terminal};
+
+        fn screen(width: u16, height: u16, config: &str) -> String {
+            let mut app = App::new();
+            // The page derives every lever from the cached document, the same one
+            // the refresh sweep reloads, so the fixture goes there.
+            app.config_document = Some(serde_yaml::from_str(config).unwrap());
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|row| {
+                    (0..buffer.area.width)
+                        .map(|column| buffer.get(column, row).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        const RENTING: &str = "client:\n  ACCEPT_NEW_DEPOSITS: true\nnetwork:\n  GATEWAY_PORT: 58443\n  DISABLE_EXPOSE_OUTSIDE: true\ncosts:\n  ALLOW_DEBT: false\nidentity:\n  MNEMONIC: \"abandon abandon ability\"\n";
+
+        /// Wide enough for the grid: every organelle is drawn, so the operator can
+        /// see the whole cell without hunting through collapsed sections.
+        #[test]
+        fn the_grid_shows_every_organelle() {
+            let screen = screen(140, 40, RENTING);
+            for organelle in cell::Organelle::ALL {
+                assert!(
+                    screen.contains(organelle.title()),
+                    "{} is missing from the grid:\n{screen}",
+                    organelle.title()
+                );
+            }
+            assert!(screen.contains("MEMBRANE"), "the membrane frames the page");
+        }
+
+        /// A lever is only useful if its current position is visible: "outside work"
+        /// with no "open" beside it is a question with no answer.
+        #[test]
+        fn a_levers_current_position_is_on_screen_beside_it() {
+            let screen = screen(140, 40, RENTING);
+            assert!(screen.contains("outside work"));
+            assert!(screen.contains("open"), "the position is shown:\n{screen}");
+            assert!(screen.contains("58443"), "a scalar shows its value:\n{screen}");
+        }
+
+        /// The one thing this page must never do. The mnemonic is in the file it
+        /// reads, and the nucleus row that reports it says only whether it is set.
+        #[test]
+        fn a_secret_never_reaches_the_screen() {
+            for (width, height) in [(140, 40), (80, 24)] {
+                let screen = screen(width, height, RENTING);
+                assert!(
+                    !screen.contains("abandon"),
+                    "the identity mnemonic leaked at {width}x{height}:\n{screen}"
+                );
+            }
+        }
+
+        /// A narrow terminal cannot show six boxes of rows, so it collapses to one
+        /// column -- and still names every organelle, so nothing becomes unreachable.
+        #[test]
+        fn a_narrow_terminal_collapses_to_one_column_without_losing_an_organelle() {
+            let screen = screen(80, 24, RENTING);
+            for organelle in cell::Organelle::ALL {
+                assert!(
+                    screen.contains(organelle.title()),
+                    "{} is unreachable at 80x24:\n{screen}",
+                    organelle.title()
+                );
+            }
+        }
+
+        /// A combination the catalogue cannot name is called out rather than shown
+        /// as one of the named positions. Showing the nearest one would have the
+        /// page misreport the policy the node is running.
+        #[test]
+        fn an_unnamed_combination_is_marked_rather_than_rounded() {
+            let lever = cell::lever("descendants").unwrap();
+            let document: serde_yaml::Value = serde_yaml::from_str(
+                "workload_admission:\n  POLICY: full\n  ON_UNSATISFIABLE: reject\n",
+            )
+            .unwrap();
+            let line = lever_line(lever, Some(&document), false, 30);
+            let text: String = line
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect();
+            assert!(text.contains("custom"), "unnamed state reads as: {text}");
+            assert!(!text.contains("strict") && !text.contains("lenient"));
+        }
+
+        /// Every lever the page can draw has a label short enough to survive the
+        /// narrowest box the grid produces, or its value is pushed off the row.
+        #[test]
+        fn every_lever_label_fits_the_narrowest_box() {
+            for lever in cell::levers() {
+                assert!(
+                    lever.label.chars().count() <= 18,
+                    "{} has a label too long for a box",
+                    lever.id
+                );
+            }
+        }
+
+        /// Every lever says what it decides and what happens if you change it. The
+        /// questions and consequences are the page's whole reason to exist over the
+        /// raw keys, so an empty one is a bug rather than a style slip.
+        #[test]
+        fn every_lever_explains_itself() {
+            for lever in cell::levers() {
+                assert!(!lever.question.is_empty(), "{} asks nothing", lever.id);
+                assert!(
+                    lever.consequence.len() > 30,
+                    "{} does not say what changing it does",
+                    lever.id
+                );
+                if let LeverKind::Link(_) = lever.kind {
+                    continue;
+                }
+                assert!(!lever.paths().is_empty(), "{} writes nothing", lever.id);
+            }
+        }
+    }
 
     /// The bars are an editor, so what matters is that every price is actually on
     /// screen -- including a free one and one small enough to round to no bar at all,
@@ -3424,4 +3930,89 @@ mod config_tree {
         }
     }
 
+}
+
+#[cfg(test)]
+mod cell_preview {
+    use super::{draw_cell, render};
+    use crate::app::{App, InputMode, Page};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn with_example_config() -> App {
+        let mut app = App::new();
+        let example = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../config.example.yaml");
+        app.config_document =
+            serde_yaml::from_str(&std::fs::read_to_string(example).unwrap()).ok();
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Cell)
+            .unwrap();
+        app
+    }
+
+    fn dump(app: &mut App, width: u16, height: u16, title: &str) {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        println!("--- {title} ---");
+        for row in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|column| buffer.get(column, row).symbol())
+                .collect();
+            println!("{line}");
+        }
+    }
+
+    /// Prints the two overlays for eyeballing:
+    /// `cargo test cell_overlays -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn cell_overlays() {
+        let mut app = with_example_config();
+        app.open_profile_picker();
+        dump(&mut app, 120, 32, "profile picker");
+
+        let mut app = with_example_config();
+        app.cell.profile = 1;
+        app.submit_profile_selection();
+        dump(&mut app, 120, 32, "profile diff");
+
+        let mut app = with_example_config();
+        app.cell.organelle = 4;
+        app.cell.lever = 0;
+        app.toggle_selected_lever();
+        dump(&mut app, 120, 32, "one lever, several keys");
+        assert_eq!(app.input_mode, InputMode::ConfirmWrites);
+    }
+
+    /// Prints the CELL page for eyeballing during development:
+    /// `cargo test cell_preview -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn preview() {
+        for (width, height) in [(120, 30), (80, 24)] {
+            let mut app = App::new();
+            // The shipped defaults, so the preview shows real values rather than a
+            // page of "not set".
+            let example = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../config.example.yaml");
+            app.config_document =
+                serde_yaml::from_str(&std::fs::read_to_string(example).unwrap()).ok();
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| draw_cell(frame, &mut app, frame.size()))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            println!("--- {width}x{height} ---");
+            for row in 0..buffer.area.height {
+                let line: String = (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect();
+                println!("{line}");
+            }
+        }
+    }
 }

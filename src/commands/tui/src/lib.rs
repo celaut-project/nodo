@@ -1,3 +1,6 @@
+/// The CELL page: policy levers and profiles.
+pub mod cell;
+
 /// Application.
 pub mod app;
 
