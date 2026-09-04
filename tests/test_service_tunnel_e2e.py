@@ -24,11 +24,11 @@ try:
     from protos import celaut_pb2_grpc
     from tests.config_bootstrap import load_example_config
     load_example_config()
-    from src.utils.node_identity import get_node_public_key_hex
+    from src.identity.node_identity import get_node_public_key_hex
     from src.tunneling import tunnel_client
     from src.gateway.gateway import Gateway
     from src.tunneling import rpc_tunnel
-    from src.utils.grpc_transport import node_channel, server_credentials
+    from src.identity.grpc_transport import node_channel, server_credentials
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     grpc = None  # type: ignore[assignment]

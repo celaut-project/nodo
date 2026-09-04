@@ -1,7 +1,7 @@
 """ErgoTree conversion utility tests (#186 phase 3.1) — pure, no JVM."""
 import pytest
 
-from src.utils.ergo_tree import (
+from src.payment_system.contracts.ergo.ergo_tree import (
     as_bytes,
     ergo_trees_equal,
     is_p2pk_proposition,

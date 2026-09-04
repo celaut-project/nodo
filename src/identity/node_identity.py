@@ -277,7 +277,7 @@ def same_component_stack(a_components, b_components) -> bool:
     ledger, a container architecture -- so the rule for deciding whether two of them
     match belongs in one place rather than being restated per field. See
     :func:`same_signature_scheme` for the reasoning behind each clause, and
-    ``src/utils/transport_stack.py`` for the other caller.
+    ``src/identity/transport_stack.py`` for the other caller.
     """
     a_components, b_components = list(a_components), list(b_components)
     if len(a_components) != len(b_components):

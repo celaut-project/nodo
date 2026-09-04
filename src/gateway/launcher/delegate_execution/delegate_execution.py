@@ -12,7 +12,7 @@ from src.manager.metrics import balance_on_other_peer
 from src.database.sql_connection import SQLConnection
 from src.tunneling import delegated_endpoints
 from src.utils import utils, logger as log
-from src.utils.grpc_transport import peer_channel
+from src.identity.grpc_transport import peer_channel
 from src.utils.monetary import format_mu
 from src.payment_system.mu_conversion import (
     configuration_for_peer,

@@ -25,7 +25,7 @@ import grpc
 
 from bee_rpc.client import client_grpc
 from protos import celaut_pb2, celaut_pb2_grpc
-from src.utils.grpc_transport import verified_channel
+from src.identity.grpc_transport import verified_channel
 
 # Read size for the local socket -> node direction, matching the relay's own
 # buffer and staying well under bee_rpc's 1 MiB chunk threshold.

@@ -4,7 +4,7 @@ from typing import Final
 import sys
 from bee_rpc.client import Dir, client_grpc
 
-from src.utils.grpc_transport import verified_channel
+from src.identity.grpc_transport import verified_channel
 from src.utils.logger import LOGGER
 
 from tests.main import *
