@@ -279,6 +279,33 @@ published id under `core_services` in `config.yaml` and have a running instance
 to build locally. See [`CONFIG.md`](CONFIG.md) and [`INSTALL.md`](INSTALL.md)
 step 9.
 
+## A peer cannot be reached, or `nodo connect` fails on TLS
+
+**Symptom:** `nodo connect <ip:port>` reports a TLS/SSL error, "presented no
+certificate", or "is held by <key>, not by the expected peer <key>".
+
+**Why:** every gRPC hop is TLS pinned to the node's identity key (see
+[`CONCEPTS.md`](CONCEPTS.md)). Three different causes look alike:
+
+* **The other side is not TLS** (a node from before this landed, or something that is
+  not a node at all): there is no plaintext fallback, so it is unreachable until it is
+  updated.
+* **The address now belongs to a different node** — a reassigned IP, or a host that
+  regenerated its `ledgers.ergo.WALLET_MNEMONIC` and therefore has a new `peer_id`. The
+  message names the key that actually answered; `nodo connect` that address again to
+  register it under the right peer.
+* **The peer restarted between the pre-flight and the channel.** The certificate is
+  generated per process, so this is transient — retry.
+
+**Fix:** this node also needs its own keypair to serve or dial at all. If it refuses to
+start with "no identity keypair", set `ledgers.ergo.WALLET_MNEMONIC` (or let the config
+generate one) — see [`CONFIG.md`](CONFIG.md).
+
+Note this is about *peer* channels. A service this node executes talks to the plain-gRPC
+port instead (`network.GATEWAY_PLAINTEXT_PORT`); if the log says that port could not be
+bound, every service launched afterwards was handed an address that answers nothing —
+free the port or point the setting at another one.
+
 ## Uninstalling
 
 There is a full uninstall path — automatic (`uninstall.sh`) and manual. See

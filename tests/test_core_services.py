@@ -139,7 +139,7 @@ class ExecuteFallbackTests(unittest.TestCase):
         ) as mock_resolve, patch.object(
             execute_cmd, "acquire_service", return_value=True
         ) as mock_acquire, patch.object(
-            execute_cmd.grpc, "insecure_channel"
+            execute_cmd, "local_channel"
         ), patch.object(
             execute_cmd.celaut_pb2_grpc, "GatewayStub"
         ) as mock_stub_cls, patch.object(
@@ -169,7 +169,7 @@ class ExecuteFallbackTests(unittest.TestCase):
         ), patch.object(
             execute_cmd, "acquire_service"
         ) as mock_acquire, patch.object(
-            execute_cmd.grpc, "insecure_channel"
+            execute_cmd, "local_channel"
         ), patch.object(
             execute_cmd.celaut_pb2_grpc, "GatewayStub"
         ) as mock_stub_cls, patch.object(

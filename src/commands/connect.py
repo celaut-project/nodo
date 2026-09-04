@@ -1,11 +1,10 @@
 from protos import celaut_pb2_grpc, celaut_pb2
 from bee_rpc.client import client_grpc as client
 
-import grpc
-
 from src.manager.manager import add_peer_instance, verified_peer_public_key
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
+from src.utils.grpc_transport import channel_and_peer_id, node_channel
 
 env_manager = ConfigManager()
 SELF_ANNOUNCE_TO_CONNECTING_PEERS = env_manager.get("SELF_ANNOUNCE_TO_CONNECTING_PEERS")
@@ -21,7 +20,10 @@ def connect(peer: str):
         print(f"Peer {peer} is already registered; refreshing what it advertises.")
 
     try:
-        channel = grpc.insecure_channel(peer)
+        # First contact, so there is no id to expect yet -- the certificate carries the
+        # peer's identity key and proves it (issue #257), so this learns *and* verifies
+        # who holds the address in one step, with no trust-on-first-use.
+        channel, certificate_peer_id = channel_and_peer_id(peer)
         try:
             peer_info = next(client(
                     method=celaut_pb2_grpc.GatewayStub(channel).GetPeerInfo,
@@ -30,6 +32,17 @@ def connect(peer: str):
                 ))
         finally:
             channel.close()
+
+        if peer_info.public_key and peer_info.public_key != certificate_peer_id:
+            # The address is provably held by certificate_peer_id, so an advertisement
+            # for a *different* node is somebody relaying (or replaying) a signed Peer
+            # that is not theirs. Registering it would file this address under the wrong
+            # id, which is exactly what the certificate is here to prevent.
+            print(
+                f"Refused peer {peer}: the address is held by {certificate_peer_id} but "
+                f"it advertised the identity {peer_info.public_key}."
+            )
+            return
         
         peer_id = add_peer_instance(peer_info)
         if not peer_id:
@@ -77,7 +90,7 @@ def connect(peer: str):
                 return
             
             try:
-                channel = grpc.insecure_channel(peer)
+                channel = node_channel(peer, expected_peer_id=certificate_peer_id)
                 try:
                     _result = next(client(
                         method=celaut_pb2_grpc.GatewayStub(channel).IntroducePeer,

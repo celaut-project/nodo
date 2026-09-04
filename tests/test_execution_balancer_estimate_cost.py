@@ -48,9 +48,7 @@ class EstimateCostOnPeerTests(unittest.TestCase):
         expected = celaut.EstimatedCost()
         expected.cost.n = "42"
 
-        with patch.object(
-            balancer_mod, "generate_uris_by_peer_id", return_value=iter(["10.0.0.1:5000"])
-        ), patch.object(balancer_mod.grpc, "insecure_channel"), patch.object(
+        with patch.object(balancer_mod, "peer_channel"), patch.object(
             balancer_mod.celaut_pb2_grpc, "GatewayStub"
         ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
@@ -73,9 +71,7 @@ class EstimateCostOnPeerTests(unittest.TestCase):
         )
 
     def test_returns_none_instead_of_raising_when_the_peer_is_unreachable(self):
-        with patch.object(
-            balancer_mod, "generate_uris_by_peer_id", return_value=iter(["10.0.0.1:5000"])
-        ), patch.object(balancer_mod.grpc, "insecure_channel"), patch.object(
+        with patch.object(balancer_mod, "peer_channel"), patch.object(
             balancer_mod.celaut_pb2_grpc, "GatewayStub"
         ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
@@ -94,9 +90,7 @@ class EstimateCostOnPeerTests(unittest.TestCase):
     def test_uses_start_service_timeout_when_full_payload_is_sent_for_costing(self):
         with patch.object(balancer_mod, "SEND_ONLY_HASHES_ASKING_COST", False), patch.object(
             balancer_mod, "START_SERVICE_ON_PEER_TIMEOUT", 120
-        ), patch.object(
-            balancer_mod, "generate_uris_by_peer_id", return_value=iter(["10.0.0.1:5000"])
-        ), patch.object(balancer_mod.grpc, "insecure_channel"), patch.object(
+        ), patch.object(balancer_mod, "peer_channel"), patch.object(
             balancer_mod.celaut_pb2_grpc, "GatewayStub"
         ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
@@ -116,9 +110,7 @@ class EstimateCostOnPeerTests(unittest.TestCase):
     def test_uses_external_cost_timeout_for_hash_only_costing(self):
         with patch.object(balancer_mod, "SEND_ONLY_HASHES_ASKING_COST", True), patch.object(
             balancer_mod, "EXTERNAL_COST_TIMEOUT", 10
-        ), patch.object(
-            balancer_mod, "generate_uris_by_peer_id", return_value=iter(["10.0.0.1:5000"])
-        ), patch.object(balancer_mod.grpc, "insecure_channel"), patch.object(
+        ), patch.object(balancer_mod, "peer_channel"), patch.object(
             balancer_mod.celaut_pb2_grpc, "GatewayStub"
         ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
@@ -140,9 +132,7 @@ class EstimateCostOnPeerTests(unittest.TestCase):
             def code(self):
                 return grpc.StatusCode.DEADLINE_EXCEEDED
 
-        with patch.object(
-            balancer_mod, "generate_uris_by_peer_id", return_value=iter(["10.0.0.1:5000"])
-        ), patch.object(balancer_mod.grpc, "insecure_channel"), patch.object(
+        with patch.object(balancer_mod, "peer_channel"), patch.object(
             balancer_mod.celaut_pb2_grpc, "GatewayStub"
         ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"

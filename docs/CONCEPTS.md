@@ -132,6 +132,88 @@ registered with this node and pay it. `nodo peers` / `nodo clients` list them.
 
 A peer is named by its identity public key — see [Node identity](#node-identity).
 
+## Transport security
+
+Every gRPC hop is TLS. A node's certificate is self-signed and carries the node's
+identity public key — its `peer_id` — in an X.509 extension, signed with the identity
+key over the certificate's own public key. There is no CA, no PKI and no system trust
+store: a caller reads the certificate first, checks that signature, and then pins that
+exact certificate for the channel. So dialling a bare `ip:port` either reaches the node
+whose `peer_id` you meant, or fails.
+
+**Peers and the CLI always use TLS, with no exception**, and the TLS port
+(`network.GATEWAY_PORT`) is the only one announced to peers. This node's own client code
+has no way to open a plaintext channel.
+
+Alongside it the gateway serves the **same** `Gateway` on a second, plain-gRPC port
+(`network.GATEWAY_PLAINTEXT_PORT`, `auto` = `GATEWAY_PORT + 1`) for two callers that are
+not peers:
+
+* **The services this node executes.** A service speaks plain gRPC and reaches the node
+  over a hop that never leaves the host; it is handed this address as data, in
+  `__config__.gateway`, so there is nothing for it to guess. Requiring TLS here would
+  mean shipping certificate pinning into every service SDK for a local hop.
+* **External callers that do not want TLS.** TLS is what the node *offers*; a caller
+  that declines it is that caller's own risk. The plaintext port is not announced to
+  peers, no firewall rule is opened for it, and it listens on one address only — the
+  gateway address the config file already names (`virtualizers.ch.NETWORK_BRIDGE_NAME`,
+  the same one written into `__config__.gateway`; loopback if that bridge is not up),
+  never `[::]`. Serving the unauthenticated `Gateway` on every interface would give away
+  exactly what the TLS port protects. So reaching it from another host takes a
+  port-forward set up on purpose. `0` disables it, and then a service must speak TLS too.
+
+Also outside TLS: the node→service leg of a tunnel (TLS terminates at the node, see
+[`TUNNELING.md`](TUNNELING.md)) and the raw TCP proxy of the delegation path, which is
+not gRPC.
+
+### What `["tls", "grpc"]` names
+
+A tag on its own says almost nothing: two nodes can both write `tls` and disagree on the
+extension OID, on what the signature covers, or on which RPCs exist — and neither could
+tell from the announcement. celaut has no conventions to fall back on, so an address that
+announces this stack declares what it means by it, in the three fields every replaceable
+component in celaut carries:
+
+| Field | Carries | Compared? |
+|---|---|---|
+| `tags` | The plain protocol name — `tls`, `grpc`. Not versioned: a variant is the same protocol with different parameters, and those go below. | Only when neither side declares `formal` |
+| `formal` | The parameters, as canonical `key=value` lines sorted by key. | **Yes — decides** |
+| `prose` | The same thing written out, with the detail an implementer needs. | **No** |
+
+So the announcement for `tls` carries, among others:
+
+```
+host_key_oid=2.25.276125094420857322236898758448456352855
+host_key_signed=CELAUT<subject_public_key_info_der_hex>
+host_key_extension=ascii:<identity_public_key_hex>:<signature_hex>
+verification=read-certificate,verify-extension,pin-exact-certificate
+```
+
+and `grpc` carries the service and **every RPC the gateway answers**, read from the
+compiled descriptor rather than typed out — so adding or removing one changes what this
+node announces without anyone remembering to.
+
+That makes the claim checkable. `speaks_our_transport_stack` runs the same comparison a
+signature scheme gets (`node_identity.same_component_stack`): a peer differing in the
+OID, in the signed payload or by a single RPC is seen as speaking something else, while
+one that only worded its prose differently is not.
+
+**Prose is deliberately not compared.** Deciding that two differently-worded
+descriptions mean the same protocol is a judgement, and the service that could make it
+has the shape `(a, b) -> bool` over two texts — an LLM's job, not a node's. Prose travels
+so the descriptor can be *read*, not diffed. It is dropped from an announcement published
+to an Ergo register, where every byte pays storage rent forever; nothing is lost from a
+verification, because what a comparison reads is `formal` and the tags.
+
+The OID itself is `uuid.uuid5(uuid.NAMESPACE_OID, "CELAUT")` written under the ITU-T
+X.667 arc `2.25`, which anyone may derive from a UUID with nothing to register. The seed
+is the project name and nothing more, so the number can be recomputed in one line and
+audited — it is a name seed, never a resource, and only the number ever travels.
+
+Practical consequences: a node with no identity keypair cannot serve, and a peer running
+a version from before this cannot be dialled — peer channels have no plaintext fallback.
+See `src/utils/tls_identity.py` and `src/utils/grpc_transport.py`.
+
 ## Node identity
 
 A node's **id is its identity public key**; there is no other name for it. Every

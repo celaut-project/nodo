@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from threading import Lock
 from typing import Optional, Tuple
 from contextlib import nullcontext
-import grpc
 from bee_rpc import client as bee
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.ledger_balancer import ledger_balancer
@@ -15,7 +14,9 @@ from protos import celaut_pb2_grpc, celaut_pb2
 from src.database.sql_connection import SQLConnection
 
 from src.utils import logger as _l
-from src.utils.utils import to_amount, generate_uris_by_peer_id
+from src.utils.grpc_transport import peer_channel
+from src.utils.tls_identity import CertificateError
+from src.utils.utils import to_amount
 from src.utils.monetary import format_mu
 from src.database.access_functions.ledgers import get_peer_contract_instances
 # Plain constants, no imports of its own, so this cannot be the edge that drags the
@@ -93,10 +94,14 @@ def generate_deposit_token(client_id: str) -> str:
 
 # Helper function to create the gRPC stub and get URIs
 def __get_grpc_stub(peer_id):
-    uri = next(generate_uris_by_peer_id(peer_id=peer_id), None)
-    if uri is None:
+    try:
+        return celaut_pb2_grpc.GatewayStub(peer_channel(peer_id=peer_id))
+    except (ConnectionError, CertificateError) as e:
+        # Same contract as before -- callers treat None as "cannot reach this peer" --
+        # but a certificate that does not prove `peer_id` now lands here too: this stub
+        # is what `pay` sends money over, so an unverified answer is not a peer.
+        _l.LOGGER(f"No verified channel to peer {peer_id}: {e}")
         return None
-    return celaut_pb2_grpc.GatewayStub(grpc.insecure_channel(uri))
 
 
 def __obtain_deposit_token(peer_id) -> Optional[str]:

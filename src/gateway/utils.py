@@ -11,6 +11,10 @@ from src.payment_system.ledgers import local_payment_methods, register_local_con
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import ConfigManager
+from src.utils.transport_stack import (
+    declare_transport_stack,
+    share_prose_on_get_peer_info,
+)
 from src.utils.utils import (
     get_local_ip_from_network,
     is_virtual_interface
@@ -18,10 +22,17 @@ from src.utils.utils import (
 
 env_manager = ConfigManager()
 
-# Read on use rather than at import: the port may not be assigned yet when this
-# module loads, and an unassigned one must raise where it is needed, not here.
+# Both read on use rather than at import: neither port may be assigned yet when this
+# module loads, and an unassigned TLS one must raise where it is needed, not here.
 def _gateway_port() -> int:
     return env_manager.get_gateway_port()
+
+
+# The plain-gRPC port, when the node serves one (see src/serve.py). Services get this
+# one rather than the TLS port: they speak plain gRPC over a hop that never leaves the
+# host. 0 when the node serves TLS only.
+def _plaintext_gateway_port() -> int:
+    return env_manager.get_plaintext_gateway_port()
 
 
 REGISTRY = env_manager.get("REGISTRY")
@@ -239,7 +250,10 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     peer.ts = ts
     # Declared alongside the signature, never without one: the field says what this
     # signature is, so on an unsigned announcement it would state a fact about nothing.
-    declare_signature_scheme(peer)
+    # One prose policy for the whole announcement (communication.SHARE_PROSE_ON_*): what
+    # a reader is handed to understand the message, as against what a verifier reads to
+    # decide about it, and the scheme is no different from the transport stack there.
+    declare_signature_scheme(peer, prose=share_prose_on_get_peer_info())
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
@@ -252,6 +266,14 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     for uri in uris:
         announced = peer.uri.add(ip=uri.ip, port=uri.port)
         announced.transport.tags.append("tcp")
+        # What the endpoint actually speaks, spelled out rather than named: the tags
+        # alone would let two nodes both write "tls" while disagreeing on the extension
+        # OID, on what the signature covers or on which RPCs exist, and neither could
+        # tell from the announcement. `formal` carries those parameters and is what a
+        # comparison reads; the prose is there so a reader can implement the thing (see
+        # src/utils/transport_stack.py). Covered by the signature below, so a relay can
+        # neither strip the declaration nor edit a parameter out of it.
+        declare_transport_stack(announced, prose=share_prose_on_get_peer_info())
 
     # Advertise what this node charges on a recurring basis, so a peer knows the
     # rate before negotiating anything. The price of a *specific service* is not
@@ -286,23 +308,73 @@ def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     expects.
 
     ``Instance`` still groups addresses under an ``internal_port``, so all of
-    ``peer.uri`` is folded into one slot at ``GATEWAY_PORT`` -- the only port a
-    self-generated ``Peer`` ever serves. The rates ride in that slot because an
+    ``peer.uri`` is folded into one slot. The rates ride in that slot because an
     ``Instance`` has nowhere else to carry them.
+
+    The port is the *plaintext* one when this node serves it (issue #257): this is what
+    a service we execute is told to talk to, and a service speaks plain gRPC. Since the
+    service learns the address from this message rather than by convention, there is
+    nothing for it to guess -- and nothing to pin. With the plaintext port disabled it
+    falls back to the TLS port, and then a service does have to speak TLS.
     """
+    port = _plaintext_gateway_port() or _gateway_port()
     instance = celaut.Instance()
 
     slot = instance.api.slot.add()
-    slot.port = _gateway_port()
+    slot.port = port
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
     for rate, amount in peer.mu_per_call.items():
         slot.mu_per_call[rate].n = amount.n
     instance.api.payment_contracts.extend(peer.payment_contracts)
 
     uri_slot = instance.uri_slot.add()
-    uri_slot.internal_port = _gateway_port()
-    uri_slot.uri.extend(celaut.Instance.Uri(ip=u.ip, port=u.port) for u in peer.uri)
+    uri_slot.internal_port = port
+    # The peer's addresses, but at the port a service is meant to use: peer.uri carries
+    # the announced (TLS) port, which is not the one being handed over here.
+    uri_slot.uri.extend(celaut.Instance.Uri(ip=u.ip, port=port) for u in peer.uri)
     return instance
+
+
+def plaintext_gateway_host() -> str:
+    """The single address the plain-gRPC gateway listens on (issue #257).
+
+    Deliberately *not* ``[::]``. That port serves the same, unauthenticated ``Gateway``
+    as the TLS one, so every interface it answers on is one more network that reaches
+    the full API with nothing to prove who is calling -- which is what the TLS port was
+    introduced to stop.
+
+    So it binds where the config file already says this node's gateway is:
+    ``virtualizers.ch.NETWORK_BRIDGE_NAME``, the same setting
+    :mod:`src.utils.configuration_file` resolves to fill ``__config__.gateway``. The
+    listening address and the advertised one come out of one call, so they cannot drift
+    apart, and a service finds the port exactly where its ``__config__`` told it to look
+    -- the proto contract, rather than a separate env var, decides.
+
+    Loopback is the fallback when the bridge is not up yet (a fresh install, or a
+    virtualizer that never created it): the local hop still works, and a caller off-host
+    is refused by the kernel rather than by an ACL nobody wrote.
+    """
+    network = env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch")
+    try:
+        host = _uri_for_network(network).ip
+    except Exception as e:
+        log.LOGGER(
+            f'No address on the gateway network {network} ({e}); binding the plaintext '
+            'gateway to loopback. Services on another interface will not reach it until '
+            'that network exists.'
+        )
+        return "127.0.0.1"
+
+    # An interface can hold a wildcard-ish address; refuse it rather than quietly
+    # serving the whole host.
+    if host in ("0.0.0.0", "::", ""):
+        log.LOGGER(
+            f'The gateway network {network} resolves to {host!r}, which is every '
+            'interface; binding the plaintext gateway to loopback instead.'
+        )
+        return "127.0.0.1"
+
+    return host
 
 
 def generate_node_peer_info(network: str) -> celaut_pb2.Peer:

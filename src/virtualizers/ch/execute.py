@@ -786,29 +786,41 @@ def _configure_guest_firewall_policy(
     # the rule could not match anything, while the log announced it as granted
     # access. See `policy.allow_host_connection_rule`.
     #
-    # This is the only service of the node's own that a guest is given access to.
-    # There is no rule for port 53: nodo does not serve DNS, and a guest that wants
+    # The gateway is the only service of the node's own that a guest is given access
+    # to. There is no rule for port 53: nodo does not serve DNS, and a guest that wants
     # name resolution gets it from a service (see the note above
     # `_configure_guest_firewall_policy`), reached through the ordinary peer-instance
     # allows or inside its own container.
     #
-    # Read the port here rather than at import: it is assigned by the daemon, which
+    # Both of the gateway's ports are opened: the plaintext one is what this guest's
+    # __config__ names (a service speaks plain gRPC), and the TLS one stays reachable
+    # so a service that wants to pin the node's certificate can (issue #257).
+    #
+    # Both are read here rather than at import: they are assigned by the daemon, which
     # may well happen after this module was first loaded.
-    gateway_port = env_manager.get_gateway_port()
-    if not vm_allow_host_connection(
-        vmachine_id=vmachine_id,
-        host_ip=NETWORK_GATEWAY_IP,
-        port=gateway_port,
-        protocol=TransportProtocol.TCP,
-        source_ip=vm_ip,
+    for gateway_port in dict.fromkeys(
+        port
+        for port in (
+            env_manager.get_plaintext_gateway_port(),
+            env_manager.get_gateway_port(),
+        )
+        if port
     ):
-        raise CHExecuteError(
-            f"Failed to allow gateway access for VM {vmachine_id}: "
+        if not vm_allow_host_connection(
+            vmachine_id=vmachine_id,
+            host_ip=NETWORK_GATEWAY_IP,
+            port=gateway_port,
+            protocol=TransportProtocol.TCP,
+            source_ip=vm_ip,
+        ):
+            raise CHExecuteError(
+                f"Failed to allow gateway access for VM {vmachine_id}: "
+                f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
+            )
+        log.LOGGER(
+            f"[CH][{vmachine_id}] firewall allow gateway: "
             f"{vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
         )
-    log.LOGGER(
-        f"[CH][{vmachine_id}] firewall allow gateway: {vm_ip} -> {NETWORK_GATEWAY_IP}:{gateway_port}/tcp"
-    )
 
     # Network tag "*" => open-internet egress. Allow-all is inserted at the head
     # of FORWARD so it takes precedence over the default-deny block_all rule.
