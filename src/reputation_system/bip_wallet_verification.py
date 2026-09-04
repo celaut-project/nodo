@@ -15,10 +15,10 @@ import binascii
 
 from src.utils import ergo_schnorr
 
-# Ergo's SLIP-44 derivation path. Reused as-is for the node's identity keypair
-# (see src/reputation_system/node_identity.py) so that a node whose identity mnemonic
-# is the same as its ledgers.ergo.WALLET_MNEMONIC gets the same key for both, with no
-# extra derivation step.
+# Ergo's SLIP-44 derivation path, for the wallet this node holds on Ergo: what it is
+# paid into, what publishes its reputation proofs, and what signs the attestation
+# vouching for the node's identity. Not the identity itself -- that is an Ergo-free
+# Ed25519 key of its own (see src/utils/node_identity.py).
 ERGO_DERIVATION_PATH = "m/44'/429'/0'/0/0"
 
 def __bip32_derive_key(bip32: BIP32, derivation_path: str):

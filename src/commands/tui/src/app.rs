@@ -4596,7 +4596,7 @@ Cold Wallet: 9cold\n";
     #[test]
     fn flattens_all_yaml_leaf_values_and_masks_secrets() {
         let value: Value = serde_yaml::from_str(
-            "network:\n  port: 5000\nledgers:\n  ergo:\n    WALLET_MNEMONIC: secret words\nservers:\n  - name: packer\n    id: abc\nempty: []\n",
+            "network:\n  port: 5000\nidentity:\n  MNEMONIC: name words\nledgers:\n  ergo:\n    WALLET_MNEMONIC: secret words\nservers:\n  - name: packer\n    id: abc\nempty: []\n",
         )
         .unwrap();
         let mut entries = Vec::new();
@@ -4611,6 +4611,15 @@ Cold Wallet: 9cold\n";
             .unwrap();
         assert!(mnemonic.secret);
         assert_eq!(mnemonic.display_value(), "•••••••• (set)");
+
+        // The node's name is a secret of the same kind, and losing it is worse: it
+        // orphans every deposit and every reputation entry recorded against this node.
+        let identity = entries
+            .iter()
+            .find(|entry| entry.path == "identity.MNEMONIC")
+            .unwrap();
+        assert!(identity.secret);
+        assert_eq!(identity.display_value(), "•••••••• (set)");
     }
 
     #[test]

@@ -793,7 +793,7 @@ def _configure_guest_firewall_policy(
     # allows or inside its own container.
     #
     # Both of the gateway's ports are opened: the plaintext one is what this guest's
-    # __config__ names (a service speaks plain gRPC), and the TLS one stays reachable
+    # __config__ names (a service speaks plain gRPC), and the TLS one is reachable too,
     # so a service that wants to pin the node's certificate can (issue #257).
     #
     # Both are read here rather than at import: they are assigned by the daemon, which

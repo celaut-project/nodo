@@ -385,6 +385,16 @@ def validate_ergo_config(
             f"update the config manually): {', '.join(sorted(removed))}"
         )
 
+    # Unconditional, unlike every ledger check below: a node without an identity has no
+    # peer_id, so it can neither serve nor dial -- with payments and reputation switched
+    # off and every ledger removed, it still needs a name.
+    identity = config.get("identity")
+    if not isinstance(identity, dict) or not (identity.get("MNEMONIC") or ""):
+        raise ConfigValidationError(
+            "identity.MNEMONIC is required: it is the key this node is named by. "
+            "Leave it empty in the file and one is generated on first load."
+        )
+
     ledgers = config.get("ledgers")
     if not isinstance(ledgers, dict):
         raise ConfigValidationError("Missing or malformed 'ledgers' mapping.")

@@ -17,17 +17,18 @@ received ``Peer`` message and no trust-on-first-use.
 
 The indirection is what the design wants regardless of which cryptography the identity
 is in: the identity key never enters a handshake, never sits in the memory of the
-process doing one, and could one day live offline or in an HSM, while the key that does
-the negotiating stays disposable. It also happens to be the only option available --
-the ``grpcio`` wheels ship BoringSSL, whose ``ec.h`` only knows the NIST curves, so a
-secp256k1 certificate is impossible rather than merely unnegotiated -- but that is the
-lesser reason, and it is not the one to reach for when the identity scheme changes.
+process doing one, and can live offline or in an HSM, while the key that does the
+negotiating stays disposable. It is also the only option open to several identity
+schemes at all: the ``grpcio`` wheels ship BoringSSL, whose ``ec.h`` only knows the
+NIST curves, so a certificate on any other curve is impossible rather than merely
+unnegotiated. That is the lesser reason -- the indirection would be worth keeping on a
+stack that had no such limit.
 
 The extension format is ours, not libp2p's: their ``peer_id`` is a multihash of a
-protobuf-encoded key while ours is the raw public key, so reusing their IANA-allocated
-OID while diverging on what it contains would be mislabelling. The OID below lives under
-the UUID arc ``2.25`` (ITU-T X.667), which anyone may derive from a UUID without
-registering anything.
+protobuf-encoded key while ours is the identity public key in the raw form its own
+scheme defines, so reusing their IANA-allocated OID while diverging on what it contains
+would be mislabelling. The OID below lives under the UUID arc ``2.25`` (ITU-T X.667),
+which anyone may derive from a UUID without registering anything.
 
 That OID and the signed payload's prefix are **protocol constants of the ``[tls, grpc]``
 stack**, not implementation details: a peer finds the extension by the OID and
@@ -56,7 +57,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
-from src.reputation_system.node_identity import (
+from src.utils.node_identity import (
     get_node_public_key_hex,
     normalize_public_key_hex,
     sign_peer_payload,
@@ -195,7 +196,7 @@ def certificate_and_key() -> Tuple[bytes, bytes]:
     public_key_hex = get_node_public_key_hex()
     if not public_key_hex:
         raise CertificateError(
-            "This node has no identity keypair (ledgers.ergo.WALLET_MNEMONIC is unset), "
+            "This node has no identity keypair (identity.MNEMONIC is unset), "
             "so it cannot serve or dial TLS. Load the config to generate one."
         )
     return _build_certificate(public_key_hex)

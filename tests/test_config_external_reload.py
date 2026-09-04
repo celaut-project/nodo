@@ -136,6 +136,41 @@ class ExternalConfigChangeTests(unittest.TestCase):
 
             self.assertEqual(manager.get("network.GATEWAY_PORT"), 4040)
 
+    def test_a_truncated_file_is_empty_even_though_loading_fills_defaults_in(self):
+        # Loading generates what the file lacks -- an identity mnemonic, a wallet -- so
+        # "did this come back empty?" cannot be asked of the config in memory: a
+        # truncated file would look populated and overwrite a working one with nothing
+        # but freshly minted defaults. It is asked of the file.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text(BASE_CONFIG, encoding="utf-8")
+
+            manager = self._manager(config_path)
+            self.assertTrue(manager.get("identity.MNEMONIC"))
+
+            config_path.write_text("", encoding="utf-8")
+            manager._last_reload_check = 0.0
+
+            self.assertEqual(manager.get("network.GATEWAY_PORT"), 4040)
+            self.assertEqual(
+                manager.get("ledgers.ergo.NODE_URL"), "http://node.example:9053"
+            )
+
+    def test_an_identity_mnemonic_is_generated_when_the_file_has_none(self):
+        # A node without one has no name and cannot serve or dial, so it is never left
+        # unset -- and it is its own section, not a key inside any ledger's.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yaml"
+            config_path.write_text(BASE_CONFIG, encoding="utf-8")
+
+            manager = self._manager(config_path)
+            identity = manager.get("identity.MNEMONIC")
+            wallet = manager.get("ledgers.ergo.WALLET_MNEMONIC")
+
+            self.assertTrue(identity)
+            self.assertTrue(wallet)
+            self.assertNotEqual(identity, wallet)
+
     def test_save_is_atomic(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"

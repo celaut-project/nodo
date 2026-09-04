@@ -10,7 +10,17 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
+from protos import celaut_pb2
 from src.commands import verify_reputation as vr
+from src.utils.contract_xattrs import set_token_id
+
+
+def _announcement(proof_ids):
+    """A stored advertisement carrying the given proofs."""
+    peer = celaut_pb2.Peer()
+    for proof_id in proof_ids:
+        set_token_id(peer.reputation_proofs.add(), proof_id)
+    return peer
 from src.commands import pay as pv
 
 
@@ -20,13 +30,14 @@ class VerifyReputationCommandTests(unittest.TestCase):
     def _patch(self, **overrides):
         # Sensible "happy path" defaults; individual tests override one piece.
         defaults = dict(
-            _peer_reputation_proof_ids=lambda peer_id: ["proof-token-1"],
+            _peer_advertisement=lambda peer_id: _announcement(["proof-token-1"]),
+            attested_proof_owner=lambda contract, peer_id: "02" + "ab" * 32,
             _get_unspent_boxes_by_token=lambda proof_id: [{"box": 1}],
             _boxes_off_canonical_contract=lambda boxes: [],
             _validate_box_structure=lambda box: True,
             _extract_register_value=lambda box, reg: "owner-r7-raw",
             _decode_coll_byte_hex=lambda value: "aabbccddeeff00112233",
-            node_proposition_hex=lambda peer_id: "aabbccddeeff00112233",
+            node_proposition_hex=lambda wallet: "aabbccddeeff00112233",
         )
         defaults.update(overrides)
         return [mock.patch.object(vr, name, new=fn)
@@ -43,7 +54,32 @@ class VerifyReputationCommandTests(unittest.TestCase):
         self.assertTrue(self._run())
 
     def test_fail_when_peer_announced_no_proof(self):
-        self.assertFalse(self._run(_peer_reputation_proof_ids=lambda peer_id: []))
+        self.assertFalse(self._run(_peer_advertisement=lambda peer_id: celaut_pb2.Peer()))
+
+    def test_fail_when_the_peer_is_not_known(self):
+        self.assertFalse(self._run(_peer_advertisement=lambda peer_id: None))
+
+    def test_fail_when_no_owner_is_attested(self):
+        # R7 names a wallet, so a peer that cannot prove it holds one has proved
+        # nothing about any proof on Ergo -- whatever the boxes themselves look like.
+        self.assertFalse(
+            self._run(attested_proof_owner=lambda contract, peer_id: None)
+        )
+
+    def test_the_wallet_checked_is_the_attested_one(self):
+        # Not the peer_id: the two are different keys, and only the wallet can ever
+        # appear in R7.
+        called = {}
+
+        def node_proposition_hex(wallet):
+            called["wallet"] = wallet
+            return "aabbccddeeff00112233"
+
+        self.assertTrue(self._run(
+            attested_proof_owner=lambda contract, peer_id: "02" + "cd" * 32,
+            node_proposition_hex=node_proposition_hex,
+        ))
+        self.assertEqual(called["wallet"], "02" + "cd" * 32)
 
     def test_every_announced_proof_is_checked(self):
         # A peer can announce several proofs, and each is one of its published opinion
@@ -56,14 +92,14 @@ class VerifyReputationCommandTests(unittest.TestCase):
             return [{"box": 1}]
 
         self.assertTrue(self._run(
-            _peer_reputation_proof_ids=lambda peer_id: ["proof-a", "proof-b"],
+            _peer_advertisement=lambda peer_id: _announcement(["proof-a", "proof-b"]),
             _get_unspent_boxes_by_token=boxes,
         ))
         self.assertEqual(checked, ["proof-a", "proof-b"])
 
     def test_one_unowned_proof_fails_the_peer(self):
         self.assertFalse(self._run(
-            _peer_reputation_proof_ids=lambda peer_id: ["proof-a", "proof-b"],
+            _peer_advertisement=lambda peer_id: _announcement(["proof-a", "proof-b"]),
             _get_unspent_boxes_by_token=lambda proof_id: [] if proof_id == "proof-b" else [{"box": 1}],
         ))
 
@@ -76,17 +112,12 @@ class VerifyReputationCommandTests(unittest.TestCase):
     def test_fail_when_box_structure_invalid(self):
         self.assertFalse(self._run(_validate_box_structure=lambda box: False))
 
-    def test_fail_when_identity_key_does_not_match_owner(self):
-        # This is the crypto gate: structure is fine, but the peer's identity
-        # public key (its peer_id) does not match the R7 owner.
-        called = {}
-
-        def node_proposition_hex(peer_id):
-            called["peer_id"] = peer_id
-            return "some-other-owner"
-
-        self.assertFalse(self._run(node_proposition_hex=node_proposition_hex))
-        self.assertEqual(called["peer_id"], "peer-1")
+    def test_fail_when_the_attested_wallet_does_not_match_owner(self):
+        # This is the crypto gate: structure is fine, the peer proved a wallet, and
+        # that wallet is simply not the one that published the proof.
+        self.assertFalse(
+            self._run(node_proposition_hex=lambda wallet: "some-other-owner")
+        )
 
 
 class PayCommandTests(unittest.TestCase):

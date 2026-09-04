@@ -220,9 +220,62 @@ A node's **id is its identity public key**; there is no other name for it. Every
 announcement (`Peer`, in `celaut.proto`) carries that key, a signature over everything
 the peer advertises, and the cryptography those two are in. A peer that carries no
 key, or whose signature does not verify, is refused outright — there is nothing else
-to register it under. The key is derived from the node's single mnemonic
-(`ledgers.ergo.WALLET_MNEMONIC`), which is also its wallet, so an identity cannot
-change underneath the peers that recorded it.
+to register it under. The key is Ed25519, derived from `identity.MNEMONIC`, so an
+identity cannot change underneath the peers that recorded it.
+
+### The identity is on no ledger
+
+The obvious shortcut is to let a ledger key *be* the identity — sign with
+`ledgers.ergo.WALLET_MNEMONIC`, and let a reputation proof's R7 owner be literally the
+`peer_id`. It makes the check a byte comparison. It is deliberately not done, and the
+reason is in the contract. R7 is the reputation contract's spending clause:
+
+```ergoscript
+INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }
+```
+
+So R7 holds an Ergo proposition and can hold nothing else, ever. An identity read out of
+it is fixed as an Ergo key by construction, for every celaut node — which privileges one
+ledger's reputation system over any other, and makes Ergo a dependency of the
+peer-to-peer layer, down to a node with no wallet being unable to serve or dial at all.
+
+What links the two is an **owner attestation**: the wallet that published a proof signs
+the node's `peer_id`, and the pair rides in that proof's own `xattrs`
+(`owner_public_key`, `owner_signature`). A reader checks two links instead of comparing
+bytes:
+
+```
+R7  = the attested wallet (owner, and the only key that can spend the box)
+       │  signs peer_id ──────────────┐
+R9  = Peer{ public_key: <ed25519>,    │   ← the attestation
+            signature, ts }  ◄────────┘
+       │  signed by the identity key
+       ▼
+   addresses, expiry, anti-replay, payment contracts, proofs
+```
+
+Both links are verifiable from the proof box alone, with no round-trip to the node, so
+the indirection costs nothing a direct byte comparison would have saved. What it buys is
+that the node's name outlives its wallets: adding, dropping or rotating one leaves its
+peers, deposits and reputation intact, and a second ledger's reputation system attaches
+the same way without either being privileged.
+
+Note what R5 does, by contrast: it names the *subject* of an opinion, is plain
+`Coll[Byte]`, and so carries the identity key of the node being talked about —
+whatever cryptography that identity is in. R5 and R7 are not the same kind of thing,
+and only R7 is constrained by what the contract has to be able to spend.
+
+It lives on the proof rather than on the `Peer` because **ownership is a property of the
+proof**. A node holds as many proofs as it likes and nothing says they share an owner, so
+one attestation per ledger on the announcement could not describe two proofs on the same
+ledger published by different wallets. Riding in the proof also means the announcement's
+signature already covers it, through `reputation_proofs`.
+
+An attestation proves possession of a key, and nothing more. It does not say the node
+accepts payment on that ledger (`payment_contracts` does, and it carries its own address)
+nor that the key holds funds. A proof whose attestation does not verify is treated as
+announcing no owner at all: the peer's identity is untouched, and only what a reader
+would have credited for that proof is lost.
 
 ### The signature scheme is declared, not assumed
 
@@ -288,9 +341,16 @@ What is singular and what is plural is deliberate, and the two do not conflict:
 
 | Field | Count | Why |
 |---|---|---|
-| `public_key`, `signature`, `signature_scheme` | one | The key is what **names** the node, so a second one is a second identity: reputation, deposits and payment attribution all split in two. Cross-signing the two keys does not heal the split — whoever needs the link speaks only one of the schemes, so they can verify only half of the proof. |
-| `payment_contracts` | many | What a node accepts is a **menu the payer picks one item from**, so a longer one costs nothing. Identifying under Ergo while accepting ERG, bitcoin and anything else that settles is the expected shape, not a contradiction. See [Balances and prices](#balances-and-prices). |
+| `public_key`, `signature`, `signature_scheme` | one | The key is what **names** the node, so a second one at the same level is a second identity: reputation, deposits and payment attribution all split in two. Cross-signing two *names* does not heal the split — whoever needs the link speaks only one of the schemes, so they can verify only half of the proof. |
+| owner attestation, in each proof's `xattrs` | one per proof | The wallet that **published that proof**, and its signature over this node's id. Not a second name: it vouches *for* the identity above, so there is a single root and nobody has to pick which key the node is. |
+| `payment_contracts` | many | What a node accepts is a **menu the payer picks one item from**, so a longer one costs nothing. Being named by a key of its own while accepting ERG, bitcoin and anything else that settles is the expected shape. See [Balances and prices](#balances-and-prices). |
 | `reputation_proofs` | many | A node holds as many proofs as it has published opinions under. See [Reputation proof](#reputation-proof). |
+
+The distinction that runs through the table is **root versus role**. A key in a
+different role, signed by the identity, is not a competing name: that is what a ledger
+an owner attestation is, and what the TLS certificate's per-process P-256 key is (see
+[Transport security](#transport-security)). One root, several keys under it. What must
+stay singular is the root.
 
 A scheme that genuinely needs two keypairs — a classical/post-quantum hybrid — is *one*
 scheme, whose key and signature encodings carry both, and not two schemes on one peer.

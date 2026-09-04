@@ -195,6 +195,7 @@ class ConfigManager(metaclass=Singleton):
         self._loaded = False
         self._config_mtime_ns: Optional[int] = None
         self._last_reload_check: float = 0.0
+        self._file_was_empty: bool = False
         # Set while a freshly opened gateway port is still only in memory; see
         # _withdraw_unsaved_gateway_port.
         self._assigned_gateway_port: Optional[int] = None
@@ -255,7 +256,11 @@ class ConfigManager(metaclass=Singleton):
         previous = self._config
         try:
             self.load_config(force_reload=True)
-            if not self._config and previous:
+            # Judged on what the *file* held, not on what is in memory afterwards:
+            # loading fills in values the file never had (an identity mnemonic, a
+            # wallet), so a truncated file would otherwise come back looking populated
+            # and wipe a working config with defaults.
+            if self._file_was_empty and previous:
                 raise ValueError("the file parsed as empty")
         except Exception as e:
             # An unreadable or half-written file must never wipe a working config.
@@ -589,6 +594,10 @@ class ConfigManager(metaclass=Singleton):
             recovered = False
             try:
                 self._config = yaml.safe_load(raw) or {}
+                # What the file itself held, before anything below fills defaults in.
+                # _reload_if_file_changed reads it to tell a truncated file apart from
+                # a config that merely happens to be sparse.
+                self._file_was_empty = not self._config
             except yaml.YAMLError:
                 # A previous version may have persisted a foreign (Java) object.
                 # Recover it as plain strings, then force a clean rewrite below.
@@ -634,14 +643,32 @@ class ConfigManager(metaclass=Singleton):
             # it at load time would have to read a port that does not exist yet. See
             # get_plaintext_gateway_port.
 
+            # The node's identity mnemonic (src/utils/node_identity.py):
+            # the key behind the peer_id it presents, the signature on its GetPeerInfo
+            # and the TLS certificate extension. It must always exist -- a node without
+            # one has no name and cannot serve or dial -- so an unset or "auto" value is
+            # generated here on first load rather than left empty.
+            #
+            # Its own section, not a ledger's: the identity is on no ledger, and a key
+            # read out of `ledgers.ergo` would be a key Ergo owns. What ties the two
+            # together is an attestation the wallet signs onto each reputation proof,
+            # which costs one signature and leaves the node free to add, drop or rotate
+            # a wallet without changing its name.
+            identity = self._config.get("identity")
+            if not isinstance(identity, dict):
+                identity = {}
+                self._config["identity"] = identity
+            configured_identity = str(identity.get("MNEMONIC") or "").strip()
+            if not configured_identity or configured_identity == "auto":
+                identity["MNEMONIC"] = Mnemonic("english").generate(strength=128)
+                self.log("Generated new node identity mnemonic")
+
             # Each ledger owns exactly ONE wallet (WALLET_MNEMONIC) -- there is no
-            # auxiliary/receiver wallet -- and that same key is the node's identity
-            # (src/reputation_system/node_identity.py): the peer_id it presents and the
-            # key it signs GetPeerInfo with. So there is exactly one mnemonic in the
-            # whole node, and it must always exist: an unset or "auto" value is
-            # generated here on first load rather than left empty, or the node would
-            # have no identity at all. Generating one is free and commits to nothing --
-            # the wallet holds no funds until someone sends some.
+            # auxiliary/receiver wallet. It is what the node is paid into and what
+            # publishes its reputation proofs there, and it vouches for the identity
+            # above by signing it once. An unset or "auto" value is generated here for
+            # the same reason: generating one is free and commits to nothing -- the
+            # wallet holds no funds until someone sends some.
             ledgers = self._config.get("ledgers")
             if isinstance(ledgers, dict):
                 for name, ledger in ledgers.items():
