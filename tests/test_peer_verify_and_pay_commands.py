@@ -12,7 +12,10 @@ from unittest import mock
 
 from protos import celaut_pb2
 from src.commands import verify_reputation as vr
-from src.utils.contract_xattrs import set_token_id
+from src.utils.contract_xattrs import get_token_id, set_token_id
+
+
+from src.commands import pay as pv
 
 
 def _announcement(proof_ids):
@@ -21,23 +24,23 @@ def _announcement(proof_ids):
     for proof_id in proof_ids:
         set_token_id(peer.reputation_proofs.add(), proof_id)
     return peer
-from src.commands import pay as pv
 
 
 class VerifyReputationCommandTests(unittest.TestCase):
-    """`verify_reputation(peer_id)` reuses the proof_validation primitives."""
+    """`verify_reputation(peer_id)` runs the node's own check, not a copy of it.
+
+    The command's job is reading the advertisement, resolving each proof's attested
+    owner, and reporting; the verdict itself comes from `explain_contract_ledger`.
+    These mock that boundary rather than the primitives beneath it -- mocking those
+    was what let the two implementations drift apart unnoticed.
+    """
 
     def _patch(self, **overrides):
         # Sensible "happy path" defaults; individual tests override one piece.
         defaults = dict(
             _peer_advertisement=lambda peer_id: _announcement(["proof-token-1"]),
             attested_proof_owner=lambda contract, peer_id: "02" + "ab" * 32,
-            _get_unspent_boxes_by_token=lambda proof_id: [{"box": 1}],
-            _boxes_off_canonical_contract=lambda boxes: [],
-            _validate_box_structure=lambda box: True,
-            _extract_register_value=lambda box, reg: "owner-r7-raw",
-            _decode_coll_byte_hex=lambda value: "aabbccddeeff00112233",
-            node_proposition_hex=lambda wallet: "aabbccddeeff00112233",
+            explain_contract_ledger=lambda contract, wallet: None,
         )
         defaults.update(overrides)
         return [mock.patch.object(vr, name, new=fn)
@@ -60,24 +63,42 @@ class VerifyReputationCommandTests(unittest.TestCase):
         self.assertFalse(self._run(_peer_advertisement=lambda peer_id: None))
 
     def test_fail_when_no_owner_is_attested(self):
-        # R7 names a wallet, so a peer that cannot prove it holds one has proved
-        # nothing about any proof on Ergo -- whatever the boxes themselves look like.
+        # R7 names a wallet, so a proof whose owner this peer cannot prove has proved
+        # nothing -- whatever the boxes themselves look like.
         self.assertFalse(
             self._run(attested_proof_owner=lambda contract, peer_id: None)
         )
+
+    def test_the_node_verdict_is_what_decides(self):
+        # Not a re-derivation of it: whatever the shared check says, the command says.
+        self.assertFalse(
+            self._run(explain_contract_ledger=lambda contract, wallet: "off-contract")
+        )
+
+    def test_the_reason_reaches_the_operator(self):
+        # The whole point of the command over the node's log: which of the checks
+        # failed, in words, rather than a bare verdict.
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self._run(
+                explain_contract_ledger=lambda contract, wallet: (
+                    "Contract ledger not compatible: ledger=False script=True"
+                )
+            )
+        self.assertIn("Contract ledger not compatible", out.getvalue())
 
     def test_the_wallet_checked_is_the_attested_one(self):
         # Not the peer_id: the two are different keys, and only the wallet can ever
         # appear in R7.
         called = {}
 
-        def node_proposition_hex(wallet):
+        def explain(contract, wallet):
             called["wallet"] = wallet
-            return "aabbccddeeff00112233"
+            return None
 
         self.assertTrue(self._run(
             attested_proof_owner=lambda contract, peer_id: "02" + "cd" * 32,
-            node_proposition_hex=node_proposition_hex,
+            explain_contract_ledger=explain,
         ))
         self.assertEqual(called["wallet"], "02" + "cd" * 32)
 
@@ -87,37 +108,65 @@ class VerifyReputationCommandTests(unittest.TestCase):
         # does not own behind one it does.
         checked = []
 
-        def boxes(proof_id):
-            checked.append(proof_id)
-            return [{"box": 1}]
+        def explain(contract, wallet):
+            checked.append(get_token_id(contract))
+            return None
 
         self.assertTrue(self._run(
             _peer_advertisement=lambda peer_id: _announcement(["proof-a", "proof-b"]),
-            _get_unspent_boxes_by_token=boxes,
+            explain_contract_ledger=explain,
         ))
         self.assertEqual(checked, ["proof-a", "proof-b"])
 
     def test_one_unowned_proof_fails_the_peer(self):
         self.assertFalse(self._run(
             _peer_advertisement=lambda peer_id: _announcement(["proof-a", "proof-b"]),
-            _get_unspent_boxes_by_token=lambda proof_id: [] if proof_id == "proof-b" else [{"box": 1}],
+            explain_contract_ledger=lambda contract, wallet: (
+                "no unspent boxes" if get_token_id(contract) == "proof-b" else None
+            ),
         ))
 
-    def test_fail_when_no_unspent_boxes(self):
-        self.assertFalse(self._run(_get_unspent_boxes_by_token=lambda proof_id: []))
 
-    def test_fail_when_box_off_canonical_contract(self):
-        self.assertFalse(self._run(_boxes_off_canonical_contract=lambda boxes: ["deadbeef"]))
+class OneCheckTwoAudiencesTests(unittest.TestCase):
+    """The node and the command must never be able to answer differently.
 
-    def test_fail_when_box_structure_invalid(self):
-        self.assertFalse(self._run(_validate_box_structure=lambda box: False))
+    They did: `verify_reputation` walked the same six steps in its own words and had
+    lost the first two, so it printed PASS for a proof on a non-canonical ledger --
+    the one the node refuses with "Not supported reputation contract", and exactly the
+    case an operator runs the command to understand.
+    """
 
-    def test_fail_when_the_attested_wallet_does_not_match_owner(self):
-        # This is the crypto gate: structure is fine, the peer proved a wallet, and
-        # that wallet is simply not the one that published the proof.
-        self.assertFalse(
-            self._run(node_proposition_hex=lambda wallet: "some-other-owner")
-        )
+    def test_the_command_and_the_node_call_the_same_function(self):
+        from src.reputation_system.contracts.ergo import proof_validation
+
+        self.assertIs(vr.explain_contract_ledger, proof_validation.explain_contract_ledger)
+
+    def test_the_verdict_is_the_reason_being_absent(self):
+        # `validate_contract_ledger` is a thin wrapper, so a caller wanting a bool and
+        # a caller wanting words cannot end up with different answers.
+        from src.reputation_system.contracts.ergo import proof_validation
+
+        with mock.patch.object(
+            proof_validation, "explain_contract_ledger", lambda c, w: None
+        ):
+            self.assertTrue(proof_validation.validate_contract_ledger(object(), "w"))
+        with mock.patch.object(
+            proof_validation, "explain_contract_ledger", lambda c, w: "nope"
+        ):
+            self.assertFalse(proof_validation.validate_contract_ledger(object(), "w"))
+
+    def test_a_non_canonical_ledger_is_refused(self):
+        # The check the command had lost. A Contract that is not the canonical
+        # reputation contract never reaches the chain lookups.
+        from protos import celaut_pb2
+        from src.reputation_system.contracts.ergo import proof_validation
+
+        foreign = celaut_pb2.Contract()
+        foreign.ledger.formal = b"some other ledger"
+        reason = proof_validation.explain_contract_ledger(foreign, "02" + "ab" * 32)
+
+        self.assertIsNotNone(reason)
+        self.assertIn("not compatible", reason)
 
 
 class PayCommandTests(unittest.TestCase):

@@ -205,7 +205,7 @@ def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
     Ergo proposition and can never hold an identity that is not one. A proof announced
     without an attestation its claimed owner signed proves nothing about who holds it.
     """
-    from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_ergo_reputation
+    from src.reputation_system.contracts.ergo.proof_validation import explain_contract_ledger
     from src.reputation_system.proof_attestation import attested_proof_owner
 
     wallet_public_key = attested_proof_owner(contract_ledger, peer.public_key)
@@ -216,9 +216,12 @@ def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
         )
         return False
 
-    # Verify contract and ledger compatibility and ownership
-    if not validate_ergo_reputation(contract_ledger, wallet_public_key):
-        log.LOGGER(f"Not supported reputation contract.")
+    # The reason, not just the verdict: the log used to say "Not supported reputation
+    # contract" for any of six different failures, which told an operator that
+    # something was wrong and nothing about what.
+    reason = explain_contract_ledger(contract_ledger, wallet_public_key)
+    if reason:
+        log.LOGGER(f"Peer {peer.public_key}: {reason}")
         return False
 
     return True
