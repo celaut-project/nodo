@@ -622,13 +622,15 @@ communication:
   # On a ledger it is off: a reputation box pays storage rent on every byte for as long
   # as it exists, and these paragraphs are several times a register's whole budget.
   #
-  # It applies to peers' announcements too, which this node republishes verbatim so a
-  # reader can verify their signatures straight off the chain. There is a real cost
-  # there: a peer's prose is inside what it signed, so stripping it invalidates that
-  # signature -- such an announcement is published without its signature and public key
-  # rather than with one that cannot verify, which makes it informational instead of
-  # verifiable. A peer that announces no prose is republished whole, signature intact.
-  # Set this true to keep every republished signature verifiable, and pay the rent.
+  # It also decides what happens to PEERS' announcements, which this node republishes
+  # so a reader can verify their signatures straight off the chain. Those are
+  # republished exactly as received or not at all: editing one to save rent would break
+  # the signature that is the whole reason for carrying it, and a Peer that no longer
+  # matches what its author signed is not that peer's claim any more. So an announcement
+  # that carries prose is either published whole (this set true, and the rent paid) or
+  # left out, in which case the opinion is still published -- the token, its sign and R5
+  # are the opinion; the announcement is extra. A peer whose announcement carries no
+  # prose is small already and is always republished whole.
   SHARE_PROSE_ON_LEDGER: false
   SELF_ANNOUNCE_TO_CONNECTING_PEERS: false
   SEND_ONLY_HASHES_ASKING_COST: true

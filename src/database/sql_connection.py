@@ -20,7 +20,7 @@ from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_con
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
 from src.utils.grpc_transport import peer_channel
-from src.utils.transport_stack import carries_prose, share_prose_on_ledger, strip_prose
+from src.utils.transport_stack import carries_prose, share_prose_on_ledger
 from src.utils.utils import from_amount, generate_uris_by_peer_id
 from src.utils.monetary import format_mu
 
@@ -1040,21 +1040,30 @@ class SQLConnection(metaclass=Singleton):
                         peer_msg.ClearField('signature')
                         peer_msg.ClearField('public_key')
 
-                    # A peer's prose is inside what it signed, so dropping it to save
-                    # rent costs the signature too: what would be published otherwise is
-                    # a signature that cannot verify, which is worse than none under the
-                    # same promise. The trade is the operator's to make
-                    # (communication.SHARE_PROSE_ON_LEDGER): pay the rent and republish
-                    # a verifiable claim, or publish a smaller informational one. A peer
-                    # that announces no prose is unaffected either way -- there is
-                    # nothing to strip, so its signature survives.
-                    if not share_prose_on_ledger() and carries_prose(peer_msg):
-                        strip_prose(peer_msg)
-                        peer_msg.ClearField('signature')
-                        peer_msg.ClearField('public_key')
+                    # A peer's announcement is republished exactly as it was received or
+                    # not at all. Editing it to save rent -- dropping the prose, which is
+                    # what makes it big -- would break the signature that is the entire
+                    # reason for republishing it, and a Peer that no longer matches what
+                    # its author signed is not that peer's claim any more. So the choice
+                    # is whole or nothing (communication.SHARE_PROSE_ON_LEDGER), and
+                    # "nothing" costs only R9: the opinion itself lives in the box's
+                    # token, its sign and R5, so it is published either way.
+                    #
+                    # A peer that announces no prose is small already and is always
+                    # published: this decides about the announcements that are expensive,
+                    # not about peers.
+                    publish_announcement = share_prose_on_ledger() or not carries_prose(peer_msg)
+                    if not publish_announcement:
+                        logger.LOGGER(
+                            f'Peer {peer_id} announced prose, which cannot be dropped '
+                            'without invalidating its signature; publishing the opinion '
+                            'without its announcement '
+                            '(communication.SHARE_PROSE_ON_LEDGER).'
+                        )
 
                     peers_dict[peer_id] = {
                         'peer': peer_msg,
+                        'publish_announcement': publish_announcement,
                         # An address list rebuilt from our own rows would not match what
                         # the peer signed, so only fill it in when we have no stored
                         # message at all (a peer migrated from before advertisements).
@@ -1086,7 +1095,9 @@ class SQLConnection(metaclass=Singleton):
                     # This used to be gated on knowing the peer's own proof id, which
                     # silently dropped every peer whose proof we had never validated --
                     # publishing an opinion set narrower than the one we actually held.
-                    instance_json = MessageToJson(data['peer'])
+                    instance_json = (
+                        MessageToJson(data['peer']) if data['publish_announcement'] else ""
+                    )
 
                     # Calculate the percentage of the total reputation token amount
                     if reputation_index - last_index_on_ledger >= env_manager.get("ledgers.ergo.reputation.LEDGER_REPUTATION_SUBMISSION_THRESHOLD"):
