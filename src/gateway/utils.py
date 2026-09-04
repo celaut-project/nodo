@@ -213,19 +213,19 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     logs. The refusal itself is only ever logged by the *remote* peer, so staying quiet
     here would leave an unreachable node with nothing locally to explain why.
     """
-    from src.reputation_system.node_identity import (
-        canonical_peer_content_digest,
-        canonical_peer_payload,
-        declare_signature_scheme,
-        get_node_public_key_hex,
-        sign_peer_payload,
-    )
+    from src.utils.node_identity import (
+    canonical_peer_content_digest,
+    canonical_peer_payload,
+    declare_signature_scheme,
+    get_node_public_key_hex,
+    sign_peer_payload,
+)
 
     public_key_hex = get_node_public_key_hex()
     if not public_key_hex:
         log.LOGGER(
             'No identity public key, so this node is announcing itself UNSIGNED and '
-            'every peer will refuse it. Check ledgers.ergo.WALLET_MNEMONIC.'
+            'every peer will refuse it. Check identity.MNEMONIC.'
         )
         return
 
@@ -235,25 +235,33 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     expiry = uri_expiry(ts)
     for uri in peer.uri:
         uri.expiry_unix_timestamp = expiry
+
+    # Both are covered by the signature, so they go on before the digest is taken --
+    # signing first and declaring afterwards would produce an announcement whose own
+    # signature refuses it.
+    #
+    # One prose policy for the whole announcement (communication.SHARE_PROSE_ON_*): what
+    # a reader is handed to understand the message, as against what a verifier reads to
+    # decide about it, and the scheme is no different from the transport stack there.
+    declare_signature_scheme(peer, prose=share_prose_on_get_peer_info())
+
     signature = sign_peer_payload(
         canonical_peer_payload(public_key_hex, ts, canonical_peer_content_digest(peer))
     )
     if not signature:
+        # Never leave a declared scheme or an attestation on an unsigned announcement:
+        # both are claims the signature is what vouches for, so on their own they state
+        # a fact about nothing.
+        peer.ClearField("signature_scheme")
         log.LOGGER(
             f'Could not sign this node\'s announcement as {public_key_hex}, so every '
-            'peer will refuse it. Check ledgers.ergo.WALLET_MNEMONIC.'
+            'peer will refuse it. Check identity.MNEMONIC.'
         )
         return
 
     peer.public_key = public_key_hex
     peer.signature = signature
     peer.ts = ts
-    # Declared alongside the signature, never without one: the field says what this
-    # signature is, so on an unsigned announcement it would state a fact about nothing.
-    # One prose policy for the whole announcement (communication.SHARE_PROSE_ON_*): what
-    # a reader is handed to understand the message, as against what a verifier reads to
-    # decide about it, and the scheme is no different from the transport stack there.
-    declare_signature_scheme(peer, prose=share_prose_on_get_peer_info())
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:

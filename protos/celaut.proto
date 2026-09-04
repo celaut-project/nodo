@@ -15,6 +15,37 @@ message DataFormat {
 }
 
 // Represents both, payment contracts and reputation proofs.
+//
+// `xattrs` is where everything ledger-specific lives, so the message itself needs no
+// field per ledger convention (see src/utils/contract_xattrs.py for the keys this
+// implementation reads). On a reputation proof, two of them carry its OWNER
+// ATTESTATION: `owner_public_key`, the key that published the proof in that ledger's
+// own encoding, and `owner_signature`, that key's signature over the announcing peer's
+// id (node_identity.attestation_payload).
+//
+// That pair is what attributes an on-chain fact to a peer without the peer's name
+// having to be an on-chain object. A reputation proof on Ergo names its owner in R7,
+// which is the reputation contract's spending clause (`INPUTS.exists {
+// b.propositionBytes == SELF.R7[Coll[Byte]].get }`), so R7 can hold nothing but an Ergo
+// proposition, ever. Reading it as the peer's id would therefore fix every celaut
+// node's identity as an Ergo key by construction. With the attestation a reader checks
+// two links instead -- R7 is the attested owner, and that owner signed this peer_id --
+// which is the same fact, still verifiable from the proof box alone with no round-trip
+// to the node (the box's R9 carries the whole signed Peer), and it holds for a second
+// ledger's reputation system without either being privileged.
+//
+// It belongs to the proof and not to the Peer because ownership is a property of the
+// proof: a node holds as many as it likes, and nothing says they share an owner. An
+// attestation per ledger on the announcement could not describe two proofs on the same
+// ledger published by different wallets.
+//
+// It proves possession of a key, and nothing more: not that the node accepts payment on
+// that ledger (payment_contracts), nor that the key holds funds. A proof whose
+// attestation does not verify is treated as announcing no owner at all -- the peer's
+// identity is untouched, and only what a reader would have credited for that proof is
+// lost. Covered by Peer.signature through reputation_proofs, so a relay can neither
+// forge one (it would have to sign) nor strip one (the announcement would stop
+// verifying).
 message Contract {
     message Ledger {
         repeated string tags = 1;
@@ -418,17 +449,25 @@ message Peer {
     repeated ContractRate payment_contracts = 3;
     map<string, Amount> mu_per_call = 4;
 
-    // Node identity (issue #236): the raw 33-byte SEC-compressed public key (hex) of
-    // the node's identity keypair, and a signature over the canonical encoding of
-    // (public_key, ts, uri, payment_contracts, mu_per_call) -- see
+    // Node identity (issue #236): the public key (hex) of the node's identity keypair,
+    // in whatever encoding `signature_scheme` names, and a signature over the canonical
+    // encoding of everything this message advertises -- see
     // node_identity.canonical_peer_payload.
     // Verifying it proves the sender controls public_key without any interactive
     // challenge, so GetPeerInfo alone is enough (SignPublicKey is removed). Both are
     // required: a Peer carrying neither, or whose signature does not verify, is refused
     // outright -- the public key IS the peer's id, so there is nothing else to register
     // it under (see manager.add_peer_instance).
+    //
+    // The identity is a keypair of the node's own, on no ledger. It is deliberately not
+    // a wallet: a wallet key is bound to what its ledger can verify and spend, so an
+    // identity that *was* one could never be anything else. The link to a ledger is an
+    // owner attestation on each reputation proof (see reputation_proofs above), which
+    // costs one signature and buys the node the right to change, add or drop a wallet
+    // without changing its name.
     string public_key = 5;
     string signature = 6;
+
 
     // Which cryptography `public_key` and `signature` are in, declared rather than
     // assumed. A scheme is an open, unordered stack of building blocks (curve,
@@ -472,10 +511,15 @@ message Peer {
     // identity -- it splits the node's reputation, its deposits and its payment
     // attribution in two, and the split cannot be healed by cross-signing the keys
     // because whoever needs the link speaks only one of the two schemes and can verify
-    // only one half of it. It would also leave every later interaction asking which
-    // key to authenticate with (nothing does yet -- the gateway channel is plain
-    // grpc.insecure_channel -- but session authentication is the obvious next use of
-    // this key, and it wants exactly one answer).
+    // only one half of it. It would also leave every later interaction asking which key
+    // to authenticate with, and the TLS certificate of issue #257 -- whose extension is
+    // signed by exactly this key -- wants one answer.
+    //
+    // Note what that argument does NOT extend to. A key in a *different role* is not a
+    // second identity: a reputation proof's owner attestation names the wallet that
+    // published it, and the TLS certificate carries a per-process P-256 key, both of
+    // them tied to this one. That is a hierarchy with a single root, not two names --
+    // nobody has to pick which one the node is. What must stay singular is the root.
     //
     // Reading a scheme is a different matter from signing with one, and stays open:
     // a node that must talk to peers signing differently plugs in a verifier for that
@@ -484,20 +528,21 @@ message Peer {
     // one descriptor whose encoding carries both, not two schemes on one Peer.
     //
     // Singular here and ONLY here. payment_contracts and reputation_proofs above are
-    // repeated on purpose and stay that way: a node identifying itself under Ergo
-    // while accepting payment in ERG, in bitcoin and in whatever else settles is the
-    // expected shape, not a contradiction. The asymmetry is what each field does. What
-    // a node accepts is a menu the payer picks one item from, so a longer menu costs
-    // nothing and refusing to hold two of them would only turn away money; the
-    // identity is what NAMES the node, and a second name is a second node as far as
-    // its reputation, its deposits and its payment attribution are concerned.
+    // repeated on purpose and stay that way: a node named by a key of its own, holding
+    // wallets on several ledgers, accepting payment in ERG and in bitcoin, is the
+    // expected shape. The asymmetry is what each field does. What a node accepts is a
+    // menu the payer picks one item from, and what it can prove about a proof is a fact
+    // per proof, so a longer list costs nothing; the identity is what NAMES the node,
+    // and a second name is a second node as far as its reputation, its deposits and its
+    // payment attribution are concerned.
     //
-    // Not covered by `signature`, and safe to leave out only while a single scheme is
-    // accepted: tampering with it can then turn a valid announcement into a refused
-    // one but never into an accepted one, which a MITM could do by corrupting any
-    // other byte anyway. The moment a second scheme is accepted it MUST enter
-    // node_identity.canonical_peer_content_digest, or a relay could re-label a
-    // signature as belonging to a weaker scheme that also accepts those bytes.
+    // Covered by `signature` (node_identity.canonical_peer_content_digest). It has to
+    // be: verification is a decision with no third answer, so a relay able to re-label
+    // a signature as belonging to a different scheme -- one that also accepts those
+    // bytes, or simply a weaker one -- would be rewriting an authentication decision in
+    // transit. That a node implements one scheme today does not make the field safe to
+    // leave out, because which schemes it accepts is a local capability that can change
+    // without the wire format changing.
     //
     // `formal` is empty on every component of this node's own declaration, as it is
     // on the Ergo ledger (reputation_system/envs.py): there is no machine-readable

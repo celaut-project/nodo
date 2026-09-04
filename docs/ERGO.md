@@ -95,16 +95,28 @@ with `Decimal` into nanoERG; all subsequent arithmetic is integer nanoERG.
 The node operator can manually provide the mnemonic for the single wallet if the node
 has been reinstalled. This same wallet is used to add reputation proofs to the network.
 
-### Node identity signatures
+### The wallet, the identity, and the attestation between them
 
-A node's identity keypair is derived from `ledgers.ergo.WALLET_MNEMONIC` on Ergo's
-derivation path (`m/44'/429'/0'/0/0`), and its 33-byte SEC-compressed public key is both
-the node's `peer_id` and the owner recorded in a reputation proof's R7
-(`0008cd` + public key). See `src/reputation_system/node_identity.py`.
+The wallet derived from `ledgers.ergo.WALLET_MNEMONIC` on Ergo's derivation path
+(`m/44'/429'/0'/0/0`) is what this node is paid into, what publishes its reputation
+proofs, and the owner recorded in a proof's R7 (`0008cd` + its 33-byte SEC-compressed
+public key).
 
-What that key signs — the `GetPeerInfo` response (`Peer.signature`) and the
-ownership challenge for a reputation proof — is signed with the **Schnorr scheme over
-secp256k1 that ChainCash/Basis use off-chain**: the same `proveDlog` sigma protocol
+It is **not** the node's `peer_id`. That is an Ed25519 key of its own, from
+`identity.MNEMONIC`, on no ledger at all (see
+[Node identity](CONCEPTS.md#node-identity)). R7 is the reputation contract's spending
+clause, so it can only ever hold an Ergo proposition — reading it as the peer's id
+would fix every celaut node's identity as an Ergo key forever.
+
+What connects the two is an **owner attestation**: this wallet signs the node's
+`peer_id`, and the pair rides in the announced proof's own `xattrs`. A reader checks that
+R7 is the attested owner and that the owner signed this `peer_id`, both from the proof
+box alone. So a proof is attributed to a node without the node's name having to be an
+on-chain object, and the node can change wallets without changing its name.
+
+What this wallet signs — the attestation, and the ownership challenge for a reputation
+proof — uses the **Schnorr scheme over secp256k1 that ChainCash/Basis use off-chain**:
+the same `proveDlog` sigma protocol
 Ergo's P2PK proofs are built on, in the encoding a reserve contract verifies explicitly.
 It is not an on-chain P2PK spending proof — sigmastate truncates the challenge to 192
 bits and serialises 56 bytes with `a` recomputed rather than sent:
@@ -126,8 +138,12 @@ because they are what the on-chain verifier does — ErgoScript's `byteArrayToBi
   neither is read as negative and the signature verifies under the unsigned convention too.
 
 The implementation is pure Python (`src/utils/ergo_schnorr.py`) — no JVM and no Ergo node,
-so a node can sign from first boot. It is checked against the Scala reference
+so a node can attest from first boot. It is checked against the Scala reference
 implementation's cross-validation vectors in `tests/test_ergo_schnorr.py`.
+
+The `GetPeerInfo` response (`Peer.signature`) is a different signature in a different
+scheme: Ed25519 by the identity key, which is what `Peer.signature_scheme` declares.
+None of the above applies to it.
 
 **An identity is mandatory.** A `Peer` that carries no public key, or whose signature does
 not verify against it, is refused: `add_peer_instance` returns nothing and stores nothing,

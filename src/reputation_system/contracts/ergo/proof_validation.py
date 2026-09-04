@@ -12,7 +12,7 @@ from src.reputation_system.envs import (
     REPUTATION_PROOF_ERGO_TREE,
     ergo_ledger,
 )
-from src.reputation_system.node_identity import node_proposition_hex
+from src.reputation_system.proof_attestation import node_proposition_hex
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
 from src.utils.java_dependency import (
@@ -223,7 +223,9 @@ def _validate_box_structure(box: dict) -> bool:
     Valida si el Perfil de Reputación es soportado por el nodo y si existe en la red.
     Utilizado para validar Perfil de un par antes de almacenarlo.
 """
-def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> bool:
+def validate_contract_ledger(
+    contract_ledger: celaut.Contract, owner_wallet_public_key: str
+) -> bool:
     # Equivalence policy: `formal` is the canonical machine-readable ledger identity, so we
     # validate ONLY the compiled ErgoTree (get_script) plus `formal`. `tags`/`prose` are
     # human-facing and intentionally not part of the compatibility decision.
@@ -266,12 +268,14 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
         logger("Structural validation of the reputation profile failed.")
         return False
 
-    # Every box must declare the SAME R7 owner, and it must match the identity
-    # public_key peer_id announced (and cryptographically proved, see
-    # manager.verified_peer_public_key) over GetPeerInfo -- a direct byte
-    # comparison, replacing the interactive SignPublicKey ownership challenge.
-    # Identity no longer depends on holding a proof; a proof, when present, is
-    # verified against the identity instead.
+    # Every box must declare the SAME R7 owner, and it must be the Ergo wallet the peer
+    # proved it holds -- the wallet named by an attestation this peer signed with its
+    # identity key and that wallet countersigned (node_identity.attested_proof_owner,
+    # resolved by the caller from the proof's own xattrs). R7 carries propositionBytes, which is what the contract
+    # checks a spender against, so a wallet is the only thing it can ever hold; the
+    # peer's identity reaches this comparison through the attestation rather than by
+    # being the same key. Identity does not depend on holding a proof; a proof, when
+    # present, is verified against the attested wallet instead.
     owners = {
         _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or ""))
         for box in boxes
@@ -282,8 +286,11 @@ def validate_contract_ledger(contract_ledger: celaut.Contract, peer_id: str) -> 
         return False
 
     owner_proposition_hex = next(iter(owners))
-    if owner_proposition_hex != node_proposition_hex(peer_id):
-        logger(f"Peer {peer_id} does not control the R7 owner for proof {token_id}.")
+    if owner_proposition_hex != node_proposition_hex(owner_wallet_public_key):
+        logger(
+            f"The attested wallet {owner_wallet_public_key} does not own the R7 owner "
+            f"for proof {token_id}."
+        )
         return False
 
     return True

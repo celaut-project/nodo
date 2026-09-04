@@ -40,7 +40,7 @@ def tearDownModule():
 
 
 from protos import celaut_pb2 as celaut  # noqa: E402
-from src.reputation_system import node_identity as ni  # noqa: E402
+from src.utils import node_identity as ni  # noqa: E402
 
 
 class NodeSignatureSchemeTests(unittest.TestCase):
@@ -120,14 +120,12 @@ class SameSignatureSchemeTests(unittest.TestCase):
         self.assertFalse(ni.same_signature_scheme(a, b))
 
     def test_a_conflicting_tag_beside_ours_is_refused(self):
-        # The case the whole rule exists for: a BIP-340 signer that also writes the
-        # tag we use. Accepting it would let a peer whose signatures this node cannot
-        # verify pass as compatible.
+        # The case the whole rule exists for: a signer of the pre-hashed RFC 8032
+        # variant that also writes the tag this node uses. Accepting it would let a peer whose
+        # signatures this node cannot verify pass as compatible.
         ours = ni.node_signature_scheme()
         theirs = ni.node_signature_scheme()
-        for component in theirs.components:
-            if "schnorr" in component.tags:
-                component.tags.append("bip340")
+        theirs.components[0].tags.append("ed25519ph")
         self.assertFalse(ni.same_signature_scheme(ours, theirs))
 
     def test_identical_tag_sets_match_whatever_their_order(self):
@@ -187,7 +185,7 @@ class UndeclaredComponentTests(unittest.TestCase):
     def test_a_peer_with_an_undeclared_component_does_not_speak_our_scheme(self):
         peer = celaut.Peer()
         ni.declare_signature_scheme(peer)
-        peer.signature_scheme.components[1].ClearField("tags")
+        peer.signature_scheme.components[0].ClearField("tags")
         self.assertFalse(ni.speaks_our_signature_scheme(peer))
 
 

@@ -6,11 +6,12 @@ if _stub is not None and not hasattr(getattr(_stub, "Mnemonic", None), "to_seed"
     for _n in [n for n in list(_sys.modules) if n.startswith("src.reputation_system.")]:
         del _sys.modules[_n]
 import unittest
+import unittest.mock
 
 from mnemonic import Mnemonic
 
 from protos import celaut_pb2
-from src.reputation_system import node_identity as ni
+from src.utils import node_identity as ni
 from src.reputation_system.bip_wallet_verification import bip_schnorr_sign, derive_compressed_pubkey
 
 MNEMONIC = Mnemonic("english").generate(strength=128)
@@ -29,21 +30,34 @@ def _peer(ip="1.2.3.4", port=80, rate="10", contract=b"HONEST", expiry=0, transp
     return peer
 
 
+def _identity(mnemonic):
+    """``(public key hex, signer)`` for a mnemonic, the way the node derives its own."""
+    public_key_hex, private_key = ni._cached_keypair(mnemonic)
+    return public_key_hex, lambda payload: private_key.sign(payload.encode("utf-8")).hex()
+
+
 class NormalizePublicKeyTests(unittest.TestCase):
     def test_accepts_canonical_lowercase_hex(self):
-        key = "02" + "ab" * 32
+        key = "ab" * 32
         self.assertEqual(ni.normalize_public_key_hex(key), key)
 
     def test_lowercases_and_strips(self):
-        key = "02" + "AB" * 32
+        key = "AB" * 32
         self.assertEqual(ni.normalize_public_key_hex("  " + key + " "), key.lower())
 
     def test_rejects_wrong_length_and_non_hex(self):
         # bytes.fromhex would accept the embedded space; a peer_id must not.
-        self.assertIsNone(ni.normalize_public_key_hex("02 " + "ab" * 32))
+        self.assertIsNone(ni.normalize_public_key_hex("ab " + "ab" * 31))
         self.assertIsNone(ni.normalize_public_key_hex("02ab"))
-        self.assertIsNone(ni.normalize_public_key_hex("zz" * 33))
+        self.assertIsNone(ni.normalize_public_key_hex("zz" * 32))
         self.assertIsNone(ni.normalize_public_key_hex(""))
+
+    def test_rejects_a_secp256k1_key(self):
+        # The identity is Ed25519, so the 33-byte compressed key an Ergo wallet uses is
+        # not a peer_id -- announcing one is announcing a key in the wrong scheme.
+        self.assertIsNone(
+            ni.normalize_public_key_hex(derive_compressed_pubkey(MNEMONIC).hex())
+        )
 
 
 class CanonicalPeerContentDigestTests(unittest.TestCase):
@@ -114,10 +128,10 @@ class CanonicalPayloadTests(unittest.TestCase):
 
 class SignAndVerifyTests(unittest.TestCase):
     def setUp(self):
-        self.pubkey_hex = derive_compressed_pubkey(MNEMONIC).hex()
+        self.pubkey_hex, self.sign = _identity(MNEMONIC)
         self.digest = ni.canonical_peer_content_digest(_peer())
         self.payload = ni.canonical_peer_payload(self.pubkey_hex, 100, self.digest)
-        self.signature = bip_schnorr_sign(MNEMONIC, self.payload)
+        self.signature = self.sign(self.payload)
 
     def test_valid_signature_verifies(self):
         self.assertTrue(ni.verify_peer_payload(self.pubkey_hex, self.payload, self.signature))
@@ -126,7 +140,7 @@ class SignAndVerifyTests(unittest.TestCase):
         self.assertFalse(ni.verify_peer_payload(self.pubkey_hex, self.payload + "x", self.signature))
 
     def test_wrong_public_key_fails(self):
-        other = derive_compressed_pubkey(OTHER_MNEMONIC).hex()
+        other, _ = _identity(OTHER_MNEMONIC)
         self.assertFalse(ni.verify_peer_payload(other, self.payload, self.signature))
 
     def test_non_canonical_public_key_is_refused(self):
@@ -139,8 +153,18 @@ class SignAndVerifyTests(unittest.TestCase):
         self.assertFalse(ni.verify_peer_payload("", self.payload, self.signature))
         self.assertFalse(ni.verify_peer_payload(self.pubkey_hex, self.payload, ""))
 
-    def test_node_proposition_hex_is_r7_shaped(self):
-        self.assertEqual(ni.node_proposition_hex(self.pubkey_hex), "0008cd" + self.pubkey_hex)
+    def test_the_identity_key_is_not_a_wallet_key(self):
+        # The whole point of the split: one mnemonic yields a name and a wallet that
+        # are different keys, so neither can be mistaken for the other.
+        self.assertNotEqual(self.pubkey_hex, derive_compressed_pubkey(MNEMONIC).hex())
+
+    def test_the_signature_scheme_is_covered_too(self):
+        # A relay that could re-label which cryptography a signature is in would be
+        # rewriting an authentication decision in transit.
+        peer = _peer()
+        bare = ni.canonical_peer_content_digest(peer)
+        ni.declare_signature_scheme(peer)
+        self.assertNotEqual(bare, ni.canonical_peer_content_digest(peer))
 
     def test_tampering_with_the_expiry_estimate_breaks_the_signature(self):
         # expiry_unix_timestamp lives on each Peer.Uri, folded into the content
@@ -151,7 +175,7 @@ class SignAndVerifyTests(unittest.TestCase):
         tampered = ni.canonical_peer_payload(
             self.pubkey_hex, 100, ni.canonical_peer_content_digest(_peer(expiry=2 ** 40))
         )
-        signature = bip_schnorr_sign(MNEMONIC, signed)
+        signature = self.sign(signed)
         self.assertTrue(ni.verify_peer_payload(self.pubkey_hex, signed, signature))
         self.assertFalse(ni.verify_peer_payload(self.pubkey_hex, tampered, signature))
 

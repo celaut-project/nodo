@@ -1,38 +1,65 @@
 """
-Node identity keypair (issue #236): a node's own secp256k1 keypair, derived in pure
-Python from a BIP-39 mnemonic. Used as the ``peer_id`` a node presents to others and
-to sign its ``GetPeerInfo`` response (``Peer.public_key`` / ``Peer.signature``).
+Node identity keypair (issue #236): a node's own Ed25519 keypair, derived from a BIP-39
+mnemonic of its own. Used as the ``peer_id`` a node presents to others and to sign its
+``GetPeerInfo`` response (``Peer.public_key`` / ``Peer.signature``).
 
-A node has exactly ONE mnemonic, ``ledgers.ergo.WALLET_MNEMONIC``, generated on first
-config load when unset. It is both the node's wallet and its identity, so a reputation
-proof published later is already tied to this node's identity for free, and the
-identity can never change underneath the peers that recorded it.
+The identity is deliberately not a wallet on any ledger, tempting though it is to make
+a reputation proof's R7 owner *be* the ``peer_id``: the comparison would be free, and
+the price is permanent. R7 is the reputation contract's spending clause
+(``INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }``), so it can hold
+nothing but an Ergo proposition -- an identity read out of it is an identity that must
+stay spendable on Ergo forever, which makes Ergo a dependency of the peer-to-peer
+layer, down to a node with no wallet being unable to serve or dial at all.
+
+What ties an identity to a ledger is an attestation: the wallet that published a
+reputation proof signs this node's ``peer_id``, and the pair rides in that proof's own
+xattrs -- per proof, because a node holds as many as it likes (issue #281) and nothing
+says they share an owner. A reader
+checks two links instead of comparing bytes -- the R7 owner is the attested wallet, and
+that wallet signed this ``peer_id`` -- which is the same fact, verifiable from the
+proof box alone with no round-trip to the node, and it holds for a second ledger
+without privileging the first. It is the shape payment already has
+(``Peer.payment_contracts`` is a menu the payer picks from), applied to reputation and
+identity.
+
+There is exactly ONE identity mnemonic per node, ``identity.MNEMONIC``, generated on
+first config load when unset. It never changes underneath the peers that recorded it,
+and it is independent of every ``ledgers.*.WALLET_MNEMONIC``: adding, removing or
+rotating a wallet leaves the node's name alone.
 """
+import hashlib
 import itertools
 import string
 from functools import lru_cache
 from typing import Final, NamedTuple, Optional, Tuple
 
-import ecdsa
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from mnemonic import Mnemonic
 
 from protos import celaut_pb2
-from src.reputation_system.bip_wallet_verification import (
-    bip_schnorr_verify_proposition,
-    derive_keypair,
-    sign_with_key,
-)
-from src.utils import ergo_schnorr
 from src.utils.config import ConfigManager
 
-# P2PK propositionBytes are `0008cd` + 33-byte SEC-compressed public key (see
-# bip_wallet_verification._P2PK_PREFIX). A reputation proof's R7 owner is stored in
-# exactly this form, so comparing it against an announced identity is a plain prefix
-# + the raw public_key hex -- no separate encoding of our own.
-_P2PK_PREFIX_HEX = "0008cd"
-
-# A SEC-compressed secp256k1 public key is 33 bytes -> 66 hex characters.
-_PUBLIC_KEY_HEX_LENGTH = 66
+# A raw Ed25519 public key is 32 bytes -> 64 hex characters.
+_PUBLIC_KEY_HEX_LENGTH = 64
 _HEX_DIGITS = frozenset(string.hexdigits.lower())
+
+# Where the identity mnemonic lives. Deliberately not under `ledgers`: an identity that
+# reads its key out of one ledger's section is an identity that ledger owns.
+IDENTITY_MNEMONIC_KEY: Final[str] = "identity.MNEMONIC"
+
+# Ed25519 takes a 32-byte seed, and BIP-39 yields 64. Rather than truncate -- which
+# would make the identity key a prefix of anything else derived from that seed -- the
+# seed is hashed with a personalisation string, so the same mnemonic could back another
+# key for another purpose without either being derivable from the other. Blake2b for
+# the same reason the peer digest uses it: one hash family across the identity path.
+_SEED_PERSONALISATION: Final[bytes] = b"celaut-id"
+
+# Domain separation for a ledger attestation, so a wallet signature made to vouch for a
+# peer_id can never be replayed as a signature over something else that wallet signs
+# (an IOU note, a reputation payload) and the other way round.
+_ATTESTATION_PREFIX: Final[str] = "celaut-ledger-attestation:"
 
 
 class SignatureSchemeComponent(NamedTuple):
@@ -85,41 +112,21 @@ class SignatureSchemeComponent(NamedTuple):
 # says everything a verification has to be written from and stands on its own.
 SIGNATURE_SCHEME_COMPONENTS: Final[Tuple[SignatureSchemeComponent, ...]] = (
     SignatureSchemeComponent(
-        ("secp256k1",),
-        "The secp256k1 elliptic curve, with generator G and group order n. Private "
-        "key: a scalar s in [1, n). Public key: the point P = s*G, encoded as its "
-        "33-byte SEC-compressed form, lowercase hex.",
-    ),
-    SignatureSchemeComponent(
-        ("schnorr",),
-        "A Schnorr signature over the curve named by the accompanying curve "
-        "component. Message: the payload bytes, signed as given, with no pre-hash. "
-        "Signature: the 65 bytes a || z, lowercase hex, where k is a nonce drawn "
-        "uniformly from [1, n) for each signature, a is the 33-byte SEC-compressed "
-        "form of k*G, and z is the 32-byte big-endian encoding of (k + e*s) mod n, e "
-        "being the challenge named by the accompanying hash component. Valid if and "
-        "only if z*G == a + e*P. A signer redraws k until the first byte of both e "
-        "and z is < 0x80: for z that is required, since a set top bit would make it "
-        "a negative scalar, and for e it makes the two's-complement and unsigned "
-        "readings coincide, so the signature verifies under either.",
-    ),
-    SignatureSchemeComponent(
-        ("blake2b256",),
-        "The challenge hash: e = blake2b256(a || m || P), its 32 bytes read as a "
-        "two's-complement big-endian integer, so a digest whose first byte is >= "
-        "0x80 denotes a negative e.",
-    ),
-    SignatureSchemeComponent(
-        ("ergo",),
-        "The keypair is the one an Ergo P2PK proposition names, and this scheme is "
-        "the sigma protocol those proofs are built on.",
+        ("ed25519",),
+        "EdDSA over edwards25519, as specified in RFC 8032 (PureEdDSA, no context, no "
+        "pre-hash). Private key: 32 uniformly random bytes. Public key: the 32-byte "
+        "compressed encoding of the corresponding curve point, lowercase hex. "
+        "Signature: the 64 bytes R || S of RFC 8032 section 5.1.6, lowercase hex, "
+        "verified by the procedure in section 5.1.7. Message: the payload bytes, "
+        "signed as given -- the algorithm hashes internally, so nothing pre-hashes "
+        "them here.",
     ),
 )
 
 # Comparing two schemes is a search for a one-to-one pairing between their components
 # (see :func:`same_signature_scheme`), which is factorial in a number a *peer* chooses.
 # The length check there means the only comparison this node actually runs is against
-# its own four-component scheme, so the search is bounded today -- but the function is
+# its own single-component scheme, so the search is bounded today -- but the function is
 # a general ``(scheme_a, scheme_b) -> bool``, and nothing stops a later caller from
 # handing it two peer schemes. Five leaves room for a scheme with one more building
 # block than ours at 120 pairings; twelve would be 479 million, so past the cap a
@@ -204,9 +211,11 @@ def _same_component(a, b) -> bool:
     ``formal`` first, as the strictest and most machine-readable identity, and the tags
     only when neither side has one -- and there as a **set**, never by intersection.
     The tags within one component are meant to be synonyms for the one thing it names
-    (``["secp256k1", "K-256"]``), but nothing in the message says so: this node cannot
-    tell that ``K-256`` restates the component it sits in while ``bip340`` beside
-    ``schnorr`` names a second, different thing. Only one of the two guesses is safe,
+    (``["ed25519", "edwards25519"]``), but nothing in the message says so: this node
+    cannot tell that ``edwards25519`` restates the component it sits in while ``ed25519ph``
+    beside ``ed25519`` names a second, different thing -- the pre-hashed variant of RFC
+    8032, whose signatures do not verify under the pure one. Only one of the two guesses
+    is safe,
     and the unsafe one accepts a signer whose signatures this node cannot verify -- so
     an extra tag makes it a different component, exactly as an extra tag made it a
     different scheme under the flat-set rule this replaced.
@@ -240,9 +249,9 @@ def same_signature_scheme(a, b) -> bool:
     across the whole scheme, the pairing must be total. A peer declaring an extra
     component, or missing one, is a different scheme even if every paired component
     matches -- same reasoning as the flat-tag-set rule this replaced (a peer declaring
-    ``["secp256k1", "bip340"]`` shares a tag with this node and signs something this
-    node cannot read -- same curve, different algorithm -- so "at least one shared
-    component" is exactly the answer that must not be given here), just expressed
+    ``["ed25519", "ed25519ph"]`` shares a tag with this node and signs something this
+    node cannot read -- same curve, different message convention -- so "at least one
+    shared component" is exactly the answer that must not be given here), just expressed
     per-component instead of over one flat list.
 
     Three things are refused before the pairing is searched for, each of them a "no"
@@ -252,7 +261,7 @@ def same_signature_scheme(a, b) -> bool:
     * **More components than the configured cap**
       (``communication.MAX_SIGNATURE_SCHEME_COMPONENTS``). The search is factorial in
       a length a peer chooses. Today the only comparison this node runs is against its
-      own four-component scheme, so the cardinality check already bounds it -- the cap
+      own single-component scheme, so the cardinality check already bounds it -- the cap
       is what keeps that true if this ever compares two peers' schemes to each other.
     * **A component that declares neither tags nor formal** on either side; see
       :func:`_component_is_declared`.
@@ -310,10 +319,8 @@ def normalize_public_key_hex(public_key_hex: str) -> Optional[str]:
 
     The public key doubles as the ``peer_id``, so it must have exactly one spelling:
     ``bytes.fromhex`` accepts uppercase and skips ASCII whitespace, which would let
-    ``"02AB…"``, ``"02ab…"`` and ``"02 ab…"`` all verify and each become a *separate*
-    peer row for one node. Worse, R7 owners are compared lowercased
-    (``proof_validation._decode_coll_byte_hex``), so a non-lowercase id could never
-    match its own reputation proof.
+    ``"AB…"``, ``"ab…"`` and ``"a b…"`` all verify and each become a *separate* peer
+    row for one node.
     """
     candidate = str(public_key_hex or "").strip().lower()
     if len(candidate) != _PUBLIC_KEY_HEX_LENGTH or not set(candidate) <= _HEX_DIGITS:
@@ -324,41 +331,48 @@ def normalize_public_key_hex(public_key_hex: str) -> Optional[str]:
 def get_identity_mnemonic() -> Optional[str]:
     """The mnemonic backing this node's identity keypair, or None if there is none.
 
-    There is exactly ONE mnemonic in a node: ``ledgers.ergo.WALLET_MNEMONIC``, which is
-    both its wallet and its identity. ConfigManager generates it on first load when
-    unset, so this returns None only if the config was never loaded -- and never
-    changes underfoot, which matters because the derived public key IS this node's
-    ``peer_id``: a second source would let the node's identity silently change (and
-    orphan its deposits and reputation network-wide) the moment a wallet was added.
+    There is exactly ONE identity mnemonic in a node, ``identity.MNEMONIC``, and it is
+    not any ledger's wallet. ConfigManager generates it on first load when unset, so
+    this returns None only if the config was never loaded -- and it never changes
+    underfoot, which matters because the derived public key IS this node's ``peer_id``:
+    a second source would let the node's identity silently change (and orphan its
+    deposits and reputation network-wide) the moment a wallet was added or removed.
     """
-    mnemonic = str(ConfigManager().get("ledgers.ergo.WALLET_MNEMONIC", "") or "").strip()
+    mnemonic = str(ConfigManager().get(IDENTITY_MNEMONIC_KEY, "") or "").strip()
     return mnemonic if mnemonic and mnemonic != "auto" else None
 
 
 @lru_cache(maxsize=4)
 def _cached_keypair(mnemonic: str):
-    """Memoized BIP-39 -> BIP-32 derivation for one mnemonic: (pubkey hex, SigningKey).
+    """Memoized derivation for one mnemonic: ``(public key hex, Ed25519PrivateKey)``.
 
-    Deriving costs a PBKDF2-HMAC-SHA512 (2048 rounds) plus a BIP-32 walk, and signing
-    a ``Peer`` used to pay it *twice* on every ``GetPeerInfo`` -- an unauthenticated
-    RPC anyone can call. The identity key never changes for a given mnemonic, so cache
-    it, keyed on the mnemonic itself so editing the config still takes effect.
+    Deriving costs a PBKDF2-HMAC-SHA512 (2048 rounds), and signing a ``Peer`` would pay
+    it on every ``GetPeerInfo`` -- an unauthenticated RPC anyone can call. The identity
+    key never changes for a given mnemonic, so cache it, keyed on the mnemonic itself
+    so editing the config still takes effect.
+
+    The BIP-39 seed is 64 bytes and Ed25519 wants 32, so it is hashed down rather than
+    truncated: a truncation would make this key a prefix of whatever else that seed
+    derives, while a personalised Blake2b leaves the two unrelated.
     """
-    private_key_bytes, pubkey = derive_keypair(mnemonic)
-    return pubkey.hex(), ecdsa.SigningKey.from_string(private_key_bytes, curve=ecdsa.SECP256k1)
+    mnemo = Mnemonic("english")
+    if not mnemo.check(mnemonic):
+        raise ValueError("Invalid mnemonic phrase.")
+    digest = hashes.Hash(hashes.BLAKE2b(64))
+    digest.update(_SEED_PERSONALISATION + mnemo.to_seed(mnemonic, passphrase=""))
+    private_key = ed25519.Ed25519PrivateKey.from_private_bytes(digest.finalize()[:32])
+    public_key_hex = private_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    ).hex()
+    return public_key_hex, private_key
 
 
 def get_node_public_key_hex() -> Optional[str]:
-    """This node's identity public key, as the 33-byte compressed-key hex string."""
+    """This node's identity public key, as the 32-byte raw Ed25519 key in hex."""
     mnemonic = get_identity_mnemonic()
     if not mnemonic:
         return None
     return _cached_keypair(mnemonic)[0]
-
-
-def node_proposition_hex(public_key_hex: str) -> str:
-    """The R7-shaped propositionBytes hex (``0008cd`` + pubkey) for a public key."""
-    return _P2PK_PREFIX_HEX + public_key_hex
 
 
 def _canonical_contract_message(contract) -> str:
@@ -422,33 +436,49 @@ def canonical_peer_content_digest(peer) -> str:
     the signature vouches for it. Leaving them out would let a relay graft proofs onto
     (or strip them from) a claim that still verifies.
 
+    An owner attestation rides inside the proof it belongs to, as two of that
+    ``Contract``'s xattrs, so it is covered by ``reputation_proofs`` above with nothing
+    further to account for here. Each one carries its own signature by the wallet it
+    names, so a forged entry cannot survive :func:`attested_proof_owner` -- but a relay
+    could still strip one, and a peer whose attestation went missing loses the
+    reputation it can prove, which covering the proofs is what prevents.
+
     Built field by field rather than from ``SerializeToString()``, which protobuf does
     not guarantee to be canonical (field order, unknown fields, non-minimal varints).
     Every repeated element is sorted so the digest does not depend on the order a node
     happened to enumerate things in.
 
-    ``signature_scheme`` is deliberately NOT covered, and that holds only while
-    :func:`speaks_our_signature_scheme` accepts exactly one scheme: altering the field
-    can then turn a valid announcement into a refused one but never into an accepted
-    one, which anyone able to alter it could do by corrupting any other byte anyway.
-    Accepting a second scheme changes that -- a relay could re-label a signature as
-    belonging to whichever accepted scheme is weakest -- so the scheme id has to enter
-    this digest in the same commit that accepts one.
+    ``signature_scheme`` is covered as well, which it has to be as soon as more than one
+    scheme can be accepted: a relay that could re-label a signature as belonging to a
+    different scheme -- one whose verification also accepts those bytes, or simply a
+    weaker one -- would be re-labelling an authentication decision. Which schemes a node
+    accepts is a local capability (see :func:`same_signature_scheme`), so nothing stops
+    one from plugging in a second verifier, and the digest must not be the thing that
+    has to change when it does.
     """
     uris = sorted(_canonical_uri(uri) for uri in peer.uri)
     contracts = sorted(_canonical_contract(gp) for gp in peer.payment_contracts)
     proofs = sorted(_canonical_contract_message(c) for c in peer.reputation_proofs)
+    scheme = ";".join(
+        sorted(_canonical_protocol(c) for c in peer.signature_scheme.components)
+    )
     rates = ";".join(
         f"{key}={peer.mu_per_call[key].n}" for key in sorted(peer.mu_per_call)
     )
 
-    canonical = "|".join(["/".join(uris), "/".join(contracts), "/".join(proofs), rates])
-    # Blake2b-256, Ergo's hash, for the same reason the signature is Ergo's Schnorr: this
-    # digest is what the signature commits to, so keeping it on a different hash family
-    # than everything else in the identity path would be the one remaining nodo-only
-    # primitive. Nothing outside this function reads the value -- it is recomputed by the
-    # verifier from the peer's own advertisement, never stored or transmitted.
-    return ergo_schnorr.blake2b256(canonical.encode("utf-8")).hex()
+    canonical = "|".join([
+        "/".join(uris),
+        "/".join(contracts),
+        "/".join(proofs),
+        rates,
+        scheme,
+    ])
+    # Blake2b-256. Nothing outside this function reads the value -- a verifier
+    # recomputes it from the peer's own advertisement, and it is never stored or
+    # transmitted -- so what matters is only that both sides derive it the same way.
+    return hashlib.blake2b(
+        canonical.encode("utf-8"), digest_size=32
+    ).hexdigest()
 
 
 def canonical_peer_payload(public_key_hex: str, ts: int, content_digest: str) -> str:
@@ -468,7 +498,7 @@ def sign_peer_payload(payload: str) -> Optional[str]:
     mnemonic = get_identity_mnemonic()
     if not mnemonic:
         return None
-    return sign_with_key(_cached_keypair(mnemonic)[1], payload)
+    return _cached_keypair(mnemonic)[1].sign(payload.encode("utf-8")).hex()
 
 
 def verify_peer_payload(public_key_hex: str, payload: str, signature_hex: str) -> bool:
@@ -480,7 +510,23 @@ def verify_peer_payload(public_key_hex: str, payload: str, signature_hex: str) -
     if normalize_public_key_hex(public_key_hex) != public_key_hex or not signature_hex:
         return False
     try:
-        proposition_bytes = bytes.fromhex(node_proposition_hex(public_key_hex))
-    except (ValueError, TypeError):
+        public_key = ed25519.Ed25519PublicKey.from_public_bytes(
+            bytes.fromhex(public_key_hex)
+        )
+        public_key.verify(bytes.fromhex(signature_hex), payload.encode("utf-8"))
+    except (InvalidSignature, ValueError, TypeError):
         return False
-    return bip_schnorr_verify_proposition(proposition_bytes, payload, signature_hex)
+    return True
+
+
+def attestation_payload(peer_id: str) -> str:
+    """The exact string a ledger wallet signs to vouch for ``peer_id``.
+
+    Prefixed so the signature cannot be lifted into any other context that wallet signs
+    -- a reputation payload, an IOU note -- nor one of those replayed as an attestation.
+    The peer_id alone would be 64 hex characters, which is also the shape of plenty of
+    other things an Ergo key is asked to sign.
+    """
+    return _ATTESTATION_PREFIX + peer_id
+
+

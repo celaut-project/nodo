@@ -8,7 +8,7 @@ installation root (`TARGET_DIR`, default `/nodo`), i.e. `/nodo/config.yaml`. The
 snapshots the previous file to `config-<YYYYMMDDHHMMSS>.yaml` beside it.
 
 > ⚠️ nodo **rewrites** `config.yaml` on its first load: `auto` values such as
-> `network.GATEWAY_PORT` and `ledgers.ergo.WALLET_MNEMONIC` are resolved to
+> `network.GATEWAY_PORT`, `identity.MNEMONIC` and `ledgers.ergo.WALLET_MNEMONIC` are resolved to
 > concrete values, and the file is re-dumped with `yaml.safe_dump`. This **strips
 > all comments**, alphabetizes keys, and persists already-interpolated paths. So a
 > live `config.yaml` is uncommented and reordered; `config.example.yaml` remains
@@ -322,6 +322,18 @@ maintenance-loop timing and client slot/expiration policy.
 |---|---|---|
 | `client.ACCEPT_NEW_DEPOSITS` | `true` | Set `false` to stop `GenerateDepositToken` for every client (local or peer): no one can open a new deposit, so no one can acquire MU beyond what they already hold. Existing balances keep spending normally -- this only closes the door on new top-ups. Use to stop onboarding new demand, or to cap growth even while demand exists. |
 
+## `identity` — the node's name
+
+| Key | Default | Meaning |
+|---|---|---|
+| `identity.MNEMONIC` | `""` | The one mnemonic behind this node's `peer_id`. The Ed25519 key derived from it signs `GetPeerInfo` and backs the TLS certificate. Empty or `"auto"` generates a fresh one on first load — a node always needs a name. **Secret.** |
+
+On no ledger, and deliberately separate from the wallets below: each wallet signs this
+identity on each reputation proof it publishes, and that pair travels with it, so a wallet can
+be added, dropped or rotated without every peer seeing a different node. Changing
+`identity.MNEMONIC` *does* make a new node, orphaning the deposits and reputation
+recorded against the old one. See [Node identity](CONCEPTS.md#node-identity).
+
 ## `ledgers.ergo` — payments & reputation
 
 There is a **single** Ergo wallet. Clients pay its derived P2PK address; excess is
@@ -330,7 +342,7 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 
 | Key | Default | Meaning |
 |---|---|---|
-| `ledgers.ergo.WALLET_MNEMONIC` | `""` | The one wallet the node controls. Empty disables payments/reputation; `"auto"` generates a fresh mnemonic on first load. **Secret.** |
+| `ledgers.ergo.WALLET_MNEMONIC` | `""` | The one wallet the node controls: what it is paid into, what publishes its reputation proofs, and what attests its identity on Ergo. Not the node's identity. Empty disables payments/reputation; `"auto"` generates a fresh mnemonic on first load. **Secret.** |
 | `ledgers.ergo.NODE_URL` | `https://node.sigmaspace.io` | Ergo node used for chain access. |
 | `ledgers.ergo.payments.MU_PER_NANOERG` | `1` | What one nanoERG buys in MU — the one place the node's unit of account meets real money, and what peers are told as `ContractRate.mu_per_unit`. ERG↔nanoERG is fixed in code, not here. |
 | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | `""` | This node's reputation proof id (reconciled by `nodo sync_reputation_proof`). |

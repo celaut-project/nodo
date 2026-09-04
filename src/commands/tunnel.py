@@ -23,7 +23,7 @@ import socket
 from typing import Optional
 
 from src.manager.manager import resolve_instance_token
-from src.reputation_system.node_identity import get_node_public_key_hex
+from src.utils.node_identity import get_node_public_key_hex
 from src.tunneling.tunnel_client import (
     DEFAULT_UDP_IDLE_TIMEOUT_S,
     serve_tcp,

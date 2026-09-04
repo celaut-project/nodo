@@ -37,7 +37,10 @@ try:
     load_example_config()
     from protos import celaut_pb2
     from src.gateway import utils as gateway_utils
-    from src.reputation_system.node_identity import get_node_public_key_hex
+    from src.utils.node_identity import (
+    get_node_public_key_hex,
+    normalize_public_key_hex,
+)
     from src.utils import grpc_transport, tls_identity
     from src.utils.tls_identity import (
         HOST_KEY_EXTENSION_OID,
@@ -193,9 +196,13 @@ class ChannelTests(unittest.TestCase):
 
     def test_another_peer_id_at_this_address_is_refused(self):
         # An ISP-reassigned address, or an impostor on a stored one: it answers, it
-        # proves an identity, and it is still not the peer we meant to reach.
+        # proves an identity, and it is still not the peer we meant to reach. The
+        # expected id has to be a well-formed one, or the refusal would come from
+        # parsing it rather than from the certificate not matching.
+        other_peer_id = "ab" * 32
+        self.assertEqual(normalize_public_key_hex(other_peer_id), other_peer_id)
         with self.assertRaises(CertificateError):
-            grpc_transport.node_channel(self.target, expected_peer_id="02" + "ab" * 32)
+            grpc_transport.node_channel(self.target, expected_peer_id=other_peer_id)
 
     def test_local_channel_verifies_the_node_it_reaches(self):
         port = int(self.target.rsplit(":", 1)[1])
