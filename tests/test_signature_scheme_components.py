@@ -40,7 +40,7 @@ def tearDownModule():
 
 
 from protos import celaut_pb2 as celaut  # noqa: E402
-from src.reputation_system import node_identity as ni  # noqa: E402
+from src.utils import node_identity as ni  # noqa: E402
 
 
 class NodeSignatureSchemeTests(unittest.TestCase):

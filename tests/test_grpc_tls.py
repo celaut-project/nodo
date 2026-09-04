@@ -37,10 +37,10 @@ try:
     load_example_config()
     from protos import celaut_pb2
     from src.gateway import utils as gateway_utils
-    from src.reputation_system.node_identity import (
-        get_node_public_key_hex,
-        normalize_public_key_hex,
-    )
+    from src.utils.node_identity import (
+    get_node_public_key_hex,
+    normalize_public_key_hex,
+)
     from src.utils import grpc_transport, tls_identity
     from src.utils.tls_identity import (
         HOST_KEY_EXTENSION_OID,

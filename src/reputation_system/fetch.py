@@ -17,7 +17,7 @@ def local_proofs() -> Generator[celaut.Contract, None, None]:
     is built, keeps every announced proof attested by construction.
     """
     from src.reputation_system.envs import REPUTATION_PROOF_ERGO_TREE, ergo_ledger
-    from src.reputation_system.node_identity import attest_proof_ownership
+    from src.reputation_system.proof_attestation import attest_proof_ownership
 
     proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
     if proof_id:

@@ -643,7 +643,7 @@ class ConfigManager(metaclass=Singleton):
             # it at load time would have to read a port that does not exist yet. See
             # get_plaintext_gateway_port.
 
-            # The node's identity mnemonic (src/reputation_system/node_identity.py):
+            # The node's identity mnemonic (src/utils/node_identity.py):
             # the key behind the peer_id it presents, the signature on its GetPeerInfo
             # and the TLS certificate extension. It must always exist -- a node without
             # one has no name and cannot serve or dial -- so an unset or "auto" value is

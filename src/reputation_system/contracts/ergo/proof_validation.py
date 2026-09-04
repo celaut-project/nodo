@@ -12,7 +12,7 @@ from src.reputation_system.envs import (
     REPUTATION_PROOF_ERGO_TREE,
     ergo_ledger,
 )
-from src.reputation_system.node_identity import node_proposition_hex
+from src.reputation_system.proof_attestation import node_proposition_hex
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_script, get_token_id
 from src.utils.java_dependency import (

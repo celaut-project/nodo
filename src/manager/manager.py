@@ -206,7 +206,7 @@ def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
     without an attestation its claimed owner signed proves nothing about who holds it.
     """
     from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_ergo_reputation
-    from src.reputation_system.node_identity import attested_proof_owner
+    from src.reputation_system.proof_attestation import attested_proof_owner
 
     wallet_public_key = attested_proof_owner(contract_ledger, peer.public_key)
     if not wallet_public_key:
@@ -291,13 +291,13 @@ def verified_peer_public_key(peer: celaut_pb2.Peer) -> Optional[str]:
     if not peer.public_key or not peer.signature:
         return None
 
-    from src.reputation_system.node_identity import (
-        canonical_peer_content_digest,
-        canonical_peer_payload,
-        normalize_public_key_hex,
-        speaks_our_signature_scheme,
-        verify_peer_payload,
-    )
+    from src.utils.node_identity import (
+    canonical_peer_content_digest,
+    canonical_peer_payload,
+    normalize_public_key_hex,
+    speaks_our_signature_scheme,
+    verify_peer_payload,
+)
 
     if not speaks_our_signature_scheme(peer):
         # The peer says it signs with cryptography other than this node's, so nothing
