@@ -42,12 +42,12 @@ from typing import Optional, Tuple
 
 import grpc
 
-from src.utils.node_identity import (
+from src.identity.node_identity import (
     get_node_public_key_hex,
     normalize_public_key_hex,
 )
 from src.utils.config import ConfigManager
-from src.utils.tls_identity import (
+from src.identity.tls_identity import (
     TLS_SERVER_NAME,
     CertificateError,
     certificate_and_key,

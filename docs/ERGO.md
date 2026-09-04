@@ -137,7 +137,7 @@ because they are what the on-chain verifier does — ErgoScript's `byteArrayToBi
 * When signing, the nonce is redrawn until the top byte of both `e` and `z` is `< 0x80`, so
   neither is read as negative and the signature verifies under the unsigned convention too.
 
-The implementation is pure Python (`src/utils/ergo_schnorr.py`) — no JVM and no Ergo node,
+The implementation is pure Python (`src/reputation_system/ergo_schnorr.py`) — no JVM and no Ergo node,
 so a node can attest from first boot. It is checked against the Scala reference
 implementation's cross-validation vectors in `tests/test_ergo_schnorr.py`.
 

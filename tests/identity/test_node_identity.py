@@ -11,7 +11,7 @@ import unittest.mock
 from mnemonic import Mnemonic
 
 from protos import celaut_pb2
-from src.utils import node_identity as ni
+from src.identity import node_identity as ni
 from src.reputation_system.bip_wallet_verification import bip_schnorr_sign, derive_compressed_pubkey
 
 MNEMONIC = Mnemonic("english").generate(strength=128)

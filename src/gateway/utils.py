@@ -3,7 +3,7 @@ import os
 import shutil
 import threading
 import time
-from typing import Generator, List, Optional
+from typing import Generator, List, Optional, Tuple
 
 import netifaces as ni
 
@@ -11,7 +11,7 @@ from src.payment_system.ledgers import local_payment_methods, register_local_con
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.utils.transport_stack import (
+from src.identity.transport_stack import (
     declare_transport_stack,
     share_prose_on_get_peer_info,
 )
@@ -199,6 +199,63 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     return uris
 
 
+# The last announcement this node signed, and the content it was signed over. A
+# GetPeerInfo answer is a public, freely redistributable object -- `_passes_anti_replay`
+# says so: `ts` guards only against a downgrade to a stale address, and nothing from the
+# caller enters the signed payload. So signing a distinct one per caller buys nothing,
+# on an unauthenticated RPC anyone can invoke at any rate they like. It also costs the
+# *receiver*: a new `ts` every time drives a full `update_peer_instance` on each repeat,
+# including on-chain revalidation of the announced proofs.
+#
+# Not persisted, deliberately. A restart signing afresh is correct and cheap, and a
+# `ts` restored from disk on a host whose clock moved back is not.
+_SIGNED_PEER_LOCK = threading.Lock()
+_signed_peer: Optional[Tuple[str, bytes, float]] = None
+
+# How long a signed announcement may be re-served. It bounds how stale a `ts` can be,
+# and it matters most when an operator has set `network.ADDRESS_VALIDITY_SECONDS`: the
+# expiry each URI advertises counts forward from that `ts`, so a frozen one would age.
+# Clamped to a fraction of that validity for the same reason.
+_SIGNED_PEER_TTL_S = 60.0
+_SIGNED_PEER_TTL_FRACTION = 0.1
+
+
+def _signed_peer_ttl() -> float:
+    """How long the cached announcement stays servable."""
+    try:
+        validity = int(env_manager.get("network.ADDRESS_VALIDITY_SECONDS", 0) or 0)
+    except (TypeError, ValueError):
+        validity = 0
+    if validity <= 0:
+        # No expiry is advertised at all, so nothing in the message ages with `ts`.
+        return _SIGNED_PEER_TTL_S
+    return min(_SIGNED_PEER_TTL_S, validity * _SIGNED_PEER_TTL_FRACTION)
+
+
+def _cached_announcement(digest: str) -> Optional[celaut_pb2.Peer]:
+    """The stored announcement when it still describes ``digest``, else None.
+
+    Keyed on the content digest, which already covers every field that distinguishes
+    one announcement from another -- addresses, rates, payment contracts, proofs, the
+    declared scheme and each address's protocol stack. So a new address or a new proof
+    invalidates this by construction, with nothing to remember to add here.
+
+    The caller holds ``_SIGNED_PEER_LOCK`` across this and the signing that may follow.
+    Guarding only the dictionary would leave the check and the signature separable, and
+    gRPC serves GetPeerInfo on several threads: four callers arriving together would
+    each find it empty and each pay for a signature, which is the cost this exists to
+    avoid.
+    """
+    if not _signed_peer:
+        return None
+    cached_digest, blob, signed_at = _signed_peer
+    if cached_digest != digest or time.monotonic() - signed_at > _signed_peer_ttl():
+        return None
+    restored = celaut_pb2.Peer()
+    restored.ParseFromString(blob)
+    return restored
+
+
 def _sign_peer(peer: celaut_pb2.Peer) -> None:
     """Sign ``peer`` with this node's identity key.
 
@@ -213,7 +270,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     logs. The refusal itself is only ever logged by the *remote* peer, so staying quiet
     here would leave an unreachable node with nothing locally to explain why.
     """
-    from src.utils.node_identity import (
+    from src.identity.node_identity import (
     canonical_peer_content_digest,
     canonical_peer_payload,
     declare_signature_scheme,
@@ -229,12 +286,9 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
         )
         return
 
-    from src.utils.network import uri_expiry
+    global _signed_peer
 
-    ts = int(time.time())
-    expiry = uri_expiry(ts)
-    for uri in peer.uri:
-        uri.expiry_unix_timestamp = expiry
+    from src.utils.network import uri_expiry
 
     # Both are covered by the signature, so they go on before the digest is taken --
     # signing first and declaring afterwards would produce an announcement whose own
@@ -245,9 +299,36 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     # decide about it, and the scheme is no different from the transport stack there.
     declare_signature_scheme(peer, prose=share_prose_on_get_peer_info())
 
-    signature = sign_peer_payload(
-        canonical_peer_payload(public_key_hex, ts, canonical_peer_content_digest(peer))
-    )
+    # The digest is taken before the expiry is stamped, so it describes what this node
+    # is announcing rather than when: an announcement whose content has not changed
+    # hits the cache instead of being signed again.
+    digest = canonical_peer_content_digest(peer)
+    with _SIGNED_PEER_LOCK:
+        cached = _cached_announcement(digest)
+        if cached is not None:
+            peer.CopyFrom(cached)
+            return
+
+        ts = int(time.time())
+        expiry = uri_expiry(ts)
+        for uri in peer.uri:
+            uri.expiry_unix_timestamp = expiry
+
+        # Re-taken with the expiry in place: that is what the signature has to cover,
+        # or a relay could stretch it. The cache is keyed on the expiry-free digest
+        # above, since this one changes every second whether the announcement did or
+        # not.
+        signature = sign_peer_payload(
+            canonical_peer_payload(
+                public_key_hex, ts, canonical_peer_content_digest(peer)
+            )
+        )
+        if signature:
+            peer.public_key = public_key_hex
+            peer.signature = signature
+            peer.ts = ts
+            _signed_peer = (digest, peer.SerializeToString(), time.monotonic())
+
     if not signature:
         # Never leave a declared scheme or an attestation on an unsigned announcement:
         # both are claims the signature is what vouches for, so on their own they state
@@ -257,11 +338,6 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
             f'Could not sign this node\'s announcement as {public_key_hex}, so every '
             'peer will refuse it. Check identity.MNEMONIC.'
         )
-        return
-
-    peer.public_key = public_key_hex
-    peer.signature = signature
-    peer.ts = ts
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
@@ -279,7 +355,7 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
         # OID, on what the signature covers or on which RPCs exist, and neither could
         # tell from the announcement. `formal` carries those parameters and is what a
         # comparison reads; the prose is there so a reader can implement the thing (see
-        # src/utils/transport_stack.py). Covered by the signature below, so a relay can
+        # src/identity/transport_stack.py). Covered by the signature below, so a relay can
         # neither strip the declaration nor edit a parameter out of it.
         declare_transport_stack(announced, prose=share_prose_on_get_peer_info())
 
