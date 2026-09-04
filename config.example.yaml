@@ -608,6 +608,28 @@ communication:
   # 479 million. This node declares four, so five leaves room for a scheme with one
   # more building block. Raise it only alongside a scheme that genuinely needs more.
   MAX_SIGNATURE_SCHEME_COMPONENTS: 5
+
+  # Whether an announcement carries the `prose` of what it declares -- the written-out
+  # specification of the signature scheme and of each address's protocol stack. It is
+  # what lets a reader holding nothing but the message implement the protocol, and it is
+  # ~5 KB per announced address. Nothing that decides a comparison lives in it: two
+  # nodes match on `formal` and on the tags, so dropping it costs a reader detail and
+  # never costs a verifier its answer (node_identity.same_component_stack).
+  #
+  # Over gRPC it is on: the bytes are transient, and a peer that cannot read what this
+  # node means by "tls, grpc" is exactly the reader the prose is written for.
+  SHARE_PROSE_ON_GET_PEER_INFO: true
+  # On a ledger it is off: a reputation box pays storage rent on every byte for as long
+  # as it exists, and these paragraphs are several times a register's whole budget.
+  #
+  # It applies to peers' announcements too, which this node republishes verbatim so a
+  # reader can verify their signatures straight off the chain. There is a real cost
+  # there: a peer's prose is inside what it signed, so stripping it invalidates that
+  # signature -- such an announcement is published without its signature and public key
+  # rather than with one that cannot verify, which makes it informational instead of
+  # verifiable. A peer that announces no prose is republished whole, signature intact.
+  # Set this true to keep every republished signature verifiable, and pay the rent.
+  SHARE_PROSE_ON_LEDGER: false
   SELF_ANNOUNCE_TO_CONNECTING_PEERS: false
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
