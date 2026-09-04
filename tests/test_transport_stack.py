@@ -58,6 +58,17 @@ class DeclarationTests(unittest.TestCase):
         served = celaut_pb2.DESCRIPTOR.services_by_name["Gateway"].methods
         self.assertEqual(sorted(declared), sorted(m.name for m in served))
 
+    def test_the_prose_explains_the_framing_and_every_method(self):
+        # While `formal` points at no published specification, the prose IS the
+        # specification: a reader holding only this announcement cannot follow a link
+        # into a repository, so naming bee-rpc without saying what it is, or listing an
+        # RPC without saying what it does, would leave the descriptor unimplementable.
+        prose = _component(_stack().protocol_stack, "grpc").prose
+        for framing_concept in ("chunk", "separator", "head", "signal", "block"):
+            self.assertIn(framing_concept, prose, f"the {framing_concept} field is unexplained")
+        for method in celaut_pb2.DESCRIPTOR.services_by_name["Gateway"].methods:
+            self.assertIn(method.name, prose, f"{method.name} is announced but not described")
+
     def test_formal_is_canonical(self):
         # It is compared byte for byte and covered by the announcement's signature, so
         # it must not depend on the order anything was built in.
