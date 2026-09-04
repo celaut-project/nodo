@@ -20,6 +20,7 @@ from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_con
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
 from src.utils.grpc_transport import peer_channel
+from src.utils.transport_stack import carries_prose, share_prose_on_ledger, strip_prose
 from src.utils.utils import from_amount, generate_uris_by_peer_id
 from src.utils.monetary import format_mu
 
@@ -1036,6 +1037,19 @@ class SQLConnection(metaclass=Singleton):
                     # trusting that field alone would publish a forgery on-chain under
                     # the "verifiable against the peer's key" promise.
                     if peer_msg.signature and peer_msg.public_key != peer_id:
+                        peer_msg.ClearField('signature')
+                        peer_msg.ClearField('public_key')
+
+                    # A peer's prose is inside what it signed, so dropping it to save
+                    # rent costs the signature too: what would be published otherwise is
+                    # a signature that cannot verify, which is worse than none under the
+                    # same promise. The trade is the operator's to make
+                    # (communication.SHARE_PROSE_ON_LEDGER): pay the rent and republish
+                    # a verifiable claim, or publish a smaller informational one. A peer
+                    # that announces no prose is unaffected either way -- there is
+                    # nothing to strip, so its signature survives.
+                    if not share_prose_on_ledger() and carries_prose(peer_msg):
+                        strip_prose(peer_msg)
                         peer_msg.ClearField('signature')
                         peer_msg.ClearField('public_key')
 

@@ -11,7 +11,10 @@ from src.payment_system.ledgers import local_payment_methods, register_local_con
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.utils.transport_stack import declare_transport_stack
+from src.utils.transport_stack import (
+    declare_transport_stack,
+    share_prose_on_get_peer_info,
+)
 from src.utils.utils import (
     get_local_ip_from_network,
     is_virtual_interface
@@ -247,7 +250,10 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     peer.ts = ts
     # Declared alongside the signature, never without one: the field says what this
     # signature is, so on an unsigned announcement it would state a fact about nothing.
-    declare_signature_scheme(peer)
+    # One prose policy for the whole announcement (communication.SHARE_PROSE_ON_*): what
+    # a reader is handed to understand the message, as against what a verifier reads to
+    # decide about it, and the scheme is no different from the transport stack there.
+    declare_signature_scheme(peer, prose=share_prose_on_get_peer_info())
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
@@ -267,7 +273,7 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
         # comparison reads; the prose is there so a reader can implement the thing (see
         # src/utils/transport_stack.py). Covered by the signature below, so a relay can
         # neither strip the declaration nor edit a parameter out of it.
-        declare_transport_stack(announced)
+        declare_transport_stack(announced, prose=share_prose_on_get_peer_info())
 
     # Advertise what this node charges on a recurring basis, so a peer knows the
     # rate before negotiating anything. The price of a *specific service* is not

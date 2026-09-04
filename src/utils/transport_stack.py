@@ -40,10 +40,11 @@ Each component is declared the way every replaceable component in celaut is:
 The gRPC half is derived from the compiled descriptor rather than typed out, so adding
 or removing an RPC changes what this node announces without anyone remembering to.
 """
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Final, Iterable, Tuple
 
 from protos import celaut_pb2
 from src.reputation_system.node_identity import same_component_stack
+from src.utils.config import ConfigManager
 from src.utils.tls_identity import (
     HOST_KEY_EXTENSION_OID,
     TLS_SERVER_NAME,
@@ -53,6 +54,13 @@ from src.utils.tls_identity import (
 # The gRPC service a node serves on this stack. Named here rather than assumed, because
 # `formal` below is built from whatever the compiled proto says it contains.
 GATEWAY_SERVICE_NAME = "Gateway"
+
+# Where the prose travels, decided per destination because the two destinations charge
+# for it differently: gRPC bytes are transient, a ledger register's are rented forever.
+SHARE_PROSE_ON_GET_PEER_INFO_KEY: Final[str] = (
+    "communication.SHARE_PROSE_ON_GET_PEER_INFO"
+)
+SHARE_PROSE_ON_LEDGER_KEY: Final[str] = "communication.SHARE_PROSE_ON_LEDGER"
 
 
 def _formal(pairs: Dict[str, str]) -> bytes:
@@ -203,6 +211,61 @@ def node_transport_stack(*, prose: bool = True):
     uri = celaut_pb2.Peer.Uri()
     declare_transport_stack(uri, prose=prose)
     return list(uri.protocol_stack)
+
+
+def share_prose_on_get_peer_info() -> bool:
+    """Whether an announcement served over gRPC carries its prose. On by default.
+
+    The bytes are transient there, and a peer that cannot read what this node means by
+    its tags is precisely the reader the prose exists for.
+    """
+    return bool(ConfigManager().get(SHARE_PROSE_ON_GET_PEER_INFO_KEY, True))
+
+
+def share_prose_on_ledger() -> bool:
+    """Whether an announcement written to a ledger carries its prose. Off by default.
+
+    A reputation box pays storage rent on every byte for as long as it exists, and these
+    paragraphs are several times a register's whole budget.
+    """
+    return bool(ConfigManager().get(SHARE_PROSE_ON_LEDGER_KEY, False))
+
+
+def carries_prose(peer) -> bool:
+    """Whether ``peer`` declares any prose at all.
+
+    Asked before stripping one, because stripping is only free on a message this node is
+    about to sign: on someone else's it costs their signature, so a peer that announced
+    none must not be treated as if it had.
+    """
+    if any(c.prose for c in peer.signature_scheme.components):
+        return True
+    return any(
+        c.prose for uri in peer.uri
+        for c in list(uri.protocol_stack) + [uri.transport]
+    )
+
+
+def strip_prose(peer) -> None:
+    """Remove every description from ``peer``, in place.
+
+    Both declarations at once -- the signature scheme and each address's protocol stack
+    -- because they are one policy: what a reader is handed to *understand* the message,
+    as opposed to what a verifier reads to *decide* about it. Nothing here is compared
+    (``node_identity._same_component`` reads ``formal``, then the tags), so this is
+    always safe to do to a message this node is about to sign.
+
+    It is NOT safe to do to a message already signed by someone else: the prose is
+    inside their digest, so removing it leaves a signature that cannot verify. A caller
+    stripping a peer's announcement has to drop the signature with it -- see
+    ``sql_connection.submit_to_ledger``, which does exactly that.
+    """
+    for component in peer.signature_scheme.components:
+        component.ClearField("prose")
+    for uri in peer.uri:
+        for component in uri.protocol_stack:
+            component.ClearField("prose")
+        uri.transport.ClearField("prose")
 
 
 def speaks_our_transport_stack(protocol_stack: Iterable) -> bool:
