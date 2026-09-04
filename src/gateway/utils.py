@@ -244,8 +244,8 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     )
     if not signature:
         # Never leave a declared scheme or an attestation on an unsigned announcement:
-        # both are claims this signature was supposed to vouch for, so on their own they
-        # state a fact about nothing.
+        # both are claims the signature is what vouches for, so on their own they state
+        # a fact about nothing.
         peer.ClearField("signature_scheme")
         del peer.ledger_attestations[:]
         log.LOGGER(

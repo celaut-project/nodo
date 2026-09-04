@@ -106,13 +106,13 @@ It is **not** the node's `peer_id`. That is an Ed25519 key of its own, from
 `identity.MNEMONIC`, on no ledger at all (see
 [Node identity](CONCEPTS.md#node-identity)). R7 is the reputation contract's spending
 clause, so it can only ever hold an Ergo proposition — reading it as the peer's id
-would have fixed every celaut node's identity as an Ergo key forever.
+would fix every celaut node's identity as an Ergo key forever.
 
 What connects the two is an **attestation**: this wallet signs the node's `peer_id`
 once, and the pair is announced in `Peer.ledger_attestations`. A reader checks that R7
 is the attested wallet and that the wallet signed this `peer_id`, both from the proof
-box alone. So a proof is still attributed to a node, and the node can change wallets
-without changing its name.
+box alone. So a proof is attributed to a node without the node's name having to be an
+on-chain object, and the node can change wallets without changing its name.
 
 What this wallet signs — the attestation, and the ownership challenge for a reputation
 proof — uses the **Schnorr scheme over secp256k1 that ChainCash/Basis use off-chain**:

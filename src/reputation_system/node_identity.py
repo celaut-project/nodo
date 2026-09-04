@@ -3,21 +3,22 @@ Node identity keypair (issue #236): a node's own Ed25519 keypair, derived from a
 mnemonic of its own. Used as the ``peer_id`` a node presents to others and to sign its
 ``GetPeerInfo`` response (``Peer.public_key`` / ``Peer.signature``).
 
-The identity is not a wallet on any ledger. It used to be one -- the node signed with
-``ledgers.ergo.WALLET_MNEMONIC``, and a reputation proof's R7 owner *was* its
-``peer_id`` -- which made the comparison free but bound the identity to a key that has
-to be spendable on Ergo forever: R7 is the reputation contract's spending clause
-(``INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }``), so it can never
-hold anything but an Ergo proposition. That made Ergo a dependency of the peer-to-peer
+The identity is deliberately not a wallet on any ledger, tempting though it is to make
+a reputation proof's R7 owner *be* the ``peer_id``: the comparison would be free, and
+the price is permanent. R7 is the reputation contract's spending clause
+(``INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }``), so it can hold
+nothing but an Ergo proposition -- an identity read out of it is an identity that must
+stay spendable on Ergo forever, which makes Ergo a dependency of the peer-to-peer
 layer, down to a node with no wallet being unable to serve or dial at all.
 
-What ties an identity to a ledger now is an attestation: a wallet on that ledger signs
-this node's ``peer_id``, and the pair travels in ``Peer.ledger_attestations``. A reader
+What ties an identity to a ledger is an attestation: a wallet on that ledger signs this
+node's ``peer_id``, and the pair travels in ``Peer.ledger_attestations``. A reader
 checks two links instead of comparing bytes -- the R7 owner is the attested wallet, and
 that wallet signed this ``peer_id`` -- which is the same fact, verifiable from the
 proof box alone with no round-trip to the node, and it holds for a second ledger
-without privileging the first. Payment already had this shape
-(``Peer.payment_contracts`` is a menu), and reputation and identity now match it.
+without privileging the first. It is the shape payment already has
+(``Peer.payment_contracts`` is a menu the payer picks from), applied to reputation and
+identity.
 
 There is exactly ONE identity mnemonic per node, ``identity.MNEMONIC``, generated on
 first config load when unset. It never changes underneath the peers that recorded it,
@@ -465,9 +466,9 @@ def canonical_peer_content_digest(peer) -> str:
     ``signature_scheme`` is covered as well, which it has to be as soon as more than one
     scheme can be accepted: a relay that could re-label a signature as belonging to a
     different scheme -- one whose verification also accepts those bytes, or simply a
-    weaker one -- would be re-labelling an authentication decision. Reading a scheme
-    stays a local capability (see :func:`same_signature_scheme`), so nothing stops a
-    node from plugging in a second verifier, and the digest must not be the thing that
+    weaker one -- would be re-labelling an authentication decision. Which schemes a node
+    accepts is a local capability (see :func:`same_signature_scheme`), so nothing stops
+    one from plugging in a second verifier, and the digest must not be the thing that
     has to change when it does.
     """
     uris = sorted(_canonical_uri(uri) for uri in peer.uri)

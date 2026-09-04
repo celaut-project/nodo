@@ -17,17 +17,18 @@ received ``Peer`` message and no trust-on-first-use.
 
 The indirection is what the design wants regardless of which cryptography the identity
 is in: the identity key never enters a handshake, never sits in the memory of the
-process doing one, and could one day live offline or in an HSM, while the key that does
-the negotiating stays disposable. It also happens to be the only option available --
-the ``grpcio`` wheels ship BoringSSL, whose ``ec.h`` only knows the NIST curves, so a
-secp256k1 certificate is impossible rather than merely unnegotiated -- but that is the
-lesser reason, and it is not the one to reach for when the identity scheme changes.
+process doing one, and can live offline or in an HSM, while the key that does the
+negotiating stays disposable. It is also the only option open to several identity
+schemes at all: the ``grpcio`` wheels ship BoringSSL, whose ``ec.h`` only knows the
+NIST curves, so a certificate on any other curve is impossible rather than merely
+unnegotiated. That is the lesser reason -- the indirection would be worth keeping on a
+stack that had no such limit.
 
 The extension format is ours, not libp2p's: their ``peer_id`` is a multihash of a
-protobuf-encoded key while ours is the raw compressed public key, so reusing their
-IANA-allocated OID while diverging on what it contains would be mislabelling. The OID
-below lives under the UUID arc ``2.25`` (ITU-T X.667), which anyone may derive from a
-UUID without registering anything.
+protobuf-encoded key while ours is the identity public key in the raw form its own
+scheme defines, so reusing their IANA-allocated OID while diverging on what it contains
+would be mislabelling. The OID below lives under the UUID arc ``2.25`` (ITU-T X.667),
+which anyone may derive from a UUID without registering anything.
 
 The P-256 key is generated per process and never touches disk. Trust comes from the
 extension, not from the certificate being stable, so there is nothing to persist,

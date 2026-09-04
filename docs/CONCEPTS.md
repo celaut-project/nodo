@@ -181,24 +181,22 @@ identity cannot change underneath the peers that recorded it.
 
 ### The identity is on no ledger
 
-It used to *be* a ledger key: the node signed with `ledgers.ergo.WALLET_MNEMONIC`, and
-a reputation proof's R7 owner was literally its `peer_id`. That made the check a byte
-comparison, and it made Ergo a dependency of the peer-to-peer layer — down to a node
-with no wallet being unable to serve or dial at all.
-
-The reason it cannot stay that way is in the contract. R7 is the reputation contract's
-spending clause:
+The obvious shortcut is to let a ledger key *be* the identity — sign with
+`ledgers.ergo.WALLET_MNEMONIC`, and let a reputation proof's R7 owner be literally the
+`peer_id`. It makes the check a byte comparison. It is deliberately not done, and the
+reason is in the contract. R7 is the reputation contract's spending clause:
 
 ```ergoscript
 INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }
 ```
 
-So R7 holds an Ergo proposition and can hold nothing else, ever. Reading it as the
-peer's id therefore fixed every celaut node's identity as an Ergo key by construction —
-and it privileged one ledger's reputation system over any other.
+So R7 holds an Ergo proposition and can hold nothing else, ever. An identity read out of
+it is fixed as an Ergo key by construction, for every celaut node — which privileges one
+ledger's reputation system over any other, and makes Ergo a dependency of the
+peer-to-peer layer, down to a node with no wallet being unable to serve or dial at all.
 
-What links the two now is an **attestation**: a wallet signs the node's `peer_id`, and
-the pair travels in `Peer.ledger_attestations`, repeated per ledger exactly as
+What links the two is an **attestation**: a wallet signs the node's `peer_id`, and the
+pair travels in `Peer.ledger_attestations`, repeated per ledger exactly as
 `payment_contracts` is. A reader checks two links instead of comparing bytes:
 
 ```
@@ -212,14 +210,15 @@ R9  = Peer{ public_key: <ed25519>,    │   ← the attestation
 ```
 
 Both links are verifiable from the proof box alone, with no round-trip to the node, so
-nothing is lost against the old byte comparison. What is gained is that the node's
-name outlives its wallets: adding, dropping or rotating one leaves its peers, deposits
-and reputation intact, and a second ledger's reputation system attaches the same way
-without either being privileged.
+the indirection costs nothing a direct byte comparison would have saved. What it buys is
+that the node's name outlives its wallets: adding, dropping or rotating one leaves its
+peers, deposits and reputation intact, and a second ledger's reputation system attaches
+the same way without either being privileged.
 
 Note what R5 does, by contrast: it names the *subject* of an opinion, is plain
 `Coll[Byte]`, and so carries the identity key of the node being talked about —
-whatever cryptography that identity is in. R5 and R7 were never the same kind of thing.
+whatever cryptography that identity is in. R5 and R7 are not the same kind of thing,
+and only R7 is constrained by what the contract has to be able to spend.
 
 An attestation proves possession of a wallet. It does not say the node accepts payment
 there (`payment_contracts`) nor that it has published anything there

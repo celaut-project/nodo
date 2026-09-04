@@ -59,8 +59,8 @@ class VerifyReputationCommandTests(unittest.TestCase):
         )
 
     def test_the_wallet_checked_is_the_attested_one(self):
-        # Not the peer_id: the two are different keys now, and only one of them can
-        # ever appear in R7.
+        # Not the peer_id: the two are different keys, and only the wallet can ever
+        # appear in R7.
         called = {}
 
         def node_proposition_hex(wallet):
