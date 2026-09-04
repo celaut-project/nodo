@@ -554,7 +554,7 @@ class ConfigManager(metaclass=Singleton):
         This is the port handed to the services this node runs -- they speak plain gRPC
         and read it from ``__config__.gateway`` -- and the one an external caller that
         declines TLS can use. Peers and the CLI always get the TLS port instead (see
-        ``src/utils/grpc_transport.py``).
+        ``src/identity/grpc_transport.py``).
 
         ``auto`` resolves to ``GATEWAY_PORT + 1`` rather than to a free port picked at
         random, so it is deterministic: a restart does not move the address a long-lived
@@ -643,7 +643,7 @@ class ConfigManager(metaclass=Singleton):
             # it at load time would have to read a port that does not exist yet. See
             # get_plaintext_gateway_port.
 
-            # The node's identity mnemonic (src/utils/node_identity.py):
+            # The node's identity mnemonic (src/identity/node_identity.py):
             # the key behind the peer_id it presents, the signature on its GetPeerInfo
             # and the TLS certificate extension. It must always exist -- a node without
             # one has no name and cannot serve or dial -- so an unset or "auto" value is

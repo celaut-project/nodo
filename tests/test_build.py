@@ -3,7 +3,7 @@ import threading
 from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc, gateway_bee
 from bee_rpc.client import Dir, client_grpc
 
-from src.utils.grpc_transport import verified_channel
+from src.identity.grpc_transport import verified_channel
 
 from tests.main import SORTER, FRONTIER, WALL, WALK, REGRESION, RANDOM, GATEWAY, generator
 

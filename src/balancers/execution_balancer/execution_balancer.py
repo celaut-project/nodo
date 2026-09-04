@@ -11,7 +11,7 @@ from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
-from src.utils.grpc_transport import peer_channel
+from src.identity.grpc_transport import peer_channel
 from src.utils.utils import service_extended, peers_id_iterator
 from src.utils.config import ConfigManager
 from src.payment_system.mu_conversion import (

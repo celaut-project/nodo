@@ -19,7 +19,7 @@ from src.utils.firewall.gateway import (
 )
 from src.utils.firewall.legacy import sweep_compat_tables
 from src.utils.firewall.reachability import ProbeResult
-from src.utils.grpc_transport import server_credentials
+from src.identity.grpc_transport import server_credentials
 from src.utils.network_policy import NetworkPolicy, NetworkPolicyConfigError
 
 env_manager = ConfigManager()

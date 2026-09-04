@@ -3,7 +3,7 @@
 The vectors below are the cross-validation vectors published in basis-tracker
 (``specs/SCHNORR_SIGNATURE_SPEC.md``), generated from the Scala reference
 (``basis/offchain/SigUtils.scala``). They are the only external oracle available for this
-primitive, and they are what keeps ``src/utils/ergo_schnorr.py`` from drifting into a
+primitive, and they are what keeps ``src/reputation_system/ergo_schnorr.py`` from drifting into a
 nodo-only variant of the scheme: a signature produced elsewhere in the Ergo ecosystem must
 verify here, byte for byte, with no re-encoding.
 
@@ -12,7 +12,7 @@ signature *scheme* is the same one node identity uses, which is the point of reu
 """
 import unittest
 
-from src.utils.ergo_schnorr import ORDER, blake2b256, challenge, sign, verify
+from src.reputation_system.ergo_schnorr import ORDER, blake2b256, challenge, sign, verify
 
 # basis-tracker specs/SCHNORR_SIGNATURE_SPEC.md, "Cross-Validation Test Vectors".
 ISSUER = "0284bf7562262bbd6940085748f3be6afa52ae317155181ece31b66351ccffa4b0"

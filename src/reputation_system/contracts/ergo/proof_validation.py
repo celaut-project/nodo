@@ -226,74 +226,100 @@ def _validate_box_structure(box: dict) -> bool:
 def validate_contract_ledger(
     contract_ledger: celaut.Contract, owner_wallet_public_key: str
 ) -> bool:
+    """Whether ``owner_wallet_public_key`` really owns the proof ``contract_ledger`` names.
+
+    Logs why when it does not. Callers that need the reason as a value -- to print it,
+    rather than to write it to a log nobody is reading at that moment -- call
+    :func:`explain_contract_ledger` instead; this is the thin wrapper over it, so the
+    two can never answer differently.
+    """
+    reason = explain_contract_ledger(contract_ledger, owner_wallet_public_key)
+    if reason:
+        logger(reason)
+    return reason is None
+
+
+def explain_contract_ledger(
+    contract_ledger: celaut.Contract, owner_wallet_public_key: str
+) -> Optional[str]:
+    """``None`` when the proof checks out, else why it did not.
+
+    The whole check in one place, in the order a reader would ask it: is this the
+    contract we know, does it name a proof, does that proof exist on-chain, is it on
+    the canonical instance, are its boxes shaped right, and is its owner the wallet
+    this peer proved it holds.
+
+    A returned string rather than a logged one because there are two audiences for the
+    same answer -- the node's log, and an operator running `nodo verify_reputation` who
+    needs to know *which* of the six failed. Producing it once is what keeps those two
+    from drifting: the command used to re-implement this sequence and had quietly lost
+    the first two checks, so it could pass a proof the node refused.
+    """
     # Equivalence policy: `formal` is the canonical machine-readable ledger identity, so we
     # validate ONLY the compiled ErgoTree (get_script) plus `formal`. `tags`/`prose` are
     # human-facing and intentionally not part of the compatibility decision.
     expected_script = bytes.fromhex(REPUTATION_PROOF_ERGO_TREE)
-    compatibility = (
-        contract_ledger.ledger.formal == ergo_ledger.formal
-        and get_script(contract_ledger) == expected_script
-    )
-
-    if not compatibility:
-        logger(
+    ledger_matches = contract_ledger.ledger.formal == ergo_ledger.formal
+    script_matches = get_script(contract_ledger) == expected_script
+    if not (ledger_matches and script_matches):
+        return (
             "Contract ledger not compatible: "
-            f"ledger={contract_ledger.ledger.formal == ergo_ledger.formal} "
-            f"script={get_script(contract_ledger) == expected_script}"
+            f"ledger={ledger_matches} script={script_matches}"
         )
-        return False
 
     token_id = get_token_id(contract_ledger)
     if not token_id:
-        logger("Incomplete contract ledger, there is no token id")
-        return False
+        return "Incomplete contract ledger, there is no token id"
 
     try:
         boxes = _get_unspent_boxes_by_token(token_id)
     except Exception as e:
-        logger(f"Error fetching token boxes for structural validation: {e}")
-        return False
+        return f"Error fetching token boxes for structural validation: {e}"
 
     if not boxes:
-        logger(f"No unspent boxes found for proof token {token_id}")
-        return False
+        return f"No unspent boxes found for proof token {token_id}"
 
     # Reject boxes sitting on a non-canonical contract instance.
     off_contract = _boxes_off_canonical_contract(boxes)
     if off_contract:
-        logger(f"Reputation proof {token_id} has boxes off the canonical contract; rejecting.")
-        return False
+        return (
+            f"Reputation proof {token_id} has boxes off the canonical contract "
+            f"(off-contract ErgoTrees: {[t[:16] + '...' for t in off_contract]})"
+        )
 
     if not all(_validate_box_structure(box) for box in boxes):
-        logger("Structural validation of the reputation profile failed.")
-        return False
+        return (
+            f"Reputation proof {token_id} has a box without the canonical R4/R5/R7 "
+            "register structure (see the log for the offending register)"
+        )
 
     # Every box must declare the SAME R7 owner, and it must be the Ergo wallet the peer
     # proved it holds -- the wallet named by an attestation this peer signed with its
-    # identity key and that wallet countersigned (node_identity.attested_proof_owner,
-    # resolved by the caller from the proof's own xattrs). R7 carries propositionBytes, which is what the contract
-    # checks a spender against, so a wallet is the only thing it can ever hold; the
-    # peer's identity reaches this comparison through the attestation rather than by
-    # being the same key. Identity does not depend on holding a proof; a proof, when
-    # present, is verified against the attested wallet instead.
+    # identity key and that wallet countersigned (proof_attestation.attested_proof_owner,
+    # resolved by the caller from the proof's own xattrs). R7 carries propositionBytes,
+    # which is what the contract checks a spender against, so a wallet is the only thing
+    # it can ever hold; the peer's identity reaches this comparison through the
+    # attestation rather than by being the same key. Identity does not depend on holding
+    # a proof; a proof, when present, is verified against the attested wallet instead.
     owners = {
         _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or ""))
         for box in boxes
     }
     owners.discard(None)
     if len(owners) != 1:
-        logger(f"Reputation proof {token_id} has inconsistent R7 owners: {sorted(o for o in owners if o)}")
-        return False
+        return (
+            f"Reputation proof {token_id} has inconsistent or missing R7 owners: "
+            f"{sorted(o for o in owners if o)}"
+        )
 
     owner_proposition_hex = next(iter(owners))
     if owner_proposition_hex != node_proposition_hex(owner_wallet_public_key):
-        logger(
+        return (
             f"The attested wallet {owner_wallet_public_key} does not own the R7 owner "
-            f"for proof {token_id}."
+            f"for proof {token_id}"
         )
-        return False
 
-    return True
+    return None
 
 
 """

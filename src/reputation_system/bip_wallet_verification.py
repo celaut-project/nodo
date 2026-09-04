@@ -1,6 +1,6 @@
 """BIP-39/BIP-32 derivation and signing for node identity (#236) and the reputation proof.
 
-Signatures are Schnorr over secp256k1 (``src.utils.ergo_schnorr``), not ECDSA -- the
+Signatures are Schnorr over secp256k1 (``src.reputation_system.ergo_schnorr``), not ECDSA -- the
 off-chain encoding ChainCash/Basis sign and an ErgoScript reserve contract verifies, not
 an on-chain P2PK spending proof (see that module). The key is derived on Ergo's path and
 denotes an Ergo P2PK proposition, so what it signs should be the kind of object that
@@ -13,12 +13,12 @@ from bip32 import BIP32, HARDENED_INDEX
 import ecdsa
 import binascii
 
-from src.utils import ergo_schnorr
+from src.reputation_system import ergo_schnorr
 
 # Ergo's SLIP-44 derivation path, for the wallet this node holds on Ergo: what it is
 # paid into, what publishes its reputation proofs, and what signs the attestation
 # vouching for the node's identity. Not the identity itself -- that is an Ergo-free
-# Ed25519 key of its own (see src/utils/node_identity.py).
+# Ed25519 key of its own (see src/identity/node_identity.py).
 ERGO_DERIVATION_PATH = "m/44'/429'/0'/0/0"
 
 def __bip32_derive_key(bip32: BIP32, derivation_path: str):

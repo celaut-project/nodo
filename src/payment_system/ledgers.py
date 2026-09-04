@@ -53,7 +53,7 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
     ``ergo_contract_from_proposition_bytes`` to build the output box, and what
     this node's own ``payment_process_validator`` turns back into an address to
     check the payment landed on its wallet — so it must travel as the ``script``
-    xattr, untouched. See the contract in src/utils/ergo_tree.py: the exchanged
+    xattr, untouched. See the contract in src/payment_system/contracts/ergo/ergo_tree.py: the exchanged
     value is never an ErgoScript source string and never a base58 address.
 
     ``contract_type`` carries the stable, wallet-independent identity instead, so
