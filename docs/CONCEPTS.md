@@ -205,6 +205,14 @@ so the descriptor can be *read*, not diffed. It is dropped from an announcement 
 to an Ergo register, where every byte pays storage rent forever; nothing is lost from a
 verification, because what a comparison reads is `formal` and the tags.
 
+A full announcement runs to roughly 5 KB per advertised address, so it is **signed once
+per change rather than once per caller**: `GetPeerInfo` serves a cached, byte-identical
+answer until the content actually changes. Nothing is given up for it — the signature is
+over a public object, and `ts` guards only against a downgrade to a stale address, so
+nothing about the caller was ever in what was signed. A repeated `ts` also lets the
+*receiver* skip a full refresh, including the on-chain revalidation of the proofs the
+announcement carries.
+
 The OID itself is `uuid.uuid5(uuid.NAMESPACE_OID, "CELAUT")` written under the ITU-T
 X.667 arc `2.25`, which anyone may derive from a UUID with nothing to register. The seed
 is the project name and nothing more, so the number can be recomputed in one line and
