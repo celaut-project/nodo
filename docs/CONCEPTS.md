@@ -166,6 +166,27 @@ Also outside TLS: the node→service leg of a tunnel (TLS terminates at the node
 [`TUNNELING.md`](TUNNELING.md)) and the raw TCP proxy of the delegation path, which is
 not gRPC.
 
+### What `["tls", "grpc"]` names
+
+Each `Peer.Uri` declares the stack its address speaks, and for this one that tag pair is
+shorthand for two constants every peer must agree on byte for byte:
+
+| Constant | Value | Why it must match |
+|---|---|---|
+| Host-key extension OID | `2.25.276125094420857322236898758448456352855` | A peer looks the extension up *by* this OID. Two nodes carrying different ones never find each other's, and the handshake is refused. |
+| Signed-payload prefix | `CELAUT` | The verifier recomputes the payload from the certificate it received. A different prefix makes every signature fail to verify. |
+
+The OID is `uuid.uuid5(uuid.NAMESPACE_OID, "CELAUT")` written under the ITU-T X.667 arc
+`2.25`, which anyone may derive from a UUID with nothing to register. The seed is the
+project name and nothing more, so the number can be recomputed in one line and audited —
+it is a name seed, never a resource, and only the number ever travels.
+
+A node is free to use other values, but then it is speaking a **different transport
+protocol**, not a variant of this one, and has to declare it: `protocol_stack` is exactly
+where an address says what it speaks, so it must carry other tags. Announcing
+`["tls", "grpc"]` while using different constants is mislabelling — the same reason we do
+not reuse libp2p's OID for our own contents.
+
 Practical consequences: a node with no identity keypair cannot serve, and a peer running
 a version from before this cannot be dialled — peer channels have no plaintext fallback.
 See `src/utils/tls_identity.py` and `src/utils/grpc_transport.py`.

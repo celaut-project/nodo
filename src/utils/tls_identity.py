@@ -30,6 +30,13 @@ scheme defines, so reusing their IANA-allocated OID while diverging on what it c
 would be mislabelling. The OID below lives under the UUID arc ``2.25`` (ITU-T X.667),
 which anyone may derive from a UUID without registering anything.
 
+That OID and the signed payload's prefix are **protocol constants of the ``[tls, grpc]``
+stack**, not implementation details: a peer finds the extension by the OID and
+recomputes the payload to verify it, so both have to match byte for byte or the
+handshake is refused. A node that changes either speaks a different transport and must
+declare it as such in ``Peer.Uri.protocol_stack`` rather than announcing
+``["tls", "grpc"]``.
+
 The P-256 key is generated per process and never touches disk. Trust comes from the
 extension, not from the certificate being stable, so there is nothing to persist,
 rotate or back up -- and no second private key on the filesystem.
@@ -64,17 +71,36 @@ from src.reputation_system.node_identity import (
 # the check satisfied without inventing a name per address.
 TLS_SERVER_NAME = "celaut-node"
 
-# uuid.uuid5(uuid.NAMESPACE_URL, "https://celaut.org/tls/host-key") as an integer,
-# under the ITU-T X.667 UUID arc. Generated once and frozen here: deriving it at import
-# time would hide a constant behind a computation, and it must never change.
+# Protocol constants of the `[tls, grpc]` stack. Both are values every peer speaking it
+# must agree on byte for byte, and neither is a local choice:
+#
+#   * a peer looks the extension up BY the OID, so two nodes carrying different ones
+#     simply do not find each other's, and the handshake is refused;
+#   * a verifier recomputes the signed payload from the certificate it received, so a
+#     different prefix makes every signature fail to verify.
+#
+# A node that changes either is speaking a different transport protocol, not a variant
+# of this one, and has to say so: `Peer.Uri.protocol_stack` is where an address declares
+# what it speaks, and it must then carry tags other than `["tls", "grpc"]`. Announcing
+# that stack while using other constants is mislabelling, exactly as reusing libp2p's
+# OID for our own contents would be.
+#
+# uuid.uuid5(uuid.NAMESPACE_OID, "CELAUT") as an integer, under the ITU-T X.667 UUID arc
+# -- an OID anyone may derive from a UUID without registering anything. The seed is the
+# project name and nothing else, so the value can be recomputed in one line and audited.
+# It is a name seed, never a resource: nothing resolves it, and only the number below
+# travels. Frozen here rather than derived at import, which would hide a constant behind
+# a computation, and it must never change once peers are speaking it.
 HOST_KEY_EXTENSION_OID = x509.ObjectIdentifier(
-    "2.25.193964635980548750110979652432648226273"
+    "2.25.276125094420857322236898758448456352855"
 )
 
-# Domain separation for the extension's signature, so a signature made here can never
-# be replayed as a signed `Peer` payload (or the other way round): both are signed with
-# the same identity key, and `canonical_peer_payload` starts with a public key hex.
-_SIGNATURE_PREFIX = "celaut-tls-host-key:"
+# Domain separation for the extension's signature, so a signature made here can never be
+# replayed as a signed `Peer` payload (or the other way round): both are signed with the
+# same identity key. What keeps them apart is that `canonical_peer_payload` starts with a
+# lowercase public key hex, which cannot begin with these bytes -- so any later payload
+# signed by the identity key must be checked against this one before it is introduced.
+_SIGNATURE_PREFIX = "CELAUT"
 
 # X.509 requires a validity window, so a node with a skewed clock could reject a
 # legitimate peer over a field that carries no security here (the pinning does the
