@@ -188,22 +188,37 @@ def get_execute_client(amount_mu: int, external: bool = False) -> str:
     pool_size = DEV_EXTERNAL_CLIENT_POOL_SIZE if external else STANDARD_DEV_CLIENT_POOL_SIZE
     return _acquire_dev_client(prefix, pool_size, amount_mu)
             
-def validate_reputation_proof(contract_ledger, peer_id) -> bool:
-    """Check that ``peer_id`` really controls a reputation proof it announced.
+def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
+    """Check that ``peer`` really controls a reputation proof it announced.
 
     Nothing is stored: the proof ids themselves live in the peer's signed
     advertisement, which is kept verbatim (see :func:`_peer_advertisement`), and a
     peer holds as many proofs as it likes -- there is no single one to record
     (issue #281). What this call is for is the check itself: a peer announcing a
-    proof whose on-chain R7 owner is a different key is either misconfigured or
-    claiming someone else's reputation, and that is worth a log line even though
-    the peer is still accepted (its identity rests on the signature it sent, see
-    :func:`verified_peer_public_key`, not on any proof).
+    proof whose on-chain R7 owner is a key it cannot prove it holds is either
+    misconfigured or claiming someone else's reputation, and that is worth a log line
+    even though the peer is still accepted (its identity rests on the signature it
+    sent, see :func:`verified_peer_public_key`, not on any proof).
+
+    Ownership runs through the peer's Ergo attestation rather than through its
+    ``peer_id``: R7 is the reputation contract's spending clause, so it holds an Ergo
+    proposition and can never hold an identity that is not one. A peer that announces
+    an Ergo proof but attests no Ergo wallet has proved nothing about it.
     """
     from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_ergo_reputation
+    from src.reputation_system.envs import LEDGER as ERGO_LEDGER_TAG
+    from src.reputation_system.node_identity import attested_wallet_public_key
+
+    wallet_public_key = attested_wallet_public_key(peer, ERGO_LEDGER_TAG)
+    if not wallet_public_key:
+        log.LOGGER(
+            f"Peer {peer.public_key} announced an Ergo reputation proof without a "
+            "verifiable Ergo wallet attestation."
+        )
+        return False
 
     # Verify contract and ledger compatibility and ownership
-    if not validate_ergo_reputation(contract_ledger, peer_id):
+    if not validate_ergo_reputation(contract_ledger, wallet_public_key):
         log.LOGGER(f"Not supported reputation contract.")
         return False
 
@@ -388,7 +403,7 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     # above; all that is left to do here is flag one the peer does not actually own.
     for contract in peer.reputation_proofs:
         try:
-            if not validate_reputation_proof(contract_ledger=contract, peer_id=peer_id):
+            if not validate_reputation_proof(contract_ledger=contract, peer=peer):
                 log.LOGGER(f"Peer {peer_id} announced a reputation proof it does not own.")
         except Exception as e:
             log.LOGGER(f"Uncontrolled error validating reputation proof for peer {peer_id}: {e}")
@@ -420,7 +435,7 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
 
     for contract_ledger in peer.reputation_proofs:
         try:
-            if not validate_reputation_proof(contract_ledger=contract_ledger, peer_id=peer_id):
+            if not validate_reputation_proof(contract_ledger=contract_ledger, peer=peer):
                 log.LOGGER(f"Peer {peer_id} announced a reputation proof it does not own.")
         except Exception as e:
             log.LOGGER(f"Uncontrolled error validating reputation proof for peer {peer_id}: {e}")

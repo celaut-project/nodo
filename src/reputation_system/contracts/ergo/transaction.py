@@ -165,11 +165,13 @@ def _self_network_data() -> str:
     self-verifying claim GetPeerInfo serves, rather than an unattributed list of
     addresses (issue #236).
 
-    It is verifiable *against this very box*: R7 holds the owner propositionBytes,
-    which are ``0008cd`` + the same public key (there is one mnemonic per node), so a
-    reader can check the R9 signature against R7 without contacting the node at all.
-    That is what makes the published expiry trustworthy -- otherwise whoever relays
-    the data could stretch or strip it.
+    It is verifiable *against this very box*, in two links rather than one: R7 holds
+    the owner propositionBytes, which are ``0008cd`` + the wallet key one of the
+    envelope's ``ledger_attestations`` names, and that attestation is the wallet's own
+    signature over the ``public_key`` the envelope is signed with. So a reader can go
+    from the box to the node's identity, and check the R9 signature, without contacting
+    the node at all. That is what makes the published expiry trustworthy -- otherwise
+    whoever relays the data could stretch or strip it.
 
     Deliberately minimal: only the gateway URI. The payment contracts, rates and
     reputation proofs are served by GetPeerInfo (and the proof is this box), and an
@@ -187,6 +189,7 @@ def _self_network_data() -> str:
     from src.reputation_system.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
+        declare_ledger_attestations,
         declare_signature_scheme,
         get_node_public_key_hex,
         sign_peer_payload,
@@ -219,6 +222,19 @@ def _self_network_data() -> str:
     if public_key_hex:
         ts = int(time.time())
         uri.expiry_unix_timestamp = uri_expiry(ts)
+        # This one is read off the ledger by people who never contacted the node, so it
+        # is the announcement that most needs to say which cryptography it is asking
+        # them to verify -- but the tags say it. Spelling the scheme out in prose as
+        # well would be a third of this register, paid for in storage rent by every box
+        # that carries it.
+        declare_signature_scheme(peer, prose=False)
+        # The attestation is what makes this box self-contained: R7 names the wallet
+        # that owns it, and the attestation is that same wallet vouching for the
+        # identity signing below, so a reader can go from the box to the peer_id without
+        # asking the node anything. Worth its couple of hundred bytes here for exactly
+        # that reason -- with it stripped, the box proves a wallet published something
+        # and says nothing about which node.
+        declare_ledger_attestations(peer)
         signature = sign_peer_payload(
             canonical_peer_payload(
                 public_key_hex, ts, canonical_peer_content_digest(peer),
@@ -228,12 +244,9 @@ def _self_network_data() -> str:
             peer.public_key = public_key_hex
             peer.signature = signature
             peer.ts = ts
-            # This one is read off the ledger by people who never contacted the node,
-            # so it is the announcement that most needs to say which cryptography it
-            # is asking them to verify -- but the tags say it. Spelling the scheme out
-            # in prose as well would be a third of this register, paid for in storage
-            # rent by every box that carries it.
-            declare_signature_scheme(peer, prose=False)
+        else:
+            peer.ClearField("signature_scheme")
+            del peer.ledger_attestations[:]
     else:
         LOGGER("No node identity available; publishing the address unsigned.")
 
@@ -327,15 +340,20 @@ def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: 
     # carries the target's key. It used to carry a reputation proof's token id, which
     # made every opinion an opinion about one of that node's proofs rather than about
     # the node -- a single key can hold several proofs, and minting a fresh one shed
-    # the accumulated on-chain reputation (issue #281). Our own key comes from the same
-    # identity keypair the R7 owner does, so a self-opinion is addressed exactly like
-    # any peer's.
+    # the accumulated on-chain reputation (issue #281).
+    #
+    # R5 and R7 name different things, and only R5 is free to. R7 is the contract's
+    # spending clause, so it holds this wallet's propositionBytes and could hold
+    # nothing else; R5 is plain Coll[Byte], which is what lets an opinion be addressed
+    # to a node's identity whatever cryptography that identity is in. A self-opinion
+    # goes to our own identity key, addressed exactly like any peer's, and the wallet
+    # spending the box vouches for it through the attestation in R9's Peer envelope.
     from src.reputation_system.node_identity import get_node_public_key_hex
 
     node_public_key = get_node_public_key_hex()
     if not node_public_key:
         raise Exception(
-            "No node identity public key available (ledgers.ergo.WALLET_MNEMONIC); "
+            "No node identity public key available (identity.MNEMONIC); "
             "cannot address a reputation opinion."
         )
 
