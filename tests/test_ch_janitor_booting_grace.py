@@ -12,25 +12,26 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
-    from src.virtualizers.ch import maintain as ch_maintain
+    from src.virtualizers.microvm import maintain as microvm_maintain
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
-    ch_maintain = None  # type: ignore[assignment]
+    microvm_maintain = None  # type: ignore[assignment]
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class JanitorBootingGraceTests(unittest.TestCase):
     def _run_janitor(self, state, in_db, alive):
+        state = {"virtualizer": "ch", "process_name": "nodo-ch-vm000001", **state}
         with patch.object(
-            ch_maintain, "list_runtime_states", return_value={"vm-1": state}
+            microvm_maintain, "list_runtime_states", return_value={"vm-1": state}
         ), patch.object(
-            ch_maintain.sc, "internal_instance_exists", return_value=in_db
+            microvm_maintain.sc, "internal_instance_exists", return_value=in_db
         ), patch.object(
-            ch_maintain, "pid_alive", return_value=alive
+            microvm_maintain, "pid_alive", return_value=alive
         ), patch.object(
-            ch_maintain, "kill_ch_vm", return_value=True
+            microvm_maintain, "kill_vm", return_value=True
         ) as kill_mock:
-            ch_maintain.janitor_cleanup_orphans(debug_mode=False)
+            microvm_maintain.sweep_orphans(debug_mode=False)
         return kill_mock
 
     def test_a_booting_vm_without_a_row_is_left_alone(self):
@@ -44,16 +45,36 @@ class JanitorBootingGraceTests(unittest.TestCase):
         kill_mock = self._run_janitor(
             {"pid": 555, "booting": True}, in_db=False, alive=False
         )
-        kill_mock.assert_called_once_with(vmachine_id="vm-1")
+        kill_mock.assert_called_once_with(
+            microvm_maintain.member("ch"), vmachine_id="vm-1"
+        )
 
     def test_a_ready_vm_without_a_row_is_still_an_orphan(self):
         # `booting` is gone from the state once the launch completes, so the
         # ordinary orphan rule applies again.
         kill_mock = self._run_janitor({"pid": 555}, in_db=False, alive=True)
-        kill_mock.assert_called_once_with(vmachine_id="vm-1")
+        kill_mock.assert_called_once_with(
+            microvm_maintain.member("ch"), vmachine_id="vm-1"
+        )
 
     def test_a_registered_and_running_vm_is_never_touched(self):
         kill_mock = self._run_janitor({"pid": 555}, in_db=True, alive=True)
+        kill_mock.assert_not_called()
+
+    def test_an_entry_no_hypervisor_claims_is_reported_not_guessed(self):
+        # Defaulting an unrecognized `virtualizer` to CH is what reaped a healthy
+        # QEMU guest with CH's process matcher (#295). An entry nobody claims is
+        # left alone and logged.
+        with patch.object(
+            microvm_maintain,
+            "list_runtime_states",
+            return_value={"vm-1": {"pid": 555, "virtualizer": "firecracker"}},
+        ), patch.object(
+            microvm_maintain.sc, "internal_instance_exists", return_value=False
+        ), patch.object(
+            microvm_maintain, "kill_vm", return_value=True
+        ) as kill_mock:
+            microvm_maintain.sweep_orphans(debug_mode=False)
         kill_mock.assert_not_called()
 
 

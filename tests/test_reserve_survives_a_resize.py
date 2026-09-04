@@ -108,7 +108,7 @@ class TheQemuBalloonSpeaksAllocationsTests(unittest.TestCase):
         state = {
             "vmachine_id": "vm-q",
             "pid": 4242,
-            "qmp_socket": "/run/qmp.sock",
+            "control_socket": "/run/qmp.sock",
             "boot_mem_bytes": BOOT_MEM,
             "guest_kernel_reserve_bytes": RESERVE,
         }

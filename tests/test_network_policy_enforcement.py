@@ -40,10 +40,10 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 VIRTUALIZER_IMPORT_ERROR = None
 try:
-    from src.virtualizers.ch import execute as ch_execute
+    from src.virtualizers.microvm import rootfs as microvm_rootfs
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     VIRTUALIZER_IMPORT_ERROR = import_exc
-    ch_execute = None
+    microvm_rootfs = None
 
 SERVE_IMPORT_ERROR = None
 try:
@@ -182,10 +182,10 @@ class VirtualizerTests(unittest.TestCase):
 
     def test_a_forbidden_network_aborts_instead_of_being_dropped(self):
         with _policy(blacklist=["*google.com"]), patch.object(
-            ch_execute.sc, "internal_instance_exists", return_value=False
-        ), patch.object(ch_execute, "resolve_network") as resolve:
+            microvm_rootfs.sc, "internal_instance_exists", return_value=False
+        ), patch.object(microvm_rootfs, "resolve_network") as resolve:
             with self.assertRaises(np.NetworkPolicyRejection):
-                ch_execute._build_network_resolution(
+                microvm_rootfs.build_network_resolution(
                     service=_service(["maps.google.com"]), father_id="father-1"
                 )
 
@@ -195,12 +195,12 @@ class VirtualizerTests(unittest.TestCase):
         # The blacklisted network never reaches the guest, so there is nothing left
         # for the policy to refuse at this point.
         with _policy(blacklist=["*google.com"]), patch.object(
-            ch_execute.sc, "internal_instance_exists", return_value=True
+            microvm_rootfs.sc, "internal_instance_exists", return_value=True
         ), patch.object(
-            ch_execute, "filter_networks_with_ancestors",
+            microvm_rootfs, "filter_networks_with_ancestors",
             return_value=[celaut.Service.Network(tags=["dns:local"])],
-        ), patch.object(ch_execute, "resolve_network", return_value=[]) as resolve:
-            resolution = ch_execute._build_network_resolution(
+        ), patch.object(microvm_rootfs, "resolve_network", return_value=[]) as resolve:
+            resolution = microvm_rootfs.build_network_resolution(
                 service=_service(["maps.google.com"], ["dns:local"]), father_id="father-1"
             )
 

@@ -8,25 +8,20 @@ case: an ``arm64`` service on an ``x86_64`` node), there is no KVM path -- so th
 backend boots the same rootfs/kernel/initramfs under ``qemu-system-<arch>`` with
 ``-accel tcg``.
 
-**Deliberate reuse of the CH backend.** Everything that is *not* the hypervisor
-invocation is shared with CH by importing its helpers directly, for two reasons:
+What is here is only what is QEMU's: the emulator binary and machine type per
+architecture, the command line, the QMP control socket, and the balloon that
+holds the boot headroom. Everything else a locally booted Linux microVM needs it
+takes from ``src.virtualizers.microvm``, the same code CH uses -- and *has* to
+take from there rather than copy, because those things are single host resources:
+one bridge, one subnet, one IP/MAC allocator that reads every VM's runtime state,
+one runtime-state store the janitor enumerates. Two backends allocating out of
+stores they cannot see each other's entries in would hand out colliding
+addresses.
 
-* Correctness, not just convenience. Host networking is a single shared resource
-  -- one bridge, one subnet, one IP/MAC allocator, one runtime-state store that
-  :func:`_used_ips` and the janitor read. A QEMU guest MUST allocate IPs and TAPs
-  through the very same code CH uses, or the two backends would hand out
-  colliding addresses. Runtime state is therefore written to the same store
-  (tagged ``virtualizer: "qemu"``), so IP accounting, the janitor and firewall IP
-  resolution all see QEMU guests too.
-* The rootfs build, config/DNS/entrypoint injection, TAP/firewall setup and
-  guest-network readiness probing are byte-for-byte identical to CH; duplicating
-  them would be 400 lines of drift waiting to happen.
-
-Only the launch itself differs, and that lives in the pure builders
-(:func:`build_kernel_cmdline`, :func:`build_qemu_command`) plus :func:`execute`.
-
-A future cleanup could promote the shared helpers into a neutral module; kept as
-an explicit import here to leave the proven CH path untouched.
+That sharing used to be spelled ``from src.virtualizers.ch import execute as
+ch_exec`` followed by twenty-two symbols, twenty of them private, which made this
+backend a client of the other one and the dependency between them bidirectional.
+See ``docs/BACKENDS.md``.
 """
 import math
 import os
@@ -45,11 +40,18 @@ from src.manager.modify_resources import modify_sysreq
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException
-from src.virtualizers.ch import execute as ch_exec
-from src.virtualizers.ch import limits
-from src.virtualizers.ch.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
-from src.virtualizers.ch.runtime_state import save_runtime_state, save_booting_state, delete_runtime_state
-from src.virtualizers.ch.virtiofs import (
+from src.virtualizers.microvm import bundle as microvm_bundle
+from src.virtualizers.microvm import limits, network, paths, rootfs, serial
+from src.virtualizers.microvm.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
+from src.virtualizers.microvm.errors import MicroVMError
+from src.virtualizers.microvm.members import QEMU as QEMU_HYPERVISOR
+from src.virtualizers.microvm.process import generate_vmachine_id
+from src.virtualizers.microvm.runtime_state import (
+    save_runtime_state,
+    save_booting_state,
+    delete_runtime_state,
+)
+from src.virtualizers.microvm.virtiofs import (
     attach_virtiofs_backends,
     build_guest_mount_plan,
     child_guest_mounts,
@@ -65,18 +67,13 @@ from src.virtualizers.qemu.config import (
     qemu_system_binary,
 )
 from src.virtualizers.qemu.hotplug import settle_boot_balloon
-from src.virtualizers.qemu.process import qemu_process_name
 from src.utils.firewall import policy as fw_policy
 from src.virtualizers.firewall import resolve_slot_transport_protocols
 
 env_manager = ConfigManager()
 sc = SQLConnection()
 
-CACHE = env_manager.get("CACHE")
-CH_API_SOCKET_DIR = env_manager.get("virtualizers.ch.API_SOCKET_DIR", "/tmp/nodo-ch")
 VIRTIOFSD_BINARY = env_manager.get("virtualizers.ch.VIRTIOFSD_BINARY", "virtiofsd")
-NETWORK_BRIDGE_NAME = ch_exec.NETWORK_BRIDGE_NAME
-NETWORK_GATEWAY_IP = ch_exec.NETWORK_GATEWAY_IP
 QEMU_CPU_MODEL = env_manager.get("virtualizers.qemu.CPU_MODEL", "max")
 # TCG is slow to reach console; give the guest more time than the KVM default.
 QEMU_NETWORK_READY_TIMEOUT_S = env_manager.get(
@@ -85,23 +82,8 @@ QEMU_NETWORK_READY_TIMEOUT_S = env_manager.get(
 )
 
 
-class QEMUExecuteError(RuntimeError):
-    pass
-
-
-def _runtime_vm_dir(vmachine_id: str) -> Path:
-    if not CACHE:
-        raise QEMUExecuteError("CACHE path is not configured.")
-    # Runtime dirs live under the shared cloud_hypervisor runtime tree so the
-    # janitor and IP accounting see QEMU guests alongside CH ones.
-    return Path(CACHE) / "cloud_hypervisor" / "runtime" / vmachine_id
-
-
 def _qmp_socket_path(vmachine_id: str) -> Path:
-    # Kept in the short CH API socket dir, not runtime_dir, to stay under the
-    # AF_UNIX SUN_LEN limit (runtime_dir is nested under CACHE and keyed by the
-    # full 64-hex vmachine_id, which alone can exceed the 108-byte limit).
-    return Path(CH_API_SOCKET_DIR) / f"qmp-{vmachine_id[:16]}.sock"
+    return QEMU_HYPERVISOR.control_socket(vmachine_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -111,17 +93,13 @@ def _qmp_socket_path(vmachine_id: str) -> Path:
 def build_kernel_cmdline(arch: str, vm_ip: str, netmask: str) -> str:
     """Guest kernel cmdline for an emulated boot.
 
-    Reuses CH's ``ip=`` autoconfig token (same bridge/gateway networking) and
-    ``root=/dev/vda`` (virtio-blk), but pins ``console=`` to the arch's serial
-    device so init output reaches the captured serial log -- ``ttyAMA0`` for the
-    arm64 ``virt`` PL011, ``ttyS0`` for the x86 16550.
+    Takes the family's ``ip=`` autoconfig token (same bridge, same gateway,
+    whichever hypervisor boots the guest) and ``root=/dev/vda`` (virtio-blk), but
+    pins ``console=`` to the arch's serial device so init output reaches the
+    captured serial log -- ``ttyAMA0`` for the arm64 ``virt`` PL011, ``ttyS0`` for
+    the x86 16550.
     """
-    guest_dev = str(ch_exec.GUEST_NET_DEVICE).strip() if ch_exec.GUEST_NET_DEVICE is not None else ""
-    if not guest_dev or guest_dev.lower() in {"auto", "none"}:
-        ip_param = f"ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}:::off"
-    else:
-        ip_param = f"ip={vm_ip}::{NETWORK_GATEWAY_IP}:{netmask}::{guest_dev}:off"
-
+    ip_param = network.guest_ip_cmdline_token(vm_ip=vm_ip, netmask=netmask)
     console = QEMU_CONSOLE_BY_ARCH.get(arch, "ttyS0")
     return " ".join(["root=/dev/vda", "rw", ip_param, f"console={console}"])
 
@@ -339,7 +317,13 @@ def build_qemu_command(
 
 
 def _build_process_args(start_command: List[str], vmachine_id: str) -> List[str]:
-    visible_name = qemu_process_name(vmachine_id)
+    """Rename the emulator process so a recycled PID cannot impersonate this VM.
+
+    ``argv[0]`` becomes the VM's visible name while ``executable=`` still points
+    at the real binary; the name is recorded in the runtime state and every later
+    reader matches it (see ``microvm.process``).
+    """
+    visible_name = QEMU_HYPERVISOR.process_name(vmachine_id)
     return [visible_name, *start_command[1:]] if start_command else [visible_name]
 
 
@@ -382,8 +366,9 @@ def execute(
     pages in a balloon and is not made here.
     """
     initial_system_resources = system_resources.at_init
-    vmachine_id = ch_exec._generate_vmachine_id()
-    runtime_dir = _runtime_vm_dir(vmachine_id)
+    vmachine_id = generate_vmachine_id()
+    log_prefix = QEMU_HYPERVISOR.prefix(vmachine_id)
+    runtime_dir = paths.runtime_vm_dir(vmachine_id)
     cleanup_rules: List[List[str]] = []
     tap_name: Optional[str] = None
     process: Optional[subprocess.Popen] = None
@@ -400,37 +385,37 @@ def execute(
         log.LOGGER(f"[QEMU][{vmachine_id}] event=start")
         log.LOGGER(
             f"[QEMU][{vmachine_id}] execute start: service_id={service_id}, father_id={father_id}, "
-            f"by_local={by_local}, assignment_ports={assigment_ports}, cache={CACHE}"
+            f"by_local={by_local}, assignment_ports={assigment_ports}, cache={paths.cache_root()}"
         )
 
-        network = ch_exec._network_preflight()
-        log.LOGGER(f"[QEMU][{vmachine_id}] network preflight ok: {network.with_prefixlen}")
+        guest_network = network.preflight()
+        log.LOGGER(f"[QEMU][{vmachine_id}] network preflight ok: {guest_network.with_prefixlen}")
 
-        arch = ch_exec._resolve_service_arch(service_id=service_id, service=service)
+        arch = microvm_bundle.resolve_service_arch(service_id=service_id, service=service)
         qemu_binary = qemu_system_binary(arch)
         if not qemu_binary:
             raise UnsupportedArchitectureException(arch=arch)
         log.LOGGER(f"[QEMU][{vmachine_id}] emulator resolved: {qemu_binary} (arch={arch})")
 
-        # Kernel/initramfs: QEMU override first, else the CH bundle's assets. The
-        # bundle still validates that the CH-side assets exist for the arch.
-        bundle = ch_exec._load_bundle(service_id=service_id, arch=arch)
+        # Kernel/initramfs: a QEMU override first, else the bundle's own assets.
+        # Loading the bundle still validates that they exist for this arch.
+        bundle = microvm_bundle.load_bundle(service_id=service_id, arch=arch)
         kernel_path = qemu_kernel_path(arch) or bundle["kernel_path"]
         initramfs_path = qemu_initramfs_path(arch) or bundle["initramfs_path"]
         if not os.path.isfile(kernel_path):
-            raise QEMUExecuteError(f"QEMU guest kernel not found for {arch}: {kernel_path}")
+            raise MicroVMError(f"QEMU guest kernel not found for {arch}: {kernel_path}")
         if not os.path.isfile(initramfs_path):
-            raise QEMUExecuteError(f"QEMU guest initramfs not found for {arch}: {initramfs_path}")
+            raise MicroVMError(f"QEMU guest initramfs not found for {arch}: {initramfs_path}")
         log.LOGGER(
             f"[QEMU][{vmachine_id}] bundle loaded: arch={arch}, rootfs={bundle['rootfs_path']}, "
             f"kernel={kernel_path}, initramfs={initramfs_path}"
         )
-        ch_exec._validate_custom_initramfs(initramfs_path)
+        microvm_bundle.validate_custom_initramfs(initramfs_path)
 
-        resolved_entrypoint = ch_exec._validate_entrypoint_strict(service=service)
+        resolved_entrypoint = microvm_bundle.validate_entrypoint_strict(service=service)
         log.LOGGER(f"[QEMU][{vmachine_id}] validated strict entrypoint: {resolved_entrypoint}")
 
-        vm_ip, mac = ch_exec._deterministic_ip_and_mac(vmachine_id)
+        vm_ip, mac = network.deterministic_ip_and_mac(vmachine_id)
         log.LOGGER(f"[QEMU][{vmachine_id}] deterministic networking: ip={vm_ip}, mac={mac}")
 
         runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -439,10 +424,10 @@ def execute(
         shutil.copy2(bundle["rootfs_path"], rootfs_path)
         log.LOGGER(f"[QEMU][{vmachine_id}] rootfs copied to runtime image: {rootfs_path}")
 
-        network_resolution = ch_exec._build_network_resolution(
+        network_resolution = rootfs.build_network_resolution(
             service=service, father_id=father_id, config=config
         )
-        cfg = ch_exec._build_configuration_file(
+        cfg = rootfs.build_configuration_file(
             config=config,
             resources=initial_system_resources,
             network_resolution=network_resolution,
@@ -450,8 +435,8 @@ def execute(
         with open(config_host_path, "wb") as f:
             f.write(cfg.SerializeToString())
 
-        for target_path in ch_exec._resolve_guest_config_targets(service=service):
-            ch_exec._run_debugfs_write(
+        for target_path in rootfs.guest_config_targets(service=service):
+            rootfs.debugfs_write(
                 image_path=rootfs_path,
                 host_file=config_host_path,
                 guest_target=target_path,
@@ -459,19 +444,19 @@ def execute(
 
         with open(entrypoint_host_path, "w", encoding="utf-8") as f:
             f.write(f"{resolved_entrypoint}\n")
-        ch_exec._run_debugfs_write(
+        rootfs.debugfs_write(
             image_path=rootfs_path,
             host_file=entrypoint_host_path,
-            guest_target="/.__nodo_entrypoint",
+            guest_target=rootfs.GUEST_ENTRYPOINT_PATH,
         )
         # No /etc/hosts nor /etc/resolv.conf: name resolution is not the node's to
-        # install in someone else's filesystem. See the note above
-        # `_configure_guest_firewall_policy` in src/virtualizers/ch/execute.py.
+        # install in someone else's filesystem. See the note in
+        # src/virtualizers/microvm/network.py.
         log.LOGGER(f"[QEMU][{vmachine_id}] guest metadata injected (config/entrypoint)")
 
         # Shared filesystems (parent -> child inheritance). Identical semantics to
         # CH; only the guest device wiring (vhost-user-fs vs CH --fs) differs.
-        shared_fs_dir = str(shared_fs_base_dir(CACHE)) if CACHE else None
+        shared_fs_dir = str(shared_fs_base_dir(paths.cache_root()))
         virtiofs_mounts: List[dict] = []
         virtiofs_args: List[str] = []
         exported_share_ids: List[str] = []
@@ -488,7 +473,7 @@ def execute(
                 _, virtiofs_mounts, _ = attach_virtiofs_backends(
                     share_mounts,
                     base_dir=shared_fs_dir,
-                    socket_dir=CH_API_SOCKET_DIR,
+                    socket_dir=str(paths.control_socket_dir()),
                     virtiofsd_binary=VIRTIOFSD_BINARY,
                     logger_fn=log.LOGGER,
                 )
@@ -496,19 +481,20 @@ def execute(
                 mount_plan_host_path = runtime_dir / ".__nodo_virtiofs"
                 with open(mount_plan_host_path, "w", encoding="utf-8") as f:
                     f.write(build_guest_mount_plan(share_mounts))
-                ch_exec._run_debugfs_write(
+                rootfs.debugfs_write(
                     image_path=rootfs_path,
                     host_file=mount_plan_host_path,
                     guest_target=GUEST_MOUNT_PLAN_PATH,
                 )
 
-        tap_name = ch_exec._create_tap(vmachine_id)
+        tap_name = network.create_tap(vmachine_id)
         log.LOGGER(f"[QEMU][{vmachine_id}] TAP created and attached: {tap_name}")
 
         # Committed before the guest exists, not after it starts pinging. See
-        # src/virtualizers/ch/execute.py for why: none of this needs the guest to
-        # be alive, and the tap above is already forwarding-capable.
-        ch_exec._configure_guest_firewall_policy(
+        # src/virtualizers/microvm/network.py for why: none of this needs the guest
+        # to be alive, and the tap above is already forwarding-capable.
+        network.configure_guest_firewall_policy(
+            log_prefix=log_prefix,
             vmachine_id=vmachine_id,
             vm_ip=vm_ip,
             network_resolution=network_resolution,
@@ -539,7 +525,7 @@ def execute(
         # every later resize has to use the same figure this boot did; re-deriving it
         # from config would drift the moment an operator edits the reserve.
         guest_kernel_reserve_b = boot_mem_b - usable_ceiling_b
-        disk_b = ch_exec._runtime_disk_bytes(vmachine_id=vmachine_id, rootfs_path=rootfs_path)
+        disk_b = rootfs.runtime_disk_bytes(log_prefix=log_prefix, rootfs_path=rootfs_path)
         # Registered at the usable ceiling, not at `at_init`: until the balloon has
         # actually taken the headroom back, the guest holds all of it, and an
         # instance is priced by what it holds. The correction below is a *shrink* of
@@ -556,7 +542,7 @@ def execute(
             disk_space=disk_b,
         )
         mem_mib = math.ceil(boot_mem_b / (1024 * 1024))
-        netmask = str(network.netmask)
+        netmask = str(guest_network.netmask)
         cmdline = build_kernel_cmdline(arch=arch, vm_ip=vm_ip, netmask=netmask)
 
         has_shared_mem = bool(share_mounts)
@@ -604,13 +590,13 @@ def execute(
         # See src/virtualizers/ch/execute.py for why this is not left to the end.
         save_booting_state(
             vmachine_id,
-            virtualizer="qemu",
+            hypervisor=QEMU_HYPERVISOR,
             service_id=service_id,
             pid=process.pid,
             ip=vm_ip,
             mac=mac,
             tap=tap_name,
-            bridge=NETWORK_BRIDGE_NAME,
+            bridge=network.NETWORK_BRIDGE_NAME,
             cleanup_rules=cleanup_rules,
             rule_comment_prefix=fw_policy.vm_comment_prefix(vmachine_id),
         )
@@ -622,9 +608,9 @@ def execute(
 
         time.sleep(1.0)
         if process.poll() is not None:
-            raise QEMUExecuteError(
+            raise MicroVMError(
                 f"qemu process exited early with code {process.returncode}. "
-                f"See {stderr_path}. stderr tail: {ch_exec._tail_file(stderr_path)}"
+                f"See {stderr_path}. stderr tail: {serial.tail_file(stderr_path)}"
             )
 
         vm_cgroup: Path = ensure_vm_cgroup(vmachine_id=vmachine_id, pid=process.pid)
@@ -639,8 +625,8 @@ def execute(
         log.LOGGER(
             f"[QEMU][{vmachine_id}] waiting guest network readiness: vm_ip={vm_ip}, timeout={network_timeout_s}s"
         )
-        ch_exec._wait_guest_network_ready(
-            vmachine_id=vmachine_id,
+        network.wait_guest_network_ready(
+            log_prefix=log_prefix,
             vm_ip=vm_ip,
             timeout_s=network_timeout_s,
             serial_log_path=serial_log_path,
@@ -691,7 +677,7 @@ def execute(
                 )
                 if not protocol:
                     continue
-                ch_exec._add_dnat_rule(
+                network.add_dnat_rule(
                     vmachine_id=vmachine_id,
                     protocol=protocol.value,
                     external_port=external_port,
@@ -715,7 +701,8 @@ def execute(
             vmachine_id,
             {
                 "vmachine_id": vmachine_id,
-                "virtualizer": "qemu",
+                "virtualizer": QEMU_HYPERVISOR.name,
+                "process_name": QEMU_HYPERVISOR.process_name(vmachine_id),
                 "service_id": service_id,
                 "arch": arch,
                 "pid": process.pid,
@@ -728,7 +715,10 @@ def execute(
                 "cleanup_rules": cleanup_rules,
                 "rule_comment_prefix": fw_policy.vm_comment_prefix(vmachine_id),
                 "cgroup_path": vm_cgroup.as_posix(),
-                "qmp_socket": str(qmp_socket_path),
+                # The socket whose disappearance means the emulator is gone, and
+                # the one hotplug issues its balloon resize over: for QEMU those are
+                # the same QMP socket.
+                "control_socket": str(qmp_socket_path),
                 # The `-m` the process was started with: the declared `at_most`
                 # plus the guest kernel reserve, and the hard ceiling every later
                 # resize is bounded by. Recording the guest's current allocation
@@ -742,7 +732,7 @@ def execute(
                 "guest_kernel_reserve_bytes": guest_kernel_reserve_b,
                 "virtiofs": virtiofs_mounts,
                 "exported_shares": exported_share_ids,
-                "bridge": NETWORK_BRIDGE_NAME,
+                "bridge": network.NETWORK_BRIDGE_NAME,
                 "serial_log": str(serial_log_path),
                 "stdout_log": str(stdout_path),
                 "stderr_log": str(stderr_path),
@@ -758,10 +748,13 @@ def execute(
     except Exception as e:
         log.LOGGER(f"[QEMU][{vmachine_id}] execute failed: {type(e).__name__}: {e}")
         log.LOGGER(f"[QEMU][{vmachine_id}] traceback:\n{traceback.format_exc()}")
-        log.LOGGER(f"[QEMU][{vmachine_id}] stderr tail ({stderr_path}): {ch_exec._tail_file(stderr_path)}")
-        log.LOGGER(f"[QEMU][{vmachine_id}] serial tail ({serial_log_path}): {ch_exec._tail_file(serial_log_path)}")
+        log.LOGGER(f"[QEMU][{vmachine_id}] stderr tail ({stderr_path}): {serial.tail_file(stderr_path)}")
+        log.LOGGER(
+            f"[QEMU][{vmachine_id}] serial tail ({serial_log_path}): "
+            f"{serial.tail_file(serial_log_path)}"
+        )
 
-        ch_exec._remove_rules(cleanup_rules)
+        network.replay_legacy_cleanup_rules(cleanup_rules)
         # Whatever was applied before the failure carries this VM's prefix.
         try:
             from src.virtualizers.firewall import remove_vm_rules
@@ -777,13 +770,13 @@ def execute(
                 process.kill()
 
         if tap_name:
-            ch_exec._delete_tap(tap_name)
+            network.delete_tap(tap_name)
 
         delete_runtime_state(vmachine_id)
 
         if runtime_dir.exists():
             shutil.rmtree(runtime_dir, ignore_errors=True)
 
-        if isinstance(e, (QEMUExecuteError, UnsupportedArchitectureException)):
+        if isinstance(e, (MicroVMError, UnsupportedArchitectureException)):
             raise
-        raise QEMUExecuteError(str(e)) from e
+        raise MicroVMError(str(e)) from e

@@ -16,8 +16,8 @@ from pathlib import Path
 # why the per-arch tables below come from `utils.arch_guard` and not from
 # `virtualizers.qemu.config`, where the emulator lookup that uses them lives.
 from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
-from src.virtualizers.ch import initramfs as ch_initramfs
-from src.virtualizers.ch import guest as ch_guest
+from src.virtualizers.microvm import initramfs as ch_initramfs
+from src.virtualizers.microvm import guest as ch_guest
 
 
 def _parse_unit_user(unit_content: str) -> str:
@@ -443,7 +443,7 @@ def _doctor_initramfs(initramfs_paths: dict, host_arch_tag: str):
     size = os.path.getsize(initramfs_path)
     print(f"[OK] Initramfs found: {initramfs_path} ({size} bytes)", flush=True)
 
-    # Read through src.virtualizers.ch.initramfs so that doctor checks exactly what
+    # Read through src.virtualizers.microvm.initramfs so that doctor checks exactly what
     # execute.py refuses to launch on -- including the contract version, which is
     # the one failure a pinned release asset can develop on its own and the one an
     # operator has no other way to see before a launch hangs.

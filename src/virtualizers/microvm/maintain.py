@@ -1,21 +1,52 @@
-import os
+"""Judging a microVM: is it healthy, is it dead weight, and what can be reclaimed.
+
+Three readers of the same store, and one definition of each question so they
+cannot disagree:
+
+* :func:`maintain` -- the maintenance tick's per-instance health check, asked
+  about instances the database knows about.
+* :func:`sweep_orphans` -- the janitor, which has the opposite problem: it looks
+  for entries the database *does not* know about, so it cannot ask the database
+  who owns what and has to enumerate the store instead.
+* :func:`scan_orphan_runtimes` / :func:`scan_failures` -- ``nodo prune``, which
+  reports the same conditions on demand and adds the two the janitor structurally
+  cannot see.
+
+One implementation for the whole family, not one per hypervisor. It used to be
+one per hypervisor because liveness needs the launcher's visible process name and
+those differ -- so the janitor, having only a state file, guessed, guessed CH, and
+reaped a healthy QEMU guest (#295). The name is now recorded in the state
+(``runtime_state``'s index), which makes the judgement uniform: what differs
+between backends is not *how* a guest is judged but *what it recorded*, and once
+it is recorded there is nothing left to dispatch on.
+"""
 import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.database.sql_connection import SQLConnection
 from src.utils import logger as log
-from src.virtualizers.ch.guest_panic import guest_panic_line
-from src.virtualizers.ch.kill import kill as kill_ch_vm
-from src.virtualizers.ch.process import pid_alive
-from src.virtualizers.ch.runtime_state import load_runtime_state
-from src.virtualizers.ch.runtime_state import list_runtime_dirs
-from src.virtualizers.ch.runtime_state import list_runtime_states
-from src.virtualizers.selection import QEMU
+from src.virtualizers.microvm import paths
+from src.virtualizers.microvm.guest_panic import guest_panic_line
+from src.virtualizers.microvm.hypervisor import Hypervisor
+from src.virtualizers.microvm.kill import kill as kill_vm
+from src.virtualizers.microvm.members import member
+from src.virtualizers.microvm.process import pid_alive
+from src.virtualizers.microvm.runtime_state import (
+    list_runtime_dirs,
+    list_runtime_states,
+    load_runtime_state,
+    recorded_process_name,
+    recorded_virtualizer,
+)
 
 sc = SQLConnection()
+
+# Used only where a log line is about the store rather than about one member's
+# guest -- an entry no member claims.
+FAMILY_LOG_TAG = "microvm"
 
 # A runtime directory exists before the state file that describes it: `execute`
 # creates `runtime/<id>/` to unpack the rootfs into, and only writes the booting
@@ -27,91 +58,81 @@ sc = SQLConnection()
 STATELESS_RUNTIME_GRACE_SECONDS = 6 * 60 * 60
 
 
-def _liveness_for(state) -> Callable[..., bool]:
-    """The ``pid_alive`` belonging to the backend that launched this VM.
+def _state_is_alive(state: Optional[Dict[str, Any]]) -> bool:
+    """Is the process this entry recorded still that process?
 
-    Both backends share this runtime-state directory, and every entry records
-    which one wrote it. Liveness, however, is not backend-agnostic: it confirms
-    the PID still belongs to *this* VM by matching the launcher's visible process
-    name, and those names differ (``nodo-ch-<id8>`` vs ``nodo-qemu-<id8>``). So a
-    QEMU guest checked with CH's matcher fails the name test while perfectly
-    alive, and the janitor reaps a healthy VM as ``stale_runtime_process_dead``.
-
-    Dispatch on the recorded ``virtualizer`` instead. The import is local because
-    the QEMU backend imports this module's package at import time.
+    Matched against the recorded name, so a recycled PID is not mistaken for a
+    live guest and a guest of one backend is not judged by another's naming.
     """
-    if str((state or {}).get("virtualizer") or "").strip().lower() == QEMU:
-        from src.virtualizers.qemu.process import pid_alive as qemu_pid_alive
+    pid = int((state or {}).get("pid") or 0)
+    if pid <= 0:
+        return False
+    return pid_alive(pid, process_name=recorded_process_name(state))
 
-        return qemu_pid_alive
-    return pid_alive
 
+def maintain(
+    hypervisor: Hypervisor,
+    vmachine_id: str,
+    debug_mode: bool,
+    remove_and_penalize: Callable[[str], None],
+) -> None:
+    """Health-check one running instance, removing and penalizing a dead one.
 
-def _kill_for(state) -> Callable[..., bool]:
-    """The teardown belonging to the backend that launched this VM.
-
-    Same reason as :func:`_liveness_for`: CH's kill looks for CH's process and
-    CH's api socket, so pointing it at a QEMU guest leaves the emulator running
-    and its QMP socket behind while the state file disappears.
+    Four ways a guest is gone, in the order they can be detected most cheaply:
+    no runtime state, no usable PID, a process that is not this VM's any more,
+    and a control socket the hypervisor no longer holds. A panicked kernel passes
+    every one of them -- the process is alive and the socket answers while the
+    guest inside is gone, holding its memory and, under emulation, a host core --
+    so it is checked last and killed here rather than left to teardown.
     """
-    if str((state or {}).get("virtualizer") or "").strip().lower() == QEMU:
-        from src.virtualizers.qemu.kill import kill as qemu_kill
-
-        return qemu_kill
-    return kill_ch_vm
-
-
-def maintain(vmachine_id: str, debug_mode: bool, remove_and_penalize: Callable[[str], None]) -> None:
     state = load_runtime_state(vmachine_id)
     if not state:
-        log.LOGGER(f"[CH][{vmachine_id}] event=maintain unhealthy reason=runtime_state_missing")
+        log.LOGGER(hypervisor.log(vmachine_id, "event=maintain unhealthy reason=runtime_state_missing"))
         remove_and_penalize(vmachine_id=vmachine_id)
         return
 
     pid = int(state.get("pid") or 0)
     if pid <= 0:
-        log.LOGGER(f"[CH][{vmachine_id}] event=maintain unhealthy reason=invalid_pid pid={pid}")
+        log.LOGGER(hypervisor.log(vmachine_id, f"event=maintain unhealthy reason=invalid_pid pid={pid}"))
         remove_and_penalize(vmachine_id=vmachine_id)
         return
 
-    if not pid_alive(pid, vmachine_id=vmachine_id):
-        log.LOGGER(f"[CH][{vmachine_id}] event=maintain unhealthy reason=process_dead pid={pid}")
+    if not _state_is_alive(state):
+        log.LOGGER(hypervisor.log(vmachine_id, f"event=maintain unhealthy reason=process_dead pid={pid}"))
         remove_and_penalize(vmachine_id=vmachine_id)
         return
 
-    api_socket = str(state.get("api_socket") or "").strip()
-    if api_socket and not os.path.exists(api_socket):
-        log.LOGGER(
-            f"[CH][{vmachine_id}] event=maintain unhealthy "
-            f"reason=api_socket_missing pid={pid} socket={api_socket}"
-        )
+    control_socket = str(state.get("control_socket") or "").strip()
+    if control_socket and not Path(control_socket).exists():
+        log.LOGGER(hypervisor.log(
+            vmachine_id,
+            f"event=maintain unhealthy reason=control_socket_missing pid={pid} socket={control_socket}",
+        ))
         remove_and_penalize(vmachine_id=vmachine_id)
         return
 
-    # Every test above asks about the hypervisor; a panicked kernel passes all of
-    # them. The process is alive, the socket answers, and the guest inside is
-    # gone -- holding its memory and, on an emulated CPU, a host core with it.
     panic = guest_panic_line(state)
     if panic:
-        log.LOGGER(
-            f"[CH][{vmachine_id}] event=maintain unhealthy reason=guest_panicked "
-            f"pid={pid} panic={panic!r}"
-        )
+        log.LOGGER(hypervisor.log(
+            vmachine_id,
+            f"event=maintain unhealthy reason=guest_panicked pid={pid} panic={panic!r}",
+        ))
         # Killed here rather than left to the teardown below: `stop_instance`
         # only kills what it finds registered, and this branch exists precisely
         # for a process no liveness test will flag again. A double kill is
         # harmless; a missed one pins the resources for good.
         try:
-            _kill_for(state)(vmachine_id=vmachine_id)
+            kill_vm(hypervisor, vmachine_id=vmachine_id)
         except Exception as e:
-            log.LOGGER(f"[CH][{vmachine_id}] event=maintain panic_kill_failed error={e}")
+            log.LOGGER(hypervisor.log(vmachine_id, f"event=maintain panic_kill_failed error={e}"))
         remove_and_penalize(vmachine_id=vmachine_id)
         return
 
     if debug_mode:
-        log.LOGGER(
-            f"[CH][{vmachine_id}] event=maintain healthy pid={pid}, api_socket={api_socket or '<none>'}"
-        )
+        log.LOGGER(hypervisor.log(
+            vmachine_id,
+            f"event=maintain healthy pid={pid}, control_socket={control_socket or '<none>'}",
+        ))
 
 
 def orphan_reason(vmachine_id: str, state) -> Optional[str]:
@@ -123,10 +144,8 @@ def orphan_reason(vmachine_id: str, state) -> Optional[str]:
     and the disagreement would be an operator watching `prune` list a VM it then
     refuses to remove.
     """
-    pid = int((state or {}).get("pid") or 0)
     in_db = sc.internal_instance_exists(id=vmachine_id)
-    is_alive = _liveness_for(state)
-    alive = is_alive(pid, vmachine_id=vmachine_id) if pid > 0 else False
+    alive = _state_is_alive(state)
     # `execute` writes the state file the instant the hypervisor process exists
     # and registers the instance immediately after (see `save_booting_state`),
     # so for the width of those two writes a live VM legitimately has no row
@@ -148,7 +167,15 @@ def orphan_reason(vmachine_id: str, state) -> Optional[str]:
     return None
 
 
-def janitor_cleanup_orphans(debug_mode: bool = False) -> None:
+def sweep_orphans(debug_mode: bool = False) -> None:
+    """Kill every VM in this family's store that no longer has an owner.
+
+    The family's answer to "sweep your own orphans": it enumerates one shared
+    store because its members share one, and dispatches each entry's teardown to
+    the hypervisor that entry names. A family with no local store -- a remote
+    backend whose runtime state is a handle to someone else's API -- implements
+    the same question by asking that API instead, and never reads a directory.
+    """
     states = list_runtime_states()
     if not states:
         return
@@ -158,25 +185,29 @@ def janitor_cleanup_orphans(debug_mode: bool = False) -> None:
         if not reason:
             continue
 
+        recorded = recorded_virtualizer(state)
+        hypervisor = member(recorded)
+        if hypervisor is None:
+            # Not this family's to tear down, and guessing is what #295 did.
+            log.LOGGER(
+                f"[{FAMILY_LOG_TAG}][{vmachine_id}] event=janitor skipped "
+                f"reason={reason} unknown_virtualizer={recorded or '<unset>'}"
+            )
+            continue
+
         pid = int((state or {}).get("pid") or 0)
         in_db = sc.internal_instance_exists(id=vmachine_id)
-        alive = _liveness_for(state)(pid, vmachine_id=vmachine_id) if pid > 0 else False
+        alive = _state_is_alive(state)
 
-        log.LOGGER(
-            f"[CH][{vmachine_id}] event=janitor cleanup_start "
-            f"reason={reason} in_db={in_db} pid={pid} alive={alive}"
-        )
+        log.LOGGER(hypervisor.log(
+            vmachine_id,
+            f"event=janitor cleanup_start reason={reason} in_db={in_db} pid={pid} alive={alive}",
+        ))
         try:
-            _kill_for(state)(vmachine_id=vmachine_id)
-            log.LOGGER(
-                f"[CH][{vmachine_id}] event=janitor cleanup_done "
-                f"reason={reason}"
-            )
+            kill_vm(hypervisor, vmachine_id=vmachine_id)
+            log.LOGGER(hypervisor.log(vmachine_id, f"event=janitor cleanup_done reason={reason}"))
         except Exception as e:
-            log.LOGGER(
-                f"[CH][{vmachine_id}] event=janitor cleanup_failed "
-                f"reason={reason} error={e}"
-            )
+            log.LOGGER(hypervisor.log(vmachine_id, f"event=janitor cleanup_failed reason={reason} error={e}"))
             if debug_mode:
                 raise
 
@@ -213,7 +244,7 @@ class PruneEntry:
 
 
 def _dir_size(path: Path) -> int:
-    from src.virtualizers.ch.build import _dir_size_bytes
+    from src.virtualizers.microvm.build import _dir_size_bytes
 
     return _dir_size_bytes(path)
 
@@ -226,15 +257,11 @@ def _age_seconds(path: Path, now: Optional[float] = None) -> Optional[float]:
 
 
 def _failures_root() -> Optional[Path]:
-    from src.virtualizers.ch.build import CACHE
-
-    if not CACHE:
-        return None
-    return Path(CACHE) / "cloud_hypervisor" / "failures"
+    return paths.failures_root() if paths.optional_family_root() else None
 
 
 def scan_orphan_runtimes() -> List[PruneEntry]:
-    """Runtime entries this node can reclaim, newest condition first.
+    """Runtime entries this node can reclaim, largest first.
 
     Two shapes, both covered:
 
@@ -352,13 +379,25 @@ def reclaim(entry: PruneEntry) -> PruneEntry:
 
     An orphan with a state file goes through ``kill``, not ``rmtree``: it is a VM,
     and its teardown also drops the firewall rules, the tap device, the cgroup and
-    the API socket it left behind. Deleting only its directory would reclaim the
-    disk and leak everything else.
+    the control socket it left behind. Deleting only its directory would reclaim
+    the disk and leak everything else.
     """
     if entry.kind == "runtime" and entry.reason != "runtime_dir_without_state":
         state = load_runtime_state(entry.vmachine_id) or {}
+        hypervisor = member(recorded_virtualizer(state))
+        if hypervisor is None:
+            entry.removed = False
+            entry.error = (
+                f"unknown virtualizer {recorded_virtualizer(state) or '<unset>'}; "
+                "not this family's to tear down"
+            )
+            log.LOGGER(
+                f"[{FAMILY_LOG_TAG}][{entry.vmachine_id}] event=prune kind=runtime "
+                f"reason={entry.reason} removed=False error={entry.error}"
+            )
+            return entry
         try:
-            _kill_for(state)(vmachine_id=entry.vmachine_id)
+            kill_vm(hypervisor, vmachine_id=entry.vmachine_id)
             entry.removed = True
         except Exception as e:
             entry.error = str(e)
@@ -367,10 +406,11 @@ def reclaim(entry: PruneEntry) -> PruneEntry:
             freed, error = _remove_tree(entry.path)
             entry.size_bytes = freed
             entry.error = error
-        log.LOGGER(
-            f"[CH][{entry.vmachine_id}] event=prune kind=runtime reason={entry.reason} "
-            f"removed={entry.removed} freed_bytes={entry.size_bytes} error={entry.error or 'none'}"
-        )
+        log.LOGGER(hypervisor.log(
+            entry.vmachine_id,
+            f"event=prune kind=runtime reason={entry.reason} removed={entry.removed} "
+            f"freed_bytes={entry.size_bytes} error={entry.error or 'none'}",
+        ))
         return entry
 
     freed, error = _remove_tree(entry.path)
@@ -378,7 +418,7 @@ def reclaim(entry: PruneEntry) -> PruneEntry:
     entry.error = error
     entry.removed = error is None
     log.LOGGER(
-        f"[CH][{entry.vmachine_id}] event=prune kind={entry.kind} reason={entry.reason} "
-        f"removed={entry.removed} freed_bytes={freed} error={error or 'none'}"
+        f"[{FAMILY_LOG_TAG}][{entry.vmachine_id}] event=prune kind={entry.kind} "
+        f"reason={entry.reason} removed={entry.removed} freed_bytes={freed} error={error or 'none'}"
     )
     return entry

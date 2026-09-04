@@ -54,7 +54,7 @@ def _ensure_guest_bridge() -> None:
     Here it only costs an inconclusive probe, which is reported as such.
     """
     try:
-        from src.virtualizers.ch.execute import ensure_guest_bridge
+        from src.virtualizers.microvm.network import ensure_guest_bridge
 
         ensure_guest_bridge()
     except Exception as e:

@@ -40,6 +40,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     father_id TEXT,
                     balance_mu TEXT,
                     mem_limit INTEGER,
+                    disk_space INTEGER,
                     serialized_instance BLOB,
                     service_id TEXT,
                     virtualizer TEXT DEFAULT NULL
@@ -63,8 +64,9 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
             cur.execute(
                 """
                 INSERT INTO local_instances
-                (id, name, ip, father_id, balance_mu, mem_limit, serialized_instance, service_id, virtualizer)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, name, ip, father_id, balance_mu, mem_limit, disk_space,
+                 serialized_instance, service_id, virtualizer)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "vm-ch",
@@ -73,6 +75,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     "client-1",
                     "1000",
                     128 * 1024 * 1024,
+                    512 * 1024 * 1024,
                     _serialized_instance(),
                     "svc-ch",
                     "ch",
@@ -81,8 +84,29 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
             cur.execute(
                 """
                 INSERT INTO local_instances
-                (id, name, ip, father_id, balance_mu, mem_limit, serialized_instance, service_id, virtualizer)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, name, ip, father_id, balance_mu, mem_limit, disk_space,
+                 serialized_instance, service_id, virtualizer)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "vm-qemu",
+                    "amber-kite",
+                    "192.168.200.11",
+                    "client-1",
+                    "950",
+                    96 * 1024 * 1024,
+                    512 * 1024 * 1024,
+                    _serialized_instance(),
+                    "svc-qemu",
+                    "qemu",
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO local_instances
+                (id, name, ip, father_id, balance_mu, mem_limit, disk_space,
+                 serialized_instance, service_id, virtualizer)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "vm-docker",
@@ -91,6 +115,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     "client-1",
                     "900",
                     64 * 1024 * 1024,
+                    256 * 1024 * 1024,
                     _serialized_instance(),
                     "svc-docker",
                     "docker",
@@ -108,7 +133,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                 instances_cmd, "METADATA", tmpdir
             ), patch.object(
                 instances_cmd,
-                "_prune_stale_ch_instances",
+                "_prune_stale_instances",
                 return_value=None,
             ), patch.object(
                 instances_cmd,
@@ -132,13 +157,13 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
         self.assertIn("Virtualizer: docker", rendered)
         self.assertNotIn("VM PID:", rendered)
 
-    def test_instances_groupable_shows_runtime_only_for_ch(self):
+    def test_instances_groupable_shows_runtime_for_every_microvm_backend(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "instances.sqlite")
             self._build_db(db_path)
 
             def _snapshot(vmachine_id):
-                if vmachine_id == "vm-ch":
+                if vmachine_id in ("vm-ch", "vm-qemu"):
                     return {
                         "pid": 1234,
                         "uptime_s": 65,
@@ -160,7 +185,7 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                 instances_cmd, "METADATA", tmpdir
             ), patch.object(
                 instances_cmd,
-                "_prune_stale_ch_instances",
+                "_prune_stale_instances",
                 return_value=None,
             ), patch.object(
                 instances_cmd,
@@ -178,23 +203,29 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
         self.assertIn("VM Memory (RSS): 9.00 MB", rendered)
         self.assertIn("VM Memory limit (cgroup): 47.68 MB", rendered)
         self.assertIn("VM Memory current (cgroup): 11.00 MB", rendered)
+        # A QEMU guest has a hypervisor process and a cgroup on this host too, so
+        # its runtime figures are as readable as CH's. They used to be hidden by a
+        # `virtualizer == "ch"` string test.
+        self.assertIn("Virtualizer: qemu", rendered)
+        self.assertEqual(rendered.count("VM PID: 1234"), 2)
+        # A backend with nothing running locally has no such figures to show.
         self.assertIn("Virtualizer: docker", rendered)
         self.assertNotIn("VM PID: N/A", rendered)
 
-    def test_list_instances_prunes_stale_ch_before_rendering(self):
+    def test_list_instances_prunes_stale_instances_before_rendering(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "instances.sqlite")
             self._build_db(db_path)
 
             with patch.object(instances_cmd, "DATABASE_FILE", db_path), patch.object(
                 instances_cmd,
-                "_ch_instance_is_stale",
-                side_effect=lambda instance_id: instance_id == "vm-ch",
+                "_instance_is_stale",
+                side_effect=lambda instance_id: instance_id in ("vm-ch", "vm-qemu"),
             ), patch(
                 "src.manager.manager.stop_instance",
                 side_effect=Exception("cleanup failed"),
             ), patch(
-                "src.virtualizers.ch.kill.kill",
+                "src.virtualizers.interface.kill",
                 return_value=True,
             ):
                 out = io.StringIO()
@@ -202,7 +233,11 @@ class CommandsInstancesCloudHypervisorTests(unittest.TestCase):
                     instances_cmd.list_instances(groupable=False)
 
         rendered = out.getvalue()
+        # Both are pruned. The sweep used to filter the candidate list down to
+        # rows whose `virtualizer` column read "ch", so a dead QEMU instance was
+        # listed as running for good.
         self.assertNotIn("ID: vm-ch", rendered)
+        self.assertNotIn("ID: vm-qemu", rendered)
         self.assertIn("ID: vm-docker", rendered)
 
 

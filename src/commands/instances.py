@@ -7,7 +7,7 @@ from src.utils.logger import ssformat
 from src.utils.monetary import format_mu
 from src.utils.utils import from_amount
 try:
-    from src.virtualizers.ch.observability import get_vm_runtime_snapshot
+    from src.virtualizers.microvm.observability import get_vm_runtime_snapshot
 except Exception:  # pragma: no cover - defensive fallback for minimal environments
     def get_vm_runtime_snapshot(vmachine_id: str):
         _ = vmachine_id
@@ -27,9 +27,6 @@ DATABASE_FILE = env_manager.get("DATABASE_FILE")
 METADATA = env_manager.get("METADATA_REGISTRY")
 DEFAULT_VIRTUALIZER = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
 
-def _is_ch_virtualizer(virtualizer: str) -> bool:
-    return str(virtualizer or "").strip().lower() == "ch"
-
 def _direct_purge_local_instance(instance_id: str) -> None:
     conn = sqlite3.connect(DATABASE_FILE)
     try:
@@ -38,39 +35,62 @@ def _direct_purge_local_instance(instance_id: str) -> None:
     finally:
         conn.close()
 
-def _ch_instance_is_stale(instance_id: str) -> bool:
+def _has_runtime_snapshot(virtualizer) -> bool:
+    """Does this instance's backend have a local process to snapshot at all?
+
+    The PID, uptime, RSS and cgroup figures below are read off a hypervisor
+    process and a cgroup on this host, so they exist for the microVM family and
+    for nothing else -- a backend running the guest somewhere else has no such
+    process to report. Asked of the registry rather than compared against the
+    string ``"ch"``, which is what hid every QEMU instance's runtime column.
+    """
+    from src.virtualizers.registry import MICROVM, family_of
+
     try:
-        from src.virtualizers.ch.process import pid_alive
-        from src.virtualizers.ch.runtime_state import load_runtime_state
+        return family_of(virtualizer or DEFAULT_VIRTUALIZER).name == MICROVM
+    except Exception:
+        return False
+
+def _instance_is_stale(instance_id: str) -> bool:
+    """Is this row's guest gone, judged by what the launcher actually recorded?
+
+    Matched against the recorded process name and the recorded control socket, so
+    the same three checks answer for any backend that wrote them. This used to
+    read CH's socket key with CH's process matcher, and to skip every instance
+    whose ``virtualizer`` column was not ``ch`` -- so a dead QEMU guest stayed
+    listed as running forever.
+    """
+    try:
+        from src.virtualizers.microvm.process import pid_alive
+        from src.virtualizers.microvm.runtime_state import (
+            load_runtime_state,
+            recorded_process_name,
+        )
 
         state = load_runtime_state(instance_id)
         if not state:
             return True
         pid = int(state.get("pid") or 0)
-        if pid <= 0 or not pid_alive(pid=pid, vmachine_id=instance_id):
+        if pid <= 0 or not pid_alive(pid=pid, process_name=recorded_process_name(state)):
             return True
-        api_socket = str(state.get("api_socket") or "").strip()
-        return bool(api_socket) and not os.path.exists(api_socket)
+        control_socket = str(state.get("control_socket") or "").strip()
+        return bool(control_socket) and not os.path.exists(control_socket)
     except Exception:
         return False
 
-def _prune_stale_ch_instances() -> None:
+def _prune_stale_instances() -> None:
     conn = sqlite3.connect(DATABASE_FILE)
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, virtualizer FROM local_instances")
-        candidates = [
-            instance_id
-            for instance_id, virtualizer in cursor.fetchall()
-            if _is_ch_virtualizer(virtualizer or DEFAULT_VIRTUALIZER)
-        ]
+        cursor.execute("SELECT id FROM local_instances")
+        candidates = [row[0] for row in cursor.fetchall()]
     except sqlite3.Error:
         return
     finally:
         conn.close()
 
     for instance_id in candidates:
-        if not _ch_instance_is_stale(instance_id):
+        if not _instance_is_stale(instance_id):
             continue
         try:
             from src.manager.manager import stop_instance
@@ -78,16 +98,19 @@ def _prune_stale_ch_instances() -> None:
             if stop_instance(token=instance_id) is None:
                 _direct_purge_local_instance(instance_id)
         except Exception:
+            # `stop_instance` is the normal teardown; this is the fallback for a
+            # row it could not act on. Routed through the interface so the kill
+            # belongs to whichever backend launched the guest.
             try:
-                from src.virtualizers.ch.kill import kill as kill_ch_vm
+                from src.virtualizers.interface import kill as vm_kill
 
-                kill_ch_vm(vmachine_id=instance_id)
+                vm_kill(vmachine_id=instance_id)
             except Exception:
                 pass
             _direct_purge_local_instance(instance_id)
 
 def list_instances(groupable: bool = False, search: str = ""):
-    _prune_stale_ch_instances()
+    _prune_stale_instances()
 
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
@@ -189,7 +212,7 @@ def list_instances(groupable: bool = False, search: str = ""):
                 vm_mem_rss = "N/A"
                 vm_mem_limit_cgroup = "N/A"
                 vm_mem_current_cgroup = "N/A"
-                if groupable and _is_ch_virtualizer(runtime_virtualizer) and id_:
+                if groupable and _has_runtime_snapshot(runtime_virtualizer) and id_:
                     snapshot = get_vm_runtime_snapshot(vmachine_id=id_)
                     vm_pid = str(snapshot.get("pid")) if snapshot.get("pid") is not None else "N/A"
                     vm_uptime = seconds_to_readable(snapshot.get("uptime_s"))
@@ -301,7 +324,7 @@ def list_instances(groupable: bool = False, search: str = ""):
             ("Memory limit", "mem_limit"),
             ("Disk limit", "disk_space"),
         ]
-        if include_runtime and _is_ch_virtualizer(inst.get("virtualizer")):
+        if include_runtime and _has_runtime_snapshot(inst.get("virtualizer")):
             fields.extend(
                 [
                     ("VM PID", "vm_pid"),

@@ -219,8 +219,8 @@ def advertise_ip_for(father_id: str, father_ip: str) -> Optional[str]:
     network it came from.
     """
     if father_id and sc.internal_instance_exists(id=father_id):
-        # Imported lazily: the virtualizer module pulls in the whole CH stack.
-        from src.virtualizers.ch.execute import NETWORK_BRIDGE_NAME
+        # Imported lazily: the network module reaches the database and the firewall.
+        from src.virtualizers.microvm.network import NETWORK_BRIDGE_NAME
 
         try:
             return utils.get_local_ip_from_network(

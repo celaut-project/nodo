@@ -1,10 +1,14 @@
-"""Cloud Hypervisor virtualizer.
+"""Cloud Hypervisor: boot a native-arch service as a microVM under KVM.
 
-Deliberately re-exports nothing: re-exporting ``build`` or ``execute`` here would make
-every module in the package cost their whole dependency tree -- grpc, bee_rpc, the
-gateway -- including the ones that need none of it, such as the guest floors in
-``limits``. Import the submodule you need:
-``from src.virtualizers.ch.limits import billable_resources``.
+Only what is CH's lives here -- its launch (``execute``) and its resize
+(``hotplug``). What it shares with QEMU because they are the same kind of thing
+-- the build cache, the bundle, the rootfs injections, host networking, cgroups,
+the runtime-state store, liveness, teardown and the janitor -- lives in
+``src.virtualizers.microvm``.
 
-The virtualizer's public surface is ``src.virtualizers.interface``, not this package.
+Deliberately re-exports nothing: re-exporting ``execute`` here would make every
+module in the package cost its whole dependency tree -- grpc, bee_rpc, the
+gateway -- including the ones that need none of it. Import the submodule you
+need, and reach a backend through ``src.virtualizers.interface`` or
+``src.virtualizers.registry`` rather than by importing it.
 """

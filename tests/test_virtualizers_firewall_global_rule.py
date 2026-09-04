@@ -24,7 +24,7 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class VirtualizerFirewallGlobalRuleTests(unittest.TestCase):
     def test_asks_the_backend_to_put_the_return_traffic_accept_first(self):
-        with patch("src.virtualizers.ch.firewall.backend") as backend:
+        with patch("src.virtualizers.microvm.firewall.backend") as backend:
             backend.return_value.ensure_first.return_value = True
             self.assertTrue(vm_firewall.ensure_forward_related_established_rule())
 
@@ -38,17 +38,17 @@ class VirtualizerFirewallGlobalRuleTests(unittest.TestCase):
         self.assertEqual(rule.comment, vm_firewall.FORWARD_RELATED_ESTABLISHED_COMMENT)
 
     def test_an_already_correct_chain_is_still_a_success(self):
-        with patch("src.virtualizers.ch.firewall.backend") as backend:
+        with patch("src.virtualizers.microvm.firewall.backend") as backend:
             backend.return_value.ensure_first.return_value = False
             self.assertTrue(vm_firewall.ensure_forward_related_established_rule())
 
     def test_a_firewall_failure_is_reported_not_swallowed(self):
-        with patch("src.virtualizers.ch.firewall.backend") as backend:
+        with patch("src.virtualizers.microvm.firewall.backend") as backend:
             backend.return_value.ensure_first.side_effect = FirewallError("no permission")
             self.assertFalse(vm_firewall.ensure_forward_related_established_rule())
 
     def test_an_unexpected_failure_is_reported_too(self):
-        with patch("src.virtualizers.ch.firewall.backend") as backend:
+        with patch("src.virtualizers.microvm.firewall.backend") as backend:
             backend.return_value.ensure_first.side_effect = RuntimeError("nft went missing")
             self.assertFalse(vm_firewall.ensure_forward_related_established_rule())
 

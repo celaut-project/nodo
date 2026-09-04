@@ -20,7 +20,7 @@ from src.utils.firewall import policy
 from src.utils.firewall.backends import FirewallBackend, FirewallError, detect_backend
 from src.utils.firewall.rules import Chain, Rule
 from src.utils.logger import LOGGER as logger
-from src.virtualizers.ch.runtime_state import load_runtime_state
+from src.virtualizers.microvm.runtime_state import load_runtime_state
 from src.virtualizers.firewall import TransportProtocol, resolve_slot_transport_protocols
 
 sc = SQLConnection()
@@ -59,10 +59,10 @@ def _apply(rules: List[Rule], *, context: str) -> bool:
         try:
             added = active.ensure(rule)
         except FirewallError as e:
-            logger(f"[CH][FW] {context}: {e}")
+            logger(f"[FW] {context}: {e}")
             return False
         if not added:
-            logger(f"[CH][FW] {context}: already in place ({rule.comment})")
+            logger(f"[FW] {context}: already in place ({rule.comment})")
     return True
 
 
@@ -71,12 +71,12 @@ def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
         vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
         rules = policy.block_all_rules(vmachine_id=vmachine_id, vm_ip=vm_ip)
     except Exception as e:
-        logger(f"[CH][FW] Failed to block all traffic for {vmachine_id}: {e}")
+        logger(f"[FW] Failed to block all traffic for {vmachine_id}: {e}")
         return False
 
     if not _apply(rules, context=f"block_all for {vmachine_id} ({vm_ip})"):
         return False
-    logger(f"[CH][FW] Blocked all outgoing traffic for {vmachine_id} ({vm_ip})")
+    logger(f"[FW] Blocked all outgoing traffic for {vmachine_id} ({vm_ip})")
     return True
 
 
@@ -97,14 +97,14 @@ def allow_connection(
             protocol=protocol.value,
         )
     except Exception as e:
-        logger(f"[CH][FW] Failed to allow connection for {vmachine_id}: {e}")
+        logger(f"[FW] Failed to allow connection for {vmachine_id}: {e}")
         return False
 
     target = f"{ip}:{port}" if port is not None else str(ip)
     if not _apply([rule], context=f"allow {vm_ip} -> {target}/{protocol.value}"):
         return False
     logger(
-        f"[CH][FW] Allowed {protocol.value} from {vmachine_id} ({vm_ip}) to {target}"
+        f"[FW] Allowed {protocol.value} from {vmachine_id} ({vm_ip}) to {target}"
     )
     return True
 
@@ -132,14 +132,14 @@ def allow_host_connection(
             protocol=protocol.value,
         )
     except Exception as e:
-        logger(f"[CH][FW] Failed to allow host connection for {vmachine_id}: {e}")
+        logger(f"[FW] Failed to allow host connection for {vmachine_id}: {e}")
         return False
 
     target = f"{host_ip}:{port}" if port is not None else str(host_ip)
     if not _apply([rule], context=f"allow_host {vm_ip} -> {target}/{protocol.value}"):
         return False
     logger(
-        f"[CH][FW] Allowed {protocol.value} from {vmachine_id} ({vm_ip}) to this host at {target}"
+        f"[FW] Allowed {protocol.value} from {vmachine_id} ({vm_ip}) to this host at {target}"
     )
     return True
 
@@ -154,7 +154,7 @@ def allow_connection_to_instance(
             slot.port: resolve_slot_transport_protocols(
                 slot,
                 logger_fn=logger,
-                context=f"[CH][FW][{vmachine_id}]",
+                context=f"[FW][{vmachine_id}]",
             )
             for slot in instance.api.slot
         }
@@ -164,13 +164,13 @@ def allow_connection_to_instance(
             internal_port = slot.internal_port
             if internal_port not in slot_protocols:
                 logger(
-                    f"[CH][FW] Internal slot {internal_port} not present in instance.api.slot. Skipping."
+                    f"[FW] Internal slot {internal_port} not present in instance.api.slot. Skipping."
                 )
                 continue
             protocol = slot_protocols[internal_port]
             if not protocol:
                 logger(
-                    f"[CH][FW] Internal slot {internal_port} has no host-supported transports. Skipping."
+                    f"[FW] Internal slot {internal_port} has no host-supported transports. Skipping."
                 )
                 continue
 
@@ -184,7 +184,7 @@ def allow_connection_to_instance(
                 )
                 if not result:
                     logger(
-                        f"[CH][FW] Failed allow_connection_to_instance for {vmachine_id} "
+                        f"[FW] Failed allow_connection_to_instance for {vmachine_id} "
                         f"towards {uri.ip}:{uri.port}/{protocol.value}"
                     )
                 results.append(result)
@@ -193,7 +193,7 @@ def allow_connection_to_instance(
             raise RuntimeError("No allow rule could be applied for any instance slot.")
         return True
     except Exception as e:
-        logger(f"[CH][FW] Failed to allow connection to instance for {vmachine_id}: {e}")
+        logger(f"[FW] Failed to allow connection to instance for {vmachine_id}: {e}")
         return False
 
 
@@ -216,14 +216,14 @@ def remove_rule(
         )
         removed = backend().delete_by_comment(Chain.FORWARD, rule.comment)
     except Exception as e:
-        logger(f"[CH][FW] Failed to remove rule for {vmachine_id}: {e}")
+        logger(f"[FW] Failed to remove rule for {vmachine_id}: {e}")
         return False
 
     target = f"{ip}:{port}" if port is not None else str(ip)
     if removed:
-        logger(f"[CH][FW] Removed {protocol.value} rule for {vmachine_id} to {target}")
+        logger(f"[FW] Removed {protocol.value} rule for {vmachine_id} to {target}")
         return True
-    logger(f"[CH][FW] No {protocol.value} rule for {vmachine_id} to {target} to remove")
+    logger(f"[FW] No {protocol.value} rule for {vmachine_id} to {target} to remove")
     return False
 
 
@@ -237,12 +237,12 @@ def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
         vm_ip = _resolve_vmachine_ip(vmachine_id=vmachine_id, source_ip=source_ip)
         rule = policy.allow_all_egress_rule(vmachine_id=vmachine_id, vm_ip=vm_ip)
     except Exception as e:
-        logger(f"[CH][FW] Failed to allow all egress for {vmachine_id}: {e}")
+        logger(f"[FW] Failed to allow all egress for {vmachine_id}: {e}")
         return False
 
     if not _apply([rule], context=f"allow_all_egress for {vmachine_id} ({vm_ip})"):
         return False
-    logger(f"[CH][FW] Allowed ALL egress for {vmachine_id} ({vm_ip}) [network tag '*']")
+    logger(f"[FW] Allowed ALL egress for {vmachine_id} ({vm_ip}) [network tag '*']")
     return True
 
 
@@ -257,9 +257,9 @@ def remove_vm_rules(vmachine_id: str) -> int:
         prefix = policy.vm_comment_prefix(vmachine_id)
         removed = backend().delete_by_comment_prefix(prefix)
     except Exception as e:
-        logger(f"[CH][FW] Failed to remove the rules of {vmachine_id}: {e}")
+        logger(f"[FW] Failed to remove the rules of {vmachine_id}: {e}")
         return 0
 
     if removed:
-        logger(f"[CH][FW] Removed {removed} firewall rule(s) for {vmachine_id}")
+        logger(f"[FW] Removed {removed} firewall rule(s) for {vmachine_id}")
     return removed

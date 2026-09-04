@@ -12,11 +12,10 @@ from pathlib import Path
 try:
     from protos import celaut_pb2 as celaut
     from src.utils import shared_filesystems as sf
-    # Load the backend module directly from its file: importing it through the
-    # `src.virtualizers.ch` package would run that package's __init__, which pulls
-    # in the full CH build stack (bee_rpc etc.). The backend itself only depends on
-    # protos + shared_filesystems, so it loads and tests standalone.
-    _VF_PATH = Path(__file__).resolve().parents[1] / "src" / "virtualizers" / "ch" / "virtiofs.py"
+    # Load the backend module directly from its file rather than through the
+    # package, so this stays a test of virtiofs alone: it depends only on protos
+    # + shared_filesystems and loads standalone.
+    _VF_PATH = Path(__file__).resolve().parents[1] / "src" / "virtualizers" / "microvm" / "virtiofs.py"
     _spec = importlib.util.spec_from_file_location("ch_virtiofs_under_test", _VF_PATH)
     vf = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(vf)

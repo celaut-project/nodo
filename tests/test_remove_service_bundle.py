@@ -17,11 +17,13 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
-    from src.virtualizers.ch import build as ch_build
+    from src.virtualizers.microvm import build as ch_build
+    from src.virtualizers.microvm import paths as microvm_paths
     from src.commands import remove as remove_cmd
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     ch_build = None  # type: ignore[assignment]
+    microvm_paths = None  # type: ignore[assignment]
     remove_cmd = None  # type: ignore[assignment]
 
 SERVICE_ID = "efe54d0a42af6c989d95ff9bbbadf7e809f80f3c151979ed4a6b19df1412b74d"
@@ -34,7 +36,7 @@ class RemoveBuiltServiceTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.cache = Path(self.tmp.name)
-        self.bundles = self.cache / "cloud_hypervisor"
+        self.bundles = self.cache / microvm_paths.FAMILY_DIR_NAME
 
         # What a built node looks like: two service bundles, the runtime directories
         # of the VMs that are running, and the debris of a failed launch.
@@ -46,9 +48,12 @@ class RemoveBuiltServiceTests(unittest.TestCase):
         self.failures = self.bundles / "failures"
         self.failures.mkdir(parents=True)
 
-        patcher = patch.object(ch_build, "CACHE", str(self.cache))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (
+            patch.object(microvm_paths, "cache_root", return_value=str(self.cache)),
+            patch.object(ch_build, "CACHE", str(self.cache)),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _write_bundle(self, service_id, arch, size):
         bundle_dir = self.bundles / service_id / arch

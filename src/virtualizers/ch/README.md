@@ -2,10 +2,14 @@
 
 > **Historical design document (pre-migration).** This file describes the
 > original plan to add Cloud Hypervisor *alongside* Docker and reflects a
-> Docker-centric world that no longer exists. **Current reality:** Cloud
-> Hypervisor (CH) is the only supported virtualizer; the Docker virtualizer
-> has been removed (`src/virtualizers/interface.py` hard-returns `"ch"`).
-> Treat references to Docker below as historical context, not current state.
+> Docker-centric world that no longer exists. **Current reality:** the Docker
+> virtualizer has been removed, and CH is one of two microVM backends (the other
+> is QEMU/TCG for foreign architectures), both chosen per service by
+> `src/virtualizers/selection.py`. Almost everything described below as CH's now
+> lives in the shared `src/virtualizers/microvm/` family layer, not in this
+> package. For how the layering actually works, read
+> [`docs/BACKENDS.md`](../../../docs/BACKENDS.md); treat this file, and every
+> reference to Docker in it, as historical context.
 
 ## Objective and Context
 
@@ -129,7 +133,8 @@ IPs and MACs are derived from the `vmachine_id` without DHCP to ensure stability
 
 ## Shared Filesystems (VirtioFS backend)
 
-`virtiofs.py` materializes **parent → child shared filesystems** for CH microVMs.
+`src/virtualizers/microvm/virtiofs.py` materializes **parent → child shared
+filesystems** for microVM guests, whichever hypervisor booted them.
 This is purely a backend: the semantics (the `shared`/`guest`/`access` xattrs,
 share identity, node co-location) live in `src/utils/shared_filesystems.py`, and
 the service specification never mentions VirtioFS. See

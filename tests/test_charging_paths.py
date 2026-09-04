@@ -105,7 +105,7 @@ class MaintenanceTickTests(unittest.TestCase):
              patch.object(maintain, "spend_mu", spend), \
              patch.object(maintain, "system_scarcity", return_value=IDLE), \
              patch.object(maintain, "_reputation_interface"), \
-             patch("src.virtualizers.ch.maintain.janitor_cleanup_orphans"):
+             patch.object(maintain, "vm_janitor_cleanup_orphans"):
             maintain.maintain_vmachines(debug_mode=False)
 
         spend.assert_called_once()

@@ -235,7 +235,7 @@ class Prices:
     # deliberately absorbs it -- a client pays for the RAM it declared and can use,
     # never for the kernel underneath it -- so an operator who wants that cost covered
     # has to price it into the memory rate, and one rate cannot cover it correctly on
-    # both arches at once. See `virtualizers.ch.limits.guest_kernel_reserve_bytes`, and
+    # both arches at once. See `virtualizers.microvm.limits.guest_kernel_reserve_bytes`, and
     # the TUI's pricing page, which shows the effective figure per arch.
     #
     # Only memory is per-arch. CPU and disk are not: the node hands a guest the vCPUs

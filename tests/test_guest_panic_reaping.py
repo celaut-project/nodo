@@ -19,12 +19,12 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
-    from src.virtualizers.ch import guest_panic
-    from src.virtualizers.ch import maintain as ch_maintain
-    from src.virtualizers.qemu import maintain as qemu_maintain
+    from src.virtualizers.microvm import guest_panic
+    from src.virtualizers.microvm import maintain as microvm_maintain
+    from src.virtualizers.microvm import members
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
-    guest_panic = ch_maintain = qemu_maintain = None  # type: ignore[assignment]
+    guest_panic = microvm_maintain = members = None  # type: ignore[assignment]
 
 
 # The tail of the real serial log, verbatim (\r\n line endings included: this is
@@ -94,26 +94,17 @@ class PanickedGuestIsReapedTests(unittest.TestCase):
 
     STATE = {"pid": 555, "serial_log": "/irrelevant-mocked"}
 
-    def _run_ch(self, panic_line):
+    def _run(self, hypervisor, panic_line, kill_effect=None):
         removed = []
-        with patch.object(ch_maintain, "load_runtime_state", return_value=dict(self.STATE)), \
-             patch.object(ch_maintain, "pid_alive", return_value=True), \
-             patch.object(ch_maintain, "guest_panic_line", return_value=panic_line), \
-             patch.object(ch_maintain, "kill_ch_vm", return_value=True) as kill_mock:
-            ch_maintain.maintain(
-                vmachine_id="vm-1",
-                debug_mode=False,
-                remove_and_penalize=lambda vmachine_id: removed.append(vmachine_id),
-            )
-        return kill_mock, removed
-
-    def _run_qemu(self, panic_line):
-        removed = []
-        with patch.object(qemu_maintain, "load_runtime_state", return_value=dict(self.STATE)), \
-             patch.object(qemu_maintain, "pid_alive", return_value=True), \
-             patch.object(qemu_maintain, "guest_panic_line", return_value=panic_line), \
-             patch("src.virtualizers.qemu.kill.kill", return_value=True) as kill_mock:
-            qemu_maintain.maintain(
+        kill_kwargs = (
+            {"side_effect": kill_effect} if kill_effect else {"return_value": True}
+        )
+        with patch.object(microvm_maintain, "load_runtime_state", return_value=dict(self.STATE)), \
+             patch.object(microvm_maintain, "_state_is_alive", return_value=True), \
+             patch.object(microvm_maintain, "guest_panic_line", return_value=panic_line), \
+             patch.object(microvm_maintain, "kill_vm", **kill_kwargs) as kill_mock:
+            microvm_maintain.maintain(
+                hypervisor,
                 vmachine_id="vm-1",
                 debug_mode=False,
                 remove_and_penalize=lambda vmachine_id: removed.append(vmachine_id),
@@ -121,33 +112,26 @@ class PanickedGuestIsReapedTests(unittest.TestCase):
         return kill_mock, removed
 
     def test_ch_kills_the_hypervisor_of_a_panicked_guest(self):
-        kill_mock, removed = self._run_ch("Kernel panic - not syncing: x")
-        kill_mock.assert_called_once_with(vmachine_id="vm-1")
+        kill_mock, removed = self._run(members.CH, "Kernel panic - not syncing: x")
+        kill_mock.assert_called_once_with(members.CH, vmachine_id="vm-1")
         self.assertEqual(removed, ["vm-1"])
 
     def test_qemu_kills_the_emulator_of_a_panicked_guest(self):
-        kill_mock, removed = self._run_qemu("Kernel panic - not syncing: x")
-        kill_mock.assert_called_once_with(vmachine_id="vm-1")
+        kill_mock, removed = self._run(members.QEMU, "Kernel panic - not syncing: x")
+        kill_mock.assert_called_once_with(members.QEMU, vmachine_id="vm-1")
         self.assertEqual(removed, ["vm-1"])
 
     def test_a_healthy_guest_is_left_running(self):
-        for runner in (self._run_ch, self._run_qemu):
-            kill_mock, removed = runner(None)
+        for hypervisor in (members.CH, members.QEMU):
+            kill_mock, removed = self._run(hypervisor, None)
             kill_mock.assert_not_called()
             self.assertEqual(removed, [])
 
     def test_teardown_still_runs_when_the_kill_itself_fails(self):
         # A kill that raises must not strand the row and the deposit with it.
-        removed = []
-        with patch.object(ch_maintain, "load_runtime_state", return_value=dict(self.STATE)), \
-             patch.object(ch_maintain, "pid_alive", return_value=True), \
-             patch.object(ch_maintain, "guest_panic_line", return_value="Kernel panic - not syncing: x"), \
-             patch.object(ch_maintain, "kill_ch_vm", side_effect=OSError("boom")):
-            ch_maintain.maintain(
-                vmachine_id="vm-1",
-                debug_mode=False,
-                remove_and_penalize=lambda vmachine_id: removed.append(vmachine_id),
-            )
+        _, removed = self._run(
+            members.CH, "Kernel panic - not syncing: x", kill_effect=OSError("boom")
+        )
         self.assertEqual(removed, ["vm-1"])
 
 
@@ -157,10 +141,10 @@ class PanickedGuestIsAnOrphanTests(unittest.TestCase):
     `nodo prune` both have to see a panicked guest as one."""
 
     def _reason(self, state, in_db=True, panic="Kernel panic - not syncing: x"):
-        with patch.object(ch_maintain.sc, "internal_instance_exists", return_value=in_db), \
-             patch.object(ch_maintain, "pid_alive", return_value=True), \
-             patch.object(ch_maintain, "guest_panic_line", return_value=panic):
-            return ch_maintain.orphan_reason(vmachine_id="vm-1", state=state)
+        with patch.object(microvm_maintain.sc, "internal_instance_exists", return_value=in_db), \
+             patch.object(microvm_maintain, "_state_is_alive", return_value=True), \
+             patch.object(microvm_maintain, "guest_panic_line", return_value=panic):
+            return microvm_maintain.orphan_reason(vmachine_id="vm-1", state=state)
 
     def test_a_panicked_guest_is_an_orphan(self):
         self.assertEqual(self._reason({"pid": 555}), "guest_panicked")

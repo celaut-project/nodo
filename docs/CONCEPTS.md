@@ -41,13 +41,19 @@ The specification is the blueprint (`service id`); the instance is the live
 process (`instance id`). One specification can have many instances. `nodo execute`
 creates an instance; `nodo instances` lists them; `nodo kill` stops one.
 
-## microVM (Cloud Hypervisor, `ch`)
+## microVM (Cloud Hypervisor, `ch`; QEMU, `qemu`)
 
-Services **execute** inside isolated Cloud Hypervisor microVMs — not Docker
-containers. `ch` is the only virtualizer. Docker, when used at all, is only for
-the *packing* step (and only in the opt-in `packer.local` mode); it never runs a
-service. Do not use `docker ps` to inspect a running instance — use
-`nodo instances` / `nodo observe`.
+Services **execute** inside isolated microVMs — not Docker containers. Cloud
+Hypervisor (`ch`) boots a service of the host's own architecture under KVM and is
+the default; QEMU (`qemu`) boots a foreign-architecture service under TCG
+emulation, and is chosen per service by
+[`selection.py`](../src/virtualizers/selection.py). Both are members of the same
+*backend family* — see [`BACKENDS.md`](BACKENDS.md) for how the two are layered
+and what they share.
+
+Docker, when used at all, is only for the *packing* step (and only in the opt-in
+`packer.local` mode); it never runs a service. Do not use `docker ps` to inspect a
+running instance — use `nodo instances` / `nodo observe`.
 
 ## Balances and prices
 

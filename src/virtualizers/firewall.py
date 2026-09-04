@@ -2,13 +2,11 @@ from enum import Enum
 from typing import Callable, List, Optional
 
 from protos import celaut_pb2 as celaut
-from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
 from src.utils.firewall import policy
 from src.utils.firewall.errors import FirewallError
 from src.utils.logger import LOGGER as logger
 
-sc = SQLConnection()
 env_manager = ConfigManager()
 
 FORWARD_RELATED_ESTABLISHED_COMMENT = policy.FORWARD_RELATED_ESTABLISHED_COMMENT
@@ -84,28 +82,24 @@ def resolve_slot_transport_protocols(
     return resolved[0]
 
 
-def _normalize_virtualizer(name: Optional[str]) -> str:
-    if not isinstance(name, str):
-        raise ValueError(f"Invalid virtualizer value: {name!r}")
-    v = name.strip().lower()
-    if not v:
-        raise ValueError("Virtualizer value is empty.")
-    if v in {"ch", "cloud_hypervisor", "cloud-hypervisor"}:
-        return "ch"
-    if v == "qemu":
-        return "qemu"
-    raise ValueError(f"Unknown virtualizer '{name}'. Supported: ch, qemu.")
-
-
-def _resolve_virtualizer(vmachine_id: str) -> str:
-    try:
-        virtualizer = sc.get_internal_virtualizer(id=vmachine_id)
-        if isinstance(virtualizer, str) and virtualizer.strip():
-            return _normalize_virtualizer(virtualizer)
-    except Exception:
-        pass
-    default_virtualizer = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
-    return _normalize_virtualizer(default_virtualizer)
+# There is no per-instance dispatch in this module, on purpose.
+#
+# It used to resolve the instance's backend from the database and then branch on
+# it -- six times, and all six branches read `if virtualizer in ("ch", "qemu")`
+# followed by the same call. That is not dispatch, it is a database lookup whose
+# answer is discarded, and its tests made the dead half look alive.
+#
+# The reason no branch was reachable is the real answer: a per-VM rule is written
+# against a tap on a bridge, by comment prefix, with iptables or nft. That is not
+# a property of *a backend* but of the whole microVM family, whose members share
+# the one bridge those rules sit on -- so both of this node's backends resolve to
+# the same implementation, and a third microVM hypervisor would too.
+#
+# A backend outside that family does not need a narrower branch here; it has no
+# tap and no bridge, so it has nothing for these functions to write. When one
+# exists, what changes is this module's contract (does the node even ask for a
+# firewall rule for such a guest?), not a branch inside it -- and the registry
+# already knows each backend's family for whoever has to answer that.
 
 
 def ensure_forward_related_established_rule() -> bool:
@@ -115,7 +109,7 @@ def ensure_forward_related_established_rule() -> bool:
     traffic for an already-allowed connection must never be evaluated against
     that. Duplicates left by an earlier start are collapsed rather than tolerated.
     """
-    from src.virtualizers.ch.firewall import backend
+    from src.virtualizers.microvm.firewall import backend
 
     try:
         added = backend().ensure_first(policy.forward_related_established_rule())
@@ -185,8 +179,8 @@ def forward_compat_state(bridge: Optional[str] = None):
 # through ``allow_host_connection`` below. What remains of the routed case is
 # ``allow_connection_to_instance``, which is the shape callers actually hold (an
 # Instance with its slots and protocols); it reaches the forward-hook allow inside
-# ``ch.firewall`` directly. A dispatcher wrapper nobody dispatches through is worse
-# than none: it is dead code that its own tests make look alive.
+# ``microvm.firewall`` directly. A dispatcher wrapper nobody dispatches through is
+# worse than none: it is dead code that its own tests make look alive.
 def allow_host_connection(
     vmachine_id: str,
     host_ip: str,
@@ -202,21 +196,15 @@ def allow_host_connection(
     conntrack state of its own, so it already matches every packet of the flow it
     permits, and the host's reply leaves through output.
     """
-    virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer in ("ch", "qemu"):
-        from src.virtualizers.ch.firewall import (
-            allow_host_connection as ch_allow_host_connection,
-        )
+    from src.virtualizers.microvm.firewall import allow_host_connection as fw_allow_host_connection
 
-        return ch_allow_host_connection(
-            vmachine_id=vmachine_id,
-            host_ip=host_ip,
-            port=port,
-            protocol=protocol,
-            source_ip=source_ip,
-        )
-
-    raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
+    return fw_allow_host_connection(
+        vmachine_id=vmachine_id,
+        host_ip=host_ip,
+        port=port,
+        protocol=protocol,
+        source_ip=source_ip,
+    )
 
 
 def allow_connection_to_instance(
@@ -227,42 +215,30 @@ def allow_connection_to_instance(
     if not ensure_forward_related_established_rule():
         return False
 
-    virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer in ("ch", "qemu"):
-        from src.virtualizers.ch.firewall import (
-            allow_connection_to_instance as ch_allow_connection_to_instance,
-        )
+    from src.virtualizers.microvm.firewall import (
+        allow_connection_to_instance as fw_allow_connection_to_instance,
+    )
 
-        return ch_allow_connection_to_instance(
-            vmachine_id=vmachine_id,
-            instance=instance,
-            source_ip=source_ip,
-        )
-
-    raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
+    return fw_allow_connection_to_instance(
+        vmachine_id=vmachine_id,
+        instance=instance,
+        source_ip=source_ip,
+    )
 
 
 def block_all(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
     if not ensure_forward_related_established_rule():
         return False
 
-    virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer in ("ch", "qemu"):
-        from src.virtualizers.ch.firewall import block_all as ch_block_all
+    from src.virtualizers.microvm.firewall import block_all as fw_block_all
 
-        return ch_block_all(vmachine_id=vmachine_id, source_ip=source_ip)
-
-    raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
+    return fw_block_all(vmachine_id=vmachine_id, source_ip=source_ip)
 
 
 def allow_all_egress(vmachine_id: str, source_ip: Optional[str] = None) -> bool:
-    virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer in ("ch", "qemu"):
-        from src.virtualizers.ch.firewall import allow_all_egress as ch_allow_all_egress
+    from src.virtualizers.microvm.firewall import allow_all_egress as fw_allow_all_egress
 
-        return ch_allow_all_egress(vmachine_id=vmachine_id, source_ip=source_ip)
-
-    raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
+    return fw_allow_all_egress(vmachine_id=vmachine_id, source_ip=source_ip)
 
 
 def remove_rule(
@@ -271,26 +247,18 @@ def remove_rule(
     port: Optional[int] = None,
     protocol: TransportProtocol = TransportProtocol.TCP,
 ) -> bool:
-    virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer in ("ch", "qemu"):
-        from src.virtualizers.ch.firewall import remove_rule as ch_remove_rule
+    from src.virtualizers.microvm.firewall import remove_rule as fw_remove_rule
 
-        return ch_remove_rule(
-            vmachine_id=vmachine_id,
-            ip=ip,
-            port=port,
-            protocol=protocol,
-        )
-
-    raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
+    return fw_remove_rule(
+        vmachine_id=vmachine_id,
+        ip=ip,
+        port=port,
+        protocol=protocol,
+    )
 
 
 def remove_vm_rules(vmachine_id: str) -> int:
     """Delete every rule nodo wrote for one VM, whatever the virtualizer."""
-    virtualizer = _resolve_virtualizer(vmachine_id)
-    if virtualizer in ("ch", "qemu"):
-        from src.virtualizers.ch.firewall import remove_vm_rules as ch_remove_vm_rules
+    from src.virtualizers.microvm.firewall import remove_vm_rules as fw_remove_vm_rules
 
-        return ch_remove_vm_rules(vmachine_id=vmachine_id)
-
-    raise ValueError(f"Unknown virtualizer for instance {vmachine_id}")
+    return fw_remove_vm_rules(vmachine_id=vmachine_id)

@@ -6,12 +6,12 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from src.virtualizers.microvm import members as microvm_members
     from src.virtualizers.qemu import execute as qemu_exec
-    from src.virtualizers.qemu import process as qemu_process
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
+    microvm_members = None  # type: ignore[assignment]
     qemu_exec = None  # type: ignore[assignment]
-    qemu_process = None  # type: ignore[assignment]
 
 
 def _argv():
@@ -134,25 +134,38 @@ class VirtiofsArgsTests(unittest.TestCase):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ProcessNameTests(unittest.TestCase):
     def test_visible_name_prefix(self):
-        name = qemu_process.qemu_process_name("abcdef0123456789")
+        # Distinct from CH's on purpose: it is what a later reader matches the
+        # PID against, and one name for both would make the check meaningless.
+        name = microvm_members.QEMU.process_name("abcdef0123456789")
         self.assertEqual(name, "nodo-qemu-abcdef01")
+        self.assertNotEqual(name, microvm_members.CH.process_name("abcdef0123456789"))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class QmpSocketPathTests(unittest.TestCase):
     def test_qmp_socket_path_uses_short_tmp_path_for_long_hash_ids(self):
         vmachine_id = "a" * 64
-        with patch.object(qemu_exec, "CH_API_SOCKET_DIR", "/tmp/nodo-ch"):
+        with patch(
+            "src.virtualizers.microvm.paths.control_socket_dir",
+            return_value=Path("/tmp/nodo-ch"),
+        ):
             socket_path = qemu_exec._qmp_socket_path(vmachine_id)
         self.assertEqual(str(socket_path), "/tmp/nodo-ch/qmp-aaaaaaaaaaaaaaaa.sock")
         self.assertLess(len(str(socket_path)), 108)
 
     def test_qmp_socket_path_independent_of_deep_cache_dir(self):
+        # An AF_UNIX path is capped at 108 bytes. A runtime directory nested under
+        # CACHE and keyed by the full 64-hex id can exceed that on its own, which
+        # is why the socket lives in a short, flat directory instead.
         vmachine_id = "b" * 64
         deep_cache = "/nodo/storage/" + ("x" * 80) + "/__cache__"
-        with patch.object(qemu_exec, "CACHE", deep_cache), \
-                patch.object(qemu_exec, "CH_API_SOCKET_DIR", "/tmp/nodo-ch"):
-            runtime_dir = qemu_exec._runtime_vm_dir(vmachine_id)
+        with patch(
+            "src.virtualizers.microvm.paths.cache_root", return_value=deep_cache
+        ), patch(
+            "src.virtualizers.microvm.paths.control_socket_dir",
+            return_value=Path("/tmp/nodo-ch"),
+        ):
+            runtime_dir = qemu_exec.paths.runtime_vm_dir(vmachine_id)
             socket_path = qemu_exec._qmp_socket_path(vmachine_id)
         self.assertGreater(len(str(runtime_dir / "qmp.sock")), 108)
         self.assertLess(len(str(socket_path)), 108)

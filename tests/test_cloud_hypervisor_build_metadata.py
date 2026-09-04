@@ -12,8 +12,9 @@ from src.utils.filesystem_xattrs import encode_filesystem_metadata_xattrs, Files
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
-    ch_build = importlib.import_module("src.virtualizers.ch.build")
-    ch_limits = importlib.import_module("src.virtualizers.ch.limits")
+    ch_build = importlib.import_module("src.virtualizers.microvm.build")
+    ch_limits = importlib.import_module("src.virtualizers.microvm.limits")
+    microvm_paths = importlib.import_module("src.virtualizers.microvm.paths")
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]
@@ -343,13 +344,14 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            bundle_dir = Path(tmpdir) / "cloud_hypervisor" / "svc" / "x86_64"
+            bundle_dir = Path(tmpdir) / microvm_paths.FAMILY_DIR_NAME / "svc" / "x86_64"
             bundle_dir.mkdir(parents=True)
             (bundle_dir / "rootfs.ext4").write_bytes(b"x" * 2048)
             with open(bundle_dir / "bundle.json", "w", encoding="utf-8") as f:
                 json.dump({"rootfs_size_bytes": 2048}, f)
 
-            with patch.object(ch_build, "CACHE", tmpdir):
+            with patch.object(microvm_paths, "cache_root", return_value=tmpdir), \
+                 patch.object(ch_build, "CACHE", tmpdir):
                 self.assertFalse(
                     ch_build._is_service_built_for_arch("svc", "x86_64", service=service)
                 )
@@ -364,13 +366,14 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            bundle_dir = Path(tmpdir) / "cloud_hypervisor" / "svc" / "x86_64"
+            bundle_dir = Path(tmpdir) / microvm_paths.FAMILY_DIR_NAME / "svc" / "x86_64"
             bundle_dir.mkdir(parents=True)
             (bundle_dir / "rootfs.ext4").write_bytes(b"x" * 8192)
             with open(bundle_dir / "bundle.json", "w", encoding="utf-8") as f:
                 json.dump({"rootfs_size_bytes": 8192}, f)
 
-            with patch.object(ch_build, "CACHE", tmpdir):
+            with patch.object(microvm_paths, "cache_root", return_value=tmpdir), \
+                 patch.object(ch_build, "CACHE", tmpdir):
                 self.assertTrue(
                     ch_build._is_service_built_for_arch("svc", "x86_64", service=service)
                 )

@@ -23,7 +23,10 @@ from src.utils.monetary import format_mu
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
-from src.virtualizers.interface import maintain as vm_maintain
+from src.virtualizers.interface import (
+    janitor_cleanup_orphans as vm_janitor_cleanup_orphans,
+    maintain as vm_maintain,
+)
 from src.core_services.low_demand import scheduler_tick
 
 env_manager = ConfigManager()
@@ -236,15 +239,11 @@ def maintain_vmachines(debug_mode: bool=False):
             sc.record_instance_consumption(id=vmachine_id, charge_mu=charge_mu, seconds=MANAGER_ITERATION_TIME)
             if debug_mode: log.LOGGER(f"Charged {vmachine_id} for the interval it just held.")
 
-    # Cloud Hypervisor janitor: cleanup stale/orphan runtime resources not tracked by DB.
-    try:
-        from src.virtualizers.ch.maintain import (
-            janitor_cleanup_orphans as ch_janitor_cleanup_orphans,
-        )
-
-        ch_janitor_cleanup_orphans(debug_mode=debug_mode)
-    except Exception as e:
-        log.LOGGER(f"[CH][janitor] failed: {e}")
+    # Reclaim what is running or on disk with no row behind it. Asked of the
+    # virtualizer interface, not of a backend: reaching into `ch.maintain` for this
+    # is what had the janitor judge QEMU guests with CH's liveness test (#295), and
+    # `interface` is the only place that knows which backends this node has.
+    vm_janitor_cleanup_orphans(debug_mode=debug_mode)
 
 
 def enforce_activity_window(debug_mode: bool = False):

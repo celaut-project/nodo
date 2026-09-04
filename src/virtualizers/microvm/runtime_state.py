@@ -1,37 +1,52 @@
+"""The family's runtime-state store: one enumerable index, private payloads.
+
+One directory, one file per VM, keyed by ``vmachine_id``, shared by every
+hypervisor in the family. Shared because what it tracks is shared: one bridge,
+one subnet, one IP/MAC allocator that reads every entry to avoid handing out an
+address twice, one janitor that has to find entries with no database row -- which
+it cannot do by asking the database, so it must be able to enumerate them.
+
+Two tiers, and the distinction is load-bearing:
+
+**The index** -- ``vmachine_id``, ``virtualizer``, ``service_id``, ``pid``,
+``process_name``, ``created_at``, ``booting``, ``ip`` -- is what a reader may
+interpret without knowing which hypervisor wrote the entry. It is the minimum
+that makes an entry judgeable: whose it is, whether its process is still the one
+that was launched, whether it is old enough to judge at all.
+
+**The payload** -- ``control_socket``, ``cgroup_path``, ``virtiofs``,
+``dnat_rules``, ``guest_kernel_reserve_bytes``, ``boot_mem_bytes`` and the rest --
+belongs to whoever wrote it. Readers outside the owning backend treat it as
+opaque.
+
+``process_name`` is in the index rather than derived by the reader on purpose.
+Deriving it means knowing the launcher's naming convention, which is per
+hypervisor, which is how CH's matcher came to be pointed at a QEMU guest and
+reaped a healthy VM (#295). Recorded, every reader matches what was actually
+launched and none of them dispatches to find out how.
+"""
 import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.utils.config import ConfigManager
-
-env_manager = ConfigManager()
-CACHE = env_manager.get("CACHE")
+from src.virtualizers.microvm import paths
+from src.virtualizers.microvm.hypervisor import Hypervisor
 
 _LOCK_GUARD = threading.Lock()
 _FILE_LOCKS: Dict[str, threading.Lock] = {}
 
 
-def _runtime_dir() -> Path:
-    if not CACHE:
-        raise RuntimeError("CACHE path is not configured.")
-    return Path(CACHE) / "cloud_hypervisor" / "runtime"
-
-
 def runtime_root() -> Path:
-    """The directory holding every VM's runtime state file and runtime directory.
+    """The directory holding every VM's state file and runtime directory.
 
     Public because more than the state file lives here: ``execute`` gives each VM
     a ``runtime/<vmachine_id>/`` directory (its own copy of the rootfs image, its
     serial log), and anything that reclaims disk has to walk those directories,
     not just the ``*.json`` beside them.
     """
-    return _runtime_dir()
-
-
-def _state_path(vmachine_id: str) -> Path:
-    return _runtime_dir() / f"{vmachine_id}.json"
+    return paths.runtime_root()
 
 
 def list_runtime_dirs() -> Dict[str, Path]:
@@ -43,7 +58,7 @@ def list_runtime_dirs() -> Dict[str, Path]:
     state — invisible to every reader that starts from the state files, and
     holding a full rootfs image.
     """
-    runtime_dir = _runtime_dir()
+    runtime_dir = runtime_root()
     if not runtime_dir.exists():
         return {}
 
@@ -63,7 +78,7 @@ def _lock_for(path: Path) -> threading.Lock:
 
 
 def save_runtime_state(vmachine_id: str, payload: Dict[str, Any]) -> None:
-    path = _state_path(vmachine_id)
+    path = paths.runtime_state_file(vmachine_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     lock = _lock_for(path)
 
@@ -77,7 +92,7 @@ def save_runtime_state(vmachine_id: str, payload: Dict[str, Any]) -> None:
 def save_booting_state(
     vmachine_id: str,
     *,
-    virtualizer: str,
+    hypervisor: Hypervisor,
     service_id: str,
     pid: int,
     ip: str,
@@ -99,9 +114,9 @@ def save_booting_state(
       would destroy it mid-boot;
     * the janitor kills any runtime state with no database row, so the two records
       belong to the same moment -- this one is written first and exempted from that
-      rule while ``booting`` is set (see ``janitor_cleanup_orphans``).
+      rule while ``booting`` is set (see ``maintain.orphan_reason``).
 
-    ``api_socket`` is deliberately absent: the hypervisor creates that socket a
+    ``control_socket`` is deliberately absent: the hypervisor creates that socket a
     moment after it starts, and ``maintain`` reads a recorded-but-missing socket as
     a dead VM. The final write adds it, once it is there to be found.
     """
@@ -109,7 +124,8 @@ def save_booting_state(
         vmachine_id,
         {
             "vmachine_id": vmachine_id,
-            "virtualizer": virtualizer,
+            "virtualizer": hypervisor.name,
+            "process_name": hypervisor.process_name(vmachine_id),
             "service_id": service_id,
             "pid": pid,
             "ip": ip,
@@ -125,7 +141,7 @@ def save_booting_state(
 
 
 def load_runtime_state(vmachine_id: str) -> Optional[Dict[str, Any]]:
-    path = _state_path(vmachine_id)
+    path = paths.runtime_state_file(vmachine_id)
     if not path.is_file():
         return None
 
@@ -136,7 +152,7 @@ def load_runtime_state(vmachine_id: str) -> Optional[Dict[str, Any]]:
 
 
 def delete_runtime_state(vmachine_id: str) -> None:
-    path = _state_path(vmachine_id)
+    path = paths.runtime_state_file(vmachine_id)
     if not path.exists():
         return
 
@@ -149,7 +165,7 @@ def delete_runtime_state(vmachine_id: str) -> None:
 
 
 def list_runtime_states() -> Dict[str, Dict[str, Any]]:
-    runtime_dir = _runtime_dir()
+    runtime_dir = runtime_root()
     if not runtime_dir.exists():
         return {}
 
@@ -165,3 +181,18 @@ def list_runtime_states() -> Dict[str, Dict[str, Any]]:
             except Exception:
                 continue
     return states
+
+
+def recorded_process_name(state: Optional[Dict[str, Any]]) -> str:
+    """The visible process name the launcher gave this VM, or ``""``.
+
+    ``""`` means "do not check the name", which is what a caller holding an entry
+    with no recorded name has to fall back to -- the alternative, guessing a
+    prefix, is the bug this field exists to remove.
+    """
+    return str((state or {}).get("process_name") or "").strip()
+
+
+def recorded_virtualizer(state: Optional[Dict[str, Any]]) -> str:
+    """Which hypervisor wrote this entry, normalized, or ``""``."""
+    return str((state or {}).get("virtualizer") or "").strip().lower()

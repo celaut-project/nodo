@@ -34,7 +34,7 @@ skipping delegation. A service that declares none is unaffected.
 ### Materialization (VirtioFS — implementation detail)
 
 On the Cloud Hypervisor backend the share is materialized with VirtioFS
-(`src/virtualizers/ch/virtiofs.py`), entirely invisible to the service spec:
+(`src/virtualizers/microvm/virtiofs.py`), entirely invisible to the service spec:
 
 1. One `virtiofsd` daemon per share on the host, exporting the share's host
    directory over a Unix socket keyed by the share id (`--sandbox chroot`,

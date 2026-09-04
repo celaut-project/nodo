@@ -82,7 +82,7 @@ below.
 Two guests on `nodo-br-ch` share one L2 domain, so by default they would ARP each
 other and their frames would be switched tap to tap, never reaching the forward
 hook — the allow-list would be a no-op for the destinations that matter most.
-Two settings, applied together, prevent that (`src/virtualizers/ch/execute.py`):
+Two settings, applied together, prevent that (`src/virtualizers/microvm/network.py`):
 
 - Each tap is enslaved as an **isolated** bridge port
   (`ip link set dev <tap> type bridge_slave isolated on`). An isolated port can
