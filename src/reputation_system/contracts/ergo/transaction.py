@@ -166,8 +166,8 @@ def _self_network_data() -> str:
     addresses (issue #236).
 
     It is verifiable *against this very box*, in two links rather than one: R7 holds
-    the owner propositionBytes, which are ``0008cd`` + the wallet key one of the
-    envelope's ``ledger_attestations`` names, and that attestation is the wallet's own
+    the owner propositionBytes, which are ``0008cd`` + the wallet key the envelope's
+    reputation proof names as its owner, and that attestation is the wallet's own
     signature over the ``public_key`` the envelope is signed with. So a reader can go
     from the box to the node's identity, and check the R9 signature, without contacting
     the node at all. That is what makes the published expiry trustworthy -- otherwise
@@ -189,7 +189,6 @@ def _self_network_data() -> str:
     from src.reputation_system.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
-        declare_ledger_attestations,
         declare_signature_scheme,
         get_node_public_key_hex,
         sign_peer_payload,
@@ -236,7 +235,6 @@ def _self_network_data() -> str:
         # asking the node anything. Worth its couple of hundred bytes here for exactly
         # that reason -- with it stripped, the box proves a wallet published something
         # and says nothing about which node.
-        declare_ledger_attestations(peer)
         signature = sign_peer_payload(
             canonical_peer_payload(
                 public_key_hex, ts, canonical_peer_content_digest(peer),
@@ -248,7 +246,6 @@ def _self_network_data() -> str:
             peer.ts = ts
         else:
             peer.ClearField("signature_scheme")
-            del peer.ledger_attestations[:]
     else:
         LOGGER("No node identity available; publishing the address unsigned.")
 

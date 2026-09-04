@@ -7,7 +7,7 @@ reputation-system validation primitives — nothing new is implemented here — 
 check each of them, in order:
 
   0. the peer attests an Ergo wallet, and that attestation verifies: the wallet
-     signed this peer's id (:func:`attested_wallet_public_key`). Everything below
+     signed this peer's id (:func:`attested_proof_owner`). Everything below
      is about that wallet, because R7 is the reputation contract's spending
      clause and so holds an Ergo proposition, never a node identity.
   1. the proof's unspent box(es) sit on the *canonical* reputation contract
@@ -38,9 +38,8 @@ from src.reputation_system.contracts.ergo.proof_validation import (
     _get_unspent_boxes_by_token,
     _validate_box_structure,
 )
-from src.reputation_system.envs import LEDGER as ERGO_LEDGER_TAG
 from src.reputation_system.node_identity import (
-    attested_wallet_public_key,
+    attested_proof_owner,
     node_proposition_hex,
 )
 
@@ -74,15 +73,6 @@ def _peer_advertisement(peer_id: str) -> Optional[celaut_pb2.Peer]:
     return announced
 
 
-def _peer_reputation_proof_ids(announced: celaut_pb2.Peer) -> List[str]:
-    """Every reputation proof (token) id an announcement carries, in announced order."""
-    return [
-        token_id for token_id in (
-            get_token_id(contract) for contract in announced.reputation_proofs
-        ) if token_id
-    ]
-
-
 def verify_reputation(peer_id: str) -> bool:
     """Verify every proof ``peer_id`` announced; print PASS/FAIL + reasons.
 
@@ -102,33 +92,22 @@ def verify_reputation(peer_id: str) -> bool:
         )
         return False
 
-    # The wallet first: without it there is nothing to check an R7 owner against. A peer
-    # can hold a wallet and be unable to prove it, which is indistinguishable from
-    # announcing someone else's -- so the answer is the same in both cases.
-    wallet_public_key = attested_wallet_public_key(announced, ERGO_LEDGER_TAG)
-    if not wallet_public_key:
-        print(
-            f"FAIL: peer {peer_id} attests no Ergo wallet (or its attestation does not "
-            "verify), so no proof on Ergo can be attributed to it.",
-            flush=True,
-        )
-        return False
-    print(f"  Attested Ergo wallet: {wallet_public_key}", flush=True)
-
-    proof_ids = _peer_reputation_proof_ids(announced)
-    if not proof_ids:
+    proofs = [c for c in announced.reputation_proofs if get_token_id(c)]
+    if not proofs:
         print(
             f"FAIL: peer {peer_id} announced no reputation proof. "
             "Run 'nodo peers' to list known peers.",
             flush=True,
         )
         return False
-    print(f"  Announced {len(proof_ids)} proof(s).", flush=True)
+    print(f"  Announced {len(proofs)} proof(s).", flush=True)
 
-    results = [_verify_proof(wallet_public_key, proof_id) for proof_id in proof_ids]
+    # Each proof carries its own owner attestation, so each is checked against the
+    # owner it names -- a peer's proofs need not share one.
+    results = [_verify_proof(peer_id, contract) for contract in proofs]
     if all(results):
         print(
-            f"PASS: peer {peer_id} owns all {len(proof_ids)} announced proof(s) "
+            f"PASS: peer {peer_id} owns all {len(proofs)} announced proof(s) "
             "(canonical contract + valid structure + R7 owner matches its attested "
             "wallet).",
             flush=True,
@@ -136,16 +115,30 @@ def verify_reputation(peer_id: str) -> bool:
         return True
 
     print(
-        f"FAIL: {results.count(False)} of {len(proof_ids)} announced proof(s) did not "
+        f"FAIL: {results.count(False)} of {len(proofs)} announced proof(s) did not "
         f"verify for peer {peer_id}.",
         flush=True,
     )
     return False
 
 
-def _verify_proof(wallet_public_key: str, proof_id: str) -> bool:
+def _verify_proof(peer_id: str, contract) -> bool:
     """One proof, checked end to end. Prints its own reasons; returns pass/fail."""
+    proof_id = get_token_id(contract)
     print(f"  Proof id: {proof_id}", flush=True)
+
+    # The owner first: without one there is nothing to check an R7 owner against. A peer
+    # can hold the wallet and be unable to prove it, which is indistinguishable from
+    # announcing someone else's -- so the answer is the same in both cases.
+    wallet_public_key = attested_proof_owner(contract, peer_id)
+    if not wallet_public_key:
+        print(
+            "FAIL: the proof carries no owner attestation this peer can prove, so it "
+            "cannot be attributed to it.",
+            flush=True,
+        )
+        return False
+    print(f"  Attested owner: {wallet_public_key}", flush=True)
 
     boxes = _get_unspent_boxes_by_token(proof_id)
     if not boxes:

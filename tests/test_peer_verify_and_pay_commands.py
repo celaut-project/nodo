@@ -12,6 +12,15 @@ from unittest import mock
 
 from protos import celaut_pb2
 from src.commands import verify_reputation as vr
+from src.utils.contract_xattrs import set_token_id
+
+
+def _announcement(proof_ids):
+    """A stored advertisement carrying the given proofs."""
+    peer = celaut_pb2.Peer()
+    for proof_id in proof_ids:
+        set_token_id(peer.reputation_proofs.add(), proof_id)
+    return peer
 from src.commands import pay as pv
 
 
@@ -21,9 +30,8 @@ class VerifyReputationCommandTests(unittest.TestCase):
     def _patch(self, **overrides):
         # Sensible "happy path" defaults; individual tests override one piece.
         defaults = dict(
-            _peer_advertisement=lambda peer_id: celaut_pb2.Peer(),
-            attested_wallet_public_key=lambda peer, ledger: "02" + "ab" * 32,
-            _peer_reputation_proof_ids=lambda announced: ["proof-token-1"],
+            _peer_advertisement=lambda peer_id: _announcement(["proof-token-1"]),
+            attested_proof_owner=lambda contract, peer_id: "02" + "ab" * 32,
             _get_unspent_boxes_by_token=lambda proof_id: [{"box": 1}],
             _boxes_off_canonical_contract=lambda boxes: [],
             _validate_box_structure=lambda box: True,
@@ -46,16 +54,16 @@ class VerifyReputationCommandTests(unittest.TestCase):
         self.assertTrue(self._run())
 
     def test_fail_when_peer_announced_no_proof(self):
-        self.assertFalse(self._run(_peer_reputation_proof_ids=lambda announced: []))
+        self.assertFalse(self._run(_peer_advertisement=lambda peer_id: celaut_pb2.Peer()))
 
     def test_fail_when_the_peer_is_not_known(self):
         self.assertFalse(self._run(_peer_advertisement=lambda peer_id: None))
 
-    def test_fail_when_no_ergo_wallet_is_attested(self):
+    def test_fail_when_no_owner_is_attested(self):
         # R7 names a wallet, so a peer that cannot prove it holds one has proved
         # nothing about any proof on Ergo -- whatever the boxes themselves look like.
         self.assertFalse(
-            self._run(attested_wallet_public_key=lambda peer, ledger: None)
+            self._run(attested_proof_owner=lambda contract, peer_id: None)
         )
 
     def test_the_wallet_checked_is_the_attested_one(self):
@@ -68,7 +76,7 @@ class VerifyReputationCommandTests(unittest.TestCase):
             return "aabbccddeeff00112233"
 
         self.assertTrue(self._run(
-            attested_wallet_public_key=lambda peer, ledger: "02" + "cd" * 32,
+            attested_proof_owner=lambda contract, peer_id: "02" + "cd" * 32,
             node_proposition_hex=node_proposition_hex,
         ))
         self.assertEqual(called["wallet"], "02" + "cd" * 32)
@@ -84,14 +92,14 @@ class VerifyReputationCommandTests(unittest.TestCase):
             return [{"box": 1}]
 
         self.assertTrue(self._run(
-            _peer_reputation_proof_ids=lambda announced: ["proof-a", "proof-b"],
+            _peer_advertisement=lambda peer_id: _announcement(["proof-a", "proof-b"]),
             _get_unspent_boxes_by_token=boxes,
         ))
         self.assertEqual(checked, ["proof-a", "proof-b"])
 
     def test_one_unowned_proof_fails_the_peer(self):
         self.assertFalse(self._run(
-            _peer_reputation_proof_ids=lambda announced: ["proof-a", "proof-b"],
+            _peer_advertisement=lambda peer_id: _announcement(["proof-a", "proof-b"]),
             _get_unspent_boxes_by_token=lambda proof_id: [] if proof_id == "proof-b" else [{"box": 1}],
         ))
 

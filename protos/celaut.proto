@@ -15,6 +15,37 @@ message DataFormat {
 }
 
 // Represents both, payment contracts and reputation proofs.
+//
+// `xattrs` is where everything ledger-specific lives, so the message itself needs no
+// field per ledger convention (see src/utils/contract_xattrs.py for the keys this
+// implementation reads). On a reputation proof, two of them carry its OWNER
+// ATTESTATION: `owner_public_key`, the key that published the proof in that ledger's
+// own encoding, and `owner_signature`, that key's signature over the announcing peer's
+// id (node_identity.attestation_payload).
+//
+// That pair is what attributes an on-chain fact to a peer without the peer's name
+// having to be an on-chain object. A reputation proof on Ergo names its owner in R7,
+// which is the reputation contract's spending clause (`INPUTS.exists {
+// b.propositionBytes == SELF.R7[Coll[Byte]].get }`), so R7 can hold nothing but an Ergo
+// proposition, ever. Reading it as the peer's id would therefore fix every celaut
+// node's identity as an Ergo key by construction. With the attestation a reader checks
+// two links instead -- R7 is the attested owner, and that owner signed this peer_id --
+// which is the same fact, still verifiable from the proof box alone with no round-trip
+// to the node (the box's R9 carries the whole signed Peer), and it holds for a second
+// ledger's reputation system without either being privileged.
+//
+// It belongs to the proof and not to the Peer because ownership is a property of the
+// proof: a node holds as many as it likes, and nothing says they share an owner. An
+// attestation per ledger on the announcement could not describe two proofs on the same
+// ledger published by different wallets.
+//
+// It proves possession of a key, and nothing more: not that the node accepts payment on
+// that ledger (payment_contracts), nor that the key holds funds. A proof whose
+// attestation does not verify is treated as announcing no owner at all -- the peer's
+// identity is untouched, and only what a reader would have credited for that proof is
+// lost. Covered by Peer.signature through reputation_proofs, so a relay can neither
+// forge one (it would have to sign) nor strip one (the announcement would stop
+// verifying).
 message Contract {
     message Ledger {
         repeated string tags = 1;
@@ -430,53 +461,13 @@ message Peer {
     //
     // The identity is a keypair of the node's own, on no ledger. It is deliberately not
     // a wallet: a wallet key is bound to what its ledger can verify and spend, so an
-    // identity that *was* one could never be anything else. The link to a ledger is
-    // `ledger_attestations` below, which costs one signature and buys the node the
-    // right to change, add or drop a wallet without changing its name.
+    // identity that *was* one could never be anything else. The link to a ledger is an
+    // owner attestation on each reputation proof (see reputation_proofs above), which
+    // costs one signature and buys the node the right to change, add or drop a wallet
+    // without changing its name.
     string public_key = 5;
     string signature = 6;
 
-    // Wallets this node has proved it holds, one per ledger: the wallet's own key, and
-    // that wallet's signature over this peer's `public_key`
-    // (node_identity.attestation_payload). Repeated for the same reason
-    // payment_contracts is -- a node can hold a wallet on every ledger that settles --
-    // and, unlike the identity, each entry is in that ledger's own cryptography.
-    //
-    // This is what attributes an on-chain fact to a peer without the peer's name being
-    // an on-chain object. A reputation proof on Ergo names its owner in R7, which is
-    // the reputation contract's spending clause (`INPUTS.exists { b.propositionBytes ==
-    // SELF.R7[Coll[Byte]].get }`), so R7 can hold nothing but an Ergo proposition, ever.
-    // Reading it as the peer's id would therefore fix every celaut node's identity as
-    // an Ergo key by construction. With an attestation the reader checks two links
-    // instead -- R7 is the attested wallet, and that wallet signed this peer_id --
-    // which is the same fact, verifiable from the proof box alone with no round-trip to
-    // the node (the box's R9 carries this whole signed Peer), and it holds for a second
-    // ledger's reputation system without either being privileged.
-    //
-    // An attestation proves possession of a wallet. It does NOT say the node accepts
-    // payment there (that is payment_contracts) nor that it has published anything
-    // there (that is reputation_proofs). A peer announcing a wallet whose signature
-    // does not verify is treated as announcing no wallet on that ledger: the identity
-    // is untouched, and only what a reader would have credited to that ledger is lost.
-    // Two attestations naming one ledger are refused rather than chosen between.
-    //
-    // Covered by `signature`: each entry is self-verifying, so a forged one cannot be
-    // added, but a relay could strip one and silently cost the peer the reputation it
-    // could prove.
-    message LedgerAttestation {
-        // Which ledger this wallet is on, in the same tags/prose/formal shape as
-        // Contract.Ledger -- and comparable to one, which is how a reader lines an
-        // attestation up with the proof or the payment contract it vouches for.
-        Contract.Ledger ledger = 1;
-        // The wallet's public key, in that ledger's own encoding (for Ergo, the
-        // 33-byte SEC-compressed key whose `0008cd`-prefixed propositionBytes are what
-        // R7 holds).
-        string public_key = 2;
-        // That wallet's signature over node_identity.attestation_payload(public_key of
-        // this Peer), in that ledger's own signature scheme.
-        string signature = 3;
-    }
-    repeated LedgerAttestation ledger_attestations = 9;
 
     // Which cryptography `public_key` and `signature` are in, declared rather than
     // assumed. A scheme is an open, unordered stack of building blocks (curve,
@@ -525,10 +516,10 @@ message Peer {
     // signed by exactly this key -- wants one answer.
     //
     // Note what that argument does NOT extend to. A key in a *different role* is not a
-    // second identity: `ledger_attestations` above carries a wallet key per ledger, and
-    // the TLS certificate carries a per-process P-256 key, both of them signed by this
-    // one. That is a hierarchy with a single root, not two names -- nobody has to pick
-    // which one the node is. What must stay singular is the root itself.
+    // second identity: a reputation proof's owner attestation names the wallet that
+    // published it, and the TLS certificate carries a per-process P-256 key, both of
+    // them tied to this one. That is a hierarchy with a single root, not two names --
+    // nobody has to pick which one the node is. What must stay singular is the root.
     //
     // Reading a scheme is a different matter from signing with one, and stays open:
     // a node that must talk to peers signing differently plugs in a verifier for that
@@ -536,14 +527,14 @@ message Peer {
     // needs two keypairs -- a classical/post-quantum hybrid, say -- is ONE scheme with
     // one descriptor whose encoding carries both, not two schemes on one Peer.
     //
-    // Singular here and ONLY here. payment_contracts, reputation_proofs and
-    // ledger_attestations above are repeated on purpose and stay that way: a node
-    // named by a key of its own, holding wallets on several ledgers, accepting payment
-    // in ERG and in bitcoin, is the expected shape. The asymmetry is what each field
-    // does. What a node accepts is a menu the payer picks one item from, and what it
-    // can prove about a ledger is a fact per ledger, so a longer list costs nothing;
-    // the identity is what NAMES the node, and a second name is a second node as far
-    // as its reputation, its deposits and its payment attribution are concerned.
+    // Singular here and ONLY here. payment_contracts and reputation_proofs above are
+    // repeated on purpose and stay that way: a node named by a key of its own, holding
+    // wallets on several ledgers, accepting payment in ERG and in bitcoin, is the
+    // expected shape. The asymmetry is what each field does. What a node accepts is a
+    // menu the payer picks one item from, and what it can prove about a proof is a fact
+    // per proof, so a longer list costs nothing; the identity is what NAMES the node,
+    // and a second name is a second node as far as its reputation, its deposits and its
+    // payment attribution are concerned.
     //
     // Covered by `signature` (node_identity.canonical_peer_content_digest). It has to
     // be: verification is a decision with no third answer, so a relay able to re-label

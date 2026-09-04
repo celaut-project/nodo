@@ -329,7 +329,7 @@ maintenance-loop timing and client slot/expiration policy.
 | `identity.MNEMONIC` | `""` | The one mnemonic behind this node's `peer_id`. The Ed25519 key derived from it signs `GetPeerInfo` and backs the TLS certificate. Empty or `"auto"` generates a fresh one on first load — a node always needs a name. **Secret.** |
 
 On no ledger, and deliberately separate from the wallets below: each wallet signs this
-identity once and the pair is announced as a `Peer.ledger_attestation`, so a wallet can
+identity on each reputation proof it publishes, and that pair travels with it, so a wallet can
 be added, dropped or rotated without every peer seeing a different node. Changing
 `identity.MNEMONIC` *does* make a new node, orphaning the deposits and reputation
 recorded against the old one. See [Node identity](CONCEPTS.md#node-identity).

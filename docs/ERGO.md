@@ -108,9 +108,9 @@ It is **not** the node's `peer_id`. That is an Ed25519 key of its own, from
 clause, so it can only ever hold an Ergo proposition — reading it as the peer's id
 would fix every celaut node's identity as an Ergo key forever.
 
-What connects the two is an **attestation**: this wallet signs the node's `peer_id`
-once, and the pair is announced in `Peer.ledger_attestations`. A reader checks that R7
-is the attested wallet and that the wallet signed this `peer_id`, both from the proof
+What connects the two is an **owner attestation**: this wallet signs the node's
+`peer_id`, and the pair rides in the announced proof's own `xattrs`. A reader checks that
+R7 is the attested owner and that the owner signed this `peer_id`, both from the proof
 box alone. So a proof is attributed to a node without the node's name having to be an
 on-chain object, and the node can change wallets without changing its name.
 

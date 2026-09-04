@@ -651,7 +651,7 @@ class ConfigManager(metaclass=Singleton):
             #
             # Its own section, not a ledger's: the identity is on no ledger, and a key
             # read out of `ledgers.ergo` would be a key Ergo owns. What ties the two
-            # together is an attestation the wallet signs (Peer.ledger_attestations),
+            # together is an attestation the wallet signs onto each reputation proof,
             # which costs one signature and leaves the node free to add, drop or rotate
             # a wallet without changing its name.
             identity = self._config.get("identity")
