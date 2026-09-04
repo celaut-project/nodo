@@ -1,6 +1,6 @@
 """Tying a reputation proof to the node that announced it (issue #236).
 
-A node's identity is a keypair of its own, on no ledger (``src.utils.node_identity``).
+A node's identity is a keypair of its own, on no ledger (``src.identity.node_identity``).
 A reputation proof's owner is a wallet, because Ergo's reputation contract names it in
 R7 -- its spending clause, ``INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]]
 .get }`` -- so R7 can hold nothing but an Ergo proposition, ever.
@@ -24,7 +24,7 @@ from src.reputation_system.bip_wallet_verification import (
     bip_schnorr_verify_proposition,
     derive_compressed_pubkey,
 )
-from src.utils.node_identity import (
+from src.identity.node_identity import (
     _HEX_DIGITS,
     attestation_payload,
     get_node_public_key_hex,

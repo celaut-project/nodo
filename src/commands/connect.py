@@ -4,7 +4,7 @@ from bee_rpc.client import client_grpc as client
 from src.manager.manager import add_peer_instance, verified_peer_public_key
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
-from src.utils.grpc_transport import channel_and_peer_id, node_channel
+from src.identity.grpc_transport import channel_and_peer_id, node_channel
 
 env_manager = ConfigManager()
 SELF_ANNOUNCE_TO_CONNECTING_PEERS = env_manager.get("SELF_ANNOUNCE_TO_CONNECTING_PEERS")

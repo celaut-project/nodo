@@ -11,7 +11,7 @@ from src.payment_system.ledgers import local_payment_methods, register_local_con
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
 from src.utils.config import ConfigManager
-from src.utils.transport_stack import (
+from src.identity.transport_stack import (
     declare_transport_stack,
     share_prose_on_get_peer_info,
 )
@@ -213,7 +213,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     logs. The refusal itself is only ever logged by the *remote* peer, so staying quiet
     here would leave an unreachable node with nothing locally to explain why.
     """
-    from src.utils.node_identity import (
+    from src.identity.node_identity import (
     canonical_peer_content_digest,
     canonical_peer_payload,
     declare_signature_scheme,
@@ -279,7 +279,7 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
         # OID, on what the signature covers or on which RPCs exist, and neither could
         # tell from the announcement. `formal` carries those parameters and is what a
         # comparison reads; the prose is there so a reader can implement the thing (see
-        # src/utils/transport_stack.py). Covered by the signature below, so a relay can
+        # src/identity/transport_stack.py). Covered by the signature below, so a relay can
         # neither strip the declaration nor edit a parameter out of it.
         declare_transport_stack(announced, prose=share_prose_on_get_peer_info())
 

@@ -6,7 +6,7 @@ from protos.gateway_bee import StartService_input_indices
 from src.commands.execute import resolve_service_hash
 from src.manager.manager import get_dev_clients
 from src.utils.config import ConfigManager
-from src.utils.grpc_transport import local_channel
+from src.identity.grpc_transport import local_channel
 from src.utils.monetary import format_mu
 from src.utils.utils import (
     from_amount,

@@ -14,8 +14,8 @@ from protos import celaut_pb2_grpc, celaut_pb2
 from src.database.sql_connection import SQLConnection
 
 from src.utils import logger as _l
-from src.utils.grpc_transport import peer_channel
-from src.utils.tls_identity import CertificateError
+from src.identity.grpc_transport import peer_channel
+from src.identity.tls_identity import CertificateError
 from src.utils.utils import to_amount
 from src.utils.monetary import format_mu
 from src.database.access_functions.ledgers import get_peer_contract_instances

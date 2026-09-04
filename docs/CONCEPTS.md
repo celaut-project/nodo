@@ -212,7 +212,7 @@ audited — it is a name seed, never a resource, and only the number ever travel
 
 Practical consequences: a node with no identity keypair cannot serve, and a peer running
 a version from before this cannot be dialled — peer channels have no plaintext fallback.
-See `src/utils/tls_identity.py` and `src/utils/grpc_transport.py`.
+See `src/identity/tls_identity.py` and `src/identity/grpc_transport.py`.
 
 ## Node identity
 
