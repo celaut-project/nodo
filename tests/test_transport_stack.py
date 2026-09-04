@@ -160,35 +160,35 @@ class ProsePolicyTests(unittest.TestCase):
         self.assertTrue(transport_stack.share_prose_on_get_peer_info())
         self.assertFalse(transport_stack.share_prose_on_ledger())
 
-    def test_stripping_takes_both_declarations(self):
+    def test_prose_is_seen_in_either_declaration(self):
         # One policy, not two: the scheme and the stack are the same kind of thing --
-        # what a reader is handed to understand the message.
+        # what a reader is handed to understand the message -- so an announcement
+        # carrying either is an announcement that is expensive to publish.
         peer = self._peer()
         self.assertTrue(transport_stack.carries_prose(peer))
 
-        transport_stack.strip_prose(peer)
-
-        self.assertFalse(transport_stack.carries_prose(peer))
-        self.assertFalse(any(c.prose for c in peer.signature_scheme.components))
-        self.assertFalse(
-            any(c.prose for uri in peer.uri for c in uri.protocol_stack)
+        for component in peer.uri[0].protocol_stack:
+            component.ClearField("prose")
+        self.assertTrue(
+            transport_stack.carries_prose(peer), "the scheme's prose still counts"
         )
 
-    def test_stripping_leaves_everything_a_comparison_reads(self):
-        # The reason this is safe on a message about to be signed: prose decides
-        # nothing, so a stripped announcement still verifies as the same protocol.
-        peer = self._peer()
-        transport_stack.strip_prose(peer)
+        for component in peer.signature_scheme.components:
+            component.ClearField("prose")
+        self.assertFalse(transport_stack.carries_prose(peer))
 
+    def test_a_bare_announcement_carries_none(self):
+        # Which is what keeps a peer that already announces bare from being held back:
+        # it is small already, so it is republished whole whatever the policy says.
+        self.assertFalse(transport_stack.carries_prose(self._peer(prose=False)))
+
+    def test_a_bare_announcement_still_declares_what_is_compared(self):
+        # Why holding prose back is a size decision and never a correctness one.
+        peer = self._peer(prose=False)
         self.assertTrue(all(c.formal for uri in peer.uri for c in uri.protocol_stack))
         self.assertTrue(
             transport_stack.speaks_our_transport_stack(peer.uri[0].protocol_stack)
         )
-
-    def test_an_announcement_without_prose_has_none_to_strip(self):
-        # Which is what keeps a peer that already announces bare from being republished
-        # unsigned: there is nothing to remove, so its signature is never touched.
-        self.assertFalse(transport_stack.carries_prose(self._peer(prose=False)))
 
 
 if __name__ == "__main__":
