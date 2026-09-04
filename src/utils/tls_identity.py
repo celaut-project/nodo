@@ -160,7 +160,7 @@ def certificate_and_key() -> Tuple[bytes, bytes]:
     public_key_hex = get_node_public_key_hex()
     if not public_key_hex:
         raise CertificateError(
-            "This node has no identity keypair (ledgers.ergo.WALLET_MNEMONIC is unset), "
+            "This node has no identity keypair (identity.MNEMONIC is unset), "
             "so it cannot serve or dial TLS. Load the config to generate one."
         )
     return _build_certificate(public_key_hex)

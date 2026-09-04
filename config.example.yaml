@@ -748,21 +748,40 @@ general_flags:
 # directly to its derived P2PK address; excess is swept to a cold wallet
 # (public address only) once both thresholds below are met:
 #     client  ->  single wallet  ->  cold wallet (when both thresholds met)
+identity:
+  # The ONE mnemonic behind this node's name. The Ed25519 keypair derived from it is
+  # the node's peer_id: the key it signs GetPeerInfo with, the key other nodes store it
+  # under, and the key its TLS certificate is bound to (issues #236 and #257). Leave
+  # empty (or "auto") and a fresh one is generated on first load -- a node always needs
+  # an identity.
+  #
+  # On no ledger, and deliberately not one of the wallets under `ledgers` below. What
+  # links the two is an attestation: each wallet signs this identity once, and the pair
+  # travels in the node's announcement (Peer.ledger_attestations), so a reader can
+  # credit an on-chain proof or a payment to this node without the node's name having
+  # to be an on-chain object. That is what lets a wallet be added, dropped or rotated
+  # without every peer seeing a different node -- and what lets a node with no wallet
+  # at all still have a name.
+  #
+  # TREAT AS A SECRET, and back it up: changing it makes every peer see a brand-new
+  # node, orphaning the deposits and the reputation recorded against the old one.
+  MNEMONIC: ""
+
 ledgers:
   ergo:
     tags: [ ergo ]
     NODE_URL: "https://node.sigmaspace.io"
     GENESIS_BLOCK_ID: "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b"
-    # The ONE mnemonic of the whole node. It is both the wallet the node controls and
-    # its identity: the key it signs GetPeerInfo with, and whose public key IS the
-    # peer_id other nodes store for it (issue #236). Leave empty (or "auto") and a
-    # fresh one is generated on first load -- a node always needs an identity, and
-    # generating a mnemonic commits to nothing, since the wallet holds no funds until
-    # someone sends some.
+    # The wallet this node controls on Ergo: what it is paid into, what publishes its
+    # reputation proofs, and what signs the attestation tying this ledger to the node's
+    # identity (see the `identity` section). Leave empty (or "auto") and a fresh one is
+    # generated on first load -- generating a mnemonic commits to nothing, since the
+    # wallet holds no funds until someone sends some.
     #
-    # TREAT AS A SECRET, and back it up: losing it means losing both the funds and the
-    # node's identity, and changing it makes every peer see a brand-new node, orphaning
-    # the deposits and reputation recorded against the old one.
+    # TREAT AS A SECRET, and back it up: losing it means losing the funds and the
+    # reputation published under it. It is NOT the node's identity, so replacing it
+    # leaves the node's name and its peers intact -- what a new wallet cannot inherit
+    # is the on-chain history of the old one.
     WALLET_MNEMONIC: ""
     HTTP_PEERS_PATH: "${main.STORAGE}/ergo_http_peers.json"
     reputation:

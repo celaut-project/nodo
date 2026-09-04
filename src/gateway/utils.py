@@ -212,6 +212,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     from src.reputation_system.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
+        declare_ledger_attestations,
         declare_signature_scheme,
         get_node_public_key_hex,
         sign_peer_payload,
@@ -221,7 +222,7 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     if not public_key_hex:
         log.LOGGER(
             'No identity public key, so this node is announcing itself UNSIGNED and '
-            'every peer will refuse it. Check ledgers.ergo.WALLET_MNEMONIC.'
+            'every peer will refuse it. Check identity.MNEMONIC.'
         )
         return
 
@@ -231,22 +232,31 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     expiry = uri_expiry(ts)
     for uri in peer.uri:
         uri.expiry_unix_timestamp = expiry
+
+    # Both are covered by the signature, so they go on before the digest is taken --
+    # signing first and declaring afterwards would produce an announcement whose own
+    # signature refuses it.
+    declare_signature_scheme(peer)
+    declare_ledger_attestations(peer)
+
     signature = sign_peer_payload(
         canonical_peer_payload(public_key_hex, ts, canonical_peer_content_digest(peer))
     )
     if not signature:
+        # Never leave a declared scheme or an attestation on an unsigned announcement:
+        # both are claims this signature was supposed to vouch for, so on their own they
+        # state a fact about nothing.
+        peer.ClearField("signature_scheme")
+        del peer.ledger_attestations[:]
         log.LOGGER(
             f'Could not sign this node\'s announcement as {public_key_hex}, so every '
-            'peer will refuse it. Check ledgers.ergo.WALLET_MNEMONIC.'
+            'peer will refuse it. Check identity.MNEMONIC.'
         )
         return
 
     peer.public_key = public_key_hex
     peer.signature = signature
     peer.ts = ts
-    # Declared alongside the signature, never without one: the field says what this
-    # signature is, so on an unsigned announcement it would state a fact about nothing.
-    declare_signature_scheme(peer)
 
 
 def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:

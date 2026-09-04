@@ -291,14 +291,14 @@ certificate", or "is held by <key>, not by the expected peer <key>".
   not a node at all): there is no plaintext fallback, so it is unreachable until it is
   updated.
 * **The address now belongs to a different node** — a reassigned IP, or a host that
-  regenerated its `ledgers.ergo.WALLET_MNEMONIC` and therefore has a new `peer_id`. The
+  regenerated its `identity.MNEMONIC` and therefore has a new `peer_id`. The
   message names the key that actually answered; `nodo connect` that address again to
   register it under the right peer.
 * **The peer restarted between the pre-flight and the channel.** The certificate is
   generated per process, so this is transient — retry.
 
 **Fix:** this node also needs its own keypair to serve or dial at all. If it refuses to
-start with "no identity keypair", set `ledgers.ergo.WALLET_MNEMONIC` (or let the config
+start with "no identity keypair", set `identity.MNEMONIC` (or let the config
 generate one) — see [`CONFIG.md`](CONFIG.md).
 
 Note this is about *peer* channels. A service this node executes talks to the plain-gRPC

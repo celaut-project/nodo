@@ -49,7 +49,7 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         qi.DATABASE_FILE = self.db_path
 
         self.mnemonic = Mnemonic("english").generate(strength=128)
-        self.pubkey = derive_compressed_pubkey(self.mnemonic).hex()
+        self.pubkey, self._private_key = ni._cached_keypair(self.mnemonic)
 
     def tearDown(self):
         import src.database.query_interface as qi
@@ -58,7 +58,26 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         self.conn.close()
         os.unlink(self.db_path)
 
-    def _peer(self, uris, *, signed=True, ts=100, contract=b"HONEST", transport="tcp"):
+    def _sign(self, peer, ts=100):
+        """Sign ``peer`` as it stands, the way a real node does.
+
+        Everything the announcement declares -- the scheme included -- is inside the
+        digest, so a peer signs what it has actually written down. A test that wants a
+        different declaration changes it *before* this, not after: changing it after is
+        precisely the tampering the signature exists to catch.
+        """
+        peer.public_key, peer.ts = self.pubkey, ts
+        peer.signature = self._private_key.sign(
+            ni.canonical_peer_payload(
+                self.pubkey, ts, ni.canonical_peer_content_digest(peer)
+            ).encode("utf-8")
+        ).hex()
+        return peer
+
+    def _peer(
+        self, uris, *, signed=True, ts=100, contract=b"HONEST", transport="tcp",
+        prepare=None,
+    ):
         peer = celaut_pb2.Peer()
         for ip, port in uris:
             uri = peer.uri.add(ip=ip, port=port)
@@ -66,14 +85,10 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         mu_per_unit = peer.payment_contracts.add()
         mu_per_unit.contract.ledger.formal = contract
         mu_per_unit.mu_per_unit.n = "1"
+        if prepare:
+            prepare(peer)
         if signed:
-            peer.public_key, peer.ts = self.pubkey, ts
-            peer.signature = bip_schnorr_sign(
-                self.mnemonic,
-                ni.canonical_peer_payload(
-                    self.pubkey, ts, ni.canonical_peer_content_digest(peer)
-                ),
-            )
+            self._sign(peer, ts)
         return peer
 
     def _uris(self, peer_id):
@@ -163,64 +178,87 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         # The cryptography a node speaks, spelled out rather than assumed. Declaring
         # it must be the same announcement as declaring nothing, or upgrading would
         # split the network in two.
-        peer = self._peer([("10.0.0.1", 9999)])
-        ni.declare_signature_scheme(peer)
+        peer = self._peer([("10.0.0.1", 9999)], prepare=ni.declare_signature_scheme)
         self.assertEqual(manager.add_peer_instance(peer), self.pubkey)
 
     def test_a_peer_signing_with_another_scheme_is_refused(self):
-        # Same key, same curve, a valid signature over the same payload -- and still
+        # A valid signature over the same payload, by the same key -- and still
         # refused, because the peer says those bytes are something this node cannot
         # verify. Accepting it would mean trusting a signature nobody checked.
-        peer = self._peer([("10.0.0.1", 9999)])
-        peer.signature_scheme.components.add(tags=["secp256k1"])
-        peer.signature_scheme.components.add(tags=["bip340"])
+        def _other_scheme(peer):
+            peer.signature_scheme.components.add(tags=["ed25519"])
+            peer.signature_scheme.components.add(tags=["ed25519ph"])
+
+        peer = self._peer([("10.0.0.1", 9999)], prepare=_other_scheme)
         self.assertIsNone(manager.verified_peer_public_key(peer))
         self.assertIsNone(manager.add_peer_instance(peer))
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM peer").fetchone()[0], 0)
 
     def test_a_shared_component_is_not_a_shared_scheme(self):
-        # Same cardinality, three of four components in common, and still refused:
-        # a BIP-340 signer names the same curve/hash/ledger this node does and still
-        # produces signatures it cannot read. The pairing must be total, not "most
-        # components matched" -- the laxer match the rest of the codebase uses for
-        # ledgers would accept it.
-        peer = self._peer([("10.0.0.1", 9999)])
-        ni.declare_signature_scheme(peer)
-        for component in peer.signature_scheme.components:
-            if "schnorr" in component.tags:
-                component.tags[:] = ["bip340"]
-        self.assertIsNone(manager.verified_peer_public_key(peer))
+        # Same cardinality, a shared tag, and still refused: a peer naming the pre-hashed
+        # variant of RFC 8032 alongside the pure one produces signatures this node cannot
+        # read. The pairing must be total, not "most components matched" -- the laxer
+        # match the rest of the codebase uses for ledgers would accept it.
+        def _extra_tag(peer):
+            ni.declare_signature_scheme(peer)
+            peer.signature_scheme.components[0].tags.append("ed25519ph")
 
-        # Rebuilding the same four components in reverse order still matches: order
-        # is not part of what a descriptor says (Peer.SignatureScheme.components is
-        # explicitly unordered).
-        del peer.signature_scheme.components[:]
-        for declared in reversed(ni.SIGNATURE_SCHEME_COMPONENTS):
-            peer.signature_scheme.components.add(
-                tags=list(declared.tags), prose=declared.prose, formal=declared.formal
+        self.assertIsNone(
+            manager.verified_peer_public_key(
+                self._peer([("10.0.0.1", 9999)], prepare=_extra_tag)
             )
+        )
+
+        # Rebuilding the same components in reverse order still matches: order is not
+        # part of what a descriptor says (Peer.SignatureScheme.components is explicitly
+        # unordered).
+        def _reversed(peer):
+            for declared in reversed(ni.SIGNATURE_SCHEME_COMPONENTS):
+                peer.signature_scheme.components.add(
+                    tags=list(declared.tags), prose=declared.prose, formal=declared.formal
+                )
+
         self.assertEqual(
-            manager.verified_peer_public_key(peer),
+            manager.verified_peer_public_key(
+                self._peer([("10.0.0.1", 9999)], prepare=_reversed)
+            ),
             self.pubkey,
             "component order is not part of what a descriptor says",
         )
 
     def test_rewording_the_description_is_not_a_different_scheme(self):
         # prose is human text with no agreed wording; refusing a peer over it would
-        # make every edit to that sentence a network split.
-        peer = self._peer([("10.0.0.1", 9999)])
-        ni.declare_signature_scheme(peer)
-        peer.signature_scheme.components[0].prose = "however this peer prefers to word it"
+        # make every edit to that sentence a network split. The peer signs its own
+        # wording, so this stays a question about the comparison and not about the
+        # signature.
+        def _reworded(peer):
+            ni.declare_signature_scheme(peer)
+            peer.signature_scheme.components[0].prose = "however this peer words it"
+
+        peer = self._peer([("10.0.0.1", 9999)], prepare=_reworded)
         self.assertEqual(manager.verified_peer_public_key(peer), self.pubkey)
+
+    def test_rewording_the_description_of_a_signed_scheme_is_tampering(self):
+        # The other half of the same rule: prose is not part of the *comparison*, but
+        # it is part of what the peer signed, so a relay cannot rewrite the sentence a
+        # reader is shown.
+        peer = self._peer([("10.0.0.1", 9999)], prepare=ni.declare_signature_scheme)
+        peer.signature_scheme.components[0].prose = "reworded in transit"
+        self.assertIsNone(manager.verified_peer_public_key(peer))
 
     def test_a_formal_specification_decides_over_the_tags(self):
         # Nothing publishes one yet (ours is empty, like the Ergo ledger's), but when
         # one side names an artifact for a component the tags stop being what the
         # answer for that component rests on.
-        peer = self._peer([("10.0.0.1", 9999)])
-        ni.declare_signature_scheme(peer)
-        peer.signature_scheme.components[0].formal = b"some formal specification"
-        self.assertIsNone(manager.verified_peer_public_key(peer))
+        def _with_formal(peer):
+            ni.declare_signature_scheme(peer)
+            peer.signature_scheme.components[0].formal = b"some formal specification"
+
+        self.assertIsNone(
+            manager.verified_peer_public_key(
+                self._peer([("10.0.0.1", 9999)], prepare=_with_formal)
+            )
+        )
 
     def test_the_scheme_is_an_unordered_stack_of_descriptors(self):
         # Pins the shape: an unordered stack of tags/prose/formal components, the way
