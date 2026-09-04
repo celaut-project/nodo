@@ -22,11 +22,20 @@ Each component is declared the way every replaceable component in celaut is:
     -readable and small enough to travel in an Ergo register.
 
 ``prose``
-    The same thing written out for a person, with the detail an implementer needs. Nodes
-    do not compare it: agreeing that two differently-worded descriptions mean the same
-    protocol is a judgement, and the shape of the service that could make it is
-    ``(a, b) -> bool`` over the two texts -- an LLM's job, not a node's. It travels so
-    the descriptor can be read, not to be diffed.
+    The same thing written out for a person, with the detail an implementer needs.
+    Complete on purpose: a reader holding only this announcement -- off a gRPC response
+    or off an Ergo register -- cannot follow a link into a repository, so while
+    ``formal`` points at no published specification this text *is* the specification and
+    has to stand on its own. Nodes do not compare it: agreeing that two differently-
+    worded descriptions mean the same protocol is a judgement, and the shape of the
+    service that could make it is ``(a, b) -> bool`` over the two texts -- an LLM's job,
+    not a node's. It travels so the descriptor can be read, not to be diffed.
+
+    It costs about 5 KB per announced address, repeated per address because the stack
+    belongs to the endpoint rather than to the node. That is paid on every
+    ``GetPeerInfo``, which is unauthenticated and re-signs its answer per call -- see
+    the cache proposed in issue #304, which makes this a fixed cost per change rather
+    than per caller.
 
 The gRPC half is derived from the compiled descriptor rather than typed out, so adding
 or removing an RPC changes what this node announces without anyone remembering to.
@@ -115,14 +124,58 @@ def grpc_component() -> Tuple[Tuple[str, ...], str, bytes]:
     })
     prose = (
         "gRPC over HTTP/2, negotiated with ALPN 'h2'. The address answers the service "
-        "named above and the RPCs listed with it, and nothing else. Every one of them "
-        "is a bidirectional stream of buffer.Buffer in both directions -- the request "
-        "and response types a reader would expect are carried inside that stream by "
-        "bee-rpc, which frames a message into blocks so a large one need not be held "
-        "whole in memory at either end. So the method set, not the message types, is "
-        "what distinguishes one node's gateway from another's: a node serving a "
-        "different set of RPCs speaks a different protocol on this address, whatever "
-        "its tags say."
+        "named above and the RPCs listed with it, and nothing else.\n"
+        "\n"
+        "FRAMING. Every RPC has the same gRPC signature -- a bidirectional stream of "
+        "buffer.Buffer in each direction -- so the request and response types below are "
+        "not gRPC message types but objects carried inside that stream by bee-rpc. A "
+        "Buffer is a frame with five optional fields, and a stream of them encodes a "
+        "sequence of objects: 'chunk' carries a slice of a serialized object (this node "
+        "emits up to 1 MiB per chunk, and a reader must accept any size); 'separator' "
+        "ends the object being sent, so several objects travel in one stream; 'head' "
+        "opens an object and its 'index' says which of the types the method accepts is "
+        "being sent, which is how a method takes a union without a wrapper message "
+        "-- StartService reads index 1=Client, 2=RecursionGuard, 3=Configuration, "
+        "4=Metadata.HashTag.Hash, 5=Metadata, 6=Service; 'signal' is flow control, a "
+        "receiver asking the sender to pause or resume so neither side has to buffer "
+        "what it cannot yet handle; 'block' replaces the bytes of a large item with the "
+        "content hashes that name it, so a filesystem a receiver already holds is not "
+        "transmitted again. The point of all of it is that an object of any size is "
+        "written and read incrementally: a service specification carrying a multi-"
+        "gigabyte filesystem never has to exist whole in memory at either end.\n"
+        "\n"
+        "METHODS. GetPeerInfo takes nothing and returns a Peer: every address this node "
+        "is reachable at, what it accepts as payment and at what rate, the reputation "
+        "proofs it published, and the signature over all of it that proves which node "
+        "answered. IntroducePeer takes a Peer and returns nothing -- the caller "
+        "announcing itself. GenerateClient takes nothing and returns the Client id the "
+        "caller is billed under. GenerateDepositToken takes a Client and returns a "
+        "TokenMessage: the identifier a payer puts in its ledger transaction so the "
+        "node can attribute the funds. Payable takes a Payment (that token, the "
+        "contract it settled on, the amount) and returns nothing; the node verifies the "
+        "transaction itself before crediting anything.\n"
+        "\n"
+        "StartService takes the union described above and returns an Instance: where "
+        "the launched service can be reached and the token that authenticates to it. "
+        "StopService takes a TokenMessage and returns a Refund, the deposit left "
+        "unspent. ModifyDeposit moves balance into or out of a running instance. "
+        "ModifyServiceSystemResources changes a live instance's resource limits and "
+        "returns the limits actually in force plus its balance. GetServiceEstimatedCost "
+        "takes a service (by content hash, or the specification itself) and returns "
+        "what running it would cost -- initial, maintenance per interval, and the "
+        "variance on that estimate -- before anything is launched. "
+        "GetResourceAvailability asks the narrower question of whether a workload of a "
+        "given resource shape could be admitted right now, for a shape that need not "
+        "correspond to any packed service. GetService takes a content hash and returns "
+        "the specification itself. GetMetrics takes an instance token and returns its "
+        "balance. ServiceTunnel takes an instance token and then relays raw bytes in "
+        "both directions to one of that instance's slots, metering the volume. Observe "
+        "takes an instance id and streams ObserveEvents describing it live -- a session "
+        "record, periodic metrics, optional per-packet records, and notices.\n"
+        "\n"
+        "So the method set, not the message types, is what distinguishes one node's "
+        "gateway from another's: a node serving a different set of RPCs speaks a "
+        "different protocol on this address, whatever its tags say."
     )
     return ("grpc",), prose, formal
 
