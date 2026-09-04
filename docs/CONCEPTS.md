@@ -408,6 +408,10 @@ It lets peers assign each other trust in a decentralized, transparent way. Nodes
 generate and submit these proofs; publishing celaut-node/service entities
 uses the same reputation-box machinery. Model: [`ERGO.md`](ERGO.md).
 
+What a node publishes about another node is an opinion, so it is only as strong as
+what backs it. An [execution receipt](EXECUTION_RECEIPTS.md) is what a client can back
+one with: a statement the accused node signed itself, about one execution it ran.
+
 ## Coverage / Benchmark / Result / Skill
 
 The four on-chain entity types in the **Unstoppable Skills** registry
