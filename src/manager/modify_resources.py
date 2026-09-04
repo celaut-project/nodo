@@ -1,7 +1,19 @@
 from protos import celaut_pb2
 from src.manager.resources import IOBigData, could_ve_this_extra_memory
 from src.database.sql_connection import SQLConnection
+from src.utils import host_limits
 from src.utils import logger as log
+
+def _growth(new, current):
+    """How much more of a resource a resize wants, or None when it wants no more.
+
+    None rather than 0, because `host_limits.ceiling_shortfalls` treats the two
+    differently: a figure is compared against the ceiling, and None means "do not ask
+    about this resource at all".
+    """
+    delta = new - current
+    return delta if delta > 0 else None
+
 
 def modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
     sc = SQLConnection()
@@ -58,6 +70,26 @@ def modify_sysreq(id: str, sys_req: celaut_pb2.Sysresources) -> bool:
     # persisted (#249).
     new_cpu_period = sys_req.cpu_period if sys_req.HasField('cpu_period') else current_cpu_period
     new_cpu_quota = sys_req.cpu_quota if sys_req.HasField('cpu_quota') else current_cpu_quota
+
+    # The operator's own ceiling (`host_limits`), against the *growth* only, and only
+    # for the resources that actually grow. What the instance already holds is part of
+    # the committed sum this is compared with, so passing the absolute figures would
+    # count the same bytes twice and refuse a resize that asks for nothing. Passing None
+    # for a resource that is shrinking or unchanged is what keeps a node already over
+    # its ceiling -- the shares were lowered underneath it -- from refusing the very
+    # resize that would bring it back under.
+    growth_shortfalls = host_limits.ceiling_shortfalls(
+        cores=_growth(
+            host_limits.requested_cores(new_cpu_quota or 0, new_cpu_period or 0),
+            host_limits.requested_cores(current_cpu_quota or 0, current_cpu_period or 0),
+        ),
+        ram_bytes=_growth(new_mem_limit or 0, current_mem_limit or 0),
+        disk_bytes=_growth(new_disk_space or 0, current_disk_space or 0),
+    )
+    if growth_shortfalls:
+        for shortfall in growth_shortfalls:
+            log.LOGGER(f"Refusing to resize {id}: {shortfall}")
+        return False
 
     if (new_mem_limit != current_mem_limit or new_disk_space != current_disk_space
             or new_cpu_period != current_cpu_period or new_cpu_quota != current_cpu_quota):

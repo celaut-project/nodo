@@ -15,6 +15,7 @@ import psutil
 
 from protos import celaut_pb2 as celaut
 from src.manager.resources import IOBigData, could_ve_this_sysreq
+from src.utils import host_limits
 
 
 def _get_service_memory_snapshot() -> tuple[int, int]:
@@ -70,6 +71,12 @@ def _sysreq_shortfalls(
       a service the host can perfectly well run a moment later.
     * **blkio_weight is neither**; it is a relative priority, so the only thing that
       can be wrong with it is being outside the range cgroups accept.
+
+    On top of all three sits the operator's own ceiling (`host_limits`), which asks a
+    different question: not "does the machine have this?" but "may this node take it?".
+    A PC with 32 GiB free refuses a 16 GiB instance when its owner has said nodo may
+    hold 8. It is checked here, in the one place all three admission callers go through,
+    so a peer probing this node's capacity is told the same thing a local launch is.
     """
     shortfalls: List[str] = []
 
@@ -105,6 +112,12 @@ def _sysreq_shortfalls(
             f"resources.at_most.blkio_weight is {int(at_most.blkio_weight)}, outside the "
             f"accepted range {low}-{high}."
         )
+
+    shortfalls.extend(host_limits.ceiling_shortfalls(
+        cores=requested_cores,
+        ram_bytes=int(at_most.mem_limit or 0),
+        disk_bytes=int(at_most.disk_space or 0),
+    ))
 
     return shortfalls
 

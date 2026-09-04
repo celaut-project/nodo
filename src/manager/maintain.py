@@ -8,11 +8,12 @@ from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
 from src.manager.ddns import ddns_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import accept_peer_refresh, ensure_dev_client_pools, stop_instance, spend_mu
+from src.manager.manager import accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu
 from src.manager.metrics import balance_on_other_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
 from src.reputation_system.reasons import Reason
+from src.utils import activity_window
 from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import peers_id_iterator
@@ -246,6 +247,49 @@ def maintain_vmachines(debug_mode: bool=False):
         log.LOGGER(f"[CH][janitor] failed: {e}")
 
 
+def enforce_activity_window(debug_mode: bool = False):
+    """Reap what is still running once the activity window closes.
+
+    Only under `activity_window.ON_CLOSE: stop`. The other setting, `refuse`, means the
+    window governs admission alone: instances already running keep running and keep
+    being charged, and the only thing that reaps them is an empty balance.
+
+    Instances descended from a dev client are left alone, the same exemption
+    `launch_service` applies at admission: the window is about renting this machine out
+    after hours, not about killing the operator's own work at midnight.
+
+    No reputation is scored either way. Being stopped by the clock is the operator's
+    decision about their own machine, and says nothing at all about the service --
+    unlike an instance the virtualizer lost, or one that could not pay.
+
+    Runs after the charging sweep, so an instance is billed for the interval it really
+    did hold before it is taken away. Its remaining balance is refunded by
+    `stop_instance`, exactly as `nodo stop` would refund it.
+    """
+    if activity_window.is_open():
+        return
+    if not activity_window.stops_running_instances():
+        if debug_mode:
+            log.LOGGER("Outside the activity window; ON_CLOSE is not 'stop', so running "
+                       "instances are left alone.")
+        return
+
+    for vmachine_id in sc.get_all_internal_containers_ids():
+        if descends_from_dev_client(vmachine_id):
+            if debug_mode:
+                log.LOGGER(f"Instance {vmachine_id} descends from a dev client; the "
+                           "activity window does not reap it.")
+            continue
+        log.LOGGER(
+            f"Stopping instance {vmachine_id}: this node is outside its activity "
+            f"window and activity_window.ON_CLOSE is 'stop'."
+        )
+        try:
+            stop_instance(token=vmachine_id)
+        except Exception as e:
+            log.LOGGER(f"Error stopping {vmachine_id} at closing time: {e}")
+
+
 def maintain_clients(debug_mode: bool=False):
     for client_id in SQLConnection().get_clients_id():
         if debug_mode: log.LOGGER(f"Maintain client {client_id}.")
@@ -474,6 +518,7 @@ def manager_thread():
         if wanted_services:
             check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
         maintain_vmachines(debug_mode=DEBUG_MODE())
+        enforce_activity_window(debug_mode=DEBUG_MODE())
         maintain_clients(debug_mode=DEBUG_MODE())
         peer_deposits(debug_mode=DEBUG_MODE())
 

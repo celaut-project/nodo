@@ -5,8 +5,8 @@ from protos import celaut_pb2 as celaut, celaut_pb2
 from src.balancers.execution_balancer.execution_balancer import execution_balancer, estimate_cost_on_peer
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
-from src.manager.manager import default_initial_balance, spend_mu
-from src.utils import utils, logger as log
+from src.manager.manager import default_initial_balance, descends_from_dev_client, spend_mu
+from src.utils import activity_window, utils, logger as log
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
@@ -164,6 +164,23 @@ def launch_service(
                 log.LOGGER(f"Service launch request made by the service {father_id}.")
         else:
             log.LOGGER(f"Service launch request made by the client {father_id}.")
+
+        # The operator's hours (`activity_window`). First thing after the requester is
+        # known, and before anything is priced, charged or built: outside the window
+        # this node takes no new work at all. Work descended from a dev client is
+        # exactly what "no new work" does not mean -- `nodo execute`, the core services
+        # and `nodo pack` all run under one, and the window is there to stop this
+        # machine being rented out after hours, not to lock its owner out of it.
+        #
+        # A running instance asking for a child is new work too, and is refused with
+        # everything else: a node that is closed cannot half-take a workload. That is
+        # felt by a service that spawns children on demand, which is the honest cost of
+        # closing a node while its instances are still running -- `ON_CLOSE: stop` is
+        # the setting for an operator who would rather they were not.
+        if not activity_window.is_open() and not descends_from_dev_client(father_id):
+            reason = activity_window.closed_reason()
+            log.LOGGER(f"Refusing to launch service {service_id}: {reason}")
+            raise Exception(f"Unable to launch service {service_id}: {reason}")
 
         # Check configuration
         if not configuration:

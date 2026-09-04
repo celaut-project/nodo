@@ -78,6 +78,7 @@ from typing import Callable, Generator, Iterator, List, Optional, Tuple
 from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.tunneling import logger
+from src.utils import host_limits
 from src.utils.config import ConfigManager
 from src.utils.cost_functions.execution_cost import traffic_charge_mu
 from src.utils.monetary import format_mu, prices
@@ -143,6 +144,12 @@ class TrafficMeter:
     is never thrown away for lack of funds. The cost is that an empty balance is
     noticed one block late: a tunnel can overrun by up to the charge interval
     before it closes. Shrink the interval to tighten that bound.
+
+    Beside the billing, and independent of it, sit the operator's own network ceilings
+    (`host_limits`): the day's relayed volume and the throughput across every tunnel at
+    once. They are a policy about this machine's connection rather than a price, so
+    they are applied whatever the rates say -- a node giving traffic away for free still
+    has a daily allowance, and a client with a full balance still gets shaped.
 
     The two rates are independent knobs, each self-disabling at zero:
     ``pricing.TUNNEL_OPEN_MU`` of 0 makes opening free (``charge_open`` spends 0, which
@@ -212,9 +219,25 @@ class TrafficMeter:
     def add(self, byte_count: int) -> bool:
         """Account ``byte_count`` of relayed traffic, billing whole blocks.
 
-        Returns False once the balance is gone, which the relay treats as a close.
+        Returns False once the balance or the day's network allowance is gone, either of
+        which the relay treats as a close.
         """
-        if not self.enabled or byte_count <= 0:
+        if byte_count <= 0:
+            return not self.exhausted.is_set()
+
+        # The operator's ceilings first, and outside the `self.enabled` guard below:
+        # `pricing.NET_MU_PER_GIB` of 0 turns off the *charge*, never the ceiling.
+        # Shaping before counting so the wait is paid on the bytes that caused it.
+        host_limits.throttle_tunnel_traffic(byte_count)
+        if not host_limits.account_tunnel_traffic(byte_count):
+            logger(
+                f"{LOG_PREFIX} {self.target}: {host_limits.daily_allowance_reason()} "
+                "Closing the tunnel."
+            )
+            self.exhausted.set()
+            return False
+
+        if not self.enabled:
             return not self.exhausted.is_set()
 
         with self._lock:
@@ -229,6 +252,12 @@ class TrafficMeter:
 
     def settle(self) -> None:
         """Bill the partial block left over when the tunnel closes."""
+        # Ahead of the `enabled` guard, and of the billing: the day's total has to reach
+        # the database even for a node that charges nothing for traffic, or a run of
+        # short tunnels would each leave less than a flush block behind and the
+        # allowance would never appear to be spent.
+        host_limits.flush_tunnel_traffic()
+
         if not self.enabled:
             return
 
@@ -565,6 +594,13 @@ def service_tunnel(
 
     ip, port, transport = _resolve_target(token, slot)
     target = f"{token}@{ip}:{port}/{transport.value}"
+
+    # A node with nothing left of its daily allowance (`host_limits`) refuses here
+    # rather than handing out a socket it would close on the first message. Ahead of
+    # `charge_open`, so nobody is billed for opening a tunnel this node was never going
+    # to relay.
+    if host_limits.daily_allowance_spent():
+        raise TunnelError(host_limits.daily_allowance_reason())
 
     # Charged before connecting: an instance that cannot pay to open the tunnel
     # gets a clean refusal instead of a socket it will lose mid-transfer.
