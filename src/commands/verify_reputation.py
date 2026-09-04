@@ -1,47 +1,42 @@
 """Verify a specific peer's on-chain reputation proofs (read-only dev command).
 
-Given a peer id, this reads every proof the peer announced in its stored
-advertisement — a node can hold more than one, and each is an opinion set it
-published, not a credential we assigned it (issue #281) — and then reuses the
-reputation-system validation primitives — nothing new is implemented here — to
-check each of them, in order:
+Given a peer id, this reads every proof the peer announced in its stored advertisement
+-- a node can hold more than one, and each is an opinion set it published, not a
+credential we assigned it (issue #281) -- and checks two things about each:
 
-  0. the peer attests an Ergo wallet, and that attestation verifies: the wallet
-     signed this peer's id (:func:`attested_proof_owner`). Everything below
-     is about that wallet, because R7 is the reputation contract's spending
-     clause and so holds an Ergo proposition, never a node identity.
-  1. the proof's unspent box(es) sit on the *canonical* reputation contract
-     (:func:`_boxes_off_canonical_contract`),
-  2. each box carries the canonical R4/R5/R7 register layout plus a reputation
-     token (:func:`_validate_box_structure`), and
-  3. the attested wallet matches the R7 owner ``propositionBytes``.
+  1. the proof names an owner, and that owner signed this peer's id
+     (:func:`attested_proof_owner`). Everything after is about that owner, because R7
+     is the reputation contract's spending clause and so holds an Ergo proposition,
+     never a node identity.
+  2. the node's own verdict on that proof, from
+     :func:`explain_contract_ledger` -- the canonical ledger and ErgoTree, an
+     announced token id, unspent boxes on the canonical contract instance, the
+     canonical R4/R5/R7 layout, and an R7 owner matching the attested one.
+
+Step 2 is the node's function, not a second implementation of it. It used to be one,
+and it had drifted: it never checked the ledger or the ErgoTree, so it printed PASS for
+proofs `add_peer_instance` was refusing -- in exactly the case an operator would run
+this, which is when the node has refused something and its log says only that it did.
 
 Two links rather than one byte comparison, and they close the same loop: the peer
 proved control of its identity key by signing its ``GetPeerInfo`` response (see
-``manager.verified_peer_public_key``), that signature covers the attestation, and
-the attestation is the wallet vouching for the identity.
+``manager.verified_peer_public_key``), that signature covers the attestation, and the
+attestation is the owner vouching for the identity.
 
 It is strictly read-only: only Ergo-explorer reads. No transaction is built or
-broadcast, and no RPC round-trip against the peer is needed anymore.
+broadcast, and no RPC round-trip against the peer is needed.
 """
 
 import sqlite3
-from typing import List, Optional
+from typing import Optional
 
 from protos import celaut_pb2
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import get_token_id
 from src.reputation_system.contracts.ergo.proof_validation import (
-    _boxes_off_canonical_contract,
-    _decode_coll_byte_hex,
-    _extract_register_value,
-    _get_unspent_boxes_by_token,
-    _validate_box_structure,
+    explain_contract_ledger,
 )
-from src.reputation_system.proof_attestation import (
-    attested_proof_owner,
-    node_proposition_hex,
-)
+from src.reputation_system.proof_attestation import attested_proof_owner
 
 
 def _peer_advertisement(peer_id: str) -> Optional[celaut_pb2.Peer]:
@@ -123,9 +118,15 @@ def verify_reputation(peer_id: str) -> bool:
 
 
 def _verify_proof(peer_id: str, contract) -> bool:
-    """One proof, checked end to end. Prints its own reasons; returns pass/fail."""
+    """One proof, checked end to end. Prints its own reasons; returns pass/fail.
+
+    The check itself is the node's own (:func:`explain_contract_ledger`), not a copy of
+    it. This used to walk the same steps in its own words and had drifted: it never
+    checked the ledger or the ErgoTree, so it passed proofs the node refused -- and it
+    is the tool an operator reaches for precisely when the node has refused one.
+    """
     proof_id = get_token_id(contract)
-    print(f"  Proof id: {proof_id}", flush=True)
+    print(f"  Proof id: {proof_id or '(none announced)'}", flush=True)
 
     # The owner first: without one there is nothing to check an R7 owner against. A peer
     # can hold the wallet and be unable to prove it, which is indistinguishable from
@@ -140,57 +141,14 @@ def _verify_proof(peer_id: str, contract) -> bool:
         return False
     print(f"  Attested owner: {wallet_public_key}", flush=True)
 
-    boxes = _get_unspent_boxes_by_token(proof_id)
-    if not boxes:
-        print(
-            f"FAIL: no unspent boxes found on-chain for proof id {proof_id}.",
-            flush=True,
-        )
-        return False
-    print(f"  Found {len(boxes)} unspent box(es) for the proof.", flush=True)
-
-    off_contract = _boxes_off_canonical_contract(boxes)
-    if off_contract:
-        print(
-            "FAIL: proof box(es) are not on the canonical reputation contract "
-            f"(off-contract ErgoTrees: {[t[:16] + '...' for t in off_contract]}).",
-            flush=True,
-        )
+    reason = explain_contract_ledger(contract, wallet_public_key)
+    if reason:
+        print(f"FAIL: {reason}.", flush=True)
         return False
 
-    for index, box in enumerate(boxes):
-        if not _validate_box_structure(box):
-            print(
-                f"FAIL: box #{index} lacks the canonical R4/R5/R7 reputation "
-                "register structure (see node log for the offending register).",
-                flush=True,
-            )
-            return False
-    print("  Box structure OK (canonical R4/R5/R7 + reputation token).", flush=True)
-
-    owner_propositions = {
-        _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or ""))
-        for box in boxes
-    }
-    owner_propositions.discard(None)
-    if len(owner_propositions) != 1:
-        print(
-            "FAIL: proof boxes carry inconsistent or missing R7 owner "
-            f"propositionBytes ({sorted(p for p in owner_propositions if p)}).",
-            flush=True,
-        )
-        return False
-    owner_proposition_hex = owner_propositions.pop()
-    print(f"  R7 owner propositionBytes: {owner_proposition_hex[:24]}...", flush=True)
-
-    if owner_proposition_hex != node_proposition_hex(wallet_public_key):
-        print(
-            f"FAIL: the attested wallet {wallet_public_key} does not match the R7 owner "
-            "(the proof was published by a different wallet than the one this peer "
-            "proved it holds).",
-            flush=True,
-        )
-        return False
-
-    print(f"  OK: reputation proof {proof_id} is owned by the attested wallet.", flush=True)
+    print(
+        f"  OK: proof {proof_id} is on the canonical contract, structurally valid, and "
+        "owned by the attested wallet.",
+        flush=True,
+    )
     return True
