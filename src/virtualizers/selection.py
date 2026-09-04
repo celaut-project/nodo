@@ -27,9 +27,7 @@ from src.virtualizers.architecture import (
     get_arch_tag,
 )
 from src.virtualizers.qemu.config import emulation_ready
-
-CH = "ch"
-QEMU = "qemu"
+from src.virtualizers.registry import CH, QEMU
 
 
 def select_virtualizer(

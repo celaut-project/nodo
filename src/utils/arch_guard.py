@@ -3,7 +3,7 @@ foreign one.
 
 Deliberately stdlib-only -- ``os``, ``platform``, ``typing`` and nothing else. That
 is what lets this be the one place the per-architecture tables live: the config
-validator, the pricing layer, ``virtualizers.ch.limits`` (which goes out of its way
+validator, the pricing layer, ``virtualizers.microvm.limits`` (which goes out of its way
 to depend on protos and config alone) and ``commands.doctor`` (which has to stay
 runnable on a checkout too broken to import the node) can all read from here without
 any of them taking on a dependency they were built to avoid.
@@ -56,7 +56,7 @@ ARCH_ALIASES = {
 #
 # Lives here because this module is the one that already owns what an arch tag *is*,
 # and it is pure stdlib -- no config, no protos, nothing that reads a disk at import.
-# That is what lets the config validator, the pricing layer and `virtualizers.ch.limits`
+# That is what lets the config validator, the pricing layer and `virtualizers.microvm.limits`
 # all share it without any of them growing a dependency it went out of its way to avoid.
 CANONICAL_ARCHITECTURES = tuple(dict.fromkeys(ARCH_ALIASES.values()))
 

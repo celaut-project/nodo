@@ -58,7 +58,7 @@ Why these:
   compiler the install fails at `pip install -r requirements.txt`. (`gcc` works
   too if you `export CC=gcc CXX=g++`.)
 - `cpio`, `gzip` — inspect the Cloud Hypervisor initramfs before each launch
-  (`src/virtualizers/ch/execute.py`). The image itself is built by CI and
+  (`src/virtualizers/microvm/bundle.py`). The image itself is built by CI and
   downloaded from the Nodo release in step 10, along with the static busybox that
   is its only binary, so neither a busybox package nor `initramfs-tools`/`dracut`
   is needed here.

@@ -28,7 +28,7 @@ from src.utils.verify import get_service_hex_main_hash
 from src.virtualizers.architecture import get_arch_tag, UnsupportedArchitectureException
 # Image floors and the sizing they feed. Shared with the pricing side, so a quote is
 # computed from the same numbers the image is formatted at (see `limits`).
-from src.virtualizers.ch import limits
+from src.virtualizers.microvm import limits, paths
 
 env_manager = ConfigManager()
 
@@ -101,16 +101,7 @@ class _BuildSecurityContext:
 
 
 def _bundle_dir(service_id: str, arch: str) -> Path:
-    if not CACHE:
-        raise RuntimeError("CACHE path is not configured.")
-    return Path(CACHE) / "cloud_hypervisor" / service_id / arch
-
-
-# Names under CACHE/cloud_hypervisor that are not service bundles: the runtime
-# directories of live VMs and the preserved debris of failed launches. A service id
-# is a hex hash and cannot collide with either, but a function that deletes trees in
-# this directory says so explicitly rather than trusting that.
-NON_BUNDLE_CACHE_DIRS = frozenset({"runtime", "failures"})
+    return paths.bundle_dir(service_id, arch)
 
 
 def remove_built_service(service_id: str) -> int:
@@ -127,30 +118,30 @@ def remove_built_service(service_id: str) -> int:
 
     Returns 0 when the service has no bundle here. Raises ValueError for anything
     that is not a single bundle directory -- an empty id (which resolves to the
-    whole cache), a traversal, or one of ``NON_BUNDLE_CACHE_DIRS``.
+    whole cache), a traversal, or one of ``paths.NON_BUNDLE_ENTRIES``.
     """
     if not CACHE:
         raise RuntimeError("CACHE path is not configured.")
 
-    bundles_root = (Path(CACHE) / "cloud_hypervisor").resolve()
+    bundles_root = paths.family_root().resolve()
     target = (bundles_root / service_id).resolve()
-    if target.parent != bundles_root or target.name in NON_BUNDLE_CACHE_DIRS:
+    if target.parent != bundles_root or target.name in paths.NON_BUNDLE_ENTRIES:
         raise ValueError(
             f"{service_id!r} does not name a service bundle under {bundles_root}; "
             "refusing to delete it."
         )
 
     if not target.is_dir():
-        logger(f"[CH][{service_id}] no built bundle to remove ({target}).")
+        logger(f"[build][{service_id}] no built bundle to remove ({target}).")
         return 0
 
     freed = _dir_size_bytes(target)
     shutil.rmtree(target, ignore_errors=True)
     if target.exists():
-        logger(f"[CH][{service_id}] bundle removal left files behind: {target}")
+        logger(f"[build][{service_id}] bundle removal left files behind: {target}")
         return max(0, freed - _dir_size_bytes(target))
 
-    logger(f"[CH][{service_id}] event=remove mode=bundle bundle_removed={target} freed_bytes={freed}")
+    logger(f"[build][{service_id}] event=remove mode=bundle bundle_removed={target} freed_bytes={freed}")
     return freed
 
 
@@ -379,7 +370,7 @@ def _audit_device_node(
 ) -> None:
     node_type = "block" if metadata.device_is_block else "char"
     logger(
-        f"[CH][SECURITY][DEVNODE][{security_context.service_id}] {decision} "
+        f"[SECURITY][DEVNODE][{security_context.service_id}] {decision} "
         f"path={rel_path} type={node_type} major={metadata.device_major} "
         f"minor={metadata.device_minor} mode={oct(metadata.mode)} reason={reason}"
     )
@@ -988,7 +979,7 @@ def _is_service_built_for_arch(
 ) -> bool:
     if not CACHE:
         return False
-    bundle_dir = Path(CACHE) / "cloud_hypervisor" / service_hash / arch
+    bundle_dir = paths.bundle_dir(service_hash, arch)
     if not (bundle_dir / "rootfs.ext4").is_file() or not (bundle_dir / "bundle.json").is_file():
         return False
 
@@ -1009,7 +1000,7 @@ def _is_service_built_for_arch(
 def is_service_built(service_hash: str) -> bool:
     if not CACHE:
         return False
-    base_dir = Path(CACHE) / "cloud_hypervisor" / service_hash
+    base_dir = paths.service_root(service_hash)
     if not base_dir.exists() or not base_dir.is_dir():
         return False
 
@@ -1033,7 +1024,7 @@ def built_rootfs_size_bytes(service_hash: str) -> Optional[int]:
     """
     if not CACHE:
         return None
-    base_dir = Path(CACHE) / "cloud_hypervisor" / service_hash
+    base_dir = paths.service_root(service_hash)
     if not base_dir.is_dir():
         return None
 
@@ -1066,7 +1057,7 @@ def build(
     security_context = _build_security_context(service_id=service_id)
     if not security_context.path_confinement:
         logger(
-            f"[CH][SECURITY][{service_id}] WARNING: PATH_CONFINEMENT is disabled."
+            f"[SECURITY][{service_id}] WARNING: PATH_CONFINEMENT is disabled."
         )
     if ROOTFS_BUILD_SANDBOX != "none":
         raise RuntimeError(

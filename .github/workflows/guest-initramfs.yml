@@ -11,7 +11,7 @@ name: guest-initramfs
 #     digests -- change, and every commit pinning the old ones stops installing,
 #     `stable` included.
 #   * The initramfs is the only part of the guest that changes at code speed, since
-#     /init is a contract with src/virtualizers/ch/execute.py. Republishing it
+#     /init is a contract with src/virtualizers/microvm/bundle.py. Republishing it
 #     should not cost a ~30 minute kernel build.
 #
 # The busybox that goes inside comes from the release itself, verified against

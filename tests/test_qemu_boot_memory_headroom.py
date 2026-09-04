@@ -15,7 +15,7 @@ from unittest.mock import patch
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
-    from src.virtualizers.ch import limits
+    from src.virtualizers.microvm import limits
     from src.virtualizers.qemu import hotplug as qemu_hotplug
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc

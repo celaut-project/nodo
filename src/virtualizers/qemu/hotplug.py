@@ -37,13 +37,13 @@ from typing import Any, Dict, Optional
 from protos import celaut_pb2
 from src.manager.modify_resources import modify_sysreq
 from src.utils import logger as log
-from src.virtualizers.ch.cgroups import (
+from src.virtualizers.microvm.cgroups import (
     apply_cpu_limit,
     apply_memory_limit,
     cgroup_v2_available,
     ensure_vm_cgroup,
 )
-from src.virtualizers.ch.runtime_state import load_runtime_state, save_runtime_state
+from src.virtualizers.microvm.runtime_state import load_runtime_state, save_runtime_state
 from src.virtualizers.qemu.qmp import QMPClient, QMPError
 
 # Guests cannot use less than a small floor; a balloon target of zero would ask
@@ -183,7 +183,7 @@ def settle_boot_balloon(
     ``at_init`` one, because ``-m`` is fixed for the life of the process: a guest
     booted at ``at_init`` can never be grown to the ceiling its manifest declared,
     whatever the balloon or the cgroup is told afterwards (see
-    :func:`src.virtualizers.ch.limits.resolve_boot_mem_bytes`). Reserving the
+    :func:`src.virtualizers.microvm.limits.resolve_boot_mem_bytes`). Reserving the
     ceiling is only half of it -- the guest must not *keep* the difference, which
     it was never granted and its balance was not funded for. So the balloon takes
     it back as soon as the guest is up, leaving the guest holding ``at_init`` and
@@ -334,7 +334,10 @@ def hotplug(
 
     state = load_runtime_state(vmachine_id) or {}
     pid = int(state.get("pid") or 0)
-    qmp_socket = str(state.get("qmp_socket") or "")
+    # For QEMU the family's `control_socket` *is* the QMP socket: the same socket
+    # whose disappearance means the emulator is gone is the one the balloon resize
+    # below is issued over.
+    qmp_socket = str(state.get("control_socket") or "")
     boot_mem_bytes = int(state.get("boot_mem_bytes") or 0)
     # Measured for this guest at boot and persisted, not re-derived: it is what the
     # kernel actually took, and an operator editing the reserve mid-life must not

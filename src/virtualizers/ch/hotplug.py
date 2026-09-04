@@ -4,13 +4,13 @@ from typing import Any, Dict
 from protos import celaut_pb2
 from src.manager.modify_resources import modify_sysreq
 from src.utils import logger as log
-from src.virtualizers.ch.cgroups import (
+from src.virtualizers.microvm.cgroups import (
     apply_cpu_limit,
     apply_memory_limit,
     cgroup_v2_available,
     ensure_vm_cgroup,
 )
-from src.virtualizers.ch.runtime_state import (
+from src.virtualizers.microvm.runtime_state import (
     load_runtime_state,
     save_runtime_state,
 )

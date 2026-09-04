@@ -145,7 +145,7 @@ busybox, or CH refuses to boot the kernel (`KernelLoad(Pe(...))`, `UefiLoad(Uefi
 **Symptom:** `nodo execute` fails before the microVM starts, with *Cloud
 Hypervisor initramfs speaks contract version '…', but this node needs '…'*.
 
-**Why:** the initramfs' `/init` and `src/virtualizers/ch/execute.py` share a
+**Why:** the initramfs' `/init` and `src/virtualizers/microvm/bundle.py` share a
 contract — which files `execute.py` writes into the service rootfs
 (`__config__`, `.__nodo_entrypoint`, `.__nodo_virtiofs`) and how `/init` reads
 them. The initramfs is a pinned release asset while the contract lives in this

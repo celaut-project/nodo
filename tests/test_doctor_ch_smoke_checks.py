@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from src.commands import doctor
-from src.virtualizers.ch import guest as ch_guest
+from src.virtualizers.microvm import guest as ch_guest
 
 
 class GuestSerialDeviceTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class GuestSerialDeviceTests(unittest.TestCase):
         for path in ("src/commands/doctor.py", "src/virtualizers/ch/execute.py"):
             with self.subTest(path=path):
                 source = Path(path).read_text(encoding="utf-8")
-                self.assertIn("ch_guest.serial_device()", source)
+                self.assertIn("_guest.serial_device()", source)
                 for line in source.splitlines():
                     if line.lstrip().startswith("#"):
                         continue  # comments recount the bug this prevents

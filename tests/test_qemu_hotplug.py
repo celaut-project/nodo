@@ -1,5 +1,9 @@
-"""QEMU hotplug: memory via virtio-balloon (QMP), CPU via cgroup, and the
-interface dispatch that routes a QEMU instance here instead of to CH.
+"""QEMU hotplug: memory via virtio-balloon (QMP), CPU via cgroup.
+
+Memory is the one resize that cannot be shared with CH, which is why this
+backend has a hotplug of its own at all: a QEMU guest boots with a fixed ``-m``
+and only a balloon resize actually returns guest RAM. Which instances reach it is
+the interface's routing, tested in ``test_virtualizers_interface_dispatch.py``.
 
 Unit-level: the QMP client and cgroup writers are patched, so no live VM. The
 point is to pin the *contract* the live nodo#274 re-test proved is required --
@@ -9,18 +13,16 @@ memory), while CPU still goes through cgroup cpu.max.
 """
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
     from src.virtualizers.qemu import hotplug as qemu_hotplug
-    from src.virtualizers import interface
 except Exception as import_exc:  # pragma: no cover
     IMPORT_ERROR = import_exc
     celaut = None
     qemu_hotplug = None
-    interface = None
 
 BOOT_MEM = 640 * 1024 * 1024
 
@@ -64,7 +66,7 @@ class QemuHotplugTests(unittest.TestCase):
         return ok, persisted, ecg, amem, acpu, mdb, _FakeQMP
 
     def test_memory_shrink_uses_balloon_and_holds_cgroup_at_boot_alloc(self):
-        state = {"vmachine_id": "vm-q", "pid": 4242, "qmp_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
+        state = {"vmachine_id": "vm-q", "pid": 4242, "control_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
         ok, persisted, ecg, amem, acpu, mdb, fq = self._run(state, _mem_cpu_req())
 
         self.assertTrue(ok)
@@ -82,7 +84,7 @@ class QemuHotplugTests(unittest.TestCase):
         self.assertEqual(report["cpu"]["status"], "applied")
 
     def test_legacy_instance_without_qmp_falls_back_to_cgroup_best_effort(self):
-        # No qmp_socket / boot_mem_bytes: cgroup-only, flagged best-effort.
+        # No control socket / boot_mem_bytes: cgroup-only, flagged best-effort.
         state = {"vmachine_id": "vm-q", "pid": 4242}
         req = celaut.ModifyServiceSystemResourcesInput()
         req.max_sysreq.mem_limit = 200 * 1024 * 1024
@@ -98,7 +100,7 @@ class QemuHotplugTests(unittest.TestCase):
         # The guest is using nearly all of its 640 MiB; the 128 MiB request would
         # OOM-panic it. It must be bounded, reported as `clamped` rather than
         # `applied`, and the DB priced at what the guest actually still holds.
-        state = {"vmachine_id": "vm-q", "pid": 4242, "qmp_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
+        state = {"vmachine_id": "vm-q", "pid": 4242, "control_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
         ok, persisted, ecg, amem, acpu, mdb, fq = self._run(
             state, _mem_cpu_req(), free=16 * 1024 * 1024
         )
@@ -113,7 +115,7 @@ class QemuHotplugTests(unittest.TestCase):
     def test_a_guest_that_cannot_report_keeps_the_memory_it_has(self):
         # No statistics => nothing safe to reclaim. Not an error, and not a
         # silent `applied` either.
-        state = {"vmachine_id": "vm-q", "pid": 4242, "qmp_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
+        state = {"vmachine_id": "vm-q", "pid": 4242, "control_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
         ok, persisted, ecg, amem, acpu, mdb, fq = self._run(
             state, _mem_cpu_req(), free=None, actual=None
         )
@@ -125,32 +127,9 @@ class QemuHotplugTests(unittest.TestCase):
         self.assertEqual(mdb.call_args.kwargs["sys_req"].mem_limit, BOOT_MEM)
 
     def test_invalid_pid_fails(self):
-        state = {"vmachine_id": "vm-q", "pid": 0, "qmp_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
+        state = {"vmachine_id": "vm-q", "pid": 0, "control_socket": "/run/qmp.sock", "boot_mem_bytes": BOOT_MEM}
         ok, persisted, *_ = self._run(state, _mem_cpu_req())
         self.assertFalse(ok)
-
-
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class InterfaceHotplugDispatchTests(unittest.TestCase):
-    def test_qemu_instance_routes_to_qemu_hotplug(self):
-        req = celaut.ModifyServiceSystemResourcesInput()
-        req.max_sysreq.mem_limit = 128 * 1024 * 1024
-        with patch.object(interface, "_resolve_instance_virtualizer", return_value=interface.QEMU), \
-             patch.object(interface, "qemu_hotplug", return_value=True) as qh, \
-             patch.object(interface, "ch_hotplug", return_value=True) as ch:
-            self.assertTrue(interface.hotplug(vmachine_id="vm-q", system_requeriments_range=req))
-        qh.assert_called_once()
-        ch.assert_not_called()
-
-    def test_ch_instance_still_routes_to_ch_hotplug(self):
-        req = celaut.ModifyServiceSystemResourcesInput()
-        req.max_sysreq.mem_limit = 128 * 1024 * 1024
-        with patch.object(interface, "_resolve_instance_virtualizer", return_value=interface.CH), \
-             patch.object(interface, "qemu_hotplug", return_value=True) as qh, \
-             patch.object(interface, "ch_hotplug", return_value=True) as ch:
-            self.assertTrue(interface.hotplug(vmachine_id="vm-c", system_requeriments_range=req))
-        ch.assert_called_once()
-        qh.assert_not_called()
 
 
 if __name__ == "__main__":

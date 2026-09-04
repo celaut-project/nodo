@@ -1,7 +1,7 @@
-"""``nodo prune`` -- reclaim the CH cache disk nothing else reclaims.
+"""``nodo prune`` -- reclaim the microVM cache disk nothing else reclaims.
 
 `nodo remove <service>` frees the bundle of a service the operator names. Two
-directories under ``CACHE/cloud_hypervisor/`` grow independently of any service:
+directories under ``CACHE/microvm/`` grow independently of any service:
 
 * ``runtime/<vmachine_id>/`` -- an instance's own copy of its rootfs image. Freed
   by ``kill``, so it is only left behind when a teardown did not finish, or when
@@ -104,8 +104,13 @@ def prune(argv: Optional[Sequence[str]] = None) -> None:
         print("This script requires superuser privileges. Please run with sudo.")
         return
 
+    # Read from the microVM family rather than through `virtualizers.interface`,
+    # deliberately: what this command reports is a disk layout -- runtime
+    # directories, rootfs images, preserved failures, and their sizes -- and that
+    # is the family's, not something every backend has. A family with nothing on
+    # this node's disk has nothing to report here. See docs/BACKENDS.md and #290.
     try:
-        from src.virtualizers.ch.maintain import (
+        from src.virtualizers.microvm.maintain import (
             reclaim,
             scan_failures,
             scan_orphan_runtimes,

@@ -53,7 +53,7 @@ Fedora package names worth knowing if you install by hand: `gcc make` for
   redirection), and the launch ends as `Kernel panic - not syncing: Attempted to kill
   init! exitcode=0x00000100` at ~0.1s with no output of its own.
 
-  Both cmdline builders derive it from `src/virtualizers/ch/guest.py`, so it cannot
+  Both cmdline builders derive it from `src/virtualizers/microvm/guest.py`, so it cannot
   be set wrong. If `virtualizers.ch.KERNEL_CMDLINE_EXTRA` in an older `config.yaml`
   still carries `console=ttyS0` — it was the shipped default — it is dropped with a
   warning rather than honoured.
@@ -87,7 +87,7 @@ installer:
 
 - **`execute`'s preflight** (`ip`, `sysctl`, `iptables`, `debugfs`, `ping`) is
   satisfied by Fedora's packages. `iptables` is the nft backend and accepts the legacy
-  syntax `src/virtualizers/ch/firewall.py` uses.
+  syntax `src/virtualizers/microvm/firewall.py` uses.
 - **SELinux in `Enforcing`** does not prevent `nodo.service` from starting out of
   `/nodo`.
 - **Nothing in `src/` is Debian-specific** — no `apt`, `dpkg` or `lsb_release`.

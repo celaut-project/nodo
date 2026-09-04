@@ -168,7 +168,7 @@ class GuestBridgeTests(unittest.TestCase):
         # probe, which is reported as such.
         logged = []
         with patch(
-            "src.virtualizers.ch.execute.ensure_guest_bridge",
+            "src.virtualizers.microvm.network.ensure_guest_bridge",
             side_effect=OSError("RTNETLINK: operation not permitted"),
         ):
             with patch.object(serve_module.log, "LOGGER", side_effect=logged.append):

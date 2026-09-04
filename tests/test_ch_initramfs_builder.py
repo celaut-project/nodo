@@ -4,10 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-# src.virtualizers.ch.initramfs is stdlib-only by design, so it imports on a bare
+# src.virtualizers.microvm.initramfs is stdlib-only by design, so it imports on a bare
 # checkout -- which is why these tests run here instead of alongside execute.py's,
 # where the whole module is skipped when grpc is absent.
-from src.virtualizers.ch import initramfs as ch_initramfs
+from src.virtualizers.microvm import initramfs as ch_initramfs
 
 
 class CloudHypervisorInitramfsBuilderTests(unittest.TestCase):
@@ -153,7 +153,7 @@ class GuestUserspaceTests(unittest.TestCase):
         # self-check silently skipped itself there.
         for path in (
             "bash/build_ch_initramfs.sh",
-            "src/virtualizers/ch/execute.py",
+            "src/virtualizers/microvm/bundle.py",
             "src/commands/doctor.py",
         ):
             with self.subTest(path=path):
@@ -275,16 +275,17 @@ class InitramfsContractTests(unittest.TestCase):
             with self.assertRaises(ch_initramfs.InitramfsReadError):
                 ch_initramfs.read(str(path))
 
-    def test_execute_and_doctor_read_through_this_one_module(self):
+    def test_the_launcher_and_doctor_read_through_this_one_module(self):
         # Two callers, one definition of what a nodo initramfs is. When doctor spelled
         # the required entries itself it also silently skipped the version check, so
-        # `doctor` passed on an image every launch would reject.
-        for path in ("src/virtualizers/ch/execute.py", "src/commands/doctor.py"):
+        # `doctor` passed on an image every launch would reject. The launcher's half
+        # is the family's bundle validation, which both hypervisors go through.
+        for path in ("src/virtualizers/microvm/bundle.py", "src/commands/doctor.py"):
             with self.subTest(path=path):
                 content = Path(path).read_text(encoding="utf-8")
-                self.assertIn("initramfs as ch_initramfs", content)
-                self.assertIn("ch_initramfs.CONTRACT_VERSION", content)
-                self.assertIn("ch_initramfs.missing_entries", content)
+                self.assertIn("import initramfs as", content)
+                self.assertIn(".CONTRACT_VERSION", content)
+                self.assertIn(".missing_entries", content)
                 # The entry names must come from the module, not be respelled.
                 self.assertNotIn('"etc/nodo-ch-initramfs.marker"', content)
 

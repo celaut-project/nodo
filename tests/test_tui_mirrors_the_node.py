@@ -29,7 +29,7 @@ try:
     from src.utils.arch_guard import CANONICAL_ARCHITECTURES
     from src.utils.config_validation import PER_ARCH_PRICE_KEYS
     from src.utils.monetary import PRICING_BY_ARCH_KEY
-    from src.virtualizers.ch import limits
+    from src.virtualizers.microvm import limits
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     CANONICAL_ARCHITECTURES = ()  # type: ignore[assignment]

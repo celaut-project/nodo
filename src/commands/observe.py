@@ -259,9 +259,9 @@ class SessionMetrics:
 # Tap interface resolution.
 # --------------------------------------------------------------------------- #
 def tap_ifname_for_instance(instance_id: str) -> str:
-    """Return the tap interface name the CH virtualizer creates for ``instance_id``.
+    """Return the tap interface name the virtualizer creates for ``instance_id``.
 
-    Mirrors ``src/virtualizers/ch/execute.py::_create_tap`` exactly:
+    Mirrors ``src/virtualizers/microvm/network.py::create_tap`` exactly:
     ``tap`` + the first 10 hex chars of ``sha1(instance_id)``. Keeping this a
     pure re-derivation (rather than a new catalogue column) means observe stays
     read-only and never diverges from the value the runtime actually programmed.
@@ -961,7 +961,7 @@ def _read_cgroup_cpu_usage_usec(cgroup_path: Optional[str]) -> Optional[int]:
 
 def _sample_resources(instance_id: str) -> Dict[str, Any]:
     """One resource sample: memory bytes + cgroup cpu usage counter."""
-    from src.virtualizers.ch.observability import get_vm_runtime_snapshot
+    from src.virtualizers.microvm.observability import get_vm_runtime_snapshot
 
     snapshot = get_vm_runtime_snapshot(vmachine_id=instance_id)
     mem_bytes = snapshot.get("cgroup_memory_current_bytes")

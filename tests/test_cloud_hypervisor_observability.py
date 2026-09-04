@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 IMPORT_ERROR = None
 try:
-    from src.virtualizers.ch import observability as ch_obs
+    from src.virtualizers.microvm import observability as ch_obs
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     ch_obs = None  # type: ignore[assignment]
@@ -71,7 +71,9 @@ class CloudHypervisorObservabilityTests(unittest.TestCase):
         self.assertIsNone(snapshot["mem_rss_bytes"])
 
     def test_snapshot_rejects_reused_pid(self):
-        state = {"pid": 654}
+        # The identity check runs off the name the launcher recorded, so an entry
+        # carries one; a PID alone can belong to whatever inherited it.
+        state = {"pid": 654, "process_name": "nodo-ch-abcdef01"}
         with patch.object(ch_obs, "pid_alive", return_value=False), patch.object(
             ch_obs.psutil,
             "Process",

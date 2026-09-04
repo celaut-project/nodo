@@ -76,7 +76,7 @@ jobs:
       # Built from the busybox produced right above, so the two assets published
       # under this tag agree: the image contains exactly the binary next to it.
       #
-      # Its /init is a contract with src/virtualizers/ch/execute.py (the entrypoint
+      # Its /init is a contract with src/virtualizers/microvm/bundle.py (the entrypoint
       # and virtiofs plan files it reads), so a pinned initramfs could in principle
       # lag the code. That is handled by the version in
       # etc/nodo-ch-initramfs.marker, which execute.py asserts at launch: a skew

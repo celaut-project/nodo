@@ -39,7 +39,7 @@ construction — **already work unprivileged today**.
 | Requirement | Status |
 |---|---|
 | `/dev/kvm` | Readable/writable by the desktop user via a logind ACL (`crw-rw----+`), with no `kvm` group membership. Cloud Hypervisor itself does not need root. |
-| rootfs image build | `mkfs.ext4 -d` (`src/virtualizers/ch/build.py:851`) plus `debugfs` writes (`src/virtualizers/ch/execute.py:477`) — **no `mount`, no loop devices**. This was evidently a deliberate design choice. |
+| rootfs image build | `mkfs.ext4 -d` (`src/virtualizers/microvm/build.py`) plus `debugfs` writes (`src/virtualizers/microvm/rootfs.py`) — **no `mount`, no loop devices**. This was evidently a deliberate design choice. |
 | cgroup v2 | `user@1000.service` already has `cpu memory pids` delegated **and writable** in `cgroup.subtree_control`. |
 | Exposed ports | `network.FREE_PORTS_RANGE` defaults to 50000–60000 — unprivileged. |
 | `nodo observe` | Already degrades gracefully without `CAP_NET_RAW`: it loses only the AF_PACKET `capture.pcap`, not the metrics (`src/commands/observe.py:748`). |
@@ -82,7 +82,7 @@ port-forwarding rewrite, not AppArmor.
 ### 1. Networking — the real blocker
 
 Roughly 30 privileged calls, 26 of them in a single file
-(`src/virtualizers/ch/execute.py`):
+(`src/virtualizers/microvm/network.py`):
 
 - `_network_preflight()` (`:306`) — creates the `nodo-br-ch` bridge, assigns its
   address, brings it up, and runs `sysctl -w net.ipv4.ip_forward=1`.
@@ -91,7 +91,7 @@ Roughly 30 privileged calls, 26 of them in a single file
 - `_ensure_masquerade()` (`:334`) and `_add_dnat_rule()` (`:503`) —
   MASQUERADE, DNAT/PREROUTING and FORWARD rules per instance.
 
-Plus `src/virtualizers/ch/firewall.py`, `src/virtualizers/firewall.py:121`, and
+Plus `src/virtualizers/microvm/firewall.py`, `src/virtualizers/firewall.py`, and
 `src/utils/config.py:115`, which opens the gateway port in the `INPUT` chain.
 
 Verified failures as a non-root user:
@@ -113,7 +113,7 @@ process is already root, which is exactly what
 
 ### 2. cgroups — trivial
 
-`CGROUPS_BASE_DIR` (`src/virtualizers/ch/cgroups.py:10`) points at
+`CGROUPS_BASE_DIR` (`src/virtualizers/microvm/cgroups.py`) points at
 `/sys/fs/cgroup`, whose root is owned by root. This is **a configuration value**,
 and the user-delegated path already works (see above). Near-zero cost to change.
 
@@ -190,7 +190,7 @@ packer* above), so the pattern is proven on this host.
 
 A small service that only creates taps and applies rules from fixed templates,
 concentrating the attack surface in a small auditable component.
-`src/virtualizers/ch/firewall.py:14` already validates its arguments with a
+`src/virtualizers/microvm/firewall.py` already validates its arguments with a
 regex and mandates audit comments, so the necessary discipline is in place.
 
 ## Recommendation

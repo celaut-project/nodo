@@ -1,100 +1,109 @@
-"""The janitor must judge a VM by the backend that launched it.
+"""The janitor must judge a VM by what its own launcher recorded.
 
-Both backends write into the same runtime-state directory, so the janitor sweeps
-CH and QEMU guests together. Liveness is not backend-agnostic though: it confirms
-the recorded PID still belongs to *this* VM by matching the launcher's visible
+Both hypervisors write into one runtime-state store, so the janitor sweeps CH and
+QEMU guests together. Liveness is where that used to go wrong: it confirms the
+recorded PID still belongs to *this* VM by matching the launcher's visible
 process name, and those names differ (``nodo-ch-<id8>`` vs ``nodo-qemu-<id8>``).
 
-Checking a QEMU guest with CH's matcher therefore fails the name test on a
-perfectly healthy VM, and the janitor reaps it as ``stale_runtime_process_dead``
-seconds after it boots. Observed on a real arm64-on-x86 launch: the guest came up
-under TCG, published its endpoint, and was killed before a single request reached
-it. The same mismatch applies to teardown, which must also be the launcher's.
+The janitor had only a state file, so it guessed the name -- and guessed CH.
+Checking a QEMU guest with CH's name therefore failed on a perfectly healthy VM,
+and the janitor reaped it as ``stale_runtime_process_dead`` seconds after it
+booted. Observed on a real arm64-on-x86 launch: the guest came up under TCG,
+published its endpoint, and was killed before a single request reached it.
+
+The name is now in the state, so there is nothing to guess. What these tests hold
+down is that the janitor uses *that* name and no other, and that teardown goes to
+the hypervisor the entry names.
 """
 import unittest
 from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
-    from src.virtualizers.ch import maintain as ch_maintain
+    from src.virtualizers.microvm import maintain as microvm_maintain
+    from src.virtualizers.microvm import members
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
-    ch_maintain = None  # type: ignore[assignment]
+    microvm_maintain = members = None  # type: ignore[assignment]
+
+VM_ID = "abcdef0123456789"
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class JanitorBackendDispatchTests(unittest.TestCase):
-    """A QEMU guest is asked the QEMU questions, a CH guest the CH ones."""
+    def _sweep(self, state, *, running_process_name, in_db=True):
+        """Sweep with exactly one process alive on the host, under one name.
 
-    def _sweep(self, state, *, ch_alive, qemu_alive, in_db=True):
-        """Run the janitor with both backends' probes distinguishable.
-
-        Each ``pid_alive`` returns a different answer, so which one the janitor
-        consulted is visible in whether the VM survived.
+        ``pid_matches`` is the real name check; faking it by name rather than by
+        answer is what makes "which name did the janitor ask about" observable.
         """
+        def matches(pid, process_name):
+            return process_name == running_process_name
+
         with patch.object(
-            ch_maintain, "list_runtime_states", return_value={"vm-1": state}
+            microvm_maintain, "list_runtime_states", return_value={VM_ID: state}
         ), patch.object(
-            ch_maintain.sc, "internal_instance_exists", return_value=in_db
-        ), patch.object(
-            ch_maintain, "pid_alive", return_value=ch_alive
+            microvm_maintain.sc, "internal_instance_exists", return_value=in_db
         ), patch(
-            "src.virtualizers.qemu.process.pid_alive", return_value=qemu_alive
+            "src.virtualizers.microvm.process.os.kill", return_value=None
+        ), patch(
+            "src.virtualizers.microvm.process.proc_state", return_value="S"
+        ), patch(
+            "src.virtualizers.microvm.process.pid_matches", side_effect=matches
         ), patch.object(
-            ch_maintain, "kill_ch_vm", return_value=True
-        ) as ch_kill, patch(
-            "src.virtualizers.qemu.kill.kill", return_value=True
-        ) as qemu_kill:
-            ch_maintain.janitor_cleanup_orphans(debug_mode=False)
-        return ch_kill, qemu_kill
+            microvm_maintain, "kill_vm", return_value=True
+        ) as kill:
+            microvm_maintain.sweep_orphans(debug_mode=False)
+        return kill
 
-    def test_a_live_qemu_guest_survives_a_ch_matcher_that_disagrees(self):
-        # The regression: CH's matcher says dead (wrong process name), QEMU's
-        # says alive. The VM is alive, so nothing may be killed.
-        ch_kill, qemu_kill = self._sweep(
-            {"pid": 555, "virtualizer": "qemu"}, ch_alive=False, qemu_alive=True
+    def _state(self, hypervisor, **extra):
+        return {
+            "vmachine_id": VM_ID,
+            "pid": 555,
+            "virtualizer": hypervisor.name,
+            "process_name": hypervisor.process_name(VM_ID),
+            **extra,
+        }
+
+    def test_a_live_qemu_guest_is_not_reaped_for_failing_chs_name_check(self):
+        # The regression: the only process on the host is the QEMU one, and the
+        # entry says so. Nothing may be killed.
+        kill = self._sweep(
+            self._state(members.QEMU),
+            running_process_name=members.QEMU.process_name(VM_ID),
         )
-        ch_kill.assert_not_called()
-        qemu_kill.assert_not_called()
+        kill.assert_not_called()
 
-    def test_a_dead_qemu_guest_is_torn_down_by_the_qemu_backend(self):
-        ch_kill, qemu_kill = self._sweep(
-            {"pid": 555, "virtualizer": "qemu"}, ch_alive=True, qemu_alive=False
+    def test_a_dead_qemu_guest_is_torn_down_as_a_qemu_guest(self):
+        kill = self._sweep(
+            self._state(members.QEMU),
+            running_process_name=members.CH.process_name(VM_ID),
         )
-        qemu_kill.assert_called_once_with(vmachine_id="vm-1")
-        ch_kill.assert_not_called()
+        kill.assert_called_once_with(members.QEMU, vmachine_id=VM_ID)
 
-    def test_a_ch_guest_is_unaffected_by_the_qemu_probe(self):
-        ch_kill, qemu_kill = self._sweep(
-            {"pid": 555, "virtualizer": "ch"}, ch_alive=False, qemu_alive=True
+    def test_a_dead_ch_guest_is_torn_down_as_a_ch_guest(self):
+        kill = self._sweep(
+            self._state(members.CH),
+            running_process_name=members.QEMU.process_name(VM_ID),
         )
-        ch_kill.assert_called_once_with(vmachine_id="vm-1")
-        qemu_kill.assert_not_called()
-
-    def test_state_without_a_virtualizer_falls_back_to_ch(self):
-        # Pre-existing state files predate the field; CH is the historical owner.
-        ch_kill, qemu_kill = self._sweep({"pid": 555}, ch_alive=False, qemu_alive=True)
-        ch_kill.assert_called_once_with(vmachine_id="vm-1")
-        qemu_kill.assert_not_called()
+        kill.assert_called_once_with(members.CH, vmachine_id=VM_ID)
 
     def test_the_recorded_virtualizer_is_matched_case_insensitively(self):
-        ch_kill, qemu_kill = self._sweep(
-            {"pid": 555, "virtualizer": "QEMU"}, ch_alive=False, qemu_alive=True
+        kill = self._sweep(
+            self._state(members.QEMU, virtualizer="QEMU"),
+            running_process_name=members.QEMU.process_name(VM_ID),
         )
-        ch_kill.assert_not_called()
-        qemu_kill.assert_not_called()
+        kill.assert_not_called()
 
     def test_a_booting_qemu_guest_without_a_row_is_left_alone(self):
-        # The booting grace has to survive the dispatch: it is computed from the
-        # same liveness answer, which must be QEMU's for a QEMU guest.
-        ch_kill, qemu_kill = self._sweep(
-            {"pid": 555, "virtualizer": "qemu", "booting": True},
-            ch_alive=False,
-            qemu_alive=True,
+        # The booting grace has to survive on the same liveness answer, which is
+        # the one taken from the entry's own recorded name.
+        kill = self._sweep(
+            self._state(members.QEMU, booting=True),
+            running_process_name=members.QEMU.process_name(VM_ID),
             in_db=False,
         )
-        ch_kill.assert_not_called()
-        qemu_kill.assert_not_called()
+        kill.assert_not_called()
 
 
 if __name__ == "__main__":

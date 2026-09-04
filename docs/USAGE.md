@@ -59,7 +59,7 @@ These are the most commonly used commands for daily tasks:
 
 - **remove `<service id | service tag>`** (requires root)  
   Removes a service from the node: its registry entry, its metadata entry, and its
-  built image (the guest rootfs cached under `CACHE/cloud_hypervisor/<id>/<arch>`,
+  built image (the guest rootfs cached under `CACHE/microvm/<id>/<arch>`,
   which is normally the bulk of the disk a service holds). Reports the bytes freed,
   or that no image was cached. Running instances of the service are not stopped --
   each already holds its own copy of the image -- and are counted in the output if any
@@ -69,7 +69,7 @@ These are the most commonly used commands for daily tasks:
 
 - **prune `[--all] [--dry-run]`** (requires root, except `--dry-run`)  
   Reclaims the cache disk that no other command owns. `nodo remove` frees the bundle
-  of a service you name; two directories under `CACHE/cloud_hypervisor/` grow with no
+  of a service you name; two directories under `CACHE/microvm/` grow with no
   owner at all:
 
   - `runtime/<vmachine_id>/` — an instance's own copy of its rootfs image. Normally

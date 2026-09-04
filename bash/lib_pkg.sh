@@ -57,7 +57,7 @@ pkg_for() {
 #                             launch (src/virtualizers/ch/execute.py); the image
 #                             itself is built by CI and comes from the Nodo release
 #   curl/ca-certificates/git  fetch runtimes and sources
-#   procps/iproute/ping/iptables/e2fsprogs  execute preflight (src/virtualizers/ch/execute.py)
+#   procps/iproute/ping/iptables/e2fsprogs  execute preflight (src/virtualizers/microvm/network.py)
 #   zip                       packing
 NODO_HOST_PACKAGE_ALIASES=(
     compiler

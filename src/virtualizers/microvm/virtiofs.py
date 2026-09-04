@@ -40,6 +40,7 @@ from src.utils.shared_filesystems import (
     guest_dirs,
     share_id,
 )
+from src.virtualizers.microvm import paths
 
 # Guest metadata file injected into the rootfs: a JSON list of the virtiofs
 # mounts the guest init should perform ({tag, path, ro}). Kept alongside the
@@ -64,9 +65,12 @@ def shared_fs_base_dir(cache: str) -> Path:
     """Host directory that backs every share on this node.
 
     A single location so the launcher (which materializes shares) and the killer
-    (which reference-counts and tears them down) always agree.
+    (which reference-counts and tears them down) always agree. ``cache`` is taken
+    as an argument rather than read from config so callers that already hold a
+    temporary root -- the tests, and any caller working off a copy -- can point
+    the whole share tree somewhere else.
     """
-    return Path(cache) / "cloud_hypervisor" / "shared_fs"
+    return Path(cache) / paths.FAMILY_DIR_NAME / "shared_fs"
 
 
 def virtiofs_tag(share_id_hex: str) -> str:
@@ -254,7 +258,7 @@ def ensure_share_backend(
     # Reuse an existing healthy daemon if present.
     existing = _load_daemon_state(state_path)
     if existing and pid_alive_fn(int(existing.get("pid") or 0)) and socket_path.exists():
-        logger_fn(f"[CH][virtiofs] share={sid} reusing daemon pid={existing.get('pid')}")
+        logger_fn(f"[virtiofs] share={sid} reusing daemon pid={existing.get('pid')}")
         return {
             "share_id_hex": sid,
             "tag": mount.tag,
@@ -275,7 +279,7 @@ def ensure_share_backend(
         virtiofsd_binary, socket_path, export_dir, sandbox=sandbox
     )
     log_path = share_state_dir(base_dir, sid) / "virtiofsd.log"
-    logger_fn(f"[CH][virtiofs] share={sid} starting daemon: {' '.join(command)}")
+    logger_fn(f"[virtiofs] share={sid} starting daemon: {' '.join(command)}")
     pid = spawn_fn(command, log_path)
 
     _save_daemon_state(
@@ -369,7 +373,7 @@ def teardown_virtiofs_for_vm(
         if not sid:
             continue
         if share_used_by_other_vm(sid, vmachine_id, runtime_states):
-            logger_fn(f"[CH][virtiofs] share={sid} still used by another VM; keeping daemon.")
+            logger_fn(f"[virtiofs] share={sid} still used by another VM; keeping daemon.")
             continue
 
         state_path = daemon_state_path(base_dir, sid)
@@ -379,16 +383,16 @@ def teardown_virtiofs_for_vm(
         if pid > 0:
             try:
                 kill_fn(pid)
-                logger_fn(f"[CH][virtiofs] share={sid} daemon pid={pid} stopped.")
+                logger_fn(f"[virtiofs] share={sid} daemon pid={pid} stopped.")
             except ProcessLookupError:
-                logger_fn(f"[CH][virtiofs] share={sid} daemon pid={pid} already gone.")
+                logger_fn(f"[virtiofs] share={sid} daemon pid={pid} already gone.")
             except Exception as e:  # noqa: BLE001 - best-effort cleanup
-                logger_fn(f"[CH][virtiofs] share={sid} error stopping daemon pid={pid}: {e}")
+                logger_fn(f"[virtiofs] share={sid} error stopping daemon pid={pid}: {e}")
         if socket_path:
             try:
                 Path(socket_path).unlink(missing_ok=True)
             except OSError as e:
-                logger_fn(f"[CH][virtiofs] share={sid} error removing socket {socket_path}: {e}")
+                logger_fn(f"[virtiofs] share={sid} error removing socket {socket_path}: {e}")
         try:
             state_path.unlink(missing_ok=True)
         except OSError:
@@ -399,13 +403,13 @@ def teardown_virtiofs_for_vm(
             disk_dir = share_state_dir(base_dir, sid)
             try:
                 shutil.rmtree(disk_dir, ignore_errors=False)
-                logger_fn(f"[CH][virtiofs] share={sid} exported directory removed ({disk_dir}).")
+                logger_fn(f"[virtiofs] share={sid} exported directory removed ({disk_dir}).")
             except FileNotFoundError:
                 pass
             except OSError as e:
-                logger_fn(f"[CH][virtiofs] share={sid} error removing directory {disk_dir}: {e}")
+                logger_fn(f"[virtiofs] share={sid} error removing directory {disk_dir}: {e}")
         else:
-            logger_fn(f"[CH][virtiofs] share={sid} child detached; parent's data preserved.")
+            logger_fn(f"[virtiofs] share={sid} child detached; parent's data preserved.")
 
 
 def _load_daemon_state(path: Path) -> Optional[dict]:

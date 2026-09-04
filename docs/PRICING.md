@@ -214,7 +214,7 @@ the size of the image its instances receive — and a **lower bound** otherwise:
 populated-tree floor and the `mkfs.ext4` growth retries are knowable only once the image
 exists. A service not yet built here can cost more than its quote, never less.
 
-The floors live in one module, `virtualizers/ch/limits.py`, imported both by the code
+The floors live in one module, `virtualizers/microvm/limits.py`, imported both by the code
 that creates a guest (`execute`, `build`) and by the code that prices one. A floor
 defined anywhere else would be a price the node charges without quoting.
 

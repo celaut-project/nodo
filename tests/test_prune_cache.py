@@ -1,7 +1,7 @@
-"""`nodo prune` has to reclaim the CH cache disk that no other command reclaims.
+"""`nodo prune` has to reclaim the microVM cache disk no other command reclaims.
 
 `nodo remove <service>` frees the bundle of a service somebody names. Two trees
-under `CACHE/cloud_hypervisor/` grow with no owner at all:
+under `CACHE/microvm/` grow with no owner at all:
 
 * `runtime/<vmachine_id>/`, freed by `kill` -- so what is left there is precisely
   what `kill` did not finish freeing. `kill` removes the directory first and the
@@ -25,13 +25,13 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
-    from src.virtualizers.ch import maintain as ch_maintain
-    from src.virtualizers.ch import runtime_state as ch_runtime_state
+    from src.virtualizers.microvm import maintain as microvm_maintain
+    from src.virtualizers.microvm import paths as microvm_paths
     from src.commands import prune as prune_cmd
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
-    ch_maintain = None  # type: ignore[assignment]
-    ch_runtime_state = None  # type: ignore[assignment]
+    microvm_maintain = None  # type: ignore[assignment]
+    microvm_paths = None  # type: ignore[assignment]
     prune_cmd = None  # type: ignore[assignment]
 
 DAY = 86400.0
@@ -45,29 +45,22 @@ class CacheFixture(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.cache = Path(self.tmp.name)
-        self.ch = self.cache / "cloud_hypervisor"
-        self.runtime = self.ch / "runtime"
-        self.failures = self.ch / "failures"
+        self.family = self.cache / microvm_paths.FAMILY_DIR_NAME
+        self.runtime = self.family / "runtime"
+        self.failures = self.family / "failures"
         self.runtime.mkdir(parents=True)
         self.failures.mkdir(parents=True)
 
-        for module, name in (
-            (ch_runtime_state, "CACHE"),
-            (ch_maintain, "CACHE"),
-        ):
-            if hasattr(module, name):
-                patcher = patch.object(module, name, str(self.cache))
-                patcher.start()
-                self.addCleanup(patcher.stop)
-
-        # `_failures_root` and `_dir_size` read CACHE from build.py.
-        from src.virtualizers.ch import build as ch_build
-
-        patcher = patch.object(ch_build, "CACHE", str(self.cache))
+        # Every family path derives from one root, so one patch redirects the
+        # whole layout -- the runtime tree, the failures tree and the sizes read
+        # off both.
+        patcher = patch.object(microvm_paths, "cache_root", return_value=str(self.cache))
         patcher.start()
         self.addCleanup(patcher.stop)
 
-        patcher = patch.object(ch_runtime_state, "_runtime_dir", return_value=self.runtime)
+        from src.virtualizers.microvm import build as microvm_build
+
+        patcher = patch.object(microvm_build, "CACHE", str(self.cache))
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -97,13 +90,13 @@ class CacheFixture(unittest.TestCase):
 class OrphanRuntimeScanTests(CacheFixture):
     def _scan(self, states, *, in_db=True, alive=True):
         with patch.object(
-            ch_maintain, "list_runtime_states", return_value=states
+            microvm_maintain, "list_runtime_states", return_value=states
         ), patch.object(
-            ch_maintain.sc, "internal_instance_exists", return_value=in_db
+            microvm_maintain.sc, "internal_instance_exists", return_value=in_db
         ), patch.object(
-            ch_maintain, "pid_alive", return_value=alive
+            microvm_maintain, "_state_is_alive", return_value=alive
         ):
-            return ch_maintain.scan_orphan_runtimes()
+            return microvm_maintain.scan_orphan_runtimes()
 
     def test_a_healthy_vm_is_never_offered_for_pruning(self):
         self._write_runtime_dir("vm-live")
@@ -163,7 +156,7 @@ class FailureScanTests(CacheFixture):
     def test_entries_older_than_the_window_are_reclaimable(self):
         self._write_failure("vm-old", size=4096, age_days=30)
 
-        prunable, kept = ch_maintain.scan_failures(retention_seconds=7 * DAY)
+        prunable, kept = microvm_maintain.scan_failures(retention_seconds=7 * DAY)
 
         self.assertEqual([e.vmachine_id for e in prunable], ["vm-old"])
         self.assertEqual(kept, [])
@@ -172,7 +165,7 @@ class FailureScanTests(CacheFixture):
         # The debris of the launch an operator is investigating right now.
         self._write_failure("vm-fresh", age_days=1)
 
-        prunable, kept = ch_maintain.scan_failures(retention_seconds=7 * DAY)
+        prunable, kept = microvm_maintain.scan_failures(retention_seconds=7 * DAY)
 
         self.assertEqual(prunable, [])
         self.assertEqual([e.vmachine_id for e in kept], ["vm-fresh"])
@@ -182,13 +175,13 @@ class FailureScanTests(CacheFixture):
         self._write_failure("vm-fresh", age_days=0)
         self._write_failure("vm-old", age_days=30)
 
-        prunable, kept = ch_maintain.scan_failures(retention_seconds=None)
+        prunable, kept = microvm_maintain.scan_failures(retention_seconds=None)
 
         self.assertEqual({e.vmachine_id for e in prunable}, {"vm-fresh", "vm-old"})
         self.assertEqual(kept, [])
 
     def test_a_node_that_never_failed_a_launch_reports_nothing(self):
-        prunable, kept = ch_maintain.scan_failures(retention_seconds=7 * DAY)
+        prunable, kept = microvm_maintain.scan_failures(retention_seconds=7 * DAY)
 
         self.assertEqual((prunable, kept), ([], []))
 
@@ -196,7 +189,7 @@ class FailureScanTests(CacheFixture):
 class ReclaimTests(CacheFixture):
     def test_a_stateless_directory_is_simply_deleted(self):
         path = self._write_runtime_dir("vm-stateless", size=2048, age_days=3)
-        entry = ch_maintain.PruneEntry(
+        entry = microvm_maintain.PruneEntry(
             kind="runtime",
             vmachine_id="vm-stateless",
             path=path,
@@ -204,40 +197,69 @@ class ReclaimTests(CacheFixture):
             size_bytes=2048,
         )
 
-        with patch.object(ch_maintain, "_kill_for") as kill_for:
-            ch_maintain.reclaim(entry)
+        with patch.object(microvm_maintain, "kill_vm") as kill_vm:
+            microvm_maintain.reclaim(entry)
 
-        kill_for.assert_not_called()
+        kill_vm.assert_not_called()
         self.assertFalse(path.exists())
         self.assertTrue(entry.removed)
         self.assertEqual(entry.size_bytes, 2048)
 
     def test_an_orphaned_vm_goes_through_kill_not_rmtree(self):
         # The directory is not the only thing it left behind: there is a tap
-        # device, a cgroup, an API socket and firewall rules. Only `kill` frees
-        # those, so reclaiming the disk directly would leak the rest.
+        # device, a cgroup, a control socket and firewall rules. Only `kill`
+        # frees those, so reclaiming the disk directly would leak the rest.
         path = self._write_runtime_dir("vm-orphan", size=1024)
-        entry = ch_maintain.PruneEntry(
+        entry = microvm_maintain.PruneEntry(
             kind="runtime",
             vmachine_id="vm-orphan",
             path=path,
             reason="orphan_runtime_state",
             size_bytes=1024,
         )
-        killer = unittest.mock.MagicMock(return_value=True)
+        with patch.object(
+            microvm_maintain,
+            "load_runtime_state",
+            return_value={"pid": 1, "virtualizer": "qemu"},
+        ), patch.object(
+            microvm_maintain, "kill_vm", return_value=True
+        ) as kill_vm:
+            microvm_maintain.reclaim(entry)
 
-        with patch.object(ch_maintain, "load_runtime_state", return_value={"pid": 1}), patch.object(
-            ch_maintain, "_kill_for", return_value=killer
-        ):
-            ch_maintain.reclaim(entry)
-
-        killer.assert_called_once_with(vmachine_id="vm-orphan")
+        # Torn down as what it is, not as CH: the entry names its hypervisor.
+        kill_vm.assert_called_once_with(
+            microvm_maintain.member("qemu"), vmachine_id="vm-orphan"
+        )
         self.assertTrue(entry.removed)
+
+    def test_an_entry_no_hypervisor_claims_is_reported_not_deleted(self):
+        path = self._write_runtime_dir("vm-alien", size=1024)
+        entry = microvm_maintain.PruneEntry(
+            kind="runtime",
+            vmachine_id="vm-alien",
+            path=path,
+            reason="orphan_runtime_state",
+            size_bytes=1024,
+        )
+
+        with patch.object(
+            microvm_maintain,
+            "load_runtime_state",
+            return_value={"pid": 1, "virtualizer": "firecracker"},
+        ), patch.object(
+            microvm_maintain, "kill_vm"
+        ) as kill_vm:
+            microvm_maintain.reclaim(entry)
+
+        kill_vm.assert_not_called()
+        self.assertFalse(entry.removed)
+        self.assertIn("firecracker", entry.error)
+        self.assertTrue(path.exists())
 
     def test_a_failed_removal_reports_what_it_actually_freed(self):
         # Never claim disk that is still on disk.
         path = self._write_runtime_dir("vm-stuck", size=4096, age_days=3)
-        entry = ch_maintain.PruneEntry(
+        entry = microvm_maintain.PruneEntry(
             kind="failure",
             vmachine_id="vm-stuck",
             path=path,
@@ -245,8 +267,8 @@ class ReclaimTests(CacheFixture):
             size_bytes=4096,
         )
 
-        with patch.object(ch_maintain.shutil, "rmtree", side_effect=OSError("device busy")):
-            ch_maintain.reclaim(entry)
+        with patch.object(microvm_maintain.shutil, "rmtree", side_effect=OSError("device busy")):
+            microvm_maintain.reclaim(entry)
 
         self.assertFalse(entry.removed)
         self.assertIn("device busy", entry.error)
@@ -262,7 +284,7 @@ class PruneCommandTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def _entry(self, **kwargs):
-        from src.virtualizers.ch.maintain import PruneEntry
+        from src.virtualizers.microvm.maintain import PruneEntry
 
         defaults = dict(
             kind="runtime",
@@ -283,12 +305,12 @@ class PruneCommandTests(unittest.TestCase):
             return entry
 
         with patch(
-            "src.virtualizers.ch.maintain.scan_orphan_runtimes", return_value=list(runtimes)
+            "src.virtualizers.microvm.maintain.scan_orphan_runtimes", return_value=list(runtimes)
         ), patch(
-            "src.virtualizers.ch.maintain.scan_failures",
+            "src.virtualizers.microvm.maintain.scan_failures",
             return_value=(list(failures), list(kept)),
         ), patch(
-            "src.virtualizers.ch.maintain.reclaim", side_effect=fake_reclaim
+            "src.virtualizers.microvm.maintain.reclaim", side_effect=fake_reclaim
         ) as reclaim, contextlib.redirect_stdout(
             output
         ):
@@ -351,11 +373,11 @@ class PruneCommandTests(unittest.TestCase):
             return e
 
         with patch(
-            "src.virtualizers.ch.maintain.scan_orphan_runtimes", return_value=[entry]
+            "src.virtualizers.microvm.maintain.scan_orphan_runtimes", return_value=[entry]
         ), patch(
-            "src.virtualizers.ch.maintain.scan_failures", return_value=([], [])
+            "src.virtualizers.microvm.maintain.scan_failures", return_value=([], [])
         ), patch(
-            "src.virtualizers.ch.maintain.reclaim", side_effect=failing_reclaim
+            "src.virtualizers.microvm.maintain.reclaim", side_effect=failing_reclaim
         ), contextlib.redirect_stdout(
             output
         ):
