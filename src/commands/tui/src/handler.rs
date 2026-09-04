@@ -39,6 +39,36 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             }
             return Ok(());
         }
+        // Every key a change would touch, shown before any of it is written. Only
+        // y applies it: Enter is a scroll key on a diff this long, and must not be
+        // the one that commits a dozen keys.
+        InputMode::ConfirmWrites => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (_, KeyCode::Char('y') | KeyCode::Char('Y')) => app.confirm_pending().await,
+                (_, KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc) => {
+                    app.cancel_pending_writes()
+                }
+                (_, KeyCode::Up) => app.scroll_details(-1),
+                (_, KeyCode::Down) => app.scroll_details(1),
+                (_, KeyCode::PageUp) => app.scroll_details(-10),
+                (_, KeyCode::PageDown) => app.scroll_details(10),
+                _ => {}
+            }
+            return Ok(());
+        }
+        // Profile picker: choose a posture, then see its diff.
+        InputMode::PickProfile => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (_, KeyCode::Up) => app.move_profile_selection(-1),
+                (_, KeyCode::Down) => app.move_profile_selection(1),
+                (_, KeyCode::Enter) => app.submit_input().await,
+                (_, KeyCode::Esc | KeyCode::Char('q')) => app.close_input(),
+                _ => {}
+            }
+            return Ok(());
+        }
         // Read-only, scrollable overlay (service details).
         InputMode::Details => {
             match (key.modifiers, key.code) {
@@ -128,13 +158,30 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         // Pricing mirrors the Peers page's +/- and Config's `e`: nudge in place, or open the
         // ordinary editor for an exact figure.
         (_, KeyCode::Char('+') | KeyCode::Char('=')) if app.page() == Page::Pricing => {
-            app.adjust_selected_price(1).await
+            app.adjust_selected_price(1)
         }
         (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Pricing => {
-            app.adjust_selected_price(-1).await
+            app.adjust_selected_price(-1)
         }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Pricing => {
             app.open_price_editor()
+        }
+        // The CELL page: Enter works the selected lever, `e` reaches the keys behind
+        // it, `p` picks a posture and `d` says how this node differs from one.
+        (_, KeyCode::Enter | KeyCode::Char(' ')) if app.page() == Page::Cell => {
+            app.toggle_selected_lever()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Cell => {
+            app.open_lever_editor()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('p')) if app.page() == Page::Cell => {
+            app.open_profile_picker()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Cell => {
+            app.show_profile_deviations()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('n')) if app.page() == Page::Cell => {
+            app.open_nat_guide()
         }
         // Clients' +/- open an amount modal rather than nudging in place, unlike
         // Peers/Pricing: a balance has no natural step size to nudge by.

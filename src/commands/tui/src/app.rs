@@ -1,3 +1,4 @@
+use crate::cell::{self, Lever, LeverKind, LeverStatus, Organelle};
 use prost::Message;
 use ratatui::layout::{Position, Rect};
 use ratatui::widgets::TableState;
@@ -9,6 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::error;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -46,18 +48,24 @@ pub enum Page {
     Peers,
     /// Clients that talk to us, and what they have paid.
     Clients,
+    /// The policy panel: what this node lets in, sells, trusts and says, as a set
+    /// of named decisions rather than as a YAML tree.
+    Cell,
     Pricing,
     Config,
     Logs,
 }
 
 impl Page {
-    pub const ALL: [Page; 8] = [
+    pub const ALL: [Page; 9] = [
         Page::Overview,
         Page::Instances,
         Page::Services,
         Page::Peers,
         Page::Clients,
+        // The three editors sit together and run from the most general to the most
+        // specific: postures, then prices, then single keys.
+        Page::Cell,
         Page::Pricing,
         Page::Config,
         Page::Logs,
@@ -70,6 +78,7 @@ impl Page {
             Page::Services => "SERVICES",
             Page::Peers => "PEERS",
             Page::Clients => "CLIENTS",
+            Page::Cell => "CELL",
             Page::Pricing => "PRICING",
             Page::Config => "CONFIG",
             Page::Logs => "LOGS",
@@ -124,6 +133,12 @@ pub enum InputMode {
     Confirm,
     /// Read-only, scrollable overlay (e.g. `nodo inspect` output).
     Details,
+    /// Profile picker on the CELL page: choose a posture, then confirm its diff.
+    PickProfile,
+    /// Confirmation showing every key a lever or profile would change, before any
+    /// of them is written. A posture is a dozen keys, and writing them without
+    /// showing them is the failure this page exists to prevent.
+    ConfirmWrites,
 }
 
 /// How the `EditConfig` popup should let the user set a value, chosen from the
@@ -174,6 +189,12 @@ pub enum PendingAction {
         path: Vec<ConfigPathSegment>,
         label: String,
     },
+    /// Apply a set of config keys — one cell lever, or a whole profile — after the
+    /// operator has seen every key it changes.
+    ApplyWrites {
+        label: String,
+        writes: Vec<(String, String)>,
+    },
 }
 
 /// The `nodo` invocation a confirmed [`PendingAction`] turns into, plus the label its
@@ -198,6 +219,296 @@ fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
             vec!["disconnect".to_string(), id],
         )),
         PendingAction::DeleteConfigItem { .. } => None,
+        PendingAction::ApplyWrites { .. } => None,
+    }
+}
+
+/// One configuration change, as the transaction that applies it.
+///
+/// A change to config.yaml and the restart that makes the node read it are a single
+/// step here, and the file is put back if that restart does not happen. Before this,
+/// a write landed on disk and the operator was told to restart -- which left the
+/// node running settings that were no longer the settings on disk, for as long as it
+/// took someone to act on a status line. Every editor in this TUI now goes through
+/// the same transaction: raw config, prices, and cell levers alike.
+#[derive(Debug, Clone)]
+struct ConfigWrite {
+    /// What the status line calls this change.
+    label: String,
+    /// The `yq` expression to apply in place. Several key assignments may be
+    /// chained with `|`, which is what makes a lever or a profile one write.
+    expression: String,
+    /// Values handed to `yq` through the environment, never interpolated into the
+    /// expression, so nothing an operator types can be read as yq syntax. `env()`
+    /// (not `strenv()`) parses each one, which is what keeps a number a number.
+    values: Vec<(String, String)>,
+    follow_up: ConfigFollowUp,
+}
+
+/// What the interface has to do once a transaction lands, beyond the reload every
+/// one of them does.
+#[derive(Debug, Clone)]
+enum ConfigFollowUp {
+    None,
+    /// Open a config-tree branch: a list that was empty was a leaf and became a
+    /// section, so an element appended to it would be written but invisible.
+    OpenBranch(Vec<String>),
+    /// Move the config-tree selection: every index after a removed element shifts
+    /// down, so the selection cannot stay on a position that now holds something
+    /// else.
+    SelectNode(Vec<String>),
+}
+
+/// How far a configuration change got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Applied {
+    /// Written, and the node restarted and came back serving with it.
+    Restarted,
+    /// Written while nothing was serving on the gateway port. There is no running
+    /// node to disagree with the file, so the change stands and the next start
+    /// reads it.
+    NotRunning,
+}
+
+/// Result of a configuration transaction.
+#[derive(Debug)]
+struct ConfigTransaction {
+    label: String,
+    result: Result<Applied, String>,
+}
+
+/// One `yq` expression that assigns every key in `writes`, and the environment
+/// each value travels in.
+///
+/// Chained with `|` so a whole posture is one in-place edit: one backup, one
+/// restart, and no window in which the file holds half a profile. Each value gets
+/// its own variable because they are passed through the environment rather than
+/// interpolated into the expression -- nothing an operator types can be read as yq
+/// syntax, and `env()` (not `strenv()`) parses it, so a number stays a number and a
+/// list stays a list.
+fn chained_write(writes: &[(String, String)]) -> (String, Vec<(String, String)>) {
+    let mut expressions: Vec<String> = Vec::with_capacity(writes.len());
+    let mut values: Vec<(String, String)> = Vec::with_capacity(writes.len());
+    for (index, (path, value)) in writes.iter().enumerate() {
+        let variable = format!("NODO_TUI_V{index}");
+        let segments = crate::cell::path_segments(path);
+        expressions.push(format!(
+            "{} = env({variable})",
+            yq_path_expression(&segments)
+        ));
+        values.push((variable, value.clone()));
+    }
+    (expressions.join(" | "), values)
+}
+
+/// Longest a `nodo daemon restart` may take before it is called failed.
+const RESTART_TIMEOUT: Duration = Duration::from_secs(180);
+/// Longest to wait for the node to accept connections again after a restart.
+/// Cloud Hypervisor assets, the database migration and the gateway reachability
+/// probe all happen before the port opens, so this is generous on purpose.
+const NODE_READY_TIMEOUT: Duration = Duration::from_secs(120);
+/// Gap between two checks of the gateway port while waiting for the node.
+const NODE_READY_POLL: Duration = Duration::from_millis(500);
+
+/// Back up config.yaml, apply the change, restart the node, and restore the backup
+/// if the node does not come back.
+///
+/// The invariant: **what the file says is what the running node loaded.** A change
+/// that cannot be restarted into is not a change, so it is undone rather than left
+/// on disk. The operator is never handed a node whose behaviour and configuration
+/// disagree, and never has to remember that they still owe it a restart.
+///
+/// Also the single place that invalidates the gateway-port verdict. The node records
+/// "this port was proven reachable" in `<CACHE>/gateway_port_passed`
+/// (`src/utils/config.py`) and skips its startup probe while that holds; a port
+/// edited here has never been proven, so the file has to go or the next start would
+/// serve on an unchecked port. Compared before and after rather than matched against
+/// the expression, because an expression that touches the key can be shaped many
+/// ways and only the value actually matters.
+async fn apply_config_change(
+    yq: PathBuf,
+    config: PathBuf,
+    cache: PathBuf,
+    write: ConfigWrite,
+) -> ConfigTransaction {
+    let label = write.label.clone();
+    let fail = |error: String| ConfigTransaction {
+        label: label.clone(),
+        result: Err(error),
+    };
+
+    // Asked before the write, because the change may be to the port itself: what
+    // decides whether a restart is owed is whether a node is serving now.
+    let port_before = read_gateway_port(&config);
+    let was_serving = serving_on(port_before.as_deref()).await;
+
+    let backup = match backup_config(&config) {
+        Ok(backup) => backup,
+        Err(error) => return fail(format!("Could not create config backup: {error}")),
+    };
+
+    let mut command = Command::new(&yq);
+    command
+        .arg("e")
+        .arg("-i")
+        .arg(&write.expression)
+        .arg(&config);
+    for (variable, value) in &write.values {
+        command.env(variable, value);
+    }
+    match command.output().await {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            return fail(format!(
+                "yq could not update configuration: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+        }
+        Err(error) => return fail(format!("Could not run {}: {error}", yq.display())),
+    }
+
+    let port_after = read_gateway_port(&config);
+    if port_after != port_before {
+        let _ = fs::remove_file(cache.join("gateway_port_passed"));
+    }
+
+    if !was_serving {
+        return ConfigTransaction {
+            label,
+            result: Ok(Applied::NotRunning),
+        };
+    }
+
+    match restart_node().await {
+        Ok(()) => {}
+        Err(error) => {
+            return fail(revert(&backup, &config, &format!("{label} NOT applied: {error}")));
+        }
+    }
+
+    // A restart command that returned successfully is not yet a node that serves:
+    // systemd reports the unit started, and the process still has its assets,
+    // migrations and reachability probe ahead of it. The port answering is the only
+    // evidence that the new configuration was actually loadable.
+    if !wait_until_serving(port_after.as_deref()).await {
+        let message = revert(
+            &backup,
+            &config,
+            &format!(
+                "{label} NOT applied: nodo did not come back within {}s",
+                NODE_READY_TIMEOUT.as_secs()
+            ),
+        );
+        // Best effort: bring the node back up on the configuration that was working
+        // before, so a failed change costs the operator a change and not their node.
+        let _ = restart_node().await;
+        return fail(message);
+    }
+
+    ConfigTransaction {
+        label,
+        result: Ok(Applied::Restarted),
+    }
+}
+
+/// Put `backup` back over `config`, and say what state that leaves things in.
+///
+/// The backup is removed once it has been restored: it is byte-identical to the
+/// file beside it and records no change that was ever kept. A backup that could NOT
+/// be restored is kept and named, because it is then the only copy of the working
+/// configuration.
+fn revert(backup: &Path, config: &Path, reason: &str) -> String {
+    match fs::copy(backup, config) {
+        Ok(_) => {
+            let _ = fs::remove_file(backup);
+            format!("{reason} • config.yaml restored")
+        }
+        Err(error) => format!(
+            "{reason} • COULD NOT RESTORE config.yaml ({error}) — the previous file is {}",
+            backup.display()
+        ),
+    }
+}
+
+/// Restart the node through the same command an operator would type.
+///
+/// `nodo daemon restart` drives systemd and needs root, and it exits non-zero when
+/// it could not do that -- which is what makes "the node was restarted" a fact here
+/// rather than a hope (`src/commands/daemon.py`).
+async fn restart_node() -> Result<(), String> {
+    let output = tokio::time::timeout(
+        RESTART_TIMEOUT,
+        Command::new("nodo")
+            .arg("daemon")
+            .arg("restart")
+            .output(),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "nodo daemon restart timed out after {}s",
+            RESTART_TIMEOUT.as_secs()
+        )
+    })?
+    .map_err(|error| format!("could not run nodo daemon restart: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let reason = failure_reason(&output);
+    Err(if reason.is_empty() {
+        "nodo daemon restart failed".to_string()
+    } else {
+        reason
+    })
+}
+
+/// Whether anything is serving on the gateway port.
+///
+/// The same question `nodo info` asks (`is_nodo_service_running` in nodo.py): a
+/// connection to the port, rather than a systemd unit state, so a node someone
+/// started by hand counts as running too. `auto` and `0` are not ports and read as
+/// nothing serving.
+async fn serving_on(port: Option<&str>) -> bool {
+    let Some(port) = port.and_then(|port| port.trim().parse::<u16>().ok()) else {
+        return false;
+    };
+    if port == 0 {
+        return false;
+    }
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    tokio::time::timeout(
+        Duration::from_millis(500),
+        tokio::net::TcpStream::connect(address),
+    )
+    .await
+    .map(|attempt| attempt.is_ok())
+    .unwrap_or(false)
+}
+
+/// Wait for the node to accept connections on `port` again, up to
+/// `NODE_READY_TIMEOUT`. False means it never did.
+async fn wait_until_serving(port: Option<&str>) -> bool {
+    let deadline = Instant::now() + NODE_READY_TIMEOUT;
+    loop {
+        if serving_on(port).await {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(NODE_READY_POLL).await;
+    }
+}
+
+/// What to report a failed command by: its stderr, or its stdout when the command
+/// printed the reason there. `nodo daemon restart` prints its permission refusal on
+/// stdout, and reporting an empty stderr would drop the one line that explains it.
+fn failure_reason(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.trim().is_empty() {
+        first_line(&String::from_utf8_lossy(&output.stdout))
+    } else {
+        first_line(&stderr)
     }
 }
 
@@ -1165,6 +1476,43 @@ impl<T: Identifiable> StatefulList<T> {
     }
 }
 
+/// Where the cursor is on the CELL page, and where the page last drew things so a
+/// click can be resolved back to them.
+///
+/// The cursor is (organelle, lever) rather than a flat index: the levers are laid
+/// out in boxes, and ←/→ moving between boxes while ↑/↓ moves inside one is what
+/// makes the layout navigable without a mouse.
+#[derive(Debug, Default)]
+pub struct CellState {
+    pub organelle: usize,
+    pub lever: usize,
+    /// Which profile the picker has highlighted.
+    pub profile: usize,
+    /// Where each organelle's box was drawn, for click routing.
+    pub organelle_areas: Vec<(usize, Rect)>,
+    /// Where each lever row was drawn: (organelle, lever, row).
+    pub lever_areas: Vec<(usize, usize, Rect)>,
+}
+
+impl CellState {
+    /// The organelle the cursor is in.
+    pub fn organelle(&self) -> Organelle {
+        Organelle::ALL[self.organelle.min(Organelle::ALL.len() - 1)]
+    }
+
+    /// The lever under the cursor, or None when the organelle is empty.
+    pub fn selected(&self) -> Option<&'static Lever> {
+        self.organelle().levers().get(self.lever).copied()
+    }
+
+    /// Move to another organelle, keeping the cursor on a row that exists there.
+    fn go_to_organelle(&mut self, index: usize) {
+        self.organelle = index % Organelle::ALL.len();
+        let count = self.organelle().levers().len();
+        self.lever = self.lever.min(count.saturating_sub(1));
+    }
+}
+
 pub struct App {
     pub title: &'static str,
     pub tabs: TabsState,
@@ -1180,6 +1528,13 @@ pub struct App {
     /// or `["servers", "[1]", "id"]` for a sequence element), which lets the tree
     /// keep its expanded sections and selection stable across refreshes and edits.
     pub config_tree_state: TreeState<String>,
+    /// Cursor and hit-test geometry for the CELL page.
+    pub cell: CellState,
+    /// config.yaml as a parsed document, from which every cell lever's position is
+    /// derived. Cached and refreshed with the rest of the data rather than read per
+    /// frame: the page is redrawn on every keystroke and tick, and re-parsing a
+    /// 40 KB file that often is work nobody asked for.
+    pub config_document: Option<Value>,
     /// Editable price vector, and how the operator's money is denominated.
     pub prices: StatefulList<PriceEntry>,
     pub scarcity: Scarcity,
@@ -1234,6 +1589,12 @@ pub struct App {
     wallet_task: Option<JoinHandle<Result<NodeInfo, String>>>,
     /// In-flight background `nodo` command, if any (keeps the UI responsive).
     command_task: Option<JoinHandle<CommandOutcome>>,
+    /// In-flight configuration transaction: write, restart, and revert on failure.
+    /// Separate from `command_task` because it holds config.yaml's backup for its
+    /// whole duration, and only one may do that at a time.
+    config_task: Option<JoinHandle<ConfigTransaction>>,
+    /// What to do with the interface once that transaction lands.
+    config_follow_up: ConfigFollowUp,
 }
 
 impl Default for App {
@@ -1253,6 +1614,8 @@ impl Default for App {
             config_all,
             config_filter: String::new(),
             config_tree_state: TreeState::default(),
+            cell: CellState::default(),
+            config_document: read_yaml(&paths.config).ok(),
             prices: StatefulList::with_items(prices),
             scarcity,
             money: Money::load(&paths.config),
@@ -1291,6 +1654,8 @@ impl Default for App {
             last_wallet_refresh: now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now),
             wallet_task: None,
             command_task: None,
+            config_task: None,
+            config_follow_up: ConfigFollowUp::None,
         }
     }
 }
@@ -1317,16 +1682,32 @@ impl App {
     /// →: enter the selected configuration branch (page-local, not page navigation —
     /// pages cycle with Tab/Shift+Tab). Ignored by every page that has no use for it.
     pub fn on_right(&mut self) {
-        if self.page() == Page::Config {
-            self.config_tree_state.key_right();
+        match self.page() {
+            Page::Config => {
+                self.config_tree_state.key_right();
+            }
+            // The cell is laid out in boxes, so ←/→ step between them.
+            Page::Cell => {
+                let next = (self.cell.organelle + 1) % Organelle::ALL.len();
+                self.cell.go_to_organelle(next);
+            }
+            _ => {}
         }
     }
 
     /// ←: leave the current configuration branch — collapse it if it is open,
     /// otherwise step up to its parent, which is what `key_left` does.
     pub fn on_left(&mut self) {
-        if self.page() == Page::Config {
-            self.config_tree_state.key_left();
+        match self.page() {
+            Page::Config => {
+                self.config_tree_state.key_left();
+            }
+            Page::Cell => {
+                let count = Organelle::ALL.len();
+                let previous = (self.cell.organelle + count - 1) % count;
+                self.cell.go_to_organelle(previous);
+            }
+            _ => {}
         }
     }
 
@@ -1346,6 +1727,12 @@ impl App {
                 self.load_selection_details();
             }
             Page::Pricing => self.prices.previous(),
+            Page::Cell => {
+                let count = self.cell.organelle().levers().len();
+                if count > 0 {
+                    self.cell.lever = (self.cell.lever + count - 1) % count;
+                }
+            }
             Page::Config => {
                 self.config_tree_state.key_up();
             }
@@ -1369,6 +1756,12 @@ impl App {
                 self.load_selection_details();
             }
             Page::Pricing => self.prices.next(),
+            Page::Cell => {
+                let count = self.cell.organelle().levers().len();
+                if count > 0 {
+                    self.cell.lever = (self.cell.lever + 1) % count;
+                }
+            }
             Page::Config => {
                 self.config_tree_state.key_down();
             }
@@ -1391,6 +1784,10 @@ impl App {
         // click itself — including collapsing a section that was already selected.
         if self.page() == Page::Config {
             self.config_tree_state.click_at(position);
+            return;
+        }
+        if self.page() == Page::Cell {
+            self.click_cell(position);
             return;
         }
         if let Some(visible) = visible_row_at(row, self.list_area) {
@@ -1607,6 +2004,10 @@ impl App {
         if self.page() != Page::Config {
             return;
         }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
         let Some(path) = self.selected_list_path() else {
             self.status = "Select a list, or one of its elements, to add to".to_string();
             return;
@@ -1624,7 +2025,7 @@ impl App {
     /// The value is parsed as YAML exactly as an ordinary edit is, so a number stays
     /// a number and an object stays an object; a glob has to be quoted (`"*.foo"`),
     /// because a bare leading `*` is a YAML alias and not a string.
-    async fn save_config_list_add(&mut self) {
+    fn save_config_list_add(&mut self) {
         let Some(path) = self.edit_config_path.clone() else {
             self.status = "No list selected".to_string();
             self.close_input();
@@ -1640,21 +2041,13 @@ impl App {
         }
 
         let value = self.input.clone();
-        let expression = format!("{} += [env(NODO_TUI_VALUE)]", yq_path_expression(&path));
-        match self.run_yq(expression, Some(&value)).await {
-            Ok(()) => {
-                self.reload_after_config_write();
-                self.close_input();
-                // A list that was empty was a leaf and is now a section: open it, or
-                // the element just added would be written but invisible.
-                self.config_tree_state.open(path_tokens(&path));
-                self.status = format!(
-                    "Added to {} • restart nodo to apply runtime changes",
-                    config_path_display(&path)
-                );
-            }
-            Err(error) => self.status = error,
-        }
+        self.close_input();
+        self.start_config_write(ConfigWrite {
+            label: format!("Add to {}", config_path_display(&path)),
+            expression: format!("{} += [env(NODO_TUI_V0)]", yq_path_expression(&path)),
+            values: vec![("NODO_TUI_V0".to_string(), value)],
+            follow_up: ConfigFollowUp::OpenBranch(path_tokens(&path)),
+        });
     }
 
     /// Confirm removing the list element the selection points at.
@@ -1673,24 +2066,25 @@ impl App {
     }
 
     /// Remove one element from a list in config.yaml.
-    async fn delete_config_list_item(&mut self, path: &[ConfigPathSegment], label: &str) {
-        let expression = format!("del({})", yq_path_expression(path));
-        match self.run_yq(expression, None).await {
-            Ok(()) => {
-                self.reload_after_config_write();
-                // Every index after the removed one shifts down, so the selection is
-                // moved to the list rather than left on a position that now holds a
-                // different element than the one that was on screen.
-                self.config_tree_state
-                    .select(path_tokens(&path[..path.len().saturating_sub(1)]));
-                self.status =
-                    format!("Removed {label} • restart nodo to apply runtime changes");
-            }
-            Err(error) => self.status = error,
-        }
+    fn delete_config_list_item(&mut self, path: &[ConfigPathSegment], label: &str) {
+        self.start_config_write(ConfigWrite {
+            label: format!("Remove {label}"),
+            expression: format!("del({})", yq_path_expression(path)),
+            values: Vec::new(),
+            // Every index after the removed one shifts down, so the selection moves
+            // to the list rather than staying on a position that now holds a
+            // different element than the one that was on screen.
+            follow_up: ConfigFollowUp::SelectNode(
+                path_tokens(&path[..path.len().saturating_sub(1)]),
+            ),
+        });
     }
 
     pub fn open_config_editor(&mut self) {
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
         let Some(entry) = self.selected_config_entry() else {
             self.status =
                 "Select a value to edit (press Enter to expand a section)".to_string();
@@ -1710,14 +2104,8 @@ impl App {
             // `self.input` above); a checkbox/stepper/picker would have nothing to
             // show without briefly displaying the value it exists to hide.
             EditKind::Text
-        } else if let Some(options) = known_enum_values(&entry.path) {
-            EditKind::Enum(options.iter().map(|value| value.to_string()).collect())
         } else {
-            match entry.value_type.as_str() {
-                "bool" => EditKind::Bool,
-                "number" => EditKind::Number,
-                _ => EditKind::Text,
-            }
+            infer_edit_kind(&entry.path, &entry.value_type)
         };
     }
 
@@ -1830,8 +2218,8 @@ impl App {
         match self.input_mode {
             InputMode::Connect => self.connect(),
             InputMode::CreditClient => self.submit_credit_client(),
-            InputMode::EditConfig => self.save_config_edit().await,
-            InputMode::AddConfigItem => self.save_config_list_add().await,
+            InputMode::EditConfig => self.save_config_edit(),
+            InputMode::AddConfigItem => self.save_config_list_add(),
             InputMode::FilterConfig => {
                 self.config_filter = self.input.trim().to_string();
                 self.apply_config_filter();
@@ -1839,7 +2227,13 @@ impl App {
                 self.close_input();
                 self.status = format!("Configuration filter: {count} matching values");
             }
-            InputMode::Normal | InputMode::Confirm | InputMode::Details => {}
+            InputMode::PickProfile => self.submit_profile_selection(),
+            // The writes confirmation answers y/n, never Enter: Enter on a
+            // twelve-key diff would apply it on a keystroke meant to scroll.
+            InputMode::Normal
+            | InputMode::Confirm
+            | InputMode::ConfirmWrites
+            | InputMode::Details => {}
         }
     }
 
@@ -1929,7 +2323,7 @@ impl App {
         );
     }
 
-    async fn save_config_edit(&mut self) {
+    fn save_config_edit(&mut self) {
         let Some(path) = self.edit_config_path.clone() else {
             self.status = "No configuration path selected".to_string();
             self.close_input();
@@ -1946,81 +2340,496 @@ impl App {
         }
 
         let value = self.input.clone();
-        match self.write_config_value(&path, &value).await {
-            Ok(()) => {
-                self.reload_after_config_write();
-                self.close_input();
-                self.status =
-                    "Configuration saved • restart nodo to apply runtime changes".to_string();
-            }
-            Err(error) => self.status = error,
-        }
+        let label = format!("Set {}", config_path_display(&path));
+        self.close_input();
+        self.write_config_value(label, &path, &value, ConfigFollowUp::None);
     }
 
     /// Write one value into config.yaml through `yq`, keeping a timestamped backup.
     ///
-    /// Shared by the configuration editor and the pricing bars so a price is written
-    /// exactly the way any other setting is -- same quoting, same backup, same failure
-    /// reporting -- rather than through a second, subtly different path.
-    async fn write_config_value(
+    /// Shared by the configuration editor, the pricing bars and the cell levers so a
+    /// price is written exactly the way any other setting is -- same quoting, same
+    /// backup, same restart, same failure reporting -- rather than through a second,
+    /// subtly different path.
+    fn write_config_value(
         &mut self,
+        label: String,
         path: &[ConfigPathSegment],
         value: &str,
-    ) -> Result<(), String> {
-        let expression = format!("{} = env(NODO_TUI_VALUE)", yq_path_expression(path));
-        self.run_yq(expression, Some(value)).await
+        follow_up: ConfigFollowUp,
+    ) {
+        self.start_config_write(ConfigWrite {
+            label,
+            expression: format!("{} = env(NODO_TUI_V0)", yq_path_expression(path)),
+            values: vec![("NODO_TUI_V0".to_string(), value.to_string())],
+            follow_up,
+        });
     }
 
-    /// Apply one in-place `yq` expression to config.yaml, backing the file up first.
+    /// Write several keys as one change: one backup, one `yq` run, one restart.
     ///
-    /// Every config write lands here -- a scalar edit, a price, an appended list
-    /// element, a removed one -- so they cannot drift into several sets of quoting,
-    /// backup and failure-reporting rules. A value is handed over through the
-    /// environment rather than interpolated into the expression, so nothing an
-    /// operator types can be read as yq syntax.
-    /// Apply one `yq` expression to config.yaml, with a backup first.
-    ///
-    /// Also the single place that invalidates the gateway-port verdict. The node
-    /// records "this port was proven reachable" in `<CACHE>/gateway_port_passed`
-    /// (`src/utils/config.py`) and skips its startup probe while that holds; a port
-    /// edited here has never been proven, so the file has to go or the next start
-    /// would serve on an unchecked port. Compared before and after rather than
-    /// matched against the expression, because an expression that touches the key
-    /// can be shaped many ways and only the value actually matters.
-    async fn run_yq(&mut self, expression: String, value: Option<&str>) -> Result<(), String> {
-        backup_config(&self.paths.config)
-            .map_err(|error| format!("Could not create config backup: {error}"))?;
-        let gateway_port_before = read_gateway_port(&self.paths.config);
-
-        let mut command = Command::new(&self.paths.yq);
-        command
-            .arg("e")
-            .arg("-i")
-            .arg(expression)
-            .arg(&self.paths.config);
-        if let Some(value) = value {
-            command.env("NODO_TUI_VALUE", value);
+    /// What a lever or a profile needs. Applying its keys one at a time would leave
+    /// the node briefly running a combination nobody chose, restart it once per key,
+    /// and -- on a failure halfway through -- leave a posture half applied, which is
+    /// the state this page exists to keep an operator out of.
+    fn write_config_values(
+        &mut self,
+        label: String,
+        writes: &[(String, String)],
+        follow_up: ConfigFollowUp,
+    ) {
+        if writes.is_empty() {
+            self.status = format!("{label}: nothing to change");
+            return;
         }
-        let output = command.output().await;
+        let (expression, values) = chained_write(writes);
+        self.start_config_write(ConfigWrite {
+            label,
+            expression,
+            values,
+            follow_up,
+        });
+    }
 
-        match output {
-            Ok(output) if output.status.success() => {
-                self.paths = Paths::discover();
-                if read_gateway_port(&self.paths.config) != gateway_port_before {
-                    let marker = self.paths.cache.join("gateway_port_passed");
-                    let _ = fs::remove_file(marker);
-                }
-                Ok(())
+    /// Begin a configuration change: back up, write, restart, and put the old file
+    /// back if the node does not come back up.
+    ///
+    /// Runs in the background so the interface stays alive across a restart, which
+    /// takes seconds. Only one at a time: two overlapping transactions would each
+    /// hold a backup of a file the other had already changed, and a revert would
+    /// then restore a state neither operator asked for.
+    fn start_config_write(&mut self, write: ConfigWrite) {
+        if self.config_task.is_some() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        self.status = format!("{} • applying and restarting nodo…", write.label);
+        self.config_follow_up = write.follow_up.clone();
+        self.config_task = Some(tokio::spawn(apply_config_change(
+            self.paths.yq.clone(),
+            self.paths.config.clone(),
+            self.paths.cache.clone(),
+            write,
+        )));
+    }
+
+    /// True while a configuration change is being applied, so nothing else edits
+    /// config.yaml underneath it.
+    pub fn config_write_running(&self) -> bool {
+        self.config_task.is_some()
+    }
+
+    /// Collect a finished configuration transaction and tell the operator what
+    /// state their node is in -- which, either way, is a state that matches the file
+    /// on disk.
+    async fn poll_config_task(&mut self) {
+        if !self
+            .config_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let task = self.config_task.take().unwrap();
+        let follow_up = std::mem::replace(&mut self.config_follow_up, ConfigFollowUp::None);
+        let transaction = match task.await {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                self.status = format!("Configuration task failed: {error}");
+                return;
             }
-            Ok(output) => Err(format!(
-                "yq could not update configuration: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )),
-            Err(error) => Err(format!(
-                "Could not run {}: {error}",
-                self.paths.yq.display()
-            )),
+        };
+
+        self.paths = Paths::discover();
+        self.reload_after_config_write();
+
+        match transaction.result {
+            Ok(applied) => {
+                match follow_up {
+                    ConfigFollowUp::None => {}
+                    ConfigFollowUp::OpenBranch(tokens) => {
+                        self.config_tree_state.open(tokens);
+                    }
+                    ConfigFollowUp::SelectNode(tokens) => {
+                        self.config_tree_state.select(tokens);
+                    }
+                }
+                let note = match applied {
+                    Applied::Restarted => "applied • nodo restarted".to_string(),
+                    Applied::NotRunning => {
+                        "applied • nodo is not serving, so it loads on next start".to_string()
+                    }
+                };
+                self.status = format!("{} • {note}", transaction.label);
+                self.app_logs
+                    .push(format!("{} — {note}", transaction.label));
+            }
+            Err(error) => {
+                self.status = error.clone();
+                self.app_logs.push(format!("ERROR: {error}"));
+            }
         }
+        self.refresh_local(true);
+    }
+
+    // --- Cell ---------------------------------------------------------------
+
+    /// What the selected lever is set to right now.
+    pub fn cell_status(&self, lever: &Lever) -> LeverStatus {
+        cell::status(lever, self.config_document.as_ref())
+    }
+
+    /// How close this node is to one of the catalogue's postures, which is what the
+    /// profile bar names the page after.
+    pub fn cell_profile(&self) -> cell::ProfileReport {
+        cell::closest_profile(self.config_document.as_ref())
+    }
+
+    /// Route a click on the CELL page: a lever row selects it, anywhere else in an
+    /// organelle's box moves the cursor into that box.
+    fn click_cell(&mut self, position: Position) {
+        if let Some((organelle, lever, _)) = self
+            .cell
+            .lever_areas
+            .iter()
+            .find(|(_, _, area)| area.contains(position))
+            .copied()
+        {
+            self.cell.organelle = organelle;
+            self.cell.lever = lever;
+            return;
+        }
+        if let Some((organelle, _)) = self
+            .cell
+            .organelle_areas
+            .iter()
+            .find(|(_, area)| area.contains(position))
+            .copied()
+        {
+            self.cell.go_to_organelle(organelle);
+        }
+    }
+
+    /// Enter on the selected lever: move it to its next position, open the value
+    /// editor, or jump to the page that owns the setting properly.
+    pub fn toggle_selected_lever(&mut self) {
+        if self.page() != Page::Cell {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+
+        let Some(lever) = self.cell.selected() else {
+            return;
+        };
+        match lever.kind {
+            LeverKind::Link(page) => {
+                if let Some(index) = Page::ALL.iter().position(|candidate| *candidate == page) {
+                    self.tabs.index = index;
+                    self.status = format!("{} is edited here", lever.label);
+                }
+            }
+            LeverKind::Scalar { .. } => self.open_lever_editor(),
+            LeverKind::Cycle(states) => {
+                let document = self.config_document.clone();
+                let current = cell::status(lever, document.as_ref());
+                let Some(next) = cell::next_state(lever, &current) else {
+                    return;
+                };
+                let Some(state) = states.get(next) else {
+                    return;
+                };
+                // DDNS with no hostname and no token is a manager that logs an error
+                // every interval and publishes nothing, so this position is refused
+                // rather than written: the operator is told what is missing instead
+                // of being left with a setting that looks on and does nothing.
+                if let Some(missing) = self.missing_prerequisite(state.writes, document.as_ref()) {
+                    self.status = missing;
+                    return;
+                }
+                let writes: Vec<(String, String)> = state
+                    .writes
+                    .iter()
+                    .map(|(path, value)| ((*path).to_string(), (*value).to_string()))
+                    .collect();
+                let changes = cell::changes(state.writes, document.as_ref());
+                if changes.is_empty() {
+                    self.status = format!("{} is already {}", lever.label, state.label);
+                    return;
+                }
+                self.confirm_writes(
+                    format!("{} → {}", lever.label, state.label),
+                    writes,
+                    changes,
+                    Some(lever.consequence),
+                    lever.warning,
+                );
+            }
+        }
+    }
+
+    /// Why a lever position cannot be written yet, if it cannot.
+    ///
+    /// Only DDNS has one: turning it on without the hostname and token it publishes
+    /// to is not a posture, it is a misconfiguration. Everything else in the
+    /// catalogue is writable on its own.
+    fn missing_prerequisite(
+        &self,
+        writes: &[(&str, &str)],
+        document: Option<&Value>,
+    ) -> Option<String> {
+        if !writes.iter().any(|(path, value)| *path == "ddns.ENABLED" && *value == "true") {
+            return None;
+        }
+        let set = |path: &str| -> bool {
+            yaml_scalar(document, &path.split('.').collect::<Vec<_>>())
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false)
+        };
+        match (set("ddns.DOMAIN"), set("ddns.TOKEN")) {
+            (true, true) => None,
+            (false, true) => Some("Set the ddns hostname first (e on \"ddns hostname\")".to_string()),
+            (true, false) => Some("Set the ddns token first (e on \"ddns token\")".to_string()),
+            (false, false) => {
+                Some("Set the ddns hostname and token first, then turn this on".to_string())
+            }
+        }
+    }
+
+    /// Open the ordinary config editor on the selected lever's key.
+    ///
+    /// A cycle lever has no single key to edit, so `e` there lists the keys it owns
+    /// instead: the operator gets to see exactly which settings one named position
+    /// stands for, and the Config page remains the place to break them apart.
+    pub fn open_lever_editor(&mut self) {
+        if self.page() != Page::Cell {
+            return;
+        }
+        let Some(lever) = self.cell.selected() else {
+            return;
+        };
+        let LeverKind::Scalar { path, .. } = lever.kind else {
+            self.show_lever_keys(lever);
+            return;
+        };
+        let document = self.config_document.clone();
+        let current = yaml_scalar(document.as_ref(), &path.split('.').collect::<Vec<_>>())
+            .unwrap_or_default();
+        let segments = cell::path_segments(path);
+        self.input_mode = InputMode::EditConfig;
+        self.input_title = format!("Edit {path}");
+        self.edit_config_path = Some(segments);
+        self.edit_config_secret = lever.secret;
+        self.edit_kind = if lever.secret {
+            EditKind::Text
+        } else {
+            let value_type = document
+                .as_ref()
+                .and_then(|document| {
+                    let mut value = document;
+                    for key in path.split('.') {
+                        value = value.get(key)?;
+                    }
+                    Some(yaml_type(value))
+                })
+                .unwrap_or("string");
+            infer_edit_kind(path, value_type)
+        };
+        // A secret opens empty, so the plaintext is never on screen -- the same rule
+        // the Config editor follows.
+        self.input = if lever.secret { String::new() } else { current };
+        self.status = lever.question.to_string();
+    }
+
+    /// Show which config keys one lever stands for, and what they say now.
+    fn show_lever_keys(&mut self, lever: &'static Lever) {
+        let document = self.config_document.clone();
+        let mut lines = vec![
+            lever.question.to_string(),
+            String::new(),
+            lever.consequence.to_string(),
+            String::new(),
+            "This one row stands for these keys:".to_string(),
+        ];
+        for path in lever.paths() {
+            let value = yaml_scalar(document.as_ref(), &path.split('.').collect::<Vec<_>>())
+                .unwrap_or_else(|| "(not a scalar or not set)".to_string());
+            lines.push(format!("  {path} = {value}"));
+        }
+        lines.push(String::new());
+        lines.push("Edit them one at a time on the CONFIG page.".to_string());
+        self.details = Some(DetailsView {
+            title: lever.label.to_string(),
+            lines,
+            scroll: 0,
+        });
+        self.input_mode = InputMode::Details;
+    }
+
+    /// Open the profile picker.
+    pub fn open_profile_picker(&mut self) {
+        if self.page() != Page::Cell {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+
+        let report = self.cell_profile();
+        self.cell.profile = cell::profiles()
+            .iter()
+            .position(|profile| profile.id == report.profile.id)
+            .unwrap_or(0);
+        self.input_mode = InputMode::PickProfile;
+        self.input_title = "Apply a profile".to_string();
+        self.status = "↑/↓ choose • Enter see what changes • Esc cancel".to_string();
+    }
+
+    pub fn move_profile_selection(&mut self, delta: i32) {
+        let count = cell::profiles().len();
+        if count == 0 {
+            return;
+        }
+        let current = self.cell.profile as i32;
+        self.cell.profile = (current + delta).rem_euclid(count as i32) as usize;
+    }
+
+    /// Confirm the selected profile, showing every key it would change.
+    pub fn submit_profile_selection(&mut self) {
+        let Some(profile) = cell::profiles().get(self.cell.profile) else {
+            self.close_input();
+            return;
+        };
+        let document = self.config_document.clone();
+        let changes = cell::changes(profile.writes, document.as_ref());
+        self.close_input();
+        if changes.is_empty() {
+            self.status = format!("Already in {} — nothing to change", profile.label);
+            return;
+        }
+        let writes: Vec<(String, String)> = profile
+            .writes
+            .iter()
+            .map(|(path, value)| ((*path).to_string(), (*value).to_string()))
+            .collect();
+        self.confirm_writes(
+            format!("Profile {}", profile.label),
+            writes,
+            changes,
+            Some(profile.blurb),
+            None,
+        );
+    }
+
+    /// Show every key a change would touch, and hold it until the operator agrees.
+    ///
+    /// Only the keys that actually change are listed. A diff padded with keys that
+    /// already hold the wanted value hides the ones that do not, which is the whole
+    /// thing the operator is being asked to read.
+    fn confirm_writes(
+        &mut self,
+        label: String,
+        writes: Vec<(String, String)>,
+        changes: Vec<cell::Change>,
+        consequence: Option<&str>,
+        warning: Option<&str>,
+    ) {
+        let mut lines = Vec::new();
+        if let Some(warning) = warning {
+            lines.push(format!("!! {warning}"));
+            lines.push(String::new());
+        }
+        if let Some(consequence) = consequence {
+            lines.push(consequence.to_string());
+            lines.push(String::new());
+        }
+        lines.push(format!(
+            "{} of {} {} change:",
+            changes.len(),
+            writes.len(),
+            if writes.len() == 1 { "key" } else { "keys" }
+        ));
+        for change in &changes {
+            lines.push(format!(
+                "  {}   {}  →  {}",
+                change.path,
+                change.from.clone().unwrap_or_else(|| "(unset)".to_string()),
+                change.to
+            ));
+        }
+        lines.push(String::new());
+        lines.push("config.yaml is backed up, written, and nodo is restarted.".to_string());
+        lines.push("If it does not come back, the backup is put straight back.".to_string());
+        self.details = Some(DetailsView {
+            title: format!("{label}? (y/N)"),
+            lines,
+            scroll: 0,
+        });
+        self.input_mode = InputMode::ConfirmWrites;
+        self.status = format!(
+            "{} {} change • y applies and restarts nodo • n cancels",
+            changes.len(),
+            if changes.len() == 1 { "key" } else { "keys" }
+        );
+        self.pending_action = Some(PendingAction::ApplyWrites { label, writes });
+    }
+
+    /// Show how this node differs from the posture it is closest to.
+    ///
+    /// The most instructive thing on the page: an operator who has never opened
+    /// config.yaml learns their own configuration by reading the handful of keys
+    /// where they are not standard.
+    pub fn show_profile_deviations(&mut self) {
+        if self.page() != Page::Cell {
+            return;
+        }
+        let report = self.cell_profile();
+        let mut lines = vec![
+            report.profile.blurb.to_string(),
+            String::new(),
+            format!("{} of {} keys match.", report.matched(), report.total),
+            String::new(),
+        ];
+        if report.deviations.is_empty() {
+            lines.push("This node is exactly in this posture.".to_string());
+        } else {
+            lines.push("Where this node differs (yours → the profile's):".to_string());
+            for change in &report.deviations {
+                lines.push(format!(
+                    "  {}   {}  →  {}",
+                    change.path,
+                    change.from.clone().unwrap_or_else(|| "(unset)".to_string()),
+                    change.to
+                ));
+            }
+            lines.push(String::new());
+            lines.push("Nothing is wrong with a deviation: it is a choice this".to_string());
+            lines.push("profile does not make for you. Press p to apply the".to_string());
+            lines.push("profile and drop them.".to_string());
+        }
+        self.details = Some(DetailsView {
+            title: format!("Closest profile: {}", report.profile.label),
+            lines,
+            scroll: 0,
+        });
+        self.input_mode = InputMode::Details;
+    }
+
+    /// Show the router steps for making this node reachable (`nodo nat-guide`).
+    pub fn open_nat_guide(&mut self) {
+        self.spawn_command(
+            CommandKind::Inspect("nat-guide".to_string()),
+            "Router guide".to_string(),
+            vec!["nat-guide".to_string()],
+        );
     }
 
     // --- Pricing ----------------------------------------------------------
@@ -2031,7 +2840,7 @@ impl App {
     /// price of 10 000 000 is not an edit anybody can see. The floor of 1 MU keeps a
     /// price that is being raised from zero from staying there, and a price is only
     /// ever taken to exactly 0 (free) by typing it, never by nudging.
-    pub async fn adjust_selected_price(&mut self, delta: i32) {
+    pub fn adjust_selected_price(&mut self, delta: i32) {
         if self.page() != Page::Pricing {
             return;
         }
@@ -2051,7 +2860,7 @@ impl App {
             return;
         }
 
-        self.write_price(&entry, next.to_string()).await;
+        self.write_price(&entry, next.to_string());
     }
 
     /// Open the ordinary config editor on the selected price, for an exact value.
@@ -2059,6 +2868,11 @@ impl App {
         if self.page() != Page::Pricing {
             return;
         }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+
         let Some(entry) = self.prices.selected().cloned() else {
             self.status = "Select a price first".to_string();
             return;
@@ -2078,25 +2892,10 @@ impl App {
     /// block on first edit -- so an operator who has never seen the block can still
     /// give one architecture its own price by nudging the row that shows what it
     /// currently inherits.
-    async fn write_price(&mut self, entry: &PriceEntry, value: String) {
+    fn write_price(&mut self, entry: &PriceEntry, value: String) {
         let path = entry.config_path();
-        let label = entry.config_label();
-        let id = entry.id.clone();
-        match self.write_config_value(&path, &value).await {
-            Ok(()) => {
-                self.reload_after_config_write();
-                let shown = self
-                    .prices
-                    .items
-                    .iter()
-                    .find(|candidate| candidate.id == id)
-                    .map(|candidate| self.money.format_mu(candidate.mu))
-                    .unwrap_or_default();
-                self.status =
-                    format!("{label} = {value} MU ({shown}) • restart nodo to apply");
-            }
-            Err(error) => self.status = error,
-        }
+        let label = format!("{} = {value} MU", entry.config_label());
+        self.write_config_value(label, &path, &value, ConfigFollowUp::None);
     }
 
     /// Re-read prices, the scarcity ceiling and the display unit from config.yaml,
@@ -2118,6 +2917,7 @@ impl App {
 
     /// Everything a config write invalidates: the money view and the config table.
     fn reload_after_config_write(&mut self) {
+        self.config_document = read_yaml(&self.paths.config).ok();
         self.reload_money();
         self.config_all = get_config_entries(&self.paths.config).unwrap_or_default();
         self.apply_config_filter();
@@ -2306,7 +3106,11 @@ impl App {
         self.close_input();
         match action {
             PendingAction::DeleteConfigItem { path, label } => {
-                self.delete_config_list_item(&path, &label).await
+                self.delete_config_list_item(&path, &label)
+            }
+            PendingAction::ApplyWrites { label, writes } => {
+                self.details = None;
+                self.write_config_values(label, &writes, ConfigFollowUp::None);
             }
             other => {
                 if let Some((label, args)) = pending_command(other) {
@@ -2322,6 +3126,12 @@ impl App {
             let max = details.lines.len().saturating_sub(1) as isize;
             details.scroll = (details.scroll as isize + delta).clamp(0, max) as usize;
         }
+    }
+
+    /// Dismiss a writes confirmation without writing anything.
+    pub fn cancel_pending_writes(&mut self) {
+        self.pending_action = None;
+        self.close_details();
     }
 
     /// Close the Details overlay and return to normal mode.
@@ -2398,6 +3208,7 @@ impl App {
 
     pub async fn refresh(&mut self, force: bool) {
         self.refresh_local(force);
+        self.poll_config_task().await;
         self.poll_command_task().await;
         self.poll_wallet_task().await;
         if self.wallet_task.is_none()
@@ -2414,6 +3225,9 @@ impl App {
         }
         self.last_data_refresh = Instant::now();
         self.paths = Paths::discover();
+        // Picks up an edit made on the Config page, or in a shell, so the cell's
+        // levers describe the file as it is rather than as it was at start-up.
+        self.config_document = read_yaml(&self.paths.config).ok();
 
         let services = get_services(&self.paths).unwrap_or_default();
         let service_names = services
@@ -3162,6 +3976,20 @@ fn yaml_edit_value(value: &Value) -> String {
         .to_string()
 }
 
+/// Which editor widget a key gets: the closed value set some keys document, else
+/// the widget for its YAML type. Shared by the Config page and the cell levers, so
+/// one key is edited the same way whichever page opened it.
+fn infer_edit_kind(path: &str, value_type: &str) -> EditKind {
+    if let Some(options) = known_enum_values(path) {
+        return EditKind::Enum(options.iter().map(|value| value.to_string()).collect());
+    }
+    match value_type {
+        "bool" => EditKind::Bool,
+        "number" => EditKind::Number,
+        _ => EditKind::Text,
+    }
+}
+
 fn yaml_type(value: &Value) -> &'static str {
     match value {
         Value::Null => "null",
@@ -3697,6 +4525,356 @@ mod tests {
     /// Timestamped config.yaml backups + retention (issue #255). The prune is
     /// pinned on hand-made filenames rather than real writes so nothing here has to
     /// sleep a second per backup to get distinct UTC stamps.
+    /// The cursor is two-dimensional: ←/→ walk the organelles, ↑/↓ the levers inside
+    /// the one in focus. Getting that wrong makes a lever unreachable by keyboard.
+    mod cell_navigation {
+        use crate::app::{App, Page};
+        use crate::cell::{LeverKind, LeverStatus, Organelle};
+
+        fn on_cell_page() -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Cell)
+                .unwrap();
+            app
+        }
+
+        #[test]
+        fn left_and_right_walk_the_organelles_and_wrap() {
+            let mut app = on_cell_page();
+            assert_eq!(app.cell.organelle(), Organelle::Channels);
+            app.on_right();
+            assert_eq!(app.cell.organelle(), Organelle::Ribosomes);
+            app.on_left();
+            app.on_left();
+            assert_eq!(
+                app.cell.organelle(),
+                Organelle::ALL[Organelle::ALL.len() - 1],
+                "stepping left off the first organelle wraps to the last"
+            );
+        }
+
+        #[test]
+        fn up_and_down_move_within_the_focused_organelle() {
+            let mut app = on_cell_page();
+            let first = app.cell.selected().unwrap().id;
+            app.on_down();
+            assert_ne!(app.cell.selected().unwrap().id, first);
+            app.on_up();
+            assert_eq!(app.cell.selected().unwrap().id, first);
+        }
+
+        /// Moving to an organelle with fewer levers than the cursor's current row
+        /// must not leave the cursor pointing past the end of it.
+        #[test]
+        fn the_cursor_never_points_past_the_end_of_an_organelle() {
+            let mut app = on_cell_page();
+            for _ in 0..6 {
+                app.on_down();
+            }
+            for index in 0..Organelle::ALL.len() {
+                let _ = index;
+                app.on_right();
+                assert!(
+                    app.cell.selected().is_some(),
+                    "{} left the cursor on nothing",
+                    app.cell.organelle().title()
+                );
+            }
+        }
+
+        /// A lever that points at another page navigates there rather than writing
+        /// a second, cruder version of what that page already does properly.
+        #[test]
+        fn the_prices_lever_jumps_to_the_pricing_page() {
+            let mut app = on_cell_page();
+            while app.cell.organelle() != Organelle::Mitochondria {
+                app.on_right();
+            }
+            app.cell.lever = Organelle::Mitochondria
+                .levers()
+                .iter()
+                .position(|lever| matches!(lever.kind, LeverKind::Link(_)))
+                .unwrap();
+            app.toggle_selected_lever();
+            assert_eq!(app.page(), Page::Pricing);
+        }
+
+        /// Turning DDNS on without the hostname and token it publishes to would
+        /// leave a manager logging an error every interval, so the position is
+        /// refused with what is missing rather than written.
+        #[test]
+        fn ddns_cannot_be_turned_on_before_it_has_a_hostname() {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str(
+                    "ddns:\n  ENABLED: false\n  DOMAIN: \"\"\n  TOKEN: \"\"\ngeneral_flags:\n  SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF: true\n",
+                )
+                .unwrap(),
+            );
+            let lever = crate::cell::lever("findable").unwrap();
+            // At "address", the next position is "+ hostname", which needs both.
+            assert_eq!(app.cell_status(lever), LeverStatus::State(1));
+            app.cell.lever = Organelle::Channels
+                .levers()
+                .iter()
+                .position(|candidate| candidate.id == "findable")
+                .unwrap();
+            app.toggle_selected_lever();
+            assert!(
+                app.status.contains("hostname"),
+                "the operator is told what is missing: {}",
+                app.status
+            );
+            assert!(app.pending_action.is_none(), "nothing was queued to write");
+        }
+
+        /// A change is never written on the keystroke that asks for it: the diff is
+        /// shown first, and only y applies it.
+        #[test]
+        fn changing_a_lever_asks_before_it_writes() {
+            let mut app = on_cell_page();
+            app.config_document =
+                Some(serde_yaml::from_str("client:\n  ACCEPT_NEW_DEPOSITS: false\n").unwrap());
+            app.cell.lever = Organelle::Ribosomes
+                .levers()
+                .iter()
+                .position(|lever| lever.id == "outside-work")
+                .unwrap();
+            app.on_right();
+            assert_eq!(app.cell.organelle(), Organelle::Ribosomes);
+            app.toggle_selected_lever();
+            assert!(app.pending_action.is_some(), "the write is held pending");
+            let details = app.details.expect("the diff is shown");
+            let body = details.lines.join("\n");
+            assert!(body.contains("client.ACCEPT_NEW_DEPOSITS"), "{body}");
+            assert!(body.contains("1 of 1 key change"), "{body}");
+            assert!(
+                body.contains("restarted"),
+                "the confirmation says the node is restarted: {body}"
+            );
+        }
+
+        /// A lever whose position can break something says so in the confirmation,
+        /// where it is read before the write rather than discovered after it. The
+        /// service-egress case is the one that matters: "nothing" refuses this
+        /// node's own core services too.
+        #[test]
+        fn a_dangerous_position_carries_its_warning_into_the_confirmation() {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str(
+                    "service_networks:\n  blacklist: []\n  whitelist: []\n",
+                )
+                .unwrap(),
+            );
+            app.cell.organelle = Organelle::ALL
+                .iter()
+                .position(|organelle| *organelle == Organelle::Immune)
+                .unwrap();
+            app.cell.lever = Organelle::Immune
+                .levers()
+                .iter()
+                .position(|lever| lever.id == "service-egress")
+                .unwrap();
+            app.toggle_selected_lever();
+            let body = app.details.expect("the diff is shown").lines.join("\n");
+            assert!(body.contains("core services"), "no warning shown:\n{body}");
+            assert!(body.contains("service_networks.blacklist"), "{body}");
+            // Flow style, the way the catalogue and the editor write a list.
+            assert!(body.contains("[\"*\"]"), "{body}");
+        }
+
+        /// A lever already in the position asked for writes nothing, so Enter on it
+        /// cannot cost the operator a restart for no change.
+        #[test]
+        fn a_lever_already_where_it_is_asked_to_go_writes_nothing() {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str("network:\n  DELEGATION_TUNNEL_POLICY: always\n").unwrap(),
+            );
+            let levers = Organelle::Vesicles.levers();
+            app.cell.organelle = Organelle::ALL
+                .iter()
+                .position(|organelle| *organelle == Organelle::Vesicles)
+                .unwrap();
+            app.cell.lever = levers
+                .iter()
+                .position(|lever| lever.id == "tunnel-policy")
+                .unwrap();
+            // "always" is position 1, so the next one is "never" -- a real change.
+            app.toggle_selected_lever();
+            assert!(app.pending_action.is_some());
+        }
+    }
+
+    /// A configuration change and the restart that makes the node read it are one
+    /// step, and the file goes back if the node does not come back. These pin the
+    /// pieces of that transaction that can be exercised without systemd.
+    mod config_transactions {
+        use super::super::{chained_write, revert, serving_on};
+        use std::fs;
+        use std::path::PathBuf;
+
+        struct TempDir(PathBuf);
+
+        impl TempDir {
+            fn new(name: &str) -> Self {
+                let path = std::env::temp_dir().join(format!("nodo-tui-txn-{name}"));
+                let _ = fs::remove_dir_all(&path);
+                fs::create_dir_all(&path).unwrap();
+                Self(path)
+            }
+            fn file(&self, name: &str) -> PathBuf {
+                self.0.join(name)
+            }
+        }
+
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        /// A profile is a dozen keys and has to be one `yq` run: applying them one
+        /// at a time would restart the node per key and could leave a posture half
+        /// written.
+        #[test]
+        fn several_keys_become_one_chained_expression() {
+            let writes = vec![
+                ("client.ACCEPT_NEW_DEPOSITS".to_string(), "true".to_string()),
+                ("pricing.SCARCITY_CURVE".to_string(), "2.0".to_string()),
+                ("service_networks.blacklist".to_string(), "[\"*\"]".to_string()),
+            ];
+            let (expression, values) = chained_write(&writes);
+            assert_eq!(
+                expression,
+                ".[\"client\"][\"ACCEPT_NEW_DEPOSITS\"] = env(NODO_TUI_V0) | \
+                 .[\"pricing\"][\"SCARCITY_CURVE\"] = env(NODO_TUI_V1) | \
+                 .[\"service_networks\"][\"blacklist\"] = env(NODO_TUI_V2)"
+            );
+            assert_eq!(values.len(), 3);
+            assert_eq!(values[2].0, "NODO_TUI_V2");
+            assert_eq!(values[2].1, "[\"*\"]");
+        }
+
+        /// Values travel in the environment and are never interpolated into the
+        /// expression, so nothing an operator types can be read as yq syntax.
+        #[test]
+        fn a_value_never_appears_in_the_expression() {
+            let writes = vec![(
+                "ddns.TOKEN".to_string(),
+                "\" | .[\"identity\"][\"MNEMONIC\"] = \"stolen\"".to_string(),
+            )];
+            let (expression, values) = chained_write(&writes);
+            assert!(!expression.contains("stolen"), "value leaked into: {expression}");
+            assert!(!expression.contains("MNEMONIC"));
+            assert_eq!(values[0].1, writes[0].1);
+        }
+
+        /// The whole point of the transaction: a change that could not be restarted
+        /// into is undone, so the file always describes the node that is running.
+        #[test]
+        fn reverting_restores_the_previous_file_byte_for_byte() {
+            let dir = TempDir::new("revert");
+            let config = dir.file("config.yaml");
+            let backup = dir.file("config-20260101000000.yaml");
+            fs::write(&backup, "network:\n  GATEWAY_PORT: 58443\n").unwrap();
+            fs::write(&config, "network:\n  GATEWAY_PORT: 1\n").unwrap();
+
+            let message = revert(&backup, &config, "Set port NOT applied: nodo did not restart");
+            assert_eq!(
+                fs::read_to_string(&config).unwrap(),
+                "network:\n  GATEWAY_PORT: 58443\n"
+            );
+            assert!(message.contains("config.yaml restored"), "{message}");
+            // The restored backup is byte-identical to the file beside it and records
+            // no change that was ever kept, so it is not left behind as clutter.
+            assert!(!backup.exists(), "the restored backup was left behind");
+        }
+
+        /// If the backup cannot be put back it is the only copy of the working
+        /// configuration, so it is kept and named rather than quietly dropped.
+        #[test]
+        fn a_backup_that_cannot_be_restored_is_named_in_the_error() {
+            let dir = TempDir::new("norestore");
+            let config = dir.file("config.yaml");
+            let missing = dir.file("config-20260101000000.yaml");
+            fs::write(&config, "x").unwrap();
+            let message = revert(&missing, &config, "Set port NOT applied");
+            assert!(message.contains("COULD NOT RESTORE"), "{message}");
+            assert!(message.contains("config-20260101000000.yaml"), "{message}");
+        }
+
+        /// `auto` is what an unassigned port reads as, and it is not a port: treating
+        /// it as one would have the transaction wait for a node that cannot be there.
+        #[tokio::test]
+        async fn an_unassigned_port_reads_as_nothing_serving() {
+            assert!(!serving_on(Some("auto")).await);
+            assert!(!serving_on(Some("0")).await);
+            assert!(!serving_on(Some("")).await);
+            assert!(!serving_on(None).await);
+        }
+
+        /// The end-to-end property, against the real `yq`: one invocation writes
+        /// every key, each keeping its YAML type -- a bool as a bool, a float as a
+        /// float, a list as a list. Skipped where `yq` is not installed, since it is
+        /// a node dependency rather than a build one.
+        #[tokio::test]
+        async fn one_yq_run_writes_every_key_with_its_type() {
+            let Some(yq) = which_yq() else {
+                eprintln!("yq not on PATH; skipping the end-to-end write");
+                return;
+            };
+            let dir = TempDir::new("yq");
+            let config = dir.file("config.yaml");
+            fs::write(
+                &config,
+                "client:\n  ACCEPT_NEW_DEPOSITS: false\npricing:\n  SCARCITY_CURVE: 1.0\nservice_networks:\n  blacklist: []\n",
+            )
+            .unwrap();
+
+            let writes = vec![
+                ("client.ACCEPT_NEW_DEPOSITS".to_string(), "true".to_string()),
+                ("pricing.SCARCITY_CURVE".to_string(), "2.0".to_string()),
+                ("service_networks.blacklist".to_string(), "[\"*\"]".to_string()),
+            ];
+            let (expression, values) = chained_write(&writes);
+            let mut command = tokio::process::Command::new(yq);
+            command.arg("e").arg("-i").arg(&expression).arg(&config);
+            for (variable, value) in &values {
+                command.env(variable, value);
+            }
+            let status = command.status().await.unwrap();
+            assert!(status.success(), "yq failed on: {expression}");
+
+            let document: serde_yaml::Value =
+                serde_yaml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+            assert_eq!(
+                document["client"]["ACCEPT_NEW_DEPOSITS"],
+                serde_yaml::Value::Bool(true)
+            );
+            assert_eq!(document["pricing"]["SCARCITY_CURVE"].as_f64(), Some(2.0));
+            assert_eq!(
+                document["service_networks"]["blacklist"],
+                serde_yaml::from_str::<serde_yaml::Value>("[\"*\"]").unwrap()
+            );
+        }
+
+        fn which_yq() -> Option<PathBuf> {
+            let configured = super::super::Paths::discover().yq;
+            if configured.exists() {
+                return Some(configured);
+            }
+            std::env::var_os("PATH").and_then(|path| {
+                std::env::split_paths(&path)
+                    .map(|directory| directory.join("yq"))
+                    .find(|candidate| candidate.exists())
+            })
+        }
+    }
+
     mod config_backups {
         use super::super::{
             backup_config, civil_from_days, is_config_backup, prune_config_backups, utc_stamp,

@@ -7,6 +7,13 @@ installation root (`TARGET_DIR`, default `/nodo`), i.e. `/nodo/config.yaml`. The
 `nodo tui` Config page, which edits in place with `yq -i` (preserving comments) and
 snapshots the previous file to `config-<YYYYMMDDHHMMSS>.yaml` beside it.
 
+A change made from the TUI is applied as a transaction: back up, write, restart nodo,
+and restore the backup if the node does not come back up on it. So the file always
+describes the running node — an edit is never left waiting for a restart. The Cell
+page is the same mechanism at a coarser grain: it groups these keys into the decisions
+an operator actually makes, and one of its levers or profiles writes several keys as a
+single change. See [the TUI reference](../src/commands/tui/README.md#applying-a-change).
+
 > ⚠️ nodo **rewrites** `config.yaml` on its first load: `auto` values such as
 > `network.GATEWAY_PORT`, `identity.MNEMONIC` and `ledgers.ergo.WALLET_MNEMONIC` are resolved to
 > concrete values, and the file is re-dumped with `yaml.safe_dump`. This **strips

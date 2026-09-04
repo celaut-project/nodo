@@ -880,7 +880,11 @@ if __name__ == '__main__':
             case "daemon":
                 from src.commands.daemon import daemon_command
                 subcommand = sys.argv[2] if len(sys.argv) > 2 else None
-                daemon_command(subcommand=subcommand, main_dir=MAIN_DIR)
+                # Exit non-zero when the service command did not do what it says, so
+                # a caller can tell "restarted" from "printed an error" -- see the
+                # docstring on daemon_command.
+                if not daemon_command(subcommand=subcommand, main_dir=MAIN_DIR):
+                    sys.exit(1)
 
             case "doctor":
                 from src.commands.doctor import doctor_command
