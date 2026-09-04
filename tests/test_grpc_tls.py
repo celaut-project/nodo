@@ -22,6 +22,7 @@ import datetime
 import ssl
 import unittest
 import unittest.mock
+import uuid
 from concurrent import futures
 
 IMPORT_ERROR = None
@@ -37,7 +38,7 @@ try:
     from protos import celaut_pb2
     from src.gateway import utils as gateway_utils
     from src.reputation_system.node_identity import get_node_public_key_hex
-    from src.utils import grpc_transport
+    from src.utils import grpc_transport, tls_identity
     from src.utils.tls_identity import (
         HOST_KEY_EXTENSION_OID,
         TLS_SERVER_NAME,
@@ -102,6 +103,36 @@ def _certificate_with_extensions(extensions):
     for extension in extensions:
         builder = builder.add_extension(extension, critical=False)
     return builder.sign(key, hashes.SHA256()).public_bytes(serialization.Encoding.DER)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ProtocolConstantsTests(unittest.TestCase):
+    """What the `["tls", "grpc"]` tag pair actually commits a node to.
+
+    These two values are agreed between peers, not chosen per node: one is how the
+    extension is found, the other is what the signature is computed over. A node using
+    different ones speaks a different transport and has to declare other tags on its
+    `Peer.Uri.protocol_stack`, so changing either here silently would make this node
+    announce a stack it does not speak.
+    """
+
+    def test_the_host_key_oid_is_the_documented_uuid(self):
+        # Derived from the project name alone, under the ITU-T X.667 arc `2.25`, so it
+        # can be recomputed rather than taken on faith.
+        self.assertEqual(
+            HOST_KEY_EXTENSION_OID.dotted_string,
+            f"2.25.{uuid.uuid5(uuid.NAMESPACE_OID, 'CELAUT').int}",
+        )
+
+    def test_the_signed_payload_cannot_be_confused_with_a_peer_payload(self):
+        # Both are signed by the identity key, so the prefix is what keeps a signature
+        # over one from verifying as a signature over the other. A canonical peer
+        # payload opens with a lowercase public key hex, which can never start this way.
+        payload = tls_identity._host_key_payload(b"\x01\x02\x03")
+        self.assertTrue(payload.startswith(tls_identity._SIGNATURE_PREFIX))
+        self.assertFalse(
+            set(payload[:len(tls_identity._SIGNATURE_PREFIX)]) <= set("0123456789abcdef")
+        )
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
