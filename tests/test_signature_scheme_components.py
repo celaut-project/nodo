@@ -121,7 +121,7 @@ class SameSignatureSchemeTests(unittest.TestCase):
 
     def test_a_conflicting_tag_beside_ours_is_refused(self):
         # The case the whole rule exists for: a signer of the pre-hashed RFC 8032
-        # variant that also writes the tag we use. Accepting it would let a peer whose
+        # variant that also writes the tag this node uses. Accepting it would let a peer whose
         # signatures this node cannot verify pass as compatible.
         ours = ni.node_signature_scheme()
         theirs = ni.node_signature_scheme()

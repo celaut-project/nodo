@@ -446,11 +446,11 @@ message Peer {
     // an on-chain object. A reputation proof on Ergo names its owner in R7, which is
     // the reputation contract's spending clause (`INPUTS.exists { b.propositionBytes ==
     // SELF.R7[Coll[Byte]].get }`), so R7 can hold nothing but an Ergo proposition, ever.
-    // Reading it as the peer's id therefore made every celaut node's identity an Ergo
-    // key by construction. With an attestation the reader checks two links instead --
-    // R7 is the attested wallet, and that wallet signed this peer_id -- which is the
-    // same fact, still verifiable from the proof box alone with no round-trip to the
-    // node (the box's R9 carries this whole signed Peer), and it holds for a second
+    // Reading it as the peer's id would therefore fix every celaut node's identity as
+    // an Ergo key by construction. With an attestation the reader checks two links
+    // instead -- R7 is the attested wallet, and that wallet signed this peer_id --
+    // which is the same fact, verifiable from the proof box alone with no round-trip to
+    // the node (the box's R9 carries this whole signed Peer), and it holds for a second
     // ledger's reputation system without either being privileged.
     //
     // An attestation proves possession of a wallet. It does NOT say the node accepts
