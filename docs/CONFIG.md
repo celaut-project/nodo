@@ -121,7 +121,29 @@ installs no binfmt handler, so cross-arch *packing* genuinely cannot work.
 `communication.*` tunes peer-to-peer messaging behaviour —
 `SELF_ANNOUNCE_TO_CONNECTING_PEERS`, `SEND_ONLY_HASHES_ASKING_COST`, and
 `DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH` (read by `src/commands/connect.py` and
-the execution balancer).
+the execution balancer), plus `MAX_SIGNATURE_SCHEME_COMPONENTS`.
+
+### Where the prose travels
+
+An announcement declares what it means — its signature scheme, and the protocol stack of
+each address — in the three fields celaut declares every component with. `formal` and the
+tags are what a comparison reads; `prose` is the same thing written out, complete enough
+to implement from, at roughly **5 KB per announced address**. Dropping it costs a reader
+detail and never costs a verifier its answer, so where it travels is a cost decision:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `communication.SHARE_PROSE_ON_GET_PEER_INFO` | `true` | Prose in what `GetPeerInfo` serves. On: the bytes are transient, and a peer that cannot read what this node means by its tags is exactly the reader it is written for. |
+| `communication.SHARE_PROSE_ON_LEDGER` | `false` | Prose in what is written to a reputation box. Off: a box pays storage rent on every byte for as long as it exists. |
+
+The ledger setting also governs **peers' announcements**, which this node republishes
+verbatim so a reader can verify their signatures straight off the chain. There is a real
+cost there, and it is why the setting exists rather than being hardcoded: a peer's prose
+is inside what it signed, so stripping it invalidates that signature. Such an
+announcement is published **without its signature and public key** rather than with one
+that cannot verify — informational instead of verifiable. A peer that announces no prose
+is republished whole, signature intact. Set it `true` to keep every republished
+signature verifiable and pay the rent.
 
 ## `packer` — how `nodo pack` builds
 

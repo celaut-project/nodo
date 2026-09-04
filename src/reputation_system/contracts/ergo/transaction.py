@@ -192,6 +192,7 @@ def _self_network_data() -> str:
         sign_peer_payload,
     )
     from src.utils.network import get_local_ip, resolve_public_host, uri_expiry
+    from src.utils.transport_stack import share_prose_on_ledger
 
     try:
         outbound_ip = get_local_ip()
@@ -232,8 +233,10 @@ def _self_network_data() -> str:
             # so it is the announcement that most needs to say which cryptography it
             # is asking them to verify -- but the tags say it. Spelling the scheme out
             # in prose as well would be a third of this register, paid for in storage
-            # rent by every box that carries it.
-            declare_signature_scheme(peer, prose=False)
+            # rent by every box that carries it, which is why
+            # communication.SHARE_PROSE_ON_LEDGER is off unless an operator decides
+            # that rent is worth paying.
+            declare_signature_scheme(peer, prose=share_prose_on_ledger())
     else:
         LOGGER("No node identity available; publishing the address unsigned.")
 

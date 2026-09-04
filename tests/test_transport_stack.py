@@ -141,5 +141,55 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ProsePolicyTests(unittest.TestCase):
+    """Where the descriptions travel, and what it costs to hold them back.
+
+    Two destinations charging differently for the same bytes: over gRPC they are
+    transient, in a ledger register they are rented for as long as the box exists.
+    """
+
+    def _peer(self, prose=True):
+        peer = celaut_pb2.Peer()
+        uri = peer.uri.add(ip="1.2.3.4", port=8080)
+        transport_stack.declare_transport_stack(uri, prose=prose)
+        peer.signature_scheme.components.add(tags=["ed25519"], prose="a scheme" if prose else "")
+        return peer
+
+    def test_the_defaults_are_on_for_grpc_and_off_for_a_ledger(self):
+        self.assertTrue(transport_stack.share_prose_on_get_peer_info())
+        self.assertFalse(transport_stack.share_prose_on_ledger())
+
+    def test_stripping_takes_both_declarations(self):
+        # One policy, not two: the scheme and the stack are the same kind of thing --
+        # what a reader is handed to understand the message.
+        peer = self._peer()
+        self.assertTrue(transport_stack.carries_prose(peer))
+
+        transport_stack.strip_prose(peer)
+
+        self.assertFalse(transport_stack.carries_prose(peer))
+        self.assertFalse(any(c.prose for c in peer.signature_scheme.components))
+        self.assertFalse(
+            any(c.prose for uri in peer.uri for c in uri.protocol_stack)
+        )
+
+    def test_stripping_leaves_everything_a_comparison_reads(self):
+        # The reason this is safe on a message about to be signed: prose decides
+        # nothing, so a stripped announcement still verifies as the same protocol.
+        peer = self._peer()
+        transport_stack.strip_prose(peer)
+
+        self.assertTrue(all(c.formal for uri in peer.uri for c in uri.protocol_stack))
+        self.assertTrue(
+            transport_stack.speaks_our_transport_stack(peer.uri[0].protocol_stack)
+        )
+
+    def test_an_announcement_without_prose_has_none_to_strip(self):
+        # Which is what keeps a peer that already announces bare from being republished
+        # unsigned: there is nothing to remove, so its signature is never touched.
+        self.assertFalse(transport_stack.carries_prose(self._peer(prose=False)))
+
+
 if __name__ == "__main__":
     unittest.main()
