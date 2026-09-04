@@ -216,7 +216,6 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     from src.reputation_system.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
-        declare_ledger_attestations,
         declare_signature_scheme,
         get_node_public_key_hex,
         sign_peer_payload,
@@ -245,7 +244,6 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
     # a reader is handed to understand the message, as against what a verifier reads to
     # decide about it, and the scheme is no different from the transport stack there.
     declare_signature_scheme(peer, prose=share_prose_on_get_peer_info())
-    declare_ledger_attestations(peer)
 
     signature = sign_peer_payload(
         canonical_peer_payload(public_key_hex, ts, canonical_peer_content_digest(peer))
@@ -255,7 +253,6 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
         # both are claims the signature is what vouches for, so on their own they state
         # a fact about nothing.
         peer.ClearField("signature_scheme")
-        del peer.ledger_attestations[:]
         log.LOGGER(
             f'Could not sign this node\'s announcement as {public_key_hex}, so every '
             'peer will refuse it. Check identity.MNEMONIC.'

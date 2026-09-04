@@ -270,8 +270,8 @@ def validate_contract_ledger(
 
     # Every box must declare the SAME R7 owner, and it must be the Ergo wallet the peer
     # proved it holds -- the wallet named by an attestation this peer signed with its
-    # identity key and that wallet countersigned (node_identity.attested_wallet_public_key,
-    # resolved by the caller). R7 carries propositionBytes, which is what the contract
+    # identity key and that wallet countersigned (node_identity.attested_proof_owner,
+    # resolved by the caller from the proof's own xattrs). R7 carries propositionBytes, which is what the contract
     # checks a spender against, so a wallet is the only thing it can ever hold; the
     # peer's identity reaches this comparison through the attestation rather than by
     # being the same key. Identity does not depend on holding a proof; a proof, when

@@ -239,9 +239,10 @@ it is fixed as an Ergo key by construction, for every celaut node — which priv
 ledger's reputation system over any other, and makes Ergo a dependency of the
 peer-to-peer layer, down to a node with no wallet being unable to serve or dial at all.
 
-What links the two is an **attestation**: a wallet signs the node's `peer_id`, and the
-pair travels in `Peer.ledger_attestations`, repeated per ledger exactly as
-`payment_contracts` is. A reader checks two links instead of comparing bytes:
+What links the two is an **owner attestation**: the wallet that published a proof signs
+the node's `peer_id`, and the pair rides in that proof's own `xattrs`
+(`owner_public_key`, `owner_signature`). A reader checks two links instead of comparing
+bytes:
 
 ```
 R7  = the attested wallet (owner, and the only key that can spend the box)
@@ -264,11 +265,17 @@ Note what R5 does, by contrast: it names the *subject* of an opinion, is plain
 whatever cryptography that identity is in. R5 and R7 are not the same kind of thing,
 and only R7 is constrained by what the contract has to be able to spend.
 
-An attestation proves possession of a wallet. It does not say the node accepts payment
-there (`payment_contracts`) nor that it has published anything there
-(`reputation_proofs`). A peer whose attestation does not verify is treated as attesting
-nothing on that ledger: its identity is untouched, and only what a reader would have
-credited to that ledger is lost.
+It lives on the proof rather than on the `Peer` because **ownership is a property of the
+proof**. A node holds as many proofs as it likes and nothing says they share an owner, so
+one attestation per ledger on the announcement could not describe two proofs on the same
+ledger published by different wallets. Riding in the proof also means the announcement's
+signature already covers it, through `reputation_proofs`.
+
+An attestation proves possession of a key, and nothing more. It does not say the node
+accepts payment on that ledger (`payment_contracts` does, and it carries its own address)
+nor that the key holds funds. A proof whose attestation does not verify is treated as
+announcing no owner at all: the peer's identity is untouched, and only what a reader
+would have credited for that proof is lost.
 
 ### The signature scheme is declared, not assumed
 
@@ -335,13 +342,13 @@ What is singular and what is plural is deliberate, and the two do not conflict:
 | Field | Count | Why |
 |---|---|---|
 | `public_key`, `signature`, `signature_scheme` | one | The key is what **names** the node, so a second one at the same level is a second identity: reputation, deposits and payment attribution all split in two. Cross-signing two *names* does not heal the split — whoever needs the link speaks only one of the schemes, so they can verify only half of the proof. |
-| `ledger_attestations` | many | A wallet the node **proved it holds**, per ledger. Not a second name: the attestation is signed by the one identity above, so there is a single root and nobody has to pick which key the node is. |
+| owner attestation, in each proof's `xattrs` | one per proof | The wallet that **published that proof**, and its signature over this node's id. Not a second name: it vouches *for* the identity above, so there is a single root and nobody has to pick which key the node is. |
 | `payment_contracts` | many | What a node accepts is a **menu the payer picks one item from**, so a longer one costs nothing. Being named by a key of its own while accepting ERG, bitcoin and anything else that settles is the expected shape. See [Balances and prices](#balances-and-prices). |
 | `reputation_proofs` | many | A node holds as many proofs as it has published opinions under. See [Reputation proof](#reputation-proof). |
 
 The distinction that runs through the table is **root versus role**. A key in a
 different role, signed by the identity, is not a competing name: that is what a ledger
-attestation is, and what the TLS certificate's per-process P-256 key is (see
+an owner attestation is, and what the TLS certificate's per-process P-256 key is (see
 [Transport security](#transport-security)). One root, several keys under it. What must
 stay singular is the root.
 

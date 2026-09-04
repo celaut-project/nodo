@@ -780,10 +780,9 @@ identity:
   # an identity.
   #
   # On no ledger, and deliberately not one of the wallets under `ledgers` below. What
-  # links the two is an attestation: each wallet signs this identity once, and the pair
-  # travels in the node's announcement (Peer.ledger_attestations), so a reader can
-  # credit an on-chain proof or a payment to this node without the node's name having
-  # to be an on-chain object. That is what lets a wallet be added, dropped or rotated
+  # links the two is an owner attestation: the wallet that publishes a reputation proof
+  # signs this identity, and the pair travels with that proof, so a reader can credit an
+  # on-chain proof to this node without the node's name having to be an on-chain object. That is what lets a wallet be added, dropped or rotated
   # without every peer seeing a different node -- and what lets a node with no wallet
   # at all still have a name.
   #

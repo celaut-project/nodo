@@ -200,20 +200,19 @@ def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
     even though the peer is still accepted (its identity rests on the signature it
     sent, see :func:`verified_peer_public_key`, not on any proof).
 
-    Ownership runs through the peer's Ergo attestation rather than through its
-    ``peer_id``: R7 is the reputation contract's spending clause, so it holds an Ergo
-    proposition and can never hold an identity that is not one. A peer that announces
-    an Ergo proof but attests no Ergo wallet has proved nothing about it.
+    Ownership runs through the proof's own owner attestation rather than through the
+    peer's ``peer_id``: R7 is the reputation contract's spending clause, so it holds an
+    Ergo proposition and can never hold an identity that is not one. A proof announced
+    without an attestation its claimed owner signed proves nothing about who holds it.
     """
     from src.reputation_system.contracts.ergo.proof_validation import validate_contract_ledger as validate_ergo_reputation
-    from src.reputation_system.envs import LEDGER as ERGO_LEDGER_TAG
-    from src.reputation_system.node_identity import attested_wallet_public_key
+    from src.reputation_system.node_identity import attested_proof_owner
 
-    wallet_public_key = attested_wallet_public_key(peer, ERGO_LEDGER_TAG)
+    wallet_public_key = attested_proof_owner(contract_ledger, peer.public_key)
     if not wallet_public_key:
         log.LOGGER(
-            f"Peer {peer.public_key} announced an Ergo reputation proof without a "
-            "verifiable Ergo wallet attestation."
+            f"Peer {peer.public_key} announced a reputation proof with no verifiable "
+            "owner attestation."
         )
         return False
 

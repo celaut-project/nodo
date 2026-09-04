@@ -11,8 +11,10 @@ nothing but an Ergo proposition -- an identity read out of it is an identity tha
 stay spendable on Ergo forever, which makes Ergo a dependency of the peer-to-peer
 layer, down to a node with no wallet being unable to serve or dial at all.
 
-What ties an identity to a ledger is an attestation: a wallet on that ledger signs this
-node's ``peer_id``, and the pair travels in ``Peer.ledger_attestations``. A reader
+What ties an identity to a ledger is an attestation: the wallet that published a
+reputation proof signs this node's ``peer_id``, and the pair rides in that proof's own
+xattrs -- per proof, because a node holds as many as it likes (issue #281) and nothing
+says they share an owner. A reader
 checks two links instead of comparing bytes -- the R7 owner is the attested wallet, and
 that wallet signed this ``peer_id`` -- which is the same fact, verifiable from the
 proof box alone with no round-trip to the node, and it holds for a second ledger
@@ -390,7 +392,7 @@ def node_proposition_hex(wallet_public_key_hex: str) -> str:
     This describes a *wallet*, never the node's identity: R7 is the reputation
     contract's spending clause, so only a key that can spend on Ergo belongs in it. A
     node's identity reaches that comparison through the attestation its Ergo wallet
-    signed (:func:`attested_wallet_public_key`), not by being the same key.
+    signed (:func:`attested_proof_owner`), not by being the same key.
     """
     return _P2PK_PREFIX_HEX + wallet_public_key_hex
 
@@ -425,15 +427,6 @@ def _canonical_protocol(protocol) -> str:
     ])
 
 
-def _canonical_attestation(attestation) -> str:
-    """Deterministic encoding of one ledger attestation."""
-    return "~".join([
-        _canonical_protocol(attestation.ledger),
-        attestation.public_key,
-        attestation.signature,
-    ])
-
-
 def _canonical_uri(uri) -> str:
     """Deterministic encoding of one advertised address and everything it declares."""
     protocol_stack = ";".join(sorted(_canonical_protocol(p) for p in uri.protocol_stack))
@@ -465,11 +458,12 @@ def canonical_peer_content_digest(peer) -> str:
     the signature vouches for it. Leaving them out would let a relay graft proofs onto
     (or strip them from) a claim that still verifies.
 
-    ``ledger_attestations`` is covered too. Each one already carries its own signature
-    by the wallet it names, so a forged entry cannot survive
-    :func:`attested_wallet_public_key` -- but a relay could still *strip* one, and a
-    peer whose Ergo attestation went missing loses the reputation it can prove. Covering
-    them makes the removal break the announcement instead.
+    An owner attestation rides inside the proof it belongs to, as two of that
+    ``Contract``'s xattrs, so it is covered by ``reputation_proofs`` above with nothing
+    further to account for here. Each one carries its own signature by the wallet it
+    names, so a forged entry cannot survive :func:`attested_proof_owner` -- but a relay
+    could still strip one, and a peer whose attestation went missing loses the
+    reputation it can prove, which covering the proofs is what prevents.
 
     Built field by field rather than from ``SerializeToString()``, which protobuf does
     not guarantee to be canonical (field order, unknown fields, non-minimal varints).
@@ -487,9 +481,6 @@ def canonical_peer_content_digest(peer) -> str:
     uris = sorted(_canonical_uri(uri) for uri in peer.uri)
     contracts = sorted(_canonical_contract(gp) for gp in peer.payment_contracts)
     proofs = sorted(_canonical_contract_message(c) for c in peer.reputation_proofs)
-    attestations = sorted(
-        _canonical_attestation(a) for a in peer.ledger_attestations
-    )
     scheme = ";".join(
         sorted(_canonical_protocol(c) for c in peer.signature_scheme.components)
     )
@@ -502,7 +493,6 @@ def canonical_peer_content_digest(peer) -> str:
         "/".join(contracts),
         "/".join(proofs),
         rates,
-        "/".join(attestations),
         scheme,
     ])
     # Blake2b-256, the hash this node's own scheme names in its challenge and the one
@@ -563,74 +553,65 @@ def attestation_payload(peer_id: str) -> str:
     return _ATTESTATION_PREFIX + peer_id
 
 
-def declare_ledger_attestations(peer) -> None:
-    """Attach this node's ledger attestations to ``peer``, replacing any already there.
+def attest_proof_ownership(contract, mnemonic: str) -> bool:
+    """Record on ``contract`` that the wallet behind ``mnemonic`` published it.
 
-    One per configured wallet: the wallet signs this node's ``peer_id``, so a reader
-    holding the announcement can tie the identity to a key on that ledger without the
-    two having to be the same key. That is what makes the identity independent of every
-    ledger while a reputation proof or a payment can still be attributed to this node.
+    The wallet signs this node's ``peer_id`` and both halves go into the proof's own
+    xattrs, so the claim travels with the thing it is about. A reader then ties an
+    on-chain owner to a peer id without the two having to be the same key -- which is
+    what lets the identity be independent of every ledger while a proof is still
+    attributable.
 
-    A wallet whose mnemonic is unusable is skipped rather than fatal: the node has an
-    identity regardless, and the ledger it could not sign for simply goes unattested --
-    a reader then declines to credit that ledger's proofs to this peer, which is the
-    right answer, and the peer-to-peer layer is unaffected.
+    Per proof rather than per peer: a node holds as many proofs as it likes (issue
+    #281) and nothing says they share an owner, so an attestation on the announcement
+    could not describe two proofs on one ledger under different wallets.
+
+    Returns whether anything was written. An unusable mnemonic, or a node with no
+    identity yet, leaves the proof unattested rather than failing: a reader then
+    declines to credit it, which is the right answer, and nothing else is affected.
     """
-    del peer.ledger_attestations[:]
     peer_id = get_node_public_key_hex()
-    if not peer_id:
-        return
+    if not peer_id or not mnemonic:
+        return False
+    try:
+        signature = bip_schnorr_sign(mnemonic, attestation_payload(peer_id))
+        public_key_hex = _wallet_public_key_hex(mnemonic)
+    except Exception:
+        return False
 
-    payload = attestation_payload(peer_id)
-    for ledger_name, mnemonic in _configured_wallets():
-        try:
-            signature = bip_schnorr_sign(mnemonic, payload)
-            public_key_hex = _wallet_public_key_hex(mnemonic)
-        except Exception:
-            continue
-        attestation = peer.ledger_attestations.add()
-        attestation.ledger.tags.append(ledger_name)
-        attestation.public_key = public_key_hex
-        attestation.signature = signature
+    from src.utils.contract_xattrs import set_owner_attestation
+
+    set_owner_attestation(contract, public_key_hex, signature)
+    return True
 
 
-def attested_wallet_public_key(peer, ledger_tag: str) -> Optional[str]:
-    """The wallet ``peer`` proved it holds on ``ledger_tag``, or None.
+def attested_proof_owner(contract, peer_id: str) -> Optional[str]:
+    """The wallet ``peer_id`` proved published ``contract``, or None.
 
-    The verification a reader runs before crediting anything on that ledger to this
-    peer: the attestation has to be signed by the very wallet it names, over this
-    peer's own id. An announcement carrying a wallet it cannot prove is worth exactly
-    as much as one carrying none.
-
-    Two attestations for one ledger are refused rather than picked between -- which
-    wallet a proof belongs to would have no answer, and choosing is policy nobody has
-    written.
+    The check a reader runs before crediting a proof to a peer: the attestation has to
+    be signed by the very wallet it names, over that peer's own id. A proof announcing
+    an owner it cannot prove is worth exactly as much as one announcing none -- naming
+    someone else's wallet is free, signing with it is not.
     """
-    peer_id = normalize_public_key_hex(peer.public_key)
+    from src.utils.contract_xattrs import get_owner_attestation
+
+    peer_id = normalize_public_key_hex(peer_id)
     if not peer_id:
         return None
 
-    candidates = [
-        attestation
-        for attestation in peer.ledger_attestations
-        if ledger_tag in attestation.ledger.tags
-    ]
-    if len(candidates) != 1:
-        return None
-
-    attestation = candidates[0]
-    wallet_public_key = str(attestation.public_key or "").strip().lower()
-    if not wallet_public_key or not set(wallet_public_key) <= _HEX_DIGITS:
+    public_key, signature = get_owner_attestation(contract)
+    public_key = public_key.strip().lower()
+    if not public_key or not signature or not set(public_key) <= _HEX_DIGITS:
         return None
     try:
-        proposition_bytes = bytes.fromhex(node_proposition_hex(wallet_public_key))
+        proposition_bytes = bytes.fromhex(node_proposition_hex(public_key))
     except (ValueError, TypeError):
         return None
     if not bip_schnorr_verify_proposition(
-        proposition_bytes, attestation_payload(peer_id), attestation.signature
+        proposition_bytes, attestation_payload(peer_id), signature
     ):
         return None
-    return wallet_public_key
+    return public_key
 
 
 def _configured_wallets():

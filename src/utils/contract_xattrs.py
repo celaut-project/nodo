@@ -13,6 +13,16 @@ REPUTATION_KEY_KEY = "reputation_key"
 # per-instance ``script`` xattr, which holds the raw ErgoTree/propositionBytes of the
 # specific wallet box and varies per node.
 CONTRACT_TYPE_KEY = "contract_type"
+# Who published this proof, and that owner proving it is the peer announcing it. The
+# ledger's own key, in the ledger's own encoding, plus its signature over the announcing
+# peer's id (node_identity.attestation_payload) -- see `attest_proof_ownership`.
+#
+# Per proof rather than per peer, because ownership is a property of the proof: a peer
+# holds as many as it likes (issue #281) and nothing says they share an owner. The
+# alternative, one attestation per ledger on the Peer, cannot express two proofs on the
+# same ledger under different wallets.
+OWNER_PUBLIC_KEY_KEY = "owner_public_key"
+OWNER_SIGNATURE_KEY = "owner_signature"
 
 
 def set_xattr_text(contract: celaut_pb2.Contract, key: str, value: str) -> None:
@@ -56,6 +66,22 @@ def set_reputation_key(contract: celaut_pb2.Contract, reputation_key: str) -> No
 
 def get_reputation_key(contract: celaut_pb2.Contract) -> str:
     return get_xattr_text(contract, REPUTATION_KEY_KEY)
+
+
+def set_owner_attestation(
+    contract: celaut_pb2.Contract, public_key: str, signature: str
+) -> None:
+    """Record who owns this proof and their signature over the peer id claiming it."""
+    set_xattr_text(contract, OWNER_PUBLIC_KEY_KEY, public_key)
+    set_xattr_text(contract, OWNER_SIGNATURE_KEY, signature)
+
+
+def get_owner_attestation(contract: celaut_pb2.Contract) -> tuple:
+    """``(public key, signature)`` of the claimed owner; either may be empty."""
+    return (
+        get_xattr_text(contract, OWNER_PUBLIC_KEY_KEY),
+        get_xattr_text(contract, OWNER_SIGNATURE_KEY),
+    )
 
 
 def set_contract_type(contract: celaut_pb2.Contract, contract_type: bytes) -> None:
