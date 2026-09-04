@@ -41,6 +41,10 @@ pub enum Organelle {
     Nucleus,
     /// The immune system: what this node refuses to trust.
     Immune,
+    /// The cell wall: how much of the host machine this node may occupy, and at what
+    /// hours. Everything else on this page decides what the node does; this decides how
+    /// much of somebody's PC it is allowed to do it with.
+    Wall,
     /// Mitochondria: energy, which for a node means money.
     Mitochondria,
     /// The vacuole: storage and housekeeping.
@@ -49,13 +53,14 @@ pub enum Organelle {
 
 impl Organelle {
     /// Reading order, and the order they are laid out in: the outward-facing three
-    /// above the nucleus, the self-preserving three below it.
-    pub const ALL: [Organelle; 7] = [
+    /// above the nucleus, the self-preserving four below it.
+    pub const ALL: [Organelle; 8] = [
         Organelle::Channels,
         Organelle::Ribosomes,
         Organelle::Vesicles,
         Organelle::Nucleus,
         Organelle::Immune,
+        Organelle::Wall,
         Organelle::Mitochondria,
         Organelle::Vacuole,
     ];
@@ -67,6 +72,7 @@ impl Organelle {
             Organelle::Vesicles => "VESICLES",
             Organelle::Nucleus => "NUCLEUS",
             Organelle::Immune => "IMMUNE",
+            Organelle::Wall => "WALL",
             Organelle::Mitochondria => "MITOCHONDRIA",
             Organelle::Vacuole => "VACUOLE",
         }
@@ -81,6 +87,7 @@ impl Organelle {
             Organelle::Vesicles => "voice",
             Organelle::Nucleus => "identity & wallet",
             Organelle::Immune => "trust",
+            Organelle::Wall => "footprint & hours",
             Organelle::Mitochondria => "money",
             Organelle::Vacuole => "upkeep",
         }
@@ -790,6 +797,199 @@ static LEVERS: &[Lever] = &[
         warning: None,
         secret: false,
     },
+    // --- WALL · footprint & hours ------------------------------------------
+    //
+    // Nothing else on this page can say "not with my whole machine". Scarcity pricing
+    // makes a busy host expensive and `spare capacity` gates only the opportunistic
+    // fallback: neither of them ever refuses a paid workload. These do.
+    Lever {
+        id: "host-ceiling",
+        organelle: Organelle::Wall,
+        label: "host ceiling",
+        question: "Is there a hard cap on how much of this machine nodo may hold?",
+        consequence: "The master switch for the four ceilings below. Off, a client may rent every core and every byte the host has, whatever it costs them.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "off",
+                writes: &[("host_limits.ENABLED", "false")],
+            },
+            LeverState {
+                label: "on",
+                writes: &[("host_limits.ENABLED", "true")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    // The three shares are cycles rather than typed numbers because the decision is
+    // "roughly how much of my PC", not a figure anyone measures. Any other value set on
+    // the Config page still applies -- the row simply reads `custom`, which is the whole
+    // point of deriving the state instead of storing it.
+    Lever {
+        id: "cpu-ceiling",
+        organelle: Organelle::Wall,
+        label: "cpu ceiling",
+        question: "How much of this machine's CPU may all instances add up to?",
+        consequence: "Compared against the sum of every instance's CPU quota, so it caps what they can take rather than what they happen to be using.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "no cap",
+                writes: &[("host_limits.MAX_CPU_SHARE", "0")],
+            },
+            LeverState {
+                label: "a quarter",
+                writes: &[("host_limits.MAX_CPU_SHARE", "0.25")],
+            },
+            LeverState {
+                label: "half",
+                writes: &[("host_limits.MAX_CPU_SHARE", "0.5")],
+            },
+            LeverState {
+                label: "most",
+                writes: &[("host_limits.MAX_CPU_SHARE", "0.8")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "ram-ceiling",
+        organelle: Organelle::Wall,
+        label: "ram ceiling",
+        question: "How much of this machine's memory may all instances add up to?",
+        consequence: "The one an operator feels first: memory handed to an instance is memory the person at this PC does not have.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "no cap",
+                writes: &[("host_limits.MAX_RAM_SHARE", "0")],
+            },
+            LeverState {
+                label: "a quarter",
+                writes: &[("host_limits.MAX_RAM_SHARE", "0.25")],
+            },
+            LeverState {
+                label: "half",
+                writes: &[("host_limits.MAX_RAM_SHARE", "0.5")],
+            },
+            LeverState {
+                label: "most",
+                writes: &[("host_limits.MAX_RAM_SHARE", "0.8")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "disk-ceiling",
+        organelle: Organelle::Wall,
+        label: "disk ceiling",
+        question: "How much of the storage filesystem may all instances add up to?",
+        consequence: "Measured against the filesystem's total size, not its free space, so a disk something else filled does not quietly raise this node's allowance.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "no cap",
+                writes: &[("host_limits.MAX_DISK_SHARE", "0")],
+            },
+            LeverState {
+                label: "a quarter",
+                writes: &[("host_limits.MAX_DISK_SHARE", "0.25")],
+            },
+            LeverState {
+                label: "half",
+                writes: &[("host_limits.MAX_DISK_SHARE", "0.5")],
+            },
+            LeverState {
+                label: "most",
+                writes: &[("host_limits.MAX_DISK_SHARE", "0.8")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "net-per-day",
+        organelle: Organelle::Wall,
+        label: "net per day",
+        question: "How much tunnelled traffic may this node relay in a day?",
+        consequence: "Counts both directions, resets at local midnight, and survives a restart. Spent, no tunnel opens and the open ones close. 0 is unlimited.",
+        kind: LeverKind::Scalar {
+            path: "host_limits.MAX_NET_GIB_PER_DAY",
+            unit: " GiB/day",
+        },
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "net-rate",
+        organelle: Organelle::Wall,
+        label: "net rate",
+        question: "How fast may tunnelled traffic flow, across every tunnel at once?",
+        consequence: "Shapes the relay by making it wait, so a transfer over the ceiling gets slower and still finishes. Only tunnelled traffic: an instance on a port of its own is not shaped. 0 is unlimited.",
+        kind: LeverKind::Scalar {
+            path: "host_limits.MAX_NET_MIB_PER_SECOND",
+            unit: " MiB/s",
+        },
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "after-hours",
+        organelle: Organelle::Wall,
+        label: "after hours",
+        question: "What happens outside the hours this node works?",
+        consequence: "Both positions refuse new work from outside. \"stop\" also destroys what is already running, mid-flight, and refunds what its balance still holds. Work from a dev client is exempt either way, so `nodo execute` and the core services keep working.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "always open",
+                writes: &[
+                    ("activity_window.ENABLED", "false"),
+                    ("activity_window.ON_CLOSE", "refuse"),
+                ],
+            },
+            LeverState {
+                label: "refuse work",
+                writes: &[
+                    ("activity_window.ENABLED", "true"),
+                    ("activity_window.ON_CLOSE", "refuse"),
+                ],
+            },
+            LeverState {
+                label: "stop work",
+                writes: &[
+                    ("activity_window.ENABLED", "true"),
+                    ("activity_window.ON_CLOSE", "stop"),
+                ],
+            },
+        ]),
+        warning: Some("\"stop\" kills running instances"),
+        secret: false,
+    },
+    Lever {
+        id: "open-from",
+        organelle: Organelle::Wall,
+        label: "open from",
+        question: "From what time of day does this node take work?",
+        consequence: "Local time, HH:MM. Equal to \"open until\" means always open, so setting the hours is what makes after-hours mean anything.",
+        kind: LeverKind::Scalar {
+            path: "activity_window.START",
+            unit: "",
+        },
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "open-until",
+        organelle: Organelle::Wall,
+        label: "open until",
+        question: "Until what time of day does this node take work?",
+        consequence: "Local time, HH:MM, and exclusive. Earlier than \"open from\" is the night shift: 22:00 to 06:00 is one window, open all night.",
+        kind: LeverKind::Scalar {
+            path: "activity_window.END",
+            unit: "",
+        },
+        warning: None,
+        secret: false,
+    },
     // --- MITOCHONDRIA · money ----------------------------------------------
     Lever {
         id: "prices",
@@ -1048,6 +1248,10 @@ static PROFILES: &[Profile] = &[
             ("workload_admission.POLICY", "fail_fast"),
             ("workload_admission.ON_UNSATISFIABLE", "reject"),
             ("low_demand.ENABLED", "false"),
+            // A node running its owner's own things on their own PC is exactly what the
+            // ceilings are for, even though nothing is rented here: they cap what nodo
+            // occupies, and a dev instance occupies it like any other.
+            ("host_limits.ENABLED", "true"),
             ("general_flags.SIMULATE_PAYMENTS", "false"),
             ("logs.DEBUG_MODE", "false"),
             ("logs.MEMORY_LOGS", "false"),
@@ -1088,6 +1292,10 @@ static PROFILES: &[Profile] = &[
             ("workload_admission.POLICY", "fail_fast"),
             ("workload_admission.ON_UNSATISFIABLE", "reject"),
             ("low_demand.ENABLED", "false"),
+            // The posture this whole organelle was written for: rent the machine out, but
+            // not all of it. Scarcity pricing above only makes the last core expensive;
+            // this is what stops it being sold at all.
+            ("host_limits.ENABLED", "true"),
             ("general_flags.SIMULATE_PAYMENTS", "false"),
             ("logs.DEBUG_MODE", "false"),
             ("logs.MEMORY_LOGS", "false"),
@@ -1126,6 +1334,9 @@ static PROFILES: &[Profile] = &[
             ("workload_admission.POLICY", "fail_fast"),
             ("workload_admission.ON_UNSATISFIABLE", "reject"),
             ("low_demand.ENABLED", "true"),
+            // No ceiling: this profile is for a machine whose job is earning, where the
+            // whole host is the product.
+            ("host_limits.ENABLED", "false"),
             ("general_flags.SIMULATE_PAYMENTS", "false"),
             ("logs.DEBUG_MODE", "false"),
             ("logs.MEMORY_LOGS", "false"),
@@ -1159,6 +1370,7 @@ static PROFILES: &[Profile] = &[
             ("workload_admission.POLICY", "full"),
             ("workload_admission.ON_UNSATISFIABLE", "warn"),
             ("low_demand.ENABLED", "true"),
+            ("host_limits.ENABLED", "false"),
             ("general_flags.SIMULATE_PAYMENTS", "false"),
             ("logs.DEBUG_MODE", "false"),
             ("logs.MEMORY_LOGS", "false"),
@@ -1196,6 +1408,7 @@ static PROFILES: &[Profile] = &[
             // The one profile that turns this on, and the reason the nucleus shows
             // it in red: a node left simulating payments looks healthy and earns
             // nothing.
+            ("host_limits.ENABLED", "false"),
             ("general_flags.SIMULATE_PAYMENTS", "true"),
             ("logs.DEBUG_MODE", "true"),
             ("logs.MEMORY_LOGS", "true"),
@@ -1527,6 +1740,7 @@ mod tests {
                 ("workload_admission.ON_UNSATISFIABLE", &["reject", "warn"]),
                 ("virtualizers.ch.SECURITY.DEVICE_NODES_POLICY", &["deny", "allowlist"]),
                 ("ui.DISPLAY_UNIT", &["erg", "mu"]),
+                ("activity_window.ON_CLOSE", &["refuse", "stop"]),
                 ("virtualizers.ch.SERIAL_MODE", &["file", "off", "null", "tty"]),
             ];
             let mut writes: Vec<(&str, &str)> = Vec::new();
@@ -1621,6 +1835,60 @@ mod tests {
             assert_eq!(next_state(lever, &LeverStatus::State(2)), Some(0));
             assert_eq!(next_state(lever, &LeverStatus::Custom), Some(0));
             assert_eq!(next_state(lever, &LeverStatus::Unset), Some(0));
+        }
+
+        /// The two decisions the WALL organelle exists for, read back off a document.
+        /// Both write more than one key, which is the reason they are levers rather
+        /// than something to find on the Config page: an operator who set
+        /// `activity_window.ENABLED` and left `ON_CLOSE` alone would have a window
+        /// whose closing behaviour they never chose.
+        #[test]
+        fn the_after_hours_lever_reads_back_what_the_document_says() {
+            let lever = lever("after-hours").unwrap();
+            let stopping = document(
+                "activity_window:\n  ENABLED: true\n  ON_CLOSE: stop\n",
+            );
+            assert_eq!(status(lever, Some(&stopping)), LeverStatus::State(2));
+            assert_eq!(status(lever, Some(&stopping)).label(lever), "stop work");
+
+            let refusing = document(
+                "activity_window:\n  ENABLED: true\n  ON_CLOSE: refuse\n",
+            );
+            assert_eq!(status(lever, Some(&refusing)), LeverStatus::State(1));
+
+            let open = document(
+                "activity_window:\n  ENABLED: false\n  ON_CLOSE: refuse\n",
+            );
+            assert_eq!(status(lever, Some(&open)), LeverStatus::State(0));
+        }
+
+        /// A share of 0 is "no cap", not "nothing allowed", and the page has to say so:
+        /// a row reading `0` where the operator expects a ceiling is the one misreading
+        /// that would have them believe the node is capped when it is wide open.
+        #[test]
+        fn a_share_of_zero_reads_as_no_cap() {
+            let lever = lever("ram-ceiling").unwrap();
+            let uncapped = document("host_limits:\n  MAX_RAM_SHARE: 0\n");
+            assert_eq!(status(lever, Some(&uncapped)).label(lever), "no cap");
+            let half = document("host_limits:\n  MAX_RAM_SHARE: 0.5\n");
+            assert_eq!(status(lever, Some(&half)).label(lever), "half");
+            // A figure typed on the Config page is reported as unnamed rather than
+            // rounded to the nearest position.
+            let typed = document("host_limits:\n  MAX_RAM_SHARE: 0.6\n");
+            assert_eq!(status(lever, Some(&typed)), LeverStatus::Custom);
+        }
+
+        /// The network ceilings are figures, not postures, so they are read straight
+        /// off the file with the unit they are quoted in.
+        #[test]
+        fn the_network_ceilings_report_their_units() {
+            let per_day = lever("net-per-day").unwrap();
+            let document = document(
+                "host_limits:\n  MAX_NET_GIB_PER_DAY: 20\n  MAX_NET_MIB_PER_SECOND: 5\n",
+            );
+            assert_eq!(status(per_day, Some(&document)).label(per_day), "20 GiB/day");
+            let rate = lever("net-rate").unwrap();
+            assert_eq!(status(rate, Some(&document)).label(rate), "5 MiB/s");
         }
 
         #[test]

@@ -196,6 +196,18 @@ TABLES = {
     # rows, where the only address involved is this node's own wallet.
     # `amount_mu` is TEXT for the same reason every other balance in this schema is:
     # MU exceeds what SQLite stores as an integer.
+    # Tunnelled bytes relayed per local calendar day, so `host_limits.MAX_NET_GIB_PER_DAY`
+    # is an allowance for the day rather than for the current run of the daemon: a
+    # counter living only in memory would reset on every restart, which on a metered
+    # connection is the one moment the ceiling was there for. One row per day, written
+    # in blocks (see src/utils/host_limits._DailyTraffic), read back at startup and at
+    # each midnight rollover.
+    "tunnel_traffic": '''
+        CREATE TABLE IF NOT EXISTS tunnel_traffic (
+            day TEXT PRIMARY KEY,
+            bytes INTEGER NOT NULL DEFAULT 0
+        )
+    ''',
     "payments": '''
         CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -3,6 +3,7 @@ from typing import Generator
 from bee_rpc import client as bee, buffer_pb2
 
 from protos import celaut_pb2
+from src.utils import activity_window
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.logger import LOGGER as logger
 
@@ -42,6 +43,22 @@ class GetResourceAvailabilityIterable:
                 resources = celaut_pb2.Service.Container.Resources()
 
             availability = get_resource_availability(resources)
+
+            # Outside `activity_window` the answer is no, whatever the resources say.
+            # A peer probing this node's capacity is asking whether it could place a
+            # workload here, and after hours it could not -- reporting the room this
+            # machine has would get the workload sent and then refused at launch.
+            #
+            # Overlaid here rather than inside `get_resource_availability` because that
+            # function answers "does this shape fit?", which is a question about the
+            # machine, and is also what the operator's own launches go through. The
+            # hours belong to the door, not to the room.
+            if not activity_window.is_open():
+                availability = dict(
+                    availability,
+                    can_execute=False,
+                    reason=activity_window.closed_reason(),
+                )
 
             # No `indices`: the response is a single flat message, the same shape
             # StopService's Refund is serialized with. The caller pairs it with

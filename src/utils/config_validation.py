@@ -147,6 +147,69 @@ def _require_share(block: Dict[str, Any], section: str, key: str, *, strictly_po
         raise ConfigValidationError(f"{section}.{key} must be a share in {bound}, got {value}")
 
 
+def _require_nonneg_number(block: Dict[str, Any], section: str, key: str) -> None:
+    """A quantity that cannot be negative. Absent means 0, which means "no ceiling"."""
+    if key not in block:
+        return
+    try:
+        value = float(block[key])
+    except (TypeError, ValueError) as exc:
+        raise ConfigValidationError(
+            f"{section}.{key} must be a number, got {block[key]!r}"
+        ) from exc
+    if value < 0:
+        raise ConfigValidationError(f"{section}.{key} must not be negative, got {value}")
+
+
+HOST_LIMIT_SHARE_KEYS = ("MAX_CPU_SHARE", "MAX_RAM_SHARE", "MAX_DISK_SHARE")
+HOST_LIMIT_NET_KEYS = ("MAX_NET_GIB_PER_DAY", "MAX_NET_MIB_PER_SECOND")
+ON_CLOSE_VALUES = ("refuse", "stop")
+
+
+def validate_host_policy_config(config: Dict[str, Any]) -> None:
+    """Validate `host_limits` and `activity_window`: how much of the host, and when.
+
+    Both are refusal policies, and a malformed one fails in whichever direction the
+    reader happens to guess -- a share that reads as 0 silently lifts a ceiling the
+    operator set, and a window that does not parse leaves the node open all night. So
+    they are checked here, at load, where the node can still say what is wrong instead
+    of behaving as if nothing were.
+    """
+    limits = config.get("host_limits") or {}
+    if not isinstance(limits, dict):
+        raise ConfigValidationError("Malformed 'host_limits' mapping.")
+    for key in HOST_LIMIT_SHARE_KEYS:
+        _require_share(limits, "host_limits", key)
+    for key in HOST_LIMIT_NET_KEYS:
+        _require_nonneg_number(limits, "host_limits", key)
+
+    window = config.get("activity_window") or {}
+    if not isinstance(window, dict):
+        raise ConfigValidationError("Malformed 'activity_window' mapping.")
+
+    # Imported here rather than at module scope: this module is loaded from inside
+    # ConfigManager.load_config, and activity_window builds a ConfigManager of its own.
+    from src.utils.activity_window import parse_clock
+
+    for key in ("START", "END"):
+        if key not in window:
+            continue
+        raw = window[key]
+        if parse_clock(str(raw).strip() if raw is not None else "") is None:
+            raise ConfigValidationError(
+                f"activity_window.{key} must be a time of day as HH:MM, got {raw!r}. "
+                "Midnight is 00:00; a window that ends before it starts wraps around it."
+            )
+
+    if "ON_CLOSE" in window:
+        on_close = str(window["ON_CLOSE"] or "").strip().lower()
+        if on_close not in ON_CLOSE_VALUES:
+            raise ConfigValidationError(
+                f"activity_window.ON_CLOSE must be one of {ON_CLOSE_VALUES}, "
+                f"got {window['ON_CLOSE']!r}"
+            )
+
+
 PRICE_KEYS = (
     "RAM_MU_PER_GIB_HOUR",
     "CPU_MU_PER_VCPU_HOUR",

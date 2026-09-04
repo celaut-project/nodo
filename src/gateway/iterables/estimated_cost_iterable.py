@@ -9,6 +9,7 @@ from src.virtualizers.architecture import UnsupportedArchitectureException, get_
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
 from src.manager.manager import default_initial_balance
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
+from src.utils import activity_window
 from src.utils.network_policy import enforce_network_policy
 from src.utils.logger import LOGGER as logger
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
@@ -38,6 +39,20 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
 
                 if not self.service_hash:
                     raise Exception("No service hash provided.")
+
+                # A price is an offer, and a closed node has nothing to offer: quoting
+                # while outside `activity_window` only gets the asking peer's balancer
+                # to select us and then fail at launch, the same reasoning the network
+                # policy below is enforced here for (#280).
+                #
+                # No dev-client exemption on this path, unlike `launch_service`: this
+                # RPC is only ever reached by a peer over the wire, so every request
+                # arriving here is outside work by construction. The operator's own
+                # launches price themselves in-process through
+                # `execution_balancer`/`generate_estimated_cost` and never come past
+                # here at all.
+                if not activity_window.is_open():
+                    raise Exception(activity_window.closed_reason())
 
                 service = read_service_from_disk(service_hash=self.service_hash)
 

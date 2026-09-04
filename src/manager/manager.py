@@ -188,6 +188,58 @@ def get_execute_client(amount_mu: int, external: bool = False) -> str:
     pool_size = DEV_EXTERNAL_CLIENT_POOL_SIZE if external else STANDARD_DEV_CLIENT_POOL_SIZE
     return _acquire_dev_client(prefix, pool_size, amount_mu)
             
+def is_dev_client_id(client_id: Optional[str]) -> bool:
+    """Whether ``client_id`` names one of this node's own dev clients.
+
+    Covers both pools, since `dev-external-` is drawn from `dev-`. Existence in the
+    clients table is checked, not just the prefix: a client id arrives verbatim in the
+    request (see `AbstractInputServiceIterable`), so anything that grants a privilege on
+    the strength of one has to be sure this node issued it. The uuid4 in a real dev
+    client id is not guessable from outside.
+    """
+    if not client_id:
+        return False
+    text = str(client_id)
+    if not text.startswith(DEV_CLIENT_PREFIX):
+        return False
+    try:
+        return sc.client_exists(client_id=text)
+    except Exception as e:
+        log.LOGGER(f"Could not check whether {text} is a dev client: {e}")
+        return False
+
+
+def descends_from_dev_client(id: Optional[str], max_depth: int = 64) -> bool:
+    """Whether ``id`` is a dev client, or an instance ultimately launched by one.
+
+    What exempts work from `activity_window`: a launch that traces back to the operator
+    is theirs, whatever hour it is, and the window exists to stop this machine being
+    *rented* outside its hours -- not to stop its owner using it. `nodo execute`, the
+    core services and `nodo pack` all run under a dev client, so all of them keep
+    working while the node is closed to everyone else.
+
+    Walks up the father chain, since only the instance at the top of it carries the
+    client id: a service two levels deep inside a dev launch is still the operator's,
+    and so is the `rundev::` sandbox `nodo ggconf` records with a dev client as its
+    father. ``max_depth`` is a cycle guard -- a father chain should be a chain, and a
+    database that says otherwise must not spin this loop forever.
+    """
+    current = id
+    for _ in range(max_depth):
+        if not current:
+            return False
+        if is_dev_client_id(current):
+            return True
+        if not sc.internal_instance_exists(id=current):
+            return False
+        parent = sc.get_internal_father_id(id=current)
+        if not parent or parent == current:
+            return False
+        current = parent
+    log.LOGGER(f"Father chain of {id} is deeper than {max_depth}; treating it as not dev.")
+    return False
+
+
 def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
     """Check that ``peer`` really controls a reputation proof it announced.
 

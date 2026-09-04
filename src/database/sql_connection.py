@@ -51,7 +51,7 @@ CONSUMPTION_WINDOW_SAMPLES = max(1, CONSUMPTION_WINDOW_SECONDS // max(1, MANAGER
 # has no upgrade path at all. Without these, a peer's reputation update would fail and
 # roll its score back with the missing event, which is a worse outcome than the feature
 # simply not being there. Everything created here is `IF NOT EXISTS`.
-TRACEABILITY_TABLES = ("payments", "reputation_events", "service_reputation")
+TRACEABILITY_TABLES = ("payments", "reputation_events", "service_reputation", "tunnel_traffic")
 
 
 def _ensure_traceability_tables(connection) -> None:
@@ -639,6 +639,43 @@ class SQLConnection(metaclass=Singleton):
             SELECT father_id, ip, id FROM local_instances
         ''')
         return [row['id'] for row in result.fetchall()]
+
+    def get_committed_resources(self) -> List[dict]:
+        """The resource grant of every instance on this node, one row each.
+
+        What `host_limits` adds up to decide whether there is room for one more. The
+        same four columns the maintenance tick prices an instance by, and for the same
+        reason: the row is what the guest was actually created with, so summing it
+        bounds real usage rather than estimating it.
+
+        Every row, dev instances included. The ceiling is on what nodo occupies on this
+        machine, and memory held by a dev instance is as unavailable to the person using
+        the PC as any other.
+        """
+        result = self._execute('''
+            SELECT mem_limit, disk_space, cpu_period, cpu_quota FROM local_instances
+        ''')
+        return [dict(row) for row in result.fetchall()]
+
+    def get_tunnel_traffic(self, day: str) -> int:
+        """Bytes this node has relayed through its tunnel on ``day`` (ISO date)."""
+        result = self._execute('SELECT bytes FROM tunnel_traffic WHERE day = ?', (day,))
+        row = result.fetchone()
+        return int(row['bytes']) if row and row['bytes'] is not None else 0
+
+    def add_tunnel_traffic(self, day: str, byte_count: int) -> None:
+        """Add ``byte_count`` to ``day``'s relayed total, creating the row if needed.
+
+        An upsert rather than a read-modify-write: the relay threads of every open
+        tunnel land here, and adding in SQL means two of them cannot both read the same
+        total and each write it back plus their own bytes.
+        """
+        if byte_count <= 0:
+            return
+        self._execute('''
+            INSERT INTO tunnel_traffic (day, bytes) VALUES (?, ?)
+            ON CONFLICT(day) DO UPDATE SET bytes = bytes + excluded.bytes
+        ''', (day, int(byte_count)))
 
     def local_instance_name_exists(self, name: str) -> bool:
         result = self._execute('''

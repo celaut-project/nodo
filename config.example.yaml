@@ -589,6 +589,70 @@ workload_admission:
   #              run a second later.
   ON_UNSATISFIABLE: reject
 
+# Hard ceilings on what this node may take from the machine it runs on. Written for a
+# node sharing a PC with the person using it: scarcity pricing (`pricing.SCARCITY_*`)
+# only makes a busy machine expensive, and `low_demand` only gates the opportunistic
+# fallback -- neither of them ever refuses a paid workload. Without this, a client may
+# rent every core and every byte the host has.
+#
+# The ceilings are checked at admission (and on every resize), against the sum of what
+# every instance this node runs has been *granted* -- the `local_instances` row the
+# maintenance tick prices it by -- plus what the newcomer asks for. That sum is a real
+# bound on usage rather than an estimate: the hypervisor holds each guest to the memory
+# size, CFS quota and image size it was created with. Nothing here samples live load;
+# that is what the scarcity surcharge is for.
+#
+# They apply to every instance this node starts, its own included: the point is a cap on
+# what nodo occupies, and a cap that its owner's instances could step over would not be
+# one. `nodo instances` is where to look when a launch is refused for want of room.
+host_limits:
+  ENABLED: false
+  # Shares of the whole machine, as psutil reports it. 0 lifts that one ceiling.
+  # CPU: the share of the host's physical cores every instance's CFS quota may add up to.
+  MAX_CPU_SHARE: 0.5
+  # RAM: the share of total memory every instance's memory limit may add up to.
+  MAX_RAM_SHARE: 0.5
+  # DISK: the share of the filesystem holding `main.STORAGE` every instance's image may
+  # add up to. Measured against the filesystem's total size, not its free space, so a
+  # disk someone else filled does not quietly raise this node's allowance.
+  MAX_DISK_SHARE: 0.5
+  # Tunnelled traffic, counting both directions, per calendar day in local time. Once
+  # the day's allowance is spent no tunnel opens and the open ones close; it resets at
+  # midnight, and the running total survives a restart. Counts only what crosses this
+  # node's tunnel (docs/TUNNELING.md): an instance reachable on a port of its own talks
+  # to the world without passing through here. 0 is unlimited.
+  MAX_NET_GIB_PER_DAY: 0
+  # Ceiling on tunnelled throughput in MiB per second, across every tunnel at once.
+  # Shapes the relay by making it wait rather than closing anything, so a transfer over
+  # the limit gets slower and still finishes. 0 is unlimited.
+  MAX_NET_MIB_PER_SECOND: 0
+
+# The hours of the day this node accepts work in. The other half of `host_limits`: that
+# one bounds how much of the machine may be rented, this one bounds when.
+#
+# Outside the window the node refuses new work -- a client's StartService, a peer's cost
+# request, a peer's capacity probe, and a running instance asking for a child. Work
+# started from a dev client is exempt, and so is everything descended from one, which is
+# what keeps `nodo execute`, the core services and `nodo pack` working at any hour: the
+# window is about renting this machine out, not about locking its owner out of it.
+activity_window:
+  ENABLED: false
+  # Local time, HH:MM. START is inclusive, END exclusive. A window that wraps midnight
+  # is the night shift and is read as one: START 22:00 / END 06:00 is open all night.
+  # START equal to END means always open, so enabling this before choosing the hours
+  # refuses nothing.
+  START: "00:00"
+  END: "00:00"
+  # What closing time does to work already running.
+  #   refuse  Only stop taking new work. Instances already running keep running, keep
+  #           being charged, and stop when their balance runs out or their client says so.
+  #   stop    Also stop every instance that is not descended from a dev client, the
+  #           moment the window closes. The client is refunded whatever its balance
+  #           still holds, exactly as `nodo stop` would refund it -- but its work is
+  #           destroyed mid-flight, so only ask for this on a machine whose hours are
+  #           genuinely not negotiable.
+  ON_CLOSE: refuse
+
 timing:
   GENERAL_WAIT_TIME: 2
   GENERAL_ATTEMPTS: 10

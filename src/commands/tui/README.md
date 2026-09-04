@@ -145,11 +145,13 @@ responsible for something is the part of the config responsible for it too:
 | `VESICLES · voice` | Delegating work to peers and paying for it, announcing to peers, how much an announcement carries |
 | `NUCLEUS · identity & wallet` | The identity mnemonic, the Ergo wallet, the cold wallet, and whether payments are real |
 | `IMMUNE · trust` | Service egress, child isolation, integrity checks, device nodes, manifest claims |
+| `WALL · footprint & hours` | How much of this machine may be held at once (CPU, RAM, disk, network), and the hours of the day work is taken in |
 | `MITOCHONDRIA · money` | The scarcity surcharge, the free tier, instance debt, the display unit — and a link to Pricing, which owns the prices themselves |
 | `VACUOLE · upkeep` | Debug logging, failure retention, downloaded files |
 
-A wide terminal draws all seven; a narrow one collapses to one column with the
-focused organelle open. The keys are the same either way.
+A wide terminal draws all eight; a narrow one collapses to one column with the
+focused organelle open. The keys are the same either way. A box shorter than its own
+list of levers scrolls to whatever is selected, so nothing in it becomes unreachable.
 
 ### Levers
 

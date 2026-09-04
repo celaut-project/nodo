@@ -615,6 +615,7 @@ class ConfigManager(metaclass=Singleton):
             from src.utils.config_validation import (
                 _find_removed_keys,
                 ConfigValidationError,
+                validate_host_policy_config,
                 validate_pricing_config,
             )
             _removed = _find_removed_keys(self._config)
@@ -630,6 +631,12 @@ class ConfigManager(metaclass=Singleton):
             # prices and the payment rate drifting onto different scales, which is the
             # failure the gas model shipped with -- are logged instead.
             validate_pricing_config(self._config, warn=lambda message: self.log(f"[PRICING] {message}"))
+
+            # How much of the host this node may take, and when (host_limits,
+            # activity_window). Refusal policies: a share that reads as 0 lifts a
+            # ceiling the operator set and a window that does not parse leaves the node
+            # open all night, so a malformed one stops here rather than being guessed at.
+            validate_host_policy_config(self._config)
 
             # Note what is NOT here: the gateway port. Picking one writes a rule
             # into the host's firewall and a value into this file, and that used to

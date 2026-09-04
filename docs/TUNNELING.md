@@ -158,6 +158,25 @@ Two honest details:
   which is `true` in the shipped config. With debt allowed, tunnels are metered
   and logged but not cut off.
 
+### The operator's own ceilings
+
+Prices decide what traffic *costs*; `host_limits` decides how much of it there may be at
+all. Two ceilings apply here, and neither is a price:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `host_limits.MAX_NET_GIB_PER_DAY` | `0` | The day's relayed volume, both directions. Spent, `service_tunnel` refuses to open one (before charging `TUNNEL_OPEN_MU`, so nobody pays to open a tunnel this node was never going to relay) and the open ones close on their next block. Resets at local midnight, and the running total is kept in the `tunnel_traffic` table so a restart does not hand out a fresh allowance. |
+| `host_limits.MAX_NET_MIB_PER_SECOND` | `0` | Throughput across every tunnel at once, shaped by making the relay wait. A transfer over the ceiling gets slower and still finishes. One token bucket for the whole node, not one per tunnel. |
+
+Both are inert until `host_limits.ENABLED` is `true`, and `0` means unlimited. They are
+applied whatever the rates say: `pricing.NET_MU_PER_GIB` of `0` turns off the *charge*
+and never the ceiling, so a node giving traffic away still has a daily allowance, and a
+client with a full balance still gets shaped. See [`CONFIG.md`](CONFIG.md#host_limits--how-much-of-this-machine-nodo-may-take).
+
+Only what crosses this relay is counted. An instance reachable on a port of its own
+(`network.DISABLE_EXPOSE_OUTSIDE: false`) talks to the world without passing through
+here, and nothing in nodo meters that.
+
 ### Peers can see these rates before using them
 
 `tunnel_open_mu` and `net_mu_per_gib` are advertised to peers, together with the

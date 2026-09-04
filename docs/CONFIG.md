@@ -329,6 +329,69 @@ maintenance-loop timing and client slot/expiration policy.
 |---|---|---|
 | `client.ACCEPT_NEW_DEPOSITS` | `true` | Set `false` to stop `GenerateDepositToken` for every client (local or peer): no one can open a new deposit, so no one can acquire MU beyond what they already hold. Existing balances keep spending normally -- this only closes the door on new top-ups. Use to stop onboarding new demand, or to cap growth even while demand exists. |
 
+## `host_limits` — how much of this machine nodo may take
+
+For a node sharing a PC with the person using it. Nothing else in the config refuses a
+paid workload: `pricing.SCARCITY_*` makes a loaded machine expensive and `low_demand`
+gates only the opportunistic fallback, so without these a client may rent every core and
+every byte the host has.
+
+CPU, RAM and disk are **admission ceilings**. They are checked at launch and on every
+resize, against the sum of what every instance has been *granted* (the `local_instances`
+row the maintenance tick prices it by) plus what the newcomer asks for. That sum bounds
+real usage rather than estimating it: the hypervisor holds each guest to the memory size,
+CFS quota and image size it was created with. Nothing here samples live load.
+
+Network has no grant to add up, so it is metered as it flows: the day's volume is counted
+and the throughput shaped, both from the tunnel relay. Only **tunnelled** traffic
+(see [`TUNNELING.md`](TUNNELING.md)) passes through there — an instance reachable on a
+port of its own talks to the world without touching this node's relay.
+
+The ceilings apply to every instance this node starts, its own included. A cap on what
+nodo occupies that the operator's own instances could step over would not be a cap.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `host_limits.ENABLED` | `false` | Master switch. Off, none of the ceilings below apply. |
+| `host_limits.MAX_CPU_SHARE` | `0.5` | Share of the host's **physical** cores that every instance's CFS quota may add up to. `0` lifts this ceiling. |
+| `host_limits.MAX_RAM_SHARE` | `0.5` | Share of total memory that every instance's memory limit may add up to. |
+| `host_limits.MAX_DISK_SHARE` | `0.5` | Share of the filesystem holding `main.STORAGE` that every instance's image may add up to. Measured against its **total** size, not its free space, so a disk something else filled does not quietly raise this node's allowance. |
+| `host_limits.MAX_NET_GIB_PER_DAY` | `0` | Tunnelled traffic, both directions, per local calendar day. Spent, no tunnel opens and the open ones close; it resets at midnight and the running total survives a restart (table `tunnel_traffic`). `0` is unlimited. |
+| `host_limits.MAX_NET_MIB_PER_SECOND` | `0` | Ceiling on tunnelled throughput across every tunnel at once. Shapes the relay by making it wait rather than closing anything, so a transfer over the ceiling gets slower and still finishes. `0` is unlimited. |
+
+A refusal names the key that would change it, and every ceiling the instance breaches
+rather than the first — an operator told only about memory would raise the memory share,
+retry, and be told about disk. A capacity psutil cannot report lifts its own ceiling: an
+unknown total is not evidence of a small one, and the memory pool and free-disk checks
+still apply either way.
+
+Edited from the TUI's Cell page, under `WALL · footprint & hours`.
+
+## `activity_window` — the hours work is taken in
+
+The other half of `host_limits`: that one bounds how much of the machine may be rented,
+this one bounds when. Rent the PC out overnight; keep it to yourself while you are
+working.
+
+Outside the window the node refuses **new** work: a client's `StartService`, a peer's
+`GetServiceEstimatedCost`, a peer's `GetResourceAvailability`, and a running instance
+asking for a child. Work descended from a dev client is exempt, which is what keeps
+`nodo execute`, the core services and `nodo pack` working at any hour — the window is
+about renting this machine out after hours, not about locking its owner out of it.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `activity_window.ENABLED` | `false` | Master switch. |
+| `activity_window.START` | `"00:00"` | Local time, `HH:MM`, inclusive. |
+| `activity_window.END` | `"00:00"` | Local time, `HH:MM`, exclusive. Earlier than `START` wraps around midnight: `22:00`–`06:00` is one window, open all night. Equal to `START` means always open, so enabling the section before choosing the hours refuses nothing. |
+| `activity_window.ON_CLOSE` | `refuse` | `refuse` stops taking new work and leaves running instances alone — they keep being charged, and an empty balance still reaps them. `stop` **also stops every instance not descended from a dev client** the moment the window closes, refunding what its balance still holds; its work is destroyed mid-flight, so only ask for it on a machine whose hours are genuinely not negotiable. |
+
+A malformed `START` or `END` is rejected at load. A window that somehow reaches the
+runtime unparseable leaves the node open and logs once: taking the node off the network
+over a typo would be a silent outage where a log line is enough.
+
+Edited from the TUI's Cell page, under `WALL · footprint & hours`.
+
 ## `identity` — the node's name
 
 | Key | Default | Meaning |

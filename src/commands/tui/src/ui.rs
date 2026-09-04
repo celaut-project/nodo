@@ -1362,9 +1362,11 @@ fn draw_cell(frame: &mut Frame, app: &mut App, area: Rect) {
     let inside = membrane.inner(rows[1]);
     frame.render_widget(membrane, rows[1]);
 
-    // 3 columns of organelles need room for a label, a value and a gap; below that
-    // the boxes are narrower than their own titles and the grid stops being readable.
-    if inside.width >= 84 && inside.height >= 16 {
+    // The grid's widest band is four organelles across, and each one needs room for a
+    // label, a value and a gap; below ~28 columns apiece the boxes are narrower than
+    // their own titles and the grid stops being readable. Narrower terminals get the
+    // accordion, which shows one organelle at a time whatever the count.
+    if inside.width >= 112 && inside.height >= 16 {
         draw_cell_grid(frame, app, inside, document.as_ref());
     } else {
         draw_cell_accordion(frame, app, inside, document.as_ref());
@@ -1394,11 +1396,15 @@ fn draw_profile_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-/// Two rows of three organelles with the nucleus banded across the middle.
+/// The outward-facing organelles above, the self-preserving ones below, and the nucleus
+/// banded across the middle.
 ///
 /// The nucleus is horizontal and central because it is what everything else depends
 /// on and the only part whose loss is permanent: a mnemonic is not recoverable, and
 /// a row of it beside "keep failures for 7 days" would read as equally routine.
+///
+/// The two rows hold three and four, which is what reading order costs: the split is
+/// "does this face outwards or inwards", not "how do these divide by three".
 fn draw_cell_grid(
     frame: &mut Frame,
     app: &mut App,
@@ -1419,9 +1425,10 @@ fn draw_cell_grid(
     ])
     .split(bands[0]);
     let bottom = Layout::horizontal([
-        Constraint::Ratio(1, 3),
-        Constraint::Ratio(1, 3),
-        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 4),
+        Constraint::Ratio(1, 4),
+        Constraint::Ratio(1, 4),
+        Constraint::Ratio(1, 4),
     ])
     .split(bands[2]);
 
@@ -1431,8 +1438,9 @@ fn draw_cell_grid(
         (Organelle::Vesicles, top[2]),
         (Organelle::Nucleus, bands[1]),
         (Organelle::Immune, bottom[0]),
-        (Organelle::Mitochondria, bottom[1]),
-        (Organelle::Vacuole, bottom[2]),
+        (Organelle::Wall, bottom[1]),
+        (Organelle::Mitochondria, bottom[2]),
+        (Organelle::Vacuole, bottom[3]),
     ];
     for (organelle, box_area) in placement {
         draw_organelle(frame, app, organelle, box_area, document);
@@ -1520,8 +1528,27 @@ fn draw_organelle(
             .collect::<Vec<_>>(),
     )
     .split(inner);
-    for (lever_index, (row, lever)) in rows.iter().zip(levers.iter()).enumerate() {
+
+    // The grid hands every box a share of the band, which can be shorter than the
+    // organelle's own list -- and a lever drawn nowhere is a lever the operator cannot
+    // reach, on a page whose whole job is to be the reachable half of the config. So
+    // the box scrolls: the selected row is always drawn, and the ones above it slide
+    // off the top. Unfocused boxes start at the first lever, which is what the eye
+    // expects of a box it is not driving.
+    let visible = rows.len();
+    let offset = if focused && visible > 0 && app.cell.lever >= visible {
+        (app.cell.lever + 1).saturating_sub(visible)
+    } else {
+        0
+    };
+    for (row, (lever_index, lever)) in rows
+        .iter()
+        .zip(levers.iter().enumerate().skip(offset))
+    {
         let selected = focused && app.cell.lever == lever_index;
+        // The absolute index, not the position in this window: it is what a mouse
+        // click resolves to a lever, and a scrolled box would otherwise select the
+        // wrong one.
         app.cell.lever_areas.push((index, lever_index, *row));
         frame.render_widget(
             Paragraph::new(lever_line(lever, document, selected, row.width)),
@@ -1618,6 +1645,7 @@ fn organelle_colour(organelle: Organelle) -> Color {
         Organelle::Vesicles => Color::LightMagenta,
         Organelle::Nucleus => WARN,
         Organelle::Immune => Color::Red,
+        Organelle::Wall => Color::LightYellow,
         Organelle::Mitochondria => GOOD,
         Organelle::Vacuole => MUTED,
     }
@@ -2409,6 +2437,57 @@ mod tests {
                 );
             }
             assert!(screen.contains("MEMBRANE"), "the membrane frames the page");
+        }
+
+        /// The grid gives every box a fixed share of its band, and an organelle can
+        /// hold more levers than that share has rows -- WALL, with the ceilings and the
+        /// hours in it, is the first one that does. A lever that is drawn nowhere
+        /// cannot be operated, so the box scrolls to whatever is selected rather than
+        /// clipping the tail off the list.
+        #[test]
+        fn a_lever_past_the_bottom_of_its_box_is_still_drawn() {
+            let wall = cell::Organelle::ALL
+                .iter()
+                .position(|organelle| *organelle == cell::Organelle::Wall)
+                .unwrap();
+            let last = cell::Organelle::Wall.levers().len() - 1;
+            let label = cell::Organelle::Wall.levers()[last].label;
+
+            let mut app = App::new();
+            app.config_document = Some(serde_yaml::from_str(RENTING).unwrap());
+            let backend = TestBackend::new(120, 30);
+            let mut terminal = Terminal::new(backend).unwrap();
+
+            let render = |app: &mut App, terminal: &mut Terminal<TestBackend>| {
+                terminal
+                    .draw(|frame| draw_cell(frame, app, frame.size()))
+                    .unwrap();
+                let buffer = terminal.backend().buffer().clone();
+                (0..buffer.area.height)
+                    .map(|row| {
+                        (0..buffer.area.width)
+                            .map(|column| buffer.get(column, row).symbol())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+
+            // Guards the test: the last lever really is off the bottom to begin with,
+            // or scrolling to it would prove nothing.
+            let unscrolled = render(&mut app, &mut terminal);
+            assert!(
+                !unscrolled.contains(label),
+                "{label} fits without scrolling, so this test proves nothing:\n{unscrolled}"
+            );
+
+            app.cell.organelle = wall;
+            app.cell.lever = last;
+            let scrolled = render(&mut app, &mut terminal);
+            assert!(
+                scrolled.contains(label),
+                "{label} is unreachable in the grid:\n{scrolled}"
+            );
         }
 
         /// A lever is only useful if its current position is visible: "outside work"
