@@ -823,7 +823,17 @@ def credit_father(father_id: str, amount_mu: int) -> bool:
     return False
 
 
-def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
+def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
+    """Stop an instance and hand its unspent deposit back, returning that figure.
+
+    ``credit=False`` stops the instance and reads the leftover without crediting
+    anybody: the returned figure is then a debt the caller has taken on, and the
+    money exists nowhere else once ``purge_internal`` has run. Only a caller that
+    stops a whole subtree has any use for it -- see ``nodo burnall``, which
+    stops fathers before their children and so cannot let each child pay its own
+    father, whose row is already gone by then. Every other caller stops one
+    instance whose father is still there, and wants the default.
+    """
     token = resolve_instance_token(token) or token
     log.LOGGER('Kill service ' + token)
     father_id, serialized_instance = None, None
@@ -881,7 +891,15 @@ def stop_instance(token: str) -> Optional[int]:  # TODO Should be divided into t
             # is the direction to err in: the books may owe a father, they may never
             # invent MU that no one paid in.
             if refund and int(refund) > 0:
-                if not father_id:
+                if not credit:
+                    # The caller owns this leftover now. Said out loud because the
+                    # row it was sitting in is gone: a caller that drops the
+                    # returned figure drops the money with it.
+                    log.LOGGER(
+                        f"Handing {format_mu(int(refund))} unspent by {token} to the "
+                        f"caller of stop_instance rather than to its father {father_id}."
+                    )
+                elif not father_id:
                     # The MU has left the child's row by now, so this is a real loss
                     # rather than a no-op, and is worth the same log line an unknown
                     # father gets in `credit_father`.

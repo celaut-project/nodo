@@ -14,9 +14,18 @@ the time the loop reaches the parent, the node is running services the loop
 already stopped once. Ordering by depth in the parent tree, roots first, means
 nothing outlives the thing that would ask for it again.
 
-Every instance is still stopped through ``stop_instance``, exactly as ``kill``
-does: the deposit is refunded to whoever paid it in, the memory is released and
-the row is purged. This is bulk, not a shortcut.
+Every instance is still stopped through ``stop_instance``: the memory is
+released, the row is purged and the unspent deposit is refunded. Where the
+refund lands is the one thing this does differently from ``kill``, and it is
+forced by the ordering. A child's leftover is credited to its father *after* the
+child's row is deleted, which is right for a lone stop -- a purge that fails
+must credit nothing so the retry pays exactly once -- and impossible here: by
+the time a child is stopped, the father the money belongs to has been purged
+too. So the refunds are rolled up instead of paid out one by one. Each instance
+is stopped with ``credit=False``, its leftover is added to the total owed at the
+top of its branch, and every total is credited once the burn is over -- to the
+client that asked for the root, or to the nearest ancestor that would not stop,
+which is still there to receive it.
 
 Nothing is stopped without a typed confirmation, because the blast radius is not
 this operator's own work. An instance a client asked for is stopped like any
@@ -30,7 +39,8 @@ import sys
 from typing import Dict, List, Sequence
 
 from src.database.sql_connection import SQLConnection
-from src.manager.manager import stop_instance
+from src.manager.manager import credit_father, stop_instance
+from src.utils.monetary import format_mu
 
 sc = SQLConnection()
 
@@ -167,19 +177,50 @@ def burnall(argv: List[str] = None) -> None:
         return
 
     stopped, failed = 0, []
+    owed: Dict[str, int] = {}
+    creditor: Dict[str, str] = {}
     for i in ordered:
+        father = fathers.get(i) or ""
+        # Who this instance's leftover is owed to. A father this loop has already
+        # stopped has no row left to credit, so the debt rolls up to whoever the
+        # father's own leftover is owed to -- the client at the root of the branch.
+        # A father that would not stop is still there, and is paid directly.
+        creditor[i] = creditor[father] if father in creditor else father
+
         # One instance that will not stop must not strand the rest: the ones
         # after it in the order are its children, and they are exactly what a
         # burnall is for.
         try:
-            if stop_instance(token=i) is not None:
-                stopped += 1
-            else:
-                failed.append((i, "stop_instance reported no result"))
+            refund = stop_instance(token=i, credit=False)
         except Exception as e:
+            del creditor[i]
             failed.append((i, str(e)))
+            continue
+
+        if refund is None:
+            # Nothing was purged, so nothing was taken off the row: the instance
+            # keeps its balance and owes this burn nothing.
+            del creditor[i]
+            failed.append((i, "stop_instance reported no result"))
+            continue
+
+        stopped += 1
+        if int(refund) > 0:
+            owed[creditor[i]] = owed.get(creditor[i], 0) + int(refund)
 
     print(f"\nStopped {stopped} of {len(ordered)} instance(s).")
+
+    # Paid here rather than inside the loop: this is the point where the whole
+    # branch is down and the sum is final. A crash before it loses the leftovers,
+    # which is the direction to err in -- the books may owe a client, they may
+    # never invent MU nobody paid in.
+    for account, amount in sorted(owed.items()):
+        if not account:
+            print(f"  lost: {format_mu(amount)} with no father on record")
+        elif credit_father(father_id=account, amount_mu=amount):
+            print(f"  refunded: {format_mu(amount)} to {account[:16]}")
+        else:
+            print(f"  lost: {format_mu(amount)} -- {account[:16]} is neither a client nor an instance")
     for i, err in failed:
         print(f"  failed: {i[:16]} -- {err}")
     if failed:
