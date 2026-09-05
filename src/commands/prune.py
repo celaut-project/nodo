@@ -15,6 +15,14 @@ This command reports both and, unless ``--dry-run``, removes them. It prints
 every entry with its size and its reason -- including the ones it *keeps* and
 why -- because an operator running this to find disk needs to see the whole
 picture, not the subset this run happened to act on.
+
+Reclaiming a ``runtime/`` entry can also stop the VM that owns it: an orphan is
+a VM whose process may still be running (a guest whose kernel panicked is the
+clearest case). Those are torn down through the same path the maintenance tick
+uses, so an instance the database still has a row for is *stopped*, not merely
+killed -- its row is purged and its unspent deposit goes back to its father.
+This is disk reclamation that happens to end a VM's life, never a disk-only
+sweep that leaves the books talking about something that no longer exists.
 """
 
 import os
