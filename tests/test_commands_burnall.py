@@ -4,6 +4,14 @@ A running orchestrator launches children on demand. Stop its children first and
 it replaces them while the loop is still going, so the node ends up running
 services the loop already stopped once -- which is why this is a command with an
 ordering rather than a shell loop over `nodo instances`.
+
+That ordering is also what the money has to work around. `stop_instance` credits
+a child's leftover to its father after purging the child's row, so a burn that
+stopped the father first would be crediting a row that no longer exists and every
+child's unspent deposit would vanish. `burnall` therefore stops with
+`credit=False` and rolls the leftovers up its own parent tree, paying each total
+to the client that asked for the root -- or to the nearest ancestor that would
+not stop, which is still there to receive it.
 """
 import unittest
 from unittest.mock import patch
@@ -26,6 +34,25 @@ TREE = {
 }
 
 
+def _burn(stop):
+    """A confirmed burn of the whole `TREE`, driven by a per-token `stop_instance`.
+
+    Returns the order the instances were stopped in and the credits that came out
+    of it, keyed by the account each total was paid to.
+    """
+    with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+         patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
+                      return_value=list(TREE)), \
+         patch.object(burnall_cmd.sc, "get_internal_father_id",
+                      side_effect=lambda id: TREE.get(id, "")), \
+         patch.object(burnall_cmd, "credit_father", return_value=True) as credit_mock, \
+         patch.object(burnall_cmd, "stop_instance", side_effect=stop) as stop_mock:
+        burnall_cmd.burnall(argv=["--yes"])
+    return (
+        [c.kwargs["token"] for c in stop_mock.call_args_list],
+        {c.kwargs["father_id"]: c.kwargs["amount_mu"] for c in credit_mock.call_args_list},
+    )
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class BurnallOrderingTests(unittest.TestCase):
     def _run(self, argv=None, euid=0, stop_result=1, ids=None, typed=burnall_cmd.CONFIRMATION,
@@ -37,6 +64,7 @@ class BurnallOrderingTests(unittest.TestCase):
                           side_effect=lambda id: TREE.get(id, "")), \
              patch.object(burnall_cmd.sys.stdin, "isatty", return_value=tty), \
              patch("builtins.input", return_value=typed), \
+             patch.object(burnall_cmd, "credit_father", return_value=True), \
              patch.object(burnall_cmd, "stop_instance", return_value=stop_result) as stop_mock:
             burnall_cmd.burnall(argv=argv)
         return [c.kwargs["token"] for c in stop_mock.call_args_list]
@@ -106,21 +134,13 @@ class BurnallOrderingTests(unittest.TestCase):
     def test_one_instance_that_will_not_stop_does_not_strand_the_rest(self):
         # The instances after it in the order are its children, which are
         # exactly what a burnall is for.
-        def stop(token):
+        def stop(token, credit=True):
             if token == "child":
                 raise RuntimeError("busy")
             return 1
 
-        with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
-             patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
-                          return_value=list(TREE)), \
-             patch.object(burnall_cmd.sc, "get_internal_father_id",
-                          side_effect=lambda id: TREE.get(id, "")), \
-             patch.object(burnall_cmd, "stop_instance", side_effect=stop) as stop_mock:
-            burnall_cmd.burnall(argv=["--yes"])
-        attempted = [c.kwargs["token"] for c in stop_mock.call_args_list]
+        attempted, _ = _burn(stop)
         self.assertCountEqual(attempted, list(TREE))
-
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DepthTests(unittest.TestCase):
@@ -135,3 +155,61 @@ class DepthTests(unittest.TestCase):
         # the command before it did any work.
         cyclic = {"a": "b", "b": "a"}
         self.assertIsInstance(burnall_cmd._depth("a", cyclic, ["a", "b"]), int)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class RefundRollupTests(unittest.TestCase):
+    """Where the leftovers land when the fathers they belong to are gone.
+
+    The father of every stopped instance in `TREE` is purged before its children
+    are reached, so nothing here can be credited instance by instance. What is
+    under test is that no MU is dropped on the way up: the whole subtree's
+    leftovers reach the client that asked for the root.
+    """
+
+    LEFTOVERS = {"parent": 10, "child": 20, "grandchild": 30, "other-root": 40}
+
+    def test_nothing_is_credited_to_a_father_this_burn_already_purged(self):
+        # The bug: `stop_instance`'s own credit would hand `child`'s leftover to
+        # `parent`, whose row is gone by then, and the money would be dropped.
+        _, credits = _burn(lambda token, credit=True: self.LEFTOVERS[token])
+        self.assertNotIn("parent", credits)
+        self.assertNotIn("child", credits)
+
+    def test_a_whole_subtree_is_refunded_to_the_client_that_asked_for_its_root(self):
+        _, credits = _burn(lambda token, credit=True: self.LEFTOVERS[token])
+        self.assertEqual(credits, {"client-1": 10 + 20 + 30, "client-2": 40})
+
+    def test_the_leftovers_are_read_without_being_credited_twice(self):
+        # `credit=False` is what makes the roll-up the only payment: leave it out
+        # and `stop_instance` pays the father as well.
+        with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+             patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
+                          return_value=list(TREE)), \
+             patch.object(burnall_cmd.sc, "get_internal_father_id",
+                          side_effect=lambda id: TREE.get(id, "")), \
+             patch.object(burnall_cmd, "credit_father", return_value=True), \
+             patch.object(burnall_cmd, "stop_instance", return_value=1) as stop_mock:
+            burnall_cmd.burnall(argv=["--yes"])
+        self.assertTrue(all(c.kwargs["credit"] is False for c in stop_mock.call_args_list))
+
+    def test_an_ancestor_that_would_not_stop_is_paid_directly(self):
+        # `parent` is still running, so it still has a row and the money is still
+        # its own: crediting its client instead would fund the client out of a
+        # live instance's balance.
+        def stop(token, credit=True):
+            if token == "parent":
+                raise RuntimeError("busy")
+            return self.LEFTOVERS[token]
+
+        _, credits = _burn(stop)
+        self.assertEqual(credits, {"parent": 20 + 30, "client-2": 40})
+
+    def test_an_instance_that_reported_no_result_owes_nothing(self):
+        # A failed purge leaves the balance on the row, so there is nothing to
+        # roll up -- and crediting anyway would invent MU nobody paid in.
+        def stop(token, credit=True):
+            return None if token == "other-root" else self.LEFTOVERS[token]
+
+        _, credits = _burn(stop)
+        self.assertEqual(credits, {"client-1": 10 + 20 + 30})
