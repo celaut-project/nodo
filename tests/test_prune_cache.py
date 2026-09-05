@@ -222,6 +222,8 @@ class ReclaimTests(CacheFixture):
             "load_runtime_state",
             return_value={"pid": 1, "virtualizer": "qemu"},
         ), patch.object(
+            microvm_maintain.sc, "internal_instance_exists", return_value=False
+        ), patch.object(
             microvm_maintain, "kill_vm", return_value=True
         ) as kill_vm:
             microvm_maintain.reclaim(entry)
@@ -254,6 +256,139 @@ class ReclaimTests(CacheFixture):
         kill_vm.assert_not_called()
         self.assertFalse(entry.removed)
         self.assertIn("firecracker", entry.error)
+        self.assertTrue(path.exists())
+
+    def test_a_registered_instance_is_stopped_so_its_deposit_goes_home(self):
+        # The case that made this routing necessary: a guest whose kernel
+        # panicked is an orphan whose process *and* database row are both alive.
+        # `kill` would free the host's side of it and leave the row holding a
+        # deposit nobody is spending, reconciled only by a maintenance tick that
+        # never runs on a node whose `serve` is stopped (#326).
+        path = self._write_runtime_dir("vm-registered", size=1024)
+        entry = microvm_maintain.PruneEntry(
+            kind="runtime",
+            vmachine_id="vm-registered",
+            path=path,
+            reason="guest_panicked",
+            size_bytes=1024,
+        )
+
+        rows = {"vm-registered"}
+
+        def stop_instance(token):
+            rows.discard(token)
+
+        with patch.object(
+            microvm_maintain,
+            "load_runtime_state",
+            return_value={"pid": 1, "virtualizer": "qemu"},
+        ), patch.object(
+            microvm_maintain.sc, "internal_instance_exists", side_effect=lambda id: id in rows
+        ), patch.object(
+            microvm_maintain, "kill_vm"
+        ) as kill_vm, patch(
+            "src.manager.manager.stop_instance", side_effect=stop_instance
+        ) as stop:
+            microvm_maintain.reclaim(entry)
+
+        stop.assert_called_once_with(token="vm-registered")
+        # `stop_instance` kills the VM itself; a second teardown here would be
+        # `kill` running against a torn-down VM.
+        kill_vm.assert_not_called()
+        self.assertTrue(entry.removed)
+
+    def test_an_unregistered_orphan_is_only_killed(self):
+        # No row means no deposit to return and nothing to purge, so the
+        # host-side teardown is the whole job.
+        path = self._write_runtime_dir("vm-rowless", size=1024)
+        entry = microvm_maintain.PruneEntry(
+            kind="runtime",
+            vmachine_id="vm-rowless",
+            path=path,
+            reason="orphan_runtime_state",
+            size_bytes=1024,
+        )
+
+        with patch.object(
+            microvm_maintain,
+            "load_runtime_state",
+            return_value={"pid": 1, "virtualizer": "qemu"},
+        ), patch.object(
+            microvm_maintain.sc, "internal_instance_exists", return_value=False
+        ), patch.object(
+            microvm_maintain, "kill_vm", return_value=True
+        ) as kill_vm, patch(
+            "src.manager.manager.stop_instance"
+        ) as stop:
+            microvm_maintain.reclaim(entry)
+
+        stop.assert_not_called()
+        kill_vm.assert_called_once_with(
+            microvm_maintain.member("qemu"), vmachine_id="vm-rowless"
+        )
+        self.assertTrue(entry.removed)
+
+    def test_a_stop_that_left_the_row_behind_is_not_reported_as_done(self):
+        # `stop_instance` swallows a failed purge and returns None. Taking that
+        # for a stop would retire an instance from the operator's report while
+        # its balance stays on the books.
+        path = self._write_runtime_dir("vm-stubborn", size=1024)
+        entry = microvm_maintain.PruneEntry(
+            kind="runtime",
+            vmachine_id="vm-stubborn",
+            path=path,
+            reason="guest_panicked",
+            size_bytes=1024,
+        )
+
+        with patch.object(
+            microvm_maintain,
+            "load_runtime_state",
+            return_value={"pid": 1, "virtualizer": "qemu"},
+        ), patch.object(
+            microvm_maintain.sc, "internal_instance_exists", return_value=True
+        ), patch.object(
+            microvm_maintain, "kill_vm"
+        ), patch(
+            "src.manager.manager.stop_instance", return_value=None
+        ):
+            microvm_maintain.reclaim(entry)
+
+        self.assertFalse(entry.removed)
+        self.assertIn("database row", entry.error)
+        # Reported as what it is: still there, and still holding its disk.
+        self.assertTrue(path.exists())
+        self.assertEqual(entry.size_bytes, 0)
+
+    def test_an_unreadable_database_stops_the_reclamation(self):
+        # Guessing "not registered" and killing would leave a father charged for
+        # a child that is gone, which is the one direction the books must not
+        # err in. Nothing is touched and the entry says why.
+        path = self._write_runtime_dir("vm-unknowable", size=1024)
+        entry = microvm_maintain.PruneEntry(
+            kind="runtime",
+            vmachine_id="vm-unknowable",
+            path=path,
+            reason="guest_panicked",
+            size_bytes=1024,
+        )
+
+        with patch.object(
+            microvm_maintain,
+            "load_runtime_state",
+            return_value={"pid": 1, "virtualizer": "qemu"},
+        ), patch.object(
+            microvm_maintain.sc,
+            "internal_instance_exists",
+            side_effect=RuntimeError("no such table: local_instances"),
+        ), patch.object(
+            microvm_maintain, "kill_vm"
+        ) as kill_vm:
+            microvm_maintain.reclaim(entry)
+
+        kill_vm.assert_not_called()
+        self.assertFalse(entry.removed)
+        self.assertIn("registered", entry.error)
         self.assertTrue(path.exists())
 
     def test_a_failed_removal_reports_what_it_actually_freed(self):
