@@ -8,10 +8,11 @@ from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
 from src.manager.ddns import ddns_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu
-from src.manager.metrics import balance_on_other_peer
+from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu
+from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
+from src.payment_system.mu_conversion import peer_mu_in_local
 from src.reputation_system.reasons import Reason
 from src.utils import activity_window
 from src.utils import logger as log
@@ -244,6 +245,113 @@ def maintain_vmachines(debug_mode: bool=False):
     # is what had the janitor judge QEMU guests with CH's liveness test (#295), and
     # `interface` is the only place that knows which backends this node has.
     vm_janitor_cleanup_orphans(debug_mode=debug_mode)
+
+
+def maintain_delegated_instances(debug_mode: bool = False):
+    """Charge a delegated instance for what the peer actually metered.
+
+    A delegated child is funded exactly like a local one -- its father is charged the
+    whole deposit at StartService -- and that deposit sits on the delegation row, in
+    this node's MU. Nothing else charges it: the sweep above prices `local_instances`,
+    and a delegated instance has no row there. Left unbilled, the deposit would still
+    be whole when the instance stopped and the father would be handed back runtime he
+    really used.
+
+    What it costs is *measured*, not predicted: the peer's own figure for the child is
+    read again and the difference against the last reading is what the client pays,
+    converted at today's rate. A quote frozen at delegation would drift three ways at
+    once -- the peer repricing its resources, the two nodes' MU rates moving against
+    each other, and a hotplug making the child bigger than the shape it was quoted at
+    -- and every one of those drifts is invisible from here. The subtraction happens
+    on the peer's scale, before any conversion, so a rate that moved between two
+    readings cannot read as consumption.
+
+    A tick that cannot reach the peer charges nothing and loses nothing: the mark is
+    only advanced by a reading that succeeded, so the next one that does charges
+    everything metered since. A peer that answers but no longer knows the instance has
+    stopped it on its own, and the row here follows it down.
+
+    An instance that cannot pay is stopped, exactly as a local one is, and
+    `stop_instance` hands its father whatever is left.
+    """
+    for row in sc.get_delegated_instances():
+        peer_id, token, vmachine_id = row.get('peer_id'), row['token'], row.get('id')
+
+        try:
+            peer_balance_mu = instance_balance_on_peer(peer_id=peer_id, token=token)
+        except Exception as e:
+            if is_peer_available(peer_id=peer_id):
+                # The peer is up and does not know this instance: it is gone there,
+                # whatever ended it. Stopping it here settles the row the same way
+                # any other stop does -- the peer answers a StopService for an
+                # instance it does not have with a refund of zero, which is exactly
+                # what it owes.
+                log.LOGGER(
+                    f"Peer {peer_id} no longer holds the delegated instance "
+                    f"{vmachine_id} ({e}); stopping it here too."
+                )
+                try:
+                    stop_instance(token=vmachine_id)
+                except Exception as stop_error:
+                    log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {stop_error}")
+            elif debug_mode:
+                log.LOGGER(
+                    f"Peer {peer_id} is unreachable; not charging the delegated "
+                    f"instance {vmachine_id} this tick."
+                )
+            continue
+
+        spent_peer_mu = int(row.get('peer_balance_mu') or 0) - peer_balance_mu
+        if spent_peer_mu <= 0:
+            # Nothing metered, or the child was topped up between readings and holds
+            # more than the mark. Either way there is nothing to charge; re-mark and
+            # measure from here.
+            sc.update_delegated_peer_balance(token=token, peer_balance_mu=peer_balance_mu)
+            continue
+
+        # Rounds up, and the client pays the remainder: this is a cost already
+        # incurred with the peer, and the floor of it leaves this node paying the
+        # difference on every tick for the life of the instance.
+        charge_mu = peer_mu_in_local(peer_id, spent_peer_mu, round_up=True)
+        if charge_mu is None:
+            log.LOGGER(
+                f"No common payment system with {peer_id} says what the "
+                f"{spent_peer_mu} MU it metered for {vmachine_id} are worth here; "
+                f"not charging this tick."
+            )
+            continue
+
+        balance_mu = int(row.get('balance_mu') or 0)
+        if balance_mu < charge_mu and not ALLOW_DEBT:
+            log.LOGGER(
+                f"Stopping delegated instance {vmachine_id} on peer {peer_id}: "
+                f"{format_mu(balance_mu)} left will not cover the "
+                f"{format_mu(charge_mu)} it just consumed there."
+            )
+            # Emptied before the stop, not left for `stop_instance` to refund: the
+            # instance consumed more than it held, so every MU on the row is already
+            # owed to the peer. Refunding it to the father would hand him back
+            # runtime this node has paid for, and the shortfall the node absorbs is
+            # then only the part the deposit could not reach.
+            sc.update_delegated_balance(token=token, balance_mu=0)
+            try:
+                stop_instance(token=vmachine_id)
+            except Exception as e:
+                log.LOGGER(f"Error stopping the delegated instance {vmachine_id}: {e}")
+            continue
+
+        # Deposit and mark in one write, because they are one fact. Charging first and
+        # marking second bills this same consumption again on the next tick if the
+        # second never lands -- every `_execute` commits on its own, so two calls are
+        # two transactions -- and marking first writes the consumption off instead.
+        sc.update_delegated_deposit(
+            token=token, balance_mu=balance_mu - charge_mu, peer_balance_mu=peer_balance_mu
+        )
+        if debug_mode:
+            log.LOGGER(
+                f"Charged delegated instance {vmachine_id} {format_mu(charge_mu)} for "
+                f"what peer {peer_id} metered since the last tick."
+            )
 
 
 def enforce_activity_window(debug_mode: bool = False):
@@ -517,6 +625,7 @@ def manager_thread():
         if wanted_services:
             check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
         maintain_vmachines(debug_mode=DEBUG_MODE())
+        maintain_delegated_instances(debug_mode=DEBUG_MODE())
         enforce_activity_window(debug_mode=DEBUG_MODE())
         maintain_clients(debug_mode=DEBUG_MODE())
         peer_deposits(debug_mode=DEBUG_MODE())

@@ -160,6 +160,33 @@ def convert_mu(
     return numerator // from_mu_per_unit
 
 
+def peer_mu_in_local(peer_id: str, amount_mu: int, *, round_up: bool = False) -> Optional[int]:
+    """A figure of the peer's, expressed in our MU, or None if nothing says what it is worth.
+
+    The single crossing for every peer figure that enters this node against a live
+    rate -- a balance we hold there, a cost the peer just metered -- so the rate is
+    read at the moment of use rather than frozen into a stored number.
+
+    ``round_up`` is the caller's, because the safe direction is not the same for
+    both: understating an asset only makes this node spend less than it could, while
+    understating a cost has the node pay the difference.
+
+    None rather than zero: "no common payment system" is not "nothing there", and
+    charging a client zero for runtime that was really consumed is a different
+    mistake from declining to charge at all.
+    """
+    try:
+        payment_system = matching_payment_system(peer_id)
+    except ValueError:
+        return None
+    return convert_mu(
+        int(amount_mu),
+        from_mu_per_unit=payment_system.peer_mu_per_unit,
+        to_mu_per_unit=payment_system.local_mu_per_unit,
+        round_up=round_up,
+    )
+
+
 def configuration_for_peer(config, *, payment_system: MatchingPaymentSystem):
     """Copy ``config`` and express its initial balance in the peer's MU.
 

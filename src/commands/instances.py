@@ -1,11 +1,9 @@
 import sqlite3
 import os
-from src.manager.metrics import __get_metrics_external
 from src.utils.config import ConfigManager
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
 from src.utils.monetary import format_mu
-from src.utils.utils import from_amount
 try:
     from src.virtualizers.microvm.observability import get_vm_runtime_snapshot
 except Exception:  # pragma: no cover - defensive fallback for minimal environments
@@ -246,15 +244,20 @@ def list_instances(groupable: bool = False, search: str = ""):
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
         if cursor.fetchone():
             cursor.execute(
-                "SELECT token_delegation, id, peer_id, father_id, serialized_instance, service_id FROM delegated_instances"
+                "SELECT token_delegation, id, peer_id, father_id, serialized_instance, service_id, "
+                "balance_mu FROM delegated_instances"
             )
-            for external_token, id, peer_id, father_id, si, service in cursor.fetchall():
+            for external_token, id, peer_id, father_id, si, service, balance_mu in cursor.fetchall():
                 parent_type = 'client' if father_id in client_ids else 'unknown'
 
+                # The deposit this node holds for the instance, in our MU -- the same
+                # figure the local rows above show, and the one its father gets back
+                # when it stops. Asking the peer instead would show the balance of
+                # this node's own account there, on the peer's scale, once per row and
+                # over the network.
                 try:
-                    metrics = __get_metrics_external(token=external_token, peer_id=peer_id)
-                    balance_value = f"{format_mu(from_amount(metrics.balance))}"
-                except:
+                    balance_value = f"{format_mu(int(balance_mu))}"
+                except (TypeError, ValueError):
                     balance_value = "N/A"
                 
                 instances.append({
