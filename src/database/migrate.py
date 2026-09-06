@@ -114,6 +114,23 @@ TABLES = {
             arch TEXT DEFAULT NULL
         )
     ''',
+    # A delegated instance keeps its deposit in `balance_mu`, in *our* MU, exactly as
+    # a local one keeps it in `local_instances.balance_mu`. The father is charged the
+    # whole deposit when the child is delegated, and that MU is parked here instead of
+    # being absorbed: the maintenance tick spends it down and whatever is left when
+    # the instance stops goes back to the father. A deposit with no row to sit on is a
+    # deposit nobody can hand back, and a parent that starts and stops delegated
+    # children in a loop would then pay a full deposit per iteration and be refunded
+    # nothing.
+    #
+    # `peer_balance_mu` is the child's balance as the *peer* keeps it, in the peer's
+    # own MU, as of the last time this node read it. It is a high-water mark, not a
+    # mirror: the tick reads the peer's figure again and charges the difference, so
+    # what the client pays follows what the peer actually metered rather than what it
+    # quoted -- through a price change, a rate change, or a hotplug that made the
+    # child bigger than the shape it was quoted at. Storing it unconverted is what
+    # makes that possible; a figure converted at write time goes stale the moment
+    # either node moves its rate (same reason as `peer.balance_mu`).
     "delegated_instances": '''
         CREATE TABLE IF NOT EXISTS delegated_instances (
             token_delegation TEXT PRIMARY KEY,
@@ -121,7 +138,9 @@ TABLES = {
             peer_id TEXT,
             father_id TEXT,
             serialized_instance TEXT,
-            service_id TEXT
+            service_id TEXT,
+            balance_mu TEXT,
+            peer_balance_mu TEXT
         )
     ''',
     "deposit_tokens": '''

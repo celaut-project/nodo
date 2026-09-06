@@ -11,15 +11,11 @@ from threading import Lock
 from typing import Any, Callable, Dict, Generator, Iterable, List, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
-import grpc
-from bee_rpc import client as bee
-
-from protos import celaut_pb2_grpc, celaut_pb2, celaut_pb2
+from protos import celaut_pb2
 from src.utils import logger as log, logger
 from src.utils.contract_xattrs import contract_shape_bytes, get_address, get_contract_type, get_script, get_token_id
 from src.utils.config import ConfigManager
 from src.utils.singleton import Singleton
-from src.identity.grpc_transport import peer_channel
 from src.identity.transport_stack import carries_prose, share_prose_on_ledger
 from src.utils.utils import from_amount, generate_uris_by_peer_id
 from src.utils.monetary import format_mu
@@ -52,6 +48,19 @@ CONSUMPTION_WINDOW_SAMPLES = max(1, CONSUMPTION_WINDOW_SECONDS // max(1, MANAGER
 # roll its score back with the missing event, which is a worse outcome than the feature
 # simply not being there. Everything created here is `IF NOT EXISTS`.
 TRACEABILITY_TABLES = ("payments", "reputation_events", "service_reputation", "tunnel_traffic")
+
+
+def _as_int(value) -> int:
+    """A MU column read back as a whole number, defaulting to zero.
+
+    Balances are stored as TEXT, since MU exceeds what SQLite stores as an integer,
+    and a row can carry NULL where nothing was ever written. Zero is the reading that
+    cannot credit anybody MU nobody paid in.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _ensure_traceability_tables(connection) -> None:
@@ -2025,10 +2034,12 @@ class SQLConnection(metaclass=Singleton):
 
         Returns:
             List[dict]: token (as the peer knows it), id (our hashed alias),
-                peer_id, father_id and the serialized instance.
+                peer_id, father_id, the serialized instance, the deposit left on
+                the row (our MU) and the peer's own last-read figure (its MU).
         """
         result = self._execute('''
-            SELECT token_delegation, id, peer_id, father_id, serialized_instance
+            SELECT token_delegation, id, peer_id, father_id, serialized_instance,
+                   balance_mu, peer_balance_mu
             FROM delegated_instances
         ''')
         return [
@@ -2038,6 +2049,8 @@ class SQLConnection(metaclass=Singleton):
                 'peer_id': row[2],
                 'father_id': row[3],
                 'serialized_instance': row[4],
+                'balance_mu': _as_int(row[5]),
+                'peer_balance_mu': _as_int(row[6]),
             }
             for row in result.fetchall()
         ]
@@ -2114,7 +2127,9 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
             pass
 
-    def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str, peer_id: str, serialized_instance: str, service_id: str):
+    def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str,
+                               peer_id: str, serialized_instance: str, service_id: str,
+                               balance_mu: int = 0, peer_balance_mu: int = 0):
         """
         Adds an external container to the database.
 
@@ -2125,11 +2140,92 @@ class SQLConnection(metaclass=Singleton):
             peer_id (str): The peer ID.
             serialized_instance (str): Serialized celaut instance.
             service_id (str): Service id
+            balance_mu (int): The deposit the father paid for this instance, in our MU.
+            peer_balance_mu (int): What the peer's own books say the instance holds,
+                in the peer's MU -- the mark the maintenance tick measures against.
         """
         self._execute('''
-            INSERT INTO delegated_instances (token_delegation, id, peer_id, father_id, serialized_instance, service_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id))
+            INSERT INTO delegated_instances (
+                token_delegation, id, peer_id, father_id, serialized_instance, service_id,
+                balance_mu, peer_balance_mu
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id,
+              str(int(balance_mu)), str(int(peer_balance_mu))))
+
+    def get_delegated_balance(self, token: str) -> int:
+        """What is left of a delegated instance's deposit, in our MU.
+
+        The counterpart of `get_instance_balance` for the delegated side. Zero for a
+        row written before the column existed, which is the reading that cannot
+        credit a father MU nobody paid in.
+
+        Args:
+            token (str): The token of the external container.
+        """
+        result = self._execute('''
+            SELECT balance_mu FROM delegated_instances WHERE token_delegation = ?
+        ''', (token,))
+        row = result.fetchone()
+        return _as_int(row['balance_mu']) if row else 0
+
+    def update_delegated_balance(self, token: str, balance_mu: int):
+        """Set what is left of a delegated instance's deposit, in our MU.
+
+        Args:
+            token (str): The token of the external container.
+            balance_mu (int): The new balance.
+        """
+        self._execute('''
+            UPDATE delegated_instances SET balance_mu = ? WHERE token_delegation = ?
+        ''', (str(int(balance_mu)), token))
+
+    def update_delegated_deposit(self, token: str, balance_mu: int, peer_balance_mu: int):
+        """Write both sides of a delegated instance's deposit at once.
+
+        One statement, because the two are one fact. What the maintenance tick charges
+        is the fall in `peer_balance_mu` since it last looked, so a deposit moved
+        without its mark bills the same consumption again on the next tick, and a mark
+        moved without the deposit writes that consumption off. Every `_execute` commits
+        on its own, so two calls here are two transactions and a failure between them
+        leaves exactly one of those states behind.
+
+        Args:
+            token (str): The token of the external container.
+            balance_mu (int): What is left of the deposit, in our MU.
+            peer_balance_mu (int): The peer's own figure it was measured against.
+        """
+        self._execute('''
+            UPDATE delegated_instances SET balance_mu = ?, peer_balance_mu = ?
+            WHERE token_delegation = ?
+        ''', (str(int(balance_mu)), str(int(peer_balance_mu)), token))
+
+    def get_delegated_peer_balance(self, token: str) -> int:
+        """The peer's own last-read figure for a delegated instance, in the peer's MU.
+
+        Args:
+            token (str): The token of the external container.
+        """
+        result = self._execute('''
+            SELECT peer_balance_mu FROM delegated_instances WHERE token_delegation = ?
+        ''', (token,))
+        row = result.fetchone()
+        return _as_int(row['peer_balance_mu']) if row else 0
+
+    def update_delegated_peer_balance(self, token: str, peer_balance_mu: int):
+        """Record what the peer's books say the instance holds, in the peer's MU.
+
+        The mark the next tick measures against: what the peer has metered since is
+        the difference between this and the peer's next answer. Stored unconverted,
+        for the reason `refresh_balance_for_peer` stores the deposit unconverted.
+
+        Args:
+            token (str): The token of the external container.
+            peer_balance_mu (int): The peer's own figure, just read.
+        """
+        self._execute('''
+            UPDATE delegated_instances SET peer_balance_mu = ? WHERE token_delegation = ?
+        ''', (str(int(peer_balance_mu)), token))
 
     def get_delegated_token_by_id(self, id: str) -> Optional[str]:
         """
@@ -2174,46 +2270,6 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to retrieve peer_id for external container {token}: {e}')
             return None
-
-    def purge_external(self, agent_id: str, peer_id: str, his_token: str) -> int:  # TODO delete?
-        """
-        Purges an external container and refunds balance_mu.
-
-        Args:
-            agent_id (str): The agent ID.
-            peer_id (str): The peer ID.
-            his_token (str): The token of the external container.
-
-        Returns:
-            int: The balance_mu amount refunded.
-        """
-        refund = 0
-
-        hashed_token = self._execute('''
-            SELECT id FROM delegated_instances WHERE token_delegation = ?
-        ''', (his_token,)).fetchone()["id"]
-
-        self._execute('''
-            DELETE FROM delegated_instances WHERE token_delegation = ?
-        ''', (his_token,))
-
-        try:
-            refund = from_amount(next(bee.client_grpc(
-                method=celaut_pb2_grpc.GatewayStub(
-                    peer_channel(peer_id=peer_id)
-                ).StopService,
-                input=celaut_pb2.TokenMessage(
-                    token=hashed_token
-                ),
-                indices_parser=celaut_pb2.Refund,
-                partitions_message_mode_parser=True
-            )).amount)
-        except grpc.RpcError as e:
-            log.LOGGER('Error during remove a container on ' + peer_id + ' ' + str(e))
-
-        return refund
-
-    # Common Methods
 
     def get_local_instance_id_by_uri(self, uri: str) -> Optional[str]:
         """

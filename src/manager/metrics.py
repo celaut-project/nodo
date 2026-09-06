@@ -83,20 +83,30 @@ def _in_local_mu(peer_id: str, peer_balance_mu: int) -> int:
 
     Rounds down. This is an asset, not a debt: understating what we hold on a peer
     only ever makes us delegate or spend less than we could, while overstating it
-    hands the peer a job it will refuse for lack of balance.
+    hands the peer a job it will refuse for lack of balance. Zero when no common
+    payment system says what the peer's MU is worth -- "nothing usable there" is the
+    safe answer for every caller of `balance_on_other_peer`.
     """
-    from src.payment_system.mu_conversion import convert_mu, matching_payment_system
+    from src.payment_system.mu_conversion import peer_mu_in_local
 
-    try:
-        payment_system = matching_payment_system(peer_id)
-    except ValueError as exc:
-        logger(f'Cannot express the balance on {peer_id} in our own MU: {exc}.')
+    local = peer_mu_in_local(peer_id, peer_balance_mu)
+    if local is None:
+        logger(f'Cannot express the balance on {peer_id} in our own MU.')
         return 0
-    return convert_mu(
-        int(peer_balance_mu),
-        from_mu_per_unit=payment_system.peer_mu_per_unit,
-        to_mu_per_unit=payment_system.local_mu_per_unit,
-    )
+    return local
+
+
+def instance_balance_on_peer(peer_id: str, token: str) -> int:
+    """A delegated instance's balance as the peer keeps it, in the *peer's* MU.
+
+    Deliberately unconverted: the maintenance tick charges the difference between two
+    of these readings, so the subtraction has to happen on the peer's own scale --
+    converting each reading first would turn a rate change between them into
+    consumption that never happened.
+
+    Raises when the peer cannot be asked, or does not know the instance.
+    """
+    return from_amount(__get_metrics_external(peer_id=peer_id, token=token).balance)
 
 
 def balance_on_other_peer(peer_id: str) -> int:
@@ -180,8 +190,13 @@ def get_metrics(token: str) -> celaut_pb2.Metrics:
         token = sc.get_delegated_token_by_id(id=token)
         if not token:
             raise Exception(f'Invalid token: {token}')
-            
-        return __get_metrics_external(
-            peer_id=sc.get_peer_id_by_external_service(token),  # peer_id
-            token=token  # If the token starts with ## ...
+
+        # Our own books, not the peer's. A delegated instance's deposit is held
+        # here, in our MU, and spent down by the maintenance tick at the rate the
+        # peer quoted; the peer's separate meter runs against this node's wholesale
+        # deposit there, in the peer's MU. Answering with the peer's figure would
+        # report the balance of an account that is not the client's, on a scale that
+        # is not his either.
+        return celaut_pb2.Metrics(
+            balance=to_amount(sc.get_delegated_balance(token=token))
         )

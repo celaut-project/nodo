@@ -57,6 +57,17 @@ def _publish_locally_if_needed(
         peer_id=peer,
     )
 
+
+def _mu(amount) -> int:
+    """A configuration or quote field as a whole number of MU. Unset fields read as zero.
+
+    `Amount.n` is a string, and a message that leaves the field out carries the empty
+    one rather than a zero -- which `from_amount` cannot parse. The same reading
+    `estimated_cost_for_local` takes of the same field.
+    """
+    return int(amount.n or 0)
+
+
 def delegate_execution(
                         service_id: str,
                         peer: str,
@@ -66,6 +77,15 @@ def delegate_execution(
                         refund_container: List[Callable],
                         father_ip: str = ""
                    ) -> celaut_pb2.ServiceInstance:
+    """Run this service on ``peer`` and open the child's local account.
+
+    A delegated child keeps its deposit on this node, exactly as a local one does, so
+    the father is refunded from this node's own books when the child stops. What the
+    peer holds against our client there is the node's own wholesale position and is
+    not mirrored per instance -- but the child's balance *as the peer keeps it* is
+    recorded, because the maintenance tick charges the client by re-reading it and
+    taking the difference.
+    """
     try:
         log.LOGGER('The service is launched on node ' + str(peer))
 
@@ -126,7 +146,18 @@ def delegate_execution(
             # Store what the client is told, so tunnels can be restored after a
             # restart and firewall cleanup targets the address actually handed out.
             serialized_instance=published_instance.SerializeToString(),
-            service_id=service_id
+            service_id=service_id,
+            # The deposit the father just paid for, in our MU -- the local
+            # configuration's figure, not the peer-scaled one that travelled. The
+            # rest of what he was charged is the peer's one-off start charge, which
+            # this node bears exactly as it bears a local one.
+            balance_mu=_mu(config.initial_mu) if config.HasField("initial_mu") else 0,
+            # The same deposit as the peer will count it: the figure that just
+            # travelled, on its scale. This is the mark the first tick measures
+            # against, so it has to be what the peer started the child with rather
+            # than a reading taken afterwards -- anything the child spends before
+            # the first tick is still the client's to pay.
+            peer_balance_mu=_mu(peer_config.initial_mu) if peer_config.HasField("initial_mu") else 0,
         )
         service_instance.token = encrypted_external_token
         service_instance.instance.CopyFrom(published_instance)

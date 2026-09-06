@@ -23,6 +23,7 @@ from src.utils.utils import (
 )
 from src.utils.config import ConfigManager
 from src.utils.monetary import free_tier, format_mu
+from src.payment_system.mu_conversion import convert_mu, matching_payment_system
 from src.virtualizers.interface import remove_firewall_rule
 from src.virtualizers.interface import kill
 from src.virtualizers.interface import hotplug
@@ -823,16 +824,59 @@ def credit_father(father_id: str, amount_mu: int) -> bool:
     return False
 
 
+def return_leftover(*, token: str, father_id: Optional[str], leftover_mu: int, credit: bool) -> None:
+    """Hand a stopped instance's unspent deposit back to its father.
+
+    The same settlement for a local child and a delegated one: both are funded by a
+    father who paid the whole deposit up front, and both keep what is left of it on
+    a row of this node's own. Where they differ is what the peer does with its side
+    of a delegated instance, which is not this function's business.
+
+    Call this once the instance's row is gone -- see the ordering note in
+    ``stop_instance``. ``credit=False`` means the caller has taken the leftover onto
+    itself and will settle it; that is said out loud because the row the MU was
+    sitting in no longer exists, so a caller that drops the figure drops the money.
+    """
+    leftover_mu = int(leftover_mu or 0)
+    if leftover_mu <= 0:
+        return
+    if not credit:
+        log.LOGGER(
+            f"Handing {format_mu(leftover_mu)} unspent by {token} to the "
+            f"caller of stop_instance rather than to its father {father_id}."
+        )
+    elif not father_id:
+        # The MU has left the child's row by now, so this is a real loss rather
+        # than a no-op, and is worth the same log line an unknown father gets in
+        # `credit_father`.
+        log.LOGGER(
+            f"Cannot return {format_mu(leftover_mu)} unspent by {token}: "
+            f"it has no father on record."
+        )
+    elif credit_father(father_id=father_id, amount_mu=leftover_mu):
+        log.LOGGER(
+            f"Returned {format_mu(leftover_mu)} unspent by {token} to its "
+            f"father {father_id}."
+        )
+
+
 def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Should be divided into two functions (for internal and for external), because part of it's use knows if is external or internal before call the function.
     """Stop an instance and hand its unspent deposit back, returning that figure.
 
+    Both kinds of instance settle the same way, and the figure is always in this
+    node's MU: a local child's deposit sits on `local_instances`, a delegated one's
+    on `delegated_instances`, and either way it is what its father paid up front and
+    did not use. A delegated stop also collects a refund from the peer, which is a
+    separate account -- this node's wholesale deposit there, in the peer's MU -- and
+    settles on the peer, not with the father.
+
     ``credit=False`` stops the instance and reads the leftover without crediting
     anybody: the returned figure is then a debt the caller has taken on, and the
-    money exists nowhere else once ``purge_internal`` has run. Only a caller that
-    stops a whole subtree has any use for it -- see ``nodo burnall``, which
-    stops fathers before their children and so cannot let each child pay its own
-    father, whose row is already gone by then. Every other caller stops one
-    instance whose father is still there, and wants the default.
+    money exists nowhere else once the row is purged. Only a caller that stops a
+    whole subtree has any use for it -- see ``nodo burnall``, which stops fathers
+    before their children and so cannot let each child pay its own father, whose row
+    is already gone by then. Every other caller stops one instance whose father is
+    still there, and wants the default.
     """
     token = resolve_instance_token(token) or token
     log.LOGGER('Kill service ' + token)
@@ -890,29 +934,10 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
             # -- a crash between the DELETE and the credit -- loses the leftover, which
             # is the direction to err in: the books may owe a father, they may never
             # invent MU that no one paid in.
-            if refund and int(refund) > 0:
-                if not credit:
-                    # The caller owns this leftover now. Said out loud because the
-                    # row it was sitting in is gone: a caller that drops the
-                    # returned figure drops the money with it.
-                    log.LOGGER(
-                        f"Handing {format_mu(int(refund))} unspent by {token} to the "
-                        f"caller of stop_instance rather than to its father {father_id}."
-                    )
-                elif not father_id:
-                    # The MU has left the child's row by now, so this is a real loss
-                    # rather than a no-op, and is worth the same log line an unknown
-                    # father gets in `credit_father`.
-                    log.LOGGER(
-                        f"Cannot return {format_mu(int(refund))} unspent by {token}: "
-                        f"it has no father on record."
-                    )
-                elif credit_father(father_id=father_id, amount_mu=int(refund)):
-                    log.LOGGER(
-                        f"Returned {format_mu(int(refund))} unspent by {token} to its "
-                        f"father {father_id}."
-                    )
-            
+            return_leftover(
+                token=token, father_id=father_id, leftover_mu=refund, credit=credit
+            )
+
         except Exception as e:
             log.LOGGER('Error purging ' + token + ' ' + str(e))
             return None
@@ -936,7 +961,7 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
                 log.LOGGER(f"No peer uri for the peer {peer_id}")
                 return None
             
-            refund = utils.from_amount(
+            peer_refund = utils.from_amount(
                 next(bee.client_grpc(
                     method=celaut_pb2_grpc.GatewayStub(
                         node_channel(peer_uri, expected_peer_id=peer_id)
@@ -949,6 +974,19 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
                         input=celaut_pb2.TokenMessage(token=external_token)
                 )).amount
             )
+            # The peer's figure, in the peer's MU, and it settles on the peer: it is
+            # credited to the client row this node holds there, which is this node's
+            # own wholesale position (`balance_on_other_peer` reads it back). It is
+            # not what the father is owed and is not converted into local MU -- the
+            # father's claim is the deposit he paid *here*, on the row below, which
+            # the maintenance tick has been spending down at the rate the peer
+            # quoted. Logged rather than dropped so an operator can see both sides.
+            log.LOGGER(
+                f"Peer {peer_id} refunded {peer_refund} of its own MU to this node's "
+                f"deposit there when {external_token} stopped."
+            )
+
+            refund = sc.get_delegated_balance(token=external_token)
             father_id = sc.get_external_father_id(token=external_token)
             serialized_instance = sc.get_delegated_instance(token=external_token)
 
@@ -957,6 +995,13 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
             # retried and the (remote-computed) refund reconciled, rather than
             # orphaning an instance the peer may still be running.
             sc.purgue_delegated(token=external_token)
+
+            # And credit after the DELETE, for the reason spelled out on the
+            # internal branch: this stop is retried while the row survives, and a
+            # credit issued before the row is gone is issued again on every retry.
+            return_leftover(
+                token=token, father_id=father_id, leftover_mu=refund, credit=credit
+            )
 
         except Exception as e:
             log.LOGGER('Error purging external instance with hashed token ' + token + ' ' + str(e))
@@ -1005,13 +1050,6 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
         except Exception as e:
             log.LOGGER(f"Exception removing rules for the father {father_id}")
 
-    # An internal instance's leftover has been credited to its father above. A
-    # delegated one's has not, and is not simply the same operation: that `refund` is
-    # a figure the peer computed, against a deposit this node holds *on the peer*
-    # (`balance_on_other_peer`), so crediting the local father from it would move MU
-    # on one side of the pair only. Which of the two ledgers settles it, and when, is
-    # not decided here.
-    # TODO reconcile a delegated instance's refund with the deposit held on the peer.
     return refund
 
 
@@ -1075,6 +1113,26 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
                 log.LOGGER(f"No peer for the token {external_token}")
                 return False, "No peer found for the external service."
 
+            # The father has already been charged (or credited) in our MU, so the
+            # row that holds his deposit has to move by the same figure -- the same
+            # bookkeeping an internal instance gets a few lines above.
+            desired_amount = sc.get_delegated_balance(token=external_token) + amount_mu
+            if desired_amount < 0:
+                return False, "Negative amount have no sense"
+
+            # The peer prices the instance in its own MU, so what travels is the
+            # translated figure -- the same crossing `configuration_for_peer` makes
+            # for the initial deposit. Rounding goes the direction that cannot pay
+            # the client's costs out of this node's pocket: a top-up hands the peer
+            # no more than the value moved, a withdrawal takes back no less than
+            # what was credited here.
+            payment_system = matching_payment_system(peer_id)
+            peer_amount = convert_mu(
+                abs(amount_mu),
+                from_mu_per_unit=payment_system.local_mu_per_unit,
+                to_mu_per_unit=payment_system.peer_mu_per_unit,
+                round_up=amount_mu < 0,
+            )
             _output = next(bee.client_grpc(
                 method=celaut_pb2_grpc.GatewayStub(
                     peer_channel(peer_id)
@@ -1082,10 +1140,30 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
                 partitions_message_mode_parser=True,
                 indices_parser=celaut_pb2.ModifyDepositOutput,
                 input=celaut_pb2.ModifyDepositInput(
-                    difference=utils.to_amount(amount_mu),
+                    difference=utils.to_amount(
+                        -peer_amount if amount_mu < 0 else peer_amount
+                    ),
                     service_token=external_token
                 )
             ))
+            # Only once the peer has actually moved its side. A local row raised for
+            # a top-up the peer never received would refund the father at the stop
+            # for runtime that was never bought, out of this node's own pocket.
+            if _output.success:
+                # Both sides together. The maintenance tick charges the fall in the
+                # peer's own figure for this instance, so a deposit change has to move
+                # the mark it measures against by the same amount: left behind, a
+                # top-up reads as an instance that consumed nothing and hides a whole
+                # interval's usage.
+                sc.update_delegated_deposit(
+                    token=external_token,
+                    balance_mu=desired_amount,
+                    peer_balance_mu=max(
+                        0,
+                        sc.get_delegated_peer_balance(token=external_token)
+                        + (-peer_amount if amount_mu < 0 else peer_amount),
+                    ),
+                )
             return _output.success, _output.message
         except Exception as e:
             log.LOGGER(f"Exception on modify_deposit for external service: {e}")
