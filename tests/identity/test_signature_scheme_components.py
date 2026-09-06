@@ -53,13 +53,32 @@ class NodeSignatureSchemeTests(unittest.TestCase):
             self.assertEqual(component.formal, declared.formal)
 
     def test_no_formal_is_shared_between_two_components(self):
-        # `formal` is compared first and decides on its own, so two components
-        # carrying the same one are interchangeable -- and a peer repeating that value
-        # on as many components would then match whatever its tags said, which is the
-        # acceptance the exact-tag-set rule exists to refuse. Empty ones are the
-        # "nothing to point at yet" default and are compared by tags instead.
+        # `formal` decides on its own wherever both sides carry one, so two components
+        # holding the same value are interchangeable -- and a peer repeating that value
+        # on as many components would then match whatever its tags said. Empty ones are
+        # the "nothing determinate to point at" default and are compared by tags.
         formals = [c.formal for c in ni.SIGNATURE_SCHEME_COMPONENTS if c.formal]
         self.assertEqual(len(formals), len(set(formals)))
+
+    def test_the_formal_states_the_parameters_the_prose_describes(self):
+        # The two are one declaration at two levels of detail: a reader implements from
+        # the prose, a comparison reads the formal, and they must not drift apart.
+        component, = ni.SIGNATURE_SCHEME_COMPONENTS
+        declared = dict(
+            line.split("=", 1) for line in component.formal.decode().splitlines()
+        )
+        self.assertEqual(declared["curve"], "edwards25519")
+        self.assertEqual(declared["variant"], "pure")
+        self.assertEqual(declared["prehash"], "none")
+        self.assertEqual(declared["spec"], "RFC8032")
+        self.assertEqual(declared["public_key_bytes"], "32")
+        self.assertEqual(declared["signature_bytes"], "64")
+
+    def test_the_formal_is_canonical(self):
+        # Byte-compared and covered by the announcement's signature, so it cannot
+        # depend on the order the parameters were written in.
+        lines = ni.SIGNATURE_SCHEME_COMPONENTS[0].formal.decode().splitlines()
+        self.assertEqual(lines, sorted(lines))
 
     def test_matches_itself(self):
         self.assertTrue(ni.same_signature_scheme(ni.node_signature_scheme(), ni.node_signature_scheme()))
@@ -108,37 +127,68 @@ class SameSignatureSchemeTests(unittest.TestCase):
         b = _scheme((["secp256k1"], b""), (["schnorr"], b""), (["blake2b256"], b""))
         self.assertFalse(ni.same_signature_scheme(a, b))
 
-    def test_an_extra_tag_makes_it_a_different_component(self):
-        # The tags in one component are *meant* to be synonyms, but nothing in the
-        # message says so: ["secp256k1", "K-256"] (a restatement) and
-        # ["schnorr", "bip340"] (two different algorithms) are indistinguishable from
-        # here, and only one of the two readings is safe. So tags are compared as an
-        # exact set, and the peer below is refused -- as it was under the flat-set rule
-        # this replaced.
+    def test_one_shared_tag_is_enough(self):
+        # Tags are alternative names for the single thing a component names, so two
+        # components agreeing on any one of them have named the same thing twice.
+        # Spelling it with one synonym more is not naming something else.
         a = _scheme((["secp256k1"], b""),)
         b = _scheme((["secp256k1", "K-256"], b""),)
+        self.assertTrue(ni.same_signature_scheme(a, b))
+
+    def test_no_shared_tag_is_a_different_component(self):
+        a = _scheme((["secp256k1"], b""),)
+        b = _scheme((["ed25519"], b""),)
         self.assertFalse(ni.same_signature_scheme(a, b))
 
-    def test_a_conflicting_tag_beside_ours_is_refused(self):
-        # The case the whole rule exists for: a signer of the pre-hashed RFC 8032
-        # variant that also writes the tag this node uses. Accepting it would let a peer whose
-        # signatures this node cannot verify pass as compatible.
+    def test_a_tag_beside_ours_does_not_unsettle_what_our_formal_pins(self):
+        # A peer writing the pre-hashed RFC 8032 tag beside the pure one, and pointing
+        # at the same parameters this node declares. What it announces IS this node's
+        # scheme; the extra word is vocabulary.
         ours = ni.node_signature_scheme()
         theirs = ni.node_signature_scheme()
         theirs.components[0].tags.append("ed25519ph")
-        self.assertFalse(ni.same_signature_scheme(ours, theirs))
+        self.assertTrue(ni.same_signature_scheme(ours, theirs))
 
-    def test_identical_tag_sets_match_whatever_their_order(self):
+    def test_a_conflicting_tag_is_told_apart_by_the_formal_and_not_by_the_tags(self):
+        # The price of matching on one shared tag, and the way out of it. Bare tags
+        # cannot separate the pre-hashed variant from the pure one when a peer names
+        # both -- same curve, different message convention -- so a component that needs
+        # them told apart states its parameters, and then they are.
+        pure, prehashed = _scheme((["ed25519"], b"")), _scheme((["ed25519", "ed25519ph"], b""))
+        self.assertTrue(ni.same_signature_scheme(pure, prehashed))
+
+        pinned = ni.node_signature_scheme()
+        theirs = ni.node_signature_scheme()
+        theirs.components[0].formal = b"prehash=sha512\n"
+        self.assertFalse(ni.same_signature_scheme(pinned, theirs))
+
+    def test_tags_carry_no_order(self):
         a = _scheme((["secp256k1", "K-256"], b""),)
         b = _scheme((["K-256", "secp256k1"], b""),)
         self.assertTrue(ni.same_signature_scheme(a, b))
 
-    def test_formal_decides_over_tags_when_present(self):
+    def test_formal_decides_when_both_sides_declare_one(self):
         a = _scheme((["secp256k1"], b"spec-v1"),)
         b = _scheme((["secp256k1"], b"spec-v2"),)
         self.assertFalse(ni.same_signature_scheme(a, b))
         c = _scheme((["secp256k1"], b"spec-v1"),)
         self.assertTrue(ni.same_signature_scheme(a, c))
+
+    def test_a_formal_on_one_side_alone_leaves_the_tags_deciding(self):
+        # Declaring the parameters says more than staying quiet about them; it does not
+        # contradict a peer that stayed quiet. Otherwise pinning a component down would
+        # cut this node off from everyone naming the same thing without pinning it.
+        a = _scheme((["secp256k1"], b"spec-v1"),)
+        b = _scheme((["secp256k1"], b""),)
+        self.assertTrue(ni.same_signature_scheme(a, b))
+        self.assertFalse(ni.same_signature_scheme(a, _scheme((["ed25519"], b""),)))
+
+    def test_a_formal_alone_shares_nothing_with_tags_alone(self):
+        # One states parameters and no name, the other a name and no parameters:
+        # nothing the two said can be compared.
+        a = _scheme(([], b"spec-v1"),)
+        b = _scheme((["secp256k1"], b""),)
+        self.assertFalse(ni.same_signature_scheme(a, b))
 
     def test_prose_is_never_compared(self):
         a = celaut.Peer.SignatureScheme()
@@ -186,7 +236,16 @@ class UndeclaredComponentTests(unittest.TestCase):
         peer = celaut.Peer()
         ni.declare_signature_scheme(peer)
         peer.signature_scheme.components[0].ClearField("tags")
+        peer.signature_scheme.components[0].ClearField("formal")
         self.assertFalse(ni.speaks_our_signature_scheme(peer))
+
+    def test_a_peer_keeping_only_the_formal_still_speaks_our_scheme(self):
+        # Half of that declaration is a declaration: the parameters name the component
+        # on their own, which is what naming it with parameters is for.
+        peer = celaut.Peer()
+        ni.declare_signature_scheme(peer)
+        peer.signature_scheme.components[0].ClearField("tags")
+        self.assertTrue(ni.speaks_our_signature_scheme(peer))
 
 
 class ComponentCapTests(unittest.TestCase):

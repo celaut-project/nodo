@@ -31,7 +31,7 @@ import hashlib
 import itertools
 import string
 from functools import lru_cache
-from typing import Final, NamedTuple, Optional, Tuple
+from typing import Dict, Final, NamedTuple, Optional, Tuple
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
@@ -62,20 +62,33 @@ _SEED_PERSONALISATION: Final[bytes] = b"celaut-id"
 _ATTESTATION_PREFIX: Final[str] = "celaut-ledger-attestation:"
 
 
+def component_formal(pairs: Dict[str, str]) -> bytes:
+    """``key=value`` lines, sorted by key, UTF-8: the canonical body of a ``formal``.
+
+    Sorted so two nodes that declare the same parameters produce identical bytes
+    whatever order they built them in -- this value is compared byte for byte, and it is
+    covered by the announcement's signature, so it must not depend on iteration order.
+
+    Lives beside the comparison rather than beside either of its callers: a signature
+    scheme and an address's protocol stack are compared by the same function, so what
+    they put in the field it reads has to be built the same way.
+    """
+    return "\n".join(f"{key}={pairs[key]}" for key in sorted(pairs)).encode("utf-8")
+
+
 class SignatureSchemeComponent(NamedTuple):
     """One building block of a signature scheme, in celaut's tags/prose/formal shape.
 
     ``formal`` belongs to the component it describes, not to the scheme around it: it
-    is what :func:`_same_component` compares *first*, so a single value shared across
-    every component would make them all interchangeable -- and a peer repeating that
-    one value on however many components would match whatever its tags said, which is
-    exactly what the exact-tag-set rule exists to refuse.
+    is what :func:`_same_component` compares whenever both sides carry one, so a single
+    value shared across every component would make them all interchangeable -- and a
+    peer repeating that one value on however many components would match whatever its
+    tags said.
 
-    It defaults to empty because no block of this node's scheme has a machine-readable
-    artifact to point at yet, the same reason it is empty on the Ergo ledger
-    (``reputation_system/envs.py``). When one gets a specification document, or the
-    content hash of a verifier service, it goes on that entry alone and becomes the
-    part that decides for it.
+    It defaults to empty, for a component whose identity its tags carry on their own.
+    A block with a specification document, or the content hash of a verifier service,
+    puts it here and that becomes the part deciding for it -- the Ergo ledger
+    (``reputation_system/envs.py``) is the case with nothing to point at.
     """
 
     tags: Tuple[str, ...]
@@ -108,8 +121,10 @@ class SignatureSchemeComponent(NamedTuple):
 # off a gRPC response, or off an Ergo register -- cannot follow a path into some
 # repository, and naming other projects only moves the question along ("and what is
 # that?"). Same reason envs.PROSE describes the Ergo system and not nodo's client for
-# it. Until `formal` points at a specification this text IS the specification, so it
-# says everything a verification has to be written from and stands on its own.
+# it. It says everything a verification has to be written from and stands on its own,
+# because `formal` beside it names the same parameters without describing any of them:
+# the two are one declaration read at two levels of detail, and only `formal` is
+# compared.
 SIGNATURE_SCHEME_COMPONENTS: Final[Tuple[SignatureSchemeComponent, ...]] = (
     SignatureSchemeComponent(
         ("ed25519",),
@@ -120,6 +135,22 @@ SIGNATURE_SCHEME_COMPONENTS: Final[Tuple[SignatureSchemeComponent, ...]] = (
         "verified by the procedure in section 5.1.7. Message: the payload bytes, "
         "signed as given -- the algorithm hashes internally, so nothing pre-hashes "
         "them here.",
+        component_formal({
+            "algorithm": "eddsa",
+            "curve": "edwards25519",
+            "variant": "pure",
+            "context": "none",
+            "prehash": "none",
+            "message": "as-given",
+            "private_key_bytes": "32",
+            "public_key_bytes": "32",
+            "public_key_encoding": "hex-lowercase",
+            "signature_bytes": "64",
+            "signature_layout": "R||S",
+            "signature_encoding": "hex-lowercase",
+            "spec": "RFC8032",
+            "verification": "RFC8032-5.1.7",
+        }),
     ),
 )
 
@@ -208,29 +239,37 @@ def _component_is_declared(component) -> bool:
 def _same_component(a, b) -> bool:
     """Whether two ``SignatureScheme.Protocol`` entries name the same building block.
 
-    ``formal`` first, as the strictest and most machine-readable identity, and the tags
-    only when neither side has one -- and there as a **set**, never by intersection.
-    The tags within one component are meant to be synonyms for the one thing it names
-    (``["ed25519", "edwards25519"]``), but nothing in the message says so: this node
-    cannot tell that ``edwards25519`` restates the component it sits in while ``ed25519ph``
-    beside ``ed25519`` names a second, different thing -- the pre-hashed variant of RFC
-    8032, whose signatures do not verify under the pure one. Only one of the two guesses
-    is safe,
-    and the unsafe one accepts a signer whose signatures this node cannot verify -- so
-    an extra tag makes it a different component, exactly as an extra tag made it a
-    different scheme under the flat-set rule this replaced.
+    ``formal`` decides whenever **both** sides declare one, as the strictest and most
+    machine-readable identity: two components pointing at different specifications name
+    different things however their tags read, which is what makes the field worth
+    declaring at all.
 
-    ``formal`` is the way out of that rigidity rather than a workaround for it: once a
-    component points at a specification, that specification decides on its own and the
-    vocabulary stops mattering.
+    Otherwise the tags decide, and there **one shared tag is enough**. The tags of a
+    component are alternative names for the single thing it names, so two components
+    that agree on any one of them have named the same thing twice: ``["tls", "tls1.3"]``
+    and ``["tls1.3", "tls-1.3"]`` are one protocol under two vocabularies, and demanding
+    the whole set match would refuse a peer for spelling it differently or for listing
+    one synonym more. The looseness is deliberate -- these descriptors are loose by
+    design (see ``Peer.SignatureScheme`` in celaut.proto), and where a shared generic
+    tag would be too weak to conclude from, ``formal`` is how a component says so
+    precisely.
+
+    Being an intersection, the relation is reflexive and symmetric but **not
+    transitive**: ``[a,b]`` matches ``[b,c]`` matches ``[c,d]``, and the ends do not
+    match. Nothing here treats "the same component" as an equivalence class, and a
+    caller that wants to group by it cannot rely on this to partition anything.
+
+    A component declaring only ``formal`` against one declaring only tags shares
+    nothing to compare and does not match: what each states is a thing the other never
+    mentions.
 
     ``prose`` is not compared at all: it is human text this node has no way to judge,
     and making it decisive would refuse a peer for rewording a sentence.
     """
     formal_a, formal_b = bytes(a.formal), bytes(b.formal)
-    if formal_a or formal_b:
+    if formal_a and formal_b:
         return formal_a == formal_b
-    return set(a.tags) == set(b.tags)
+    return bool(set(a.tags) & set(b.tags))
 
 
 def same_signature_scheme(a, b) -> bool:
@@ -245,14 +284,12 @@ def same_signature_scheme(a, b) -> bool:
     A scheme is an unordered stack of components (see ``Peer.SignatureScheme`` in
     celaut.proto), so this asks for a one-to-one pairing between the two schemes'
     components, not a positional comparison. Within a pair, matching is
-    :func:`_same_component`'s (``formal`` first, an exact set of tags otherwise);
-    across the whole scheme, the pairing must be total. A peer declaring an extra
-    component, or missing one, is a different scheme even if every paired component
-    matches -- same reasoning as the flat-tag-set rule this replaced (a peer declaring
-    ``["ed25519", "ed25519ph"]`` shares a tag with this node and signs something this
-    node cannot read -- same curve, different message convention -- so "at least one
-    shared component" is exactly the answer that must not be given here), just expressed
-    per-component instead of over one flat list.
+    :func:`_same_component`'s (``formal`` when both sides carry one, a shared tag
+    otherwise); across the whole scheme, the pairing must be total. A peer declaring an
+    extra component, or missing one, is a different scheme even if every paired
+    component matches: a shared tag is enough to identify one *building block*, never
+    to conclude anything about a scheme built from a different number of them, and a
+    stack that names one thing this node's does not is a stack it does not speak.
 
     Three things are refused before the pairing is searched for, each of them a "no"
     in its own right rather than an optimization:

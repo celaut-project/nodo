@@ -184,7 +184,7 @@ detail and never costs a verifier its answer, so where it travels is a cost deci
 
 | Key | Default | Meaning |
 |---|---|---|
-| `communication.SHARE_PROSE_ON_GET_PEER_INFO` | `true` | Prose in what `GetPeerInfo` serves. On: the bytes are transient, and a peer that cannot read what this node means by its tags is exactly the reader it is written for. |
+| `communication.SHARE_PROSE_ON_GET_PEER_INFO` | `false` | Prose in what `GetPeerInfo` serves. Off: the RPC is unauthenticated and answers whoever asks, so the paragraphs are paid on every call to callers the node knows nothing about. On, an announcement is complete enough to implement the protocol from. |
 | `communication.SHARE_PROSE_ON_LEDGER` | `false` | Prose in what is written to a reputation box. Off: a box pays storage rent on every byte for as long as it exists. |
 
 The ledger setting also decides what happens to **peers' announcements**, which this node

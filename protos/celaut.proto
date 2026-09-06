@@ -544,9 +544,11 @@ message Peer {
     // leave out, because which schemes it accepts is a local capability that can change
     // without the wire format changing.
     //
-    // `formal` is empty on every component of this node's own declaration, as it is
-    // on the Ergo ledger (reputation_system/envs.py): there is no machine-readable
-    // artifact to point at yet, and the tags carry the identity until there is one.
+    // A component whose parameters are fully determined states them in `formal`, in
+    // the `key=value` lines node_identity.component_formal builds, which is what makes
+    // the declaration decidable without agreeing on a vocabulary first. Where there is
+    // nothing determinate to point at -- the Ergo ledger (reputation_system/envs.py) --
+    // it stays empty and the tags carry the identity.
     message SignatureScheme {
         message Protocol {
             repeated string tags = 1;
@@ -554,11 +556,15 @@ message Peer {
             bytes formal = 3;
         }
         // Two schemes match iff there is a one-to-one pairing between their
-        // components where each pair matches on `formal`, or -- when neither side
-        // of the pair has one -- carries exactly the same set of `tags`. Order
-        // carries no meaning. Every component must declare `tags`, `formal` or
-        // both: one holding only `prose` states nothing a comparison can act on.
-        // See node_identity.same_signature_scheme.
+        // components where each pair matches on `formal` -- when both sides of the
+        // pair declare one -- or otherwise shares at least one `tag`. A component's
+        // tags are alternative names for the single thing it names, so agreeing on
+        // any one of them is agreeing on the thing; where that is too weak a
+        // conclusion to draw, `formal` is how a component says precisely what it is.
+        // Note this makes matching non-transitive: it identifies components, it does
+        // not partition them into classes. Order carries no meaning. Every component
+        // must declare `tags`, `formal` or both: one holding only `prose` states
+        // nothing a comparison can act on. See node_identity.same_signature_scheme.
         repeated Protocol components = 1;
     }
     SignatureScheme signature_scheme = 7;
