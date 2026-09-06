@@ -51,8 +51,8 @@ def mu_per_nanoerg() -> Decimal:
     contract — a second ledger settling in another token declares its own — and because
     an operator may want to rescale what an MU means against ERG.
 
-    Read per call, not captured at import: ``ConfigManager`` reloads the file when it
-    changes on disk, and it is a replaceable singleton.
+    Read per call, not captured at import: ``ConfigManager`` is a replaceable
+    singleton, and tests swap it out under this module.
     """
     raw = ConfigManager().get(RATE_KEY, 1)
     rate = _decimal(raw if raw not in (None, "") else 1, what=RATE_KEY)

@@ -1,5 +1,6 @@
 import sys, os, subprocess
 from bee_rpc.utils import modify_env
+from src.commands.daemon import config_digest, is_serving, restart_after_config_write
 from src.manager.manager import resolve_instance_token
 from src.utils import logger as log
 import src.manager.resources as iobd
@@ -28,22 +29,6 @@ def gateway_port():
     error message tells the operator to run next).
     """
     return env_manager.gateway_port_or_none()
-
-
-def is_nodo_service_running():
-    """Check if the nodo service is running by verifying if the gateway port is in use."""
-    import socket
-    port = gateway_port()
-    if not port:
-        return False  # No port assigned means nothing can be serving on one.
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(1)
-            result = s.connect_ex(('localhost', int(port)))
-            return result == 0  # Port is in use (connection successful)
-    except Exception as e:
-        print(f"Error checking if the gateway port is in use: {e}", flush=True)
-        return False
 
 
 def get_git_commit():
@@ -183,7 +168,7 @@ if __name__ == '__main__':
         """, flush=True)
             
         try:
-            if not is_nodo_service_running():
+            if not is_serving():
                 print("\nNote: Nodo service is not running.", flush=True)
         except Exception as e:
             print(f"Error checking nodo.service status: {e}", flush=True)
@@ -254,14 +239,14 @@ if __name__ == '__main__':
                     "\n\n",
                     flush=True)
                 try:
-                    if not is_nodo_service_running():
+                    if not is_serving():
                         print("\nNote: Nodo service is not running.", flush=True)
                 except Exception as e:
                     print(f"Error checking nodo.service status: {e}", flush=True)
 
             case "info":
                 try:
-                    status = "running" if is_nodo_service_running() else "not running"
+                    status = "running" if is_serving() else "not running"
                     print(f"Nodo service is currently {status}.", flush=True)
                 except Exception as e:
                     print(f"Error checking nodo.service status: {e}", flush=True)
@@ -685,6 +670,10 @@ if __name__ == '__main__':
                 disconnect(sys.argv[2])
 
             case 'submit_reputation':
+                # Submitting stores the proof id in config.yaml, from a process that is
+                # not the daemon -- so the daemon has to be restarted onto it. See
+                # restart_after_config_write.
+                config_before = config_digest()
                 try:
                     from src.reputation_system.interface import submit_reputation
                     result: bool = submit_reputation(force_submit=True)
@@ -695,21 +684,26 @@ if __name__ == '__main__':
                     print("Reputation proof submitted successfully.", flush=True)
                 else:
                     print("Failed to submit reputation proof.", flush=True)
+                restart_after_config_write(config_before)
 
             case 'sync_reputation_proof':
+                # Reconciling writes the proof id it settled on into config.yaml, so a
+                # serving node has to be restarted onto it. See restart_after_config_write.
+                config_before = config_digest()
                 try:
                     from src.reputation_system.contracts.ergo.proof_validation import sync_reputation_proof_ownership
                     sync_reputation_proof_ownership()
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
                     os._exit(1)
+                restart_after_config_write(config_before)
                 
             case 'refresh_ergo_nodes':
                 from src.manager.ergo import get_refresh_peers
                 get_refresh_peers()
 
             case 'serve':
-                if not is_nodo_service_running():
+                if not is_serving():
                     from src.serve import serve
 
                     check_integrity_on_serve = bool(env_manager.get("hashing.CHECK_INTEGRITY_ON_SERVE", False))

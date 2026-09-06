@@ -1,5 +1,6 @@
 import copy
 import os
+import random
 import re
 import shutil
 import sys
@@ -131,28 +132,20 @@ _TolerantLoader.add_multi_constructor(
 )
 
 
-# config.yaml is shared between the long-running `nodo serve` daemon and the
-# short-lived CLI/TUI processes. A CLI write (e.g. storing a freshly submitted
-# REPUTATION_PROOF_ID) must become visible to the daemon, which would otherwise
-# keep serving the config it read at boot — and, worse, overwrite the file with
-# it on the next `set()`. Re-stat the file at most once every
-# _RELOAD_CHECK_INTERVAL seconds and reload when it changed on disk.
-_RELOAD_CHECK_INTERVAL = 5.0
-
-
 # --- config.yaml backups (issue #255) ---------------------------------------
 # Keep the newest N timestamped backups. The Rust TUI (src/commands/tui/src/app.rs)
 # uses the same constant, filename pattern and retention so a node's backup
 # directory looks identical however the last write happened.
 CONFIG_BACKUP_RETENTION = 10
 
-_CONFIG_BACKUP_RE = re.compile(r"^config-\d{14}\.yaml$")
+_CONFIG_BACKUP_RE = re.compile(r"^config-\d{14}-\d{4}\.yaml$")
 
 
 def _prune_config_backups(directory: str, retention: int) -> None:
-    """Delete all but the newest `retention` config-<stamp>.yaml files. Names sort
-    chronologically because the stamp is zero-padded UTC, so a lexical sort is a
-    time sort."""
+    """Delete all but the newest `retention` config-<stamp>-<nnnn>.yaml files. Names
+    sort chronologically because the stamp is zero-padded UTC, so a lexical sort is a
+    time sort; the random tail only orders backups that share a second, where there is
+    no order to get right."""
     try:
         names = sorted(n for n in os.listdir(directory) if _CONFIG_BACKUP_RE.match(n))
     except OSError:
@@ -166,15 +159,20 @@ def _prune_config_backups(directory: str, retention: int) -> None:
 
 
 def backup_config_file(config_path: str, retention: int = CONFIG_BACKUP_RETENTION) -> Optional[str]:
-    """Snapshot config_path to config-<YYYYMMDDHHMMSS>.yaml beside it, then prune to
-    the newest `retention`. Timestamps are UTC so the filename sorts the same
+    """Snapshot config_path to config-<YYYYMMDDHHMMSS>-<nnnn>.yaml beside it, then
+    prune to the newest `retention`. Timestamps are UTC so the filename sorts the same
     whatever the machine's timezone and matches the Rust TUI byte for byte. Returns
-    the backup path, or None when there's nothing to back up yet."""
+    the backup path, or None when there's nothing to back up yet.
+
+    The four random digits are what makes a snapshot per write rather than per second:
+    the stamp alone gives two writes inside the same second the same name, and the
+    second copy then overwrites the first -- destroying the only record of the state
+    before it, which is the one a revert would want."""
     if not os.path.isfile(config_path):
         return None
     directory = os.path.dirname(config_path) or "."
     stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
-    backup_path = os.path.join(directory, f"config-{stamp}.yaml")
+    backup_path = os.path.join(directory, f"config-{stamp}-{random.randrange(10_000):04d}.yaml")
     shutil.copy2(config_path, backup_path)
     _prune_config_backups(directory, retention)
     return backup_path
@@ -186,6 +184,18 @@ class ConfigManager(metaclass=Singleton):
     It loads the configuration, handles nested structures, processes dynamic values
     (like 'auto' for ports or path interpolation), and provides a simple
     interface to access configuration values.
+
+    config.yaml is read once per process and never re-read. A running node is the
+    configuration it booted with: an edit to the file takes effect when the daemon
+    restarts, and `nodo tui` makes that one step -- validate, back up, write, restart,
+    and put the backup back if the node does not come up on it.
+
+    Nothing here watches the file, which is what lets everything derived from a config
+    value be cached for the life of the process: the identity keypair, the TLS
+    certificate peers pin against this node's peer_id, the interpolated paths.
+    Re-reading mid-run would put those caches out of step with the config they were
+    built from: a node serving a certificate for one identity while announcing
+    another (issue #310).
     """
 
     def __init__(self, config_path: str = "config.yaml", log: Optional[Callable[[str], None]] = None):
@@ -193,9 +203,6 @@ class ConfigManager(metaclass=Singleton):
         self._config: Dict[str, Any] = {}
         self._lock = threading.RLock()
         self._loaded = False
-        self._config_mtime_ns: Optional[int] = None
-        self._last_reload_check: float = 0.0
-        self._file_was_empty: bool = False
         # Set while a freshly opened gateway port is still only in memory; see
         # _withdraw_unsaved_gateway_port.
         self._assigned_gateway_port: Optional[int] = None
@@ -224,53 +231,15 @@ class ConfigManager(metaclass=Singleton):
         data[keys[-1]] = value
 
     def ensure_loaded(self):
-        """Lazily load configuration, refreshing it if another process rewrote it."""
+        """Load configuration the first time it is needed, then keep it.
+
+        The file is read once per process. A change on disk is not picked up: the
+        node runs the configuration it booted with until it is restarted.
+        """
         with self._lock:
             if self._loaded:
-                self._reload_if_file_changed()
                 return
             self.load_config()
-
-    def _current_mtime_ns(self) -> Optional[int]:
-        try:
-            return os.stat(self.config_path).st_mtime_ns
-        except OSError:
-            return None
-
-    def _reload_if_file_changed(self, force_check: bool = False):
-        """Reload config.yaml when it changed on disk since we last read it.
-
-        Assumes the caller holds the lock and the config is already loaded. Pass
-        force_check to skip the _RELOAD_CHECK_INTERVAL debounce, which `set()`
-        does so a write always lands on top of the newest file contents.
-        """
-        now = time.monotonic()
-        if not force_check and now - self._last_reload_check < _RELOAD_CHECK_INTERVAL:
-            return
-        self._last_reload_check = now
-
-        mtime = self._current_mtime_ns()
-        if mtime is None or mtime == self._config_mtime_ns:
-            return
-
-        previous = self._config
-        try:
-            self.load_config(force_reload=True)
-            # Judged on what the *file* held, not on what is in memory afterwards:
-            # loading fills in values the file never had (an identity mnemonic, a
-            # wallet), so a truncated file would otherwise come back looking populated
-            # and wipe a working config with defaults.
-            if self._file_was_empty and previous:
-                raise ValueError("the file parsed as empty")
-        except Exception as e:
-            # An unreadable or half-written file must never wipe a working config.
-            self._config = previous
-            # Don't retry (and re-log) until the file changes again.
-            self._config_mtime_ns = mtime
-            self.log(f"Could not reload {self.config_path}, keeping the loaded config: {e}")
-            return
-
-        self.log(f"Reloaded {self.config_path} after an external change.")
 
     def _guest_network_unlocked(self) -> Dict[str, Optional[str]]:
         """Where guests reach this node, for the reachability probe.
@@ -580,6 +549,10 @@ class ConfigManager(metaclass=Singleton):
         """
         Loads the YAML file, processes dynamic values, and interpolates paths.
         Idempotent unless force_reload=True.
+
+        Nothing in the node passes force_reload: a process reads config.yaml once and
+        runs on it until it restarts. It exists for tests that rewrite the file under
+        a manager they keep.
         """
         with self._lock:
             if self._loaded and not force_reload:
@@ -594,10 +567,6 @@ class ConfigManager(metaclass=Singleton):
             recovered = False
             try:
                 self._config = yaml.safe_load(raw) or {}
-                # What the file itself held, before anything below fills defaults in.
-                # _reload_if_file_changed reads it to tell a truncated file apart from
-                # a config that merely happens to be sparse.
-                self._file_was_empty = not self._config
             except yaml.YAMLError:
                 # A previous version may have persisted a foreign (Java) object.
                 # Recover it as plain strings, then force a clean rewrite below.
@@ -696,8 +665,6 @@ class ConfigManager(metaclass=Singleton):
                 self.log("Dynamic values were processed, saving configuration...")
                 self._save_config_unlocked()
 
-            self._config_mtime_ns = self._current_mtime_ns()
-            self._last_reload_check = time.monotonic()
             self._loaded = True
 
     def _save_config_unlocked(self):
@@ -714,15 +681,14 @@ class ConfigManager(metaclass=Singleton):
         # Coerce to native types first, then use safe_dump so a foreign object can
         # never again be persisted as a `!!python/object:...` tag.
         safe_config = to_yaml_safe(self._config)
-        # Write through a temporary file so a concurrent reader (another nodo
-        # process reloading on mtime) never sees a truncated config.yaml. Falls
-        # back to an in-place write where the directory isn't writable.
+        # Write through a temporary file so a concurrent reader (a CLI process
+        # starting up, the TUI reading the file) never sees a truncated
+        # config.yaml. Falls back to an in-place write where the directory isn't
+        # writable.
         if not self._atomic_write(safe_config):
             with open(self.config_path, "w") as f:
                 yaml.safe_dump(safe_config, f, indent=2, default_flow_style=False)
             self._chmod_config()
-
-        self._config_mtime_ns = self._current_mtime_ns()
 
     def _atomic_write(self, safe_config: Dict[str, Any]) -> bool:
         # Resolve symlinks: replacing the link itself would detach the config
@@ -802,14 +768,16 @@ class ConfigManager(metaclass=Singleton):
         """
         Sets a configuration value and saves it to the file.
         Nested values can be accessed using dot notation.
+
+        Saving rewrites the whole file from the configuration this process loaded,
+        so a key another process wrote in the meantime is overwritten. That is the
+        cost of never re-reading the file, and it is paid where it is cheapest:
+        the keys nodo writes at runtime (`ledgers.ergo.*`) are ones it recomputes,
+        and an operator's edit goes through `nodo tui`, which restarts the daemon
+        onto the file it just wrote.
         """
         with self._lock:
             self.ensure_loaded()
-            # Saving rewrites the whole file, so start from what is on disk right
-            # now: otherwise a stale in-memory copy would silently revert keys
-            # another process wrote (e.g. the daemon dropping the CLI's
-            # REPUTATION_PROOF_ID while updating ledgers.ergo.NODE_URL).
-            self._reload_if_file_changed(force_check=True)
             # Normalize now so in-memory reads also get a native value, not a
             # Java/foreign object that would later poison the YAML file.
             keys = key.split(".")

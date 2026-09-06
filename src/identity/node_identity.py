@@ -139,7 +139,7 @@ DEFAULT_MAX_SIGNATURE_SCHEME_COMPONENTS: Final[int] = 5
 
 
 def _max_signature_scheme_components() -> int:
-    """The configured cap, read per call so raising it needs no restart.
+    """The configured cap, read per call rather than captured at import.
 
     Anything unreadable falls back to the default, deliberately catching everything:
     this is a safety bound consulted from the peer-registration path, and a node with
@@ -349,7 +349,8 @@ def _cached_keypair(mnemonic: str):
     Deriving costs a PBKDF2-HMAC-SHA512 (2048 rounds), and signing a ``Peer`` would pay
     it on every ``GetPeerInfo`` -- an unauthenticated RPC anyone can call. The identity
     key never changes for a given mnemonic, so cache it, keyed on the mnemonic itself
-    so editing the config still takes effect.
+    rather than on nothing: a process only ever sees one, but a test (or the installer,
+    minting the first one) may drive this with several.
 
     The BIP-39 seed is 64 bytes and Ed25519 wants 32, so it is hashed down rather than
     truncated: a truncation would make this key a prefix of whatever else that seed

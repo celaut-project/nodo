@@ -27,9 +27,11 @@ and unlike the activity window (`src/utils/activity_window.py`), where exempting
 operator is the whole point, here there is nobody to exempt: a byte held by a dev
 instance is as unavailable to the person using the PC as any other.
 
-Shares are of the whole machine as psutil reports it, resolved at use time so a config
-edit from the TUI needs no restart. 0 lifts that one ceiling; the section switched off
-lifts all of them.
+Shares are of the whole machine as psutil reports it, resolved at use time rather than
+at import so the figures follow the machine rather than the moment this module loaded.
+The ceilings themselves come from the config the node booted with, so an edit reaches
+them through the restart `nodo tui` performs. 0 lifts that one ceiling; the section
+switched off lifts all of them.
 
 What admission compares is the service's declared `resources.at_most`, which is where a
 service says how large it may become. A service that declares no `at_most` at all is not
