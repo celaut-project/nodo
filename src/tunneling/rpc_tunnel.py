@@ -274,7 +274,7 @@ class TrafficMeter:
 
 
 def _udp_idle_timeout() -> float:
-    """Read the UDP idle timeout at use time, so a config reload takes effect."""
+    """Read the UDP idle timeout at use time rather than binding it at import."""
     try:
         configured = env_manager.get("network.TUNNEL_UDP_IDLE_TIMEOUT_S", DEFAULT_UDP_IDLE_TIMEOUT_S)
         timeout = float(configured)

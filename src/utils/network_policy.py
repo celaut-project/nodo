@@ -270,9 +270,9 @@ def enforce_network_policy(
 ) -> None:
     """Raise :class:`NetworkPolicyRejection` if the policy refuses ``networks``.
 
-    ``policy`` defaults to whatever ``config.yaml`` currently says, read through the
-    shared :class:`ConfigManager` -- which reloads the file when it changes on disk,
-    so an edited policy takes effect without a restart.
+    ``policy`` defaults to whatever ``config.yaml`` said when this process loaded it,
+    read through the shared :class:`ConfigManager`. An edited policy takes effect on
+    the next daemon start; `nodo tui` writes the change and restarts in one step.
     """
     resolved = policy if policy is not None else NetworkPolicy.from_config()
     rejection = resolved.check(networks=networks, subject=subject)

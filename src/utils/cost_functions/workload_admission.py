@@ -80,7 +80,7 @@ _DEFAULT_ON_UNSATISFIABLE: Final[str] = ON_UNSATISFIABLE_REJECT
 
 
 def _policy(key: str, valid: Tuple[str, ...], default: str) -> str:
-    """One of ``valid``, read per call so a change needs no daemon restart.
+    """One of ``valid``, read per call rather than captured at import.
 
     An unrecognised value falls back to the default and says so: silently applying
     something other than what the config asks for is how a node ends up admitting

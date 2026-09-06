@@ -3,16 +3,60 @@
 Nodo reads a single `config.yaml`, created from
 [`config.example.yaml`](../config.example.yaml) at install time. It lives in the
 installation root (`TARGET_DIR`, default `/nodo`), i.e. `/nodo/config.yaml`. The
-`main.MAIN_DIR` value inside it is the same root. Edit it directly, or use the
-`nodo tui` Config page, which edits in place with `yq -i` (preserving comments) and
-snapshots the previous file to `config-<YYYYMMDDHHMMSS>.yaml` beside it.
+`main.MAIN_DIR` value inside it is the same root.
 
-A change made from the TUI is applied as a transaction: back up, write, restart nodo,
-and restore the backup if the node does not come back up on it. So the file always
-describes the running node — an edit is never left waiting for a restart. The Cell
+## Edit it with `nodo tui`
+
+The Config page is the supported way to change a value, because it is the only one
+that does all four things a change needs:
+
+1. **Validates** the value against the key's type before it lands.
+2. **Backs up** the previous file to `config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` beside it.
+3. **Writes** in place with `yq -i`, preserving comments.
+4. **Restarts nodo** — and puts the backup straight back if the node does not come
+   up on the new file.
+
+The four are one transaction, so the file always describes the node that is running,
+and a change that cannot be started into is undone rather than left on disk. The Cell
 page is the same mechanism at a coarser grain: it groups these keys into the decisions
 an operator actually makes, and one of its levers or profiles writes several keys as a
 single change. See [the TUI reference](../src/commands/tui/README.md#applying-a-change).
+
+> ⚠️ **`config.yaml` is read once, when the node starts.** Nothing watches the file.
+> A running node keeps serving the configuration it booted with, however many times
+> the file changes underneath it. That is deliberate: everything derived from a config
+> value — the identity keypair, the TLS certificate peers pin against this node's
+> `peer_id`, the interpolated paths — is then fixed for the life of the process
+> instead of drifting out of step with it mid-run.
+>
+> So if you edit the file by hand, **restart the node yourself**:
+>
+> ```bash
+> sudo nodo daemon restart
+> ```
+>
+> Until you do, the edit is invisible to the running node — and worse, it is not
+> safe: nodo rewrites the whole file from the configuration it loaded whenever it
+> persists a value of its own (`ledgers.ergo.NODE_URL`, a reputation proof id), which
+> silently reverts a hand edit that has not been restarted into. There is no
+> validation and no backup on that path either. Hand-editing is for a node that is
+> stopped.
+
+## What writes `config.yaml`
+
+Four paths, and every one of them snapshots the file to
+`config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` before overwriting it (the ten most recent are
+kept). The stamp is UTC and the four trailing digits are random, so two writes inside
+the same second get a snapshot each instead of the second overwriting the first's:
+
+| Writer | What it writes | Restart |
+|---|---|---|
+| `nodo tui` | whatever you edit, in one `yq` invocation | Restarts the node, and reverts the file if it does not come back. |
+| A CLI command — `nodo sync_reputation_proof`, `nodo submit_reputation` | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | Restarts a serving node once it sees the file changed. Needs root; if the restart cannot happen the command says so and names the fix. |
+| The daemon itself | `ledgers.ergo.NODE_URL` when the configured Ergo node stops answering, and the proof id when it submits one | None needed — the process that wrote the value is the one running on it, and the value is live in memory the moment it is set. |
+| First load, on any process | resolves `auto` values (`network.GATEWAY_PORT`, `identity.MNEMONIC`, `ledgers.ergo.WALLET_MNEMONIC`) and interpolated paths | None — this happens before the node serves. |
+
+A hand edit is the one write with none of that: no validation, no backup, no restart.
 
 > ⚠️ nodo **rewrites** `config.yaml` on its first load: `auto` values such as
 > `network.GATEWAY_PORT`, `identity.MNEMONIC` and `ledgers.ergo.WALLET_MNEMONIC` are resolved to
