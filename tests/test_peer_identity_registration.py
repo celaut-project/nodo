@@ -195,18 +195,32 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM peer").fetchone()[0], 0)
 
     def test_a_shared_component_is_not_a_shared_scheme(self):
-        # Same cardinality, a shared tag, and still refused: a peer naming the pre-hashed
-        # variant of RFC 8032 alongside the pure one produces signatures this node cannot
-        # read. The pairing must be total, not "most components matched" -- the laxer
-        # match the rest of the codebase uses for ledgers would accept it.
+        # A component matching is not a scheme matching: the pairing must be total, not
+        # "most components matched" -- the laxer match the rest of the codebase uses for
+        # ledgers would accept the peer below. It names the block this node names and
+        # one more, so it is a scheme built out of something this node has no verifier
+        # for.
+        def _extra_component(peer):
+            ni.declare_signature_scheme(peer)
+            peer.signature_scheme.components.add(tags=["some-threshold-wrapper"])
+
+        self.assertIsNone(
+            manager.verified_peer_public_key(
+                self._peer([("10.0.0.1", 9999)], prepare=_extra_component)
+            )
+        )
+
+        # A synonym written beside ours, on the other hand, is the same block named
+        # twice, and this node's own `formal` says so parameter by parameter.
         def _extra_tag(peer):
             ni.declare_signature_scheme(peer)
             peer.signature_scheme.components[0].tags.append("ed25519ph")
 
-        self.assertIsNone(
+        self.assertEqual(
             manager.verified_peer_public_key(
                 self._peer([("10.0.0.1", 9999)], prepare=_extra_tag)
-            )
+            ),
+            self.pubkey,
         )
 
         # Rebuilding the same components in reverse order still matches: order is not
@@ -247,9 +261,8 @@ class PeerIdentityRegistrationTests(unittest.TestCase):
         self.assertIsNone(manager.verified_peer_public_key(peer))
 
     def test_a_formal_specification_decides_over_the_tags(self):
-        # Nothing publishes one yet (ours is empty, like the Ergo ledger's), but when
-        # one side names an artifact for a component the tags stop being what the
-        # answer for that component rests on.
+        # Both sides state the parameters of this one component, so the tags stop being
+        # what the answer for it rests on -- and these two sets of parameters differ.
         def _with_formal(peer):
             ni.declare_signature_scheme(peer)
             peer.signature_scheme.components[0].formal = b"some formal specification"

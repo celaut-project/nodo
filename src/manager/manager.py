@@ -288,10 +288,20 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
     transport the host does not support is skipped rather than stored: storing it
     would hand every later reader an endpoint it cannot speak to.
 
+    An address has to pass twice, because a ``Peer.Uri`` declares two things: the
+    family it is reached over (``transport``) and what is layered on top of it
+    (``protocol_stack``). Both are the same question -- can this node talk to it --
+    asked one layer apart, so a foreign stack is skipped for the same reason an
+    unsupported transport is.
+
     Returns the addresses actually stored, so a caller pruning superseded ones keeps
     exactly those and not the ones it just refused: an address skipped here but left
     in ``keep`` would survive as a stale row carrying its previous transport.
     """
+    # Imported here, like node_identity below: reading this module at import time
+    # would resolve the config before the process has one.
+    from src.identity.transport_stack import speaks_our_transport_stack
+
     stored: List[Tuple[str, int]] = []
     for uri in peer.uri:
         try:
@@ -307,6 +317,23 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
             log.LOGGER(
                 f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} declares no "
                 "host-supported transport. Skipping."
+            )
+            continue
+        if not speaks_our_transport_stack(uri.protocol_stack):
+            # The address carries a transport this host speaks but layers something
+            # else on top of it -- a different TLS extension OID, a different signed
+            # payload, a different set of RPCs. Dialling it would reach a listener and
+            # then fail in the handshake, with nothing in the error saying why, so the
+            # address is skipped here and the reason logged from what the peer itself
+            # declared. Only `formal` and the tags are read: prose is the same protocol
+            # worded differently (node_identity.same_component_stack).
+            declared = "; ".join(
+                " ".join(c.tags) + (f" formal={bytes(c.formal).hex()}" if c.formal else "")
+                for c in uri.protocol_stack
+            )
+            log.LOGGER(
+                f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} speaks [{declared}], "
+                "which this node does not. Skipping."
             )
             continue
         sc.add_peer_uri(uri=uri, peer_id=peer_id, transport=protocol.value)

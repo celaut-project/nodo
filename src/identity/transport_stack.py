@@ -40,10 +40,10 @@ Each component is declared the way every replaceable component in celaut is:
 The gRPC half is derived from the compiled descriptor rather than typed out, so adding
 or removing an RPC changes what this node announces without anyone remembering to.
 """
-from typing import Dict, Final, Iterable, Tuple
+from typing import Final, Iterable, Tuple
 
 from protos import celaut_pb2
-from src.identity.node_identity import same_component_stack
+from src.identity.node_identity import component_formal, same_component_stack
 from src.utils.config import ConfigManager
 from src.identity.tls_identity import (
     HOST_KEY_EXTENSION_OID,
@@ -63,16 +63,6 @@ SHARE_PROSE_ON_GET_PEER_INFO_KEY: Final[str] = (
 SHARE_PROSE_ON_LEDGER_KEY: Final[str] = "communication.SHARE_PROSE_ON_LEDGER"
 
 
-def _formal(pairs: Dict[str, str]) -> bytes:
-    """``key=value`` lines, sorted by key, UTF-8.
-
-    Sorted so two nodes that declare the same parameters produce identical bytes
-    whatever order they built them in -- this value is compared byte for byte, and it is
-    covered by the announcement's signature, so it must not depend on iteration order.
-    """
-    return "\n".join(f"{key}={pairs[key]}" for key in sorted(pairs)).encode("utf-8")
-
-
 def _gateway_methods() -> str:
     """Every RPC of the Gateway service, sorted, from the compiled descriptor.
 
@@ -86,7 +76,7 @@ def _gateway_methods() -> str:
 
 def tls_component() -> Tuple[Tuple[str, ...], str, bytes]:
     """The ``tls`` half: how a caller authenticates the address it dialled."""
-    formal = _formal({
+    formal = component_formal({
         "min_version": "1.3",
         "server_name": TLS_SERVER_NAME,
         "certificate": "self-signed,p-256,ca:true",
@@ -122,7 +112,7 @@ def tls_component() -> Tuple[Tuple[str, ...], str, bytes]:
 
 def grpc_component() -> Tuple[Tuple[str, ...], str, bytes]:
     """The ``grpc`` half: which RPCs the address answers, and how they are framed."""
-    formal = _formal({
+    formal = component_formal({
         "transport": "http/2",
         "alpn": "h2",
         "service": celaut_pb2.DESCRIPTOR.services_by_name[GATEWAY_SERVICE_NAME].full_name,
@@ -214,12 +204,16 @@ def node_transport_stack(*, prose: bool = True):
 
 
 def share_prose_on_get_peer_info() -> bool:
-    """Whether an announcement served over gRPC carries its prose. On by default.
+    """Whether an announcement served over gRPC carries its prose. Off by default.
 
-    The bytes are transient there, and a peer that cannot read what this node means by
-    its tags is precisely the reader the prose exists for.
+    ``GetPeerInfo`` is unauthenticated and answers whoever asks, so the paragraphs are
+    ~5 KB per announced address on every call, paid to callers the node knows nothing
+    about. Nothing that decides a comparison is in them -- ``formal`` and the tags are
+    what a reader matches on -- so the default buys back the bandwidth and keeps the
+    answer. Turn it on to serve an announcement complete enough to implement the
+    protocol from, which is the one thing holding the prose back costs.
     """
-    return bool(ConfigManager().get(SHARE_PROSE_ON_GET_PEER_INFO_KEY, True))
+    return bool(ConfigManager().get(SHARE_PROSE_ON_GET_PEER_INFO_KEY, False))
 
 
 def share_prose_on_ledger() -> bool:
@@ -250,11 +244,11 @@ def speaks_our_transport_stack(protocol_stack: Iterable) -> bool:
     """Whether an announced stack is the one this node speaks.
 
     The same comparison a signature scheme gets (``node_identity.same_component_stack``):
-    ``formal`` decides, an exact set of tags decides when neither side declares one, and
-    the pairing across the stack must be total. So a peer announcing ``tls`` and ``grpc``
-    with a different OID, a different signed payload or a different set of RPCs is
-    correctly seen as speaking something else, while one that only worded its prose
-    differently is not.
+    ``formal`` decides when both sides declare one, a single shared tag decides
+    otherwise, and the pairing across the stack must be total. So a peer announcing
+    ``tls`` and ``grpc`` with a different OID, a different signed payload or a different
+    set of RPCs is correctly seen as speaking something else, while one that only worded
+    its prose differently, or reached for another name for the same protocol, is not.
 
     An empty stack means the sender said nothing rather than that it speaks nothing:
     announcements predating this declaration carry no components, and the tags they

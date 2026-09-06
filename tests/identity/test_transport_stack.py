@@ -156,8 +156,11 @@ class ProsePolicyTests(unittest.TestCase):
         peer.signature_scheme.components.add(tags=["ed25519"], prose="a scheme" if prose else "")
         return peer
 
-    def test_the_defaults_are_on_for_grpc_and_off_for_a_ledger(self):
-        self.assertTrue(transport_stack.share_prose_on_get_peer_info())
+    def test_neither_destination_carries_prose_by_default(self):
+        # gRPC pays it on every unauthenticated GetPeerInfo, a register pays rent on it
+        # forever. Different bills, same answer: opt in where a reader needs to learn
+        # the protocol from the announcement alone.
+        self.assertFalse(transport_stack.share_prose_on_get_peer_info())
         self.assertFalse(transport_stack.share_prose_on_ledger())
 
     def test_prose_is_seen_in_either_declaration(self):
