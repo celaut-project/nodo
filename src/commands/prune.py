@@ -72,6 +72,14 @@ def _format_age(age_seconds: Optional[float]) -> str:
 
 
 def _print_entries(title: str, entries: Sequence, *, verb: str) -> int:
+    """Print one section and return the bytes it accounts for.
+
+    Before a reclamation ``size_bytes`` is what the scan found on disk; after
+    one it is what that entry actually freed, which is zero for an entry whose
+    teardown failed. The same sum therefore reads as "would be freed" in a dry
+    run and as "was freed" in a real one, and neither ever claims disk that is
+    still there.
+    """
     if not entries:
         return 0
     print(f"\n{title}")
@@ -165,6 +173,10 @@ def prune(argv: Optional[Sequence[str]] = None) -> None:
         except Exception as e:
             entry.error = str(e)
             entry.removed = False
+            # A reclamation that did not even get to report itself freed
+            # nothing anyone can rely on; the total below only adds up disk
+            # that was measured after the fact.
+            entry.size_bytes = 0
 
     freed_runtimes = _print_entries("Orphaned runtime directories:", runtimes, verb="removed")
     freed_failures = _print_entries("Preserved launch failures:", failures, verb="removed")
