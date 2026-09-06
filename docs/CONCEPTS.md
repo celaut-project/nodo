@@ -312,30 +312,40 @@ How a node compares two schemes on its own, until such a service is asked, is a
 one-to-one pairing between their components — every component on each side paired with
 exactly one on the other, order carrying no meaning — where each pair is decided by:
 
-* **`formal` first.** A machine-readable specification is the strictest identity for
-  that one component. Nothing publishes one yet, so every component of this node's own
-  scheme has an empty `formal` — exactly as the Ergo ledger's is.
-* **The tags as an exact set** when neither side of the pair has a `formal`. Not an
-  intersection: the tags within one component are *meant* to be synonyms for the one
-  thing it names (`["secp256k1", "K-256"]`), but nothing in the message says so, and a
-  node cannot tell a restatement from a second, different claim — `["schnorr",
-  "bip340"]` looks exactly like `["secp256k1", "K-256"]` from here. One of the two
-  guesses accepts a signer whose signatures this node cannot verify, so an extra tag
-  makes it a different component. `formal` is the way out of that rigidity: a component
-  that points at a specification is decided by the specification, and its vocabulary
-  stops mattering.
+* **`formal`, when both sides of the pair carry one.** Stating the parameters is the
+  strictest identity a component has, and two components stating different ones name
+  different things however their tags read. This node's `ed25519` component states
+  them (`node_identity.component_formal` — `key=value` lines, sorted, UTF-8); the Ergo
+  ledger's `formal` stays empty because there is nothing determinate to state.
+* **One shared tag, otherwise.** The tags of a component are alternative names for the
+  single thing it names, so agreeing on any one of them is agreeing on the thing:
+  `["tls", "tls1.3"]` and `["tls1.3", "tls-1.3"]` are one protocol under two
+  vocabularies, and demanding the whole set match would refuse a peer for spelling it
+  differently. Where a shared tag is too weak a conclusion — `["ed25519",
+  "ed25519ph"]` names the pre-hashed variant of RFC 8032 beside the pure one, and its
+  signatures do not verify under the pure procedure — `formal` is how a component says
+  precisely what it is, and then it decides.
+* **A `formal` on one side alone does not decide.** Stating the parameters says more
+  than staying quiet about them; it does not contradict a peer that stayed quiet, so
+  the tags still answer. Otherwise pinning a component down would cut this node off
+  from everyone naming the same thing without pinning it.
 * **Nothing at all, never.** A component must carry `tags`, `formal` or both. One
   holding only `prose` — or nothing — is not a building block this node can reason
-  about, so the scheme is refused rather than half-compared.
+  about, so the scheme is refused rather than half-compared. For the same reason a
+  component carrying only `formal` shares nothing with one carrying only tags.
 * **`prose`, never.** It is human text with no agreed wording, and making it decisive
-  would refuse a peer for rewording a sentence. What it is for is being read: while
-  `formal` is empty, that paragraph *is* the specification of that building block,
-  written to be enough to implement the verification from.
+  would refuse a peer for rewording a sentence. What it is for is being read: it says
+  in words what `formal` states as parameters, complete enough to implement the
+  verification from.
+
+Matching on one shared tag makes the relation **non-transitive**: `[a,b]` matches
+`[b,c]` matches `[c,d]`, and the ends do not match. It identifies components; it does
+not partition them into classes, and nothing may group by it.
 
 The search for that pairing is factorial in the number of components, which is a number
 the *peer* chooses, so `communication.MAX_SIGNATURE_SCHEME_COMPONENTS` (5 by default)
 caps it: a longer scheme is refused rather than computed. Comparing against this node's
-own four-component scheme is bounded by the cardinality check regardless; the cap is
+own single-component scheme is bounded by the cardinality check regardless; the cap is
 what keeps that true if two peers' schemes are ever compared to each other.
 
 Across the whole scheme, though, the pairing must be total: a peer declaring
@@ -345,9 +355,9 @@ produces signatures that node cannot read — same cardinality or not, a partial
 not a shared scheme.
 
 An empty descriptor (no components at all) means the sender's default, so an
-announcement predating the field still verifies. This node speaks Schnorr over
-secp256k1 in Ergo's off-chain encoding and nothing else: an announcement declaring
-another scheme is refused unread, rather than reported as a bad signature.
+announcement predating the field still verifies. This node speaks Ed25519 (RFC 8032
+PureEdDSA) with its identity key and nothing else: an announcement declaring another
+scheme is refused unread, rather than reported as a bad signature.
 
 ### One identity, many ways to pay
 

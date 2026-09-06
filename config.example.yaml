@@ -680,9 +680,11 @@ communication:
   # nodes match on `formal` and on the tags, so dropping it costs a reader detail and
   # never costs a verifier its answer (node_identity.same_component_stack).
   #
-  # Over gRPC it is on: the bytes are transient, and a peer that cannot read what this
-  # node means by "tls, grpc" is exactly the reader the prose is written for.
-  SHARE_PROSE_ON_GET_PEER_INFO: true
+  # Over gRPC it is off: GetPeerInfo is unauthenticated and answers whoever asks, so the
+  # paragraphs are paid on every call to callers the node knows nothing about. Set it
+  # true to serve an announcement a reader can implement "tls, grpc" from without
+  # asking anyone what this node means by them.
+  SHARE_PROSE_ON_GET_PEER_INFO: false
   # On a ledger it is off: a reputation box pays storage rent on every byte for as long
   # as it exists, and these paragraphs are several times a register's whole budget.
   #
