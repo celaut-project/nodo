@@ -257,6 +257,8 @@ class ReclaimTests(CacheFixture):
         self.assertFalse(entry.removed)
         self.assertIn("firecracker", entry.error)
         self.assertTrue(path.exists())
+        # Not this family's to tear down means not this family's to count.
+        self.assertEqual(entry.size_bytes, 0)
 
     def test_a_registered_instance_is_stopped_so_its_deposit_goes_home(self):
         # The case that made this routing necessary: a guest whose kernel
@@ -390,6 +392,55 @@ class ReclaimTests(CacheFixture):
         self.assertFalse(entry.removed)
         self.assertIn("registered", entry.error)
         self.assertTrue(path.exists())
+        self.assertEqual(entry.size_bytes, 0)
+
+    def test_a_kill_that_failed_frees_nothing_and_says_so(self):
+        # The whole reason the total is measured after the fact: the directory
+        # is still there, so not one of its bytes may reach "Freed N in total".
+        path = self._write_runtime_dir("vm-busy", size=4096)
+        entry = microvm_maintain.PruneEntry(
+            kind="runtime",
+            vmachine_id="vm-busy",
+            path=path,
+            reason="orphan_runtime_state",
+            size_bytes=4096,
+        )
+
+        with patch.object(
+            microvm_maintain,
+            "load_runtime_state",
+            return_value={"pid": 1, "virtualizer": "qemu"},
+        ), patch.object(
+            microvm_maintain.sc, "internal_instance_exists", return_value=False
+        ), patch.object(
+            microvm_maintain, "kill_vm", side_effect=RuntimeError("cgroup busy")
+        ):
+            microvm_maintain.reclaim(entry)
+
+        self.assertFalse(entry.removed)
+        self.assertIn("cgroup busy", entry.error)
+        self.assertTrue(path.exists())
+        self.assertEqual(entry.size_bytes, 0)
+
+    def test_a_teardown_that_raised_outright_frees_nothing(self):
+        # `reclaim` itself blowing up is the third way into the same lie.
+        path = self._write_runtime_dir("vm-exploding", size=4096)
+        entry = microvm_maintain.PruneEntry(
+            kind="runtime",
+            vmachine_id="vm-exploding",
+            path=path,
+            reason="guest_panicked",
+            size_bytes=4096,
+        )
+
+        with patch.object(
+            microvm_maintain, "load_runtime_state", side_effect=OSError("state unreadable")
+        ):
+            with self.assertRaises(OSError):
+                microvm_maintain.reclaim(entry)
+
+        self.assertEqual(entry.size_bytes, 0)
+        self.assertTrue(path.exists())
 
     def test_a_failed_removal_reports_what_it_actually_freed(self):
         # Never claim disk that is still on disk.
@@ -458,6 +509,50 @@ class PruneCommandTests(unittest.TestCase):
         reclaim.assert_called_once()
         self.assertIn("1.40 GB", printed)
         self.assertIn("Freed", printed)
+
+    def test_an_entry_that_freed_nothing_is_not_counted_as_freed(self):
+        # An operator reading "Freed 1.40 GB" and finding `df` unchanged has
+        # been told something false about their own disk (#317).
+        def failing_reclaim(entry):
+            entry.removed = False
+            entry.error = "cgroup busy"
+            entry.size_bytes = 0
+            return entry
+
+        with patch(
+            "src.virtualizers.microvm.maintain.scan_orphan_runtimes",
+            return_value=[self._entry()],
+        ), patch(
+            "src.virtualizers.microvm.maintain.scan_failures", return_value=([], [])
+        ), patch(
+            "src.virtualizers.microvm.maintain.reclaim", side_effect=failing_reclaim
+        ), contextlib.redirect_stdout(
+            output := io.StringIO()
+        ):
+            prune_cmd.prune(argv=[])
+
+        printed = output.getvalue()
+        self.assertIn("Freed 0 B in total", printed)
+        self.assertNotIn("1.40 GB", printed)
+        self.assertIn("could not be fully removed", printed)
+
+    def test_a_reclamation_that_raised_is_not_counted_either(self):
+        with patch(
+            "src.virtualizers.microvm.maintain.scan_orphan_runtimes",
+            return_value=[self._entry()],
+        ), patch(
+            "src.virtualizers.microvm.maintain.scan_failures", return_value=([], [])
+        ), patch(
+            "src.virtualizers.microvm.maintain.reclaim",
+            side_effect=RuntimeError("boom"),
+        ), contextlib.redirect_stdout(
+            output := io.StringIO()
+        ):
+            prune_cmd.prune(argv=[])
+
+        printed = output.getvalue()
+        self.assertIn("Freed 0 B in total", printed)
+        self.assertIn("boom", printed)
 
     def test_dry_run_removes_nothing(self):
         printed, reclaim = self._run(["--dry-run"], runtimes=[self._entry()])

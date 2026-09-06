@@ -357,6 +357,18 @@ def scan_failures(retention_seconds: Optional[float], now: Optional[float] = Non
     return prunable, kept
 
 
+def _remaining_bytes(path: Path) -> int:
+    """What is still on disk at ``path`` -- 0 when there is nothing there.
+
+    A :class:`PruneEntry` whose directory is already gone carries an empty path,
+    and an empty path resolves to the working directory, which is not this
+    node's to measure.
+    """
+    if not path or not path.name or not path.exists():
+        return 0
+    return _dir_size(path)
+
+
 def _remove_tree(path: Path) -> Tuple[int, Optional[str]]:
     """Delete ``path``; return (bytes actually freed, error message or None).
 
@@ -374,13 +386,8 @@ def _remove_tree(path: Path) -> Tuple[int, Optional[str]]:
     return before, None
 
 
-def reclaim(entry: PruneEntry) -> PruneEntry:
-    """Remove what ``entry`` describes, recording what was actually freed.
-
-    A runtime entry is a VM, not a directory, so it is never reclaimed with
-    ``rmtree`` alone -- its teardown also drops the firewall rules, the tap
-    device, the cgroup and the control socket it left behind, and deleting only
-    its directory would reclaim the disk and leak all of that.
+def _tear_down_runtime(entry: PruneEntry) -> Tuple[Optional[Hypervisor], Optional[bool]]:
+    """Stop or kill the VM ``entry`` describes; return (member, registered).
 
     Which teardown depends on one question, and it is not what killed the VM:
     does the database still have a row for it?
@@ -395,78 +402,96 @@ def reclaim(entry: PruneEntry) -> PruneEntry:
       is stopped, that is never (#326).
     * It does not -- ``kill``, the host-side teardown on its own. There is no
       row to purge and no deposit to return.
+
+    ``size_bytes`` is not this function's to set: :func:`reclaim` measures the
+    disk after whichever of these routes ran, including the ones that ran
+    nothing.
+    """
+    state = load_runtime_state(entry.vmachine_id) or {}
+    hypervisor = member(recorded_virtualizer(state))
+    if hypervisor is None:
+        entry.removed = False
+        entry.error = (
+            f"unknown virtualizer {recorded_virtualizer(state) or '<unset>'}; "
+            "not this family's to tear down"
+        )
+        return None, None
+
+    try:
+        registered = sc.internal_instance_exists(id=entry.vmachine_id)
+    except Exception as e:
+        # Without the answer there is no safe move: kill a VM that turns out
+        # to have had a row and its deposit stays on the books as MU the
+        # father paid for something no longer running, which is the
+        # direction the accounting must never err in. Left alone and
+        # reported, it is still here for the next run.
+        entry.removed = False
+        entry.error = f"cannot tell whether it is registered: {e}"
+        return hypervisor, None
+
+    try:
+        if registered:
+            # Imported here rather than at module scope: the manager imports
+            # the virtualizer interface, which imports this family.
+            from src.manager.manager import stop_instance
+
+            stop_instance(token=entry.vmachine_id)
+            # Checked rather than assumed: `stop_instance` swallows a failed
+            # purge and returns None, and reporting a stop that left the row
+            # alive as done is how a balance nobody is spending goes
+            # unnoticed. The maintenance tick retries what is still here.
+            if sc.internal_instance_exists(id=entry.vmachine_id):
+                raise RuntimeError("stop_instance left the database row in place")
+        else:
+            kill_vm(hypervisor, vmachine_id=entry.vmachine_id)
+        entry.removed = True
+    except Exception as e:
+        entry.error = str(e)
+        entry.removed = False
+
+    # Both teardowns remove the runtime directory themselves; this is what
+    # happens when one of them got as far as the database and not as far as
+    # the disk.
+    if entry.removed and _remaining_bytes(entry.path):
+        _, error = _remove_tree(entry.path)
+        entry.error = error
+    return hypervisor, registered
+
+
+def reclaim(entry: PruneEntry) -> PruneEntry:
+    """Remove what ``entry`` describes, recording what was actually freed.
+
+    A runtime entry is a VM, not a directory, so it is never reclaimed with
+    ``rmtree`` alone -- its teardown also drops the firewall rules, the tap
+    device, the cgroup and the control socket it left behind, and deleting only
+    its directory would reclaim the disk and leak all of that. That routing is
+    :func:`_tear_down_runtime`'s.
+
+    Whichever route the entry takes -- and there are several that free nothing
+    at all: an unclaimed virtualizer, an unreadable database, a teardown that
+    raised -- ``size_bytes`` leaves here holding the bytes that are no longer on
+    disk, measured after the fact, never the size the scan found. `nodo prune`
+    adds these up into its "Freed N in total", so a number in that line is disk
+    an operator can spend (#317).
     """
     if entry.kind == "runtime" and entry.reason != "runtime_dir_without_state":
-        state = load_runtime_state(entry.vmachine_id) or {}
-        hypervisor = member(recorded_virtualizer(state))
-        if hypervisor is None:
-            entry.removed = False
-            entry.error = (
-                f"unknown virtualizer {recorded_virtualizer(state) or '<unset>'}; "
-                "not this family's to tear down"
+        scanned = entry.size_bytes
+        hypervisor: Optional[Hypervisor] = None
+        registered: Optional[bool] = None
+        try:
+            hypervisor, registered = _tear_down_runtime(entry)
+        finally:
+            entry.size_bytes = max(0, scanned - _remaining_bytes(entry.path))
+            line = (
+                f"event=prune kind=runtime reason={entry.reason} "
+                f"registered={registered} removed={entry.removed} "
+                f"freed_bytes={entry.size_bytes} error={entry.error or 'none'}"
             )
             log.LOGGER(
-                f"[{FAMILY_LOG_TAG}][{entry.vmachine_id}] event=prune kind=runtime "
-                f"reason={entry.reason} removed=False error={entry.error}"
+                hypervisor.log(entry.vmachine_id, line)
+                if hypervisor is not None
+                else f"[{FAMILY_LOG_TAG}][{entry.vmachine_id}] {line}"
             )
-            return entry
-
-        try:
-            registered = sc.internal_instance_exists(id=entry.vmachine_id)
-        except Exception as e:
-            # Without the answer there is no safe move: kill a VM that turns out
-            # to have had a row and its deposit stays on the books as MU the
-            # father paid for something no longer running, which is the
-            # direction the accounting must never err in. Left alone and
-            # reported, it is still here for the next run.
-            entry.removed = False
-            entry.error = f"cannot tell whether it is registered: {e}"
-            log.LOGGER(hypervisor.log(
-                entry.vmachine_id,
-                f"event=prune kind=runtime reason={entry.reason} removed=False "
-                f"error={entry.error}",
-            ))
-            return entry
-
-        try:
-            if registered:
-                # Imported here rather than at module scope: the manager imports
-                # the virtualizer interface, which imports this family.
-                from src.manager.manager import stop_instance
-
-                stop_instance(token=entry.vmachine_id)
-                # Checked rather than assumed: `stop_instance` swallows a failed
-                # purge and returns None, and reporting a stop that left the row
-                # alive as done is how a balance nobody is spending goes
-                # unnoticed. The maintenance tick retries what is still here.
-                if sc.internal_instance_exists(id=entry.vmachine_id):
-                    raise RuntimeError("stop_instance left the database row in place")
-            else:
-                kill_vm(hypervisor, vmachine_id=entry.vmachine_id)
-            entry.removed = True
-        except Exception as e:
-            entry.error = str(e)
-            entry.removed = False
-        # Both teardowns remove the runtime directory themselves; this is what
-        # happens when one of them got as far as the database and not as far as
-        # the disk.
-        if entry.path and entry.path.exists():
-            if entry.removed:
-                freed, error = _remove_tree(entry.path)
-                entry.size_bytes = freed
-                entry.error = error
-            else:
-                # A teardown that stopped halfway still freed whatever it got
-                # through, and the summary adds up what every entry carries. The
-                # scanned size is what this *would* have freed, so leaving it
-                # here reports disk that is still occupied as reclaimed.
-                entry.size_bytes = max(0, entry.size_bytes - _dir_size(entry.path))
-        log.LOGGER(hypervisor.log(
-            entry.vmachine_id,
-            f"event=prune kind=runtime reason={entry.reason} registered={registered} "
-            f"removed={entry.removed} freed_bytes={entry.size_bytes} "
-            f"error={entry.error or 'none'}",
-        ))
         return entry
 
     freed, error = _remove_tree(entry.path)
