@@ -341,9 +341,10 @@ def _prices_by_arch(key: str) -> Dict[str, int]:
 def prices() -> Prices:
     """This node's current price vector.
 
-    Read from config on every call rather than cached at import: ``ConfigManager``
-    reloads the file when it changes on disk, so an operator can reprice a running node
-    without restarting it.
+    Read from config on every call rather than cached at import: ``ConfigManager`` is
+    a replaceable singleton, so a module-level binding would freeze the prices to
+    whichever manager happened to exist at import time. Repricing a node means editing
+    `pricing:` and restarting it, which is what `nodo tui` does in one step.
     """
     max_multiplier = int(_number("pricing.SCARCITY_MAX_MULTIPLIER", 1))
     if max_multiplier < 1:

@@ -4373,20 +4373,42 @@ pub fn shorten(value: &str, max: usize) -> String {
 /// looks identical however the last write happened (issue #255).
 const CONFIG_BACKUP_RETENTION: usize = 10;
 
-/// Snapshot `config` to `config-<YYYYMMDDHHMMSS>.yaml` beside it, then prune to the
-/// newest `CONFIG_BACKUP_RETENTION`. Timestamps are UTC so the filename sorts the
-/// same whatever the machine's timezone and matches the Python path byte for byte.
-/// Returns the backup path written.
+/// Snapshot `config` to `config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` beside it, then prune
+/// to the newest `CONFIG_BACKUP_RETENTION`. Timestamps are UTC so the filename sorts
+/// the same whatever the machine's timezone and matches the Python path byte for
+/// byte. Returns the backup path written.
+///
+/// The four random digits make the snapshot one per write rather than one per second:
+/// the stamp alone gives two writes inside the same second the same name, and the
+/// second copy then overwrites the first -- destroying the only record of the state
+/// before it, which is the one a revert would want.
 fn backup_config(config: &Path) -> io::Result<PathBuf> {
-    let backup = config.with_file_name(format!("config-{}.yaml", utc_stamp(SystemTime::now())));
+    let backup = config.with_file_name(format!(
+        "config-{}-{:04}.yaml",
+        utc_stamp(SystemTime::now()),
+        backup_nonce(),
+    ));
     fs::copy(config, &backup)?;
     prune_config_backups(config)?;
     Ok(backup)
 }
 
-/// Delete all but the newest `CONFIG_BACKUP_RETENTION` `config-<stamp>.yaml` files
-/// in `config`'s directory. A lexical sort is a time sort because the stamp is
-/// zero-padded, so "keep the last N names" is "keep the N most recent".
+/// Four random digits for a backup filename.
+///
+/// `RandomState` is the std hasher seed: freshly keyed from the OS per instance, which
+/// is exactly the entropy wanted here and the reason this needs no `rand` dependency
+/// for four digits. Nothing about a backup name is security-sensitive -- it only has
+/// to differ from its neighbour.
+fn backup_nonce() -> u16 {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    (RandomState::new().build_hasher().finish() % 10_000) as u16
+}
+
+/// Delete all but the newest `CONFIG_BACKUP_RETENTION` `config-<stamp>-<nnnn>.yaml`
+/// files in `config`'s directory. A lexical sort is a time sort because the stamp is
+/// zero-padded, so "keep the last N names" is "keep the N most recent"; the random
+/// tail only orders backups that share a second, where there is no order to get right.
 fn prune_config_backups(config: &Path) -> io::Result<()> {
     let dir = config.parent().filter(|p| !p.as_os_str().is_empty());
     let dir = dir.unwrap_or_else(|| Path::new("."));
@@ -4404,19 +4426,24 @@ fn prune_config_backups(config: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// True for a `config-<14 digits>.yaml` backup name, so pruning never touches
-/// `config.yaml` itself or anything a user dropped in the directory.
+/// True for a `config-<14 digits>-<4 digits>.yaml` backup name, so pruning never
+/// touches `config.yaml` itself or anything a user dropped in the directory.
 fn is_config_backup(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
-    let Some(stamp) = name
+    let Some(tail) = name
         .strip_prefix("config-")
         .and_then(|rest| rest.strip_suffix(".yaml"))
     else {
         return false;
     };
-    stamp.len() == 14 && stamp.bytes().all(|byte| byte.is_ascii_digit())
+    let Some((stamp, nonce)) = tail.split_once('-') else {
+        return false;
+    };
+    stamp.len() == 14
+        && nonce.len() == 4
+        && tail.bytes().all(|byte| byte.is_ascii_digit() || byte == b'-')
 }
 
 /// Format a `SystemTime` as `YYYYMMDDHHMMSS` in UTC, without pulling in a date
@@ -4779,7 +4806,7 @@ mod tests {
         fn reverting_restores_the_previous_file_byte_for_byte() {
             let dir = TempDir::new("revert");
             let config = dir.file("config.yaml");
-            let backup = dir.file("config-20260101000000.yaml");
+            let backup = dir.file("config-20260101000000-0417.yaml");
             fs::write(&backup, "network:\n  GATEWAY_PORT: 58443\n").unwrap();
             fs::write(&config, "network:\n  GATEWAY_PORT: 1\n").unwrap();
 
@@ -4800,11 +4827,11 @@ mod tests {
         fn a_backup_that_cannot_be_restored_is_named_in_the_error() {
             let dir = TempDir::new("norestore");
             let config = dir.file("config.yaml");
-            let missing = dir.file("config-20260101000000.yaml");
+            let missing = dir.file("config-20260101000000-0417.yaml");
             fs::write(&config, "x").unwrap();
             let message = revert(&missing, &config, "Set port NOT applied");
             assert!(message.contains("COULD NOT RESTORE"), "{message}");
-            assert!(message.contains("config-20260101000000.yaml"), "{message}");
+            assert!(message.contains("config-20260101000000-0417.yaml"), "{message}");
         }
 
         /// `auto` is what an unassigned port reads as, and it is not a port: treating
@@ -4939,15 +4966,19 @@ mod tests {
             assert_eq!(civil_from_days(0), (1970, 1, 1));
         }
 
-        /// Only `config-<14 digits>.yaml` is a backup. `config.yaml` itself, and
-        /// anything else in the directory, must survive a prune.
+        /// Only `config-<14 digits>-<4 digits>.yaml` is a backup. `config.yaml`
+        /// itself, and anything else in the directory, must survive a prune.
         #[test]
         fn recognises_only_timestamped_backups() {
-            assert!(is_config_backup(Path::new("/x/config-20231114221320.yaml")));
+            assert!(is_config_backup(Path::new("/x/config-20231114221320-0007.yaml")));
             assert!(!is_config_backup(Path::new("/x/config.yaml")));
             assert!(!is_config_backup(Path::new("/x/config-2023.yaml")));
-            assert!(!is_config_backup(Path::new("/x/config-20231114221320.yaml.bak")));
+            assert!(!is_config_backup(Path::new("/x/config-20231114221320-0007.yaml.bak")));
             assert!(!is_config_backup(Path::new("/x/notes.yaml")));
+            // The stamp alone, without the nonce, is not one of ours.
+            assert!(!is_config_backup(Path::new("/x/config-20231114221320.yaml")));
+            assert!(!is_config_backup(Path::new("/x/config-20231114221320-007.yaml")));
+            assert!(!is_config_backup(Path::new("/x/config-20231114221320-abcd.yaml")));
         }
 
         /// Twelve backups in, exactly ten survive, and they are the ten newest.
@@ -4956,7 +4987,7 @@ mod tests {
             let dir = TempDir::new("prune");
             fs::write(dir.config(), "current").unwrap();
             for i in 0..12 {
-                dir.touch(&format!("config-202401010000{:02}.yaml", i));
+                dir.touch(&format!("config-202401010000{:02}-0000.yaml", i));
             }
             dir.touch("keep-me.txt"); // a foreign file must be untouched
             prune_config_backups(&dir.config()).unwrap();
@@ -4967,8 +4998,8 @@ mod tests {
                 .filter(|n| n.starts_with("config-") && n.ends_with(".yaml"))
                 .collect();
             assert_eq!(backups.len(), CONFIG_BACKUP_RETENTION);
-            assert_eq!(backups.first().unwrap(), "config-20240101000002.yaml");
-            assert_eq!(backups.last().unwrap(), "config-20240101000011.yaml");
+            assert_eq!(backups.first().unwrap(), "config-20240101000002-0000.yaml");
+            assert_eq!(backups.last().unwrap(), "config-20240101000011-0000.yaml");
             assert!(dir.names().contains(&"config.yaml".to_string()));
             assert!(dir.names().contains(&"keep-me.txt".to_string()));
         }
@@ -4978,37 +5009,30 @@ mod tests {
         fn prune_is_a_noop_below_the_cap() {
             let dir = TempDir::new("under");
             for i in 0..5 {
-                dir.touch(&format!("config-202401010000{:02}.yaml", i));
+                dir.touch(&format!("config-202401010000{:02}-0000.yaml", i));
             }
             prune_config_backups(&dir.config()).unwrap();
             assert_eq!(dir.names().len(), 5);
         }
 
-        /// End-to-end mirror of the Python demo in the PR: twelve *real*
-        /// `backup_config` calls -- the exact function `write_config_value` runs on
-        /// each save -- a second apart so every UTC stamp is distinct, must leave
-        /// exactly ten backups, the oldest two pruned. `#[ignore]`d because it sleeps
-        /// ~13s; run with `cargo test -- --ignored`.
+        /// Twelve *real* `backup_config` calls -- the exact function
+        /// `write_config_value` runs on each save -- as fast as the machine can make
+        /// them, so every one lands inside the same second or two. Each still gets a
+        /// name of its own, and the cap still holds: twelve writes, ten backups.
         #[test]
-        #[ignore]
-        fn demo_twelve_real_writes_keep_ten() {
-            let dir = TempDir::new("demo12");
+        fn twelve_real_writes_in_the_same_second_keep_ten() {
+            let dir = TempDir::new("twelve");
             let cfg = dir.config();
             for i in 0..12 {
                 fs::write(&cfg, format!("write-{i}")).unwrap();
                 backup_config(&cfg).unwrap();
-                std::thread::sleep(std::time::Duration::from_millis(1_050));
             }
-            let mut backups: Vec<String> = dir
+            let backups: Vec<String> = dir
                 .names()
                 .into_iter()
                 .filter(|n| n.starts_with("config-") && n.ends_with(".yaml"))
                 .collect();
-            backups.sort();
-            eprintln!("RUST PATH (backup_config x12): {} kept", backups.len());
-            eprintln!("  oldest kept: {}", backups.first().unwrap());
-            eprintln!("  newest kept: {}", backups.last().unwrap());
-            assert_eq!(backups.len(), CONFIG_BACKUP_RETENTION);
+            assert_eq!(backups.len(), CONFIG_BACKUP_RETENTION, "{backups:?}");
         }
 
         /// The write path: `backup_config` copies the live file's bytes to a
@@ -5019,7 +5043,7 @@ mod tests {
             fs::write(dir.config(), "the-current-config").unwrap();
             // Pre-seed ten old backups so this write has to prune one.
             for i in 0..10 {
-                dir.touch(&format!("config-202401010000{:02}.yaml", i));
+                dir.touch(&format!("config-202401010000{:02}-0000.yaml", i));
             }
             let backup = backup_config(&dir.config()).unwrap();
             assert!(is_config_backup(&backup));

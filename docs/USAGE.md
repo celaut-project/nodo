@@ -270,7 +270,8 @@ These are the most commonly used commands for daily tasks:
 
 - **tui**  
   Launches the terminal user interface for monitoring and managing the node. Its
-  Config page is also where environment and runtime settings are edite ([`CONFIG.md`](CONFIG.md)).  
+  Config page is **the** place to change a setting: it validates the value, backs the
+  file up, writes it, and restarts the node in one step ([`CONFIG.md`](CONFIG.md)).  
   **Example:**  
   `nodo tui`
 
@@ -485,9 +486,11 @@ These are intended for development or advanced maintenance environments:
   `nodo ggconf /path/to/repository`
 
 - **submit_reputation**  
-  Forces the submission of reputation information.  
+  Forces the submission of reputation information. Writes the resulting proof id to
+  `config.yaml`, so it restarts a serving node (needs root — see
+  [Changing configuration on a running node](#changing-configuration-on-a-running-node)).  
   **Example:**  
-  `nodo submit_reputation`
+  `sudo nodo submit_reputation`
 
 - **sync_reputation_proof**  
   Reconciles the locally configured reputation proof with the wallet mnemonic and reports
@@ -495,9 +498,11 @@ These are intended for development or advanced maintenance environments:
   config if it is not owned by the configured wallet, (3) if a mnemonic is configured,
   looks up an on-chain reputation proof owned by that wallet and stores its id in the
   config when one exists. Run it by hand after changing the mnemonic, so the new wallet
-  picks up its associated reputation proof (if any).  
+  picks up its associated reputation proof (if any). Steps 2 and 3 write `config.yaml`,
+  so it restarts a serving node (needs root — see
+  [Changing configuration on a running node](#changing-configuration-on-a-running-node)).  
   **Example:**  
-  `nodo sync_reputation_proof`
+  `sudo nodo sync_reputation_proof`
 
 - **refresh_ergo_nodes**  
   Refreshes the Ergo nodes list and selects one as a provider.  
@@ -560,6 +565,33 @@ Use `nodo daemon` commands to start, stop, restart, or check the status of the N
 
 Use `sudo nodo doctor` to check and fix the service configuration if issues arise.
 
+### Changing configuration on a running node
+
+`config.yaml` is read **once, at start**. Nothing watches the file, so a running node
+keeps serving the configuration it booted with no matter what the file says afterwards.
+Everything the node derives from a config value — its identity keypair, the TLS
+certificate peers pin, the interpolated paths — is fixed for the life of the process,
+which is exactly the point.
+
+So change settings through `nodo tui`, which writes the file and restarts the node as
+one transaction (and reverts the file if the node does not come back).
+
+The same rule binds nodo's own commands: a CLI command that writes `config.yaml`
+(`nodo sync_reputation_proof`, `nodo submit_reputation`) restarts a serving node itself
+once it sees the file changed, which is why those need root on a running node. If the
+restart cannot happen, the command says so and tells you to run it — the write is on
+disk but not live until you do.
+
+If you edit `config.yaml` by hand, restart the node yourself:
+
+```bash
+sudo nodo daemon restart
+```
+
+Until you do, the running node ignores the edit, and the next value it persists rewrites
+the file from what it loaded — overwriting the change. Hand-edit a stopped node. Details
+in [`CONFIG.md`](CONFIG.md).
+
 ### Manual Execution in Development Mode: `nodo serve`
 
 Use `nodo serve` to run Nodo in a development environment or when you don’t want to use background service mode.
@@ -584,7 +616,8 @@ removed because nodo does not use it.
 - On Services, `e` executes the selected service and `d` deletes it.
 - On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
-  preserved, and each write snapshots the previous file to `config-<timestamp>.yaml`.
+  preserved, and each write snapshots the previous file to
+  `config-<timestamp>-<nnnn>.yaml` — one snapshot per write, not per second.
 - On Cell, the node's policies are laid out as a cell: Right/Left move between organelles,
   Up/Down between the decisions inside one, and Enter moves a decision to its next position
   (after showing every key it would change). `p` applies a whole posture — "just me",
@@ -593,7 +626,9 @@ removed because nodo does not use it.
 - **Every configuration change from the TUI backs up `config.yaml`, writes it, and restarts
   nodo — and puts the backup straight back if the node does not come up on it.** So the
   file always describes the node that is running, and no change is left waiting for a
-  restart somebody has to remember. The restart drives `systemctl`, so editing
+  restart somebody has to remember. This is why the TUI is the supported editor: the node
+  reads `config.yaml` once at start and never again, so a change that is not restarted
+  into is a change the node never sees. The restart drives `systemctl`, so editing
   configuration on a serving node needs root.
 - `q`, Escape, or Ctrl+C exits.
 

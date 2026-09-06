@@ -100,7 +100,7 @@ column) and, on `Enter`, runs `nodo credit_client <client id> <amount>` or
 Every configuration change made in this TUI — a raw key on Config, a price on Pricing,
 a lever or a profile on Cell — is applied as one transaction:
 
-1. `config.yaml` is snapshotted to `config-<YYYYMMDDHHMMSS>.yaml` beside it (the ten
+1. `config.yaml` is snapshotted to `config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` beside it (the ten
    most recent are kept, matching what the Python `ConfigManager` prunes to).
 2. The change is written with nodo's configured `yq`, in place, comments preserved.
    A change that spans several keys — a lever, a profile — is **one** `yq` invocation,
@@ -113,6 +113,10 @@ a lever or a profile on Cell — is applied as one transaction:
 So what the file says is what the running node loaded. A change that cannot be
 restarted into is not left on disk to be discovered later, and there is no state in
 which the node's behaviour and its configuration disagree.
+
+Step 3 is not a convenience. `ConfigManager` reads `config.yaml` once per process and
+never re-reads it, so a change that is not restarted into is a change the node never
+sees — which is what makes this TUI the supported way to edit a serving node.
 
 Two consequences worth knowing:
 
@@ -221,13 +225,15 @@ example, list values appear as `core_services[1].id` and nested values as
   anywhere else, as in `dns:*`, needs no quoting.
 - The update is performed with nodo's configured `yq` binary, preserving comments and the
   rest of the file layout.
-- Before every write, the previous file is snapshotted to `config-<YYYYMMDDHHMMSS>.yaml`
-  beside it; the ten most recent are kept.
+- Before every write, the previous file is snapshotted to
+  `config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` beside it; the ten most recent are kept. The
+  stamp is UTC and the four trailing digits are random, so writes inside one second
+  each keep a snapshot.
 - Paths containing `mnemonic`, `password`, `secret`, `private_key`, `token`, or `api_key` are
   masked in tables and modal input. Leaving a secret editor blank keeps the existing value;
   enter `""` explicitly to clear it.
-- A saved value is immediately visible in the TUI, but a running nodo process may require a
-  restart before it observes the change.
+- A saved value is immediately visible in the TUI; a running nodo process observes it
+  only after the restart above, because it reads `config.yaml` once at start.
 
 ## Development
 

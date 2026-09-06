@@ -18,8 +18,9 @@ machine out, not about locking its owner out of it. The exemption is the caller'
 apply -- this module only answers what time it is -- and `descends_from_dev_client` in
 `src/manager/manager.py` is what answers it.
 
-Times are the host's local time, read at every call rather than cached, so an operator
-who edits the window from the TUI does not have to restart the node for it.
+Times are the host's local time, read at every call rather than cached: the answer
+depends on the clock, not only on the config. The window itself is the one the node
+booted with, and an edit reaches it through the restart `nodo tui` performs.
 """
 from datetime import datetime, time as clock
 from typing import Optional, Tuple
