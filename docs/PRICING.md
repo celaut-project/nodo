@@ -242,6 +242,56 @@ A shrink is applied as asked, with no floor of the node's own. Booting needs
 `MIN_MEM_MIB`, but a running service asking for less memory than that is making a
 decision about its own guest, and the row records what it holds either way.
 
+### An instance that runs on a peer
+
+A delegated instance is priced to its father exactly like a local one, and the two
+have nothing to do with each other beyond that. There are two accounts, in two units,
+and this node stands between them:
+
+| Account | Unit | Who moves it |
+| --- | --- | --- |
+| the child's deposit, on `delegated_instances.balance_mu` | our MU | the father pays it at StartService; the maintenance tick spends it down by what the peer metered; the stop refunds what is left |
+| this node's deposit with the peer, against the client row it holds for us there | the peer's MU | the peer charges the child's real cost against it, and refunds the unspent part when the child stops |
+
+The father's claim is the first row and only the first row. It is opened with the
+deposit he was charged (`config.initial_mu`, in our MU — the rest of the quote is the
+peer's one-off start charge, borne exactly as a local one is), and it is spent by
+`maintain.maintain_delegated_instances`. When the instance stops, `stop_instance` hands
+the remainder back through the same `credit_father` a local stop uses — after the row
+is deleted, so a stop that is retried cannot pay twice.
+
+What the tick charges is **measured, not predicted**. The row also keeps
+`peer_balance_mu`: the child's balance as the peer's own books hold it, in the peer's
+MU, as of the last reading. Each tick reads it again and charges the difference,
+converted at today's rate. A quote frozen at delegation would drift three ways that are
+all invisible from here — the peer repricing its resources (nothing advertises a price
+vector; `node_advertised_rates` went with the gas model), the two `mu_per_unit` rates
+moving against each other, and a `hotplug` making the child bigger than the shape it
+was quoted at. The subtraction happens on the peer's scale before any conversion, so a
+rate that moved between two readings cannot read as consumption.
+
+An instance that consumed more than its deposit holds is stopped, and its row is
+emptied first rather than refunded: every MU on it is already owed to the peer for
+runtime that happened, so what the node absorbs is only the part the deposit could not
+reach. That reading is also the liveness check. A peer that answers but no longer knows the
+instance has stopped it on its own, and the row here follows it down; a peer that
+cannot be reached charges nothing and loses nothing, because the mark only advances
+with a charge, so the next successful reading bills everything metered since. A deposit
+change moves the mark by the same amount it moves the deposit, or the interval it lands
+in would read as a child that consumed nothing.
+
+What the peer refunds at that moment is the *other* account. It is credited to this
+node's deposit there, in the peer's MU, and is logged rather than forwarded: paying a
+local father out of it would pay him from an account that is not his, on a scale that
+is not his, on top of the deposit he is already owed. The node buys the runtime
+wholesale from the peer and sells it at the price it quoted, and the difference
+between the two meters is the node's position to hold.
+
+Top-ups move both halves. `ModifyDeposit` charges the father here, converts the figure
+to the peer's MU (`mu_conversion.convert_mu`, rounding the direction that cannot pay
+the client's costs out of the node's pocket) and forwards it — and only writes the
+local row and its mark once the peer has confirmed its side.
+
 ### Worked example
 
 At the defaults above, an instance with 256 MiB RAM, 1 vCPU and 10 GiB disk, on an
