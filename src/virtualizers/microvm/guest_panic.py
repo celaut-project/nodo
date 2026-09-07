@@ -8,7 +8,7 @@ liveness test that asks about the *process* reports a healthy VM. One core per
 dead guest, held until an operator notices.
 
 Only the guest's own console says otherwise, which is why this reads the serial
-log the launchers already write (``SERIAL_MODE: file``) rather than asking the
+log both launchers write, per VM and unconditionally, rather than asking the
 hypervisor. A panic is also the last thing a kernel prints, so the marker is
 always within the tail -- there is no need to read a log of unbounded size.
 

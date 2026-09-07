@@ -56,8 +56,9 @@ CH_BINARY_PATH = env_manager.get("virtualizers.ch.BINARY_PATH")
 # Defaulting it to console=ttyS0 is what made arm64 guests panic before /init
 # printed anything.
 KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "")
-CH_SERIAL_MODE = env_manager.get("virtualizers.ch.SERIAL_MODE", "file")
-CH_CONSOLE_MODE = env_manager.get("virtualizers.ch.CONSOLE_MODE", "off")
+# Where a guest's serial output lands inside its own runtime directory. Not a config
+# key: see _resolve_ch_stream_args.
+SERIAL_LOG_NAME = "cloud-hypervisor.serial.log"
 VIRTIOFSD_BINARY = env_manager.get("virtualizers.ch.VIRTIOFSD_BINARY", "virtiofsd")
 GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     "virtualizers.ch.GUEST_NETWORK_READY_TIMEOUT_S",
@@ -86,35 +87,21 @@ def _resolve_ch_binary() -> str:
 
 
 def _resolve_ch_stream_args(runtime_dir: Path) -> Tuple[List[str], Optional[Path]]:
-    args: List[str] = []
-    serial_log_path: Optional[Path] = None
+    """CH's stream arguments, and the file the guest's serial output lands in.
 
-    serial_mode = str(CH_SERIAL_MODE).strip() if CH_SERIAL_MODE is not None else ""
-    serial_mode_lower = serial_mode.lower()
-    if serial_mode:
-        if serial_mode_lower == "file":
-            serial_log_path = runtime_dir / "cloud-hypervisor.serial.log"
-            args.extend(["--serial", f"file={serial_log_path}"])
-        elif serial_mode_lower in {"off", "null", "tty"}:
-            args.extend(["--serial", serial_mode_lower])
-        else:
-            args.extend(["--serial", serial_mode])
-            if serial_mode_lower.startswith("file="):
-                serial_path_value = serial_mode.split("=", 1)[1].strip()
-                if serial_path_value:
-                    serial_log_path = Path(serial_path_value)
+    Fixed rather than configurable, and QEMU pins the same shape on its side. The
+    serial log is evidence, not convenience output: ``guest_panic_line`` reads it to
+    decide whether a guest panicked, and the maintenance tick kills that VM and
+    penalises its instance -100 INSTANCE_LOST. Both ways of configuring it were
+    therefore ways of breaking it -- a chosen path was one file for every VM on the
+    node, so one guest's panic read as every guest's (issue #322), and ``off`` left the
+    check with nothing to read, silently retiring the reaping of panicked guests.
 
-    console_mode = str(CH_CONSOLE_MODE).strip() if CH_CONSOLE_MODE is not None else ""
-    console_mode_lower = console_mode.lower()
-    if console_mode:
-        if console_mode_lower in {"off", "null", "tty"} or console_mode_lower.startswith("file="):
-            args.extend(["--console", console_mode])
-        else:
-            raise MicroVMError(
-                f"Invalid CONSOLE_MODE value '{console_mode}'. Expected one of off/null/tty/file=<path>."
-            )
-
-    return args, serial_log_path
+    The virtio console stays off because it would be a second copy of the same output:
+    the cmdline points the kernel at ttyS0, which is what ``--serial`` captures.
+    """
+    serial_log_path = runtime_dir / SERIAL_LOG_NAME
+    return ["--serial", f"file={serial_log_path}", "--console", "off"], serial_log_path
 
 
 def _kernel_cmdline(vm_ip: str, netmask: str) -> str:

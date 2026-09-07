@@ -159,10 +159,10 @@ list of levers scrolls to whatever is selected, so nothing in it becomes unreach
 
 ### Levers
 
-One row is one decision, and it may span several keys. `debug mode` writes five of
+One row is one decision, and it may span several keys. `debug mode` writes four of
 them (`logs.DEBUG_MODE`, `logs.MEMORY_LOGS`, `logs.TUNNEL_LOGS`,
-`virtualizers.ch.SERIAL_MODE`, `CONSERVE_RUNTIME_DIR_ON_FAILURE`); `delegate work`
-writes two, because delegating and paying for it are separately answerable.
+`CONSERVE_RUNTIME_DIR_ON_FAILURE`); `delegate work` writes two, because delegating
+and paying for it are separately answerable.
 
 - `Enter` moves the lever to its next position — after showing every key that would
   change, and only writing on `y`.
