@@ -174,7 +174,15 @@ def _reserve_for_arch(arch: Optional[str]) -> Tuple[int, float]:
     can correct one architecture without touching the other. Both at zero size the VM
     at exactly the usable figure, for that arch alone.
     """
-    canonical = normalize_arch_tag(arch) or arch
+    # No arch named means this host's own, which is what the guest will boot as. The
+    # largest-reserve fallback below is for an arch that *is* named and unknown -- a
+    # guest whose overhead nobody measured, where over-reserving is the safe direction.
+    # Reaching it for `None` instead made the two entry points quote different figures
+    # for the same guest on any host that is not the arch that fallback came from: the
+    # TUI's pricing page showed one overhead and the VM booted with another. It also
+    # built the config prefix `...GUEST_KERNEL_RESERVE.None`, under which no operator
+    # override could ever be found (issue #321).
+    canonical = normalize_arch_tag(arch) or arch or host_arch_tag()
     default_mib, default_ratio = _DEFAULT_GUEST_KERNEL_RESERVE.get(
         canonical, _FALLBACK_GUEST_KERNEL_RESERVE
     )
@@ -254,9 +262,10 @@ def guest_boot_memory_bytes(usable_bytes: int, arch: Optional[str] = None) -> in
     usable_bytes = int(usable_bytes)
     if usable_bytes <= 0:
         return usable_bytes
-    return usable_bytes + guest_kernel_reserve_bytes(
-        usable_bytes, arch if arch is not None else host_arch_tag()
-    )
+    # `arch` straight through: resolving an absent one is `_reserve_for_arch`'s job, so
+    # that this and `guest_kernel_reserve_bytes` -- the figure the operator is shown --
+    # cannot resolve it two different ways (issue #321).
+    return usable_bytes + guest_kernel_reserve_bytes(usable_bytes, arch)
 
 
 def resolve_initial_resources(resources: celaut_pb2.Sysresources) -> Tuple[int, int, int, int]:
