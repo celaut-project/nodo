@@ -137,7 +137,7 @@ pricing:
   SCARCITY_CURVE: 1.0                # 1.0 = linear; >1 stays flat until real scarcity
 
 free_tier:
-  CREDIT_MU_PER_NEW_CLIENT: 0        # 0 = no gift; >0 = starting credit
+  CREDIT_MU_PER_NEW_CLIENT: 4500000  # one hour of 0.5 GiB + 1 vCPU at the prices above
   FREE_WHILE_SCARCITY_BELOW: 0.0     # charge nothing while every resource is under this load
 ```
 

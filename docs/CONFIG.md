@@ -340,7 +340,7 @@ set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING
 | `pricing.MODIFY_RESOURCES_MU` | `10000` | Changing a running instance's resources. |
 | `pricing.SCARCITY_MAX_MULTIPLIER` | `10` | Ceiling of the surcharge when a resource runs out. `1` prices purely by consumption. |
 | `pricing.SCARCITY_CURVE` | `1.0` | How fast the surcharge arrives. `1.0` is linear; higher stays near 1x until the resource is genuinely scarce. |
-| `free_tier.CREDIT_MU_PER_NEW_CLIENT` | `0` | Starting balance given to every new client. |
+| `free_tier.CREDIT_MU_PER_NEW_CLIENT` | `4500000` | Starting balance given to every new client: one hour of 0.5 GiB of RAM plus one vCPU at the shipped prices. `0` gives nothing away, which with `costs.ALLOW_DEBT` off refuses every new client at its first launch. |
 | `free_tier.FREE_WHILE_SCARCITY_BELOW` | `0.0` | Charge nothing while *every* resource is below this share of capacity. `0.0` disables it. |
 | `ui.DISPLAY_UNIT` | `erg` | What you read and type. `erg`, `mu`, or a name declared under `ui.UNITS`. Purely presentational. |
 | `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
