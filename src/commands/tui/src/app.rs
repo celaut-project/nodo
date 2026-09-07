@@ -26,6 +26,11 @@ pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 pub const HISTORY_POINTS: usize = 120;
 const DATA_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const WALLET_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+/// How often the on-chain reputation report is re-read. Far slower than the wallet,
+/// because it costs a paginated scan of the whole reputation contract and an opinion
+/// changes when somebody publishes a transaction -- minutes apart at best. `r` forces
+/// it, for the operator who has just been told a peer vouched for them.
+const REPUTATION_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 /// How much demand history the SCHEDULE page reads back. A month shows the weekly shape
 /// without letting one unusual day set the scale of the whole chart.
 const DEMAND_HISTORY_DAYS: u16 = 30;
@@ -52,6 +57,9 @@ pub enum Page {
     Peers,
     /// Clients that talk to us, and what they have paid.
     Clients,
+    /// What this node has been paid, and what the network stakes on it — the two
+    /// things it earns by being up.
+    Earnings,
     /// The policy panel: what this node lets in, sells, trusts and says, as a set
     /// of named decisions rather than as a YAML tree.
     Cell,
@@ -65,12 +73,15 @@ pub enum Page {
 }
 
 impl Page {
-    pub const ALL: [Page; 10] = [
+    pub const ALL: [Page; 11] = [
         Page::Overview,
         Page::Instances,
         Page::Services,
         Page::Peers,
         Page::Clients,
+        // After the two pages that name who we deal with, because it is the sum of
+        // what dealing with them came to.
+        Page::Earnings,
         // The editors sit together and run from the most general to the most
         // specific: postures, then the two that own a decision with a shape of its own
         // -- prices as bars, the working day as a day -- then single keys.
@@ -88,6 +99,7 @@ impl Page {
             Page::Services => "SERVICES",
             Page::Peers => "PEERS",
             Page::Clients => "CLIENTS",
+            Page::Earnings => "EARNINGS",
             Page::Cell => "CELL",
             Page::Pricing => "PRICING",
             Page::Schedule => "SCHEDULE",
@@ -684,6 +696,155 @@ pub struct ClientDetail {
     pub deposits: Vec<DepositToken>,
     pub instances: Vec<ClientInstance>,
     pub payments: Vec<PaymentRow>,
+}
+
+/// What one payment network has brought in, per window.
+///
+/// Only accepted incoming payments count as earned: a `rejected` row is a deposit this
+/// node could not validate, so no balance was credited for it and nothing arrived. It
+/// is carried alongside rather than dropped, because a network that keeps refusing
+/// deposits is the operator's problem to see, not ours to hide.
+///
+/// Amounts stay in raw MU, as the catalogue stores them, and are rendered in the
+/// display unit at draw time like every other balance here. `u128` because MU exceeds
+/// what SQLite holds as an integer, which is why the column is TEXT in the first place.
+#[derive(Debug, Clone, Default)]
+pub struct LedgerEarnings {
+    /// Ledger tag from the payment row (`ergo`), or `unknown` for a row that carries
+    /// none — a payment we took without recording which network it came over.
+    pub ledger: String,
+    pub day: u128,
+    pub week: u128,
+    pub month: u128,
+    pub year: u128,
+    pub total: u128,
+    /// Deposits refused, all time.
+    pub refused: u128,
+}
+
+impl Identifiable for LedgerEarnings {
+    fn id(&self) -> &str {
+        &self.ledger
+    }
+}
+
+/// Opinions added up, with for and against kept apart.
+///
+/// Shares of the proofs that published them, so each figure is in `0..1` per opining
+/// proof and the two are not a single number by construction: a node with +0.4 and
+/// -0.3 against it is in a different position from one with +0.1 and no detractor, and
+/// only the net would call them the same. Mirrors `ReputationTotals` in
+/// `src/reputation_system/opinions.py`.
+#[derive(Debug, Clone, Default)]
+pub struct ReputationTotals {
+    pub positive: f64,
+    pub negative: f64,
+    pub positive_proofs: u32,
+    pub negative_proofs: u32,
+    /// nanoERG of unrecoverable sunk cost behind the opinions in each direction.
+    ///
+    /// The other half of the answer, and the half a share cannot give: minting a proof
+    /// is free, so a large share of cheap proofs and the same share of expensive ones
+    /// are very different positions to be in.
+    pub positive_backing: f64,
+    pub negative_backing: f64,
+}
+
+impl ReputationTotals {
+    pub fn net(&self) -> f64 {
+        self.positive - self.negative
+    }
+
+    pub fn net_backing(&self) -> f64 {
+        self.positive_backing - self.negative_backing
+    }
+
+    pub fn proofs(&self) -> u32 {
+        self.positive_proofs + self.negative_proofs
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.proofs() == 0
+    }
+}
+
+/// One on-chain opinion about this node: who staked, how much of themselves, and when.
+#[derive(Debug, Clone)]
+pub struct NodeOpinion {
+    /// The reputation box, which is what identifies the row: one proof may hold
+    /// several opinions about the same node, so the proof id is not unique here.
+    pub box_id: String,
+    pub proof_id: String,
+    /// R7, the owner proposition of the wallet that can spend the box.
+    pub owner: String,
+    pub amount: u128,
+    /// The publishing proof's tokens that are actually saying something: what it holds
+    /// minus the reserve in its self-pointing box. The minted supply would be the wrong
+    /// denominator by six orders of magnitude — see `proof_standing` on the Python side.
+    pub assigned_amount: u128,
+    /// `amount / assigned_amount` — the share of what that proof has said which is
+    /// said about this node.
+    pub weight: f64,
+    pub positive: bool,
+    /// Unix seconds of the block the box was created in, or `None` when it could not
+    /// be dated. A revised opinion is dated by its revision: changing a reputation box
+    /// spends it and writes a new one, so there is no older date on the chain to show.
+    pub published_at: Option<i64>,
+    /// Total nanoERG sunk into the publishing proof, across all of its boxes. One-way:
+    /// the reputation contract lets that total grow and never shrink, on the owner's
+    /// own spending path as much as on the public top-up path.
+    pub burned_nanoerg: f64,
+    /// `weight * burned_nanoerg` — the share of that sunk cost standing behind this
+    /// node. What makes two equal shares comparable, since a proof costs nothing to
+    /// mint and the ERG behind it cannot be reclaimed.
+    pub backed_nanoerg: f64,
+}
+
+impl Identifiable for NodeOpinion {
+    fn id(&self) -> &str {
+        &self.box_id
+    }
+}
+
+/// What the network stakes on this node, as `nodo reputation --json` reports it.
+///
+/// Read through the CLI rather than from the chain directly: the lookup is a paginated
+/// explorer scan and the arithmetic is the ecosystem's, both of which already exist on
+/// the Python side (`src/reputation_system/opinions.py`). Re-deriving either here would
+/// be a second implementation of a number that has to agree with what other readers of
+/// the same chain compute.
+#[derive(Debug, Clone, Default)]
+pub struct NodeReputation {
+    pub node_id: String,
+    pub own_proof_id: String,
+    /// Everything staked on this node, whenever it was staked.
+    ///
+    /// The only aggregate there is. Reputation is a stock, not a flow, and the chain
+    /// cannot be made to answer "earned this week": revising an opinion spends its box
+    /// and writes a new one, and a nodo proof re-splits its whole supply on every
+    /// submission, so all of its dates reset together. A window over them would report
+    /// the publisher's submission cadence, which is why only money is windowed here.
+    pub standing: ReputationTotals,
+    /// Every opinion behind `standing`. `App` keeps its own selectable list of these
+    /// (see `App::opinions`); this is the report as it was read.
+    pub opinions: Vec<NodeOpinion>,
+    /// What this node's own proof stakes on it, kept out of the totals: a node
+    /// vouching for itself is not reputation.
+    pub own: Vec<NodeOpinion>,
+    /// Unix seconds the report was produced, `None` before the first one lands.
+    pub read_at: Option<i64>,
+    /// Why the chain could not be read, when it could not.
+    pub error: String,
+}
+
+impl NodeReputation {
+    /// Whether a report has landed at all, however empty it turned out.
+    ///
+    /// Distinct from "nothing is staked on this node": the page has to be able to say
+    /// "not read yet" without claiming the network is silent.
+    pub fn is_read(&self) -> bool {
+        self.read_at.is_some()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1328,6 +1489,17 @@ fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
     (entries, scarcity)
 }
 
+/// Seconds since the Unix epoch, or `None` on a machine whose clock predates it.
+///
+/// Only ever used to say how long ago something happened, so a clock that cannot be
+/// read means "no age to show" rather than an age of zero.
+pub fn unix_now() -> Option<i64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_secs() as i64)
+}
+
 /// Minutes since local midnight.
 ///
 /// Asked of SQLite, which is already a dependency and already the only thing in this
@@ -1638,6 +1810,18 @@ pub struct App {
     pub guest_kernel_reserves: Vec<(&'static str, GuestKernelReserve)>,
     /// Detail for the selected peer / client, reloaded when the selection moves or the
     /// data refreshes — never per frame, since drawing must not touch the database.
+    /// What each payment network has brought in, per window. Read from the catalogue
+    /// with the rest of the local data, so it is as live as any balance on screen.
+    pub earnings: Vec<LedgerEarnings>,
+    /// What the network stakes on this node, from `nodo reputation --json`.
+    pub reputation: NodeReputation,
+    /// The same report's opinions, as the page's selectable table.
+    ///
+    /// A `StatefulList` of its own rather than a cursor into `reputation.opinions`,
+    /// because that is what keeps a selection on the opinion the operator picked
+    /// rather than on a row number: the report is re-read wholesale every few minutes,
+    /// and `StatefulList::refresh` re-finds the selected row by id across that.
+    pub opinions: StatefulList<NodeOpinion>,
     pub peer_detail: Option<PeerDetail>,
     pub client_detail: Option<ClientDetail>,
     pub service_detail: Option<ServiceDetail>,
@@ -1680,6 +1864,8 @@ pub struct App {
     last_storage_refresh: Instant,
     last_wallet_refresh: Instant,
     wallet_task: Option<JoinHandle<Result<NodeInfo, String>>>,
+    last_reputation_refresh: Instant,
+    reputation_task: Option<JoinHandle<Result<NodeReputation, String>>>,
     /// In-flight background `nodo` command, if any (keeps the UI responsive).
     command_task: Option<JoinHandle<CommandOutcome>>,
     /// In-flight configuration transaction: write, restart, and revert on failure.
@@ -1718,6 +1904,9 @@ impl Default for App {
             demand_days: DEMAND_HISTORY_DAYS,
             money: Money::load(&paths.config),
             guest_kernel_reserves: get_guest_kernel_reserves(&paths.config),
+            earnings: Vec::new(),
+            reputation: NodeReputation::default(),
+            opinions: StatefulList::with_items(Vec::new()),
             peer_detail: None,
             client_detail: None,
             service_detail: None,
@@ -1751,6 +1940,10 @@ impl Default for App {
             last_storage_refresh: now.checked_sub(Duration::from_secs(30)).unwrap_or(now),
             last_wallet_refresh: now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now),
             wallet_task: None,
+            last_reputation_refresh: now
+                .checked_sub(REPUTATION_REFRESH_INTERVAL)
+                .unwrap_or(now),
+            reputation_task: None,
             command_task: None,
             config_task: None,
             config_follow_up: ConfigFollowUp::None,
@@ -1830,6 +2023,7 @@ impl App {
                 self.clients.previous();
                 self.load_selection_details();
             }
+            Page::Earnings => self.opinions.previous(),
             Page::Pricing => self.prices.previous(),
             Page::Cell => {
                 let count = self.cell.organelle().levers().len();
@@ -1860,6 +2054,7 @@ impl App {
                 self.clients.next();
                 self.load_selection_details();
             }
+            Page::Earnings => self.opinions.next(),
             Page::Pricing => self.prices.next(),
             Page::Cell => {
                 let count = self.cell.organelle().levers().len();
@@ -1917,6 +2112,7 @@ impl App {
                 self.clients.select_visible(visible);
                 self.load_selection_details();
             }
+            Page::Earnings => self.opinions.select_visible(visible),
             Page::Pricing => self.prices.select_visible(visible),
             _ => {}
         }
@@ -3462,6 +3658,13 @@ impl App {
             self.last_wallet_refresh = Instant::now();
             self.wallet_task = Some(tokio::spawn(fetch_node_info()));
         }
+        self.poll_reputation_task().await;
+        if self.reputation_task.is_none()
+            && (force || self.last_reputation_refresh.elapsed() >= REPUTATION_REFRESH_INTERVAL)
+        {
+            self.last_reputation_refresh = Instant::now();
+            self.reputation_task = Some(tokio::spawn(fetch_node_reputation()));
+        }
     }
 
     fn refresh_local(&mut self, force: bool) {
@@ -3490,6 +3693,7 @@ impl App {
             .refresh(get_peers(&self.paths.database).unwrap_or_default());
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         // After the lists, since a selection that vanished takes its detail with it.
         self.load_selection_details();
         self.node_logs = read_last_lines(&self.paths.log, 250).unwrap_or_default();
@@ -3603,6 +3807,32 @@ impl App {
         self.instance_counters = counters;
     }
 
+    /// Collect a finished reputation report, or the reason there is none.
+    ///
+    /// A failed read leaves the previous report on screen with the failure beside it,
+    /// rather than blanking the page: the last known standing is still the truest
+    /// thing available, and an operator whose explorer is down is better told that than
+    /// shown zeros.
+    async fn poll_reputation_task(&mut self) {
+        if !self
+            .reputation_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let task = self.reputation_task.take().unwrap();
+        match task.await {
+            Ok(Ok(reputation)) => {
+                self.opinions.refresh(reputation.opinions.clone());
+                self.reputation = reputation;
+            }
+            Ok(Err(error)) => self.reputation.error = error,
+            Err(error) => self.reputation.error = format!("Reputation read failed: {error}"),
+        }
+    }
+
     async fn poll_wallet_task(&mut self) {
         if !self
             .wallet_task
@@ -3654,6 +3884,50 @@ fn first_line(text: &str) -> String {
         .find(|line| !line.is_empty())
         .unwrap_or("")
         .to_string()
+}
+
+/// Run `nodo reputation --json` off the UI thread.
+///
+/// Generously timed against the wallet's twenty seconds: the report walks the whole
+/// reputation contract a page at a time, and the point of doing it in a task is that a
+/// slow explorer costs a stale figure rather than a frozen interface.
+async fn fetch_node_reputation() -> Result<NodeReputation, String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(120),
+        Command::new("nodo").args(["reputation", "--json"]).output(),
+    )
+    .await
+    .map_err(|_| "nodo reputation timed out after 120 seconds".to_string())?
+    .map_err(|error| format!("Unable to run nodo reputation: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match report_line(&stdout) {
+        Some(line) => parse_node_reputation(line),
+        None => Err(nonblank_error(&String::from_utf8_lossy(&output.stderr))),
+    }
+}
+
+/// The report out of `nodo`'s stdout, or None when it printed none.
+///
+/// Not the whole of stdout: `ConfigManager` prints on its way past whenever it fills a
+/// default in -- a node loading a fresh config generates its identity mnemonics and
+/// says so -- and any such line ahead of the report would make the lot unparseable.
+/// The report is printed as one line, last, so it is the last line that looks like one.
+pub fn report_line(stdout: &str) -> Option<&str> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .rev()
+        .find(|line| line.starts_with('{'))
+}
+
+/// First non-blank line of a command's stderr, or a fallback when it said nothing.
+fn nonblank_error(stderr: &str) -> String {
+    let line = first_line(stderr);
+    if line.is_empty() {
+        "nodo reputation produced no output".to_string()
+    } else {
+        line
+    }
 }
 
 async fn fetch_node_info() -> Result<NodeInfo, String> {
@@ -3771,6 +4045,182 @@ impl DemandByHour {
     pub fn total_refused(&self) -> u32 {
         self.refused.iter().sum()
     }
+}
+
+/// What each payment network brought in, over each window, from the `payments` table.
+///
+/// One query for the whole page: the windows are evaluated by SQLite against
+/// `created_at`, which `record_payment` writes as UTC (`CURRENT_TIMESTAMP`), so the
+/// comparison is against `datetime('now')` in the same zone. The amounts are summed
+/// here rather than in SQL because `amount_mu` is TEXT — `SUM` over it would go through
+/// a float and start rounding somewhere above 2^53 MU.
+///
+/// Rolling windows, not calendar ones: "the last week" has to be the same length of
+/// time on a Monday as on a Sunday for two readings of this page to be comparable.
+/// Money is the only thing on this page windowed at all -- see `NodeReputation`.
+///
+/// A payment with no date is in no window but is still in the all-time total, the same
+/// rule an undated opinion gets. `COALESCE` rather than leaving the comparison to
+/// return NULL: an unreadable flag would fail the whole query, and one odd row must not
+/// be able to blank the page.
+fn get_earnings(database: &Path) -> SqlResult<Vec<LedgerEarnings>> {
+    let connection = Connection::open(database)?;
+    if !table_exists(&connection, "payments") {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection.prepare(
+        "SELECT COALESCE(NULLIF(TRIM(ledger), ''), 'unknown') AS ledger,
+                status,
+                amount_mu,
+                COALESCE(created_at, '') >= datetime('now', '-1 day')    AS in_day,
+                COALESCE(created_at, '') >= datetime('now', '-7 days')   AS in_week,
+                COALESCE(created_at, '') >= datetime('now', '-30 days')  AS in_month,
+                COALESCE(created_at, '') >= datetime('now', '-365 days') AS in_year
+         FROM payments WHERE direction = 'in'",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, bool>(3)?,
+            row.get::<_, bool>(4)?,
+            row.get::<_, bool>(5)?,
+            row.get::<_, bool>(6)?,
+        ))
+    })?;
+
+    let mut by_ledger: HashMap<String, LedgerEarnings> = HashMap::new();
+    for row in rows {
+        let (ledger, status, amount, in_day, in_week, in_month, in_year) = row?;
+        // An unparseable amount is dropped rather than read as zero: a row we cannot
+        // read is not a payment of nothing, and silently sinking it into a total is
+        // how an accounting page starts lying. `record_payment` writes `str(int(...))`,
+        // so this is a corrupted row, not a shape we support.
+        let Ok(amount) = amount.trim().parse::<u128>() else {
+            continue;
+        };
+        let entry = by_ledger.entry(ledger.clone()).or_insert_with(|| LedgerEarnings {
+            ledger,
+            ..LedgerEarnings::default()
+        });
+        if status == "rejected" {
+            entry.refused += amount;
+            continue;
+        }
+        if status != "accepted" {
+            continue;
+        }
+        entry.total += amount;
+        if in_year {
+            entry.year += amount;
+        }
+        if in_month {
+            entry.month += amount;
+        }
+        if in_week {
+            entry.week += amount;
+        }
+        if in_day {
+            entry.day += amount;
+        }
+    }
+
+    let mut earnings: Vec<LedgerEarnings> = by_ledger.into_values().collect();
+    // Biggest earner first, and alphabetical between equals so the rows do not swap
+    // places between refreshes on a node that has taken nothing yet.
+    earnings.sort_by(|a, b| b.total.cmp(&a.total).then_with(|| a.ledger.cmp(&b.ledger)));
+    Ok(earnings)
+}
+
+/// Parse `nodo reputation --json` into the page's own shapes.
+///
+/// The command reports an error as a body of its own (`{"error": …}`) rather than as a
+/// non-zero exit with nothing on stdout, so a failed chain read arrives here as a
+/// readable reason and reaches the page as one.
+pub fn parse_node_reputation(output: &str) -> Result<NodeReputation, String> {
+    let document: serde_json::Value =
+        serde_json::from_str(output).map_err(|error| format!("unreadable report: {error}"))?;
+    if let Some(error) = document.get("error").and_then(|value| value.as_str()) {
+        return Err(error.to_string());
+    }
+
+    let totals = |value: Option<&serde_json::Value>| ReputationTotals {
+        positive: json_f64(value, "positive"),
+        negative: json_f64(value, "negative"),
+        positive_proofs: json_f64(value, "positive_proofs") as u32,
+        negative_proofs: json_f64(value, "negative_proofs") as u32,
+        positive_backing: json_f64(value, "positive_backing"),
+        negative_backing: json_f64(value, "negative_backing"),
+    };
+    let opinions = |key: &str| {
+        document
+            .get(key)
+            .and_then(|value| value.as_array())
+            .map(|items| items.iter().map(parse_opinion).collect())
+            .unwrap_or_default()
+    };
+
+    Ok(NodeReputation {
+        node_id: json_str(document.get("node_id")),
+        own_proof_id: json_str(document.get("own_proof_id")),
+        standing: totals(document.get("standing")),
+        opinions: opinions("opinions"),
+        own: opinions("own"),
+        read_at: document
+            .get("read_at")
+            .and_then(|value| value.as_i64()),
+        error: document
+            .get("errors")
+            .and_then(|value| value.as_object())
+            .map(|errors| {
+                errors
+                    .iter()
+                    .map(|(ledger, reason)| format!("{ledger}: {}", json_str(Some(reason))))
+                    .collect::<Vec<_>>()
+                    .join(" • ")
+            })
+            .unwrap_or_default(),
+    })
+}
+
+fn parse_opinion(value: &serde_json::Value) -> NodeOpinion {
+    NodeOpinion {
+        box_id: json_str(value.get("box_id")),
+        proof_id: json_str(value.get("proof_id")),
+        owner: json_str(value.get("owner")),
+        amount: json_u128(value.get("amount")),
+        assigned_amount: json_u128(value.get("assigned_amount")),
+        weight: json_f64(Some(value), "weight"),
+        positive: value
+            .get("positive")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false),
+        published_at: value.get("published_at").and_then(|value| value.as_i64()),
+        burned_nanoerg: json_f64(Some(value), "burned_nanoerg"),
+        backed_nanoerg: json_f64(Some(value), "backed_nanoerg"),
+    }
+}
+
+fn json_str(value: Option<&serde_json::Value>) -> String {
+    value
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn json_f64(value: Option<&serde_json::Value>, key: &str) -> f64 {
+    value
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.0)
+}
+
+fn json_u128(value: Option<&serde_json::Value>) -> u128 {
+    value
+        .and_then(|value| value.as_u64())
+        .map(u128::from)
+        .unwrap_or(0)
 }
 
 fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
@@ -4799,19 +5249,32 @@ mod tests {
     mod mouse_geometry {
         use super::super::{tab_at, visible_row_at, Page, Rect};
 
-        const BAR: Rect = Rect {
-            x: 0,
-            y: 0,
-            width: 120,
-            height: 3,
-        };
+        /// A bar wide enough for every tab, with a column of slack past the last one.
+        ///
+        /// Derived from the page list rather than written down, so adding a page cannot
+        /// quietly turn "the column past the last tab" into "inside the last tab" and
+        /// leave both tests below passing for the wrong reason.
+        fn bar() -> Rect {
+            let titles: usize = Page::ALL
+                .iter()
+                .map(|page| page.title().chars().count() + 2) // a space each side
+                .sum();
+            let dividers = 3 * (Page::ALL.len() - 1); // " │ "
+            Rect {
+                x: 0,
+                y: 0,
+                width: (1 + titles + dividers + 1) as u16, // left border, tabs, slack
+                height: 3,
+            }
+        }
 
         #[test]
         fn every_tab_title_maps_to_its_own_page() {
             // Walk the bar cell by cell and collect which tab each column resolves to;
             // every page must claim its title, in order, with gaps only on dividers.
-            let claimed: Vec<usize> = (BAR.x..BAR.x + BAR.width)
-                .filter_map(|x| tab_at(x, BAR))
+            let bar = bar();
+            let claimed: Vec<usize> = (bar.x..bar.x + bar.width)
+                .filter_map(|x| tab_at(x, bar))
                 .collect();
             let mut seen: Vec<usize> = claimed.clone();
             seen.dedup();
@@ -4824,9 +5287,10 @@ mod tests {
 
         #[test]
         fn clicks_outside_any_tab_select_nothing() {
-            assert_eq!(tab_at(BAR.x, BAR), None, "left border");
+            let bar = bar();
+            assert_eq!(tab_at(bar.x, bar), None, "left border");
             assert_eq!(
-                tab_at(BAR.x + BAR.width - 1, BAR),
+                tab_at(bar.x + bar.width - 1, bar),
                 None,
                 "past the last tab"
             );
@@ -6928,6 +7392,232 @@ Cold Wallet: 9cold\n";
     /// silently renders nothing looks exactly like a peer with no history -- the same
     /// confusion issue #231 was about, one table over. So they are exercised against a
     /// real database rather than through the widgets.
+    /// What the EARNINGS page reads: money out of the catalogue, reputation out of
+    /// `nodo reputation --json`. Both are accounting, so the tests here are about the
+    /// ways a figure can be wrong rather than about the happy path.
+    mod earnings {
+        use super::*;
+
+        fn temp_dir(name: &str) -> PathBuf {
+            let dir = std::env::temp_dir()
+                .join(format!("nodo-tui-earnings-{name}-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            dir
+        }
+
+        /// A catalogue with one payment per window, plus the rows that must not count.
+        ///
+        /// Dated relative to `now` by SQLite itself, because that is what
+        /// `get_earnings` compares against: a fixture with literal dates would start
+        /// failing the day it aged out of the year.
+        fn paid_database(dir: &Path) -> PathBuf {
+            let path = dir.join("earnings.sqlite");
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_id TEXT,
+                                        direction TEXT, status TEXT, peer_id TEXT, client_id TEXT,
+                                        deposit_token TEXT, ledger TEXT, contract_hash TEXT,
+                                        address TEXT, amount_mu TEXT NOT NULL,
+                                        created_at DATETIME);
+                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
+                        VALUES ('in', 'accepted', 'ergo', '1', datetime('now', '-1 hour'));
+                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
+                        VALUES ('in', 'accepted', 'ergo', '10', datetime('now', '-3 days'));
+                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
+                        VALUES ('in', 'accepted', 'ergo', '100', datetime('now', '-20 days'));
+                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
+                        VALUES ('in', 'accepted', 'ergo', '1000', datetime('now', '-200 days'));
+                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
+                        VALUES ('in', 'accepted', 'ergo', '10000', datetime('now', '-800 days'));
+                     -- A deposit we could not validate: no balance was credited for it.
+                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
+                        VALUES ('in', 'rejected', 'ergo', '7', datetime('now', '-1 hour'));
+                     -- Money we paid out. Not earnings, whatever its status.
+                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
+                        VALUES ('out', 'communicated', 'ergo', '5000', datetime('now', '-1 hour'));
+                     -- Taken over a network the row does not name.
+                     INSERT INTO payments (direction, status, amount_mu, created_at)
+                        VALUES ('in', 'accepted', '3', datetime('now', '-1 hour'));
+                     -- Undated: in no window, but still money this node took.
+                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
+                        VALUES ('in', 'accepted', 'ergo', '100000', NULL);",
+                )
+                .unwrap();
+            path
+        }
+
+        #[test]
+        fn each_window_holds_what_came_in_inside_it() {
+            let dir = temp_dir("windows");
+            let earnings = get_earnings(&paid_database(&dir)).unwrap();
+
+            let ergo = earnings.iter().find(|entry| entry.ledger == "ergo").unwrap();
+            assert_eq!(ergo.day, 1);
+            assert_eq!(ergo.week, 11);
+            assert_eq!(ergo.month, 111);
+            assert_eq!(ergo.year, 1111);
+            // All time reaches past the year, which is the point of having the column
+            // — and holds the undated payment, which is in no window at all.
+            assert_eq!(ergo.total, 111_111);
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_refused_deposit_is_counted_apart_from_what_was_earned() {
+            // It never became balance, so adding it to the earnings would report
+            // income that did not arrive — and dropping it would hide a client whose
+            // payments keep failing.
+            let dir = temp_dir("refused");
+            let earnings = get_earnings(&paid_database(&dir)).unwrap();
+
+            let ergo = earnings.iter().find(|entry| entry.ledger == "ergo").unwrap();
+            assert_eq!(ergo.refused, 7);
+            assert_eq!(ergo.day, 1, "the refused deposit leaked into the day");
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn what_we_paid_out_is_not_earnings() {
+            let dir = temp_dir("outgoing");
+            let earnings = get_earnings(&paid_database(&dir)).unwrap();
+
+            // Everything accepted and incoming, and nothing else: the 5000 we sent
+            // and the 7 we refused are both outside this sum.
+            let taken: u128 = earnings.iter().map(|entry| entry.total).sum();
+            assert_eq!(taken, 111_114, "{earnings:?}");
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_payment_over_an_unnamed_network_is_still_money() {
+            // `ledger` is nullable on the row, and a payment with no tag is money the
+            // node took: silently discarding it would understate what it earned.
+            let dir = temp_dir("unnamed");
+            let earnings = get_earnings(&paid_database(&dir)).unwrap();
+
+            let unknown = earnings
+                .iter()
+                .find(|entry| entry.ledger == "unknown")
+                .expect("the untagged payment vanished");
+            assert_eq!(unknown.day, 3);
+            // Biggest earner first, so the rows do not reorder between refreshes.
+            assert_eq!(earnings[0].ledger, "ergo");
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_node_with_no_payments_table_reads_as_no_earnings() {
+            let dir = temp_dir("empty");
+            let path = dir.join("empty.sqlite");
+            Connection::open(&path).unwrap();
+
+            assert!(get_earnings(&path).unwrap().is_empty());
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        const REPORT: &str = r#"{
+            "node_id": "ed6d", "own_proof_id": "aa11", "read_at": 1800000000,
+            "errors": {},
+            "standing": {"positive": 0.5, "negative": 0.125, "net": 0.375,
+                         "positive_proofs": 1, "negative_proofs": 1},
+            "opinions": [{"ledger": "ergo", "proof_id": "f3b6", "owner": "0008cd",
+                          "amount": 1, "assigned_amount": 95,
+                          "weight": 0.010526315789473684, "positive": true,
+                          "published_at": 1799000000, "box_id": "box-1",
+                          "burned_nanoerg": 96000000, "backed_nanoerg": 1010526.3}],
+            "own": [{"ledger": "ergo", "proof_id": "aa11", "owner": "0008cd",
+                     "amount": 1, "assigned_amount": 1,
+                     "weight": 1.0, "positive": true,
+                     "published_at": 1798000000, "box_id": "box-own",
+                     "burned_nanoerg": 1000000, "backed_nanoerg": 1000000}]
+        }"#;
+
+        #[test]
+        fn a_report_is_read_whole() {
+            let reputation = parse_node_reputation(REPORT).unwrap();
+
+            assert_eq!(reputation.node_id, "ed6d");
+            assert_eq!(reputation.own_proof_id, "aa11");
+            assert_eq!(reputation.standing.positive, 0.5);
+            assert_eq!(reputation.standing.negative, 0.125);
+            assert_eq!(reputation.standing.proofs(), 2);
+            assert_eq!(reputation.read_at, Some(1_800_000_000));
+            assert!(reputation.is_read());
+            assert!(reputation.error.is_empty());
+
+            assert_eq!(reputation.opinions.len(), 1);
+            let opinion = &reputation.opinions[0];
+            assert_eq!(opinion.box_id, "box-1");
+            assert_eq!(opinion.proof_id, "f3b6");
+            // One token out of the ninety-five that proof has assigned: ~1.05%, not
+            // the 0.000001% the minted supply would have made of it.
+            assert_eq!((opinion.amount, opinion.assigned_amount), (1, 95));
+            assert!((opinion.weight - 0.010_526_3).abs() < 1e-6);
+            assert_eq!(opinion.burned_nanoerg, 96_000_000.0);
+            assert!(opinion.positive);
+            assert_eq!(opinion.published_at, Some(1_799_000_000));
+
+            // Our own proof's stake arrives separately, so it can be shown without
+            // being counted.
+            assert_eq!(reputation.own.len(), 1);
+            assert_eq!(reputation.own[0].proof_id, "aa11");
+        }
+
+        #[test]
+        fn a_report_carries_no_windows_to_read_reputation_over() {
+            // Deliberately absent rather than missed: the chain cannot date what it
+            // holds (a proof re-dates every opinion when it republishes), so a window
+            // would report the publisher's submission cadence. Only money is windowed,
+            // and that comes from the catalogue.
+            let reputation = parse_node_reputation(REPORT).unwrap();
+            assert_eq!(reputation.standing.positive, 0.5);
+            assert!(!REPORT.contains("periods"), "the report grew windows again");
+        }
+
+        #[test]
+        fn a_ledger_that_could_not_be_read_is_named_beside_the_figures() {
+            let reputation = parse_node_reputation(
+                r#"{"node_id": "ed6d", "own_proof_id": "", "read_at": 1,
+                     "errors": {"ergo": "explorer unreachable"},
+                     "standing": {"positive": 0.0, "negative": 0.0,
+                                  "positive_proofs": 0, "negative_proofs": 0},
+                     "opinions": [], "own": []}"#,
+            )
+            .unwrap();
+            assert_eq!(reputation.error, "ergo: explorer unreachable");
+        }
+
+        #[test]
+        fn a_line_printed_ahead_of_the_report_does_not_swallow_it() {
+            // A node loading a fresh config generates its identity and says so on
+            // stdout. Parsing the whole stream would fail, and the page would report
+            // an unreadable chain on a node whose chain is perfectly readable.
+            // One line, as `nodo reputation --json` prints it.
+            let report = r#"{"node_id": "ed6d", "read_at": 1, "own_proof_id": "", "standing": {}, "opinions": [], "own": []}"#;
+            let noisy = format!("Generated new node identity mnemonic\n{report}\n");
+            let reputation = parse_node_reputation(report_line(&noisy).unwrap()).unwrap();
+            assert_eq!(reputation.node_id, "ed6d");
+            assert_eq!(report_line("nothing json here\n"), None);
+        }
+
+        #[test]
+        fn a_failed_command_is_an_error_and_never_an_empty_verdict() {
+            // `{"error": …}` is what the command prints when it could not read the
+            // chain at all. Read as a report it would say "nobody stakes anything on
+            // this node", which is a claim about the network.
+            let error = parse_node_reputation(r#"{"error": "no node identity", "read_at": 1}"#)
+                .unwrap_err();
+            assert_eq!(error, "no node identity");
+            assert!(parse_node_reputation("not json at all").is_err());
+        }
+    }
+
     mod payment_and_reputation_history {
         use super::*;
 

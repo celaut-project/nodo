@@ -485,6 +485,21 @@ These are intended for development or advanced maintenance environments:
   **Example:**  
   `nodo ggconf /path/to/repository`
 
+- **reputation `[<node id>]` `[--json]`**  
+  What the network stakes on this node: every reputation proof out there that has put
+  part of itself behind it, for or against. Read-only — explorer reads
+  only, nothing is signed or spent. A figure is the *share* of what a staking proof
+  has assigned to opinions — not of everything it minted, most of which sits in its own
+  reserve box; see
+  [Reputation system implementation](ERGO.md#reputation-system-implementation). Pass a
+  node's identity public key (a peer id) to ask the same question about a peer, and
+  `--json` for the machine-readable report the TUI's EARNINGS page reads. Beside each
+  share it reports what that share cost: the ERG burned into the publishing proof, which
+  the contract makes unrecoverable, apportioned by the share committed. Minting a proof
+  is free, so the two figures have to be read together.  
+  **Example:**  
+  `nodo reputation`
+
 - **submit_reputation**  
   Forces the submission of reputation information. Writes the resulting proof id to
   `config.yaml`, so it restarts a serving node (needs root — see
@@ -602,9 +617,9 @@ If `hashing.CHECK_INTEGRITY_ON_SERVE` is set to `true`, Nodo runs an automatic i
 ## Terminal User Interface (TUI)
 
 Run `nodo tui` to open the operations console. Its pages cover node/host statistics, current
-instance resource usage and reservations, local services, peers, clients, complete
-`config.yaml` editing, logs, storage, and Ergo wallet balances. The old tunnels page was
-removed because nodo does not use it.
+instance resource usage and reservations, local services, peers, clients, what the node has
+earned, complete `config.yaml` editing, logs, storage, and Ergo wallet balances. The old
+tunnels page was removed because nodo does not use it.
 
 - `Tab`/`Shift+Tab` switches pages; Up/Down selects rows.
 - `r` refreshes.
@@ -613,6 +628,14 @@ removed because nodo does not use it.
 - On Clients, `+`/`-` credit/debit the selected client's balance (`nodo credit_client`/`debit_client`),
   and the detail card shows what a client has paid, its deposit tokens, and the instances it
   started here.
+- On Earnings, the money each payment network brought in is windowed — last day, week,
+  month, year and all time — because money is a flow; what the network stakes on this
+  node is shown as a standing with the ERG sunk behind it, and deliberately not windowed,
+  because a proof re-dates every one of its opinions when it republishes (see
+  [ERGO.md](ERGO.md#why-there-is-no-reputation-earned-this-week)). Every proof that has
+  staked something on this node is listed underneath. Money comes from the catalogue and
+  is live; the reputation half is `nodo reputation` re-read every five minutes, and `r`
+  re-reads it now.
 - On Services, `e` executes the selected service and `d` deletes it.
 - On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are

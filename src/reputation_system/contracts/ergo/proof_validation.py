@@ -4,6 +4,9 @@ from protos import celaut_pb2 as celaut
 
 from src.identity.node_identity import get_node_public_key_hex
 from src.reputation_system.contracts.ergo.utils import (
+    box_register,
+    decode_coll_byte_hex,
+    ergo_tree_template_hash,
     get_public_key,
     iter_unspent_boxes_by_address,
     owner_proposition_bytes_hex,
@@ -33,60 +36,6 @@ class ProofLookupUnavailable(ValueError):
     one — must not treat an unreachable node as one. Subclasses ValueError so
     existing callers that only expect that keep working.
     """
-
-
-def _decode_coll_byte_hex(register_value: str) -> Optional[str]:
-    """
-    Return the raw byte payload (hex) of a Coll[Byte] register.
-
-    Handles the node's serialized form — ``0e`` (Coll[Byte] type tag) + VLQ length +
-    payload — and the explorer's already-rendered raw-hex form. No fixed-length
-    assumption: R7 holds the owner ``propositionBytes`` (~35 bytes for a P2PK), R4/R5
-    hold 32-byte token ids, etc.
-    """
-    if not register_value:
-        return None
-
-    value = register_value.strip().lower()
-    if not value:
-        return None
-
-    if value.startswith("0e"):
-        # Serialized Coll[Byte]: 0e <VLQ length> <payload bytes>.
-        idx = 2
-        length = 0
-        shift = 0
-        try:
-            while idx + 1 < len(value):
-                byte = int(value[idx:idx + 2], 16)
-                idx += 2
-                length |= (byte & 0x7F) << shift
-                if not (byte & 0x80):
-                    break
-                shift += 7
-        except ValueError:
-            return None
-        payload = value[idx:idx + length * 2]
-        return payload or None
-
-    # Already the rendered raw-hex payload.
-    return value
-
-
-def _extract_register_value(box: dict, register: str) -> Optional[str]:
-    additional = box.get("additionalRegisters", {})
-    reg = additional.get(register)
-
-    if reg is None:
-        return None
-
-    if isinstance(reg, str):
-        return reg
-
-    if isinstance(reg, dict):
-        return reg.get("serializedValue") or reg.get("renderedValue")
-
-    return None
 
 
 def _boxes_off_canonical_contract(boxes: List[dict]) -> List[str]:
@@ -120,7 +69,7 @@ def _node_own_proof_token_id(
     different type, or opinion boxes about other peers -- which must NOT be adopted as the
     node's own proof.
     """
-    if _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or "")) != owner_proposition:
+    if decode_coll_byte_hex(str(box_register(box, "R7") or "")) != owner_proposition:
         return None
 
     assets = box.get("assets") or []
@@ -128,8 +77,8 @@ def _node_own_proof_token_id(
     if not token_id:
         return None
 
-    r4 = (_decode_coll_byte_hex(str(_extract_register_value(box, "R4") or "")) or "").lower()
-    r5 = (_decode_coll_byte_hex(str(_extract_register_value(box, "R5") or "")) or "").lower()
+    r4 = (decode_coll_byte_hex(str(box_register(box, "R4") or "")) or "").lower()
+    r5 = (decode_coll_byte_hex(str(box_register(box, "R5") or "")) or "").lower()
 
     # R5 must name us: our self-opinion, not an opinion we hold about another peer.
     if r5 != identity_key.lower():
@@ -149,7 +98,7 @@ def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
     already carries every box in full, with ``ergoTree`` as canonical hex and
     ``additionalRegisters`` in the serialized ``0e…`` form that
     :func:`_boxes_off_canonical_contract`, :func:`_validate_box_structure` and
-    :func:`_decode_coll_byte_hex` all expect — the same shape
+    :func:`decode_coll_byte_hex` all expect — the same shape
     :func:`iter_unspent_boxes_by_address` yields on the ownership-lookup path.
 
     Do NOT route this through AppKit's ``InputBox.toJson()``: it renders
@@ -205,7 +154,7 @@ def _validate_box_structure(box: dict) -> bool:
     field are deferred to :func:`_boxes_off_canonical_contract` / the ownership check.
     """
     for register in ("R4", "R5", "R7"):
-        decoded = _decode_coll_byte_hex(str(_extract_register_value(box, register) or ""))
+        decoded = decode_coll_byte_hex(str(box_register(box, register) or ""))
         if not decoded:
             logger(f"Reputation box structure invalid: register {register} missing or undecodable.")
             return False
@@ -307,7 +256,7 @@ def explain_contract_ledger(
     # attestation rather than by being the same key. Identity does not depend on holding
     # a proof; a proof, when present, is verified against the attested wallet instead.
     owners = {
-        _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or ""))
+        decode_coll_byte_hex(str(box_register(box, "R7") or ""))
         for box in boxes
     }
     owners.discard(None)
@@ -374,7 +323,7 @@ def _validate_reputation_proof_ownership(mnemonic_phrase: str, proof_id: str) ->
 
         # R7 of a Reputation Box holds the owner's raw propositionBytes (Coll[Byte]).
         box_owners = {
-            _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or ""))
+            decode_coll_byte_hex(str(box_register(box, "R7") or ""))
             for box in boxes
         }
 
@@ -400,22 +349,38 @@ def _validate_reputation_proof_ownership(mnemonic_phrase: str, proof_id: str) ->
         ) from e
 
 
-def _search_boxes_by_r7(ergo, contract_address: str, owner_proposition_hex: str) -> Optional[List[dict]]:
+def _search_boxes_by_r7(api_url: str, owner_proposition_hex: str) -> Optional[List[dict]]:
     """
     Try to fetch only the boxes whose R7 equals ``owner_proposition_hex`` using the
     explorer's register-filtered search, avoiding a full paginated scan of the contract.
 
-    Returns the matching boxes, or ``None`` when the endpoint does not support register
-    filtering (so the caller falls back to the paginated scan).
+    Returns the matching boxes, or ``None`` when the search cannot be used (so the
+    caller falls back to the paginated scan).
+
+    Two things this gets right that a register filter is easy to get wrong, both of
+    which turn into a silent "no such box" rather than an error:
+
+    * the endpoint **requires** ``ergoTreeTemplateHash`` -- omitting it is an HTTP 400,
+      so a filter without one never ran at all;
+    * it matches the **rendered** register value, the raw payload hex, and returns
+      nothing for the serialized ``0e``-prefixed form.
+
+    The client-side re-check stays: a template hash identifies a contract's code, not
+    its exact tree, so the search can return look-alike boxes (see
+    :func:`_boxes_off_canonical_contract`).
     """
     import requests
 
-    api_url = str(ergo.get_api_url()).rstrip("/")
+    api_url = str(api_url).rstrip("/")
     url = f"{api_url}/api/v1/boxes/unspent/search"
+    try:
+        template_hash = ergo_tree_template_hash(REPUTATION_PROOF_ERGO_TREE)
+    except ValueError as e:
+        logger(f"Cannot derive the reputation contract template ({e}); falling back to paginated scan.")
+        return None
     body = {
-        "ergoTreeTemplateHash": None,
-        "registers": {"R7": "0e" + format(len(owner_proposition_hex) // 2, "02x") + owner_proposition_hex},
-        "constants": {},
+        "ergoTreeTemplateHash": template_hash,
+        "registers": {"R7": owner_proposition_hex},
         "assets": [],
     }
     try:
@@ -430,10 +395,9 @@ def _search_boxes_by_r7(ergo, contract_address: str, owner_proposition_hex: str)
         items = response.json().get("items", [])
     except ValueError:
         return None
-    # Filter defensively client-side: the endpoint matches on address, not always R7.
     return [
         b for b in items
-        if _decode_coll_byte_hex(str(_extract_register_value(b, "R7") or "")) == owner_proposition_hex
+        if decode_coll_byte_hex(str(box_register(b, "R7") or "")) == owner_proposition_hex
     ]
 
 
@@ -470,7 +434,7 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
         )
 
     # Fast path: register-filtered lookup.
-    filtered = _search_boxes_by_r7(ergo, contract_address, owner_proposition)
+    filtered = _search_boxes_by_r7(str(ergo.get_api_url()), owner_proposition)
     if filtered is not None:
         for box in filtered:
             token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft, identity_key)
@@ -479,7 +443,7 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
         return None
 
     # Fallback: bounded paginated scan, breaking on first match.
-    for box in iter_unspent_boxes_by_address(ergo, contract_address):
+    for box in iter_unspent_boxes_by_address(str(ergo.get_api_url()), contract_address):
         token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft, identity_key)
         if token_id:
             return token_id

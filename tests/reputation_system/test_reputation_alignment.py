@@ -1,5 +1,5 @@
 from src.reputation_system import envs
-from src.reputation_system.contracts.ergo import proof_validation, transaction
+from src.reputation_system.contracts.ergo import proof_validation, transaction, utils
 
 
 # Canonical reputation-proof register spec — enforced by reputation_proof.es and shared
@@ -68,19 +68,19 @@ def test_looks_like_hex():
 def test_decode_coll_byte_hex_roundtrips_ids_and_proposition():
     # R4/R5 token ids round-trip: raw-byte encode -> serialized Coll[Byte] -> decode.
     for value in (TYPE_NFT, PROOF_ID):
-        assert proof_validation._decode_coll_byte_hex(_coll_byte(transaction._id_bytes(value))) == value
+        assert utils.decode_coll_byte_hex(_coll_byte(transaction._id_bytes(value))) == value
     # R7 raw propositionBytes (variable length) round-trips.
     assert (
-        proof_validation._decode_coll_byte_hex(_coll_byte(bytes.fromhex(P2PK_PROPOSITION)))
+        utils.decode_coll_byte_hex(_coll_byte(bytes.fromhex(P2PK_PROPOSITION)))
         == P2PK_PROPOSITION
     )
 
 
 def test_decode_coll_byte_hex_handles_multibyte_vlq_and_rendered_form():
     big = bytes(range(200))  # payload > 127 bytes -> multi-byte VLQ length
-    assert proof_validation._decode_coll_byte_hex(_coll_byte(big)) == big.hex()
+    assert utils.decode_coll_byte_hex(_coll_byte(big)) == big.hex()
     # Explorer's already-rendered raw-hex form (no 0e tag) passes through.
-    assert proof_validation._decode_coll_byte_hex(TYPE_NFT) == TYPE_NFT
+    assert utils.decode_coll_byte_hex(TYPE_NFT) == TYPE_NFT
 
 
 def test_decode_rejects_the_old_utf8_double_encoding():
@@ -88,7 +88,7 @@ def test_decode_rejects_the_old_utf8_double_encoding():
     # STRING, so a raw-byte reader (the whole ecosystem) decodes it to the hex-of-ASCII,
     # never the real token id -> the proof is invisible in the web app.
     legacy_utf8 = _coll_byte(TYPE_NFT.encode("utf-8"))
-    assert proof_validation._decode_coll_byte_hex(legacy_utf8) != TYPE_NFT
+    assert utils.decode_coll_byte_hex(legacy_utf8) != TYPE_NFT
 
 
 def test_validate_box_structure_accepts_canonical_registers():
