@@ -47,7 +47,13 @@ CONSUMPTION_WINDOW_SAMPLES = max(1, CONSUMPTION_WINDOW_SECONDS // max(1, MANAGER
 # has no upgrade path at all. Without these, a peer's reputation update would fail and
 # roll its score back with the missing event, which is a worse outcome than the feature
 # simply not being there. Everything created here is `IF NOT EXISTS`.
-TRACEABILITY_TABLES = ("payments", "reputation_events", "service_reputation", "tunnel_traffic")
+TRACEABILITY_TABLES = (
+    "payments",
+    "reputation_events",
+    "service_reputation",
+    "tunnel_traffic",
+    "demand_history",
+)
 
 
 def _as_int(value) -> int:
@@ -2027,6 +2033,87 @@ class SQLConnection(metaclass=Singleton):
         ''', (token,))
         result = cursor.fetchone()
         return result[0] if result else None
+
+    def add_demand_history(
+        self,
+        hour: str,
+        instances_held: int = 0,
+        mu_charged: int = 0,
+        admissions: int = 0,
+        refusals: int = 0,
+        refused_closed: int = 0,
+    ) -> None:
+        """Fold one flush of counters into ``hour``'s row (issue #337).
+
+        Additive except for ``instances_held``, which is a high-water mark: two flushes
+        of the same hour add their launches together and keep the larger of their two
+        peaks, so a restart mid-hour cannot make a busy hour look quiet. `mu_charged` is
+        TEXT and added as an integer here, for the same reason every balance is.
+        """
+        self._execute(
+            """
+            INSERT INTO demand_history
+                (hour, instances_held, mu_charged, admissions, refusals, refused_closed)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hour) DO UPDATE SET
+                instances_held = MAX(instances_held, excluded.instances_held),
+                mu_charged = CAST(
+                    CAST(mu_charged AS INTEGER) + CAST(excluded.mu_charged AS INTEGER) AS TEXT
+                ),
+                admissions = admissions + excluded.admissions,
+                refusals = refusals + excluded.refusals,
+                refused_closed = refused_closed + excluded.refused_closed
+            """,
+            (
+                hour,
+                int(instances_held),
+                str(int(mu_charged)),
+                int(admissions),
+                int(refusals),
+                int(refused_closed),
+            ),
+        )
+
+    def get_demand_history(self, days: int = 30) -> List[dict]:
+        """The recorded hours over the last ``days``, oldest first.
+
+        Bounded by the caller's window rather than by what the table holds, so a reader
+        drawing a month does not pay for a quarter of history.
+        """
+        result = self._execute(
+            """
+            SELECT hour, instances_held, mu_charged, admissions, refusals, refused_closed
+            FROM demand_history
+            WHERE hour >= strftime('%Y-%m-%dT%H', 'now', 'localtime', ?)
+            ORDER BY hour ASC
+            """,
+            (f"-{max(1, int(days))} days",),
+        )
+        return [
+            {
+                "hour": row[0],
+                "instances_held": int(row[1] or 0),
+                "mu_charged": _as_int(row[2]),
+                "admissions": int(row[3] or 0),
+                "refusals": int(row[4] or 0),
+                "refused_closed": int(row[5] or 0),
+            }
+            for row in result.fetchall()
+        ]
+
+    def prune_demand_history(self, keep_days: int) -> None:
+        """Drop hours older than ``keep_days``, so this table has a ceiling.
+
+        Pruned on the hour rollover rather than on a schedule of its own: the one moment
+        a row is certainly finished is when a later one starts.
+        """
+        self._execute(
+            """
+            DELETE FROM demand_history
+            WHERE hour < strftime('%Y-%m-%dT%H', 'now', 'localtime', ?)
+            """,
+            (f"-{max(1, int(keep_days))} days",),
+        )
 
     def get_delegated_instances(self) -> List[dict]:
         """

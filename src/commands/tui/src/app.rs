@@ -1,4 +1,5 @@
 use crate::cell::{self, Lever, LeverKind, LeverStatus, Organelle};
+use crate::schedule::{self};
 use prost::Message;
 use ratatui::layout::{Position, Rect};
 use ratatui::widgets::TableState;
@@ -25,6 +26,9 @@ pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 pub const HISTORY_POINTS: usize = 120;
 const DATA_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const WALLET_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+/// How much demand history the SCHEDULE page reads back. A month shows the weekly shape
+/// without letting one unusual day set the scale of the whole chart.
+const DEMAND_HISTORY_DAYS: u16 = 30;
 /// Shortest gap between two counter samples that yields a meaningful rate. The
 /// ordinary sweep is `DATA_REFRESH_INTERVAL` apart, but a forced refresh (after a
 /// kill, or an `r` keypress) can land immediately after one; dividing a counter
@@ -52,21 +56,27 @@ pub enum Page {
     /// of named decisions rather than as a YAML tree.
     Cell,
     Pricing,
+    /// The hours this node takes work in, drawn as a day rather than typed as two
+    /// times: `activity_window` is one window even when it runs through midnight, and
+    /// two separate fields cannot say so.
+    Schedule,
     Config,
     Logs,
 }
 
 impl Page {
-    pub const ALL: [Page; 9] = [
+    pub const ALL: [Page; 10] = [
         Page::Overview,
         Page::Instances,
         Page::Services,
         Page::Peers,
         Page::Clients,
-        // The three editors sit together and run from the most general to the most
-        // specific: postures, then prices, then single keys.
+        // The editors sit together and run from the most general to the most
+        // specific: postures, then the two that own a decision with a shape of its own
+        // -- prices as bars, the working day as a day -- then single keys.
         Page::Cell,
         Page::Pricing,
+        Page::Schedule,
         Page::Config,
         Page::Logs,
     ];
@@ -80,6 +90,7 @@ impl Page {
             Page::Clients => "CLIENTS",
             Page::Cell => "CELL",
             Page::Pricing => "PRICING",
+            Page::Schedule => "SCHEDULE",
             Page::Config => "CONFIG",
             Page::Logs => "LOGS",
         }
@@ -1317,6 +1328,64 @@ fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
     (entries, scarcity)
 }
 
+/// Minutes since local midnight.
+///
+/// Asked of SQLite, which is already a dependency and already the only thing in this
+/// binary that knows what local time is: `std` has no local clock at all, and pulling
+/// in a date library for one number is a poor trade. Falls back to midnight, which
+/// draws the marker at 00:00 rather than refusing to draw the day.
+pub fn local_minute_of_day() -> u16 {
+    fn query() -> Option<u16> {
+        let connection = rusqlite::Connection::open_in_memory().ok()?;
+        let text: String = connection
+            .query_row("SELECT strftime('%H:%M', 'now', 'localtime')", [], |row| {
+                row.get(0)
+            })
+            .ok()?;
+        crate::schedule::parse_clock(&text)
+    }
+    query().unwrap_or(0)
+}
+
+/// The four keys a working day is, and the label the change is reported under.
+///
+/// Pure, and separate from `App::commit_schedule`, for the reason `chained_write` is:
+/// starting the write spawns a task, so a test that went through the method would need
+/// a runtime to ask the only question worth asking -- what would reach config.yaml.
+pub fn schedule_writes(window: schedule::Window) -> (String, Vec<(String, String)>) {
+    let writes = vec![
+        (
+            "activity_window.ENABLED".to_string(),
+            window.enabled.to_string(),
+        ),
+        (
+            "activity_window.START".to_string(),
+            schedule::format_clock(window.start),
+        ),
+        (
+            "activity_window.END".to_string(),
+            schedule::format_clock(window.end),
+        ),
+        (
+            "activity_window.ON_CLOSE".to_string(),
+            window.on_close.as_str().to_string(),
+        ),
+    ];
+    // All four every time, including the ones that did not move: `yq` sets what it is
+    // given, and a window written as a partial set would leave the node running some of
+    // the old decision and some of the new.
+    let label = if window.always_open() {
+        "Set schedule: always open".to_string()
+    } else {
+        format!(
+            "Set schedule {} -> {}",
+            schedule::format_clock(window.start),
+            schedule::format_clock(window.end)
+        )
+    };
+    (label, writes)
+}
+
 fn read_yaml(path: &Path) -> Result<Value, String> {
     let content = fs::read_to_string(path)
         .map_err(|error| format!("Unable to read {}: {error}", path.display()))?;
@@ -1539,6 +1608,30 @@ pub struct App {
     pub prices: StatefulList<PriceEntry>,
     pub scarcity: Scarcity,
     pub money: Money,
+    /// Which edge of the working day the SCHEDULE page is moving, and the window as
+    /// edited but not yet applied.
+    ///
+    /// A draft rather than a write per keypress: `activity_window.START` and `.END` are
+    /// one decision, and applying them one at a time would restart the node onto a
+    /// combination nobody chose -- 22:00→06:00 arrived at through 22:00→18:00, which is
+    /// a day shift the operator never asked for and which `ON_CLOSE: stop` would act
+    /// on. `write_config_values` exists for exactly this, so the page collects the
+    /// change and commits it once.
+    pub schedule_edge: schedule::Edge,
+    pub schedule_draft: Option<schedule::Window>,
+    /// A month of demand folded onto the hours of a clock, drawn under the window on
+    /// the SCHEDULE page so the hours can be chosen against what was actually asked
+    /// for (issue #337).
+    pub demand: DemandByHour,
+    /// How many days of history `demand` covers.
+    pub demand_days: u16,
+    /// Minutes since local midnight, refreshed with the rest of the data.
+    ///
+    /// Local because `activity_window` is local: a day drawn in UTC would be a
+    /// different day from the one the node enforces. Sampled on the data tick rather
+    /// than per frame, since drawing must not do work that can fail, and a marker on a
+    /// 24-hour bar only has to be right to the minute.
+    pub now_minute: u16,
     /// The guest kernel reserve per architecture, as the node will apply it. Shown on
     /// the pricing page because the node absorbs it: it is the gap between memory sold
     /// and host RAM committed, and it is what a memory price has to cover.
@@ -1618,6 +1711,11 @@ impl Default for App {
             config_document: read_yaml(&paths.config).ok(),
             prices: StatefulList::with_items(prices),
             scarcity,
+            schedule_edge: schedule::Edge::Start,
+            schedule_draft: None,
+            now_minute: local_minute_of_day(),
+            demand: DemandByHour::default(),
+            demand_days: DEMAND_HISTORY_DAYS,
             money: Money::load(&paths.config),
             guest_kernel_reserves: get_guest_kernel_reserves(&paths.config),
             peer_detail: None,
@@ -1683,6 +1781,7 @@ impl App {
     /// pages cycle with Tab/Shift+Tab). Ignored by every page that has no use for it.
     pub fn on_right(&mut self) {
         match self.page() {
+            Page::Schedule => self.nudge_schedule(1),
             Page::Config => {
                 self.config_tree_state.key_right();
             }
@@ -1699,6 +1798,7 @@ impl App {
     /// otherwise step up to its parent, which is what `key_left` does.
     pub fn on_left(&mut self) {
         match self.page() {
+            Page::Schedule => self.nudge_schedule(-1),
             Page::Config => {
                 self.config_tree_state.key_left();
             }
@@ -1713,6 +1813,10 @@ impl App {
 
     pub fn on_up(&mut self) {
         match self.page() {
+            // Two edges, so up and down both mean "the other one". ←/→ are the ones
+            // that move an hour, which is why the arrows are split this way rather
+            // than up/down adjusting and ←/← selecting.
+            Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.previous(),
             Page::Services => {
                 self.services.previous();
@@ -1742,6 +1846,7 @@ impl App {
 
     pub fn on_down(&mut self) {
         match self.page() {
+            Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.next(),
             Page::Services => {
                 self.services.next();
@@ -2916,6 +3021,146 @@ impl App {
     }
 
     /// Everything a config write invalidates: the money view and the config table.
+    /// The working day as `config.yaml` states it, or as the page has edited it.
+    ///
+    /// Read from `config_document` rather than mirrored into a field of its own: that
+    /// document is already reloaded after every write, and a second copy would be one
+    /// more thing that can disagree with the file the node actually booted with.
+    pub fn schedule_window(&self) -> schedule::Window {
+        if let Some(draft) = self.schedule_draft {
+            return draft;
+        }
+        self.schedule_saved()
+    }
+
+    /// The window on disk, ignoring any unapplied edit.
+    pub fn schedule_saved(&self) -> schedule::Window {
+        let document = self.config_document.as_ref();
+        let clock = |key: &str| {
+            yaml_scalar(document, &["activity_window", key])
+                .as_deref()
+                .and_then(schedule::parse_clock)
+        };
+        schedule::Window {
+            enabled: yaml_scalar(document, &["activity_window", "ENABLED"])
+                .map(|value| value.trim().eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
+            // An unparseable hour cannot be drawn, and it cannot reach a running node
+            // either: `config_validation` stops the node on it. Falling back to
+            // midnight shows the day as always open, which is what a node with no
+            // usable window does.
+            start: clock("START").unwrap_or(0),
+            end: clock("END").unwrap_or(0),
+            on_close: schedule::OnClose::parse(
+                &yaml_scalar(document, &["activity_window", "ON_CLOSE"]).unwrap_or_default(),
+            ),
+        }
+    }
+
+    /// Whether the page holds an edit that the node is not running yet.
+    pub fn schedule_is_dirty(&self) -> bool {
+        self.schedule_draft
+            .map(|draft| draft != self.schedule_saved())
+            .unwrap_or(false)
+    }
+
+    /// Move the selected edge by `steps` half-hours, in the draft.
+    pub fn nudge_schedule(&mut self, steps: i32) {
+        if self.page() != Page::Schedule {
+            return;
+        }
+        let mut window = self.schedule_window();
+        // Snapped on the first nudge so an hour typed into the file by hand -- 22:17 --
+        // lands on the grid the cursor moves along, instead of carrying its odd minutes
+        // through every later edit.
+        let edge = match self.schedule_edge {
+            schedule::Edge::Start => &mut window.start,
+            schedule::Edge::End => &mut window.end,
+        };
+        *edge = schedule::nudge(schedule::snap(*edge), steps);
+        self.schedule_draft = Some(window);
+        self.status = self.schedule_draft_status();
+    }
+
+    /// Switch which edge the arrows move.
+    pub fn toggle_schedule_edge(&mut self) {
+        if self.page() != Page::Schedule {
+            return;
+        }
+        self.schedule_edge = self.schedule_edge.other();
+        self.status = format!("Moving when the node {}", self.schedule_edge.label());
+    }
+
+    /// Turn the window on or off, in the draft.
+    pub fn toggle_schedule_enabled(&mut self) {
+        if self.page() != Page::Schedule {
+            return;
+        }
+        let mut window = self.schedule_window();
+        window.enabled = !window.enabled;
+        self.schedule_draft = Some(window);
+        self.status = self.schedule_draft_status();
+    }
+
+    /// Swap `ON_CLOSE` between refusing new work and stopping what runs, in the draft.
+    pub fn toggle_schedule_on_close(&mut self) {
+        if self.page() != Page::Schedule {
+            return;
+        }
+        let mut window = self.schedule_window();
+        window.on_close = match window.on_close {
+            schedule::OnClose::Refuse => schedule::OnClose::Stop,
+            schedule::OnClose::Stop => schedule::OnClose::Refuse,
+        };
+        self.schedule_draft = Some(window);
+        self.status = self.schedule_draft_status();
+    }
+
+    /// Throw the unapplied edit away.
+    pub fn discard_schedule_draft(&mut self) {
+        if self.schedule_draft.take().is_some() {
+            self.status = "Schedule edit discarded".to_string();
+        }
+    }
+
+    fn schedule_draft_status(&self) -> String {
+        let window = self.schedule_window();
+        if self.schedule_is_dirty() {
+            format!(
+                "{} -> {} ({}) - Enter applies, Esc discards",
+                schedule::format_clock(window.start),
+                schedule::format_clock(window.end),
+                window.open_duration(),
+            )
+        } else {
+            "Schedule matches the running node".to_string()
+        }
+    }
+
+    /// Apply the edited window: one backup, one write, one restart.
+    pub fn commit_schedule(&mut self) {
+        if self.page() != Page::Schedule {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        let Some(draft) = self.schedule_draft else {
+            self.status = "Nothing to apply".to_string();
+            return;
+        };
+        if draft == self.schedule_saved() {
+            self.schedule_draft = None;
+            self.status = "Schedule matches the running node".to_string();
+            return;
+        }
+
+        let (label, writes) = schedule_writes(draft);
+        self.schedule_draft = None;
+        self.write_config_values(label, &writes, ConfigFollowUp::None);
+    }
+
     fn reload_after_config_write(&mut self) {
         self.config_document = read_yaml(&self.paths.config).ok();
         self.reload_money();
@@ -3224,6 +3469,9 @@ impl App {
             return;
         }
         self.last_data_refresh = Instant::now();
+        self.now_minute = local_minute_of_day();
+        self.demand = get_demand_by_hour(&self.paths.database, DEMAND_HISTORY_DAYS)
+            .unwrap_or_default();
         self.paths = Paths::discover();
         // Picks up an edit made on the Config page, or in a shell, so the cell's
         // levers describe the file as it is rather than as it was at start-up.
@@ -3458,6 +3706,71 @@ fn parse_erg_amount(value: &str) -> Option<f64> {
         .trim()
         .parse::<f64>()
         .ok()
+}
+
+/// Peak instances held and work refused for a shut window, per hour of the clock.
+///
+/// Two arrays of 24, folded from `demand_history` (issue #337): for each hour of the
+/// day, the worst hour of that name in the period, and the refusals accumulated across
+/// it. A mean would flatten a machine that is busy every evening into one that is
+/// mildly busy all day, which is the opposite of what choosing working hours needs to
+/// see; refusals add up, because there the total is the cost.
+///
+/// An absent table is an empty history, not an error: a node that has not run since the
+/// table was introduced simply has nothing to draw, and the page says so.
+fn get_demand_by_hour(database: &Path, days: u16) -> SqlResult<DemandByHour> {
+    let connection = Connection::open(database)?;
+    let mut statement = connection.prepare(
+        "SELECT CAST(substr(hour, -2) AS INTEGER),
+                MAX(instances_held),
+                SUM(refused_closed)
+         FROM demand_history
+         WHERE hour >= strftime('%Y-%m-%dT%H', 'now', 'localtime', ?1)
+         GROUP BY substr(hour, -2)",
+    )?;
+    let rows = statement.query_map([format!("-{days} days")], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1).unwrap_or(0),
+            row.get::<_, i64>(2).unwrap_or(0),
+        ))
+    })?;
+
+    let mut demand = DemandByHour::default();
+    for row in rows {
+        let (hour, held, refused) = row?;
+        if (0..24).contains(&hour) {
+            demand.held[hour as usize] = held.max(0) as u32;
+            demand.refused[hour as usize] = refused.max(0) as u32;
+        }
+    }
+    Ok(demand)
+}
+
+/// A month of demand folded onto the 24 hours of a clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DemandByHour {
+    /// Peak instances held in each hour of the day.
+    pub held: [u32; 24],
+    /// Launches refused because the window was shut, per hour of the day.
+    pub refused: [u32; 24],
+}
+
+impl DemandByHour {
+    /// Whether anything was ever recorded. A node with no history gets a note saying
+    /// so, rather than a flat bar that reads as "nobody ever asked for anything".
+    pub fn is_empty(&self) -> bool {
+        self.held.iter().all(|value| *value == 0)
+            && self.refused.iter().all(|value| *value == 0)
+    }
+
+    pub fn peak_held(&self) -> u32 {
+        self.held.iter().copied().max().unwrap_or(0)
+    }
+
+    pub fn total_refused(&self) -> u32 {
+        self.refused.iter().sum()
+    }
 }
 
 fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
@@ -6269,6 +6582,205 @@ Cold Wallet: 9cold\n";
     }
 
     /// ←/→ walk the Config tree; pages are cycled with Tab/Shift+Tab only.
+    /// Editing the working day: what the keys move, and what reaches config.yaml.
+    ///
+    /// The arithmetic of a window lives in `crate::schedule` and is tested there. What
+    /// is here is the part that can only go wrong in the page: which edge an arrow
+    /// moves, that an edit is held rather than applied per keypress, and that applying
+    /// it writes all four keys at once.
+    mod working_hours {
+        use super::*;
+        use crate::schedule::{format_clock, parse_clock, Edge, OnClose};
+        use super::super::schedule_writes;
+
+        fn on_schedule_page(yaml: &str) -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Schedule)
+                .unwrap();
+            app.config_document = serde_yaml::from_str(yaml).ok();
+            app
+        }
+
+        const NIGHT: &str = "activity_window:\n  ENABLED: true\n  START: '22:00'\n  END: '06:00'\n  ON_CLOSE: refuse\n";
+
+        #[test]
+        fn the_window_is_read_from_the_config_document() {
+            let app = on_schedule_page(NIGHT);
+            let window = app.schedule_window();
+            assert!(window.enabled);
+            assert_eq!(window.start, parse_clock("22:00").unwrap());
+            assert_eq!(window.end, parse_clock("06:00").unwrap());
+            assert_eq!(window.on_close, OnClose::Refuse);
+            assert!(!app.schedule_is_dirty());
+        }
+
+        #[test]
+        fn a_config_with_no_window_at_all_reads_as_always_open() {
+            // What a node that has never been given hours looks like -- and what an
+            // unparseable hour looks like too, since it cannot reach a running node:
+            // `config_validation` stops the node on one.
+            let app = on_schedule_page("network:\n  GATEWAY_PORT: 4040\n");
+            assert!(app.schedule_window().always_open());
+            assert!(!app.schedule_is_dirty());
+        }
+
+        #[test]
+        fn the_arrows_move_the_selected_edge_only() {
+            let mut app = on_schedule_page(NIGHT);
+            assert_eq!(app.schedule_edge, Edge::Start);
+
+            app.on_right();
+            let window = app.schedule_window();
+            assert_eq!(window.start, parse_clock("22:30").unwrap());
+            assert_eq!(window.end, parse_clock("06:00").unwrap(), "the far edge stayed");
+
+            app.on_up();
+            assert_eq!(app.schedule_edge, Edge::End);
+            app.on_left();
+            let window = app.schedule_window();
+            assert_eq!(window.start, parse_clock("22:30").unwrap());
+            assert_eq!(window.end, parse_clock("05:30").unwrap());
+        }
+
+        #[test]
+        fn an_edit_is_held_rather_than_applied_per_keypress() {
+            // Applying each nudge would restart the node onto a window nobody chose:
+            // 22:00→06:00 reached from 22:00→18:00 is a day shift, and `ON_CLOSE: stop`
+            // would act on it.
+            let mut app = on_schedule_page(NIGHT);
+            app.on_right();
+            app.on_right();
+
+            assert!(app.schedule_is_dirty());
+            assert!(
+                app.config_task.is_none(),
+                "moving an edge started a configuration write"
+            );
+            assert_eq!(
+                app.schedule_saved().start,
+                parse_clock("22:00").unwrap(),
+                "the file was changed before Enter"
+            );
+        }
+
+        #[test]
+        fn esc_gives_the_edit_up_and_leaves_the_saved_window() {
+            let mut app = on_schedule_page(NIGHT);
+            app.on_right();
+            app.discard_schedule_draft();
+
+            assert!(!app.schedule_is_dirty());
+            assert_eq!(app.schedule_window().start, parse_clock("22:00").unwrap());
+        }
+
+        #[test]
+        fn an_hour_typed_by_hand_snaps_onto_the_grid_when_first_moved() {
+            let mut app = on_schedule_page(
+                "activity_window:\n  ENABLED: true\n  START: '22:17'\n  END: '06:00'\n",
+            );
+            assert_eq!(
+                app.schedule_window().start,
+                parse_clock("22:17").unwrap(),
+                "shown as the file spells it"
+            );
+
+            app.on_right();
+            assert_eq!(
+                app.schedule_window().start,
+                parse_clock("23:00").unwrap(),
+                "22:17 snaps to 22:30, then moves half an hour"
+            );
+        }
+
+        #[test]
+        fn w_turns_the_window_on_without_touching_its_hours() {
+            let mut app = on_schedule_page(
+                "activity_window:\n  ENABLED: false\n  START: '09:00'\n  END: '18:00'\n",
+            );
+            assert!(app.schedule_window().always_open(), "off means open");
+
+            app.toggle_schedule_enabled();
+            let window = app.schedule_window();
+            assert!(window.enabled);
+            assert!(!window.always_open());
+            assert_eq!(window.start, parse_clock("09:00").unwrap());
+            assert_eq!(window.end, parse_clock("18:00").unwrap());
+        }
+
+        #[test]
+        fn c_swaps_what_closing_time_does() {
+            let mut app = on_schedule_page(NIGHT);
+            app.toggle_schedule_on_close();
+            assert_eq!(app.schedule_window().on_close, OnClose::Stop);
+            app.toggle_schedule_on_close();
+            assert_eq!(app.schedule_window().on_close, OnClose::Refuse);
+        }
+
+        #[test]
+        fn applying_writes_all_four_keys_as_one_change() {
+            // One backup, one yq run, one restart: the four keys are one decision, and
+            // a node restarted between them would be running a combination nobody
+            // picked -- 22:00→06:00 arrived at through 22:00→18:00 is a day shift, and
+            // `ON_CLOSE: stop` would act on it.
+            let mut app = on_schedule_page(NIGHT);
+            app.on_right();
+            app.toggle_schedule_on_close();
+
+            let (_, writes) = schedule_writes(app.schedule_window());
+            let keys: Vec<&str> = writes.iter().map(|(key, _)| key.as_str()).collect();
+            assert_eq!(
+                keys,
+                vec![
+                    "activity_window.ENABLED",
+                    "activity_window.START",
+                    "activity_window.END",
+                    "activity_window.ON_CLOSE",
+                ]
+            );
+            let written: Vec<&str> = writes.iter().map(|(_, value)| value.as_str()).collect();
+            assert_eq!(written, vec!["true", "22:30", "06:00", "stop"]);
+        }
+
+        #[test]
+        fn applying_nothing_starts_no_write() {
+            // Reaches the spawn only when there is a change, so this also pins that a
+            // no-op does not restart the node -- `tokio::spawn` off a runtime would
+            // panic here if it did.
+            let mut app = on_schedule_page(NIGHT);
+            app.commit_schedule();
+            assert!(app.config_task.is_none());
+
+            // An edit that lands back where it started is not a change either.
+            app.on_right();
+            app.on_left();
+            app.commit_schedule();
+            assert!(app.config_task.is_none(), "a no-op restarted the node");
+            assert!(!app.schedule_is_dirty());
+        }
+
+        #[test]
+        fn the_label_says_what_is_being_applied() {
+            let mut app = on_schedule_page(NIGHT);
+            app.on_right();
+            let (label, _) = schedule_writes(app.schedule_window());
+            assert!(
+                label.contains(&format_clock(parse_clock("22:30").unwrap())),
+                "label: {label}"
+            );
+
+            let always = schedule::Window {
+                enabled: false,
+                ..app.schedule_window()
+            };
+            assert!(
+                schedule_writes(always).0.contains("always open"),
+                "a window that refuses nothing should say so"
+            );
+        }
+    }
+
     mod config_tree_navigation {
         use super::*;
 

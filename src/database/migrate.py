@@ -227,6 +227,32 @@ TABLES = {
             bytes INTEGER NOT NULL DEFAULT 0
         )
     ''',
+    # What this node was asked for, by local hour (issue #337). The operator chooses the
+    # hours this machine works in; this is what makes that choice answerable against
+    # something -- which hours anybody asks for, and what closing costs.
+    #
+    # `hour` is 'YYYY-MM-DDTHH' local, so a lexical sort is a time sort and the last
+    # two characters are the hour of the clock -- which is how the TUI folds a month
+    # into 24 columns. Local rather than UTC to line up with `activity_window`, the
+    # setting it exists to be read against.
+    #
+    # `instances_held` is the *peak* within the hour, not the mean: the question is what
+    # the machine had to fit at once. `mu_charged` is TEXT for the reason every balance
+    # in this schema is -- MU exceeds what SQLite stores as an integer.
+    #
+    # `refused_closed` is the row's reason for existing. A refusal for want of memory
+    # would have happened at any hour; one behind a shut window is work the operator
+    # declined and could accept by moving an edge, so the two are counted apart.
+    "demand_history": '''
+        CREATE TABLE IF NOT EXISTS demand_history (
+            hour TEXT PRIMARY KEY,
+            instances_held INTEGER NOT NULL DEFAULT 0,
+            mu_charged TEXT NOT NULL DEFAULT '0',
+            admissions INTEGER NOT NULL DEFAULT 0,
+            refusals INTEGER NOT NULL DEFAULT 0,
+            refused_closed INTEGER NOT NULL DEFAULT 0
+        )
+    ''',
     "payments": '''
         CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

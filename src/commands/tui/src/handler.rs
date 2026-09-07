@@ -125,6 +125,15 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
     }
 
     match (key.modifiers, key.code) {
+        // Esc gives up an unapplied schedule before it gives up the interface: quitting
+        // with an edit on screen would throw it away silently, and a second Esc still
+        // quits. Only while there is something to discard, so the global meaning of the
+        // key is untouched everywhere else.
+        (KeyModifiers::NONE, KeyCode::Esc)
+            if app.page() == Page::Schedule && app.schedule_is_dirty() =>
+        {
+            app.discard_schedule_draft()
+        }
         (KeyModifiers::CONTROL, KeyCode::Char('c'))
         | (KeyModifiers::NONE, KeyCode::Esc)
         | (KeyModifiers::NONE, KeyCode::Char('q')) => app.quit(),
@@ -168,6 +177,15 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         // The CELL page: Enter works the selected lever, `e` reaches the keys behind
         // it, `p` picks a posture and `d` says how this node differs from one.
+        // The SCHEDULE page: ←/→ and ↑/↓ reach it through on_left/on_right/on_up, so
+        // only the keys with no arrow of their own are here.
+        (_, KeyCode::Enter) if app.page() == Page::Schedule => app.commit_schedule(),
+        (KeyModifiers::NONE, KeyCode::Char('w')) if app.page() == Page::Schedule => {
+            app.toggle_schedule_enabled()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Schedule => {
+            app.toggle_schedule_on_close()
+        }
         (_, KeyCode::Enter | KeyCode::Char(' ')) if app.page() == Page::Cell => {
             app.toggle_selected_lever()
         }

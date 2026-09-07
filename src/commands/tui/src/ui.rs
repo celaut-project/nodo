@@ -1,9 +1,11 @@
 use crate::app::{
     format_bytes, format_bytes_compact, format_rate_compact, percent, segment_token, shorten, App,
+    DemandByHour,
     Client, ClientDetail, ConfigEntry, EditKind, InputMode, Instance, Money, Page, PaymentRow, Peer,
     PeerDetail, PriceEntry, ReputationEvent, Service, ServiceDetail, HISTORY_POINTS,
 };
 use crate::cell::{self, Lever, LeverStatus, Organelle};
+use crate::schedule;
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
 use tui_tree_widget::{Tree, TreeItem};
@@ -39,6 +41,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Clients => draw_clients(frame, app, layout[1]),
         Page::Cell => draw_cell(frame, app, layout[1]),
         Page::Pricing => draw_pricing(frame, app, layout[1]),
+        Page::Schedule => draw_schedule(frame, app, layout[1]),
         Page::Config => draw_config(frame, app, layout[1]),
         Page::Logs => draw_logs(frame, app, layout[1]),
     }
@@ -1711,6 +1714,347 @@ fn draw_profile_popup(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
+/// The hours this node takes work in, drawn as the day it is.
+///
+/// `activity_window` is two times of day, and typed into two fields they read as two
+/// unrelated numbers: that 22:00 with 06:00 means one stretch through midnight is a
+/// fact about the code rather than anything on screen. So is the answer to the question
+/// an operator opens this page with -- is it open *now* -- which is in neither field.
+///
+/// The bar answers both by being a day: the open stretch is one run of blocks whether
+/// or not it crosses midnight, and a marker says where now is. Moving a cursor along it
+/// also makes an unusable hour inexpressible, where the two scalar editors it replaces
+/// took `25:00` happily and let the node refuse to start on it.
+fn draw_schedule(frame: &mut Frame, app: &mut App, area: Rect) {
+    let window = app.schedule_window();
+    let now = app.now_minute;
+    let rows = Layout::vertical([
+        Constraint::Length(11),
+        Constraint::Length(7),
+        Constraint::Min(3),
+    ])
+    .split(area);
+
+    draw_day_bar(frame, rows[0], app, window, now);
+    draw_schedule_summary(frame, rows[1], app, window, now);
+    draw_schedule_help(frame, rows[2], app);
+}
+
+fn draw_day_bar(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    window: schedule::Window,
+    now: u16,
+) {
+    let dirty = app.schedule_is_dirty();
+    let title = if dirty {
+        " THE WORKING DAY • edited, not applied ".to_string()
+    } else {
+        " THE WORKING DAY ".to_string()
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(if dirty { WARN } else { MUTED }))
+        .title(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width < 24 || inner.height < 5 {
+        return;
+    }
+
+    // As many whole cells per hour as the width allows, up to a quarter-hour each. A
+    // whole number of them keeps every hour the same width -- an axis where some hours
+    // are wider than others is a chart that lies about where the edges are -- and the
+    // bar then spans the pane instead of stopping halfway across it.
+    let per_hour = (inner.width / 24).clamp(1, 4);
+    let width = per_hour * 24;
+    let per_slot = 60 / per_hour;
+
+    let mut ticks = String::new();
+    let mut axis = String::new();
+    for slot in 0..width {
+        let minute = slot * per_slot;
+        axis.push(if minute % 180 == 0 { '┼' } else { '─' });
+        if minute % 180 == 0 {
+            ticks.push_str(&format!("{:02}", minute / 60));
+        }
+        while ticks.chars().count() < (slot + 1) as usize {
+            ticks.push(' ');
+        }
+    }
+    // Closes the day. Without it the axis stops at 21 and the last three hours read as
+    // if they were outside the chart.
+    if inner.width > width {
+        axis.push('┤');
+        ticks.push_str("24");
+    }
+
+    let mut bar: Vec<Span> = Vec::new();
+    for slot in 0..width {
+        let minute = slot * per_slot;
+        let open = window.contains(minute);
+        let is_now = now >= minute && now < minute + per_slot;
+        let (glyph, colour) = match (open, is_now) {
+            (true, true) => ('█', GOOD),
+            (true, false) => ('█', if dirty { WARN } else { ACCENT }),
+            (false, true) => ('▒', BAD),
+            (false, false) => ('░', MUTED),
+        };
+        bar.push(Span::styled(glyph.to_string(), Style::default().fg(colour)));
+    }
+
+    // The marker sits under the bar rather than inside it: a cell that showed "now"
+    // instead of open/closed would hide the one thing the bar is for at the one hour
+    // the operator cares about most.
+    let mut marker = String::new();
+    let now_slot = (now / per_slot).min(width.saturating_sub(1));
+    for _ in 0..now_slot {
+        marker.push(' ');
+    }
+    marker.push('▲');
+
+    let open_now = window.contains(now);
+    let state = if open_now { "OPEN" } else { "CLOSED" };
+    let state_colour = if open_now { GOOD } else { BAD };
+
+    let mut lines = vec![
+        Line::from(Span::styled(ticks, Style::default().fg(MUTED))),
+        Line::from(Span::styled(axis, Style::default().fg(MUTED))),
+        Line::from(bar),
+        Line::from(Span::styled(marker, Style::default().fg(state_colour))),
+        Line::from(vec![
+            Span::styled(
+                format!("now {} · ", schedule::format_clock(now)),
+                Style::default().fg(MUTED),
+            ),
+            Span::styled(
+                state,
+                Style::default().fg(state_colour).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+    ];
+
+    // On the same axis as the window above, in the same pane. Two charts in two panes
+    // would be two axes the eye has to line up by hand, and lining them up is the whole
+    // point: an operator should be able to see that they are closed through their own
+    // busiest stretch (issue #337).
+    lines.extend(demand_lines(&app.demand, app.demand_days, per_hour, width));
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The demand rows drawn beneath the working day, on its axis.
+///
+/// Sparklines rather than numbers: what matters is the shape against the window above,
+/// not a figure per hour. Refusals get their own row because they are the number that
+/// can change a decision -- an hour the operator is closed through and work arrived in
+/// anyway is the one hour worth reconsidering.
+fn demand_lines(
+    demand: &DemandByHour,
+    days: u16,
+    per_hour: u16,
+    width: u16,
+) -> Vec<Line<'static>> {
+    if demand.is_empty() {
+        return vec![Line::from(Span::styled(
+            format!(
+                "No demand recorded yet — the last {days} days will appear here as the node runs."
+            ),
+            Style::default().fg(MUTED),
+        ))];
+    }
+
+    // Eight levels, so a busy hour and a quiet one are told apart by height rather than
+    // by reading a legend.
+    const LEVELS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let spark = |series: &[u32; 24], colour: Color| -> Line<'static> {
+        let peak = series.iter().copied().max().unwrap_or(0).max(1);
+        let mut spans: Vec<Span> = Vec::new();
+        for slot in 0..width {
+            let hour = (slot / per_hour) as usize;
+            let value = series[hour.min(23)];
+            let glyph = if value == 0 {
+                ' '
+            } else {
+                // Scaled so the busiest hour is full height and anything non-zero is
+                // visible: an hour with one instance must not round away to nothing.
+                let level = ((value as usize * LEVELS.len()) / (peak as usize + 1)).min(7);
+                LEVELS[level]
+            };
+            spans.push(Span::styled(glyph.to_string(), Style::default().fg(colour)));
+        }
+        Line::from(spans)
+    };
+
+    let mut lines = vec![spark(&demand.held, Color::Blue)];
+    let refused = demand.total_refused();
+    if refused > 0 {
+        lines.push(spark(&demand.refused, BAD));
+        lines.push(Line::from(vec![
+            Span::styled("peak ", Style::default().fg(MUTED)),
+            Span::styled(
+                format!("{} held", demand.peak_held()),
+                Style::default().fg(Color::Blue),
+            ),
+            Span::styled(" · ", Style::default().fg(MUTED)),
+            Span::styled(
+                format!("{refused} refused for being closed"),
+                Style::default().fg(BAD),
+            ),
+            Span::styled(
+                format!(" · last {days} days"),
+                Style::default().fg(MUTED),
+            ),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("peak ", Style::default().fg(MUTED)),
+            Span::styled(
+                format!("{} held", demand.peak_held()),
+                Style::default().fg(Color::Blue),
+            ),
+            Span::styled(
+                format!(" · nothing refused for being closed · last {days} days"),
+                Style::default().fg(MUTED),
+            ),
+        ]));
+    }
+    lines
+}
+
+fn draw_schedule_summary(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    window: schedule::Window,
+    now: u16,
+) {
+    let selected = app.schedule_edge;
+    let edge_span = |edge: schedule::Edge, minute: u16| {
+        let text = format!(" {} {} ", edge.label(), schedule::format_clock(minute));
+        let style = if edge == selected {
+            Style::default().fg(Color::Black).bg(ACCENT)
+        } else {
+            Style::default().fg(ACCENT)
+        };
+        Span::styled(text, style)
+    };
+
+    // The span those two hours describe, whether or not it is being enforced: a line
+    // reading "opens 09:00 · closes 18:00 · 24 h a day" contradicts itself, and the
+    // note below is where "not enforced" belongs.
+    let span_of_hours = schedule::Window {
+        enabled: true,
+        ..window
+    };
+    let mut lines = vec![Line::from(vec![
+        edge_span(schedule::Edge::Start, window.start),
+        Span::raw("  "),
+        edge_span(schedule::Edge::End, window.end),
+        Span::styled(
+            format!("   {} a day", span_of_hours.open_duration()),
+            Style::default().fg(MUTED),
+        ),
+    ])];
+
+    if window.always_open() {
+        // Two ways to be always open, and an operator who set the hours and saw no
+        // change is looking at one of them.
+        lines.push(Line::from(Span::styled(
+            if window.enabled {
+                "Always open: the two hours are equal, so nothing is refused."
+            } else {
+                "Always open: the window is off. Press `w` to enforce these hours."
+            },
+            Style::default().fg(WARN),
+        )));
+    } else {
+        if window.wraps() {
+            lines.push(Line::from(Span::styled(
+                "The night shift: one window through midnight, not two.",
+                Style::default().fg(MUTED),
+            )));
+        }
+        if let Some(minutes) = window.minutes_until_flip(now) {
+            let verb = if window.contains(now) { "closes" } else { "opens" };
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "{verb} in {}h {:02}m",
+                    minutes / 60,
+                    minutes % 60
+                ),
+                Style::default().fg(MUTED),
+            )));
+        }
+    }
+
+    lines.push(Line::from(match window.on_close {
+        schedule::OnClose::Refuse => vec![
+            Span::styled("at closing: ", Style::default().fg(MUTED)),
+            Span::styled("refuse", Style::default().fg(GOOD)),
+            Span::styled(
+                " — new work only. What runs keeps running and keeps being charged.",
+                Style::default().fg(MUTED),
+            ),
+        ],
+        schedule::OnClose::Stop => vec![
+            Span::styled("at closing: ", Style::default().fg(MUTED)),
+            Span::styled("stop", Style::default().fg(BAD).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " — running instances are destroyed mid-flight and refunded.",
+                Style::default().fg(MUTED),
+            ),
+        ],
+    }));
+    lines.push(Line::from(Span::styled(
+        "Work from a dev client is exempt either way, so `nodo execute` and the core services keep working.",
+        Style::default().fg(MUTED),
+    )));
+
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(MUTED))
+                .title(" THE HOURS "),
+        ),
+        area,
+    );
+}
+
+fn draw_schedule_help(frame: &mut Frame, area: Rect, app: &App) {
+    let dirty = app.schedule_is_dirty();
+    let mut lines = vec![Line::from(Span::styled(
+        "←/→ move the selected edge by 30 min   ↑/↓ switch edge   w window on/off   c what closing does",
+        Style::default().fg(MUTED),
+    ))];
+    lines.push(Line::from(if dirty {
+        vec![
+            Span::styled("Enter", Style::default().fg(WARN).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " applies it (backup, write, restart, and revert if the node does not come back)   ",
+                Style::default().fg(MUTED),
+            ),
+            Span::styled("Esc", Style::default().fg(WARN)),
+            Span::styled(" discards", Style::default().fg(MUTED)),
+        ]
+    } else {
+        vec![Span::styled(
+            "Nothing to apply: this is the schedule the node is running.",
+            Style::default().fg(MUTED),
+        )]
+    }));
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(MUTED))
+                .title(" EDIT "),
+        ),
+        area,
+    );
+}
+
 fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
     let columns = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
         .split(area);
@@ -2162,6 +2506,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Page::Pricing => {
             "tab/shift+tab cycle  •  ↑/↓ select  •  +/- adjust 10%  •  e exact value  •  r refresh  •  q quit"
         }
+        Page::Schedule => {
+            "→/← move edge 30m  •  ↑/↓ which edge  •  w window on/off  •  c closing policy  •  ⏎ apply  •  esc discard  •  q quit"
+        }
         Page::Config => {
             "tab/shift+tab cycle  •  ↑/↓ select  •  →/← branch  •  ⏎ toggle  •  e edit  •  a add to list  •  d remove element  •  / filter  •  q quit"
         }
@@ -2391,6 +2738,266 @@ fn visible_tail(lines: &[String], count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The working day has to be legible as a day: which hours are open, where now is,
+    /// and whether the thing is even being enforced. Drawn rather than described,
+    /// because the layout is the feature -- these are the mistakes a reading of the
+    /// code does not catch (a bar spanning half the pane, an axis stopping at 21, a
+    /// summary line whose three figures contradict each other).
+    mod schedule_page {
+        use super::super::draw_schedule;
+        use crate::app::{App, Page};
+        use ratatui::{backend::TestBackend, Terminal};
+
+        fn screen(width: u16, height: u16, config: &str, now: u16) -> String {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Schedule)
+                .unwrap();
+            app.config_document = Some(serde_yaml::from_str(config).unwrap());
+            app.now_minute = now;
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| draw_schedule(frame, &mut app, frame.size()))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|row| {
+                    (0..buffer.area.width)
+                        .map(|column| buffer.get(column, row).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        const NIGHT: &str = "activity_window:\n  ENABLED: true\n  START: '22:00'\n  END: '06:00'\n  ON_CLOSE: refuse\n";
+
+        /// A month of demand: busy through the evening, refused work at 20:00 and
+        /// 21:00 -- the hours this node is closed through.
+        fn evening_demand() -> crate::app::DemandByHour {
+            let mut demand = crate::app::DemandByHour::default();
+            for (hour, held) in [(9, 1), (12, 2), (17, 4), (18, 6), (19, 7), (20, 8), (21, 5), (23, 2)] {
+                demand.held[hour] = held;
+            }
+            demand.refused[20] = 11;
+            demand.refused[21] = 4;
+            demand
+        }
+
+        fn screen_with_demand(config: &str, now: u16, demand: crate::app::DemandByHour) -> String {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Schedule)
+                .unwrap();
+            app.config_document = Some(serde_yaml::from_str(config).unwrap());
+            app.now_minute = now;
+            app.demand = demand;
+            let backend = TestBackend::new(100, 26);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| draw_schedule(frame, &mut app, frame.size()))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|row| {
+                    (0..buffer.area.width)
+                        .map(|column| buffer.get(column, row).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        /// The row of demand blocks, and the row of refusals under it.
+        fn demand_rows(screen: &str) -> Vec<&str> {
+            screen
+                .lines()
+                .filter(|line| {
+                    line.chars()
+                        .any(|glyph| ('▁'..='█').contains(&glyph) && glyph != '█')
+                        || (line.contains('█') && !line.contains('░'))
+                })
+                .collect()
+        }
+
+        #[test]
+        fn a_node_with_no_history_says_so_instead_of_drawing_a_flat_line() {
+            // A flat bar would read as "nobody ever asked for anything", which is a
+            // different claim from "this has not been recorded yet".
+            let screen = screen_with_demand(NIGHT, 12 * 60, crate::app::DemandByHour::default());
+            assert!(screen.contains("No demand recorded yet"), "{screen}");
+        }
+
+        #[test]
+        fn demand_is_drawn_on_the_same_axis_as_the_window() {
+            // The entire point: an operator has to be able to see that they are closed
+            // through their own busiest hours. Two charts on two axes would leave that
+            // to be lined up by eye.
+            let screen = screen_with_demand(NIGHT, 12 * 60, evening_demand());
+            let rows = demand_rows(&screen);
+            assert!(!rows.is_empty(), "no demand row on screen:\n{screen}");
+
+            let per_hour = 4;
+            let held = cells(rows[0]);
+            let column = |hour: usize| held[hour * per_hour];
+            assert_eq!(column(3), ' ', "03:00 had no demand: {held:?}");
+            assert_ne!(column(20), ' ', "20:00 was the busiest hour: {held:?}");
+            assert_eq!(
+                held.len(),
+                cells(bar(&screen)).len(),
+                "the demand row and the window are not the same width"
+            );
+        }
+
+        #[test]
+        fn the_busiest_hour_is_full_height_and_a_quiet_one_is_still_visible() {
+            let screen = screen_with_demand(NIGHT, 12 * 60, evening_demand());
+            let held = cells(demand_rows(&screen)[0]);
+            let per_hour = 4;
+            assert_eq!(held[20 * per_hour], '█', "peak hour");
+            // One instance out of a peak of eight must not round away to nothing.
+            assert_eq!(held[9 * per_hour], '▁', "quiet hour");
+        }
+
+        #[test]
+        fn work_refused_for_being_closed_gets_its_own_row_and_a_total() {
+            let screen = screen_with_demand(NIGHT, 12 * 60, evening_demand());
+            assert!(
+                screen.contains("15 refused for being closed"),
+                "the cost of the operator's own hours is not stated:\n{screen}"
+            );
+            assert!(screen.contains("peak 8 held"), "{screen}");
+            assert_eq!(
+                demand_rows(&screen).len(),
+                2,
+                "refusals should be a row of their own:\n{screen}"
+            );
+        }
+
+        #[test]
+        fn nothing_refused_is_said_plainly_rather_than_left_blank() {
+            let mut demand = evening_demand();
+            demand.refused = [0; 24];
+            let screen = screen_with_demand(NIGHT, 12 * 60, demand);
+            assert!(screen.contains("nothing refused for being closed"), "{screen}");
+            assert_eq!(demand_rows(&screen).len(), 1, "an empty row was drawn:\n{screen}");
+        }
+        const DAY: &str = "activity_window:\n  ENABLED: true\n  START: '09:00'\n  END: '18:00'\n  ON_CLOSE: stop\n";
+
+        /// The bar of open/closed blocks, whatever row it landed on.
+        fn bar(screen: &str) -> &str {
+            screen
+                .lines()
+                .find(|line| line.contains('█') || line.contains('░'))
+                .unwrap_or_else(|| panic!("no day bar on screen:\n{screen}"))
+        }
+
+        /// A drawn row without the pane border, so a column index is an hour rather
+        /// than an hour plus one. Every row here lives inside a bordered block, and
+        /// indexing straight into the screen line reads the cell next door -- which
+        /// only shows up where neighbouring cells differ, so it hid in the bar tests
+        /// and appeared in the demand ones.
+        fn cells(line: &str) -> Vec<char> {
+            line.chars().filter(|glyph| *glyph != '│').collect()
+        }
+
+        #[test]
+        fn the_axis_spans_the_whole_day() {
+            let screen = screen(100, 24, NIGHT, 12 * 60);
+            // 24 closes the day: an axis stopping at 21 reads as if the last three
+            // hours were outside the chart.
+            for hour in ["00", "03", "06", "09", "12", "15", "18", "21", "24"] {
+                assert!(screen.contains(hour), "{hour} missing from the axis:\n{screen}");
+            }
+        }
+
+        #[test]
+        fn the_bar_spans_the_pane_rather_than_stopping_halfway() {
+            let screen = screen(100, 24, DAY, 12 * 60);
+            let blocks = bar(&screen)
+                .chars()
+                .filter(|glyph| *glyph == '█' || *glyph == '░' || *glyph == '▒')
+                .count();
+            // A whole number of cells per hour, as wide as the pane allows: 96 of the
+            // 98 usable columns at this width, not 48 of them.
+            assert!(blocks >= 96, "the bar is only {blocks} cells wide:\n{screen}");
+            assert_eq!(blocks % 24, 0, "hours are not all the same width: {blocks}");
+        }
+
+        #[test]
+        fn a_day_shift_is_open_in_the_middle_and_closed_at_both_ends() {
+            let bar = cells(bar(&screen(100, 24, DAY, 12 * 60)));
+            let open_at = |hour: usize| bar[hour * 4];
+            assert_eq!(open_at(3), '░', "03:00 should be closed");
+            assert_eq!(open_at(12), '█', "12:00 should be open");
+            assert_eq!(open_at(20), '░', "20:00 should be closed");
+        }
+
+        #[test]
+        fn a_night_shift_is_open_at_both_ends_and_says_it_is_one_window() {
+            let screen = screen(100, 24, NIGHT, 23 * 60);
+            let bar = cells(bar(&screen));
+            let per_hour = 4;
+            assert_eq!(bar[2 * per_hour], '█', "02:00 open");
+            assert_eq!(bar[12 * per_hour], '░', "12:00 closed");
+            // Drawn on a straight 00→24 axis the night shift is two runs of blocks, so
+            // the one thing the picture cannot say has to be written down.
+            assert!(
+                screen.contains("one window through midnight"),
+                "nothing says the two ends are one window:\n{screen}"
+            );
+        }
+
+        #[test]
+        fn the_marker_says_whether_it_is_open_right_now() {
+            let open = screen(100, 24, NIGHT, 23 * 60 + 40);
+            assert!(open.contains("now 23:40"), "{open}");
+            assert!(open.contains("OPEN"), "{open}");
+            assert!(open.contains("closes in"), "{open}");
+
+            let closed = screen(100, 24, NIGHT, 12 * 60);
+            assert!(closed.contains("CLOSED"), "{closed}");
+            assert!(closed.contains("opens in"), "{closed}");
+        }
+
+        #[test]
+        fn a_window_that_is_off_says_so_next_to_the_hours_it_is_not_enforcing() {
+            let screen = screen(
+                100,
+                24,
+                "activity_window:\n  ENABLED: false\n  START: '09:00'\n  END: '18:00'\n",
+                11 * 60,
+            );
+            assert!(screen.contains("the window is off"), "{screen}");
+            // The three figures on the hours line describe the same span: "opens 09:00,
+            // closes 18:00, 24 h a day" contradicted itself.
+            assert!(screen.contains("9 h a day"), "{screen}");
+            assert!(!screen.contains("24 h a day"), "{screen}");
+        }
+
+        #[test]
+        fn stopping_at_closing_time_is_spelled_out() {
+            let screen = screen(100, 24, DAY, 12 * 60);
+            assert!(screen.contains("destroyed mid-flight"), "{screen}");
+        }
+
+        #[test]
+        fn a_narrow_terminal_still_draws_a_day() {
+            // One cell per hour is the floor; below that the pane is left empty rather
+            // than drawing an axis whose hours are different widths.
+            let screen = screen(40, 24, DAY, 12 * 60);
+            assert!(screen.contains("00"), "{screen}");
+            let blocks = bar(&screen)
+                .chars()
+                .filter(|glyph| *glyph == '█' || *glyph == '░' || *glyph == '▒')
+                .count();
+            assert_eq!(blocks, 24, "expected one cell per hour:\n{screen}");
+        }
+    }
 
     /// The cell is a panel an operator reads to decide something, so what matters is
     /// that the decision and where it is currently set are both legibly on screen --
