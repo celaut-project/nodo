@@ -17,8 +17,15 @@ try:
     from protos import celaut_pb2
     from src.gateway import utils as gateway_utils
     from src.identity import node_identity as ni
+    from src.reputation_system import fetch as reputation_fetch
+    from src.reputation_system import proof_attestation
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
+
+PROOF_ID = "46bf6503dfa0551e7a74f005f33b717f26115ed21f338297639040d3d0cfe484"
+WALLET_MNEMONIC = (
+    "ozone drill grab fiber curtain grace pudding thank cruise elder eight picnic"
+)
 
 
 def _announcement(ip="1.2.3.4", port=8080):
@@ -142,6 +149,79 @@ class SignedAnnouncementCacheTests(unittest.TestCase):
                 t.start()
             for t in threads:
                 t.join()
+
+        self.assertEqual(len(calls), 1)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class AttestedProofsDoNotMoveTheDigestTests(unittest.TestCase):
+    """An announced reputation proof has to describe the same content twice (issue #314).
+
+    The cache above is keyed on the announcement's content digest, and a proof's owner
+    attestation is an xattr the digest covers. Ergo's Schnorr signing draws a random
+    nonce, so an attestation signed per announcement gives identical content a different
+    digest, and the cache then never hits on exactly the nodes that hold a proof. These
+    go through `local_proofs`, where the attestation is made: a hand-built `Peer` never
+    reaches it, so a case that builds one cannot see this.
+    """
+
+    _counting_signer = SignedAnnouncementCacheTests._counting_signer
+
+    def setUp(self):
+        gateway_utils._signed_peer = None
+        self.addCleanup(setattr, gateway_utils, "_signed_peer", None)
+        proof_attestation._owner_attestation.cache_clear()
+        self.addCleanup(proof_attestation._owner_attestation.cache_clear)
+
+        # Only the two keys, everything else through to the real config. ConfigManager
+        # is a Singleton, so this object is the one the whole process reads: a mock that
+        # answered `default` to anything unlisted would also blank out
+        # `identity.MNEMONIC`, leaving the node with no peer_id to attest and nothing to
+        # sign -- which looks exactly like the cache working.
+        real_get = reputation_fetch.env_manager.get
+
+        def config(key, default=None):
+            if key == "ledgers.ergo.reputation.REPUTATION_PROOF_ID":
+                return PROOF_ID
+            if key == "ledgers.ergo.WALLET_MNEMONIC":
+                return WALLET_MNEMONIC
+            return real_get(key, default)
+
+        patch = unittest.mock.patch.object(reputation_fetch.env_manager, "get", config)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    @staticmethod
+    def _announcement_with_proofs(ip="1.2.3.4", port=8080):
+        """An announcement carrying this node's proofs, as `_build_peer` assembles it."""
+        peer = _announcement(ip=ip, port=port)
+        peer.reputation_proofs.extend(reputation_fetch.local_proofs())
+        return peer
+
+    def test_the_proof_is_attested(self):
+        # Guards the rest: an unattested proof carries no signature xattr, so the
+        # digests below would match for the wrong reason.
+        peer = self._announcement_with_proofs()
+        self.assertEqual(len(peer.reputation_proofs), 1)
+        self.assertEqual(
+            proof_attestation.attested_proof_owner(
+                peer.reputation_proofs[0], ni.get_node_public_key_hex()
+            ),
+            proof_attestation._wallet_public_key_hex(WALLET_MNEMONIC),
+        )
+
+    def test_identical_content_keeps_one_digest(self):
+        digests = {
+            ni.canonical_peer_content_digest(self._announcement_with_proofs())
+            for _ in range(3)
+        }
+        self.assertEqual(len(digests), 1, f"content digest moved: {digests}")
+
+    def test_an_announcement_with_a_proof_is_signed_once(self):
+        calls, patch = self._counting_signer()
+        with patch:
+            gateway_utils._sign_peer(self._announcement_with_proofs())
+            gateway_utils._sign_peer(self._announcement_with_proofs())
 
         self.assertEqual(len(calls), 1)
 
