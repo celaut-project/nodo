@@ -136,11 +136,6 @@ virtualizers:
     #     RATIO: 0.025
     # cgroup v2 root path for per-VM lifecycle hotplug controls.
     CGROUPS_BASE_DIR: "/sys/fs/cgroup"
-    # Guest output streams for debug:
-    # SERIAL_MODE: file|off|null|tty|file=/custom/path.log
-    # CONSOLE_MODE: off|null|tty|file=/custom/path.log
-    SERIAL_MODE: "file"
-    CONSOLE_MODE: "off"
     # Keep the runtime directory of a failed launch under CACHE/microvm/
     # failures/<vmachine_id>/ for debugging. Nothing reclaims those automatically:
     # run 'nodo prune' to drop the ones older than FAILURE_RETENTION_DAYS.

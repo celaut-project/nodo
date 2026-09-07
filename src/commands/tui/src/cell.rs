@@ -1126,7 +1126,7 @@ static LEVERS: &[Lever] = &[
         organelle: Organelle::Vacuole,
         label: "debug mode",
         question: "Do I want everything logged while I work out what is wrong?",
-        consequence: "Turns on debug, in-memory and tunnel logs, guest serial capture and failure retention in one go. Noisy: tunnel logs alone are a line per connection and per billed MiB.",
+        consequence: "Turns on debug, in-memory and tunnel logs and failure retention in one go. Noisy: tunnel logs alone are a line per connection and per billed MiB.",
         kind: LeverKind::Cycle(&[
             LeverState {
                 label: "off",
@@ -1142,7 +1142,6 @@ static LEVERS: &[Lever] = &[
                     ("logs.DEBUG_MODE", "true"),
                     ("logs.MEMORY_LOGS", "true"),
                     ("logs.TUNNEL_LOGS", "true"),
-                    ("virtualizers.ch.SERIAL_MODE", "file"),
                     ("virtualizers.ch.CONSERVE_RUNTIME_DIR_ON_FAILURE", "true"),
                 ],
             },
@@ -1741,7 +1740,6 @@ mod tests {
                 ("virtualizers.ch.SECURITY.DEVICE_NODES_POLICY", &["deny", "allowlist"]),
                 ("ui.DISPLAY_UNIT", &["erg", "mu"]),
                 ("activity_window.ON_CLOSE", &["refuse", "stop"]),
-                ("virtualizers.ch.SERIAL_MODE", &["file", "off", "null", "tty"]),
             ];
             let mut writes: Vec<(&str, &str)> = Vec::new();
             for lever in levers() {
