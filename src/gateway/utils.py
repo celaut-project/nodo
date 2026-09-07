@@ -238,7 +238,14 @@ def _cached_announcement(digest: str) -> Optional[celaut_pb2.Peer]:
     Keyed on the content digest, which already covers every field that distinguishes
     one announcement from another -- addresses, rates, payment contracts, proofs, the
     declared scheme and each address's protocol stack. So a new address or a new proof
-    invalidates this by construction, with nothing to remember to add here.
+    invalidates this, with nothing to remember to add here.
+
+    That coverage is what makes answering a hit with ``CopyFrom`` safe, and it is
+    checked rather than assumed: ``canonical_peer_content_digest`` is built field by
+    field (protobuf's serialization is not canonical), so a field added to ``Peer``
+    and not wired into it would be a field whose fresh value this discards for the
+    cache's lifetime. ``tests/test_peer_content_digest_covers_every_field.py`` fails
+    on any such field until it is either covered or declared excluded (issue #330).
 
     The caller holds ``_SIGNED_PEER_LOCK`` across this and the signing that may follow.
     Guarding only the dictionary would leave the check and the signature separable, and
