@@ -1,59 +1,63 @@
 # Concepts
 
-A short, self-contained glossary of the terms Nodo uses. It is the conceptual
-companion to the task-oriented [`USAGE.md`](USAGE.md), the [`PACKING.md`](PACKING.md)
-input format, and the payment/reputation model in [`ERGO.md`](ERGO.md). The
-underlying paradigm is defined in
-[celaut-project/paradigm](https://github.com/celaut-project/paradigm).
+A short, self-contained glossary of **celaut**: what a service is, what a node is,
+and what the contract between two nodes says. Everything here is paradigm-level —
+no term in it depends on how Nodo happens to implement it, and where a concept does
+have an implementation in this repository, the pointer says where to read it:
+[`USAGE.md`](USAGE.md) for the commands, [`PACKING.md`](PACKING.md) for the packer's
+input format, [`CONFIG.md`](CONFIG.md) for configuration,
+[`BACKENDS.md`](BACKENDS.md) for execution, [`PRICING.md`](PRICING.md) and
+[`ERGO.md`](ERGO.md) for prices and settlement. The paradigm itself is defined in
+[celaut-project/paradigm](https://github.com/celaut-project/paradigm); the wire
+contract quoted throughout is [`celaut.proto`](../protos/celaut.proto).
 
 ## Celaut
 
-The paradigm Nodo implements: a network in which **services** are specialized
-software components encapsulated in binary files, and **nodes** are the computers
-that discover each other, run those services, and pay each other for the work. It
-is designed to be multi-ledger; Ergo is the ledger implemented today (see
-[`ERGO.md`](ERGO.md)) — "not necessarily the only ledger to be used."
+A network in which **services** are specialized software components encapsulated in
+binary files, and **nodes** are the computers that discover each other, run those
+services, and pay each other for the work. It is multi-ledger by design: no ledger is
+part of the definition of anything — "not necessarily the only ledger to be used."
 
-## Node (`nodo`)
+## Node
 
 A single participant in the network. A node executes services (locally or by
 delegating to peers), exposes a communication interface to the services it runs,
-provisions their address + token, resolves their dependencies, and — in this
-implementation — can pack projects into service specifications. See the node
-responsibilities in the project [`README.md`](../README.md).
+provisions their address + token, and resolves their dependencies. Turning a project
+into a specification is explicitly *not* one of a node's responsibilities, though an
+implementation may offer it.
 
 ## Service specification
 
 A **deterministic, content-addressed** description of a program: its filesystem,
 architecture, entrypoint, resource limits, API, and declared environment. It is
 identified by the hash of its content (its **service id**), so the same
-specification always has the same id, on any node. Produced by `nodo pack` (see
-[`PACKING.md`](PACKING.md)); exchanged as a `.celaut.bee` package.
+specification always has the same id, on any node.
 
-- **`.celaut.bee`** — the importable/transmittable package (`nodo export <svc> <dir>`).
-- **`.celaut` (raw)** — a raw specification for **hash verification only**; it is
-  **not** importable (`nodo export <svc> <dir> --raw`).
+It travels in two shapes, and only one of them is a package:
+
+- **A package** — the importable, transmittable artifact: a framed container carrying
+  the specification and the blocks it references.
+- **A raw specification** — the specification's own bytes, for **hash verification
+  only**. It is what the id is the hash of, and it is not importable.
 
 ## Instance
 
-A **running** service — one launched specification executing inside a microVM.
-The specification is the blueprint (`service id`); the instance is the live
-process (`instance id`). One specification can have many instances. `nodo execute`
-creates an instance; `nodo instances` lists them; `nodo kill` stops one.
+A **running** service — one launched specification executing in an isolated
+environment. The specification is the blueprint (`service id`); the instance is the
+live process (`instance id`). One specification can have many instances.
 
-## microVM (Cloud Hypervisor, `ch`; QEMU, `qemu`)
+## Execution environment
 
-Services **execute** inside isolated microVMs — not Docker containers. Cloud
-Hypervisor (`ch`) boots a service of the host's own architecture under KVM and is
-the default; QEMU (`qemu`) boots a foreign-architecture service under TCG
-emulation, and is chosen per service by
-[`selection.py`](../src/virtualizers/selection.py). Both are members of the same
-*backend family* — see [`BACKENDS.md`](BACKENDS.md) for how the two are layered
-and what they share.
+A service is a binary that declares the architecture it is built for, so what runs it
+is an isolated environment of that architecture, provisioned by the node. celaut names
+no virtualization technology and a specification cannot ask for one: a node may boot a
+microVM, emulate a foreign architecture, or refuse the work and delegate it, and the
+service cannot tell which. Whatever tooling a node uses to *build* a specification is
+not what the service runs in either.
 
-Docker, when used at all, is only for the *packing* step (and only in the opt-in
-`packer.local` mode); it never runs a service. Do not use `docker ps` to inspect a
-running instance — use `nodo instances` / `nodo observe`.
+The consequence for an operator is that a running instance is observed by asking the
+node about it, never by inspecting the host's container or hypervisor tooling — the
+node is the only thing that knows which instance a given process is.
 
 ## Balances and prices
 
@@ -62,115 +66,97 @@ nothing collapses them into a single number, so a node short on memory but rich 
 disk can charge accordingly. Prices rise with contention, up to a ceiling the node
 advertises alongside them.
 
-Three things are kept apart, and conflating them is what the previous "gas" model got
-wrong:
+Three things are kept apart, and conflating them is the classic mistake:
 
 | | What it is |
 |---|---|
-| **MU** (monetary unit) | What the node *counts in*. An integer, so no balance goes through a float. It is the node's own unit of account and has **no intrinsic value**. |
-| The **contract rate** | What one MU is *worth*. A property of the payment system, not of MU: each payment contract declares how many MU one of its units buys, and that declaration travels to peers with every price. |
-| `ui.DISPLAY_UNIT` | What *you* read and type. Purely presentational; changing it never changes what anybody is charged. |
+| **MU** (monetary unit) | What a node *counts in*. An integer, so no balance goes through a float. It is the node's own unit of account and has **no intrinsic value**. |
+| The **contract rate** | What one MU is *worth*. A property of the payment system, not of MU: each payment contract declares how many MU one of its units buys (`ContractRate.mu_per_unit`), and that declaration travels to peers with every price. |
+| The **display unit** | What a human reads and types. Purely presentational, local to one node, absent from the wire; changing it never changes what anybody is charged. |
 
-### Where ERG fits
+### Payment systems
 
-Ergo is the **default** payment system and ERG the default representation. Neither is
-fixed, and neither is part of the definition of anything. A payment system is just a
-contract that declares its own rate; Ergo is simply the first one implemented
-(`src/payment_system/contracts/ergo/`), and it sits beside a simulated contract used
-for testing. The accounting core names no ledger — MU is not pegged to ERG, and code
-reading a price is expected to read the rate rather than assume one.
+A payment system is just a **contract that declares its own rate**. MU is pegged to
+nothing, and the accounting core of a node names no ledger: code reading a price is
+expected to read the rate rather than assume one.
 
 Two consequences worth stating plainly:
 
-* **Another node need not accept ERG.** Every node advertises the payment contracts it
-  accepts (`Peer.payment_contracts`). Paying a peer means finding a contract you both
-  hold; a peer that shares none with you will show you its prices and be unpayable by
-  you. Sharing at least one is what makes two nodes able to trade at all.
-* **A node may accept several at once**, ERG among them or not. What a node advertises
-  is a list, not a choice, and which contract settles a given payment is decided per
-  payment by matching against what the payer can actually pay with.
+* **A node need not accept the ledger you hold.** Every node advertises the payment
+  contracts it accepts (`Peer.payment_contracts`). Paying a peer means finding a
+  contract you both hold; a peer that shares none with you will show you its prices
+  and be unpayable by you. Sharing at least one is what makes two nodes able to trade
+  at all.
+* **A node may accept several at once.** What a node advertises is a list, not a
+  choice, and which contract settles a given payment is decided per payment by
+  matching against what the payer can actually pay with. A pair of nodes sharing more
+  than one is ambiguous rather than free to pick — choosing between them is policy,
+  and policy is not part of the contract.
 
 Because the rate is declared per contract instead of assumed, a price quoted in MU
 stays meaningful to a node that settles in something else entirely.
 
-### Topping up
+### Client balances
 
-The flow below is Ergo's, being the payment system currently implemented; another
-contract would define its own equivalent.
+A client holds a balance with a node, counted in MU. How money becomes balance is the
+payment contract's business: the contract defines what a deposit is, where the funds
+go, and what proves that a given deposit belongs to a given client. The node's side of
+it is the same whatever the ledger — it credits a balance once the contract says the
+funds arrived, can quote what an execution will cost before it starts, and lets the
+deposit behind a running instance grow or shrink while it runs.
 
-A client tops up its balance on a node by generating a **deposit token** — a
-locally-generated identifier, not an on-chain asset — and submitting an Ergo
-transaction that carries that identifier (in register R4) plus some ERG; the node
-verifies the deposit belongs to the client and that the funds reached its wallet,
-then credits the balance. Nodes run a single hot wallet
-(`ledgers.ergo.WALLET_MNEMONIC`); clients pay its derived P2PK address, and excess
-is swept to an optional cold address.
-
-`nodo estimate` reports what a service costs before you run it, and
-`nodo increase_deposit` / `nodo decrease_deposit` adjust a running instance — all in
-your display unit, ERG unless you changed it. `nodo pay` is the exception and always
-takes ERG: what it moves is an on-chain ERG transfer, denominated by the ledger rather
-than by a display preference. Full model: [`PRICING.md`](PRICING.md) for what things
-cost, [`ERGO.md`](ERGO.md) for how they settle.
+What settles on a ledger is denominated by that ledger, not by anybody's display unit.
+The flow for the ledger implemented here is in [`ERGO.md`](ERGO.md), and what things
+cost is in [`PRICING.md`](PRICING.md).
 
 ## Address and token provisioning
 
-To talk to a running instance you need its **communication address** (`ip:port`,
-from the ports the service declares in `service.json → api`) and an
-**authentication token**. Providing these is a core node responsibility
-(project [`README.md`](../README.md)); the API's transport, `protocol` (e.g.
-`grpc`) and `mu_per_call` come from the service's own `service.json → api`
-block (see [`PACKING.md`](PACKING.md)).
+To talk to a running instance you need its **communication address** (`ip:port`, from
+the ports the specification declares in its `api`) and an **authentication token**.
+Providing these is a core node responsibility. The API's transport, its `protocol`
+(e.g. `grpc`) and its `mu_per_call` are declared by the specification itself, so what
+a call costs and how it is spoken travel with the service rather than with the node
+running it.
 
 ## Block
 
-A content-addressed chunk of storage. Large files in a service's filesystem are
-not embedded inline in the protobuf; they are stored as **blocks** referenced by
-their content hash, which deduplicates identical large files across services. See
-*Filesystem Parsing Behaviour* in [`PACKING.md`](PACKING.md).
+A content-addressed chunk of storage. Large files in a service's filesystem are not
+embedded inline in the specification; they are stored as **blocks** referenced by
+their content hash, which deduplicates identical large files across services.
 
 ## Peers and clients
 
-**Peers** are other nodes this node has connected to; nodes reciprocally offer and
+**Peers** are other nodes a node has connected to; nodes reciprocally offer and
 request services from their peers, so a node can run a workload locally or hand it
 to a peer. **Clients** are the entities (nodes or external callers) that have
-registered with this node and pay it. `nodo peers` / `nodo clients` list them.
+registered with a node and pay it.
 
 A peer is named by its identity public key — see [Node identity](#node-identity).
 
 ## Transport security
 
-Every gRPC hop is TLS. A node's certificate is self-signed and carries the node's
-identity public key — its `peer_id` — in an X.509 extension, signed with the identity
-key over the certificate's own public key. There is no CA, no PKI and no system trust
-store: a caller reads the certificate first, checks that signature, and then pins that
-exact certificate for the channel. So dialling a bare `ip:port` either reaches the node
-whose `peer_id` you meant, or fails.
+Every hop between nodes is TLS. A node's certificate is self-signed and carries the
+node's identity public key — its `peer_id` — in an X.509 extension, signed with the
+identity key over the certificate's own public key. There is no CA, no PKI and no
+system trust store: a caller reads the certificate first, checks that signature, and
+then pins that exact certificate for the channel. So dialling a bare `ip:port` either
+reaches the node whose `peer_id` you meant, or fails. Only an authenticated address is
+announced to peers, and a peer channel has no plaintext fallback.
 
-**Peers and the CLI always use TLS, with no exception**, and the TLS port
-(`network.GATEWAY_PORT`) is the only one announced to peers. This node's own client code
-has no way to open a plaintext channel.
+Two hops are deliberately outside it, and neither is a hop between nodes:
 
-Alongside it the gateway serves the **same** `Gateway` on a second, plain-gRPC port
-(`network.GATEWAY_PLAINTEXT_PORT`, `auto` = `GATEWAY_PORT + 1`) for two callers that are
-not peers:
+* **The node ↔ service hop.** A service reaches its node over a hop that never leaves
+  the host, and it is handed that address as data, so there is nothing for it to guess.
+  Requiring TLS there would mean shipping certificate pinning into every service SDK
+  for a local hop.
+* **A caller that declines TLS.** TLS is what a node *offers*; whether it also answers
+  an unauthenticated address is that node's own policy and that caller's own risk. Such
+  an address is not announced to peers — serving the same interface unauthenticated on
+  every interface would give away exactly what the authenticated one protects.
 
-* **The services this node executes.** A service speaks plain gRPC and reaches the node
-  over a hop that never leaves the host; it is handed this address as data, in
-  `__config__.gateway`, so there is nothing for it to guess. Requiring TLS here would
-  mean shipping certificate pinning into every service SDK for a local hop.
-* **External callers that do not want TLS.** TLS is what the node *offers*; a caller
-  that declines it is that caller's own risk. The plaintext port is not announced to
-  peers, no firewall rule is opened for it, and it listens on one address only — the
-  gateway address the config file already names (`virtualizers.ch.NETWORK_BRIDGE_NAME`,
-  the same one written into `__config__.gateway`; loopback if that bridge is not up),
-  never `[::]`. Serving the unauthenticated `Gateway` on every interface would give away
-  exactly what the TLS port protects. So reaching it from another host takes a
-  port-forward set up on purpose. `0` disables it, and then a service must speak TLS too.
-
-Also outside TLS: the node→service leg of a tunnel (TLS terminates at the node, see
-[`TUNNELING.md`](TUNNELING.md)) and the raw TCP proxy of the delegation path, which is
-not gRPC.
+Also outside TLS: the node→service leg of a tunnel, where TLS terminates at the node
+(see [`TUNNELING.md`](TUNNELING.md)), and the raw TCP proxy of the delegation path,
+which is not gRPC.
 
 ### What `["tls", "grpc"]` names
 
@@ -196,53 +182,51 @@ verification=read-certificate,verify-extension,pin-exact-certificate
 ```
 
 and `grpc` carries the service and **every RPC the gateway answers**, read from the
-compiled descriptor rather than typed out — so adding or removing one changes what this
+compiled descriptor rather than typed out — so adding or removing one changes what a
 node announces without anyone remembering to.
 
-That makes the claim checkable. `speaks_our_transport_stack` runs the same comparison a
-signature scheme gets (`node_identity.same_component_stack`): a peer differing in the
-OID, in the signed payload or by a single RPC is seen as speaking something else, while
-one that only worded its prose differently is not.
+That makes the claim checkable, by the same component-stack comparison a signature
+scheme gets (see [The signature scheme is declared, not
+assumed](#the-signature-scheme-is-declared-not-assumed)): a peer differing in the OID,
+in the signed payload or by a single RPC is seen as speaking something else, while one
+that only worded its prose differently is not.
 
 **Prose is deliberately not compared.** Deciding that two differently-worded
 descriptions mean the same protocol is a judgement, and the service that could make it
 has the shape `(a, b) -> bool` over two texts — an LLM's job, not a node's. Prose travels
 so the descriptor can be *read*, not diffed. It is dropped from an announcement published
-to an Ergo register, where every byte pays storage rent forever; nothing is lost from a
+to a ledger register, where every byte pays storage rent forever; nothing is lost from a
 verification, because what a comparison reads is `formal` and the tags.
 
 A full announcement runs to roughly 5 KB per advertised address, so it is **signed once
-per change rather than once per caller**: `GetPeerInfo` serves a cached, byte-identical
-answer until the content actually changes. Nothing is given up for it — the signature is
-over a public object, and `ts` guards only against a downgrade to a stale address, so
-nothing about the caller was ever in what was signed. A repeated `ts` also lets the
-*receiver* skip a full refresh, including the on-chain revalidation of the proofs the
-announcement carries.
+per change rather than once per caller**: the announcement RPC serves a cached,
+byte-identical answer until the content actually changes. Nothing is given up for it —
+the signature is over a public object, and `ts` guards only against a downgrade to a
+stale address, so nothing about the caller was ever in what was signed. A repeated `ts`
+also lets the *receiver* skip a full refresh, including the on-chain revalidation of the
+proofs the announcement carries.
 
 The OID itself is `uuid.uuid5(uuid.NAMESPACE_OID, "CELAUT")` written under the ITU-T
 X.667 arc `2.25`, which anyone may derive from a UUID with nothing to register. The seed
 is the project name and nothing more, so the number can be recomputed in one line and
 audited — it is a name seed, never a resource, and only the number ever travels.
 
-Practical consequences: a node with no identity keypair cannot serve, and a peer running
-a version from before this cannot be dialled — peer channels have no plaintext fallback.
-See `src/identity/tls_identity.py` and `src/identity/grpc_transport.py`.
-
 ## Node identity
 
 A node's **id is its identity public key**; there is no other name for it. Every
-announcement (`Peer`, in `celaut.proto`) carries that key, a signature over everything
-the peer advertises, and the cryptography those two are in. A peer that carries no
-key, or whose signature does not verify, is refused outright — there is nothing else
-to register it under. The key is Ed25519, derived from `identity.MNEMONIC`, so an
-identity cannot change underneath the peers that recorded it.
+announcement (`Peer`) carries that key, a signature over everything the peer
+advertises, and the cryptography those two are in. A peer that carries no key, or
+whose signature does not verify, is refused outright — there is nothing else to
+register it under. The key is derived from a seed its operator holds, so an identity
+cannot change underneath the peers that recorded it, and a node with no identity
+keypair can neither serve nor dial.
 
 ### The identity is on no ledger
 
-The obvious shortcut is to let a ledger key *be* the identity — sign with
-`ledgers.ergo.WALLET_MNEMONIC`, and let a reputation proof's R7 owner be literally the
-`peer_id`. It makes the check a byte comparison. It is deliberately not done, and the
-reason is in the contract. R7 is the reputation contract's spending clause:
+The obvious shortcut is to let a ledger key *be* the identity — sign with the node's
+wallet, and let a reputation proof's R7 owner be literally the `peer_id`. It makes the
+check a byte comparison. It is deliberately not done, and the reason is in the
+contract. R7 is the reputation contract's spending clause:
 
 ```ergoscript
 INPUTS.exists { b.propositionBytes == SELF.R7[Coll[Byte]].get }
@@ -261,7 +245,7 @@ bytes:
 ```
 R7  = the attested wallet (owner, and the only key that can spend the box)
        │  signs peer_id ──────────────┐
-R9  = Peer{ public_key: <ed25519>,    │   ← the attestation
+R9  = Peer{ public_key: <identity>,   │   ← the attestation
             signature, ts }  ◄────────┘
        │  signed by the identity key
        ▼
@@ -304,9 +288,8 @@ architecture is declared with. Nothing derives an id from it, here or anywhere e
 celaut: a hash algorithm can name itself as `H("")` because hashing is keyless and
 unary, but verification takes a key, a message and a signature and has no such
 canonical output. **The descriptor is the name**, and whether two of them mean the same
-cryptography is a comparison — `node_identity.same_signature_scheme`, which is also the
-single place an equivalence service of the shape `(scheme_a, scheme_b) -> bool` would
-be asked instead.
+cryptography is a comparison — the one place an equivalence service of the shape
+`(scheme_a, scheme_b) -> bool` would be asked instead.
 
 How a node compares two schemes on its own, until such a service is asked, is a
 one-to-one pairing between their components — every component on each side paired with
@@ -314,9 +297,9 @@ exactly one on the other, order carrying no meaning — where each pair is decid
 
 * **`formal`, when both sides of the pair carry one.** Stating the parameters is the
   strictest identity a component has, and two components stating different ones name
-  different things however their tags read. This node's `ed25519` component states
-  them (`node_identity.component_formal` — `key=value` lines, sorted, UTF-8); the Ergo
-  ledger's `formal` stays empty because there is nothing determinate to state.
+  different things however their tags read. An `ed25519` component can state them
+  (`key=value` lines, sorted, UTF-8); a ledger convention's `formal` may stay empty
+  because there is nothing determinate to state.
 * **One shared tag, otherwise.** The tags of a component are alternative names for the
   single thing it names, so agreeing on any one of them is agreeing on the thing:
   `["tls", "tls1.3"]` and `["tls1.3", "tls-1.3"]` are one protocol under two
@@ -327,10 +310,10 @@ exactly one on the other, order carrying no meaning — where each pair is decid
   precisely what it is, and then it decides.
 * **A `formal` on one side alone does not decide.** Stating the parameters says more
   than staying quiet about them; it does not contradict a peer that stayed quiet, so
-  the tags still answer. Otherwise pinning a component down would cut this node off
+  the tags still answer. Otherwise pinning a component down would cut a node off
   from everyone naming the same thing without pinning it.
 * **Nothing at all, never.** A component must carry `tags`, `formal` or both. One
-  holding only `prose` — or nothing — is not a building block this node can reason
+  holding only `prose` — or nothing — is not a building block a node can reason
   about, so the scheme is refused rather than half-compared. For the same reason a
   component carrying only `formal` shares nothing with one carrying only tags.
 * **`prose`, never.** It is human text with no agreed wording, and making it decisive
@@ -343,10 +326,10 @@ Matching on one shared tag makes the relation **non-transitive**: `[a,b]` matche
 not partition them into classes, and nothing may group by it.
 
 The search for that pairing is factorial in the number of components, which is a number
-the *peer* chooses, so `communication.MAX_SIGNATURE_SCHEME_COMPONENTS` (5 by default)
-caps it: a longer scheme is refused rather than computed. Comparing against this node's
-own single-component scheme is bounded by the cardinality check regardless; the cap is
-what keeps that true if two peers' schemes are ever compared to each other.
+the *peer* chooses, so an implementation caps it: a longer scheme is refused rather than
+computed. Comparing against a single-component scheme of one's own is bounded by the
+cardinality check regardless; the cap is what keeps that true if two peers' schemes are
+ever compared to each other.
 
 Across the whole scheme, though, the pairing must be total: a peer declaring
 `["secp256k1"]` and `["bip340"]` as two components shares the curve component with a
@@ -355,9 +338,8 @@ produces signatures that node cannot read — same cardinality or not, a partial
 not a shared scheme.
 
 An empty descriptor (no components at all) means the sender's default, so an
-announcement predating the field still verifies. This node speaks Ed25519 (RFC 8032
-PureEdDSA) with its identity key and nothing else: an announcement declaring another
-scheme is refused unread, rather than reported as a bad signature.
+announcement predating the field still verifies. A node declaring a scheme its reader
+does not implement is refused unread, rather than reported as a bad signature.
 
 ### One identity, many ways to pay
 
@@ -366,63 +348,59 @@ What is singular and what is plural is deliberate, and the two do not conflict:
 | Field | Count | Why |
 |---|---|---|
 | `public_key`, `signature`, `signature_scheme` | one | The key is what **names** the node, so a second one at the same level is a second identity: reputation, deposits and payment attribution all split in two. Cross-signing two *names* does not heal the split — whoever needs the link speaks only one of the schemes, so they can verify only half of the proof. |
-| owner attestation, in each proof's `xattrs` | one per proof | The wallet that **published that proof**, and its signature over this node's id. Not a second name: it vouches *for* the identity above, so there is a single root and nobody has to pick which key the node is. |
-| `payment_contracts` | many | What a node accepts is a **menu the payer picks one item from**, so a longer one costs nothing. Being named by a key of its own while accepting ERG, bitcoin and anything else that settles is the expected shape. See [Balances and prices](#balances-and-prices). |
+| owner attestation, in each proof's `xattrs` | one per proof | The wallet that **published that proof**, and its signature over the node's id. Not a second name: it vouches *for* the identity above, so there is a single root and nobody has to pick which key the node is. |
+| `payment_contracts` | many | What a node accepts is a **menu the payer picks one item from**, so a longer one costs nothing. Being named by a key of its own while accepting several ledgers is the expected shape. See [Balances and prices](#balances-and-prices). |
 | `reputation_proofs` | many | A node holds as many proofs as it has published opinions under. See [Reputation proof](#reputation-proof). |
 
 The distinction that runs through the table is **root versus role**. A key in a
 different role, signed by the identity, is not a competing name: that is what a ledger
-an owner attestation is, and what the TLS certificate's per-process P-256 key is (see
+owner attestation is, and what the transport certificate's own key is (see
 [Transport security](#transport-security)). One root, several keys under it. What must
 stay singular is the root.
 
 A scheme that genuinely needs two keypairs — a classical/post-quantum hybrid — is *one*
 scheme, whose key and signature encodings carry both, and not two schemes on one peer.
 
-Advertising several payment contracts is not the same as settling in several: which
-one pays for a given interaction is matched per payment, and a pair of nodes that
-happens to share more than one is refused as ambiguous rather than chosen between
-(`mu_conversion.matching_payment_system`) — picking is policy nobody has written yet.
-
 Only *signing* is singular, though. What a node can **verify** is a local capability:
 the way to reach a peer that signs differently is to plug a verifier for that scheme
-into the reader, never to ask the peer to carry more keys. Nothing plugs one in today,
-so in practice two nodes must speak the same scheme to register each other, and a node
-that changes its scheme becomes a new peer, with the reputation of one.
+into the reader, never to ask the peer to carry more keys. So a node that changes its
+scheme becomes a new peer to everyone who cannot read the new one, with the reputation
+of one.
 
 ## Service composition (dependencies)
 
-Services can depend on other services. In `pack_config.json` you declare
-`dependencies`; with `dependencies_env: true` the packer injects each resolved
-dependency's content hash into the build as an environment variable, so a service
-can address its dependencies by id regardless of which node runs them. See the
-`dependencies` / `dependencies_env` reference in [`PACKING.md`](PACKING.md).
+Services can depend on other services, and a dependency is named the way everything
+else is: by content hash. So a service addresses its dependencies by service id
+regardless of which node ends up running them, and resolving an id to a reachable
+address is the node's job — the fourth of its responsibilities. What the dependent
+service is given is an address and a token, exactly as any caller would be.
 
 ## Core services
 
-Celaut services the node treats as part of its own workflow, referenced by service
-id (content hash) in `core_services` in `config.yaml`. The well-known roles today
-are `packer` (builds services in a sealed microVM for `nodo pack`),
-`source-application` (resolves a service id to its downloadable sources), and
-`low-demand-fallback` (an opportunistic service run only when the node is idle;
-WIP). See [`CONFIG.md`](CONFIG.md).
+Celaut services a node treats as part of its own workflow, referenced by service id
+rather than built in. The well-known roles are `packer` (builds services in a sealed,
+isolated environment), `source-application` (resolves a service id to its downloadable
+sources), and `low-demand-fallback` (an opportunistic service run only when the node is
+idle). A node's own machinery being celaut services means it is replaceable, and
+replaceable by id.
 
 ## Reputation proof
 
-An on-chain record (an Ergo token held in "reputation boxes") through which a node
-publishes **its own opinions about other nodes**. Each box is one opinion: register
-R5 names the node it is about — by that node's **identity public key**, the same key
-that is its `peer_id` — and the token amount in the box is the weight behind it.
+An on-chain record (in the ledger implemented here, a token held in "reputation boxes")
+through which a node publishes **its own opinions about other nodes**. Each box is one
+opinion: register R5 names the node it is about — by that node's **identity public
+key**, the same key that is its `peer_id` — and the token amount in the box is the
+weight behind it.
 
 Read the direction carefully: a proof belongs to its *author*. `Peer.reputation_proofs`
 in an announcement is what that peer thinks of others, never a rating of the peer
-itself, and a single identity key may hold several proofs at once (issue #281). What
-we think of a peer is separate and local: `peer.reputation_score` plus the
-`reputation_events` that explain it, keyed by the peer's public key.
+itself, and a single identity key may hold several proofs at once. What a node thinks of
+a peer is separate and local: a score plus the events that explain it, keyed by the
+peer's public key.
 
 It lets peers assign each other trust in a decentralized, transparent way. Nodes
-generate and submit these proofs; publishing celaut-node/service entities
-uses the same reputation-box machinery. Model: [`ERGO.md`](ERGO.md).
+generate and submit these proofs; publishing celaut node/service entities uses the same
+reputation-box machinery. Model: [`ERGO.md`](ERGO.md).
 
 What a node publishes about another node is an opinion, so it is only as strong as
 what backs it. An [execution receipt](EXECUTION_RECEIPTS.md) is what a client can back

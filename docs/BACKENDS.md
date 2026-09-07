@@ -5,8 +5,15 @@ and what it takes to add a third one. The conceptual companion is
 [`CONCEPTS.md`](CONCEPTS.md); the operator-facing view of the same machinery is
 [`USAGE.md`](USAGE.md) and [`FIREWALL.md`](FIREWALL.md).
 
-Two backends exist today. Both boot a Linux microVM on this host, so almost
-everything they do is the same thing done twice — which is exactly the problem
+Two backends exist: Cloud Hypervisor (`ch`), which boots a service of the host's own
+architecture under KVM and is the default, and QEMU (`qemu`), which boots a
+foreign-architecture service under TCG emulation. `selection.py` chooses between them
+per service, by architecture. Docker, when used at all, is only for the *packing* step
+(and only in the opt-in `packer.local` mode); it never runs a service, so `docker ps`
+tells you nothing about a running instance — `nodo instances` and `nodo observe` do.
+
+Both boot a Linux microVM on this host, so almost everything they do is the same thing
+done twice — which is exactly the problem
 this document settles: *which* of it is shared, at what layer, and on what
 grounds.
 
