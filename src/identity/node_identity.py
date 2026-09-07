@@ -486,6 +486,15 @@ def canonical_peer_content_digest(peer) -> str:
     Every repeated element is sorted so the digest does not depend on the order a node
     happened to enumerate things in.
 
+    The price of that choice is that "covers everything" is a property of this code
+    rather than of the encoding, so it is asserted:
+    ``tests/test_peer_content_digest_covers_every_field.py`` censuses every field of
+    every message named below and fails on one that is neither covered here nor
+    declared excluded, and it also checks that each covered field genuinely moves the
+    digest. A field left out would be one a relay can rewrite under a signature that
+    still verifies -- and, because ``gateway.utils`` caches on this digest, one whose
+    fresh value is replaced by the cached announcement (issue #330).
+
     ``signature_scheme`` is covered as well, which it has to be as soon as more than one
     scheme can be accepted: a relay that could re-label a signature as belonging to a
     different scheme -- one whose verification also accepts those bytes, or simply a
