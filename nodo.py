@@ -100,6 +100,16 @@ def print_java_dependency_error(exc: JavaDependencyMissing) -> None:
     log.LOGGER(str(exc))
     print(str(exc), flush=True)
 
+
+def warn_if_not_serving() -> None:
+    """Footnote for the help screens: the commands listed need a serving node."""
+    try:
+        if not is_serving():
+            print("\nNote: Nodo service is not running.", flush=True)
+    except Exception as e:
+        print(f"Error checking nodo.service status: {e}", flush=True)
+
+
 if __name__ == '__main__':
 
     if not os.path.exists(os.path.join(MAIN_DIR, "storage", ".acceptedkya")):
@@ -135,114 +145,17 @@ if __name__ == '__main__':
     )
 
     if len(sys.argv) == 1:
-        # Quick guide about commands and check if nodo.service is running.
-        print(
-            "Welcome to Nodo! Please provide a command. "
-            "Use 'nodo help' to see available commands.\n",
-            flush=True
-        )
-
-        print("""
-        Getting started
-
-        nodo tui
-            Open the operations console (status, peers, and the config editor).
-
-        nodo download <url>
-            Download and import a published service.
-
-        nodo pack <folder>
-            Package a local project into a service.
-
-        nodo publish <service>
-            Publish a local service.
-
-        nodo execute <service>
-            Run a local or packaged service.
-
-        nodo import <path>
-            Import a packaged service file.
-
-        nodo export <service> <path>
-            Export a packaged service artifact.
-        """, flush=True)
-            
-        try:
-            if not is_serving():
-                print("\nNote: Nodo service is not running.", flush=True)
-        except Exception as e:
-            print(f"Error checking nodo.service status: {e}", flush=True)
-
-
+        from src.commands.help import print_quick_start
+        print_quick_start()
+        warn_if_not_serving()
 
     else:
         match sys.argv[1]:
 
-            case "help":
-                print("Command needed: "
-                    "\n- execute [--remote] [--name instance-name] [-e key value] <service id> | <service tag> | <'.celaut' file path>"
-                    "\n- estimate <service id> | <service tag> | <'.celaut' file path>"
-                    "\n- inspect <service id> | <service tag>"
-                    "\n- remove <service id> | <service tag>"
-                    "\n- prune [--all] [--dry-run]   (reclaim orphaned runtime dirs and preserved launch failures)"
-                    "\n- kill <instance id>"
-                    "\n- burnall [--dry-run] [--yes]   (stop every instance, parents first; asks first)"
-                    "\n- observe <instance id> [--save <path>]"
-                    "\n- tunnel <instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]"
-                    "\n- increase_deposit <instance id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
-                    "\n- decrease_deposit <instance id> <amount>"
-                    "\n- services"
-                    "\n- tag <service id|tag> <new tag>"
-                    "\n- clients"
-                    "\n- peers"
-                    "\n- instances"
-                    "\n- instances --grouped"
-                    "\n- connect <ip:port>"
-                    "\n- disconnect <peer_id>"
-                    "\n- pack <project directory>"
-                    "\n- envs"
-                    "\n- tui"
-                    "\n- completion <bash|zsh|install>  (shell tab-completion for commands and ids)"
-                    "\n- info"
-                    "\n- logs"
-                    "\n- export <service> <path>"
-                    "\n- export <service> <path> --raw"
-                    "\n- import <path>"
-                    "\n- publish <service id|service tag>"
-                    "\n- download <manifest url> [-o <output dir>]"
-                    "\n- integrity [<service id|service tag>] [--fix]"
-
-                    "\n\n Development commands:"
-                    "\n- update"
-                    "\n- serve"
-                    "\n- migrate"
-                    "\n- storage:prune_blocks"
-                    "\n- test <test name>"
-                    "\n- ggconf <repository path>"
-                    "\n- submit_reputation"
-                    "\n- sync_reputation_proof"
-                    "\n- refresh_ergo_nodes"
-                    "\n- prune_containers"
-                    "\n- refresh_clients"
-                    "\n- tx_history"
-                    "\n- force_execution <peer_id> [--name instance-name] [-e key value] <service id> | <service tag> | <'.celaut' file path>  (bypasses the execution balancer; delegates straight to peer_id, no fallback -- testing/dev only)"
-                    "\n- increase_peer_deposit <peer id> <amount>"
-                    "\n- credit_client <client id> <amount>   (in ui.DISPLAY_UNIT, ERG by default)"
-                    "\n- debit_client <client id> <amount>"
-                    "\n- verify_reputation <peer id>  (validate a peer's on-chain reputation proof + ownership challenge)"
-                    "\n- pay <peer id> <amount in ERG>  (pay a peer via the single-wallet flow; shows your balance on that peer afterward)"
-                    "\n- local_builder <buildctl args>  (runs buildctl against nodo's rootless builder; local packer only)"
-                    "\n- daemon start|status|stop|restart  (control the nodo.service systemd unit)"
-                    "\n- doctor  (check/fix nodo.service, KVM readiness, and Cloud Hypervisor compatibility)"
-                    "\n- nat-guide  (how to forward the gateway port on your router so this node is reachable)"
-                    "\n- firewall-compat status|apply|remove  (the FORWARD rules nodo needs from another firewall on this host)"
-                    "\n\n",
-                    flush=True)
-                try:
-                    if not is_serving():
-                        print("\nNote: Nodo service is not running.", flush=True)
-                except Exception as e:
-                    print(f"Error checking nodo.service status: {e}", flush=True)
+            case "help" | "-h" | "--help":
+                from src.commands.help import print_help
+                print_help()
+                warn_if_not_serving()
 
             case "info":
                 try:
@@ -901,7 +814,16 @@ if __name__ == '__main__':
                 os._exit(completion_main(sys.argv[2:]))
 
             case other:
-                print('Unknown command.', flush=True)
+                # Never a dead end: point at the catalogue, and at the command
+                # the operator most likely meant to type.
+                from difflib import get_close_matches
+                from src.commands.help import commands
+
+                print(f"Unknown command: {other}", flush=True)
+                for suggestion in get_close_matches(other, commands(), n=1):
+                    print(f"Did you mean '{suggestion}'?", flush=True)
+                print("Run 'nodo help' to see every command.", flush=True)
+                sys.exit(1)
 
     # Hand the console back when a one-shot command finishes. The Ergo / reputation
     # commands (sync_reputation_proof, submit_reputation, tx_history, …)

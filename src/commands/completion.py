@@ -40,7 +40,13 @@ SERVICE_COMMANDS = [
 INSTANCE_COMMANDS = ["kill", "observe", "increase_deposit", "decrease_deposit", "tunnel"]
 
 # Commands whose first positional argument is a peer id.
-PEER_COMMANDS = ["disconnect", "increase_peer_deposit", "verify_reputation", "pay"]
+PEER_COMMANDS = [
+    "disconnect",
+    "increase_peer_deposit",
+    "verify_reputation",
+    "pay",
+    "force_execution",
+]
 
 # Commands whose first positional argument is a client id.
 CLIENT_COMMANDS = ["credit_client", "debit_client"]
@@ -67,6 +73,7 @@ COMMANDS = sorted(
         "download",
         "integrity",
         "execute",
+        "force_execution",
         "estimate",
         "update",
         "kill",
