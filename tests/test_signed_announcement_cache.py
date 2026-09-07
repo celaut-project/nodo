@@ -38,8 +38,8 @@ def _announcement(ip="1.2.3.4", port=8080):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class SignedAnnouncementCacheTests(unittest.TestCase):
     def setUp(self):
-        gateway_utils._signed_peer = None
-        self.addCleanup(setattr, gateway_utils, "_signed_peer", None)
+        gateway_utils._signed_peers.clear()
+        self.addCleanup(gateway_utils._signed_peers.clear)
 
     def _counting_signer(self):
         """Wraps the real signer so the count is of real signatures, not of stubs."""
@@ -154,6 +154,60 @@ class SignedAnnouncementCacheTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class TwoAnnouncementShapesShareTheCacheTests(unittest.TestCase):
+    """This node announces itself in more than one shape (issue #329).
+
+    `generate_full_node_peer_info` answers GetPeerInfo with every interface;
+    `generate_node_peer_info` builds one bridge address per service launch. Their
+    digests differ, so a cache with a single slot had each call evicting the other's
+    entry, and a node launching instances while serving GetPeerInfo missed every time --
+    the case the cache exists for.
+    """
+
+    def setUp(self):
+        gateway_utils._signed_peers.clear()
+        self.addCleanup(gateway_utils._signed_peers.clear)
+
+    _counting_signer = SignedAnnouncementCacheTests._counting_signer
+
+    def test_two_shapes_do_not_evict_each_other(self):
+        calls, patch = self._counting_signer()
+        with patch:
+            for _ in range(2):
+                gateway_utils._sign_peer(_announcement(ip="1.2.3.4"))
+                gateway_utils._sign_peer(_announcement(ip="10.0.0.1", port=9090))
+
+        # Two shapes, one signature each, however they interleave.
+        self.assertEqual(len(calls), 2)
+
+    def test_the_cache_is_bounded(self):
+        calls, patch = self._counting_signer()
+        with patch:
+            for i in range(gateway_utils._SIGNED_PEERS_MAX + 3):
+                gateway_utils._sign_peer(_announcement(ip=f"10.0.0.{i}"))
+
+        self.assertLessEqual(
+            len(gateway_utils._signed_peers), gateway_utils._SIGNED_PEERS_MAX
+        )
+
+    def test_the_oldest_shape_is_the_one_dropped(self):
+        # Asked of the behaviour rather than of the dict: what a caller can observe is
+        # whether re-serving a shape costs a signature.
+        calls, patch = self._counting_signer()
+        newest = f"10.0.0.{gateway_utils._SIGNED_PEERS_MAX}"
+        with patch:
+            for i in range(gateway_utils._SIGNED_PEERS_MAX + 1):
+                gateway_utils._sign_peer(_announcement(ip=f"10.0.0.{i}"))
+            so_far = len(calls)
+
+            gateway_utils._sign_peer(_announcement(ip=newest))
+            self.assertEqual(len(calls), so_far, "the newest shape was not kept")
+
+            gateway_utils._sign_peer(_announcement(ip="10.0.0.0"))
+            self.assertEqual(len(calls), so_far + 1, "the oldest shape was not dropped")
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class AttestedProofsDoNotMoveTheDigestTests(unittest.TestCase):
     """An announced reputation proof has to describe the same content twice (issue #314).
 
@@ -168,8 +222,8 @@ class AttestedProofsDoNotMoveTheDigestTests(unittest.TestCase):
     _counting_signer = SignedAnnouncementCacheTests._counting_signer
 
     def setUp(self):
-        gateway_utils._signed_peer = None
-        self.addCleanup(setattr, gateway_utils, "_signed_peer", None)
+        gateway_utils._signed_peers.clear()
+        self.addCleanup(gateway_utils._signed_peers.clear)
         proof_attestation._owner_attestation.cache_clear()
         self.addCleanup(proof_attestation._owner_attestation.cache_clear)
 

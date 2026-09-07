@@ -1,4 +1,4 @@
-"""``nodo burnall`` -- stop every instance this node is running.
+"""``nodo burnall`` -- stop every instance this node is running or paying for.
 
 ``nodo kill <id>`` stops one instance the operator names. There is no way to
 name all of them, and the situations that call for it are the ones where the
@@ -13,6 +13,12 @@ children while it is still up means killing instances it is busy replacing. By
 the time the loop reaches the parent, the node is running services the loop
 already stopped once. Ordering by depth in the parent tree, roots first, means
 nothing outlives the thing that would ask for it again.
+
+Delegated instances are in the sweep too. They run on a peer rather than here, so
+they pin none of this machine's cores -- but they are billed to this node's deposit
+with that peer, which makes them the ones still costing the operator money after a
+burn that skipped them reported success. ``stop_instance`` routes an external token
+on its own; the sweep simply has to hand it one.
 
 Every instance is still stopped through ``stop_instance``: the memory is
 released, the row is purged and the unspent deposit is refunded. Where the
@@ -75,14 +81,14 @@ THRONE = """
 """
 
 
-def _depth(vmachine_id: str, fathers: Dict[str, str], internal: Sequence[str]) -> int:
-    """How many internal ancestors an instance has; 0 when its parent is a client.
+def _depth(vmachine_id: str, fathers: Dict[str, str], known_ids: Sequence[str]) -> int:
+    """How many instance ancestors an instance has; 0 when its parent is a client.
 
-    A father that is not itself an internal instance is a client, which ends the
-    chain. The visited set is not defensive dressing: a father cycle would
+    A father that is not itself one of this burn's instances is a client, which ends
+    the chain. The visited set is not defensive dressing: a father cycle would
     otherwise spin here forever, and this runs before anything has been stopped.
     """
-    known = set(internal)
+    known = set(known_ids)
     seen = set()
     depth, current = 0, vmachine_id
     while True:
@@ -93,7 +99,7 @@ def _depth(vmachine_id: str, fathers: Dict[str, str], internal: Sequence[str]) -
         current, depth = father, depth + 1
 
 
-def _confirmed(total: int, roots: int) -> bool:
+def _confirmed(total: int, roots: int, remote: int = 0) -> bool:
     """Ask, and only accept the exact phrase.
 
     A closed stdin is a refusal, not an assent: the one thing this must never do
@@ -101,7 +107,10 @@ def _confirmed(total: int, roots: int) -> bool:
     mean it pass --yes.
     """
     print("─" * 75)
-    print(f"  This stops ALL {total} running instance(s) on this node. There is no undo.")
+    print(f"  This stops ALL {total} instance(s) this node is running or paying for.")
+    if remote:
+        print(f"  {remote} of them run on a peer, billed to this node's deposit there.")
+    print("  There is no undo.")
     if roots:
         print(f"  {roots} of them were asked for by a client.")
         print("  Stopping one is indistinguishable, from that client's side, from a")
@@ -149,12 +158,41 @@ def burnall(argv: List[str] = None) -> None:
         print(f"burnall: could not read the instance list: {e}")
         return
 
+    # The delegated ones too. They are the instances that keep costing the operator
+    # money after this reports success -- running on a peer, billed to this node's
+    # deposit there -- so a sweep that skipped them was contradicting its own prompt
+    # ("ALL {total} running instance(s)") and its own reason for existing (issue #327).
+    # `stop_instance` already routes an external token correctly; it was simply never
+    # handed one.
+    delegated: Dict[str, str] = {}
+    try:
+        for row in sc.get_delegated_instances() or []:
+            # Our own alias, not the peer's token: `stop_instance` reaches the external
+            # branch by `get_delegated_token_by_id`, which looks the delegation token up
+            # `WHERE id = ?`. Handing it the token instead resolves to nothing, and the
+            # stop reports "no external token" without stopping anything. It is also
+            # the id `nodo instances` prints and `nodo kill` accepts.
+            alias = row.get("id")
+            if alias:
+                delegated[alias] = row.get("father_id") or ""
+    except Exception as e:
+        # Reported rather than fatal: the local instances are still worth stopping, and
+        # the operator has to know the remote ones were not looked at.
+        print(f"burnall: could not read the delegated instance list: {e}")
+        print("         locally-run instances only; check `nodo instances` afterwards.")
+    ids = ids + [token for token in delegated if token not in ids]
+
     if not ids:
         print("No instances running.")
         return
 
     fathers = {}
     for i in ids:
+        if i in delegated:
+            # Read off the delegated row: `get_internal_father_id` looks in
+            # `local_instances`, where a delegated instance has no row at all.
+            fathers[i] = delegated[i]
+            continue
         try:
             fathers[i] = sc.get_internal_father_id(id=i) or ""
         except Exception:
@@ -167,13 +205,16 @@ def burnall(argv: List[str] = None) -> None:
     print(THRONE)
     print(f"{len(ordered)} instance(s), parents first:")
     for i in ordered:
-        print(f"  {'  ' * depths[i]}{i[:16]}  (depth {depths[i]})")
+        where = "  delegated" if i in delegated else ""
+        print(f"  {'  ' * depths[i]}{i[:16]}  (depth {depths[i]}){where}")
 
     if dry_run:
         print("\n--dry-run: nothing stopped.")
         return
 
-    if not assume_yes and not _confirmed(total=len(ordered), roots=roots):
+    if not assume_yes and not _confirmed(
+        total=len(ordered), roots=roots, remote=len(delegated)
+    ):
         return
 
     stopped, failed = 0, []

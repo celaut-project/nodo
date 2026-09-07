@@ -218,6 +218,15 @@ def peer_id_from_certificate(certificate_der: bytes) -> str:
         extension = certificate.extensions.get_extension_for_oid(HOST_KEY_EXTENSION_OID)
     except x509.ExtensionNotFound:
         raise CertificateError("Certificate carries no celaut host-key extension.")
+    except Exception as e:
+        # Everything else the lookup can raise, for the same reason the parse above is
+        # wrapped this way: the input is whatever an unknown address answered with. A
+        # certificate carrying this OID twice is refused by `CertificateBuilder` but
+        # trivially built by hand and parses fine, and `x509.DuplicateExtension` is no
+        # subclass of CertificateError -- so it escaped every caller that handles a
+        # refusal, including the payment path's `except (ConnectionError,
+        # CertificateError)`, turning "cannot reach this peer" into a crash (issue #312).
+        raise CertificateError(f"Unusable host-key extension: {e}")
 
     try:
         public_key_hex, _, signature = extension.value.value.decode("ascii").partition(":")

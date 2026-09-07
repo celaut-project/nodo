@@ -37,7 +37,18 @@ SERIAL_TAIL_BYTES = 64 * 1024
 
 
 def read_serial_tail(path: str, size: int = SERIAL_TAIL_BYTES) -> str:
-    """The last ``size`` bytes of a serial log, or "" if it cannot be read."""
+    """The last ``size`` bytes of a serial log, whole lines only, or "" if unreadable.
+
+    A window taken from the end starts wherever ``size`` bytes back happens to land,
+    which is usually mid-line. That matters because the marker is required at the start
+    of a line -- ``re.MULTILINE`` makes ``^`` match at position 0 too, so a guest line
+    reading ``... Kernel panic - not syncing: x`` that got split at exactly this offset
+    would arrive with its own prefix cut off and match as though the guest had printed
+    it first (issue #328). So the partial first line is dropped, and
+    only when the read did not start at the beginning of the file -- a log shorter than
+    the window has no partial line to drop, and dropping its first would hide a panic
+    from a guest that printed one and little else.
+    """
     try:
         with open(path, "rb") as fh:
             try:
@@ -45,11 +56,21 @@ def read_serial_tail(path: str, size: int = SERIAL_TAIL_BYTES) -> str:
             except OSError:
                 # Shorter than the window: read what there is.
                 fh.seek(0)
-            return fh.read().decode("utf-8", errors="replace")
-    except (FileNotFoundError, IsADirectoryError, PermissionError):
-        return ""
+            # Asked of the position, not of whether the seek raised: a log of exactly
+            # `size` bytes seeks fine and lands on 0, where the first line is whole and
+            # dropping it would hide a panic printed at the very top of the log.
+            partial = fh.tell() > 0
+            tail = fh.read().decode("utf-8", errors="replace")
     except Exception:
+        # A missing log, a directory, no permission, a vanished mount: every one of
+        # them means "cannot tell", and `guest_panic_line` leaves such a guest alone.
         return ""
+    if not partial:
+        return tail
+    _, newline, rest = tail.partition("\n")
+    # No newline anywhere means the whole window is one unterminated line, and there is
+    # no way to tell where it began.
+    return rest if newline else ""
 
 
 def guest_panic_line(state: Optional[Dict[str, Any]]) -> Optional[str]:
