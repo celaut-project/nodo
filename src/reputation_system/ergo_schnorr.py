@@ -52,6 +52,19 @@ exists instead of a one-line call into a library:
 Only ``ecdsa`` (already a dependency, used for the BIP-32 identity keypair) and ``hashlib``
 are needed: no JVM, no Ergo node. Same reason ``bip_wallet_verification`` derives keys in
 pure Python -- a node must be able to sign from first boot.
+
+What ``ecdsa`` contributes is group arithmetic and point encoding; none of its own
+signature code is reached, and the curve here is secp256k1, never P-256. That distinction
+is worth stating because the library declares side channels out of scope for itself
+(GHSA-wj6h-64fc-37mp: Minerva on P-256, through ``SigningKey.sign_digest``). The one
+place a secret scalar touches it is ``k*G`` in :func:`sign`, and ``PointJacobi.__mul__``
+reduces the scalar modulo ``2n`` before multiplying, so its bit length -- the quantity
+Minerva recovers -- does not vary with the nonce. That is a mitigation, not a
+constant-time guarantee, and what bounds the exposure is that this signer is not a
+service a caller can drive: a peer announcement is signed once per change in its content
+and then served from cache, while what a peer can ask for repeatedly is verification,
+over public values. Moving the arithmetic onto libsecp256k1 (``coincurve``, already
+installed underneath ``bip32``) is what would settle the question rather than bound it.
 """
 from __future__ import annotations
 
