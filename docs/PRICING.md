@@ -52,7 +52,7 @@ It also belongs there *in the code*: the rate and its conversions live in
 `src/payment_system/contracts/ergo/rate.py`, not in the accounting core, which names no
 ledger. Ergo is the default and currently the only implemented payment system, not a
 peg — a peer may accept it, not accept it, or accept others alongside it (see
-[`CONCEPTS.md`](CONCEPTS.md), "Where ERG fits"):
+[`CONCEPTS.md`](CONCEPTS.md), "Payment systems"):
 
 ```yaml
 ledgers:

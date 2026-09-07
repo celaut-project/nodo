@@ -249,7 +249,8 @@ Controls exposure and remote execution. Key entries: `GATEWAY_PORT` (`auto`, TLS
 authenticated against this node's identity key, and the only port announced to peers),
 `GATEWAY_PLAINTEXT_PORT` (`auto` = `GATEWAY_PORT + 1`; the same gateway in plain gRPC,
 for the services this node runs and for external callers that do not want TLS — `0`
-disables it, see [`CONCEPTS.md`](CONCEPTS.md)),
+disables it, and then a service must speak TLS too; see [The plaintext
+gateway](#the-plaintext-gateway) below),
 `PUBLIC_IP` / `EXTERNAL_INTERFACE` (what `nodo execute --remote` advertises),
 `PUBLIC_TCP_PORT` / `PUBLIC_UDP_PORT` (the external port a router forwards, when it
 differs from the internal one — empty means "same as internal"; only
@@ -272,6 +273,29 @@ The two directions are separate settings, and neither implies the other:
 | Don't run services **for** other peers (client-only) | `client.ACCEPT_NEW_DEPOSITS: false` |
 | Don't ask other peers to run services **for you** (local-only) | `network.DELEGATE_EXECUTION: false` |
 | Keep delegating, but approve every outgoing payment yourself | `deposits.AUTOMATIC_REFILL: false` |
+
+### The plaintext gateway
+
+`GATEWAY_PORT` is TLS and is the only port announced to peers; peers and the CLI always
+use TLS, with no exception, and this node's own client code has no way to open a
+plaintext channel (see [Transport security](CONCEPTS.md#transport-security)).
+`GATEWAY_PLAINTEXT_PORT` serves the **same** `Gateway` in plain gRPC for the two callers
+that are not peers:
+
+* **The services this node executes.** A service speaks plain gRPC and reaches the node
+  over a hop that never leaves the host; it is handed this address as data, in
+  `__config__.gateway`, so there is nothing for it to guess. Requiring TLS here would
+  mean shipping certificate pinning into every service SDK for a local hop.
+* **External callers that do not want TLS.** TLS is what the node *offers*; a caller
+  that declines it is that caller's own risk.
+
+It is deliberately hard to reach from elsewhere: it is not announced to peers, no
+firewall rule is opened for it, and it listens on one address only — the gateway address
+the config file already names (`virtualizers.ch.NETWORK_BRIDGE_NAME`, the same one
+written into `__config__.gateway`; loopback if that bridge is not up), never `[::]`.
+Serving the unauthenticated `Gateway` on every interface would give away exactly what
+the TLS port protects, so reaching it from another host takes a port-forward set up on
+purpose.
 
 ## `service_networks`
 
