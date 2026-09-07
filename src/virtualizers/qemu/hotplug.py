@@ -277,6 +277,11 @@ def _apply_memory_balloon(
     see :func:`_safe_balloon_target`. A request below that bound is honoured as
     far as it safely can be and reported as ``clamped``, because the alternative
     -- delivering it exactly -- kills the guest.
+
+    Either bound leaves the guest holding something other than what was asked
+    for, so both report ``clamped`` and carry a ``delivered`` figure in usable
+    bytes: the caller prices the instance at what the guest has, never at a
+    request the hypervisor could not honour.
     """
     reserve_bytes = max(0, int(reserve_bytes))
     allocation = int(target_bytes) + reserve_bytes
@@ -295,17 +300,24 @@ def _apply_memory_balloon(
             f"({int(target_bytes)} usable + {reserve_bytes} guest kernel reserve); "
             f"cgroup memory.max held at boot allocation {int(boot_mem_bytes)} in {cgroup_path}"
         )
+        notes = []
         if allocation > int(boot_mem_bytes):
-            detail += (
-                f" (requested {int(target_bytes)} usable needs {allocation} and exceeds "
-                f"boot -m; clamped -- QEMU cannot grow a guest above its boot allocation)"
+            notes.append(
+                f"requested {int(target_bytes)} usable needs {allocation} and exceeds "
+                f"boot -m; clamped -- QEMU cannot grow a guest above its boot allocation"
             )
         if safety_note:
+            notes.append(safety_note)
+        if notes:
             # Reported as its own status so a caller can tell "you got what you
-            # asked for" from "you got as much as was survivable".
+            # asked for" from "you got as much as was available", and so the
+            # delivered figure below is what the row gets priced at. Both bounds
+            # -- the boot ceiling above and the guest's own free memory -- leave
+            # the guest holding less than was asked for, and billing the request
+            # would charge for memory it does not have.
             result = _field_result(
                 status="clamped",
-                detail=f"{detail} ({safety_note})",
+                detail=f"{detail} ({'; '.join(notes)})",
                 requested=int(target_bytes),
             )
             result["delivered"] = max(0, int(clamped) - reserve_bytes)
@@ -439,9 +451,10 @@ def hotplug(
     if cpu_requested and report["results"]["cpu"]["status"] != "applied":
         strict_ok = False
 
-    # A clamped shrink is a real resize, just not the requested one, so the
+    # A clamped resize is a real resize, just not the requested one, so the
     # instance must be priced at what it actually holds. Recording the request
-    # instead would bill a guest for less memory than it still has.
+    # instead would bill a clamped shrink for less memory than the guest still
+    # has, and a grow past the boot ``-m`` for memory QEMU cannot give it.
     if report["results"].get("mem_limit", {}).get("status") == "clamped":
         delivered = report["results"]["mem_limit"].get("delivered")
         if delivered:
