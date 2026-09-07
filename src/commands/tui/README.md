@@ -16,6 +16,7 @@ particular installation directory.
 | **Clients** | Who pays us: balance, last usage, and whether the client is metered at all. The detail card lists what it has paid, the deposit tokens it holds and what became of them, and the instances it started here. A client cannot be resolved to a peer and the page does not pretend otherwise (see issue #178). Balance can be credited/debited with `+`/`-`. |
 | **Cell** | The node's policies as a set of named decisions, laid out as a cell: what it lets in, what work it takes, what it says to the network, what it distrusts, how it charges, and what it keeps. One row is one decision, and moving it writes every key that decision spans. Postures ("just me", "cautious renter", …) apply a whole set at once, and the page says which one this node is closest to. |
 | **Pricing** | What this node charges, per resource, as vertical bars you can nudge. Recurring and one-off prices are charted apart because their magnitudes are unrelated. Beside them: the display unit, what one MU is worth on the ledger, the scarcity ceiling, and a worked hourly example. |
+| **Schedule** | The hours this node takes work in (`activity_window`), drawn as the day it is: the open stretch as one run of blocks, a marker at the current hour, and what closing time does to work already running. Underneath, on the same axis, a month of demand folded onto the 24 hours of a clock — peak instances held, and the work refused because the window was shut. Edited by moving an edge rather than by typing a time, so an unusable hour cannot be expressed. |
 | **Config** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited, and list elements can be added and removed. |
 | **Logs** | Tail of `storage/app.log` beside commands/actions launched from the TUI. |
 
@@ -65,10 +66,10 @@ common case.
 | Key | Action |
 |---|---|
 | `Tab` / `Shift+Tab` | Next/previous page (both wrap) |
-| `↑` / `↓` | Select table row, or move through the Config tree |
-| `→` / `←` | Enter/leave a Config branch (see below), move between Cell organelles; ignored by the other pages |
+| `↑` / `↓` | Select table row, move through the Config tree, or pick which edge of the working day the arrows move on Schedule |
+| `→` / `←` | Enter/leave a Config branch (see below), move between Cell organelles, move the selected edge of the working day by 30 min on Schedule; ignored by the other pages |
 | `r` | Force a refresh |
-| `c` | Connect a peer, from Peers |
+| `c` | Connect a peer, from Peers; on Schedule, what closing time does (refuse / stop) |
 | `a` | Config: append an element to the selected list |
 | `d` | Delete the selected service, forget the selected peer on Peers, remove the selected Config list element, or show how this node deviates from its closest profile on Cell |
 | `k` | Kill the selected instance |
@@ -78,10 +79,11 @@ common case.
 | `p` | Cell: apply a profile |
 | `+` / `-` | Adjust peer reputation on Peers, the selected price by 10 % on Pricing, or open a credit/debit amount modal on Clients |
 | `n` | Cell: the router steps (`nodo nat-guide`) |
+| `w` | Schedule: enforce the hours, or stop enforcing them |
 | `/` | Filter Config paths/values |
 | `x` | Clear the Config filter |
-| `Enter` / `Space` | Expand/collapse the selected Config section, or move the selected Cell lever to its next position |
-| `Enter` / `Esc` | Save/cancel a modal |
+| `Enter` / `Space` | Expand/collapse the selected Config section, move the selected Cell lever to its next position, or apply the edited working day on Schedule |
+| `Enter` / `Esc` | Save/cancel a modal. On Schedule, `Esc` gives up an unapplied edit before it gives up the interface: a second `Esc` still quits |
 | `Ctrl+U` | Clear modal input |
 | `q` or `Ctrl+C` | Exit |
 
@@ -98,13 +100,17 @@ column) and, on `Enter`, runs `nodo credit_client <client id> <amount>` or
 ## Applying a change
 
 Every configuration change made in this TUI — a raw key on Config, a price on Pricing,
-a lever or a profile on Cell — is applied as one transaction:
+a lever or a profile on Cell, the working day on Schedule — is applied as one
+transaction:
 
 1. `config.yaml` is snapshotted to `config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` beside it (the ten
    most recent are kept, matching what the Python `ConfigManager` prunes to).
 2. The change is written with nodo's configured `yq`, in place, comments preserved.
-   A change that spans several keys — a lever, a profile — is **one** `yq` invocation,
-   so the file never holds half of it.
+   A change that spans several keys — a lever, a profile, the four keys a working day
+   is — is **one** `yq` invocation, so the file never holds half of it. That is also
+   why Schedule collects an edit and applies it on `Enter` rather than writing per
+   keypress: `START` and `END` are one decision, and a node restarted between them
+   would be running a window nobody chose.
 3. If something is serving on the gateway port, `nodo daemon restart` runs and the
    port is waited on until it answers again.
 4. **If the node does not come back, the snapshot is put straight back** and the node

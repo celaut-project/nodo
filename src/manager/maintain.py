@@ -14,7 +14,7 @@ from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
 from src.payment_system.mu_conversion import peer_mu_in_local
 from src.reputation_system.reasons import Reason
-from src.utils import activity_window
+from src.utils import activity_window, demand_history
 from src.utils import logger as log
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import peers_id_iterator
@@ -171,6 +171,10 @@ def maintain_vmachines(debug_mode: bool=False):
         {key for key in _instances_penalised if key[0] not in set(live_instances)}
     )
 
+    # Summed as the sweep goes, so the hourly history costs one addition rather than a
+    # second pass over the instances.
+    charged_this_tick = 0
+
     for vmachine_id in live_instances:
 
         # Skip development vmachines from the ggconf command
@@ -238,7 +242,15 @@ def maintain_vmachines(debug_mode: bool=False):
             # balance diff) so a top-up between ticks never reads as negative spend. The
             # dev-vmachine skip above means no sample is recorded when nothing is charged.
             sc.record_instance_consumption(id=vmachine_id, charge_mu=charge_mu, seconds=MANAGER_ITERATION_TIME)
+            charged_this_tick += int(charge_mu or 0)
             if debug_mode: log.LOGGER(f"Charged {vmachine_id} for the interval it just held.")
+
+    # What this hour looked like (issue #337). Both figures were computed above and
+    # were being dropped: the operator choosing the hours this node works in has
+    # nothing else to read that choice against.
+    demand_history.record_tick(
+        instances_held=len(live_instances), mu_charged=charged_this_tick
+    )
 
     # Reclaim what is running or on disk with no row behind it. Asked of the
     # virtualizer interface, not of a backend: reaching into `ch.maintain` for this

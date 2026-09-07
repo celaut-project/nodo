@@ -6,7 +6,7 @@ from src.balancers.execution_balancer.execution_balancer import execution_balanc
 from src.gateway.launcher.delegate_execution.delegate_execution import delegate_execution
 from src.gateway.launcher.local_execution.local_execution import local_execution
 from src.manager.manager import default_initial_balance, descends_from_dev_client, spend_mu
-from src.utils import activity_window, utils, logger as log
+from src.utils import activity_window, demand_history, utils, logger as log
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.utils.utils import from_amount, to_amount
 from src.database.sql_connection import SQLConnection
@@ -180,6 +180,11 @@ def launch_service(
         if not activity_window.is_open() and not descends_from_dev_client(father_id):
             reason = activity_window.closed_reason()
             log.LOGGER(f"Refusing to launch service {service_id}: {reason}")
+            # Counted apart from every other refusal (issue #337): this is the only one
+            # the operator can undo by moving an edge on the SCHEDULE page, so it is
+            # what makes "these are my hours" answerable as "and this is what they cost
+            # me". A refusal for want of memory would have happened at any hour.
+            demand_history.record_refusal(because_closed=True)
             raise Exception(f"Unable to launch service {service_id}: {reason}")
 
         # Check configuration
@@ -333,6 +338,10 @@ def launch_service(
                         log.LOGGER(f"Exception blocking firewall rules to {father_id} for the dependency {str(instance)}")
                         raise e
 
+                # Work this node took (issue #337). Here rather than earlier because
+                # this is the first point at which the instance is actually running and
+                # reachable -- counting an admission before that would count attempts.
+                demand_history.record_admission()
                 return instance
 
             except Exception as e:
@@ -357,4 +366,10 @@ def launch_service(
             local_preflight_failure=local_preflight_failure,
         )
         log.LOGGER(_err_msg)
+        # Demand this node could not meet: every place it could have run was tried and
+        # none would. Counted, while the validation failures above are not -- a
+        # malformed request is not work anybody could have taken, and folding the two
+        # together would make the history read as a capacity problem whenever a client
+        # sent a bad message.
+        demand_history.record_refusal()
         raise Exception(_err_msg)
