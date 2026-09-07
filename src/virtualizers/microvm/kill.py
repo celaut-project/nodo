@@ -32,7 +32,6 @@ from src.virtualizers.microvm.hypervisor import Hypervisor
 from src.virtualizers.microvm.process import pid_matches
 from src.virtualizers.microvm.runtime_state import (
     delete_runtime_state,
-    list_runtime_states,
     load_runtime_state,
     recorded_process_name,
 )
@@ -135,22 +134,18 @@ def kill(hypervisor: Hypervisor, vmachine_id: str) -> bool:
     except Exception as e:
         log.LOGGER(hypervisor.log(vmachine_id, f"failed removing runtime directory: {e}"))
 
-    # Release shared-filesystem backends. A virtiofsd daemon is stopped only when
-    # this was the last VM using its share on the host; the exported directory is
-    # removed only for shares this VM itself exported (owned_share_ids), so a
-    # departing child never deletes its parent's data.
+    # Release the shared filesystems this VM used. Each share's own state says
+    # who else is still using it: its daemon is stopped and its directory removed
+    # when this VM was the last user, and not before -- which covers both a
+    # parent leaving while a child still holds the share and a child outliving
+    # the parent that created it.
     virtiofs_mounts = state.get("virtiofs") or []
     if virtiofs_mounts:
         try:
-            other_states = {
-                vid: s for vid, s in list_runtime_states().items() if vid != vmachine_id
-            }
             teardown_virtiofs_for_vm(
                 vmachine_id=vmachine_id,
                 mounts_state=virtiofs_mounts,
-                runtime_states=other_states,
                 base_dir=str(shared_fs_base_dir(paths.cache_root())),
-                owned_share_ids=state.get("exported_shares") or [],
                 logger_fn=log.LOGGER,
             )
         except Exception as e:

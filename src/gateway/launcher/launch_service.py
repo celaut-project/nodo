@@ -16,6 +16,7 @@ from src.utils.cost_functions.resource_availability import get_resource_availabi
 from src.utils.cost_functions.workload_admission import evaluate_possible_environment_workloads
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.utils.network_policy import enforce_network_policy
+from src.manager.shares import ShareAuthorizationError, authorize_shares
 from src.utils.shared_filesystems import service_requires_parent_colocation
 
 sc = SQLConnection()
@@ -228,6 +229,19 @@ def launch_service(
             raise Exception(
                 f"Unable to launch service {service_id}: {workload_admission_failure}"
             )
+
+        # A `guest` directory is an execution precondition, not an option: if the
+        # parent that launched this service does not export the share it asks
+        # for, the service cannot run -- here or anywhere. Checked before the
+        # balancer and before any MU is spent, and deliberately not inside
+        # `_detect_local_preflight_failure`, which reports a *local* failure worth
+        # trying another candidate for. There is no other candidate: the export is
+        # materialized from the parent's own rootfs, on the parent's own node.
+        try:
+            authorize_shares(service=service, father_id=father_id, config=configuration)
+        except ShareAuthorizationError as e:
+            log.LOGGER(f"Refusing to launch service {service_id}: {e}")
+            raise Exception(f"Unable to launch service {service_id}: {e}") from e
 
         # `nodo force_execution` bypass (testing/dev only): the call carries a
         # forced-peer hint correlated via `recursion_guard_token`, never
