@@ -99,10 +99,10 @@ class TheQemuBalloonSpeaksAllocationsTests(unittest.TestCase):
              patch.object(qemu_hotplug, "cgroup_v2_available", return_value=True), \
              patch.object(qemu_hotplug, "ensure_vm_cgroup", return_value=Path("/sys/fs/cgroup/nodo-ch/vm-q")), \
              patch.object(qemu_hotplug, "apply_memory_limit") as apply_mem, \
-             patch.object(qemu_hotplug, "modify_sysreq", return_value=True), \
+             patch.object(qemu_hotplug, "modify_sysreq", return_value=True) as persisted, \
              patch.object(qemu_hotplug, "QMPClient", _FakeQMP):
             ok = qemu_hotplug.hotplug(vmachine_id="vm-q", system_requeriments_range=req)
-        return ok, _FakeQMP.last_target, apply_mem
+        return ok, _FakeQMP.last_target, apply_mem, persisted
 
     def _state(self, **extra):
         state = {
@@ -118,7 +118,7 @@ class TheQemuBalloonSpeaksAllocationsTests(unittest.TestCase):
     def test_a_shrink_leaves_the_service_the_bytes_it_asked_for(self):
         # 128 MiB usable means a 128 MiB + reserve allocation. Asking the guest for
         # 128 MiB flat would leave the service 128 minus a kernel.
-        ok, target, _ = self._run(self._state(), _mem_request(128 * MIB))
+        ok, target, _, _ = self._run(self._state(), _mem_request(128 * MIB))
         self.assertTrue(ok)
         self.assertEqual(target, 128 * MIB + RESERVE)
 
@@ -126,14 +126,14 @@ class TheQemuBalloonSpeaksAllocationsTests(unittest.TestCase):
         # The whole point of booting at the ceiling: a grow back to it must land,
         # and must land on the *allocation* that makes the ceiling usable -- which
         # is exactly the boot allocation, so it is affordable by construction.
-        ok, target, _ = self._run(self._state(), _mem_request(USABLE_CEILING))
+        ok, target, _, _ = self._run(self._state(), _mem_request(USABLE_CEILING))
         self.assertTrue(ok)
         self.assertEqual(target, BOOT_MEM)
 
     def test_the_cgroup_is_never_moved_off_the_boot_allocation(self):
         # Unchanged by the reserve, and worth pinning here too: memory.max below
         # what qemu has mapped is what OOM-kills it (nodo#274).
-        _, _, apply_mem = self._run(self._state(), _mem_request(128 * MIB))
+        _, _, apply_mem, _ = self._run(self._state(), _mem_request(128 * MIB))
         apply_mem.assert_called_once()
         self.assertEqual(apply_mem.call_args.kwargs["mem_limit"], BOOT_MEM)
 
@@ -141,9 +141,44 @@ class TheQemuBalloonSpeaksAllocationsTests(unittest.TestCase):
         # A usable figure above the declared ceiling needs more than `-m`, which
         # QEMU cannot give. Clamped to the boot allocation and reported, rather
         # than handed to the guest as a target it cannot mean anything by.
-        ok, target, _ = self._run(self._state(), _mem_request(4096 * MIB))
+        ok, target, _, _ = self._run(self._state(), _mem_request(4096 * MIB))
         self.assertTrue(ok)
         self.assertEqual(target, BOOT_MEM)
+
+    def test_a_request_the_boot_allocation_cannot_cover_is_priced_at_the_ceiling(self):
+        # The guest is left holding `-m`, so the row has to say the usable figure
+        # that allocation covers. Persisting the request would bill the client for
+        # RAM QEMU never handed the guest.
+        ok, _, _, persisted = self._run(self._state(), _mem_request(4096 * MIB))
+        self.assertTrue(ok)
+        self.assertEqual(persisted.call_args.kwargs["sys_req"].mem_limit, USABLE_CEILING)
+
+    def test_a_grow_past_the_ceiling_is_reported_as_clamped_not_applied(self):
+        # `applied` is the caller's signal that the request landed verbatim, and
+        # the only status the DB correction looks at is `clamped`.
+        req = _mem_request(4096 * MIB)
+        captured = {}
+
+        with patch.object(qemu_hotplug, "load_runtime_state", return_value=self._state()), \
+             patch.object(qemu_hotplug, "save_runtime_state", side_effect=lambda vid, p: captured.update(p)), \
+             patch.object(qemu_hotplug, "cgroup_v2_available", return_value=True), \
+             patch.object(qemu_hotplug, "ensure_vm_cgroup", return_value=Path("/sys/fs/cgroup/nodo-ch/vm-q")), \
+             patch.object(qemu_hotplug, "apply_memory_limit"), \
+             patch.object(qemu_hotplug, "modify_sysreq", return_value=True), \
+             patch.object(qemu_hotplug, "QMPClient", self._idle_guest()):
+            qemu_hotplug.hotplug(vmachine_id="vm-q", system_requeriments_range=req)
+
+        mem = (captured.get("last_hotplug_report") or {})["results"]["mem_limit"]
+        self.assertEqual(mem["status"], "clamped")
+        self.assertEqual(mem["delivered"], USABLE_CEILING)
+        self.assertEqual(mem["requested"], 4096 * MIB)
+
+    def test_a_grow_to_exactly_the_ceiling_is_still_applied(self):
+        # It lands verbatim -- the boot allocation was sized for precisely this --
+        # so nothing was clamped and there is nothing to correct.
+        ok, _, _, persisted = self._run(self._state(), _mem_request(USABLE_CEILING))
+        self.assertTrue(ok)
+        self.assertEqual(persisted.call_args.kwargs["sys_req"].mem_limit, USABLE_CEILING)
 
     def test_what_is_reported_back_stays_in_usable_bytes(self):
         # The unit the request arrived in and the unit the row is priced in. A
@@ -192,7 +227,7 @@ class TheQemuBalloonSpeaksAllocationsTests(unittest.TestCase):
         # figure, so there is nothing to add back and the target is verbatim.
         state = self._state()
         del state["guest_kernel_reserve_bytes"]
-        ok, target, _ = self._run(state, _mem_request(128 * MIB))
+        ok, target, _, _ = self._run(state, _mem_request(128 * MIB))
         self.assertTrue(ok)
         self.assertEqual(target, 128 * MIB)
 
