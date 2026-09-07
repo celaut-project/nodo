@@ -147,10 +147,14 @@ done
 # --- best-effort: SKILL.md nodo commands exist in the CLI dispatcher --------
 NODO_PY="${REPO_ROOT}/nodo.py"
 if [ -f "${NODO_PY}" ]; then
-  known="$(grep -oE 'case "[a-z0-9_:]+"' "${NODO_PY}" | sed -E 's/case "(.*)"/\1/' | sort -u)"
-  # also accept commands listed in the help block
-  known="${known}
-$(grep -oE '\\n- [a-z0-9_:]+' "${NODO_PY}" | sed -E 's/\\n- //' | sort -u)"
+  # The dispatcher is the authority for "does this command exist", and both quote
+  # styles are in use there (`case "info":` beside `case 'clients':`) -- the same two
+  # tests/test_help.py accepts. It used to be read together with a `\n- <cmd>` help
+  # block inside nodo.py; that block moved to src/commands/help.py (#339), leaving the
+  # grep for it matching nothing, which under `pipefail` killed this script outright.
+  # No second source is needed: test_help.py already pins help.py against these cases.
+  known="$(grep -oE "case [\"'][a-z0-9_:]+[\"']" "${NODO_PY}" \
+    | sed -E "s/case [\"'](.*)[\"']/\1/" | sort -u)"
   # Only treat `nodo <cmd>` inside inline-code spans or at the start of a fenced
   # code line as a command invocation — never bare prose like "nodo can resolve".
   used="$( {
