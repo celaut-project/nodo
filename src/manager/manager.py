@@ -259,14 +259,38 @@ def validate_reputation_proof(contract_ledger, peer: celaut_pb2.Peer) -> bool:
     without an attestation its claimed owner signed proves nothing about who holds it.
     """
     from src.reputation_system.contracts.ergo.proof_validation import explain_contract_ledger
+    from src.identity.node_identity import normalize_public_key_hex
     from src.reputation_system.proof_attestation import attested_proof_owner
+    from src.utils.contract_xattrs import get_owner_attestation
 
     wallet_public_key = attested_proof_owner(contract_ledger, peer.public_key)
     if not wallet_public_key:
-        log.LOGGER(
-            f"Peer {peer.public_key} announced a reputation proof with no verifiable "
-            "owner attestation."
-        )
+        # Two different things, and only one of them is a claim about ownership. A proof
+        # arriving with no attestation at all says nothing about who holds it -- there is
+        # nothing to disbelieve -- while one carrying an attestation that does not verify
+        # is a claim this node has checked and rejected. Reporting both as "does not own"
+        # blamed a peer for having stated nothing (issue #315).
+        _, signature = get_owner_attestation(contract_ledger)
+        if not normalize_public_key_hex(peer.public_key):
+            # The third case, and the only one that is not about the proof at all:
+            # `attested_proof_owner` has nothing to check the attestation *against*.
+            # Both call sites work on an already-verified peer, so this should be
+            # unreachable -- and saying "the attestation does not verify" if it ever is
+            # reached would be the same misattribution this branch exists to undo.
+            log.LOGGER(
+                f"Peer {peer.public_key} announced a reputation proof, but its own peer "
+                "id is not a usable key, so no attestation can be checked against it."
+            )
+        elif not signature:
+            log.LOGGER(
+                f"Peer {peer.public_key} announced a reputation proof with no owner "
+                "attestation, so this node cannot credit it."
+            )
+        else:
+            log.LOGGER(
+                f"Peer {peer.public_key} announced a reputation proof whose owner "
+                "attestation does not verify."
+            )
         return False
 
     # The reason, not just the verdict: the log used to say "Not supported reputation
@@ -485,8 +509,11 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     # above; all that is left to do here is flag one the peer does not actually own.
     for contract in peer.reputation_proofs:
         try:
-            if not validate_reputation_proof(contract_ledger=contract, peer=peer):
-                log.LOGGER(f"Peer {peer_id} announced a reputation proof it does not own.")
+            # No line of our own on a False: validate_reputation_proof has already said
+            # which of the several failures it was, and a second line asserting the peer
+            # "does not own" the proof both duplicated it and overstated the weakest of
+            # them (issue #315).
+            validate_reputation_proof(contract_ledger=contract, peer=peer)
         except Exception as e:
             log.LOGGER(f"Uncontrolled error validating reputation proof for peer {peer_id}: {e}")
 
@@ -517,8 +544,9 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
 
     for contract_ledger in peer.reputation_proofs:
         try:
-            if not validate_reputation_proof(contract_ledger=contract_ledger, peer=peer):
-                log.LOGGER(f"Peer {peer_id} announced a reputation proof it does not own.")
+            # See add_peer_instance: the check logs its own reason, in terms of what the
+            # peer actually announced (issue #315).
+            validate_reputation_proof(contract_ledger=contract_ledger, peer=peer)
         except Exception as e:
             log.LOGGER(f"Uncontrolled error validating reputation proof for peer {peer_id}: {e}")
 

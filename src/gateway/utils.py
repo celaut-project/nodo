@@ -3,6 +3,7 @@ import os
 import shutil
 import threading
 import time
+from collections import OrderedDict
 from typing import Generator, List, Optional, Tuple
 
 import netifaces as ni
@@ -209,8 +210,19 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
 #
 # Not persisted, deliberately. A restart signing afresh is correct and cheap, and a
 # `ts` restored from disk on a host whose clock moved back is not.
+# Keyed by content digest and holding more than one, because this node announces
+# itself in two shapes: `generate_full_node_peer_info` (every interface, what
+# GetPeerInfo and `nodo connect` answer with) and `generate_node_peer_info` (one bridge
+# address, built per service launch). Their digests differ, so a single slot had each
+# call evicting the other's entry, and a node launching instances while serving
+# GetPeerInfo thrashed to a ~0% hit rate -- the case the cache exists for (issue #329).
+#
+# Bounded, and small: the shapes are enumerable, not per-caller. Nothing in the message
+# depends on who is asking, so a growing key space here would mean something else went
+# wrong. Whichever entry is oldest goes when the bound is reached.
 _SIGNED_PEER_LOCK = threading.Lock()
-_signed_peer: Optional[Tuple[str, bytes, float]] = None
+_signed_peers: "OrderedDict[str, Tuple[bytes, float]]" = OrderedDict()
+_SIGNED_PEERS_MAX = 4
 
 # How long a signed announcement may be re-served. It bounds how stale a `ts` can be,
 # and it matters most when an operator has set `network.ADDRESS_VALIDITY_SECONDS`: the
@@ -253,10 +265,12 @@ def _cached_announcement(digest: str) -> Optional[celaut_pb2.Peer]:
     each find it empty and each pay for a signature, which is the cost this exists to
     avoid.
     """
-    if not _signed_peer:
+    entry = _signed_peers.get(digest)
+    if entry is None:
         return None
-    cached_digest, blob, signed_at = _signed_peer
-    if cached_digest != digest or time.monotonic() - signed_at > _signed_peer_ttl():
+    blob, signed_at = entry
+    if time.monotonic() - signed_at > _signed_peer_ttl():
+        del _signed_peers[digest]
         return None
     restored = celaut_pb2.Peer()
     restored.ParseFromString(blob)
@@ -293,7 +307,6 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
         )
         return
 
-    global _signed_peer
 
     from src.utils.network import uri_expiry
 
@@ -334,7 +347,10 @@ def _sign_peer(peer: celaut_pb2.Peer) -> None:
             peer.public_key = public_key_hex
             peer.signature = signature
             peer.ts = ts
-            _signed_peer = (digest, peer.SerializeToString(), time.monotonic())
+            _signed_peers[digest] = (peer.SerializeToString(), time.monotonic())
+            _signed_peers.move_to_end(digest)
+            while len(_signed_peers) > _SIGNED_PEERS_MAX:
+                _signed_peers.popitem(last=False)
 
     if not signature:
         # Never leave a declared scheme or an attestation on an unsigned announcement:

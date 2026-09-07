@@ -18,6 +18,11 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    # Before importing burnall: it builds a SQLConnection at import time, which reads
+    # the config. Without this the import raises, every case here is skipped, and the
+    # skip is silent -- which is how this file came to assert nothing at all.
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
     from src.commands import burnall as burnall_cmd
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -43,6 +48,7 @@ def _burn(stop):
     with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
          patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
                       return_value=list(TREE)), \
+         patch.object(burnall_cmd.sc, "get_delegated_instances", return_value=[]), \
          patch.object(burnall_cmd.sc, "get_internal_father_id",
                       side_effect=lambda id: TREE.get(id, "")), \
          patch.object(burnall_cmd, "credit_father", return_value=True) as credit_mock, \
@@ -56,10 +62,12 @@ def _burn(stop):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class BurnallOrderingTests(unittest.TestCase):
     def _run(self, argv=None, euid=0, stop_result=1, ids=None, typed=burnall_cmd.CONFIRMATION,
-             tty=True):
+             tty=True, delegated=None):
         ids = list(TREE) if ids is None else ids
         with patch.object(burnall_cmd.os, "geteuid", return_value=euid), \
              patch.object(burnall_cmd.sc, "get_all_internal_containers_ids", return_value=ids), \
+             patch.object(burnall_cmd.sc, "get_delegated_instances",
+                          return_value=list(delegated or [])), \
              patch.object(burnall_cmd.sc, "get_internal_father_id",
                           side_effect=lambda id: TREE.get(id, "")), \
              patch.object(burnall_cmd.sys.stdin, "isatty", return_value=tty), \
@@ -120,7 +128,7 @@ class BurnallOrderingTests(unittest.TestCase):
         # outside this node through those.
         with patch.object(burnall_cmd, "_confirmed", return_value=False) as confirm:
             self._run(typed=None)
-        confirm.assert_called_once_with(total=4, roots=2)
+        confirm.assert_called_once_with(total=4, roots=2, remote=0)
 
     def test_the_throne_is_shown_before_anything_is_stopped(self):
         # An operator gets one look at the scale of this before being asked.
@@ -141,6 +149,83 @@ class BurnallOrderingTests(unittest.TestCase):
 
         attempted, _ = _burn(stop)
         self.assertCountEqual(attempted, list(TREE))
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class DelegatedInstancesTests(unittest.TestCase):
+    """The instances that keep billing after a burn reports success (issue #327).
+
+    A delegated instance runs on a peer, so it pins none of this machine's cores -- and
+    is paid for out of this node's deposit with that peer, which makes it the one still
+    costing the operator money. `stop_instance` routes an external token on its own;
+    the sweep has to hand it one.
+    """
+
+    ROW = {"token": "remote-token", "id": "alias", "peer_id": "peer-1", "father_id": "parent"}
+
+    def _run(self, delegated, stop_result=1):
+        with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+             patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
+                          return_value=list(TREE)), \
+             patch.object(burnall_cmd.sc, "get_delegated_instances", return_value=delegated), \
+             patch.object(burnall_cmd.sc, "get_internal_father_id",
+                          side_effect=lambda id: TREE.get(id, "")), \
+             patch.object(burnall_cmd, "credit_father", return_value=True), \
+             patch.object(burnall_cmd, "stop_instance", return_value=stop_result) as stop_mock:
+            burnall_cmd.burnall(argv=["--yes"])
+        return [c.kwargs["token"] for c in stop_mock.call_args_list]
+
+    def test_a_delegated_instance_is_stopped(self):
+        self.assertIn("alias", self._run([self.ROW]))
+
+    def test_it_is_stopped_by_our_own_alias_not_the_peers_token(self):
+        # `stop_instance` reaches its external branch through
+        # `get_delegated_token_by_id`, which resolves the delegation token `WHERE
+        # id = ?`. Handed the token itself it resolves nothing, logs "no external
+        # token" and stops nothing -- so which of the two identifiers the sweep passes
+        # is the difference between working and silently doing nothing.
+        stopped = self._run([self.ROW])
+        self.assertIn("alias", stopped)
+        self.assertNotIn("remote-token", stopped)
+
+    def test_it_is_stopped_after_the_father_that_would_relaunch_it(self):
+        stopped = self._run([self.ROW])
+        self.assertLess(stopped.index("parent"), stopped.index("alias"))
+
+    def test_an_unreadable_delegated_list_still_burns_the_local_ones(self):
+        # Reported, not fatal: the local instances are still worth stopping.
+        with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+             patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
+                          return_value=list(TREE)), \
+             patch.object(burnall_cmd.sc, "get_delegated_instances",
+                          side_effect=RuntimeError("no such table")), \
+             patch.object(burnall_cmd.sc, "get_internal_father_id",
+                          side_effect=lambda id: TREE.get(id, "")), \
+             patch.object(burnall_cmd, "credit_father", return_value=True), \
+             patch.object(burnall_cmd, "stop_instance", return_value=1) as stop_mock:
+            burnall_cmd.burnall(argv=["--yes"])
+        self.assertCountEqual(
+            [c.kwargs["token"] for c in stop_mock.call_args_list], list(TREE)
+        )
+
+    def test_a_row_with_no_alias_is_skipped(self):
+        self.assertCountEqual(
+            self._run([{"token": "remote-token", "id": "", "father_id": "parent"}]),
+            list(TREE),
+        )
+
+    def test_the_prompt_counts_the_remote_ones(self):
+        with patch.object(burnall_cmd.os, "geteuid", return_value=0), \
+             patch.object(burnall_cmd.sc, "get_all_internal_containers_ids",
+                          return_value=list(TREE)), \
+             patch.object(burnall_cmd.sc, "get_delegated_instances", return_value=[self.ROW]), \
+             patch.object(burnall_cmd.sc, "get_internal_father_id",
+                          side_effect=lambda id: TREE.get(id, "")), \
+             patch.object(burnall_cmd, "credit_father", return_value=True), \
+             patch.object(burnall_cmd, "stop_instance", return_value=1), \
+             patch.object(burnall_cmd, "_confirmed", return_value=False) as confirm:
+            burnall_cmd.burnall(argv=[])
+        confirm.assert_called_once_with(total=5, roots=2, remote=1)
+
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DepthTests(unittest.TestCase):
