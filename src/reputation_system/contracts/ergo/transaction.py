@@ -143,7 +143,7 @@ def __build_proof_box(
                 .tokens([ergo_token_cls(proof_id, jpype.JLong(abs(int(token_amount))))]) \
                 .registers([
                     org_appkit.ErgoValue.of(_java_bytes(jpype, _id_bytes(type_nft_id))),            # R4: typeNftTokenId (raw bytes)
-                    org_appkit.ErgoValue.of(_java_bytes(jpype, _id_bytes(object_to_assign))),       # R5: uniqueObjectData (raw bytes; self = own token id)
+                    org_appkit.ErgoValue.of(_java_bytes(jpype, _id_bytes(object_to_assign))),       # R5: uniqueObjectData (raw bytes; the target node's identity public key)
                     org_appkit.ErgoValue.of(jpype.JBoolean(False)),                                  # R6: isLocked
                     org_appkit.ErgoValue.of(_java_bytes(jpype, owner_proposition)),                  # R7: raw propositionBytes of the owner
                     org_appkit.ErgoValue.of(jpype.JBoolean(int(token_amount) >= 0)),                # R8: customFlag (sign of the amount)

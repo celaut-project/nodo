@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from protos import celaut_pb2 as celaut
 
+from src.identity.node_identity import get_node_public_key_hex
 from src.reputation_system.contracts.ergo.utils import (
     get_public_key,
     iter_unspent_boxes_by_address,
@@ -105,15 +106,19 @@ def _boxes_off_canonical_contract(boxes: List[dict]) -> List[str]:
     ]
 
 
-def _node_own_proof_token_id(box: dict, owner_proposition: str, node_type_nft: str) -> Optional[str]:
+def _node_own_proof_token_id(
+    box: dict, owner_proposition: str, node_type_nft: str, identity_key: str
+) -> Optional[str]:
     """
     If ``box`` is the node's OWN reputation proof owned by ``owner_proposition``, return its
     token id; otherwise None.
 
     nodo mints its proof with R7 = owner propositionBytes, R4 = the CELAUT node-type NFT,
-    and R5 self-pointing to the proof's own token id (see transaction.py). The wallet may
-    also own unrelated proofs — e.g. a user profile of a different type, or reputation-edge
-    boxes pointing at another object — which must NOT be adopted as the node's proof.
+    and R5 = the identity public key of the node the opinion is about (see transaction.py).
+    The box that names ``identity_key`` is the node's self-opinion, so it is the one that
+    identifies the proof. The wallet may also own unrelated proofs -- a user profile of a
+    different type, or opinion boxes about other peers -- which must NOT be adopted as the
+    node's own proof.
     """
     if _decode_coll_byte_hex(str(_extract_register_value(box, "R7") or "")) != owner_proposition:
         return None
@@ -126,8 +131,8 @@ def _node_own_proof_token_id(box: dict, owner_proposition: str, node_type_nft: s
     r4 = (_decode_coll_byte_hex(str(_extract_register_value(box, "R4") or "")) or "").lower()
     r5 = (_decode_coll_byte_hex(str(_extract_register_value(box, "R5") or "")) or "").lower()
 
-    # R5 must self-point: an identity/node proof, not a reputation edge to another object.
-    if r5 != token_id.lower():
+    # R5 must name us: our self-opinion, not an opinion we hold about another peer.
+    if r5 != identity_key.lower():
         return None
     # When configured, R4 must be the node-type NFT — never a user PROFILE_TYPE_NFT etc.
     if node_type_nft and r4 != node_type_nft.lower():
@@ -439,7 +444,8 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     Prefers an R7/propositionBytes-filtered query; only when the endpoint lacks register
     filtering does it fall back to the bounded paginated scan of the canonical contract
     address (with the existing pagination/timeout/log limits). Returns the proof (token) id
-    of the first box whose R7 equals the wallet's owner propositionBytes, or None.
+    of the first box that is this node's own self-opinion -- R7 the wallet's owner
+    propositionBytes, R5 the node's identity public key -- or None.
     """
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
     if not node_url:
@@ -453,18 +459,28 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     node_type_nft = ConfigManager().get("ledgers.ergo.reputation.CELAUT_NODE_TYPE_NFT_ID") or ""
     contract_address = REPUTATION_PROOF_ADDRESS
 
+    # The wallet says which proofs are ours to spend; the identity key says which of their
+    # boxes is the one about us. Both are needed to tell our proof from an opinion we hold
+    # about a peer, so a node without an identity cannot answer this question at all.
+    identity_key = get_node_public_key_hex()
+    if not identity_key:
+        raise ValueError(
+            "No node identity public key available (identity.MNEMONIC); "
+            "cannot recognise this node's own reputation proof."
+        )
+
     # Fast path: register-filtered lookup.
     filtered = _search_boxes_by_r7(ergo, contract_address, owner_proposition)
     if filtered is not None:
         for box in filtered:
-            token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft)
+            token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft, identity_key)
             if token_id:
                 return token_id
         return None
 
     # Fallback: bounded paginated scan, breaking on first match.
     for box in iter_unspent_boxes_by_address(ergo, contract_address):
-        token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft)
+        token_id = _node_own_proof_token_id(box, owner_proposition, node_type_nft, identity_key)
         if token_id:
             return token_id
 
