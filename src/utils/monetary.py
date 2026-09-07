@@ -370,7 +370,11 @@ def prices() -> Prices:
 
 
 def free_tier() -> FreeTier:
-    raw_credit = _config().get("free_tier.CREDIT_MU_PER_NEW_CLIENT", 0)
+    # One hour of the smallest useful guest at the shipped prices -- 0.5 GiB of RAM plus
+    # one vCPU -- matching config.example.yaml. Not 0: with costs.ALLOW_DEBT off, which
+    # is the default, a client credited nothing is refused at its first launch and the
+    # node does no work for anybody it did not fund by hand (issue #324).
+    raw_credit = _config().get("free_tier.CREDIT_MU_PER_NEW_CLIENT", 4_500_000)
     credit = _decimal(raw_credit if raw_credit not in (None, "") else 0,
                       what="free_tier.CREDIT_MU_PER_NEW_CLIENT")
     return FreeTier(

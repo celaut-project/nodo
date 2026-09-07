@@ -497,8 +497,19 @@ pricing:
 
 # What this node gives away.
 free_tier:
-  # Starting balance credited to every new client, in MU. 0 gives nothing away.
-  CREDIT_MU_PER_NEW_CLIENT: 0
+  # Starting balance credited to every new client, in MU. 0 gives nothing away -- and
+  # with costs.ALLOW_DEBT off, which is the default, a client credited nothing is
+  # refused at its first launch (issue #324). So the default funds one hour of the
+  # smallest useful guest at the prices above: 0.5 GiB of RAM (500_000) plus one vCPU
+  # (4_000_000), on an unloaded node. Derived from those prices, not a round number:
+  # an operator who changes a price and wants the credit to keep meaning "one hour"
+  # has to recompute it.
+  #
+  # It does not cover a build (pricing.BUILD_MU, charged once for a service this node
+  # has not built yet), so a new client's first launch of an unbuilt service still
+  # needs funding. Covering that by default would give away 10_000_000 MU to anyone
+  # who calls GenerateClient.
+  CREDIT_MU_PER_NEW_CLIENT: 4500000
   # Charge nothing while EVERY resource sits below this share of its capacity (0.0 to
   # 1.0). 0.0 disables it (always charge); 0.5 means "free while the node is under half
   # load". This is how you run a node that is free until it is actually busy.
