@@ -1,8 +1,9 @@
 use crate::app::{
-    format_bytes, format_bytes_compact, format_rate_compact, percent, segment_token, shorten, App,
-    DemandByHour,
-    Client, ClientDetail, ConfigEntry, EditKind, InputMode, Instance, Money, Page, PaymentRow, Peer,
-    PeerDetail, PriceEntry, ReputationEvent, Service, ServiceDetail, HISTORY_POINTS,
+    format_bytes, format_bytes_compact, format_rate_compact, percent, segment_token, shorten,
+    unix_now, App, DemandByHour,
+    Client, ClientDetail, ConfigEntry, EditKind, InputMode, Instance, Money, Page,
+    PaymentRow, Peer, PeerDetail, PriceEntry, ReputationEvent, ReputationTotals, Service,
+    ServiceDetail, HISTORY_POINTS,
 };
 use crate::cell::{self, Lever, LeverStatus, Organelle};
 use crate::schedule;
@@ -39,6 +40,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Services => draw_services(frame, app, layout[1]),
         Page::Peers => draw_peers(frame, app, layout[1]),
         Page::Clients => draw_clients(frame, app, layout[1]),
+        Page::Earnings => draw_earnings(frame, app, layout[1]),
         Page::Cell => draw_cell(frame, app, layout[1]),
         Page::Pricing => draw_pricing(frame, app, layout[1]),
         Page::Schedule => draw_schedule(frame, app, layout[1]),
@@ -977,6 +979,350 @@ fn draw_clients(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(client_table, split[0], &mut app.clients.state);
 
     draw_card(frame, split[1], "SELECTED CLIENT", detail, ACCENT);
+}
+
+/// The two things a node earns by being up: money, and the network's opinion of it.
+///
+/// They are drawn apart because they are different kinds of quantity. Money is a flow,
+/// so it is read over windows -- what came in yesterday, last week, last month. The
+/// network's opinion is a stock: it is what is staked on this node now, and the chain
+/// cannot be made to say when it was earned (a proof re-dates every one of its
+/// opinions when it republishes, so a window over those dates would measure its
+/// submission cadence). Windowing it anyway would put a figure on the page that reads
+/// like the money above it and means nothing of the kind.
+fn draw_earnings(frame: &mut Frame, app: &mut App, area: Rect) {
+    const MIN_OPINIONS_HEIGHT: u16 = 4;
+    let notes = reputation_lines(app);
+    // Two borders, the header, the blank line `header_row` puts under it, and a row
+    // per payment network -- one placeholder row when there is none.
+    let table_height = app.earnings.len().max(1) as u16 + 4;
+    let rows = Layout::vertical([
+        Constraint::Length(table_height),
+        Constraint::Length(notes.len() as u16 + 2),
+        Constraint::Min(MIN_OPINIONS_HEIGHT),
+    ])
+    .split(area);
+
+    draw_money_taken_in(frame, app, rows[0]);
+    draw_card(frame, rows[1], "REPUTATION HELD ON THIS NODE", notes, ACCENT);
+    draw_opinions(frame, app, rows[2]);
+}
+
+/// What came in, per payment network, over each window.
+///
+/// One row per network rather than one total, because they are not interchangeable: a
+/// node paid over two networks holds two balances in two places, and summing them
+/// would name a figure the operator cannot spend.
+fn draw_money_taken_in(frame: &mut Frame, app: &App, area: Rect) {
+    let refused: u128 = app.earnings.iter().map(|entry| entry.refused).sum();
+    let title = if refused > 0 {
+        // Money a client tried to pay and this node could not validate, so no balance
+        // was credited for it. Named in the title rather than given a column: it is
+        // rare, and when it is not rare it is the first thing here worth reading.
+        format!(
+            " MONEY TAKEN IN • {} refused ",
+            app.money.format_raw(&refused.to_string())
+        )
+    } else {
+        " MONEY TAKEN IN ".to_string()
+    };
+
+    let mut rows: Vec<Row> = app
+        .earnings
+        .iter()
+        .map(|entry| {
+            Row::new(vec![
+                Cell::from(entry.ledger.clone()),
+                money_cell(&app.money, entry.day),
+                money_cell(&app.money, entry.week),
+                money_cell(&app.money, entry.month),
+                money_cell(&app.money, entry.year),
+                money_cell(&app.money, entry.total),
+            ])
+        })
+        .collect();
+    if rows.is_empty() {
+        // A node nobody has paid has earned zero over every window, which is a
+        // measurement -- so the row is drawn with the zeros rather than left out, and
+        // named for why it has no payment network of its own.
+        rows.push(
+            Row::new(
+                std::iter::once(Cell::from("nothing paid in yet"))
+                    .chain((0..5).map(|_| money_cell(&app.money, 0)))
+                    .collect::<Vec<_>>(),
+            )
+            .style(Style::default().fg(MUTED)),
+        );
+    }
+
+    frame.render_widget(
+        Table::new(
+            rows,
+            [
+                Constraint::Min(20),
+                Constraint::Length(12),
+                Constraint::Length(12),
+                Constraint::Length(12),
+                Constraint::Length(12),
+                Constraint::Length(12),
+            ],
+        )
+        .header(header_row(vec![
+            "Network",
+            "Last day",
+            "Last week",
+            "Last month",
+            "Last year",
+            "All time",
+        ]))
+        .block(section_block(title, ACCENT)),
+        area,
+    );
+}
+
+/// One amount, in the display unit, greyed when there is nothing in it.
+///
+/// A real zero, not a `—`: the catalogue was read and nothing came in over that
+/// window, which is a measurement and not a gap.
+fn money_cell(money: &Money, amount: u128) -> Cell<'static> {
+    let cell = Cell::from(money.format_raw(&amount.to_string()));
+    if amount == 0 {
+        cell.style(Style::default().fg(MUTED))
+    } else {
+        cell
+    }
+}
+
+/// What is staked on this node, what it cost the proofs staking it, and where the
+/// figures were read from.
+///
+/// Short lines on purpose: the card is drawn at a fixed height computed from the line
+/// count, so a line that wrapped would be a line that vanished.
+fn reputation_lines(app: &App) -> Vec<Line<'static>> {
+    let reputation = &app.reputation;
+    let mut lines = Vec::new();
+
+    if !reputation.is_read() {
+        lines.push(Line::from(Span::styled(
+            "Reading the chain…",
+            Style::default().fg(MUTED),
+        )));
+    } else {
+        let standing = &reputation.standing;
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("+{} ", format_share(standing.positive)),
+                Style::default().fg(GOOD).bold(),
+            ),
+            Span::styled("for   ", Style::default().fg(MUTED)),
+            Span::styled(
+                format!("−{} ", format_share(standing.negative)),
+                Style::default().fg(if standing.negative > 0.0 { BAD } else { MUTED }),
+            ),
+            Span::styled("against   ", Style::default().fg(MUTED)),
+            Span::styled(
+                format!("net {}", format_signed_share(standing.net())),
+                Style::default().fg(if standing.net() < 0.0 { BAD } else { GOOD }),
+            ),
+            Span::styled(
+                format!("   {}", proof_count(standing)),
+                Style::default().fg(MUTED),
+            ),
+        ]));
+        // The half a share cannot give. Minting a proof costs nothing, so a share is
+        // only as meaningful as what the proof staking it had to give up — and the
+        // reputation contract makes that ERG unrecoverable, by its owner too.
+        lines.push(Line::from(vec![
+            Span::styled("backed by ", Style::default().fg(MUTED)),
+            Span::styled(
+                format_erg(standing.positive_backing),
+                Style::default().fg(GOOD),
+            ),
+            Span::styled(" for / ", Style::default().fg(MUTED)),
+            Span::styled(
+                format_erg(standing.negative_backing),
+                Style::default().fg(if standing.negative_backing > 0.0 { BAD } else { MUTED }),
+            ),
+            Span::styled(" against, sunk and unrecoverable", Style::default().fg(MUTED)),
+        ]));
+    }
+
+    // Both halves of the reading in one line, and the reason this block has no windows
+    // beside a money table that does — otherwise the first thing an operator asks is
+    // where they went.
+    lines.push(Line::from(Span::styled(
+        "a share of what each proof assigned · no windows: a republish re-dates it all",
+        Style::default().fg(MUTED),
+    )));
+
+    if !reputation.own.is_empty() {
+        // An operator whose own proof stakes everything on itself would otherwise
+        // wonder where that stake went.
+        lines.push(Line::from(Span::styled(
+            format!(
+                "this node's own proof stakes {} on itself, left out above",
+                reputation
+                    .own
+                    .iter()
+                    .map(|opinion| {
+                        format!(
+                            "{}{}",
+                            if opinion.positive { "+" } else { "−" },
+                            format_share(opinion.weight)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    lines.push(Line::from(Span::styled(
+        format!(
+            "node {}   proof {}",
+            shorten(nonempty(&reputation.node_id, "unknown"), 20),
+            shorten(nonempty(&reputation.own_proof_id, "none published"), 20),
+        ),
+        Style::default().fg(MUTED),
+    )));
+
+    if !reputation.error.is_empty() {
+        // The previous figures stay on screen; this says they may be stale and why.
+        lines.push(Line::from(Span::styled(
+            format!("chain not read: {}", reputation.error),
+            Style::default().fg(WARN),
+        )));
+    }
+
+    lines
+}
+
+/// Every proof that has staked something on this node.
+fn draw_opinions(frame: &mut Frame, app: &mut App, area: Rect) {
+    if app.opinions.items.is_empty() {
+        frame.render_widget(
+            Paragraph::new(vec![Line::from(Span::styled(
+                if app.reputation.is_read() {
+                    "No proof has staked anything on this node. Reputation arrives when \
+                     another node publishes an opinion about this one."
+                } else {
+                    "Once the chain is read, every proof that has staked something on \
+                     this node is listed here."
+                },
+                Style::default().fg(MUTED),
+            ))])
+            .wrap(Wrap { trim: true })
+            .block(section_block(" WHO STAKES ON THIS NODE ", ACCENT)),
+            area,
+        );
+        return;
+    }
+
+    let now = app
+        .reputation
+        .read_at
+        .unwrap_or_else(|| unix_now().unwrap_or(0));
+    let rows = app.opinions.items.iter().map(|opinion| {
+        Row::new(vec![
+            Cell::from(format!(
+                "{}{}",
+                if opinion.positive { "+" } else { "−" },
+                format_share(opinion.weight)
+            ))
+            .style(Style::default().fg(if opinion.positive { GOOD } else { BAD })),
+            // What that share cost whoever published it. A proof sitting at the
+            // min-box value has had nothing sacrificed into it, which is what tells a
+            // cheap opinion from an expensive one.
+            Cell::from(format_erg(opinion.backed_nanoerg)).style(Style::default().fg(
+                if opinion.backed_nanoerg > 0.0 {
+                    ACCENT
+                } else {
+                    MUTED
+                },
+            )),
+            // Long enough to identify the proof on an explorer, with the ellipsis
+            // making it plain that it is not the whole id.
+            Cell::from(shorten(&opinion.proof_id, 40)),
+            Cell::from(format_age(opinion.published_at, now)),
+        ])
+    });
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(10),
+            Constraint::Length(13),
+            Constraint::Min(26),
+            Constraint::Length(10),
+        ],
+    )
+    .header(header_row(vec![
+        "Stake",
+        "Backed by",
+        "Proof",
+        "Published",
+    ]))
+    .block(section_block(
+        format!(
+            " WHO STAKES ON THIS NODE • {} opinions ",
+            app.opinions.items.len()
+        ),
+        ACCENT,
+    ))
+    .highlight_style(selected_style())
+    .highlight_symbol("▸ ");
+    app.list_area = area;
+    frame.render_stateful_widget(table, area, &mut app.opinions.state);
+}
+
+/// A sunk-cost figure, in ERG.
+///
+/// Never routed through [`Money`]: MU is this node's unit of account for what it
+/// charges, and ERG somebody else has burned into their own proof is not a balance of
+/// ours to denominate — the same line the Overview's wallet card draws. ERG ↔ nanoERG
+/// is fixed by the Ergo protocol, so the divisor is a constant and not a setting.
+fn format_erg(nanoerg: f64) -> String {
+    format!("{:.6} ERG", nanoerg / 1e9)
+}
+
+/// A share of a proof, as the percentage of it that it is.
+fn format_share(share: f64) -> String {
+    format!("{:.3}%", share * 100.0)
+}
+
+/// The same, signed, for a net figure where the direction is the point.
+fn format_signed_share(share: f64) -> String {
+    format!(
+        "{}{}",
+        if share < 0.0 { "−" } else { "+" },
+        format_share(share.abs())
+    )
+}
+
+fn proof_count(totals: &ReputationTotals) -> String {
+    match (totals.positive_proofs, totals.negative_proofs) {
+        (0, 0) => "no proof stakes anything here".to_string(),
+        (1, 0) => "1 proof, for".to_string(),
+        (0, 1) => "1 proof, against".to_string(),
+        (positive, 0) => format!("{positive} proofs, all for"),
+        (0, negative) => format!("{negative} proofs, all against"),
+        (positive, negative) => format!("{positive} for, {negative} against"),
+    }
+}
+
+/// How long ago an opinion was published, to the day.
+///
+/// `—` when the box could not be dated, which is the one case where nothing can be
+/// said: an undated opinion still counts towards the standing total, and is in no
+/// window (see `published_since` on the Python side).
+fn format_age(published_at: Option<i64>, now: i64) -> String {
+    let Some(published_at) = published_at else {
+        return "—".to_string();
+    };
+    match (now - published_at).max(0) / 86_400 {
+        0 => "today".to_string(),
+        days => format!("{days}d ago"),
+    }
 }
 
 /// Everything the Clients page knows about the selected client.
@@ -2500,6 +2846,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Page::Clients => {
             "tab/shift+tab cycle  •  ↑/↓ select  •  + credit  •  - debit  •  r refresh  •  q quit"
         }
+        Page::Earnings => {
+            "tab/shift+tab cycle  •  ↑/↓ select an opinion  •  r re-read the chain  •  q quit"
+        }
         Page::Cell => {
             "→/← organelle  •  ↑/↓ lever  •  ⏎ change  •  e keys behind it  •  p profiles  •  d deviations  •  n router guide"
         }
@@ -3778,6 +4127,288 @@ mod tests {
         assert!(text.contains("Burn/h"), "missing the burn-rate column header");
         assert!(text.contains("3.6 ERG"), "missing the per-hour burn rate");
         assert!(text.contains("12 samples"), "missing the burn-rate sample count");
+    }
+
+    /// The EARNINGS page has to answer "is this machine worth leaving on" without
+    /// either half of the answer being mistakable for the other: money is money and a
+    /// share of somebody's proof is not, and neither is a number the page may invent
+    /// when it has not been read.
+    mod earnings_page {
+        use super::super::draw_earnings;
+        use crate::app::{
+            App, LedgerEarnings, NodeOpinion, NodeReputation, Page, ReputationTotals,
+        };
+        use ratatui::{backend::TestBackend, Terminal};
+
+        const NOW: i64 = 1_800_000_000;
+        const DAY: i64 = 86_400;
+
+        /// One opinion, shaped as mainnet's really are: a proof that has assigned a
+        /// couple of dozen tokens out of ~1e8, staking one of them here.
+        fn opinion(
+            proof: &str,
+            amount: u128,
+            assigned_amount: u128,
+            positive: bool,
+            age_days: i64,
+            burned_nanoerg: f64,
+        ) -> NodeOpinion {
+            let weight = amount as f64 / assigned_amount as f64;
+            NodeOpinion {
+                box_id: format!("box-{proof}"),
+                proof_id: proof.to_string(),
+                owner: "0008cd0392aabbcc".to_string(),
+                amount,
+                assigned_amount,
+                weight,
+                positive,
+                published_at: Some(NOW - age_days * DAY),
+                burned_nanoerg,
+                backed_nanoerg: weight * burned_nanoerg,
+            }
+        }
+
+        fn totals(positive: f64, negative: f64) -> ReputationTotals {
+            ReputationTotals {
+                positive,
+                negative,
+                positive_proofs: u32::from(positive > 0.0),
+                negative_proofs: u32::from(negative > 0.0),
+                // 10 ERG behind the supporter, the min-box floor behind the detractor.
+                positive_backing: positive * 10e9,
+                negative_backing: negative * 1e6,
+            }
+        }
+
+        /// A node that has been paid over Ergo and vouched for by one proof, opposed
+        /// by another, with its own self-opinion set aside.
+        fn earning_node() -> App {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Earnings)
+                .unwrap();
+            app.earnings = vec![LedgerEarnings {
+                ledger: "ergo".to_string(),
+                day: 0,
+                week: 2_000_000_000,
+                month: 7_500_000_000,
+                year: 12_000_000_000,
+                total: 12_000_000_000,
+                refused: 500_000_000,
+            }];
+            let reputation = NodeReputation {
+                node_id: "ed6df5dfbea1f0932dc7fdd25d0f0543f6086ef110fc888f1acd5c89af4c84b8"
+                    .to_string(),
+                own_proof_id: "aa".repeat(32),
+                standing: totals(0.5, 0.125),
+                opinions: vec![
+                    // A proof with 10 ERG sunk into it, and one sitting at the
+                    // min-box floor: the same page has to tell them apart.
+                    opinion("f3b61c2e", 1, 2, true, 3, 10e9),
+                    opinion("9d0a4471", 1, 8, false, 20, 1e6),
+                ],
+                own: vec![opinion(&"aa".repeat(32), 1, 1, true, 40, 1e6)],
+                read_at: Some(NOW),
+                error: String::new(),
+            };
+            app.opinions.refresh(reputation.opinions.clone());
+            app.reputation = reputation;
+            app
+        }
+
+        fn screen(app: &mut App, width: u16, height: u16) -> String {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| draw_earnings(frame, app, frame.size()))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|row| {
+                    (0..buffer.area.width)
+                        .map(|column| buffer.get(column, row).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        #[test]
+        fn money_is_shown_per_network_and_per_window() {
+            let screen = screen(&mut earning_node(), 120, 24);
+            assert!(screen.contains("Last week"), "missing the window columns");
+            assert!(screen.contains("ergo"), "missing the payment network");
+            // Raw MU rendered in the display unit, ERG by default: 12e9 MU is 12 ERG.
+            assert!(screen.contains("12 ERG"), "missing the all-time figure:\n{screen}");
+            assert!(screen.contains("7.5 ERG"), "missing the month figure:\n{screen}");
+        }
+
+        #[test]
+        fn a_refused_deposit_is_named_rather_than_folded_into_the_total() {
+            // Money a client tried to pay and this node could not validate. Adding it
+            // to what was earned would report income that never arrived.
+            let screen = screen(&mut earning_node(), 120, 24);
+            assert!(
+                screen.contains("0.5 ERG refused"),
+                "the refused deposit is not on the page:\n{screen}"
+            );
+        }
+
+        #[test]
+        fn reputation_keeps_what_is_for_and_against_apart() {
+            // A stake against is not a smaller stake for, so the two never collapse
+            // into one figure — the net is stated as well, never instead.
+            let screen = screen(&mut earning_node(), 120, 24);
+            assert!(screen.contains("+50.000%"), "missing the stake in favour:\n{screen}");
+            assert!(screen.contains("−12.500%"), "missing the stake against:\n{screen}");
+            assert!(screen.contains("net +37.500%"), "missing the net:\n{screen}");
+            assert!(screen.contains("1 for, 1 against"), "missing the proof count:\n{screen}");
+        }
+
+        #[test]
+        fn money_is_windowed_and_reputation_is_not() {
+            // The point of drawing them apart: money is a flow, so the windows mean
+            // something; the network's opinion is a stock the chain cannot date, so a
+            // window over it would read like the money above it and mean nothing of
+            // the kind. The page says why rather than leaving a gap.
+            let screen = screen(&mut earning_node(), 120, 26);
+            let money = screen
+                .lines()
+                .find(|line| line.trim_start_matches('│').starts_with("ergo"))
+                .expect("no money row");
+            assert!(money.contains("7.5 ERG"), "{screen}");
+            assert!(
+                !screen.contains("reputation · for"),
+                "reputation is being windowed again:\n{screen}"
+            );
+            assert!(
+                screen.contains("no windows"),
+                "the missing windows are unexplained:\n{screen}"
+            );
+        }
+
+        #[test]
+        fn a_window_nothing_came_in_over_reads_zero_rather_than_a_dash() {
+            // The catalogue was read and nothing arrived that day, which is a
+            // measurement and not a gap.
+            let screen = screen(&mut earning_node(), 120, 26);
+            let money = screen
+                .lines()
+                .find(|line| line.trim_start_matches('│').starts_with("ergo"))
+                .expect("no money row");
+            assert!(money.contains("0 ERG"), "the quiet day is not stated:\n{screen}");
+        }
+
+        #[test]
+        fn every_opinion_is_listed_as_a_share_rather_than_as_raw_token_counts() {
+            // Raw counts cannot be read: what "1 token" is worth depends entirely on
+            // how many that proof has assigned, so the share is the only figure that
+            // means anything on its own.
+            let screen = screen(&mut earning_node(), 120, 30);
+            assert!(screen.contains("f3b61c2e"), "missing the supporting proof:\n{screen}");
+            assert!(screen.contains("9d0a4471"), "missing the opposing proof:\n{screen}");
+            assert!(screen.contains("+50.000%"), "missing the share:\n{screen}");
+            assert!(!screen.contains(" of 2"), "raw counts are back:\n{screen}");
+            assert!(screen.contains("3d ago"), "missing when it was published:\n{screen}");
+        }
+
+        #[test]
+        fn what_a_share_cost_its_publisher_is_shown_beside_it() {
+            // A share alone cannot be read: minting a proof is free, so 50% of a proof
+            // with 10 ERG sunk into it and 12.5% of one sitting at the min-box floor
+            // are worlds apart, and the page has to say which is which.
+            let screen = screen(&mut earning_node(), 120, 30);
+            assert!(screen.contains("Backed by"), "missing the backing column:\n{screen}");
+            let row = |needle: &str| {
+                screen.lines().find(|line| line.contains(needle)).unwrap().to_string()
+            };
+            // 50% of a 10 ERG proof: 5 ERG of unrecoverable value stands behind us.
+            assert!(row("f3b61c2e").contains("5.000000 ERG"), "{screen}");
+            // 12.5% of a proof that cost 0.001 ERG to exist: next to nothing.
+            assert!(row("9d0a4471").contains("0.000125 ERG"), "{screen}");
+            // And the standing total, in the same unit.
+            assert!(
+                screen.contains("backed by") && screen.contains("sunk and unrecoverable"),
+                "the totals do not state the backing:\n{screen}"
+            );
+        }
+
+        #[test]
+        fn backing_is_shown_in_erg_and_never_through_the_display_unit() {
+            // MU is what this node charges in; ERG somebody else burned into their own
+            // proof is not a balance of ours to denominate. Reading it in MU would
+            // make one node's sacrifice look like another node's price list.
+            let mut app = earning_node();
+            app.money = crate::app::Money {
+                unit_name: "mu".to_string(),
+                symbol: "MU".to_string(),
+                mu_per_unit: 1.0,
+                mu_per_unit_pow10: Some(0),
+                decimals: 0,
+                mu_per_nanoerg: 1.0,
+            };
+            let screen = screen(&mut app, 120, 30);
+            assert!(screen.contains("5.000000 ERG"), "backing left the ERG scale:\n{screen}");
+        }
+
+        #[test]
+        fn our_own_proof_is_shown_but_said_to_be_excluded() {
+            // Otherwise an operator holding a proof that stakes everything on itself
+            // would wonder why the page says nobody has staked anything on them.
+            let screen = screen(&mut earning_node(), 120, 30);
+            assert!(
+                screen.contains("own proof stakes") && screen.contains("left out above"),
+                "the node's own stake is unexplained:\n{screen}"
+            );
+        }
+
+        /// A node with nothing recorded either way. `App::new()` reads the real
+        /// catalogue, so both halves are cleared: the machine running the tests may
+        /// well have been paid.
+        fn fresh_node() -> App {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Earnings)
+                .unwrap();
+            app.earnings.clear();
+            app.reputation = NodeReputation::default();
+            app.opinions.refresh(Vec::new());
+            app
+        }
+
+        #[test]
+        fn an_unread_chain_says_so_instead_of_showing_zeros() {
+            // A node whose explorer is unreachable has *unknown* reputation, and a
+            // page reading "+0.000% from no proof" would be a claim about the network.
+            let screen = screen(&mut fresh_node(), 120, 24);
+            assert!(screen.contains("Reading the chain"), "no reading notice:\n{screen}");
+            assert!(!screen.contains("no proof"), "claimed a verdict it has not read:\n{screen}");
+        }
+
+        #[test]
+        fn a_failed_read_keeps_the_last_figures_and_says_why() {
+            let mut app = earning_node();
+            app.reputation.error = "ergo: explorer unreachable".to_string();
+            let screen = screen(&mut app, 120, 30);
+            assert!(screen.contains("+50.000%"), "the last standing was dropped:\n{screen}");
+            assert!(
+                screen.contains("chain not read: ergo: explorer unreachable"),
+                "the failure is not reported:\n{screen}"
+            );
+        }
+
+        #[test]
+        fn a_node_nobody_has_paid_reads_zero_rather_than_losing_the_row() {
+            // Without the placeholder the reputation rows would sit alone under money
+            // headings, which reads as though the money figures were the reputation.
+            let screen = screen(&mut fresh_node(), 120, 24);
+            let row = screen
+                .lines()
+                .find(|line| line.contains("nothing paid in yet"))
+                .unwrap_or_else(|| panic!("no money row at all:\n{screen}"));
+            assert_eq!(row.matches("0 ERG").count(), 5, "{screen}");
+        }
     }
 
     #[test]

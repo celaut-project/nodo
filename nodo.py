@@ -740,6 +740,11 @@ if __name__ == '__main__':
                 from src.commands.credit_client import credit_client
                 credit_client(client_id=sys.argv[2], amount=sys.argv[3], decrement=True)
 
+            case "reputation":
+                from src.commands.reputation import reputation
+                ok = reputation(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
             case "verify_reputation":
                 if len(sys.argv) < 3:
                     print("Usage: nodo verify_reputation <peer_id>", flush=True)

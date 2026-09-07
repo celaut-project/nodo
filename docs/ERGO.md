@@ -202,6 +202,130 @@ The registers of an opinion box itself:
 - **R8** — `customFlag`, carrying the sign of the amount
 - **R9** — free-form content; for a self-opinion, the node's signed `Peer` message
 
+###### Reading the reputation held on a node
+
+The same registers, read the other way round. Every proof in the ecosystem lives on one
+P2S contract, so "what does the network think of this node" is a filter over that one
+contract: the boxes whose R4 is `CELAUT_NODE_TYPE_NFT_ID` and whose R5 is the node's
+identity public key. `nodo reputation` does exactly that
+(`src/reputation_system/contracts/ergo/opinions.py`), and
+`reputation_system.interface.get_node_reputation` is the ledger-neutral way in.
+
+The explorer applies that filter itself, through
+`POST /api/v1/boxes/unspent/search`, so the usual case is one request rather than a page
+per hundred boxes on a contract that grows with the whole ecosystem. Two details decide
+whether it filters at all, and **both fail by returning nothing rather than by
+erroring** — so a filter written either way wrong reads as "nobody has an opinion about
+this node":
+
+- `ergoTreeTemplateHash` is **required**. Omitting it (or sending `null`) is an HTTP 400.
+  It is `sha256` of the ErgoTree *template* — the root expression with the segregated
+  constants stripped — derived from the pinned tree by
+  `utils.ergo_tree_template_hash`, and pinned in the test suite against the value
+  checked on mainnet.
+- register values are matched in their **rendered** form: the raw payload hex, with no
+  `0e`/length prefix. The serialized form matches zero boxes.
+
+A template hash names a contract's *code*, not its exact tree: constant segregation
+makes it shared by every tree with the same code and different constants. So what comes
+back is still filtered client-side on the canonical `ergoTree` — at the time of writing
+the template matched 311 unspent boxes where the canonical address held 307. A box on a
+look-alike tree is invisible to every other reader of the chain, and crediting it would
+report reputation nobody else can see. Scanning the contract address
+(`GET /api/v1/boxes/unspent/byAddress`) remains as a fallback for when the search cannot
+be used at all, and both paths run through that same client-side filter.
+
+What such a box is *worth* is not its token count. A reputation proof has a fixed
+supply, and its owner decides how much of it to stake on each thing it has an opinion
+about, so an opinion is worth the share of its publisher committed here, in `0..1`.
+
+The share is of the supply the proof has **assigned to opinions** — everything it holds
+except what sits in a box pointing at its own token id. That self-pointing box is how a
+proof declares itself (`profileFetch`'s `is_self_defined` selects on it) and where it
+parks what it has not assigned; it is a reserve, not a judgement about anything, and it
+is never itself counted as an opinion.
+
+That reserve is nearly the whole supply in practice. Measured on mainnet: every live
+profile holds ~99,999,9xx of its 99,999,999 tokens in one self-pointing box and spends
+**one token per opinion**.
+
+| proof | boxes | reserved | assigned | one token, of assigned | of minted |
+|---|---|---|---|---|---|
+| `2e743564…` | 96 | 99,999,904 | 95 | 1.0526 % | 0.0000010 % |
+| `758eb796…` | 79 | 99,999,922 | 78 | 1.2821 % | 0.0000010 % |
+| `cd37aa0f…` | 39 | 99,999,961 | 38 | 2.6316 % | 0.0000010 % |
+
+So dividing by `emissionAmount` makes every real opinion in the system 0.000001 % — the
+same unreadable figure for all of them. This is where nodo parts from
+`ReputationProof.compute` in `reputation-systems/reputation-system`, which uses the
+minted supply: same numerator, a denominator that excludes the reserve. It is summed
+from the proof's own boxes rather than as `emissionAmount - reserved`, so tokens parked
+outside the contract cannot dilute the opinions either; on the live proofs the two agree
+exactly (99,999,904 + 95 = 99,999,999).
+
+Two further consequences:
+
+- **Polarity is a register, not a sign.** R8 says whether the stake is for or against,
+  so what is staked for and what is staked against are reported apart and netted only
+  where one figure is asked for. A box that declares no polarity is counted neither way.
+- **One proof counts once.** A proof holding several boxes about the same node is worth
+  the sum of their signed shares, capped by construction at what it has assigned, so
+  splitting a stake across ten boxes buys no extra weight.
+
+But a share on its own cannot be read, because **minting a proof is free**. What is not
+free is the ERG behind it, and the contract makes that one-way: `nativeErgIsPreserved`
+requires `totalNativeOut >= totalNativeIn` across the proof's boxes on the *owner's own*
+spending path, not only on the public top-up path, so ERG put into a proof can never be
+taken back out (`sacrifice_assets` in the reference library is the deliberate act of
+adding to it, and anyone may top a box up without a signature). That sunk cost is the
+system's only Sybil resistance.
+
+So every opinion also carries the total ERG burned into the proof that published it —
+`total_burned` in the reference library, the sum of `value` over the proof's unspent
+boxes — and `nodo reputation` reports **`share × burned`**: the portion of that
+unrecoverable value standing behind this node. A proof that sacrificed 10 ERG and
+commits half of itself puts 5 ERG behind you; one sitting at the min-box value each of
+its boxes needs to exist has had *nothing* sacrificed into it, and 100 % of it is worth
+0.001 ERG. Read the two figures together: the share says how much of a proof is
+committed, the backing says what that commitment cost.
+
+Multiplying the *share* is deliberate, and differs from the reference web app's profile
+score (`Profile.svelte`), which multiplies the raw `token_amount` by `burned / 1e9`. A
+token supply is chosen freely by whoever mints the proof, so weighing the raw count
+rewards minting a larger supply — which costs nothing. The share is supply-independent,
+which is what makes two proofs comparable.
+
+The node's own proof is reported separately and left out of the totals — a node
+vouching for itself is not reputation.
+
+###### Why there is no "reputation earned this week"
+
+`nodo reputation` reports a standing and what backs it, and **no per-window breakdown**.
+That is a deliberate absence, not a gap: the chain cannot answer the question.
+
+Dates come from the block each box was created in, and revising an opinion spends its
+box and writes a new one, so the chain keeps no earlier date. On top of that,
+`submit_to_ledger` re-splits the node's **whole** supply across its current peers on
+every submission — proportionally to internal reputation, with one token kept for the
+self-opinion — and `__create_reputation_proof_tx` gathers input boxes covering that whole
+supply, so every submission spends every box and mints new ones. A single peer
+accumulating `LEDGER_REPUTATION_SUBMISSION_THRESHOLD` reputation events (10, counted per
+event, so a handful of interactions) triggers it, and once triggered every peer already
+on the proof is re-included.
+
+So a nodo proof re-dates all of its opinions at once. A window over those dates would
+measure how often the publisher republishes and present it as reputation earned that
+week — which, next to the real money flows the TUI's EARNINGS page draws above it, would
+read like one. Each opinion still carries the age of its own box, which is all that date
+honestly supports. Answering the question properly would mean walking a token's whole
+box history in height order and reconstructing the share per target at each step; that
+is not done.
+
+That whole-supply split is also why a nodo proof holds **nothing in reserve**: it has no
+self-pointing box at all (its self-opinion is addressed to its own identity key, like
+any other opinion), so its assigned supply is its minted supply and the shares it
+publishes are exactly its normalised internal reputation.
+
 ##### Payment System
 The payment system implements these fields:
 - `contract`/`script` xattr: the raw ErgoTree/propositionBytes of the box that receives each payment

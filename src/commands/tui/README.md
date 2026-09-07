@@ -14,6 +14,7 @@ particular installation directory.
 | **Services** | Locally available services, metadata tag, content ID, stored size, and execution action. The detail card carries the service's reputation — accumulated over every instance of it that has run here, since an instance is gone minutes after it misbehaves — and the events behind it. |
 | **Peers** | Who we talk to: endpoints, our balance with each, reputation, and the payment contracts and rates a peer declares. The detail card adds every payment we have made to the selected peer — including one broadcast that the peer never acknowledged — and the reputation events behind its score, each with the reason that produced it. Peers can be connected (`c`) and forgotten (`d`) from here. |
 | **Clients** | Who pays us: balance, last usage, and whether the client is metered at all. The detail card lists what it has paid, the deposit tokens it holds and what became of them, and the instances it started here. A client cannot be resolved to a peer and the page does not pretend otherwise (see issue #178). Balance can be credited/debited with `+`/`-`. |
+| **Earnings** | What this node earned by being up, in both currencies it earns in, each drawn as the kind of quantity it is: money per payment network over the last day/week/month/year, because money is a flow; and what the network stakes on this node as a standing, with the ERG sunk behind it, because a chain that re-dates an opinion whenever its proof republishes cannot say when reputation was earned. Underneath, every proof that has staked something on this node. |
 | **Cell** | The node's policies as a set of named decisions, laid out as a cell: what it lets in, what work it takes, what it says to the network, what it distrusts, how it charges, and what it keeps. One row is one decision, and moving it writes every key that decision spans. Postures ("just me", "cautious renter", …) apply a whole set at once, and the page says which one this node is closest to. |
 | **Pricing** | What this node charges, per resource, as vertical bars you can nudge. Recurring and one-off prices are charted apart because their magnitudes are unrelated. Beside them: the display unit, what one MU is worth on the ledger, the scarcity ceiling, and a worked hourly example. |
 | **Schedule** | The hours this node takes work in (`activity_window`), drawn as the day it is: the open stretch as one run of blocks, a marker at the current hour, and what closing time does to work already running. Underneath, on the same axis, a month of demand folded onto the 24 hours of a clock — peak instances held, and the work refused because the window was shut. Edited by moving an edge rather than by typing a time, so an unusable hour cannot be expressed. |
@@ -38,6 +39,67 @@ configuration change — see [Applying a change](#applying-a-change).
 Ergo information is refreshed asynchronously through `nodo info` every 60 seconds so JVM or
 explorer latency cannot freeze the interface. Local database/system data refreshes every two
 seconds; the recursive storage scan is limited to every 30 seconds.
+
+## Earnings
+
+Two halves, read from different places, refreshed at different speeds, and drawn as
+different kinds of quantity — which is the point of the page.
+
+**Money is a flow**, so it is windowed: what came in over the last day, week, month,
+year and all time, per payment network. It comes from the `payments` table on the
+ordinary two-second sweep. Only `direction = 'in'` and `status = 'accepted'` counts as
+earned — a `rejected` row is a deposit this node could not validate, so no balance was
+credited for it and nothing arrived. Refused deposits are named in the block title
+instead of being folded into a total, and money paid *out* is not earnings at all. One
+row per ledger tag rather than one total: a node paid over two networks holds two
+balances in two places, and summing them would name a figure the operator cannot spend.
+A payment whose row carries no ledger tag is still money, and appears as `unknown`. `0`
+is a window the catalogue was read for and nothing arrived in — a measurement, not a gap.
+
+**Reputation is a stock**, so it is not windowed at all, and the card says so rather
+than leaving a gap where the money's windows are. The chain cannot date what it holds:
+revising an opinion spends its box and writes a new one, and a nodo proof re-splits its
+whole supply across its peers on **every** submission — one peer reaching
+`LEDGER_REPUTATION_SUBMISSION_THRESHOLD` events is enough — so every date on that proof
+resets together. A "reputation earned this week" column would therefore report how often
+the other node republishes, sitting next to real money flows and reading like one. Each
+opinion still shows the age of its own box in the table below, which is all that date
+honestly supports.
+
+What is reported instead is the standing and what backs it, from `nodo reputation
+--json`, re-read every five minutes (and on `r`). It is a subprocess rather than a query
+because the lookup goes to the Ergo explorer and a frame must never wait on the network;
+it is *that* command rather than a second implementation because the arithmetic has to
+agree with what every other reader of the same chain computes. See
+[Reading the reputation held on a node](../../../docs/ERGO.md#reading-the-reputation-held-on-a-node).
+
+A reputation figure is a **share of what the staking proof has assigned to opinions**,
+not a token count and not a share of everything it minted. A proof parks the supply it
+has not assigned in a box pointing at itself, and on mainnet that reserve is nearly all
+of it — every live profile holds ~99,999,9xx of its 99,999,999 tokens there and spends
+one token per opinion. Against the minted supply every real opinion in the system reads
+0.000001%, the same figure for all of them; against the assigned supply, one token out
+of the ninety-five a proof has deployed reads 1.05%. Raw token counts are not shown at
+all: what "1 token" is worth depends entirely on how many that proof has assigned, so
+the share is the only figure that means anything on its own (`nodo reputation` prints
+the counts for anyone who wants to check the arithmetic).
+
+Beside it, `Backed by` says what that share cost: the ERG burned into the publishing
+proof, which the reputation contract makes unrecoverable even by its owner, apportioned
+by the share committed here. Read together, because minting a proof is free — 100 % of a
+proof sitting at the min-box value it needs to exist is backed by 0.001 ERG, and the
+page has to be able to tell that from a proof somebody sacrificed 10 ERG into. It is
+shown in ERG and never through `ui.DISPLAY_UNIT`: MU is what *this* node charges in, and
+somebody else's sunk cost is not a balance of ours to denominate (the same line the
+Overview wallet card draws).
+
+What is staked for and what is staked against are separate rows, because a stake against
+is not a smaller stake for. `—` means the chain has not been read; a failed read leaves
+the previous figures in place with the reason beside them, rather than blanking the page.
+
+This node's own proof is shown but excluded from the totals. A node vouching for itself
+is not reputation, and an operator holding a proof that stakes everything on itself
+would otherwise wonder where that stake went.
 
 ## Live instance usage
 
@@ -68,7 +130,7 @@ common case.
 | `Tab` / `Shift+Tab` | Next/previous page (both wrap) |
 | `↑` / `↓` | Select table row, move through the Config tree, or pick which edge of the working day the arrows move on Schedule |
 | `→` / `←` | Enter/leave a Config branch (see below), move between Cell organelles, move the selected edge of the working day by 30 min on Schedule; ignored by the other pages |
-| `r` | Force a refresh |
+| `r` | Force a refresh (on Earnings, re-reads the chain as well) |
 | `c` | Connect a peer, from Peers; on Schedule, what closing time does (refuse / stop) |
 | `a` | Config: append an element to the selected list |
 | `d` | Delete the selected service, forget the selected peer on Peers, remove the selected Config list element, or show how this node deviates from its closest profile on Cell |
