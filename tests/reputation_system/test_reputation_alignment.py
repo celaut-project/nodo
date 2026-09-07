@@ -5,7 +5,7 @@ from src.reputation_system.contracts.ergo import proof_validation, transaction
 # Canonical reputation-proof register spec — enforced by reputation_proof.es and shared
 # by every ecosystem reader (reputation-systems web app, Game of Prompts, skills, forum):
 #   R4 Coll[Byte] = typeNftTokenId          (raw token-id bytes)
-#   R5 Coll[Byte] = uniqueObjectData         (raw bytes; a self-profile points to its own token id)
+#   R5 Coll[Byte] = uniqueObjectData         (raw bytes; for a node, its identity public key)
 #   R7 Coll[Byte] = owner propositionBytes   (raw ErgoTree — NOT blake2b256(propositionBytes))
 # Ids are stored as their RAW bytes, never as UTF-8 text of the hex string.
 
@@ -143,6 +143,9 @@ def test_find_reputation_proof_id_uses_defined_owner_helper():
     names = fn.__code__.co_names
     assert "owner_script_hash_hex" not in names
     assert "owner_proposition_bytes_hex" in names
+    # R5 names the node rather than the proof, so discovery also needs the identity key
+    # to tell our own box from the opinions we hold about peers.
+    assert "get_node_public_key_hex" in names
 
 
 # Real on-chain values from Nate's node (wallet 9fcwct…) — used to pin discovery selection.
@@ -151,6 +154,9 @@ _NODE_TYPE = "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
 _PROFILE_TYPE = "1820fd428a0b92d61ce3f86cd98240fdeeee8a392900f0b19a2e017d66f79926"
 _NODE_PROOF = "34ad59463ca524f9a27dd9f549e6c81fda819e8772137ee800a0408b8214d1a4"
 _USER_PROFILE = "cd37aa0fa3d9e2b7af812b921fdb5e2b04e351afcd74aa71f0d80d2bf91f8e58"
+# Ed25519 identity keys: ours (R5 of our self-opinion) and a peer's (R5 of an edge).
+_IDENTITY = "aa" * 32
+_PEER_IDENTITY = "de" * 32
 
 
 def _box(token, r4, r5, r7=_OWNER):
@@ -168,13 +174,16 @@ def _box(token, r4, r5, r7=_OWNER):
 
 def test_discovery_adopts_only_the_nodes_own_proof():
     pick = proof_validation._node_own_proof_token_id
-    # The node's own proof: R4 = node-type NFT, R5 self-points, R7 = owner -> adopted.
-    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _NODE_PROOF), _OWNER, _NODE_TYPE) == _NODE_PROOF
-    # A user PROFILE the same wallet owns (R4 = profile-type, self-pointing) -> rejected.
-    assert pick(_box(_USER_PROFILE, _PROFILE_TYPE, _USER_PROFILE), _OWNER, _NODE_TYPE) is None
-    # A reputation-edge box (R5 points to another object, not self) -> rejected.
-    assert pick(_box(_USER_PROFILE, _NODE_TYPE, "de" * 32), _OWNER, _NODE_TYPE) is None
+    # The node's own proof: R4 = node-type NFT, R5 = our identity key, R7 = owner -> adopted.
+    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _IDENTITY), _OWNER, _NODE_TYPE, _IDENTITY) == _NODE_PROOF
+    # A user PROFILE the same wallet owns (R4 = profile-type) -> rejected.
+    assert pick(_box(_USER_PROFILE, _PROFILE_TYPE, _IDENTITY), _OWNER, _NODE_TYPE, _IDENTITY) is None
+    # An opinion we hold about a peer (R5 names another node's key) -> rejected.
+    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _PEER_IDENTITY), _OWNER, _NODE_TYPE, _IDENTITY) is None
     # A proof owned by a different wallet (R7 mismatch) -> rejected.
-    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _NODE_PROOF, r7="00" * 36), _OWNER, _NODE_TYPE) is None
-    # With node type unconfigured, fall back to self-pointing only (still rejects edges).
-    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _NODE_PROOF), _OWNER, "") == _NODE_PROOF
+    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _IDENTITY, r7="00" * 36), _OWNER, _NODE_TYPE, _IDENTITY) is None
+    # With node type unconfigured, the identity key alone still rejects the peer edges.
+    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _IDENTITY), _OWNER, "", _IDENTITY) == _NODE_PROOF
+    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _PEER_IDENTITY), _OWNER, "", _IDENTITY) is None
+    # The pre-#281 layout, where R5 self-pointed to the proof's own token id -> rejected.
+    assert pick(_box(_NODE_PROOF, _NODE_TYPE, _NODE_PROOF), _OWNER, _NODE_TYPE, _IDENTITY) is None
