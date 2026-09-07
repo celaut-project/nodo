@@ -70,8 +70,7 @@ def attest_proof_ownership(contract, mnemonic: str) -> bool:
     if not peer_id or not mnemonic:
         return False
     try:
-        signature = bip_schnorr_sign(mnemonic, attestation_payload(peer_id))
-        public_key_hex = _wallet_public_key_hex(mnemonic)
+        public_key_hex, signature = _owner_attestation(mnemonic, peer_id)
     except Exception:
         return False
 
@@ -108,6 +107,35 @@ def attested_proof_owner(contract, peer_id: str) -> Optional[str]:
     ):
         return None
     return public_key
+
+
+@lru_cache(maxsize=4)
+def _owner_attestation(mnemonic: str, peer_id: str) -> tuple:
+    """``(wallet public key hex, signature)`` attesting ``peer_id``, cached per pair.
+
+    One signature per (wallet, peer id), not one per announcement. Ergo's Schnorr signing
+    draws a random nonce, so signing the same message twice yields two different
+    signatures -- and this signature is an xattr on the proof, which the announcement's
+    content digest covers. Signing per call therefore gives identical content a different
+    digest every time, which leaves the signed-announcement cache in ``gateway.utils``
+    unhittable on any node holding a proof: every caller of the unauthenticated
+    ``GetPeerInfo`` costs a full signature and a new ``ts``, and a new ``ts`` costs the
+    *receiver* a full ``update_peer_instance``, on-chain revalidation of the announced
+    proofs included (issue #314).
+
+    Reusing the signature is safe because the message never varies: it is
+    ``attestation_payload(peer_id)``, and both the wallet and the node's identity are
+    fixed for the life of the process. What must never be reused is a *nonce* across
+    different messages, which is not what happens here -- the cached signature is what
+    signing again would produce.
+
+    Exceptions are left to propagate: ``lru_cache`` does not memoize them, so an unusable
+    mnemonic is retried rather than remembered as permanently unusable.
+    """
+    return (
+        _wallet_public_key_hex(mnemonic),
+        bip_schnorr_sign(mnemonic, attestation_payload(peer_id)),
+    )
 
 
 @lru_cache(maxsize=4)
