@@ -1,16 +1,21 @@
 """Pluggable energy measurement backends.
 
-RAPL is the day-one source: ``/sys/class/powercap/intel-rapl/`` energy counters
-in microjoules, no extra hardware, no operator configuration. It is CPU-package
-only — GPU, disk and PSU losses are not included — so a RAPL reading is a
-*floor*, not wall-socket consumption.
+RAPL is the first source tried: ``/sys/class/powercap/intel-rapl/`` energy
+counters in microjoules, no extra hardware and no operator configuration. The
+path carries Intel's name because ``intel_rapl_msr`` is the driver behind it, and
+that same driver serves AMD Zen, so the directory and the domain layout are what
+an AMD machine exposes too. It is CPU-package only — GPU, disk and PSU losses are
+not included — so a RAPL reading is a *floor*, not wall-socket consumption.
 
-Where RAPL is unreadable (permissions, non-x86, VMs, WSL), a model estimator
-kicks in: idle watts plus a linear term in CPU utilisation. Coefficients live
-in config so an operator can tune them per machine.
+Where there is no readable counter — ``energy_uj`` is root-only on current
+kernels, and Apple Silicon under Asahi, ARM boards, VMs and WSL have no RAPL at
+all — a model estimator can take over: idle watts plus a linear term in CPU
+utilisation. Its two coefficients have to be measured with a meter, so a machine
+whose operator has not measured them reports nothing. An invented number reads
+exactly like a measured one once it is on screen and in the database.
 
-IPMI, NVML and a smart plug belong behind the same ``EnergyBackend`` protocol
-later; they are not implemented here.
+The backends that need hardware a node cannot be assumed to have are declared
+below with what each one would measure, and produce no reading.
 
 This module imports nothing from the rest of nodo so the math can be tested
 without ``bee_rpc``.
@@ -210,6 +215,97 @@ class ModelBackend:
             backend=self.name,
             is_floor=False,
         )
+
+
+class HwmonBackend:
+    """A power or energy sensor the kernel publishes as hwmon. Unimplemented.
+
+    The reading for machines with no RAPL at all. On Apple Silicon under Asahi the
+    ``macsmc`` drivers surface the SMC's rails here, which is the only power figure
+    an M-series Mac offers Linux; ARM boards with a shunt (INA219 and kin) and
+    server boards exposing PMBus rails land in the same place. A sensor answers in
+    microwatts (``powerN_input``, a rate, so an implementation multiplies by
+    ``elapsed_seconds``) or in microjoules (``energyN_input``, a counter to
+    subtract, like RAPL).
+
+    What a rail actually covers is a property of the board and is not discoverable:
+    one machine's ``power1_input`` is the whole SoC, another's is a single 12V line,
+    and this host's is the battery. So an implementation cannot pick a sensor by
+    scanning -- config has to name the chip and the rail, and the operator has to
+    know what they named. That, not the reading, is the work.
+
+    ``power_supply`` is not the way in either, though ``power_now`` looks like the
+    whole machine: on a laptop it measures battery discharge, so it reads zero for
+    the mains-powered machine a node is expected to be.
+    """
+
+    name = "hwmon"
+
+    def sample(self, elapsed_seconds: float) -> Optional[EnergyReading]:
+        return None
+
+
+class IpmiBackend:
+    """Whole-machine draw from the board's management controller. Unimplemented.
+
+    A server's BMC exposes the power the PSU is pulling from the wall, which is the
+    figure RAPL cannot reach: it covers the GPU, the disks, the fans and the PSU's
+    own losses, not just the CPU package. ``ipmitool dcmi power reading`` (or DCMI
+    over the local KCS interface) answers in watts, an instantaneous rate rather
+    than a counter, so an implementation multiplies by ``elapsed_seconds`` for the
+    interval's joules and reports ``is_floor=False``.
+
+    Needs a BMC, so it is server hardware only -- there is nothing to talk to on a
+    laptop or a consumer desktop -- plus ``ipmitool`` and access to the IPMI device
+    nodes. ``sample`` answering None keeps a node that lists this backend falling
+    through to the next one.
+    """
+
+    name = "ipmi"
+
+    def sample(self, elapsed_seconds: float) -> Optional[EnergyReading]:
+        return None
+
+
+class NvmlBackend:
+    """Per-GPU draw from NVIDIA's management library. Unimplemented.
+
+    ``nvmlDeviceGetPowerUsage`` (the library behind ``nvidia-smi``) reports each
+    GPU's draw in milliwatts. RAPL never sees the GPU at all, so on a machine that
+    rents out CUDA work the package figure misses the largest consumer in the box.
+
+    Unlike the others this is an *addend*, not an alternative: a GPU reading is not
+    a substitute for the CPU reading. Wiring it into :func:`first_reading`, where
+    the first answer wins, would report the GPU and drop the package. Summing
+    backends is a different composition than falling through them, and the monitor
+    does not do it, which is why ``sample`` answers None.
+    """
+
+    name = "nvml"
+
+    def sample(self, elapsed_seconds: float) -> Optional[EnergyReading]:
+        return None
+
+
+class SmartPlugBackend:
+    """A metering plug between the machine and the wall. Unimplemented.
+
+    A Shelly or Tasmota plug publishes instantaneous watts, and usually a
+    cumulative watt-hour counter, over HTTP or MQTT. It is the only source that
+    measures the socket itself, so it is the one figure that needs no caveat about
+    what it leaves out -- the accurate option for a home node, and the reason the
+    others are described as floors.
+
+    The costs are real: the operator has to buy the plug and put its address in
+    config, the poll leaves the host over the network, and the plug measures
+    whatever is plugged into it, which may be a power strip holding more than this
+    machine. ``sample`` answers None until there is something configured to poll.
+    """
+
+    name = "smart_plug"
+
+    def sample(self, elapsed_seconds: float) -> Optional[EnergyReading]:
+        return None
 
 
 def first_reading(
