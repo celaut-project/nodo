@@ -12,8 +12,12 @@ from pathlib import Path
 
 from src.manager.energy.attribution import attribute, attribute_load
 from src.manager.energy.backends import (
+    HwmonBackend,
+    IpmiBackend,
     ModelBackend,
+    NvmlBackend,
     RaplBackend,
+    SmartPlugBackend,
     first_reading,
     model_watts,
     package_domain_dirs,
