@@ -77,6 +77,7 @@ GROUPS: List[Group] = [
             ("connect <ip:port>", "introduce this node to a peer"),
             ("disconnect <peer>", "forget a peer"),
             ("clients", "list the clients that use this node"),
+            ("reputation [<peer>]", "what the network stakes on us (--json)"),
             ("verify_reputation <peer>", "validate a peer's reputation proof and ownership"),
             ("submit_reputation", "publish this node's reputation proof on-chain"),
             ("sync_reputation_proof", "reconcile the proof id with what the chain holds"),
