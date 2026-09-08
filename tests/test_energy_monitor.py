@@ -246,6 +246,47 @@ class ModelTests(unittest.TestCase):
     MONITOR_IMPORT_ERROR is not None,
     f"Missing runtime dependencies: {MONITOR_IMPORT_ERROR}",
 )
+class PriceSourceRegistryTests(unittest.TestCase):
+    """A source is built once, and an unconfigurable one is not a log every minute."""
+
+    def setUp(self):
+        self.addCleanup(setattr, energy_monitor, "_setting", energy_monitor._setting)
+        self.addCleanup(energy_monitor._price_sources.clear)
+        self.addCleanup(energy_monitor._unknown_price_sources.clear)
+        energy_monitor._price_sources.clear()
+        energy_monitor._unknown_price_sources.clear()
+        self.logged = []
+        self.addCleanup(setattr, energy_monitor.log, "LOGGER", energy_monitor.log.LOGGER)
+        energy_monitor.log.LOGGER = self.logged.append
+
+    def _configure(self, **values):
+        energy_monitor._setting = lambda key, default: values.get(key, default)
+
+    def test_the_source_is_built_once_and_kept(self):
+        """A day-ahead source rebuilt per tick would refetch its curve per tick."""
+        self._configure(PRICE_SOURCE="fixed", PRICE_PER_KWH=0.2)
+        self.assertIs(energy_monitor._price_source(), energy_monitor._price_source())
+
+    def test_the_configured_tariff_reaches_the_sample(self):
+        self._configure(PRICE_SOURCE="fixed", PRICE_PER_KWH=0.2, CURRENCY="EUR")
+        tariff = energy_monitor._tariff()
+        self.assertAlmostEqual(tariff.price_per_kwh, 0.2)
+        self.assertEqual(tariff.currency, "EUR")
+        self.assertEqual(tariff.source, "fixed")
+
+    def test_an_unknown_source_falls_back_and_says_so_once(self):
+        self._configure(PRICE_SOURCE="esios", PRICE_PER_KWH=0.2)
+        for _ in range(5):
+            tariff = energy_monitor._tariff()
+        self.assertEqual(tariff.source, "fixed", "the fixed tariff is the floor")
+        self.assertEqual(len(self.logged), 1, "one warning, not one per sample")
+        self.assertIn("esios", self.logged[0])
+
+
+@unittest.skipIf(
+    MONITOR_IMPORT_ERROR is not None,
+    f"Missing runtime dependencies: {MONITOR_IMPORT_ERROR}",
+)
 class BusyCoresTests(unittest.TestCase):
     def test_host_percentage_becomes_core_time(self):
         cores = os.cpu_count() or 1
