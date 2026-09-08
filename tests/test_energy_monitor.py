@@ -217,27 +217,84 @@ class ModelTests(unittest.TestCase):
         self.assertAlmostEqual(reading.watts, 10)
 
 
+@unittest.skipIf(
+    MONITOR_IMPORT_ERROR is not None,
+    f"Missing runtime dependencies: {MONITOR_IMPORT_ERROR}",
+)
+class BusyCoresTests(unittest.TestCase):
+    def test_host_percentage_becomes_core_time(self):
+        cores = os.cpu_count() or 1
+        self.assertAlmostEqual(energy_monitor._busy_cores(100.0), float(cores))
+        self.assertAlmostEqual(energy_monitor._busy_cores(50.0), cores / 2)
+        self.assertAlmostEqual(energy_monitor._busy_cores(0.0), 0.0)
+
+
+class UnimplementedBackendTests(unittest.TestCase):
+    """A declared-but-unimplemented backend has to be safe to list."""
+
+    def test_they_produce_no_reading_and_do_not_raise(self):
+        for backend in (HwmonBackend(), IpmiBackend(), NvmlBackend(), SmartPlugBackend()):
+            self.assertTrue(backend.name)
+            self.assertIsNone(backend.sample(60.0))
+
+    def test_listing_them_falls_through_to_a_backend_that_answers(self):
+        model = ModelBackend(idle_watts=40, load_watts=0, cpu_percent_fn=lambda: 0)
+        reading = first_reading(
+            [HwmonBackend(), IpmiBackend(), NvmlBackend(), SmartPlugBackend(), model],
+            5.0,
+        )
+        self.assertEqual(reading.backend, "model")
+        self.assertAlmostEqual(reading.watts, 40)
+
+
 class AttributionTests(unittest.TestCase):
-    def test_cpu_share_splits_load(self):
-        inst, leftover = attribute_load(100.0, {"a": 3.0, "b": 1.0})
+    def test_instances_split_the_load_they_account_for(self):
+        # Four cores busy, all of it the two instances: they take the whole load.
+        inst, leftover = attribute_load(100.0, {"a": 3.0, "b": 1.0}, busy_cores=4.0)
         self.assertAlmostEqual(inst["a"], 75.0)
         self.assertAlmostEqual(inst["b"], 25.0)
         self.assertAlmostEqual(leftover, 0.0)
 
+    def test_work_no_instance_did_stays_with_the_host(self):
+        """The defect this replaces: one small guest reading as the whole machine.
+
+        Eight cores, one busy, and the instance is using a twentieth of one. Its
+        watts are its own twentieth, not everything the package drew.
+        """
+        inst, leftover = attribute_load(64.0, {"a": 0.05}, busy_cores=8.0)
+        self.assertAlmostEqual(inst["a"], 0.4)
+        self.assertAlmostEqual(leftover, 63.6)
+
+    def test_an_instances_watts_do_not_move_when_another_starts(self):
+        alone, _ = attribute_load(80.0, {"a": 1.0}, busy_cores=4.0)
+        crowded, _ = attribute_load(80.0, {"a": 1.0, "b": 2.0}, busy_cores=4.0)
+        self.assertAlmostEqual(alone["a"], crowded["a"])
+
     def test_zero_weight_stays_unattributed(self):
-        inst, leftover = attribute_load(80.0, {"a": 0.0, "b": 0.0})
+        inst, leftover = attribute_load(80.0, {"a": 0.0, "b": 0.0}, busy_cores=2.0)
         self.assertEqual(inst, {"a": 0.0, "b": 0.0})
         self.assertAlmostEqual(leftover, 80.0)
 
+    def test_an_idle_host_attributes_nothing(self):
+        inst, leftover = attribute_load(40.0, {"a": 1.0}, busy_cores=0.0)
+        # busy_cores floors at the weights, so a guest the host figure missed is
+        # still charged for what its own counter says it used.
+        self.assertAlmostEqual(inst["a"], 40.0)
+        self.assertAlmostEqual(leftover, 0.0)
+
     def test_model_idle_is_other(self):
-        result = attribute(node_watts=150.0, weights={"a": 1.0}, idle_watts=30.0)
+        result = attribute(
+            node_watts=150.0, weights={"a": 1.0}, busy_cores=1.0, idle_watts=30.0
+        )
         self.assertAlmostEqual(result.instance_watts["a"], 120.0)
         self.assertAlmostEqual(result.other_watts, 30.0)
         self.assertAlmostEqual(result.instance_share["a"], 120.0 / 150.0)
         self.assertAlmostEqual(result.other_share, 30.0 / 150.0)
 
     def test_rapl_with_no_cpu_is_all_other(self):
-        result = attribute(node_watts=40.0, weights={"a": 0.0}, idle_watts=0.0)
+        result = attribute(
+            node_watts=40.0, weights={"a": 0.0}, busy_cores=2.0, idle_watts=0.0
+        )
         self.assertAlmostEqual(result.instance_watts["a"], 0.0)
         self.assertAlmostEqual(result.other_watts, 40.0)
 

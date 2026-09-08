@@ -24,6 +24,7 @@ from src.manager.energy.backends import (
     ModelBackend,
     RaplBackend,
     first_reading,
+    package_power_limit_watts,
 )
 from src.manager.energy.cgroup import (
     CpuWeightTracker,
@@ -128,6 +129,13 @@ def _cgroups_base() -> Path:
 
 
 def _cpu_percent() -> float:
+    """Host CPU use since the previous call, as a percentage.
+
+    Read exactly once per tick and passed around, never called twice in a tick:
+    ``psutil.cpu_percent(interval=None)`` measures against its own last call, so a
+    second call moments later reports the near-zero interval between the two rather
+    than the sampling interval.
+    """
     try:
         import psutil
 
@@ -136,15 +144,55 @@ def _cpu_percent() -> float:
         return 0.0
 
 
-def _backends() -> List[EnergyBackend]:
-    idle = _as_float(_setting("IDLE_WATTS", DEFAULT_IDLE_WATTS), DEFAULT_IDLE_WATTS)
-    load = _as_float(_setting("LOAD_WATTS", DEFAULT_LOAD_WATTS), DEFAULT_LOAD_WATTS)
+def _idle_watts() -> float:
+    """Watts the machine draws doing nothing, as measured by the operator.
+
+    Nothing on the host publishes this, so there is no fallback: 0 leaves the model
+    uncalibrated and silent.
+    """
+    return _as_float(_setting("IDLE_WATTS", DEFAULT_IDLE_WATTS), DEFAULT_IDLE_WATTS)
+
+
+@lru_cache(maxsize=1)
+def _declared_load_watts() -> float:
+    """The packages' sustained power limit, memoised. A machine's ceiling is fixed."""
+    limit = package_power_limit_watts(_rapl.root)
+    return float(limit) if limit else 0.0
+
+
+def _load_watts() -> float:
+    """Extra watts at 100% CPU: the operator's figure, else the declared ceiling.
+
+    An operator who measured the machine at full load has the better number, since
+    it includes RAM, disks and the power supply's losses. Where nobody measured,
+    the packages' own long-term limit is at least real and specific to this
+    machine, and it is readable when the energy counter is not.
+    """
+    configured = _as_float(
+        _setting("LOAD_WATTS", DEFAULT_LOAD_WATTS), DEFAULT_LOAD_WATTS
+    )
+    if configured > 0:
+        return configured
+    return _declared_load_watts()
+
+
+def _busy_cores(cpu_percent: float) -> float:
+    """Host CPU use over the interval expressed in cores, to match cgroup weights.
+
+    A cgroup's ``usage_usec`` delta is core-time, so the host figure it is measured
+    against has to be core-time too: 50% of an eight-core machine is four cores.
+    """
+    cores = os.cpu_count() or 1
+    return max(0.0, float(cpu_percent)) / 100.0 * cores
+
+
+def _backends(cpu_percent: float) -> List[EnergyBackend]:
     return [
         _rapl,
         ModelBackend(
-            idle_watts=idle,
-            load_watts=load,
-            cpu_percent_fn=_cpu_percent,
+            idle_watts=_idle_watts(),
+            load_watts=_load_watts(),
+            cpu_percent_fn=lambda: cpu_percent,
         ),
     ]
 
@@ -192,18 +240,21 @@ def _persist(reading, tariff: Tariff, attributed, elapsed_seconds: float) -> Non
 def _prime() -> None:
     """Take a RAPL/cgroup snapshot so the next tick has a real delta.
 
-    The first call has no interval yet. Pretending the sample covers
-    SAMPLE_INTERVAL_SECONDS would invent joules for time that has not
-    passed. RAPL's first ``sample`` already returns None (no previous
-    counter); we still call it so the counter is stored.
+    The first call has no interval behind it. Pretending the sample covers
+    SAMPLE_INTERVAL_SECONDS would invent joules for time that has not passed.
+    RAPL's first ``sample`` returns None for want of a previous counter, and is
+    called anyway so that counter lands. ``psutil.cpu_percent`` is primed for the
+    same reason: its first answer is a documented 0.0 with nothing behind it.
     """
     _rapl.sample(1.0)
+    _cpu_percent()
     usage = _instance_usage_usec()
     _cpu_weights.weights(usage, 0.0)
 
 
 def _sample(elapsed_seconds: float) -> None:
-    reading = first_reading(_backends(), elapsed_seconds)
+    cpu_percent = _cpu_percent()
+    reading = first_reading(_backends(cpu_percent), elapsed_seconds)
     if reading is None:
         return
     tariff = _tariff()
@@ -211,11 +262,11 @@ def _sample(elapsed_seconds: float) -> None:
     weights = _cpu_weights.weights(usage, elapsed_seconds)
     idle = 0.0
     if reading.backend == "model":
-        idle = _as_float(_setting("IDLE_WATTS", DEFAULT_IDLE_WATTS), DEFAULT_IDLE_WATTS)
-        idle = min(idle, reading.watts)
+        idle = min(_idle_watts(), reading.watts)
     attributed = attribute(
         node_watts=reading.watts,
         weights=weights,
+        busy_cores=_busy_cores(cpu_percent),
         idle_watts=idle,
     )
     _persist(reading, tariff, attributed, elapsed_seconds)
