@@ -347,6 +347,45 @@ this machine's addresses filled in; `nodo info` and `sudo nodo doctor` report wh
 resolves and whether the port is listening. Nothing verifies the forwarding from
 *outside* yet — that needs a peer to connect back.
 
+## `energy`
+
+What this machine costs in electricity, and how much of that is each guest. The
+manager samples on its own cadence inside the maintenance loop. **Informational
+only**: it never touches what the node charges in MU, and it feeds no admission
+or `low_demand` decision.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `energy.ENABLED` | `true` | Whether to sample at all. |
+| `energy.SAMPLE_INTERVAL_SECONDS` | `60` | Sampling cadence. Floored at 5. |
+| `energy.PRICE_PER_KWH` | `0.0` | Flat tariff. `0` shows watts and no currency cost. Stored with every sample, so a later change does not rewrite history. |
+| `energy.CURRENCY` | `"EUR"` | Label only; nothing converts between currencies. |
+| `energy.PRICE_SOURCE` | `"fixed"` | Only `fixed` is implemented, and it is the one that works offline. An unknown value falls back to it and says so once. |
+| `energy.IDLE_WATTS` | `0` | Watts at 0% CPU, for the model fallback. `0` means uncalibrated and the model then reports nothing. |
+| `energy.LOAD_WATTS` | `0` | Extra watts at 100% CPU. `0` falls back to the CPU packages' declared long-term limit where sysfs exposes it. |
+
+### Where the number comes from
+
+RAPL first: `/sys/class/powercap/intel-rapl/` energy counters, which the same
+driver provides on Intel and on AMD Zen. That figure is the **CPU package only**
+— no GPU, no disks, no power-supply losses — so the TUI labels it a floor, not
+wall-socket consumption. On current kernels `energy_uj` is root-only, so most
+nodes will not get it.
+
+Where there is no counter — an unreadable RAPL, Apple Silicon under Asahi, ARM
+boards, VMs, WSL — the fallback is a straight line: `IDLE_WATTS` at rest plus
+`LOAD_WATTS` scaled by CPU use. Those two numbers are **calibration inputs, not
+tunables**. Measure them with a plug-in meter, once with the machine quiet and
+once with every core busy. Left at `0`, the node reports `—` rather than a figure
+nobody measured; that is deliberate, because an invented number is
+indistinguishable from a measured one once it is on screen.
+
+Per-instance watts are the guest's share of the *host's* CPU over the interval,
+read from its cgroup, so they do not move when another guest starts. Whatever no
+instance accounts for — the host's own work, nodo itself, idle draw — is not
+attributed to anybody. Delegated instances get nothing: their power is burnt on
+the peer that runs them.
+
 ## `pricing`, `free_tier`, `ui`, `deposits`
 
 What this node charges, in **MU** — its own unit of account. What an MU is worth is set
