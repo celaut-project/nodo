@@ -31,7 +31,7 @@ from src.manager.energy.cgroup import (
     instance_cgroup_dir,
     read_usage_usec,
 )
-from src.manager.energy.price import FixedPriceSource, Tariff
+from src.manager.energy.price import FixedPriceSource, PriceSource, Tariff
 from src.utils.config import ConfigManager
 from src.utils import logger as log
 
@@ -51,6 +51,11 @@ MIN_INTERVAL_SECONDS = 5
 _last_tick_monotonic: Optional[float] = None
 _cpu_weights = CpuWeightTracker()
 _rapl = RaplBackend()
+# Price sources live as long as the process, so one that caches a day-ahead curve
+# keeps it between ticks instead of refetching every interval. Safe to hold: config
+# is read once per process, so a source built from it cannot go stale.
+_price_sources: Dict[str, PriceSource] = {}
+_unknown_price_sources: Set[str] = set()
 
 
 def _config() -> ConfigManager:
@@ -108,22 +113,49 @@ def interval_seconds() -> int:
     return configured
 
 
-def _tariff() -> Tariff:
-    source_name = str(_setting("PRICE_SOURCE", "fixed") or "fixed").strip().lower()
-    # Only "fixed" is implemented. Anything else falls back rather than hanging
-    # the tick on an HTTP client that does not exist.
-    if source_name != "fixed":
-        log.LOGGER(
-            f"{LOG_PREFIX} energy.PRICE_SOURCE={source_name!r} is not implemented; "
-            "using fixed."
-        )
+def _fixed_price_source() -> PriceSource:
+    """The configured flat tariff. The floor every other source falls back to."""
     return FixedPriceSource(
         price_per_kwh=_as_float(
             _setting("PRICE_PER_KWH", DEFAULT_PRICE_PER_KWH),
             DEFAULT_PRICE_PER_KWH,
         ),
         currency=str(_setting("CURRENCY", DEFAULT_CURRENCY) or DEFAULT_CURRENCY),
-    ).current()
+    )
+
+
+# Where a new source is registered: a name, and something that builds it once.
+_PRICE_SOURCE_BUILDERS: Dict[str, Callable[[], PriceSource]] = {
+    "fixed": _fixed_price_source,
+}
+
+
+def _price_source() -> PriceSource:
+    """The configured source, built on first use and kept for the process.
+
+    A name with no builder falls back to the fixed tariff, and says so once rather
+    than once per sample: a typo in config must not write a log line every
+    interval for the life of the node.
+    """
+    name = str(_setting("PRICE_SOURCE", "fixed") or "fixed").strip().lower()
+    build = _PRICE_SOURCE_BUILDERS.get(name)
+    if build is None:
+        if name not in _unknown_price_sources:
+            _unknown_price_sources.add(name)
+            log.LOGGER(
+                f"{LOG_PREFIX} energy.PRICE_SOURCE={name!r} is not implemented; "
+                "using the fixed tariff."
+            )
+        name, build = "fixed", _fixed_price_source
+    source = _price_sources.get(name)
+    if source is None:
+        source = build()
+        _price_sources[name] = source
+    return source
+
+
+def _tariff() -> Tariff:
+    return _price_source().current()
 
 
 def _cgroups_base() -> Path:

@@ -2,10 +2,30 @@
 
 Samples persist energy and the tariff in effect at that moment; cost is
 derived on read. A misconfigured or later-changed tariff therefore does not
-rewrite history.
+rewrite history, and an hourly price needs no column of its own.
 
-Only ``fixed`` is implemented. A day-ahead/spot API (REE/ESIOS, ENTSO-E) would
-be another ``PriceSource``; do not half-wire it here.
+``fixed`` is the only source implemented, and the only one that has to work
+offline. A day-ahead market source (REE/ESIOS, ENTSO-E) is another
+``PriceSource`` and belongs beside this one, under three constraints that the
+one-method interface hides:
+
+- **``current()`` runs on the manager thread**, inside the sampling tick, next to
+  ``maintain_vmachines`` and ``enforce_activity_window``. It must not do network
+  I/O. Day-ahead prices make that easy rather than hard: the whole next day
+  publishes at once, so a source fetches a curve on its own cadence and
+  ``current()`` only indexes it by the hour.
+- **A source is built once and kept** (see the registry in ``monitor``), so a
+  cached curve survives between ticks. Anything rebuilt per sample would refetch
+  every interval.
+- **Offline is not a degraded mode, it is the floor.** A market source that cannot
+  reach its API answers with the configured fixed tariff, never with a stale
+  price and never with nothing.
+
+And the market number is not the bill: a wholesale spot price carries no access
+tolls, no electricity tax, no VAT and no retailer margin, which together are the
+larger part of what an operator pays. A source that reports it raw understates
+the cost with more decimal places than the guess it replaced, so the multiplier
+and the fixed term belong in config next to the credentials.
 """
 
 from __future__ import annotations
@@ -22,6 +42,14 @@ class Tariff:
 
 
 class PriceSource(Protocol):
+    """Something that can name the price of a kWh right now.
+
+    ``name`` is part of the contract, not decoration: it is what a sample stores
+    in ``Tariff.source``, so a row says which source priced it.
+    """
+
+    name: str
+
     def current(self) -> Tariff:
         ...
 
