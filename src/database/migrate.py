@@ -383,10 +383,6 @@ def create_tables(cursor):
     })
     retire_slot_table(cursor)
     ensure_peer_address_uniqueness(cursor)
-    # Pre-#258 energy_consumption stored a precomputed cost; CREATE TABLE IF NOT
-    # EXISTS will not change those columns. Reshape drops the dead schema.
-    from src.manager.energy.schema import reshape_energy_schema
-    reshape_energy_schema(cursor)
 
 
 def retire_slot_table(cursor) -> None:

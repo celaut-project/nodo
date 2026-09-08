@@ -82,23 +82,6 @@ def _ensure_traceability_tables(connection) -> None:
         logger.LOGGER(f'Could not ensure the payment and reputation tables exist: {e}')
 
 
-def _ensure_energy_schema(connection) -> None:
-    """Reshape energy tables on every process start.
-
-    ``nodo migrate`` is not an upgrade path (it deletes the database), and
-    ``CREATE TABLE IF NOT EXISTS`` will not change the pre-#258 columns. The
-    reshape is idempotent and drops the dead ``monitoring_config`` table.
-    """
-    try:
-        from src.manager.energy.schema import reshape_energy_schema
-
-        cursor = connection.cursor()
-        reshape_energy_schema(cursor)
-        connection.commit()
-    except Exception as e:
-        logger.LOGGER(f'Could not ensure energy tables exist: {e}')
-
-
 class SQLConnection(metaclass=Singleton):
     _connection = None
     _lock = Lock()
@@ -117,7 +100,6 @@ class SQLConnection(metaclass=Singleton):
             SQLConnection._connection = sqlite3.connect(DATABASE_FILE, check_same_thread=False)
             SQLConnection._connection.row_factory = sqlite3.Row
             _ensure_traceability_tables(SQLConnection._connection)
-            _ensure_energy_schema(SQLConnection._connection)
 
     def _execute(self, query: str, params=()) -> sqlite3.Cursor:
         """
