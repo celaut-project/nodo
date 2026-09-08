@@ -98,7 +98,7 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::vertical([
-        Constraint::Length(7),
+        Constraint::Length(9),
         Constraint::Length(7),
         Constraint::Min(6),
     ])
@@ -122,6 +122,8 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
             ),
             metric_line("Address", nonempty(&app.node_info.address, "—")),
             metric_line("Version", shorten(&app.node_info.version, 18)),
+            metric_line("Power", node_power_line(&app.node_energy)),
+            metric_line("Elec.", node_cost_line(&app.node_energy)),
         ],
         ACCENT,
     );
@@ -328,11 +330,11 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_instances_tree(frame, app, area);
         return;
     }
-    // 13 = 11 detail lines + the block's two border rows. The card carries the figures
+    // 14 = 12 detail lines + the block's two border rows. The card carries the figures
     // the row has no width for: the disk allocation, the vCPU allowance the CPU% is
-    // measured against, the cumulative disk/net totals, and the burn rate broken out
-    // per minute and per hour with the age and sample count of the average.
-    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(13)]).split(area);
+    // measured against, the cumulative disk/net totals, the burn rate, and the
+    // attributed watts (issue #258).
+    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(14)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
         let location = if instance.is_local() {
             "local".to_string()
@@ -455,6 +457,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             metric_line("Net", net_detail(instance)),
             metric_line("Balance", money.format_raw(&instance.balance)),
             metric_line("Burn", burn_detail(instance, money)),
+            metric_line("Energy", energy_detail(instance)),
         ];
         // `observe` attaches to a local process, so it is only offered for local
         // instances. Full id, so the line can be copied as-is.
@@ -554,6 +557,68 @@ fn format_burn_rate(mu_per_hour: Option<f64>, money: &Money) -> String {
 /// rate from two stale samples must not read like a fresh one. It prices *reserved*
 /// resources at current scarcity, so it is the cost of keeping the instance running at
 /// present prices, not measured resource usage (#245); the label says so.
+fn format_watts(watts: Option<f64>) -> String {
+    match watts {
+        Some(value) if value.is_finite() && value >= 0.0 => {
+            if value < 10.0 {
+                format!("{value:.2} W")
+            } else {
+                format!("{value:.0} W")
+            }
+        }
+        _ => "—".to_string(),
+    }
+}
+
+fn energy_detail(instance: &Instance) -> String {
+    match (instance.energy_watts, instance.energy_share) {
+        (Some(watts), Some(share)) if watts.is_finite() && share.is_finite() => {
+            format!(
+                "{} · {:.0}% of node • CPU-share of measured draw",
+                format_watts(Some(watts)),
+                (share * 100.0).clamp(0.0, 100.0)
+            )
+        }
+        _ => "— • no samples yet".to_string(),
+    }
+}
+
+fn node_power_line(energy: &crate::app::NodeEnergy) -> String {
+    match energy.watts {
+        Some(watts) if watts.is_finite() && watts >= 0.0 => {
+            let kind = if energy.is_floor {
+                "RAPL floor"
+            } else if energy.backend == "model" {
+                "model estimate"
+            } else if energy.backend.is_empty() {
+                "measured"
+            } else {
+                energy.backend.as_str()
+            };
+            format!("{} · {}", format_watts(Some(watts)), kind)
+        }
+        _ => "—".to_string(),
+    }
+}
+
+fn node_cost_line(energy: &crate::app::NodeEnergy) -> String {
+    match energy.watts {
+        Some(watts)
+            if watts.is_finite() && watts >= 0.0 && energy.price_per_kwh > 0.0 =>
+        {
+            let per_hour = (watts / 1000.0) * energy.price_per_kwh;
+            let currency = if energy.currency.is_empty() {
+                "EUR"
+            } else {
+                energy.currency.as_str()
+            };
+            format!("{per_hour:.4} {currency}/h")
+        }
+        Some(_) => "— • no tariff".to_string(),
+        None => "—".to_string(),
+    }
+}
+
 fn burn_detail(instance: &Instance, money: &Money) -> String {
     match (instance.mu_per_minute, instance.mu_per_hour) {
         (Some(per_minute), Some(per_hour)) => {
@@ -3998,6 +4063,8 @@ mod tests {
                 mu_per_hour: None,
                 consumption_samples: None,
                 consumption_age_secs: None,
+                energy_watts: None,
+                energy_share: None,
             }
         }
 
@@ -4104,6 +4171,8 @@ mod tests {
             mu_per_hour: Some(3_600_000_000.0),
             consumption_samples: Some(12),
             consumption_age_secs: Some(45.0),
+            energy_watts: Some(12.0),
+            energy_share: Some(0.3),
         }]);
         app.instances.state.select(Some(0));
         app.instances.state_id = Some("8f4e2c".to_string());
@@ -4127,6 +4196,8 @@ mod tests {
         assert!(text.contains("Burn/h"), "missing the burn-rate column header");
         assert!(text.contains("3.6 ERG"), "missing the per-hour burn rate");
         assert!(text.contains("12 samples"), "missing the burn-rate sample count");
+        assert!(text.contains("12 W"), "missing attributed watts");
+        assert!(text.contains("30% of node"), "missing energy share");
     }
 
     /// The EARNINGS page has to answer "is this machine worth leaving on" without
@@ -4884,6 +4955,8 @@ mod tests {
                 mu_per_hour: None,
                 consumption_samples: None,
                 consumption_age_secs: None,
+                energy_watts: None,
+                energy_share: None,
             }
         }
 
