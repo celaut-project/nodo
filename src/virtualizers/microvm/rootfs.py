@@ -1,14 +1,17 @@
 """Putting the node's data inside the guest's own filesystem, offline.
 
-Every write into a guest image goes through ``debugfs``, never a loop mount:
-that is what lets a node build and launch guests without root and without
+Every read of and write into a guest image goes through ``debugfs``, never a loop
+mount: that is what lets a node build and launch guests without root and without
 ``CAP_SYS_ADMIN`` (see ``docs/ROOTLESS.md``). Both hypervisors inject the same
 three things into the same image the same way -- the serialized
 ``ConfigurationFile`` at the path the service declared, the resolved entrypoint,
-and (when there are shares) the virtiofs mount plan -- so this is one
-implementation, not a convention two backends each re-implement.
+and (when there are shares) the virtiofs mount plan -- and pull a share's seed
+data back out of it the same way, so this is one implementation, not a convention
+two backends each re-implement.
 """
 import posixpath
+import shutil
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -66,6 +69,40 @@ def debugfs_write(image_path: Path, host_file: Path, guest_target: str) -> None:
 
     write_cmd = f"write {host_file} {guest_target}"
     run(["debugfs", "-w", "-R", write_cmd, str(image_path)])
+
+
+def debugfs_rdump(image_path: Path, guest_dir: str, host_dest: Path) -> bool:
+    """Copy the offline image's ``guest_dir`` subtree out onto ``host_dest``.
+
+    The read half of ``debugfs_write``, and rootless for the same reason: no loop
+    mount, no ``CAP_SYS_ADMIN``. Used to seed a shared filesystem's host
+    directory with what the exporting service packaged at that path, so mounting
+    the share over it does not hide the packaged content.
+
+    ``debugfs rdump`` writes the source *directory* into its destination, so it
+    dumps into a staging directory next to the target and the entries are then
+    moved across. What landed in the staging directory is discovered by reading
+    it, never by deriving a name from ``guest_dir``: that string comes from the
+    service specification, and a path arithmetic on it is a path arithmetic on
+    someone else's input. Returns False (having logged) when the image has
+    nothing at that path, which is an empty share, not an error.
+    """
+    host_dest.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=host_dest.parent) as staging:
+        result = run(
+            ["debugfs", "-R", f"rdump {guest_dir} {staging}", str(image_path)],
+            check=False,
+        )
+        dumped = next((p for p in Path(staging).iterdir() if p.is_dir()), None)
+        if dumped is None:
+            log.LOGGER(
+                f"nothing to seed from {image_path}:{guest_dir} "
+                f"({(result.stderr or result.stdout or '').strip()})"
+            )
+            return False
+        for entry in dumped.iterdir():
+            shutil.move(str(entry), str(host_dest / entry.name))
+    return True
 
 
 def build_network_resolution(
