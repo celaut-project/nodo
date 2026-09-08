@@ -20,6 +20,7 @@ from src.manager.energy.backends import (
     SmartPlugBackend,
     first_reading,
     model_watts,
+    package_power_limit_watts,
     package_domain_dirs,
     wrapped_delta,
 )
@@ -208,6 +209,30 @@ class ModelTests(unittest.TestCase):
         self.assertFalse(reading.is_floor)
         self.assertAlmostEqual(reading.watts, 90)
         self.assertAlmostEqual(reading.joules, 900)
+
+    def test_an_uncalibrated_model_reports_nothing(self):
+        """No measured idle figure, no reading: a guess is not a small measurement."""
+        backend = ModelBackend(idle_watts=0, load_watts=120, cpu_percent_fn=lambda: 50)
+        self.assertIsNone(backend.sample(10.0))
+
+    def test_the_declared_package_ceiling_is_the_load_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _rapl_tree(root, {"intel-rapl:0": (0, 100), "intel-rapl:1": (0, 100)})
+            for index in (0, 1):
+                domain = root / f"intel-rapl:{index}"
+                (domain / "constraint_0_name").write_text("long_term")
+                (domain / "constraint_0_power_limit_uw").write_text("45000000")
+                # The short-term limit is a burst ceiling, not the sustained one.
+                (domain / "constraint_1_name").write_text("short_term")
+                (domain / "constraint_1_power_limit_uw").write_text("60000000")
+            self.assertAlmostEqual(package_power_limit_watts(root), 90.0)
+
+    def test_no_declared_ceiling_is_no_answer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _rapl_tree(root, {"intel-rapl:0": (0, 100)})
+            self.assertIsNone(package_power_limit_watts(root))
 
     def test_first_reading_falls_back_to_model(self):
         rapl = RaplBackend(root=Path("/no/such/rapl"))
