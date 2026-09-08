@@ -552,11 +552,9 @@ fn format_burn_rate(mu_per_hour: Option<f64>, money: &Money) -> String {
     }
 }
 
-/// The burn line for the detail card: both the per-minute and per-hour figures, plus
-/// how many samples the average is built from and how long ago it was last updated — a
-/// rate from two stale samples must not read like a fresh one. It prices *reserved*
-/// resources at current scarcity, so it is the cost of keeping the instance running at
-/// present prices, not measured resource usage (#245); the label says so.
+/// A power reading, in whole watts once there are enough of them for the decimals to
+/// be noise. `—` covers "no sample" and "nothing to measure it with" alike; a `0 W`
+/// there would claim the machine is drawing nothing.
 fn format_watts(watts: Option<f64>) -> String {
     match watts {
         Some(value) if value.is_finite() && value >= 0.0 => {
@@ -570,6 +568,10 @@ fn format_watts(watts: Option<f64>) -> String {
     }
 }
 
+/// The energy line for the detail card: what this guest drew, and how much of the
+/// node's own figure that is. The share is against the whole machine, so two guests'
+/// percentages plus the host's unattributed rest come to 100 — a guest using a
+/// twentieth of one core reads as a twentieth of one core, not as the whole node.
 fn energy_detail(instance: &Instance) -> String {
     match (instance.energy_watts, instance.energy_share) {
         (Some(watts), Some(share)) if watts.is_finite() && share.is_finite() => {
@@ -619,6 +621,11 @@ fn node_cost_line(energy: &crate::app::NodeEnergy) -> String {
     }
 }
 
+/// The burn line for the detail card: both the per-minute and per-hour figures, plus
+/// how many samples the average is built from and how long ago it was last updated — a
+/// rate from two stale samples must not read like a fresh one. It prices *reserved*
+/// resources at current scarcity, so it is the cost of keeping the instance running at
+/// present prices, not measured resource usage (#245); the label says so.
 fn burn_detail(instance: &Instance, money: &Money) -> String {
     match (instance.mu_per_minute, instance.mu_per_hour) {
         (Some(per_minute), Some(per_hour)) => {

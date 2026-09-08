@@ -187,11 +187,11 @@ class ImportDoesNotTypeErrorTests(unittest.TestCase):
 
         self.assertTrue(hasattr(backends, "RaplBackend"))
 
-    def test_package_import_does_not_read_missing_config_as_int(self):
-        # The old power.py did int(env_manager.get("MONITOR_INTERVAL")) at
-        # module scope and TypeError'd. The replacement package must import
-        # without touching config; energy_tick is lazy so this does not load
-        # logger/ConfigManager.
+    def test_package_import_does_not_read_config_at_module_scope(self):
+        # A module-scope `int(env_manager.get(...))` TypeErrors on a config that does
+        # not carry the key, which makes the package unimportable rather than
+        # unconfigured. `energy_tick` is exposed lazily so this import pulls in
+        # neither ConfigManager nor the logger.
         import src.manager.energy as energy
 
         self.assertIn("energy_tick", energy.__all__)

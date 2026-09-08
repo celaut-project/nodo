@@ -4,16 +4,19 @@ Wired into ``manager_thread`` as ``energy_tick()``, same shape as ``ddns_tick``:
 calling it more often than ``energy.SAMPLE_INTERVAL_SECONDS`` is a cheap no-op,
 and it never raises.
 
-Config is re-read every tick so an operator can flip ENABLED or the tariff from
-the TUI without restarting. Missing keys fall back to defaults — importing this
-module must not TypeError the way ``power.py`` did.
+Every setting goes through ``_setting``, which answers with a default when the key
+is absent, so a config that does not mention ``energy`` at all still imports and
+runs. ``ConfigManager`` reads config.yaml once per process, so a changed tariff or
+a flipped ENABLED takes effect when the daemon restarts.
 """
 
 from __future__ import annotations
 
+import os
 import time
+from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set
 
 from src.manager.energy.attribution import attribute
 from src.manager.energy.backends import (
