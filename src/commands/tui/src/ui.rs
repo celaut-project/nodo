@@ -585,17 +585,22 @@ fn energy_detail(instance: &Instance) -> String {
     }
 }
 
+/// The NODE card's power line: the figure, and which source stands behind it. The
+/// source is named rather than described, because they are not interchangeable — a
+/// package counter, a rail, the power supply's input and a plug at the wall measure
+/// four different things, and `floor` says the number is short of the whole machine.
+/// A combined source arrives already named for its parts (`rapl+nvml`).
 fn node_power_line(energy: &crate::app::NodeEnergy) -> String {
     match energy.watts {
         Some(watts) if watts.is_finite() && watts >= 0.0 => {
-            let kind = if energy.is_floor {
-                "RAPL floor"
+            let kind = if energy.backend.is_empty() {
+                "measured".to_string()
             } else if energy.backend == "model" {
-                "model estimate"
-            } else if energy.backend.is_empty() {
-                "measured"
+                "model estimate".to_string()
+            } else if energy.is_floor {
+                format!("{} floor", energy.backend)
             } else {
-                energy.backend.as_str()
+                energy.backend.clone()
             };
             format!("{} · {}", format_watts(Some(watts)), kind)
         }
@@ -3159,6 +3164,52 @@ fn visible_tail(lines: &[String], count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// The power line has to say which of four different measurements it is showing.
+    /// A package counter, a rail, the supply's input and a plug at the wall are not
+    /// interchangeable, and naming one of them for another misreads by whatever the
+    /// missing parts of the machine draw.
+    mod power_line {
+        use super::super::node_power_line;
+        use crate::app::NodeEnergy;
+
+        fn line(watts: Option<f64>, backend: &str, is_floor: bool) -> String {
+            node_power_line(&NodeEnergy {
+                watts,
+                backend: backend.to_string(),
+                is_floor,
+                ..NodeEnergy::default()
+            })
+        }
+
+        #[test]
+        fn a_partial_source_is_named_and_marked_a_floor() {
+            assert_eq!(line(Some(12.0), "rapl", true), "12 W · rapl floor");
+            assert_eq!(line(Some(9.0), "hwmon", true), "9.00 W · hwmon floor");
+        }
+
+        #[test]
+        fn a_combined_source_keeps_the_names_of_its_parts() {
+            assert_eq!(line(Some(150.0), "rapl+nvml", true), "150 W · rapl+nvml floor");
+        }
+
+        #[test]
+        fn a_whole_machine_source_is_not_called_a_floor() {
+            assert_eq!(line(Some(200.0), "ipmi", false), "200 W · ipmi");
+            assert_eq!(line(Some(180.0), "smart_plug", false), "180 W · smart_plug");
+        }
+
+        #[test]
+        fn the_estimate_says_it_is_one() {
+            assert_eq!(line(Some(90.0), "model", false), "90 W · model estimate");
+        }
+
+        #[test]
+        fn no_sample_is_a_dash_and_never_a_zero() {
+            assert_eq!(line(None, "rapl", true), "—");
+            assert_eq!(line(f64::NAN.into(), "rapl", true), "—");
+        }
+    }
 
     /// The working day has to be legible as a day: which hours are open, where now is,
     /// and whether the thing is even being enforced. Drawn rather than described,

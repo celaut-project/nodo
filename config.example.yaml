@@ -802,6 +802,43 @@ energy:
   LOAD_WATTS: 0               # Extra watts at 100% CPU. 0 => the packages' own
                               # declared long-term limit, when sysfs exposes it.
 
+  # Sources that need hardware or an address. Each is off until configured, and
+  # each is tried before RAPL, in this order, because each sees more of the
+  # machine than RAPL does. None of them is required.
+  #
+  # A metering plug is the only source that reads the socket itself, losses and
+  # all. Give it its own endpoint and where the watts sit in the JSON it answers:
+  #   Shelly Gen1       http://<ip>/meter/0                     power
+  #   Shelly Gen2/Plus  http://<ip>/rpc/Switch.GetStatus?id=0   apower
+  #   Tasmota           http://<ip>/cm?cmnd=Status%208          StatusSNS.ENERGY.Power
+  # It measures whatever is plugged into it, so a power strip reports the strip.
+  SMART_PLUG_URL: ""
+  SMART_PLUG_POWER_PATH: "power"
+
+  # A server's BMC, through `ipmitool dcmi power reading`: the power the supply
+  # pulls from the wall. Needs ipmitool and access to the IPMI device, so there
+  # is nothing to enable on a laptop or a consumer desktop.
+  IPMI_ENABLED: false
+
+  # A kernel hwmon rail, which is the only power figure Apple Silicon under Asahi
+  # (chip "macsmc") and most ARM boards offer. CHIP is a
+  # /sys/class/hwmon/hwmonN/name and SENSOR a prefix in it: "power1" reads
+  # microwatts, "energy1" a microjoule counter -- prefer the counter. What a rail
+  # covers is a property of the board, so this cannot be guessed. Do not point it
+  # at the battery: that measures discharge and reads zero on mains.
+  HWMON_CHIP: ""
+  HWMON_SENSOR: ""
+
+  # The GPUs, through `nvidia-smi`. RAPL never sees them, so this one *adds* to a
+  # partial reading rather than replacing it -- and is skipped when the figure
+  # already covers the machine, which would count the GPU twice.
+  NVML_ENABLED: false
+
+  # Ceiling on the subprocess and HTTP sources above, per sample. They run on the
+  # maintenance loop, so this is wall time that loop gives up when a plug is
+  # unreachable or a BMC is slow.
+  EXTERNAL_TIMEOUT_SECONDS: 2
+
 publisher:
   PROVIDER: "github"
   REPOSITORY: "owner/repo"

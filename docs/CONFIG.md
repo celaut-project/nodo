@@ -363,22 +363,56 @@ or `low_demand` decision.
 | `energy.PRICE_SOURCE` | `"fixed"` | Only `fixed` is implemented, and it is the one that works offline. An unknown value falls back to it and says so once. |
 | `energy.IDLE_WATTS` | `0` | Watts at 0% CPU, for the model fallback. `0` means uncalibrated and the model then reports nothing. |
 | `energy.LOAD_WATTS` | `0` | Extra watts at 100% CPU. `0` falls back to the CPU packages' declared long-term limit where sysfs exposes it. |
+| `energy.SMART_PLUG_URL` | `""` | A metering plug's own HTTP endpoint. Empty means no plug and no request. |
+| `energy.SMART_PLUG_POWER_PATH` | `"power"` | Dotted path to the watts inside the plug's JSON. |
+| `energy.IPMI_ENABLED` | `false` | Ask the BMC through `ipmitool dcmi power reading`. |
+| `energy.HWMON_CHIP` | `""` | A `/sys/class/hwmon/hwmonN/name` to read a rail from. |
+| `energy.HWMON_SENSOR` | `""` | Sensor prefix in that chip: `power1` (microwatts) or `energy1` (a microjoule counter). |
+| `energy.NVML_ENABLED` | `false` | Add the GPUs' draw, through `nvidia-smi`. |
+| `energy.EXTERNAL_TIMEOUT_SECONDS` | `2` | Ceiling for each subprocess or HTTP source, per sample. |
 
 ### Where the number comes from
 
-RAPL first: `/sys/class/powercap/intel-rapl/` energy counters, which the same
-driver provides on Intel and on AMD Zen. That figure is the **CPU package only**
-— no GPU, no disks, no power-supply losses — so the TUI labels it a floor, not
-wall-socket consumption. On current kernels `energy_uj` is root-only, so most
-nodes will not get it.
+Sources are tried in order of how much of the machine each one sees, and the
+first that answers wins. The TUI names the one it used, and marks it a `floor`
+when the figure is short of the whole machine.
 
-Where there is no counter — an unreadable RAPL, Apple Silicon under Asahi, ARM
-boards, VMs, WSL — the fallback is a straight line: `IDLE_WATTS` at rest plus
+| Source | Sees | Needs |
+|---|---|---|
+| `smart_plug` | the socket, losses and all | a metering plug and its address |
+| `ipmi` | what the power supply pulls in | a BMC, so server hardware |
+| `hwmon` | one rail of the board | knowing which rail, from config |
+| `rapl` | the CPU packages | nothing, but `energy_uj` is root-only on current kernels |
+| `model` | nothing; it estimates | two measured coefficients |
+
+`rapl` is the one most nodes have: `/sys/class/powercap/intel-rapl/`, which the
+same driver serves on Intel and on AMD Zen. It is the **CPU package only** — no
+GPU, no disks, no power-supply losses — hence the `floor`.
+
+`hwmon` is the reading for machines with no RAPL: Apple Silicon under Asahi
+publishes the SMC's rails there (chip `macsmc`), and so do ARM boards with a
+shunt. What a rail covers is a property of the board and cannot be guessed, which
+is why both the chip and the sensor come from config. Do not point it at the
+battery — that measures discharge and reads zero on mains.
+
+`nvml` is not in the order, because a GPU's draw is not an alternative to the
+CPU's: it **adds**. It is added only to a figure that is already partial. A plug
+and a power supply both see the GPU, and adding it to those would count it twice.
+
+Zero is never a reading. A running machine draws power, so a source answering
+`0` is not measuring this machine — a battery on mains, a plug whose socket is
+off — and the next source gets its turn instead.
+
+The `model` is the last resort: a straight line, `IDLE_WATTS` at rest plus
 `LOAD_WATTS` scaled by CPU use. Those two numbers are **calibration inputs, not
 tunables**. Measure them with a plug-in meter, once with the machine quiet and
 once with every core busy. Left at `0`, the node reports `—` rather than a figure
 nobody measured; that is deliberate, because an invented number is
 indistinguishable from a measured one once it is on screen.
+
+`smart_plug`, `ipmi` and `nvml` cost wall time in the maintenance loop — an HTTP
+request and two subprocesses — so each takes `EXTERNAL_TIMEOUT_SECONDS`, and one
+that is not configured is never asked.
 
 Per-instance watts are the guest's share of the *host's* CPU over the interval,
 read from its cgroup, so they do not move when another guest starts. Whatever no

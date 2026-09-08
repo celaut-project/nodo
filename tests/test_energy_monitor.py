@@ -6,21 +6,27 @@ are plain entries in ``migrate.TABLES`` and carry no logic to test.
 """
 
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
 from src.manager.energy.attribution import attribute, attribute_load
 from src.manager.energy.backends import (
+    EnergyReading,
     HwmonBackend,
     IpmiBackend,
     ModelBackend,
     NvmlBackend,
     RaplBackend,
     SmartPlugBackend,
+    dig,
     first_reading,
+    http_get_json,
     model_watts,
     package_power_limit_watts,
+    run_command,
+    with_additions,
     package_domain_dirs,
     wrapped_delta,
 )
@@ -295,22 +301,223 @@ class BusyCoresTests(unittest.TestCase):
         self.assertAlmostEqual(energy_monitor._busy_cores(0.0), 0.0)
 
 
-class UnimplementedBackendTests(unittest.TestCase):
-    """A declared-but-unimplemented backend has to be safe to list."""
+class HwmonTests(unittest.TestCase):
+    def _tree(self, chips):
+        """Write a fake /sys/class/hwmon. ``chips`` maps hwmonN to (name, files)."""
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        for directory, (name, files) in chips.items():
+            chip = root / directory
+            chip.mkdir(parents=True)
+            (chip / "name").write_text(name, encoding="utf-8")
+            for filename, value in files.items():
+                (chip / filename).write_text(str(value), encoding="utf-8")
+        return root
 
-    def test_they_produce_no_reading_and_do_not_raise(self):
-        for backend in (HwmonBackend(), IpmiBackend(), NvmlBackend(), SmartPlugBackend()):
-            self.assertTrue(backend.name)
-            self.assertIsNone(backend.sample(60.0))
+    def test_a_power_sensor_is_microwatts_and_needs_no_previous_sample(self):
+        root = self._tree({"hwmon0": ("macsmc", {"power1_input": 7_500_000})})
+        backend = HwmonBackend(chip="macsmc", sensor="power1", root=root)
+        reading = backend.sample(60.0)
+        self.assertAlmostEqual(reading.watts, 7.5)
+        self.assertAlmostEqual(reading.joules, 450.0)
+        self.assertTrue(reading.is_floor, "a rail is a subset of the socket")
 
-    def test_listing_them_falls_through_to_a_backend_that_answers(self):
-        model = ModelBackend(idle_watts=40, load_watts=0, cpu_percent_fn=lambda: 0)
-        reading = first_reading(
-            [HwmonBackend(), IpmiBackend(), NvmlBackend(), SmartPlugBackend(), model],
-            5.0,
+    def test_an_energy_sensor_is_a_counter_to_subtract(self):
+        root = self._tree({"hwmon0": ("ina219", {"energy1_input": 1_000_000})})
+        backend = HwmonBackend(chip="ina219", sensor="energy1", root=root)
+        self.assertIsNone(backend.sample(60.0), "first snapshot has no delta")
+        (root / "hwmon0" / "energy1_input").write_text("7000000")
+        reading = backend.sample(60.0)
+        self.assertAlmostEqual(reading.joules, 6.0)
+        self.assertAlmostEqual(reading.watts, 0.1)
+
+    def test_a_counter_going_backwards_is_not_a_reading(self):
+        """hwmon publishes no wrap range, so a decrease cannot be interpreted."""
+        root = self._tree({"hwmon0": ("ina219", {"energy1_input": 9_000_000})})
+        backend = HwmonBackend(chip="ina219", sensor="energy1", root=root)
+        backend.sample(60.0)
+        (root / "hwmon0" / "energy1_input").write_text("1000000")
+        self.assertIsNone(backend.sample(60.0))
+
+    def test_the_chip_is_found_by_name_not_by_number(self):
+        """hwmonN is assigned at probe time and is not stable across reboots."""
+        root = self._tree(
+            {
+                "hwmon0": ("acpitz", {}),
+                "hwmon1": ("coretemp", {}),
+                "hwmon2": ("macsmc", {"power1_input": 3_000_000}),
+            }
         )
-        self.assertEqual(reading.backend, "model")
-        self.assertAlmostEqual(reading.watts, 40)
+        backend = HwmonBackend(chip="macsmc", sensor="power1", root=root)
+        self.assertAlmostEqual(backend.sample(10.0).watts, 3.0)
+
+    def test_a_battery_rail_on_mains_reads_zero_and_zero_is_not_a_reading(self):
+        """The trap this rule exists for: a laptop battery is one of these chips.
+
+        It measures discharge, so on the mains it answers 0, and a 0 W sample
+        would shadow every source behind it and claim the node draws nothing.
+        """
+        root = self._tree({"hwmon0": ("BAT0", {"power1_input": 0})})
+        self.assertIsNone(HwmonBackend("BAT0", "power1", root).sample(60.0))
+
+    def test_an_unknown_chip_or_sensor_is_no_reading(self):
+        root = self._tree({"hwmon0": ("acpitz", {})})
+        self.assertIsNone(HwmonBackend("nope", "power1", root).sample(10.0))
+        self.assertIsNone(HwmonBackend("acpitz", "power1", root).sample(10.0))
+        self.assertIsNone(HwmonBackend("acpitz", "", root).sample(10.0))
+        self.assertIsNone(
+            HwmonBackend("acpitz", "temp1", root).sample(10.0),
+            "a temperature is not energy",
+        )
+
+
+class IpmiTests(unittest.TestCase):
+    DCMI = """
+        Instantaneous power reading:                   120 Watts
+        Minimum during sampling period:                 90 Watts
+        Maximum during sampling period:                340 Watts
+    """
+
+    def test_the_instantaneous_reading_covers_the_machine(self):
+        backend = IpmiBackend(runner=lambda argv, timeout: self.DCMI)
+        reading = backend.sample(60.0)
+        self.assertAlmostEqual(reading.watts, 120.0)
+        self.assertAlmostEqual(reading.joules, 7200.0)
+        self.assertFalse(reading.is_floor, "the PSU's input is not a floor")
+
+    def test_no_ipmitool_and_no_dcmi_are_both_no_reading(self):
+        self.assertIsNone(IpmiBackend(runner=lambda a, t: None).sample(60.0))
+        self.assertIsNone(IpmiBackend(runner=lambda a, t: "").sample(60.0))
+        self.assertIsNone(
+            IpmiBackend(runner=lambda a, t: "Command not supported").sample(60.0)
+        )
+
+    def test_it_asks_for_dcmi_without_a_shell(self):
+        seen = []
+        IpmiBackend(runner=lambda argv, timeout: seen.append(list(argv))).sample(60.0)
+        self.assertEqual(seen, [["ipmitool", "dcmi", "power", "reading"]])
+
+
+class NvmlTests(unittest.TestCase):
+    def test_every_gpu_adds_up(self):
+        backend = NvmlBackend(runner=lambda a, t: "45.2\n30.1\n")
+        reading = backend.sample(10.0)
+        self.assertAlmostEqual(reading.watts, 75.3)
+        self.assertTrue(reading.is_floor)
+
+    def test_a_gpu_that_reports_nothing_is_skipped(self):
+        backend = NvmlBackend(runner=lambda a, t: "[N/A]\n40.0\n")
+        self.assertAlmostEqual(backend.sample(10.0).watts, 40.0)
+
+    def test_no_driver_and_no_readable_gpu_are_no_reading(self):
+        self.assertIsNone(NvmlBackend(runner=lambda a, t: None).sample(10.0))
+        self.assertIsNone(NvmlBackend(runner=lambda a, t: "[N/A]\n").sample(10.0))
+
+
+class SmartPlugTests(unittest.TestCase):
+    def test_the_three_plugs_the_docstring_names(self):
+        cases = (
+            ({"power": 12.5}, "power"),
+            ({"apower": 12.5, "aenergy": {"total": 3.0}}, "apower"),
+            ({"StatusSNS": {"ENERGY": {"Power": 12.5}}}, "StatusSNS.ENERGY.Power"),
+        )
+        for payload, path in cases:
+            backend = SmartPlugBackend(
+                url="http://plug.local/meter/0",
+                power_path=path,
+                fetch=lambda url, timeout: payload,
+            )
+            reading = backend.sample(60.0)
+            self.assertAlmostEqual(reading.watts, 12.5, msg=path)
+            self.assertFalse(reading.is_floor, "the socket is the whole figure")
+
+    def test_an_unconfigured_plug_is_never_fetched(self):
+        calls = []
+
+        def fetch(url, timeout):
+            calls.append(url)
+            return {"power": 1}
+
+        self.assertIsNone(SmartPlugBackend(url="", fetch=fetch).sample(60.0))
+        self.assertEqual(calls, [], "no url, no request")
+
+    def test_a_socket_switched_off_is_not_a_zero_watt_machine(self):
+        backend = SmartPlugBackend(
+            url="http://plug.local/meter/0", fetch=lambda u, t: {"power": 0}
+        )
+        self.assertIsNone(backend.sample(60.0))
+
+    def test_an_unreachable_plug_or_a_wrong_path_is_no_reading(self):
+        url = "http://plug.local/meter/0"
+        self.assertIsNone(
+            SmartPlugBackend(url, fetch=lambda u, t: None).sample(60.0)
+        )
+        self.assertIsNone(
+            SmartPlugBackend(url, "watts", fetch=lambda u, t: {"power": 1}).sample(60.0)
+        )
+        self.assertIsNone(
+            SmartPlugBackend(url, "power", fetch=lambda u, t: {"power": "n/a"}).sample(60.0)
+        )
+
+    def test_only_http_urls_are_fetched(self):
+        """`requests` honours file:, so a mistyped url would read a local file."""
+        self.assertIsNone(http_get_json("file:///etc/passwd", 0.5))
+        self.assertIsNone(http_get_json("/etc/passwd", 0.5))
+
+    def test_dig_follows_dicts_and_list_indexes(self):
+        payload = {"a": [{"b": 7}]}
+        self.assertEqual(dig(payload, "a.0.b"), 7)
+        self.assertIsNone(dig(payload, "a.1.b"))
+        self.assertIsNone(dig(payload, "a.b"))
+        self.assertIsNone(dig(payload, ""))
+
+
+class RunCommandTests(unittest.TestCase):
+    def test_output_failure_and_a_missing_binary(self):
+        self.assertEqual(run_command(("echo", "hi"), 5.0), "hi\n")
+        self.assertIsNone(run_command(("false",), 5.0), "a non-zero exit says no")
+        self.assertIsNone(run_command(("nodo-no-such-binary-2b9f",), 5.0))
+        self.assertIsNone(run_command((), 5.0))
+
+
+class WithAdditionsTests(unittest.TestCase):
+    class Fake:
+        def __init__(self, reading, name="fake"):
+            self.name = name
+            self.reading = reading
+            self.calls = 0
+
+        def sample(self, elapsed_seconds):
+            self.calls += 1
+            return self.reading
+
+    def test_a_gpu_adds_to_a_package(self):
+        primary = EnergyReading(joules=600.0, watts=10.0, backend="rapl", is_floor=True)
+        gpu = self.Fake(
+            EnergyReading(joules=2400.0, watts=40.0, backend="nvml", is_floor=True)
+        )
+        combined = with_additions(primary, [gpu], 60.0)
+        self.assertAlmostEqual(combined.watts, 50.0)
+        self.assertAlmostEqual(combined.joules, 3000.0)
+        self.assertEqual(combined.backend, "rapl+nvml", "a sample says what built it")
+        self.assertTrue(combined.is_floor, "package plus GPU is still not the socket")
+
+    def test_a_whole_machine_reading_already_contains_the_gpu(self):
+        primary = EnergyReading(
+            joules=12000.0, watts=200.0, backend="smart_plug", is_floor=False
+        )
+        gpu = self.Fake(
+            EnergyReading(joules=2400.0, watts=40.0, backend="nvml", is_floor=True)
+        )
+        combined = with_additions(primary, [gpu], 60.0)
+        self.assertIs(combined, primary)
+        self.assertEqual(gpu.calls, 0, "not even asked, so it costs nothing")
+
+    def test_nothing_to_add_leaves_the_reading_alone(self):
+        primary = EnergyReading(joules=600.0, watts=10.0, backend="rapl", is_floor=True)
+        self.assertIs(with_additions(primary, [self.Fake(None)], 60.0), primary)
+        self.assertIs(with_additions(primary, [], 60.0), primary)
+        self.assertIsNone(with_additions(None, [self.Fake(None)], 60.0))
 
 
 class AttributionTests(unittest.TestCase):

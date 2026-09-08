@@ -20,11 +20,17 @@ from typing import Callable, Dict, List, Optional, Set
 
 from src.manager.energy.attribution import attribute
 from src.manager.energy.backends import (
+    DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
     EnergyBackend,
+    HwmonBackend,
+    IpmiBackend,
     ModelBackend,
+    NvmlBackend,
     RaplBackend,
+    SmartPlugBackend,
     first_reading,
     package_power_limit_watts,
+    with_additions,
 )
 from src.manager.energy.cgroup import (
     CpuWeightTracker,
@@ -221,9 +227,66 @@ def _busy_cores(cpu_percent: float) -> float:
     return max(0.0, float(cpu_percent)) / 100.0 * cores
 
 
+def _external_timeout() -> float:
+    return _as_float(
+        _setting("EXTERNAL_TIMEOUT_SECONDS", DEFAULT_EXTERNAL_TIMEOUT_SECONDS),
+        DEFAULT_EXTERNAL_TIMEOUT_SECONDS,
+    )
+
+
+@lru_cache(maxsize=1)
+def _measuring_backends() -> List[EnergyBackend]:
+    """The configured sources that measure, most complete first.
+
+    Order is the whole point: a plug reads the socket, a BMC reads the supply's
+    input, a rail and a CPU package read a part. `first_reading` takes the first
+    that answers, so the best figure the machine can give has to come first.
+
+    A source the operator has not configured is left out rather than asked and
+    ignored, which is what keeps a node that configures none of them from paying
+    for a subprocess or an HTTP request every tick. Built once: some of them hold
+    the previous counter, and config is read once per process anyway.
+    """
+    timeout = _external_timeout()
+    backends: List[EnergyBackend] = []
+
+    plug_url = str(_setting("SMART_PLUG_URL", "") or "").strip()
+    if plug_url:
+        backends.append(
+            SmartPlugBackend(
+                url=plug_url,
+                power_path=str(_setting("SMART_PLUG_POWER_PATH", "power") or "power"),
+                timeout_seconds=timeout,
+            )
+        )
+    if _as_bool(_setting("IPMI_ENABLED", False), False):
+        backends.append(IpmiBackend(timeout_seconds=timeout))
+
+    chip = str(_setting("HWMON_CHIP", "") or "").strip()
+    sensor = str(_setting("HWMON_SENSOR", "") or "").strip()
+    if chip and sensor:
+        backends.append(HwmonBackend(chip=chip, sensor=sensor))
+
+    backends.append(_rapl)
+    return backends
+
+
+@lru_cache(maxsize=1)
+def _additive_backends() -> List[EnergyBackend]:
+    """Sources whose draw adds to a partial reading instead of replacing it.
+
+    See `with_additions`: these are asked only when the measured figure is a
+    floor, since a source that already covers the machine has them in it.
+    """
+    if not _as_bool(_setting("NVML_ENABLED", False), False):
+        return []
+    return [NvmlBackend(timeout_seconds=_external_timeout())]
+
+
 def _backends(cpu_percent: float) -> List[EnergyBackend]:
-    return [
-        _rapl,
+    # The model goes last: it is the only one that answers without measuring, so
+    # it must not shadow a source that does.
+    return _measuring_backends() + [
         ModelBackend(
             idle_watts=_idle_watts(),
             load_watts=_load_watts(),
@@ -277,11 +340,14 @@ def _prime() -> None:
 
     The first call has no interval behind it. Pretending the sample covers
     SAMPLE_INTERVAL_SECONDS would invent joules for time that has not passed.
-    RAPL's first ``sample`` returns None for want of a previous counter, and is
-    called anyway so that counter lands. ``psutil.cpu_percent`` is primed for the
-    same reason: its first answer is a documented 0.0 with nothing behind it.
+    Every measuring source is sampled and the answer thrown away, because the
+    ones that read a counter -- RAPL, an hwmon energy sensor -- have nothing to
+    subtract from until they have read it once. ``psutil.cpu_percent`` is primed
+    for the same reason: its first answer is a documented 0.0 with nothing behind
+    it. The cost is one round of whatever the configured sources cost, once.
     """
-    _rapl.sample(1.0)
+    for backend in _measuring_backends():
+        backend.sample(1.0)
     _cpu_percent()
     usage = _instance_usage_usec()
     _cpu_weights.weights(usage, 0.0)
@@ -289,14 +355,22 @@ def _prime() -> None:
 
 def _sample(elapsed_seconds: float) -> None:
     cpu_percent = _cpu_percent()
-    reading = first_reading(_backends(cpu_percent), elapsed_seconds)
+    reading = with_additions(
+        first_reading(_backends(cpu_percent), elapsed_seconds),
+        _additive_backends(),
+        elapsed_seconds,
+    )
     if reading is None:
         return
     tariff = _tariff()
     usage = _instance_usage_usec()
     weights = _cpu_weights.weights(usage, elapsed_seconds)
     idle = 0.0
-    if reading.backend == "model":
+    if not reading.is_floor:
+        # A figure that covers the machine includes the draw it has at rest, and
+        # no instance caused that. A floor is a package or a rail, which an
+        # at-the-wall idle figure does not describe -- subtracting 30 W of house
+        # from an 8 W package would leave nothing to attribute at all.
         idle = min(_idle_watts(), reading.watts)
     attributed = attribute(
         node_watts=reading.watts,
