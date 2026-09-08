@@ -779,6 +779,20 @@ low_demand:
   LOW_DEMAND_CONSECUTIVE_POLLS: 3 # consecutive below-threshold, idle polls required before starting (hysteresis).
   # Future per-resource thresholds (e.g. GPU_MAX_PERCENT, DISK_MAX_PERCENT) go here.
 
+# Node electricity draw (issue #258). Informational only: watts, a derived currency
+# cost, and a per-instance CPU-share split. Does not feed MU pricing or low_demand.
+# RAPL (/sys/class/powercap/intel-rapl) is used when readable and is a CPU-package
+# *floor*, not wall-socket consumption. Otherwise idle + linear-in-CPU%.
+energy:
+  ENABLED: true
+  SAMPLE_INTERVAL_SECONDS: 60
+  PRICE_PER_KWH: 0.0          # 0 => show watts, omit currency cost. Persisted per sample.
+  CURRENCY: "EUR"             # Presentation only.
+  PRICE_SOURCE: "fixed"       # Only "fixed" is implemented (works offline).
+  # Model fallback when RAPL is unreadable (permissions, non-x86, VMs, WSL):
+  IDLE_WATTS: 30              # Watts at 0% CPU.
+  LOAD_WATTS: 120             # Extra watts at 100% CPU (so 100% ≈ IDLE+LOAD).
+
 publisher:
   PROVIDER: "github"
   REPOSITORY: "owner/repo"

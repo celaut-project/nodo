@@ -924,6 +924,22 @@ pub struct Instance {
     /// fresh one. Both `None` when there is no consumption row.
     pub consumption_samples: Option<u64>,
     pub consumption_age_secs: Option<f64>,
+    /// Latest attributed watts and share of node watts from `instance_energy`.
+    /// `None` when no energy sample has landed, and always `None` for delegated
+    /// instances (their draw is on the owning peer). A stored `0` is a real idle
+    /// reading after a sample; missing is unknown.
+    pub energy_watts: Option<f64>,
+    pub energy_share: Option<f64>,
+}
+
+/// Latest node-level energy sample. Cost is derived from watts * price, never stored.
+#[derive(Debug, Clone, Default)]
+pub struct NodeEnergy {
+    pub watts: Option<f64>,
+    pub price_per_kwh: f64,
+    pub currency: String,
+    pub backend: String,
+    pub is_floor: bool,
 }
 
 impl Instance {
@@ -1832,6 +1848,8 @@ pub struct App {
     pub ram_history: VecDeque<u64>,
     pub stats: DashboardStats,
     pub node_info: NodeInfo,
+    /// Latest energy sample (issue #258). Missing until the node has written a row.
+    pub node_energy: NodeEnergy,
     pub paths: Paths,
     pub input_mode: InputMode,
     pub input: String,
@@ -1920,6 +1938,7 @@ impl Default for App {
                 service_status: "checking…".to_string(),
                 ..NodeInfo::default()
             },
+            node_energy: NodeEnergy::default(),
             paths,
             input_mode: InputMode::Normal,
             input: String::new(),
@@ -3694,6 +3713,7 @@ impl App {
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
+        self.node_energy = get_node_energy(&self.paths);
         // After the lists, since a selection that vanished takes its detail with it.
         self.load_selection_details();
         self.node_logs = read_last_lines(&self.paths.log, 250).unwrap_or_default();
@@ -4571,9 +4591,19 @@ fn get_instances(
                 mu_per_hour: mu_per_second.map(|rate| rate * 3600.0),
                 consumption_samples: consumption_samples.map(|count| count as u64),
                 consumption_age_secs: consumption_age_secs.map(|secs| secs as f64),
+                energy_watts: None,
+                energy_share: None,
             })
         })?
         .collect::<SqlResult<Vec<_>>>()?;
+
+    let energy = get_instance_energy_map(&connection);
+    for instance in &mut instances {
+        if let Some((watts, share)) = energy.get(&instance.id) {
+            instance.energy_watts = Some(*watts);
+            instance.energy_share = Some(*share);
+        }
+    }
 
     // Delegated (remote) instances live on other peers. The table carries no
     // balance / memory / disk columns, and a remote balance needs an async gRPC call
@@ -4629,10 +4659,61 @@ fn get_delegated_instances(
                 mu_per_hour: None,
                 consumption_samples: None,
                 consumption_age_secs: None,
+                energy_watts: None,
+                energy_share: None,
             })
         })?
         .collect();
     instances
+}
+
+fn get_instance_energy_map(connection: &Connection) -> HashMap<String, (f64, f64)> {
+    let mut out = HashMap::new();
+    if !table_exists(connection, "instance_energy") {
+        return out;
+    }
+    let Ok(mut statement) = connection.prepare(
+        "SELECT instance_id, watts, share FROM instance_energy",
+    ) else {
+        return out;
+    };
+    if let Ok(rows) = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, f64>(1)?,
+            row.get::<_, f64>(2)?,
+        ))
+    }) {
+        for row in rows.flatten() {
+            out.insert(row.0, (row.1, row.2));
+        }
+    }
+    out
+}
+
+fn get_node_energy(paths: &Paths) -> NodeEnergy {
+    let Ok(connection) = Connection::open(&paths.database) else {
+        return NodeEnergy::default();
+    };
+    if !table_exists(&connection, "energy_consumption") {
+        return NodeEnergy::default();
+    }
+    connection
+        .query_row(
+            "SELECT watts, price_per_kwh, currency, backend, is_floor
+             FROM energy_consumption ORDER BY id DESC LIMIT 1",
+            [],
+            |row| {
+                Ok(NodeEnergy {
+                    watts: row.get(0)?,
+                    price_per_kwh: row.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+                    currency: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    backend: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    is_floor: row.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
+                })
+            },
+        )
+        .unwrap_or_default()
 }
 
 /// Whether a table exists, so a query can degrade gracefully against a database the
@@ -5868,6 +5949,8 @@ mod tests {
                 mu_per_hour: None,
                 consumption_samples: None,
                 consumption_age_secs: None,
+                energy_watts: None,
+                energy_share: None,
             }
         }
 
