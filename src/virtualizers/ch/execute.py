@@ -40,14 +40,8 @@ from src.virtualizers.microvm.runtime_state import (
     save_booting_state,
     save_runtime_state,
 )
-from src.virtualizers.microvm.virtiofs import (
-    attach_virtiofs_backends,
-    build_guest_mount_plan,
-    child_guest_mounts,
-    parent_export_mounts,
-    shared_fs_base_dir,
-    GUEST_MOUNT_PLAN_PATH,
-)
+from src.virtualizers.microvm.shares import materialize_shares
+from src.virtualizers.microvm.virtiofs import share_bytes, shared_fs_base_dir
 
 env_manager = ConfigManager()
 
@@ -59,7 +53,6 @@ KERNEL_CMDLINE_EXTRA = env_manager.get("virtualizers.ch.KERNEL_CMDLINE_EXTRA", "
 # Where a guest's serial output lands inside its own runtime directory. Not a config
 # key: see _resolve_ch_stream_args.
 SERIAL_LOG_NAME = "cloud-hypervisor.serial.log"
-VIRTIOFSD_BINARY = env_manager.get("virtualizers.ch.VIRTIOFSD_BINARY", "virtiofsd")
 GUEST_NETWORK_READY_TIMEOUT_S = env_manager.get(
     "virtualizers.ch.GUEST_NETWORK_READY_TIMEOUT_S",
     8,
@@ -282,50 +275,20 @@ def execute(
             f"{rootfs.GUEST_ENTRYPOINT_PATH}"
         )
 
-        # Shared filesystems (parent -> child inheritance). A service exports its
-        # `shared=true` directories to the children it launches, and inherits its
-        # parent's exports for its own `guest=true` directories. The exporting
-        # parent owns the share (share id = H(this_instance_id, path)); a child
-        # reconstructs the same id from its `father_id`, so it can only attach to a
-        # directory its own parent exported. VirtioFS is the backend here only —
-        # the service spec never mentions it. Ordinary services declare neither and
-        # this whole block is a no-op.
-        shared_fs_dir = str(shared_fs_base_dir(paths.cache_root()))
-        virtiofs_mounts = []
-        exported_share_ids: List[str] = []
-        if shared_fs_dir:
-            export_mounts = parent_export_mounts(service, vmachine_id, shared_fs_dir)
-            guest_mounts = child_guest_mounts(service, father_id, shared_fs_dir)
-            share_mounts = export_mounts + guest_mounts
-            if share_mounts:
-                log.LOGGER(
-                    f"[CH][{vmachine_id}] shared filesystems: {len(export_mounts)} exported, "
-                    f"{len(guest_mounts)} inherited from father={father_id}"
-                )
-                fs_device_args, virtiofs_mounts, _ = attach_virtiofs_backends(
-                    share_mounts,
-                    base_dir=shared_fs_dir,
-                    socket_dir=str(paths.control_socket_dir()),
-                    virtiofsd_binary=VIRTIOFSD_BINARY,
-                    logger_fn=log.LOGGER,
-                )
-                exported_share_ids = [m.share_id_hex for m in export_mounts]
-                mount_plan_host_path = runtime_dir / ".__nodo_virtiofs"
-                with open(mount_plan_host_path, "w", encoding="utf-8") as f:
-                    f.write(build_guest_mount_plan(share_mounts))
-                rootfs.debugfs_write(
-                    image_path=rootfs_path,
-                    host_file=mount_plan_host_path,
-                    guest_target=GUEST_MOUNT_PLAN_PATH,
-                )
-                log.LOGGER(
-                    f"[CH][{vmachine_id}] virtiofs devices attached: {len(share_mounts)}; "
-                    f"guest mount plan injected: {GUEST_MOUNT_PLAN_PATH}"
-                )
-            else:
-                fs_device_args = []
-        else:
-            fs_device_args = []
+        # Shared filesystems (parent -> child inheritance), whose whole model
+        # lives in src/utils/shared_filesystems.py and is materialized the same
+        # way for both hypervisors. VirtioFS is the backend only -- the service
+        # spec never mentions it -- and an ordinary service that declares no
+        # share gets an empty setup here.
+        shares = materialize_shares(
+            service=service,
+            config=config,
+            vmachine_id=vmachine_id,
+            father_id=father_id,
+            rootfs_path=rootfs_path,
+            runtime_dir=runtime_dir,
+            log_prefix=log_prefix,
+        )
 
         tap_name = network.create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
@@ -363,6 +326,15 @@ def execute(
         # instance hold more disk than it asked for, and the manifest figure would bill
         # it for the smaller number.
         disk_b = rootfs.runtime_disk_bytes(log_prefix=log_prefix, rootfs_path=rootfs_path)
+        # A share the instance exports is its own storage: seeded from its image, at
+        # the path it declared, and only it can be there for as long as the share
+        # is. So the disk it is registered with -- what the host's ceiling adds up
+        # and what it is charged for -- covers the directory as well as the image
+        # from the first tick, rather than only from the first time the
+        # maintenance sweep re-derives it.
+        disk_b += share_bytes(
+            str(shared_fs_base_dir(paths.cache_root())), shares.exported_share_ids
+        )
         resolved_resources = celaut.Sysresources(
             cpu_period=cpu_period,
             cpu_quota=cpu_quota,
@@ -425,7 +397,7 @@ def execute(
             "--cmdline",
             kernel_cmdline,
         ]
-        start_command.extend(fs_device_args)
+        start_command.extend(shares.fs_device_args)
         start_command.extend(stream_args)
         log.LOGGER(f"[CH][{vmachine_id}] launching cloud-hypervisor: {' '.join(start_command)}")
 
@@ -464,6 +436,8 @@ def execute(
             bridge=network.NETWORK_BRIDGE_NAME,
             cleanup_rules=cleanup_rules,
             rule_comment_prefix=fw_policy.vm_comment_prefix(vmachine_id),
+            virtiofs=shares.mounts_state,
+            exported_shares=shares.exported_share_ids,
         )
         if register_instance:
             register_instance(vmachine_id, vm_ip, resolved_resources)
@@ -574,8 +548,8 @@ def execute(
                 # Absent on an instance launched before the reserve existed, which was
                 # booted at exactly its usable figure and so has none.
                 "guest_kernel_reserve_bytes": guest_kernel_reserve_b,
-                "virtiofs": virtiofs_mounts,
-                "exported_shares": exported_share_ids,
+                "virtiofs": shares.mounts_state,
+                "exported_shares": shares.exported_share_ids,
                 "bridge": network.NETWORK_BRIDGE_NAME,
                 "serial_log": str(serial_log_path) if serial_log_path else "",
                 "stdout_log": str(stdout_path),

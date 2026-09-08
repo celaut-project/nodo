@@ -24,6 +24,7 @@ from src.utils.monetary import format_mu
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing, log_java_dependency_warning
+from src.virtualizers.microvm.shares import resolved_disk_bytes
 from src.virtualizers.interface import (
     janitor_cleanup_orphans as vm_janitor_cleanup_orphans,
     maintain as vm_maintain,
@@ -204,6 +205,25 @@ def maintain_vmachines(debug_mode: bool=False):
         # launch, so the tick never has to read a service off disk to price the
         # instance running it. A row from before the column existed reports None and
         # is charged the node's scalar memory price, exactly as it was.
+        # A shared filesystem is part of the instance that exports it, and unlike
+        # that instance's image -- a fixed-size file -- it grows after the launch
+        # resolved how much disk the instance holds. So an exporter's disk is
+        # re-derived here and written back to its row, which is the one figure
+        # everything else reads: what this tick charges, what the host's disk
+        # ceiling adds up, and what the next launch is admitted against. An
+        # instance that exports nothing is not measured and its row is not
+        # touched.
+        resolved_disk = resolved_disk_bytes(vmachine_id)
+        if resolved_disk is not None and resolved_disk != int(sys_req['disk_space'] or 0):
+            if debug_mode:
+                log.LOGGER(
+                    f"{vmachine_id} disk with its shares: {resolved_disk} B "
+                    f"(row had {sys_req['disk_space'] or 0} B)"
+                )
+            sc.update_sys_req(id=vmachine_id, mem_limit=None, disk_space=resolved_disk)
+            sys_req = dict(sys_req)
+            sys_req['disk_space'] = resolved_disk
+
         charge_mu = compute_maintenance_cost(
             system_resources=celaut.Sysresources(
                 mem_limit=sys_req['mem_limit'] or 0,

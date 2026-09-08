@@ -133,10 +133,12 @@ IPs and MACs are derived from the `vmachine_id` without DHCP to ensure stability
 
 ## Shared Filesystems (VirtioFS backend)
 
-`src/virtualizers/microvm/virtiofs.py` materializes **parent → child shared
-filesystems** for microVM guests, whichever hypervisor booted them.
-This is purely a backend: the semantics (the `shared`/`guest`/`access` xattrs,
-share identity, node co-location) live in `src/utils/shared_filesystems.py`, and
+`src/virtualizers/microvm/shares.py` materializes **parent → child shared
+filesystems** for microVM guests, whichever hypervisor booted them, over the
+virtio-fs backend in `src/virtualizers/microvm/virtiofs.py`.
+This is purely a backend: the semantics (the `shared`/`guest`/`access` /
+`share_tag`/`share_env` xattrs, share identity) live in
+`src/utils/shared_filesystems.py`, authorization in `src/manager/shares.py`, and
 the service specification never mentions VirtioFS. See
 [`docs/SHARED_FILESYSTEMS.md`](../../../docs/SHARED_FILESYSTEMS.md) for the full
 model. Configure the daemon binary with `virtualizers.ch.VIRTIOFSD_BINARY`

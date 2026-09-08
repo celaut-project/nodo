@@ -51,14 +51,8 @@ from src.virtualizers.microvm.runtime_state import (
     save_booting_state,
     delete_runtime_state,
 )
-from src.virtualizers.microvm.virtiofs import (
-    attach_virtiofs_backends,
-    build_guest_mount_plan,
-    child_guest_mounts,
-    parent_export_mounts,
-    shared_fs_base_dir,
-    GUEST_MOUNT_PLAN_PATH,
-)
+from src.virtualizers.microvm.shares import materialize_shares
+from src.virtualizers.microvm.virtiofs import share_bytes, shared_fs_base_dir
 from src.virtualizers.qemu.config import (
     QEMU_CONSOLE_BY_ARCH,
     QEMU_MACHINE_BY_ARCH,
@@ -73,7 +67,6 @@ from src.virtualizers.firewall import resolve_slot_transport_protocols
 env_manager = ConfigManager()
 sc = SQLConnection()
 
-VIRTIOFSD_BINARY = env_manager.get("virtualizers.ch.VIRTIOFSD_BINARY", "virtiofsd")
 QEMU_CPU_MODEL = env_manager.get("virtualizers.qemu.CPU_MODEL", "max")
 # TCG is slow to reach console; give the guest more time than the KVM default.
 QEMU_NETWORK_READY_TIMEOUT_S = env_manager.get(
@@ -455,37 +448,18 @@ def execute(
         log.LOGGER(f"[QEMU][{vmachine_id}] guest metadata injected (config/entrypoint)")
 
         # Shared filesystems (parent -> child inheritance). Identical semantics to
-        # CH; only the guest device wiring (vhost-user-fs vs CH --fs) differs.
-        shared_fs_dir = str(shared_fs_base_dir(paths.cache_root()))
-        virtiofs_mounts: List[dict] = []
-        virtiofs_args: List[str] = []
-        exported_share_ids: List[str] = []
-        share_mounts: List = []
-        if shared_fs_dir:
-            export_mounts = parent_export_mounts(service, vmachine_id, shared_fs_dir)
-            guest_mounts = child_guest_mounts(service, father_id, shared_fs_dir)
-            share_mounts = export_mounts + guest_mounts
-            if share_mounts:
-                log.LOGGER(
-                    f"[QEMU][{vmachine_id}] shared filesystems: {len(export_mounts)} exported, "
-                    f"{len(guest_mounts)} inherited from father={father_id}"
-                )
-                _, virtiofs_mounts, _ = attach_virtiofs_backends(
-                    share_mounts,
-                    base_dir=shared_fs_dir,
-                    socket_dir=str(paths.control_socket_dir()),
-                    virtiofsd_binary=VIRTIOFSD_BINARY,
-                    logger_fn=log.LOGGER,
-                )
-                exported_share_ids = [m.share_id_hex for m in export_mounts]
-                mount_plan_host_path = runtime_dir / ".__nodo_virtiofs"
-                with open(mount_plan_host_path, "w", encoding="utf-8") as f:
-                    f.write(build_guest_mount_plan(share_mounts))
-                rootfs.debugfs_write(
-                    image_path=rootfs_path,
-                    host_file=mount_plan_host_path,
-                    guest_target=GUEST_MOUNT_PLAN_PATH,
-                )
+        # CH, and the same materialization: only the guest device wiring
+        # (vhost-user-fs vs CH's --fs) is this backend's own, built below from
+        # the mount state.
+        shares = materialize_shares(
+            service=service,
+            config=config,
+            vmachine_id=vmachine_id,
+            father_id=father_id,
+            rootfs_path=rootfs_path,
+            runtime_dir=runtime_dir,
+            log_prefix=log_prefix,
+        )
 
         tap_name = network.create_tap(vmachine_id)
         log.LOGGER(f"[QEMU][{vmachine_id}] TAP created and attached: {tap_name}")
@@ -526,6 +500,15 @@ def execute(
         # from config would drift the moment an operator edits the reserve.
         guest_kernel_reserve_b = boot_mem_b - usable_ceiling_b
         disk_b = rootfs.runtime_disk_bytes(log_prefix=log_prefix, rootfs_path=rootfs_path)
+        # A share the instance exports is its own storage: seeded from its image, at
+        # the path it declared, and only it can be there for as long as the share
+        # is. So the disk it is registered with -- what the host's ceiling adds up
+        # and what it is charged for -- covers the directory as well as the image
+        # from the first tick, rather than only from the first time the
+        # maintenance sweep re-derives it.
+        disk_b += share_bytes(
+            str(shared_fs_base_dir(paths.cache_root())), shares.exported_share_ids
+        )
         # Registered at the usable ceiling, not at `at_init`: until the balloon has
         # actually taken the headroom back, the guest holds all of it, and an
         # instance is priced by what it holds. The correction below is a *shrink* of
@@ -545,8 +528,8 @@ def execute(
         netmask = str(guest_network.netmask)
         cmdline = build_kernel_cmdline(arch=arch, vm_ip=vm_ip, netmask=netmask)
 
-        has_shared_mem = bool(share_mounts)
-        virtiofs_args = build_virtiofs_args(virtiofs_mounts, mem_mib) if has_shared_mem else []
+        has_shared_mem = shares.any
+        virtiofs_args = build_virtiofs_args(shares.mounts_state, mem_mib) if has_shared_mem else []
 
         start_command = build_qemu_command(
             qemu_binary=qemu_binary,
@@ -599,6 +582,8 @@ def execute(
             bridge=network.NETWORK_BRIDGE_NAME,
             cleanup_rules=cleanup_rules,
             rule_comment_prefix=fw_policy.vm_comment_prefix(vmachine_id),
+            virtiofs=shares.mounts_state,
+            exported_shares=shares.exported_share_ids,
         )
         registered = False
         if register_instance:
@@ -730,8 +715,8 @@ def execute(
                 # into a guest allocation, so a grow to the declared ceiling really
                 # leaves the service that much to allocate.
                 "guest_kernel_reserve_bytes": guest_kernel_reserve_b,
-                "virtiofs": virtiofs_mounts,
-                "exported_shares": exported_share_ids,
+                "virtiofs": shares.mounts_state,
+                "exported_shares": shares.exported_share_ids,
                 "bridge": network.NETWORK_BRIDGE_NAME,
                 "serial_log": str(serial_log_path),
                 "stdout_log": str(stdout_path),

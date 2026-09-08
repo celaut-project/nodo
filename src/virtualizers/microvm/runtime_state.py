@@ -101,12 +101,14 @@ def save_booting_state(
     bridge: str,
     cleanup_rules: List[Any],
     rule_comment_prefix: str,
+    virtiofs: Optional[List[Any]] = None,
+    exported_shares: Optional[List[str]] = None,
 ) -> None:
     """Record a VM the instant its hypervisor process exists, before it is ready.
 
     The full state is written at the end of ``execute``, once the guest answers on
     the network -- seconds later, and after the guest has already had time to call
-    the node. Two readers cannot wait that long:
+    the node. Three readers cannot wait that long:
 
     * the maintenance sweep prunes any instance in the database that has no runtime
       state (``unhealthy reason=runtime_state_missing``), so an instance recorded
@@ -114,7 +116,15 @@ def save_booting_state(
       would destroy it mid-boot;
     * the janitor kills any runtime state with no database row, so the two records
       belong to the same moment -- this one is written first and exempted from that
-      rule while ``booting`` is set (see ``maintain.orphan_reason``).
+      rule while ``booting`` is set (see ``maintain.orphan_reason``);
+    * a teardown reads ``virtiofs`` to release the shared filesystems a VM holds.
+      They are reserved before the VM is built, so a guest killed in this window
+      already holds them, and a state that did not carry them would leak a
+      virtiofsd daemon and a directory nobody would ever collect.
+
+    ``exported_shares`` travels with it for the same reason on the accounting
+    side: the maintenance tick charges an exporter for the bytes its shares hold,
+    and a VM is chargeable from the moment it exists.
 
     ``control_socket`` is deliberately absent: the hypervisor creates that socket a
     moment after it starts, and ``maintain`` reads a recorded-but-missing socket as
@@ -134,6 +144,8 @@ def save_booting_state(
             "bridge": bridge,
             "cleanup_rules": cleanup_rules,
             "rule_comment_prefix": rule_comment_prefix,
+            "virtiofs": virtiofs or [],
+            "exported_shares": exported_shares or [],
             "booting": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         },
