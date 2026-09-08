@@ -1,10 +1,11 @@
-"""Energy cost monitoring (issue #258) — math, RAPL, schema, tick boundary.
+"""Energy cost monitoring (issue #258) — the measurement math, RAPL, and the split.
 
-These tests import the energy package's leaf modules, not ``src.manager.maintain``
-or ``sql_connection``, so they run on a Mac Python that lacks ``bee_rpc``.
+These tests import the energy package's leaf modules, not ``src.manager.maintain`` or
+``sql_connection``, so they need neither ``bee_rpc`` nor a ``config.yaml``. The tables
+are plain entries in ``migrate.TABLES`` and carry no logic to test.
 """
 
-import sqlite3
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,10 +25,6 @@ from src.manager.energy.price import (
     cost_from_energy,
     cost_per_hour,
     energy_kwh,
-)
-from src.manager.energy.schema import (
-    energy_consumption_is_legacy,
-    reshape_energy_schema,
 )
 
 
@@ -160,59 +157,6 @@ class PriceTests(unittest.TestCase):
         self.assertEqual(tariff.price_per_kwh, 0.0)
         self.assertEqual(tariff.currency, "EUR")
         self.assertEqual(tariff.source, "fixed")
-
-
-class SchemaTests(unittest.TestCase):
-    def test_legacy_table_is_dropped_and_reshaped(self):
-        conn = sqlite3.connect(":memory:")
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE energy_consumption (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp DATETIME,
-                cpu_percent REAL,
-                memory_usage REAL,
-                power_consumption REAL,
-                cost REAL
-            )
-            """
-        )
-        cursor.execute(
-            "INSERT INTO energy_consumption (power_consumption, cost) VALUES (12, 0.5)"
-        )
-        cursor.execute("CREATE TABLE monitoring_config (id INTEGER PRIMARY KEY)")
-        self.assertTrue(energy_consumption_is_legacy(cursor))
-        reshape_energy_schema(cursor)
-        conn.commit()
-
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='monitoring_config'"
-        )
-        self.assertIsNone(cursor.fetchone())
-        cursor.execute("PRAGMA table_info(energy_consumption)")
-        columns = {row[1] for row in cursor.fetchall()}
-        self.assertIn("energy_joules", columns)
-        self.assertNotIn("power_consumption", columns)
-        self.assertNotIn("cost", columns)
-        cursor.execute("SELECT COUNT(*) FROM energy_consumption")
-        self.assertEqual(cursor.fetchone()[0], 0)
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='instance_energy'"
-        )
-        self.assertIsNotNone(cursor.fetchone())
-
-        # Idempotent.
-        reshape_energy_schema(cursor)
-        cursor.execute("PRAGMA table_info(energy_consumption)")
-        columns_again = {row[1] for row in cursor.fetchall()}
-        self.assertEqual(columns, columns_again)
-
-    def test_fresh_db_is_not_legacy(self):
-        conn = sqlite3.connect(":memory:")
-        cursor = conn.cursor()
-        reshape_energy_schema(cursor)
-        self.assertFalse(energy_consumption_is_legacy(cursor))
 
 
 class CgroupWeightTests(unittest.TestCase):
