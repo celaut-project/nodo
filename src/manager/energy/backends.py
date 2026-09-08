@@ -72,12 +72,28 @@ def _read_int(path: Path) -> Optional[int]:
         return None
 
 
-def package_domain_dirs(root: Path) -> List[Path]:
-    """Package-level RAPL domains under ``root``.
+def _read_text(path: Path) -> Optional[str]:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
 
-    ``intel-rapl:0``, ``intel-rapl:1`` are packages. ``intel-rapl:0:0`` is a
-    subdomain (DRAM, core, …) already counted in the package total; including
-    those would double-count.
+
+def package_domain_dirs(root: Path) -> List[Path]:
+    """Package-level RAPL domains under ``root``, as their ``name`` file declares.
+
+    A control type holds one directory per domain, named after itself: ``<ct>:0``
+    is a top-level domain and ``<ct>:0:0`` a subdomain of it (dram, core, uncore)
+    whose energy the package total already carries, so counting a subdomain would
+    count it twice. Depth is read from the number of colons rather than a hardcoded
+    prefix, since the control type is named after the driver -- ``intel-rapl`` even
+    on AMD.
+
+    Which top-level domain is a *package* cannot be inferred from its position:
+    ``<ct>:1`` is the second socket on a two-socket board, but on a client CPU it
+    is commonly ``psys``, the whole-platform domain, which *contains* the package
+    instead of sitting beside it. Summing the two would report the platform twice
+    over. So the ``name`` file decides and only ``package*`` is taken.
     """
     if not root.is_dir():
         return []
@@ -87,42 +103,67 @@ def package_domain_dirs(root: Path) -> List[Path]:
     except OSError:
         return []
     for path in sorted(entries, key=lambda p: p.name):
-        name = path.name
-        if not name.startswith("intel-rapl:"):
+        if len(path.name.split(":")) != 2:
             continue
-        rest = name.split("intel-rapl:", 1)[1]
-        if ":" in rest:
+        if not path.is_dir():
             continue
-        if path.is_dir():
-            packages.append(path)
+        name = _read_text(path / "name")
+        if not name or not name.startswith("package"):
+            continue
+        packages.append(path)
     return packages
 
 
-def read_package_counters(root: Path) -> Optional[Tuple[int, int]]:
-    """Sum ``energy_uj`` and ``max_energy_range_uj`` across package domains.
+def read_package_counters(root: Path) -> Dict[str, Tuple[int, int]]:
+    """``(energy_uj, max_energy_range_uj)`` per package domain, keyed by directory.
 
-    Returns None when no package is readable. A package missing
-    ``max_energy_range_uj`` still contributes its energy; wrap handling then
-    has no range for that package and a wrap is treated as unreadable.
+    Kept per domain rather than summed, because each counter wraps on its own
+    ``max_energy_range_uj``: a total tells you a wrap happened somewhere but not in
+    which domain, and the range to add back is the wrapping domain's alone.
+
+    A domain whose ``energy_uj`` cannot be read is left out. One with no readable
+    range gets 0, which :func:`wrapped_delta` reads as "a wrap here cannot be
+    interpreted".
     """
-    total_uj = 0
-    total_range = 0
-    saw_any = False
-    ranges_complete = True
+    counters: Dict[str, Tuple[int, int]] = {}
     for domain in package_domain_dirs(root):
         energy = _read_int(domain / "energy_uj")
         if energy is None:
             continue
-        saw_any = True
-        total_uj += energy
         rng = _read_int(domain / "max_energy_range_uj")
-        if rng is None or rng <= 0:
-            ranges_complete = False
-        else:
-            total_range += rng
-    if not saw_any:
-        return None
-    return total_uj, total_range if ranges_complete else 0
+        counters[domain.name] = (energy, rng if rng and rng > 0 else 0)
+    return counters
+
+
+def package_power_limit_watts(root: Path = RAPL_ROOT) -> Optional[float]:
+    """Sustained power limit the CPU packages declare, in watts, or None.
+
+    Each domain carries its constraints as ``constraint_<n>_name`` and
+    ``constraint_<n>_power_limit_uw``; the one named ``long_term`` is the package's
+    sustained ceiling, near enough its TDP. On a two-socket board the limits add up
+    the way the counters do.
+
+    Worth having because of an asymmetry in the permissions: ``energy_uj`` is
+    root-only on current kernels, while the constraint files are world-readable. A
+    node that cannot learn what it is drawing can still learn what it is allowed to
+    draw, which is a real per-machine number where the alternative is a guess.
+
+    It is a *package* ceiling, so it says nothing about RAM, disks, fans or the
+    power supply's losses, and nothing about idle draw either.
+    """
+    total = 0.0
+    for domain in package_domain_dirs(root):
+        limit_uw = None
+        for constraint in sorted(domain.glob("constraint_*_name")):
+            if _read_text(constraint) != "long_term":
+                continue
+            prefix = constraint.name[: -len("_name")]
+            limit_uw = _read_int(domain / f"{prefix}_power_limit_uw")
+            break
+        if limit_uw is None or limit_uw <= 0:
+            return None
+        total += limit_uw / 1_000_000.0
+    return total if total > 0 else None
 
 
 def wrapped_delta(previous: int, current: int, max_range: int) -> Optional[int]:
@@ -140,31 +181,47 @@ def wrapped_delta(previous: int, current: int, max_range: int) -> Optional[int]:
 
 
 class RaplBackend:
-    """CPU-package RAPL. Readings are a floor, not wall-socket watts."""
+    """CPU-package RAPL. Readings are a floor, not wall-socket watts.
+
+    Holds the previous counter of every package domain, so a two-socket board is
+    two deltas added together and a wrap is resolved against the range of the
+    domain that wrapped.
+    """
 
     name = "rapl"
 
     def __init__(self, root: Path = RAPL_ROOT):
         self.root = Path(root)
-        self._previous_uj: Optional[int] = None
-        self._max_range_uj: int = 0
+        self._previous_uj: Optional[Dict[str, int]] = None
 
     def sample(self, elapsed_seconds: float) -> Optional[EnergyReading]:
         counters = read_package_counters(self.root)
-        if counters is None:
+        if not counters:
             return None
-        current_uj, max_range_uj = counters
         previous = self._previous_uj
-        self._previous_uj = current_uj
-        self._max_range_uj = max_range_uj
-        if previous is None:
+        self._previous_uj = {
+            domain: energy for domain, (energy, _) in counters.items()
+        }
+        if previous is None or elapsed_seconds <= 0:
             return None
-        if elapsed_seconds <= 0:
+        total_uj = 0
+        matched = 0
+        for domain, (current_uj, max_range_uj) in counters.items():
+            before = previous.get(domain)
+            if before is None:
+                # A domain that appeared mid-run has no delta of its own yet.
+                continue
+            delta_uj = wrapped_delta(before, current_uj, max_range_uj)
+            if delta_uj is None:
+                # An uninterpretable wrap makes the whole interval unmeasurable:
+                # reporting the other domains alone would understate the package
+                # total and read as a drop in draw that did not happen.
+                return None
+            total_uj += delta_uj
+            matched += 1
+        if matched == 0:
             return None
-        delta_uj = wrapped_delta(previous, current_uj, max_range_uj)
-        if delta_uj is None:
-            return None
-        joules = delta_uj / MICROJOULES_PER_JOULE
+        joules = total_uj / MICROJOULES_PER_JOULE
         watts = joules / elapsed_seconds
         if watts < 0:
             return None
@@ -177,11 +234,30 @@ class RaplBackend:
 
 
 class ModelBackend:
-    """Idle + linear-in-utilisation estimator. Always available.
+    """Idle + linear-in-utilisation estimator, for machines with no counter.
 
-    ``cpu_percent_fn`` must be non-blocking. ``psutil.cpu_percent(interval=None)``
-    returns 0.0 on the first call; that is accepted (the sample then reports
-    idle watts only) rather than sleeping 100ms on the manager thread.
+    Two coefficients define a straight line: ``idle_watts`` at 0% CPU and
+    ``idle_watts + load_watts`` at 100%. Both are **calibration inputs**, not
+    tuning knobs -- they come from a meter at the wall, read once with the machine
+    quiet and once with every core busy. Guessing them is not a smaller version of
+    measuring them: a figure that suits a mid-range desktop is an order of
+    magnitude out on a Raspberry Pi and half of what a two-socket server idles at.
+
+    ``idle_watts`` of 0 means uncalibrated, and ``sample`` then answers None so the
+    node reports nothing rather than a number nobody measured. Idle is the
+    coefficient that has to come from a human: the load term can be taken from the
+    package's own declared ceiling (:func:`package_power_limit_watts`), but no
+    machine publishes what it burns doing nothing.
+
+    Even calibrated, the line only meets the curve at its two ends. Power goes with
+    V²f and voltage climbs with frequency, so the last points of utilisation cost
+    far more watts than the first; ``cpu_percent`` averages over cores, so four
+    cores pinned and eight half-busy read the same; and RAM, disk and GPU are not
+    in the formula at all. It is an order of magnitude, not a measurement, which is
+    what ``is_floor=False`` and the TUI's "model estimate" label say.
+
+    ``cpu_percent_fn`` must be non-blocking, so the manager thread never sleeps in
+    here for an interval.
     """
 
     name = "model"

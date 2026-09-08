@@ -32,12 +32,24 @@ from src.manager.energy.price import (
 )
 
 
-def _rapl_tree(root: Path, packages):
-    """Write fake intel-rapl package dirs. ``packages`` is {name: (uj, max_uj)}."""
+MONITOR_IMPORT_ERROR = None
+try:
+    from src.manager.energy import monitor as energy_monitor
+except Exception as import_exc:  # pragma: no cover - needs a readable config.yaml
+    MONITOR_IMPORT_ERROR = import_exc
+
+
+def _rapl_tree(root: Path, domains):
+    """Write a fake powercap control type. ``domains`` maps directory name to
+    ``(uj, max_uj)``, or to ``(uj, max_uj, name)`` to set the ``name`` file to
+    something other than a package (``psys``, ``dram``, …)."""
     root.mkdir(parents=True, exist_ok=True)
-    for name, (energy_uj, max_uj) in packages.items():
-        domain = root / name
+    for index, (directory, spec) in enumerate(domains.items()):
+        energy_uj, max_uj = spec[0], spec[1]
+        declared = spec[2] if len(spec) > 2 else f"package-{index}"
+        domain = root / directory
         domain.mkdir(parents=True, exist_ok=True)
+        (domain / "name").write_text(declared, encoding="utf-8")
         (domain / "energy_uj").write_text(str(energy_uj), encoding="utf-8")
         if max_uj is not None:
             (domain / "max_energy_range_uj").write_text(str(max_uj), encoding="utf-8")
@@ -51,12 +63,41 @@ class RaplTests(unittest.TestCase):
                 root,
                 {
                     "intel-rapl:0": (10, 100),
-                    "intel-rapl:0:0": (3, 100),
+                    "intel-rapl:0:0": (3, 100, "dram"),
                     "intel-rapl:1": (5, 100),
                 },
             )
             names = [p.name for p in package_domain_dirs(root)]
             self.assertEqual(names, ["intel-rapl:0", "intel-rapl:1"])
+
+    def test_a_platform_domain_is_not_a_package(self):
+        """`<ct>:1` is a second socket on a server and `psys` on a client CPU.
+
+        psys covers the package, so adding the two reports the machine twice.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _rapl_tree(
+                root,
+                {
+                    "intel-rapl:0": (10, 100),
+                    "intel-rapl:1": (5, 100, "psys"),
+                },
+            )
+            names = [p.name for p in package_domain_dirs(root)]
+            self.assertEqual(names, ["intel-rapl:0"])
+
+    def test_amd_layout_is_read_by_name_not_by_prefix(self):
+        """AMD Zen goes through `intel_rapl_msr` and lands in the same directory.
+
+        Nothing may key off the literal control-type name, so a domain directory
+        under any control type counts as long as its `name` says package.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _rapl_tree(root, {"amd-rapl:0": (10, 100), "amd-rapl:1": (5, 100)})
+            names = [p.name for p in package_domain_dirs(root)]
+            self.assertEqual(names, ["amd-rapl:0", "amd-rapl:1"])
 
     def test_delta_then_watts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -89,6 +130,63 @@ class RaplTests(unittest.TestCase):
             # 20 uJ wrap delta (90 -> 10 with range 100) over 10s
             self.assertAlmostEqual(reading.joules, 20 / 1_000_000)
             self.assertAlmostEqual(reading.watts, 2 / 1_000_000)
+
+    def test_two_sockets_add_up(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _rapl_tree(root, {"intel-rapl:0": (0, 10**9), "intel-rapl:1": (0, 10**9)})
+            backend = RaplBackend(root=root)
+            backend.sample(60.0)
+            _rapl_tree(
+                root,
+                {"intel-rapl:0": (6_000_000, 10**9), "intel-rapl:1": (6_000_000, 10**9)},
+            )
+            reading = backend.sample(60.0)
+            # 6 J + 6 J over 60 s
+            self.assertAlmostEqual(reading.joules, 12.0)
+            self.assertAlmostEqual(reading.watts, 0.2)
+
+    def test_one_socket_wrapping_does_not_inflate_the_other(self):
+        """A wrap is resolved against the range of the domain that wrapped.
+
+        Adding a summed range back would credit the interval with a second
+        domain's whole counter -- kilowatts out of a machine drawing watts.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wrap_at = 262_143_328_850  # the range a real package reports
+            _rapl_tree(
+                root,
+                {
+                    "intel-rapl:0": (wrap_at - 1_000, wrap_at),
+                    "intel-rapl:1": (5_000_000, wrap_at),
+                },
+            )
+            backend = RaplBackend(root=root)
+            backend.sample(60.0)
+            _rapl_tree(
+                root,
+                {
+                    # package-0 advances 6000 uJ and turns over; package-1 advances 6 J.
+                    "intel-rapl:0": (5_000, wrap_at),
+                    "intel-rapl:1": (11_000_000, wrap_at),
+                },
+            )
+            reading = backend.sample(60.0)
+            self.assertAlmostEqual(reading.joules, (6_000 + 6_000_000) / 1_000_000)
+            self.assertAlmostEqual(reading.watts, 0.1001, places=4)
+
+    def test_an_uninterpretable_wrap_drops_the_sample(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _rapl_tree(root, {"intel-rapl:0": (90, None)})
+            backend = RaplBackend(root=root)
+            backend.sample(60.0)
+            _rapl_tree(root, {"intel-rapl:0": (10, None)})
+            self.assertIsNone(
+                backend.sample(60.0),
+                "no range to add back, so the interval is unmeasurable",
+            )
 
     def test_missing_sysfs_returns_none(self):
         backend = RaplBackend(root=Path("/no/such/rapl"))

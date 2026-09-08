@@ -781,8 +781,11 @@ low_demand:
 
 # Node electricity draw (issue #258). Informational only: watts, a derived currency
 # cost, and a per-instance CPU-share split. Does not feed MU pricing or low_demand.
-# RAPL (/sys/class/powercap/intel-rapl) is used when readable and is a CPU-package
-# *floor*, not wall-socket consumption. Otherwise idle + linear-in-CPU%.
+# RAPL (/sys/class/powercap/intel-rapl, the same path on Intel and on AMD Zen) is
+# used when readable and is a CPU-package *floor*, not wall-socket consumption.
+# Machines without it -- Apple Silicon under Asahi, ARM boards, VMs, or a kernel
+# that keeps energy_uj root-only -- get the idle + linear-in-CPU% estimate below,
+# which is only as good as its two coefficients.
 energy:
   ENABLED: true
   SAMPLE_INTERVAL_SECONDS: 60
