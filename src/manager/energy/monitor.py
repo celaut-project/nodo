@@ -41,8 +41,11 @@ DEFAULT_ENABLED = True
 DEFAULT_INTERVAL_SECONDS = 60
 DEFAULT_PRICE_PER_KWH = 0.0
 DEFAULT_CURRENCY = "EUR"
-DEFAULT_IDLE_WATTS = 30.0
-DEFAULT_LOAD_WATTS = 120.0
+# The model's coefficients have no defaults worth shipping: a number that fits one
+# machine is an order of magnitude wrong on another. 0 means uncalibrated, and an
+# uncalibrated model reports nothing at all.
+DEFAULT_IDLE_WATTS = 0.0
+DEFAULT_LOAD_WATTS = 0.0
 MIN_INTERVAL_SECONDS = 5
 
 _last_tick_monotonic: Optional[float] = None

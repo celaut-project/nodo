@@ -792,9 +792,15 @@ energy:
   PRICE_PER_KWH: 0.0          # 0 => show watts, omit currency cost. Persisted per sample.
   CURRENCY: "EUR"             # Presentation only.
   PRICE_SOURCE: "fixed"       # Only "fixed" is implemented (works offline).
-  # Model fallback when RAPL is unreadable (permissions, non-x86, VMs, WSL):
-  IDLE_WATTS: 30              # Watts at 0% CPU.
-  LOAD_WATTS: 120             # Extra watts at 100% CPU (so 100% ≈ IDLE+LOAD).
+  # Coefficients of the model fallback, for a machine with no readable counter.
+  # MEASURE THESE WITH A PLUG-IN METER -- do not estimate them. Read the wall once
+  # with the machine quiet and once with every core busy; the difference is
+  # LOAD_WATTS and the quiet figure is IDLE_WATTS. A number that suits somebody
+  # else's machine is an order of magnitude out on a Raspberry Pi and half of what
+  # a two-socket server idles at, and once on screen it reads like a measurement.
+  IDLE_WATTS: 0               # Watts at 0% CPU. 0 => no model reading at all.
+  LOAD_WATTS: 0               # Extra watts at 100% CPU. 0 => the packages' own
+                              # declared long-term limit, when sysfs exposes it.
 
 publisher:
   PROVIDER: "github"

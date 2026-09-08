@@ -275,6 +275,8 @@ class ModelBackend:
     def sample(self, elapsed_seconds: float) -> Optional[EnergyReading]:
         if elapsed_seconds <= 0:
             return None
+        if self.idle_watts <= 0:
+            return None
         try:
             cpu_percent = float(self._cpu_percent_fn())
         except Exception:
