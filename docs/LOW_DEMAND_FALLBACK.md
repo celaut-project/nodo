@@ -75,21 +75,25 @@ is concrete rather than hand-wavy.
   `psutil.virtual_memory()` is used directly there too. `get_ram_avaliable()`
   (`resources.py:76`) = pool minus locked. This is the RAM signal to compare
   against the RAM threshold.
-- **CPU:** `psutil.cpu_percent(...)` is already used in several places:
-  `src/manager/power.py:48` (`get_system_metrics` returns `cpu_percent` and
-  `memory_usage` = `memory.percent`), and in the cost functions
-  (`src/utils/cost_functions/resource_availability.py:123`,
-  `src/utils/cost_functions/execution_cost.py:145`). CPU availability is
+- **CPU:** `psutil.cpu_percent(interval=None)` is used in the cost functions
+  (`src/utils/cost_functions/resource_availability.py:136`,
+  `src/utils/cost_functions/execution_cost.py:92`), in this scheduler
+  (`src/core_services/low_demand.py:_current_cpu_percent`) and in the energy
+  sampler (`src/manager/energy/monitor.py:_cpu_percent`). CPU availability is
   computed as `100 - psutil.cpu_percent(...)`.
+
+  One caveat that binds every caller: the non-blocking form measures against
+  *its own last call anywhere in the process*, so two callers in the same tick
+  give the second one the gap between them rather than the interval. The energy
+  sampler reads it once per tick and passes the figure down for that reason.
 - **"How busy is the node" (running workloads):**
   `SQLConnection().get_all_internal_containers_ids()`
-  (`src/database/sql_connection.py:479`) lists running internal instances;
-  `internal_instance_exists(id)` (`sql_connection.py:513`) checks one.
+  (`src/database/sql_connection.py:646`) lists running internal instances;
+  `internal_instance_exists(id)` (`sql_connection.py:786`) checks one.
 
-  Note `power.py`'s `get_system_metrics()` is a ready-made single call that
-  returns both `cpu_percent` and `memory_usage` (percent). We could reuse it, but
-  it does a blocking `psutil.cpu_percent(interval=1)`; for a poll loop we may
-  prefer the non-blocking form. **(open question 4)**
+  **Open question 4 is settled:** the poll uses the non-blocking form. There is no
+  single call that hands over CPU and memory together, and there should not be one
+  that blocks for a second inside a loop this thread also uses to maintain guests.
 
 ### 2.3 Starting the fallback (launch path)
 
@@ -234,8 +238,8 @@ The three design questions below were put to maintainer Josemi and are now
 ### Recorded for completeness (not blocking)
 
 4. **CPU sampling cost.** The poll uses the non-blocking
-   `psutil.cpu_percent(interval=None)` form (cheap per tick; the blocking
-   `interval=1` form in `power.py:48` is avoided).
+   `psutil.cpu_percent(interval=None)` form: it returns immediately, where the
+   blocking form would hold this thread for its whole interval.
 5. **Config vs. literal env vars.** Thresholds live as `config.yaml` keys under
    `low_demand:` (consistent with every other tunable). Literal OS-env overrides
    would be a separate `ConfigManager` change and are out of scope.

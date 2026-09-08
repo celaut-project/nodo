@@ -1,8 +1,8 @@
 """Read per-instance CPU from cgroup v2 ``cpu.stat``.
 
-The TUI already does this for the live CPU% column. The energy sampler needs
-the same number on the Python side at sample time, without scraping the TUI
-and without a blocking ``psutil`` interval.
+The TUI reads the same files for its live CPU% column. The energy sampler needs
+that number on the Python side at sample time, without scraping the TUI and
+without a blocking ``psutil`` interval.
 
 ``usage_usec`` is cumulative core-microseconds. Two snapshots yield a weight
 in cores (1.0 = one core busy for the whole interval). Missing files or a
