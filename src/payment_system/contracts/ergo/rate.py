@@ -178,7 +178,17 @@ def assets() -> Tuple[Asset, ...]:
     because its id was mistyped would leave the node quietly advertising fewer payment
     methods than its operator configured.
     """
-    raw = ConfigManager().get(ASSETS_KEY) or []
+    return parse_assets(ConfigManager().get(ASSETS_KEY))
+
+
+def parse_assets(raw) -> Tuple[Asset, ...]:
+    """The same list, from a raw config value rather than from the live config.
+
+    Split out so startup validation checks *these* rules rather than a second copy of
+    them (``utils.config_validation``): a rule enforced in one place and not the other
+    is a config the node accepts at boot and then refuses to read, or the reverse.
+    """
+    raw = raw or []
     if not isinstance(raw, (list, tuple)):
         raise ValueError(f"{ASSETS_KEY} must be a list of assets, got {type(raw).__name__}.")
 
@@ -299,6 +309,26 @@ def mu_to_base_units_exact(amount_mu: int, asset: Asset) -> Decimal:
 def base_units_to_mu(base_units: int, asset: Asset) -> int:
     """Base units of ``asset`` -> MU, for crediting a payment that arrived."""
     return int(Decimal(int(base_units)) * asset.mu_per_base_unit)
+
+
+def whole_to_base_units(value: Any, asset: Asset, *, what: str) -> int:
+    """A whole-unit decimal string -> base units of ``asset``, exactly.
+
+    The shape every monetary setting in the config uses (``HOT_WALLET_LIMITS`` and
+    friends are decimal strings in whole units), so a per-asset limit reads the same way
+    as ERG's. Truncation is refused rather than rounded: a limit of "0.001" on a
+    two-decimal token is a mistake the operator has to see, not a limit of zero.
+    """
+    amount = _decimal(value if value not in (None, "") else 0, what=what)
+    if amount < 0:
+        raise ValueError(f"{what} cannot be negative, got {amount}.")
+    scaled = amount * (Decimal(10) ** asset.decimals)
+    if scaled != scaled.to_integral_value():
+        raise ValueError(
+            f"{what}={amount} is finer than {asset.symbol}'s {asset.decimals} decimals, "
+            "so it cannot be expressed in that asset at all."
+        )
+    return int(scaled)
 
 
 def base_units_to_str(base_units: int, asset: Asset) -> str:

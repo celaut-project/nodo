@@ -37,16 +37,19 @@ class _Catalogue:
         self.settlements = []
 
     def donation_owed(self, ledger, contract_hash, token_id):
-        return self.owed
+        return self.owed if token_id == "ERG" else Decimal(0)
 
-    def settle_donation(self, *, ledger, contract_hash, token_id, paid_native, records):
-        self.settlements.append({
-            "ledger": ledger,
-            "token_id": token_id,
-            "paid_native": paid_native,
-            "records": records,
-        })
-        self.owed -= Decimal(str(paid_native))
+    def settle_donations(self, entries):
+        # One call for every asset a payout touched: the window between two commits is
+        # where a crash pays one debt twice.
+        for entry in entries:
+            self.settlements.append({
+                "ledger": entry["ledger"],
+                "token_id": entry["token_id"],
+                "paid_native": entry["paid_native"],
+                "records": entry["records"],
+            })
+            self.owed -= Decimal(str(entry["paid_native"]))
         return True
 
 
@@ -58,11 +61,15 @@ class PayoutTests(unittest.TestCase):
         catalogue = _Catalogue(owed)
         sent = []
 
-        def simple_send(ergo, amount, receiver_addresses, wallet_mnemonic, fee):
+        def send_assets(outputs, fee_nanoerg):
+            # `outputs` is [(address, nanoERG, [(token_id, base units)])]: one box per
+            # destination carrying every asset it is owed, which is what makes a tick
+            # one transaction rather than one per asset.
             sent.append({
-                "amount": amount,
-                "receivers": receiver_addresses,
-                "fee": fee,
+                "amount": [nanoerg / 10 ** 9 for _a, nanoerg, _t in outputs],
+                "receivers": [address for address, _n, _t in outputs],
+                "tokens": [tokens for _a, _n, tokens in outputs],
+                "fee": fee_nanoerg / 10 ** 9,
             })
             return tx_id
 
@@ -77,13 +84,12 @@ class PayoutTests(unittest.TestCase):
                            return_value=min_transfer_erg), \
                 mock.patch.object(interface, "SIMULATE_PAYMENTS", lambda: simulate), \
                 mock.patch.object(interface, "WALLET_MNEMONIC", lambda: "mnemonic"), \
-                mock.patch.object(interface, "_ergo_runtime",
-                                  return_value=(None, simple_send, None, None)), \
-                mock.patch.object(interface, "__init_ergo", lambda: object(), create=True), \
+                mock.patch.object(interface, "_send_assets", side_effect=send_assets), \
                 mock.patch.object(interface, "__get_sender_addr",
-                                  lambda mnemonic: object(), create=True), \
-                mock.patch.object(interface, "__confirmed_balance_nanoerg",
-                                  lambda address: balance, create=True), \
+                                  lambda mnemonic: object()), \
+                mock.patch.object(
+                    interface, "__balance_total",
+                    lambda address: {"confirmed": {"nanoErgs": balance, "tokens": []}}), \
                 mock.patch(
                     "src.payment_system.donations.config.pay_wallets",
                     return_value=wallets if wallets is not None

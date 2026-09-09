@@ -311,8 +311,11 @@ def init():
     """
     proposition_bytes = get_wallet_proposition_bytes()
     address = get_wallet_address()
+    assets = rate.assets()
+    if assets:
+        _warn_if_tokens_cannot_be_moved(assets)
     sql = sql_connection.SQLConnection()
-    for asset in (NATIVE_ASSET, *(a.token_id for a in rate.assets())):
+    for asset in (NATIVE_ASSET, *(a.token_id for a in assets)):
         contract = celaut_pb2.Contract(ledger=ergo_ledger)
         set_token_id(contract, asset)
         # Canonical value: raw ErgoTree/propositionBytes of the wallet's P2PK payment boxes.
@@ -322,6 +325,39 @@ def init():
         # Derived address for local display/indexing only; never the source of truth.
         set_address(contract, address)
         sql.add_contract(contract=contract)
+
+
+def _warn_if_tokens_cannot_be_moved(assets) -> None:
+    """Say at startup what a token-only wallet will not be able to do.
+
+    Being *paid* in a token needs no ERG at all -- the payer supplies the fee and the
+    box the token travels in -- so a node can accept SigUSD with an empty ERG balance
+    and be perfectly configured. Paying one, sweeping one to cold storage and donating
+    one all need ERG of this node's own, and each of those failures otherwise surfaces
+    much later and somewhere else: a payment that falls through to another method, a
+    sweep that logs and returns, a donation debt that quietly keeps growing.
+
+    Checked against the wallet rather than announced whenever assets are configured. An
+    unconditional warning on a correct config is a warning operators learn to ignore,
+    and this one is only true of a wallet that is actually short.
+    """
+    try:
+        needed = DEFAULT_FEE + 2 * SAFE_MIN_BOX_VALUE
+        held = __confirmed_balance_nanoerg(__get_sender_addr(WALLET_MNEMONIC()))
+        if held >= needed:
+            return
+        LOGGER(
+            f"This node accepts {len(assets)} token(s) on Ergo and its wallet holds "
+            f"{nanoerg_to_erg_str(held)} ERG, less than the "
+            f"{nanoerg_to_erg_str(needed)} a token transaction needs for its fee and "
+            "its output box. It can still be PAID in those tokens -- the payer supplies "
+            "both -- but it cannot pay in them, cannot sweep them to the cold wallet, "
+            "and cannot pay their donations until it holds some ERG."
+        )
+    except Exception as e:
+        # A wallet balance that cannot be read is not a reason to fail registration:
+        # without the rows this writes, no peer can pay this node at all.
+        LOGGER(f"Could not check the ERG balance behind the configured tokens: {e}")
 
 
 def check_sender_balance(amount: int) -> bool:
@@ -380,41 +416,103 @@ def manager():
 
 
 def _pay_accrued_donations():
-    """Pay the donation debt accrued on this contract, if a transaction is worth making.
+    """Pay every asset's donation debt on this contract, in ONE transaction.
 
     The order and the bookkeeping are shared (`donations.payout`); what is Ergo's is the
-    money -- its fee, its minimum box value, how a nanoERG figure reads, and how to send.
+    money -- its fee, its minimum box value, how an amount reads, and how to send.
+
+    One transaction for every asset, because an Ergo output carries them all: a payout
+    per asset would pay a fee per asset, and each of those fees is money donated on top
+    of the share the operator configured.
+
+    ERG's debt declares the fee, so the fee comes out of the share rather than on top of
+    it (#282). A token's declares none, because an Ergo fee is paid in ERG and a debt in
+    SigUSD cannot pay it -- so paying a token donation costs this node ERG: the fee, and
+    a carrier box for any wallet that is owed only tokens. That is the same asymmetry as
+    every other token operation here, and a wallet with no ERG cannot do it at all.
     """
     from src.payment_system.donations import config as donation_config
-    from src.payment_system.donations.payout import pay_accrued
+    from src.payment_system.donations.payout import Debt, pay_accrued_together
 
-    def send(outputs, fee_nanoerg: int) -> str:
-        _, simple_send, _, _ = _ergo_runtime()
-        return str(simple_send(
-            ergo=__init_ergo(),
-            # simple_send expects ERG amounts.
-            amount=[__nanoerg_to_erg(amount) for _, amount in outputs],
-            receiver_addresses=[address for address, _ in outputs],
-            wallet_mnemonic=WALLET_MNEMONIC(),
-            fee=__nanoerg_to_erg(fee_nanoerg),
-        ))
-
-    def can_cover(total_nanoerg: int) -> bool:
-        # Plus a change box: a transaction that leaves nothing spendable behind cannot
-        # be built at all.
-        required = total_nanoerg + SAFE_MIN_BOX_VALUE
-        return __confirmed_balance_nanoerg(__get_sender_addr(WALLET_MNEMONIC())) >= required
-
-    pay_accrued(
-        ledger=LEDGER,
-        contract_hash=CONTRACT_HASH,
+    assets = rate.assets()
+    debts = [Debt(
         asset=NATIVE_ASSET,
         fee=DEFAULT_FEE,
         minimum_output=SAFE_MIN_BOX_VALUE,
         min_transfer=erg_to_nanoerg(donation_config.min_transfer(LEDGER, NATIVE_ASSET)),
-        send=send,
         render=lambda amount: f"{nanoerg_to_erg_str(amount)} ERG",
         to_mu=rate.nanoerg_to_mu,
+    )]
+    for asset in assets:
+        debts.append(Debt(
+            asset=asset.token_id,
+            # Not this asset's money: see the class' own note.
+            fee=0,
+            # One base unit is the smallest thing a token output can carry.
+            minimum_output=1,
+            min_transfer=rate.whole_to_base_units(
+                donation_config.min_transfer(LEDGER, asset.token_id), asset,
+                what=f"ledgers.{LEDGER}.payments.ASSETS[{asset.symbol}]."
+                     "DONATION_MIN_TRANSFER"),
+            render=partial(_render_asset, asset=asset),
+            to_mu=partial(rate.base_units_to_mu, asset=asset),
+        ))
+
+    def send(outputs) -> str:
+        """One box per destination, carrying everything that destination is owed."""
+        built, carriers = [], 0
+        for address, amounts in outputs:
+            nanoerg = int(amounts.get(NATIVE_ASSET, 0))
+            tokens = [(a, int(v)) for a, v in amounts.items() if a != NATIVE_ASSET]
+            if tokens and nanoerg < SAFE_MIN_BOX_VALUE:
+                # A wallet owed only tokens still needs a box to receive them in, and
+                # that ERG is not part of any debt.
+                carriers += SAFE_MIN_BOX_VALUE - nanoerg
+                nanoerg = SAFE_MIN_BOX_VALUE
+            built.append((address, nanoerg, tokens))
+        if carriers:
+            LOGGER(
+                f"Paying {nanoerg_to_erg_str(carriers)} ERG of carrier boxes so the "
+                "token donations have somewhere to land. That ERG is this node's own, "
+                "not part of any debt."
+            )
+        return _send_assets(built, fee_nanoerg=DEFAULT_FEE)
+
+    def can_cover(totals) -> bool:
+        wallets = max(1, len(donation_config.pay_wallets(LEDGER)))
+        # The ERG going out, the fee, and a change box -- a transaction that leaves
+        # nothing spendable behind cannot be built.
+        required = int(totals.get(NATIVE_ASSET, 0)) + DEFAULT_FEE + SAFE_MIN_BOX_VALUE
+        if any(asset != NATIVE_ASSET for asset in totals):
+            # Plus a carrier box per destination. Counted for every wallet rather than
+            # for the ones that turn out to need it: over-asking leaves the debt accrued
+            # for another tick, under-asking builds a transaction the network refuses.
+            required += SAFE_MIN_BOX_VALUE * wallets
+        total = __balance_total(address=__get_sender_addr(WALLET_MNEMONIC()))
+        held = int(((total or {}).get("confirmed") or {}).get("nanoErgs") or 0)
+        if held < required:
+            LOGGER(
+                f"The donation payout needs {nanoerg_to_erg_str(required)} ERG for the "
+                f"amounts, the fee and the boxes; the wallet holds "
+                f"{nanoerg_to_erg_str(held)} ERG."
+            )
+            return False
+        for asset_id, owed in totals.items():
+            if asset_id == NATIVE_ASSET:
+                continue
+            if _token_balance(total, asset_id) < int(owed):
+                LOGGER(
+                    f"The donation payout owes {owed} base units of {asset_id[:12]} and "
+                    "the wallet does not hold them."
+                )
+                return False
+        return True
+
+    pay_accrued_together(
+        ledger=LEDGER,
+        contract_hash=CONTRACT_HASH,
+        debts=debts,
+        send=send,
         valid_address=is_valid_ergo_address,
         simulate=SIMULATE_PAYMENTS(),
         available=can_cover,
@@ -424,8 +522,111 @@ def _pay_accrued_donations():
     )
 
 
+def _render_asset(amount: int, asset) -> str:
+    """A base-unit amount of one asset as a person reads it."""
+    return f"{rate.base_units_to_str(amount, asset)} {asset.symbol}"
+
+
+def _send_assets(outputs, fee_nanoerg: int) -> str:
+    """One transaction, one output per destination, each carrying ERG and any tokens.
+
+    ``outputs`` is ``[(address, nanoerg, [(token_id, base_units), ...]), ...]``.
+
+    This exists because an Ergo transaction carries several assets in one output, and
+    both jobs on this contract's tick want exactly that: the sweep moves every asset
+    over its limit to the cold wallet, and the donation payout pays every debt it owes,
+    each in **one** transaction rather than one per asset. Going through ergpy's
+    ``simple_send`` instead would mean one ERG-only transaction per asset, paying a fee
+    every time for what is one piece of work.
+
+    Whatever the inputs hold beyond what these outputs name comes back as change to this
+    wallet, which AppKit builds -- so an asset this transaction is not moving is kept,
+    never swept by accident.
+    """
+    _, _, jpype, org_appkit = _ergo_runtime()
+    ergo = __init_ergo()
+    sender_address = __get_sender_addr(WALLET_MNEMONIC())
+
+    total_nanoerg = sum(int(value) for _address, value, _tokens in outputs)
+    token_ids, token_amounts = [], []
+    for _address, _value, tokens in outputs:
+        for token_id, units in tokens:
+            token_ids.append(token_id)
+            token_amounts.append(int(units))
+
+    # `amount_list` is read by ergpy in whole ERG.
+    input_utxo = ergo.getInputBoxCovering(
+        amount_list=[__nanoerg_to_erg(total_nanoerg + fee_nanoerg)],
+        sender_address=sender_address,
+        tokenList=[token_ids] if token_ids else None,
+        amount_tokens=[token_amounts] if token_ids else None,
+    )
+    if not input_utxo:
+        raise Exception("No UTXO found to build the transaction from.")
+
+    ergo_token = _ergo_token_class(jpype, org_appkit) if token_ids else None
+    out_boxes = []
+    for address, value, tokens in outputs:
+        builder = ergo._ctx.newTxBuilder().outBoxBuilder().value(int(value))
+        if tokens:
+            builder = builder.tokens([
+                ergo_token(token_id, jpype.JLong(int(units))) for token_id, units in tokens
+            ])
+        # Through this package's own helpers rather than AppKit's address classes: the
+        # payment path already exchanges propositionBytes and builds contracts from
+        # them, so a destination written as a base58 address takes the same route.
+        out_boxes.append(builder.contract(
+            ergo_contract_from_proposition_bytes(proposition_bytes_from_address(address))
+        ).build())
+
+    unsigned_tx = ergo.buildUnsignedTransaction(
+        input_box=input_utxo,
+        outBox=out_boxes,
+        fee=fee_nanoerg / 10**9,
+        sender_address=sender_address,
+    )
+    w_mnemonic = ergo.getMnemonic(wallet_mnemonic=WALLET_MNEMONIC(), mnemonic_password=None)[0]
+    signed_tx = ergo.signTransaction(unsigned_tx, w_mnemonic, prover_index=0)
+    return str(ergo.txId(signed_tx))
+
+
+def _asset_sweep_limits(asset) -> Tuple[int, int]:
+    """``(hot limit, minimum transfer)`` for one asset, in its base units.
+
+    Per asset, in whole units of it, the same decimal-string shape as ERG's. Absent
+    keys mean zero -- which is a hot limit of nothing, so everything above the minimum
+    transfer is swept. That is the same reading ERG's keys get.
+    """
+    entry = _asset_config_entry(asset.token_id)
+    return (
+        rate.whole_to_base_units(
+            entry.get("HOT_WALLET_LIMITS"), asset,
+            what=f"{rate.ASSETS_KEY}[{asset.symbol}].HOT_WALLET_LIMITS"),
+        rate.whole_to_base_units(
+            entry.get("COLD_WALLET_MIN_TRANSFER"), asset,
+            what=f"{rate.ASSETS_KEY}[{asset.symbol}].COLD_WALLET_MIN_TRANSFER"),
+    )
+
+
+def _asset_config_entry(token_id: str) -> dict:
+    """The operator's ``ASSETS:`` entry for one token id, or an empty block."""
+    for entry in env_manager.get(rate.ASSETS_KEY) or []:
+        if isinstance(entry, dict) and str(entry.get("TOKEN_ID") or "").strip().lower() == token_id:
+            return entry
+    return {}
+
+
 def _sweep_to_cold_wallet():
-    """Sweep excess from the single wallet to the cold wallet when both thresholds are met."""
+    """Sweep every asset over its own limits to the cold wallet, in ONE transaction.
+
+    One transaction, not one per asset: an Ergo output carries several assets at once,
+    and the cold wallet is a single Ergo address that receives whatever is sent to it
+    (which is why ``COLD_WALLET`` is not per asset while the limits are).
+
+    A token sweep still costs ERG -- the fee, and the box the tokens travel in -- so a
+    wallet without it cannot sweep at all, however many tokens it holds. That is the
+    same asymmetry as paying: being *paid* in a token needs no ERG, moving one does.
+    """
     LOGGER("Exec ergo interface manager (single-wallet cold sweep).")
     try:
         cold_wallet = COLD_WALLET()
@@ -433,9 +634,9 @@ def _sweep_to_cold_wallet():
             LOGGER("No cold wallet configured; skipping sweep.")
             return
 
-        _, simple_send, _, _ = _ergo_runtime()
         wallet_addr = __get_sender_addr(WALLET_MNEMONIC())
-        balance_nano = __confirmed_balance_nanoerg(wallet_addr)
+        total = __balance_total(address=wallet_addr)
+        balance_nano = int(((total or {}).get("confirmed") or {}).get("nanoErgs") or 0)
         hot_limit_nano = _hot_wallet_limit_nanoerg()
         min_transfer_nano = _cold_wallet_min_transfer_nanoerg()
 
@@ -445,27 +646,56 @@ def _sweep_to_cold_wallet():
             min_transfer_nanoerg=min_transfer_nano,
             fee_nanoerg=DEFAULT_FEE,
         )
-        if sweep_nano is None:
+
+        token_sweeps = []
+        for asset in rate.assets():
+            hot_limit, min_transfer = _asset_sweep_limits(asset)
+            held = _token_balance(total, asset.token_id)
+            # `fee=0` and `technical_min=1`: the fee is not this asset's money, and the
+            # smallest token output is one base unit. The ERG those need is checked
+            # once, below, for the whole transaction.
+            amount = _compute_sweep_amount(
+                balance=held, hot_limit=hot_limit, min_transfer=min_transfer,
+                fee=0, technical_min=1,
+            )
+            if amount:
+                token_sweeps.append((asset, amount))
+
+        if sweep_nano is None and not token_sweeps:
             LOGGER(
                 f"Nothing to sweep. balance={balance_nano} hot_limit={hot_limit_nano} "
-                f"min_transfer={min_transfer_nano} fee={DEFAULT_FEE} (all nanoERG)."
+                f"min_transfer={min_transfer_nano} fee={DEFAULT_FEE} (all nanoERG), and "
+                f"no configured asset is over its limit."
             )
             return
 
-        receiver_addresses = [cold_wallet]
-        amounts_nano = [sweep_nano]
+        # The box the sweep travels in. When only tokens are moving there is no ERG
+        # excess to carry them, so the technical minimum comes out of the hot wallet --
+        # the unavoidable ERG cost of moving a token (#342 4.4).
+        box_value = sweep_nano if sweep_nano is not None else SAFE_MIN_BOX_VALUE
+        # Plus a change box: a transaction that leaves nothing spendable cannot be built.
+        required = box_value + DEFAULT_FEE + (0 if sweep_nano is not None else SAFE_MIN_BOX_VALUE)
+        if balance_nano < required:
+            LOGGER(
+                f"Not sweeping: it needs {nanoerg_to_erg_str(required)} ERG for the fee "
+                f"and the output box and the wallet holds "
+                f"{nanoerg_to_erg_str(balance_nano)} ERG. "
+                f"{len(token_sweeps)} asset(s) stay in the hot wallet."
+            )
+            return
 
+        moving = [f"{nanoerg_to_erg_str(box_value)} ERG"] + [
+            f"{rate.base_units_to_str(amount, asset)} {asset.symbol}"
+            for asset, amount in token_sweeps
+        ]
         LOGGER(
-            f"Sweeping {nanoerg_to_erg_str(sweep_nano)} ERG from the wallet to cold wallet "
-            f"{cold_wallet} (fee {nanoerg_to_erg_str(DEFAULT_FEE)} ERG)."
+            f"Sweeping {', '.join(moving)} from the wallet to cold wallet {cold_wallet} "
+            f"(fee {nanoerg_to_erg_str(DEFAULT_FEE)} ERG)."
         )
-        # simple_send expects ERG amounts.
-        tx = simple_send(
-            ergo=__init_ergo(),
-            amount=[__nanoerg_to_erg(a) for a in amounts_nano],
-            receiver_addresses=receiver_addresses,
-            wallet_mnemonic=WALLET_MNEMONIC(),
-            fee=__nanoerg_to_erg(DEFAULT_FEE),
+        tx = _send_assets(
+            [(cold_wallet, box_value,
+              [(asset.token_id, amount) for asset, amount in token_sweeps])],
+            fee_nanoerg=DEFAULT_FEE,
         )
         LOGGER(f"Cold sweep tx -> {tx}")
     except Exception as e:

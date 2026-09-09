@@ -97,23 +97,27 @@ LOCAL_PEER_ID = "LOCAL"
 PAYMENT_INSERT = """
     INSERT INTO payments (
         tx_id, direction, status, peer_id, client_id, deposit_token,
-        ledger, contract_hash, address, amount_mu, purpose
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ledger, contract_hash, token_id, address, amount_mu, purpose
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
 def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
                           peer_id=None, client_id=None, deposit_token=None,
-                          ledger=None, contract_hash=None, address=None,
+                          ledger=None, contract_hash=None, token_id=None, address=None,
                           purpose=None) -> tuple:
     """Bind one payment row for :data:`PAYMENT_INSERT`, in its column order.
 
     Shared so a donation payout can write its rows in the *same* transaction that
-    decrements the debt they discharge (see :meth:`SQLConnection.settle_donation`),
+    decrements the debt they discharge (see :meth:`SQLConnection.settle_donations`),
     without either place restating the column list.
+
+    ``token_id`` is the asset the payment was made *in*, which is what makes the row
+    say what money moved: ``amount_mu`` is deliberately ledger-neutral, so two rows of
+    one tick paying two assets on one contract would otherwise be indistinguishable.
     """
     return (tx_id, direction, status, peer_id, client_id, deposit_token,
-            ledger, contract_hash, address, str(int(amount_mu)), purpose)
+            ledger, contract_hash, token_id, address, str(int(amount_mu)), purpose)
 
 
 def _decimal_or_zero(value) -> Decimal:
@@ -2523,7 +2527,8 @@ class SQLConnection(metaclass=Singleton):
                        tx_id: Optional[str] = None, peer_id: Optional[str] = None,
                        client_id: Optional[str] = None, deposit_token: Optional[str] = None,
                        ledger: Optional[str] = None, contract_hash: Optional[str] = None,
-                       address: Optional[str] = None, purpose: Optional[str] = None) -> bool:
+                       token_id: Optional[str] = None, address: Optional[str] = None,
+                       purpose: Optional[str] = None) -> bool:
         """Write down one payment. Returns whether the row landed.
 
         This never raises. Every caller is on a path where the money has already moved:
@@ -2542,8 +2547,8 @@ class SQLConnection(metaclass=Singleton):
             self._execute(PAYMENT_INSERT, payment_insert_params(
                 tx_id=tx_id, direction=direction, status=status, peer_id=peer_id,
                 client_id=client_id, deposit_token=deposit_token, ledger=ledger,
-                contract_hash=contract_hash, address=address, amount_mu=amount_mu,
-                purpose=purpose,
+                contract_hash=contract_hash, token_id=token_id, address=address,
+                amount_mu=amount_mu, purpose=purpose,
             ))
             return True
         except Exception as e:
@@ -2639,54 +2644,79 @@ class SQLConnection(metaclass=Singleton):
 
     def settle_donation(self, *, ledger: str, contract_hash: str, token_id: str,
                         paid_native: Decimal, records: List[dict]) -> bool:
-        """Decrement a debt by what was just paid, and record the payments that paid it.
+        """Decrement one method's debt by what was just paid, and record the payments.
 
-        One transaction, deliberately. The debt is decremented only *after* the
-        transaction is on the wire, and the rows that say so are written with it: two
-        separate commits would let a crash between them either pay the same debt twice
-        or lose the record of a donation that did go out.
-
-        The decrement is a subtraction rather than a reset, so the fraction that was
-        below a whole native unit -- and anything accrued while the transaction was in
-        flight -- stays owed instead of being written off.
-
-        Each entry of ``records`` is one output: ``{tx_id, address, amount_mu}``, and
-        nothing else. The columns that are the same for every row of one payout --
-        direction, status, purpose, ledger, contract -- are filled in here, so an entry
-        carrying one of those would collide with it.
+        The single-asset case of :meth:`settle_donations`, which is where the rule that
+        makes this safe is written down.
         """
-        paid = _decimal_or_zero(paid_native)
-        if paid <= 0:
-            return False
+        return self.settle_donations([{
+            "ledger": ledger, "contract_hash": contract_hash, "token_id": token_id,
+            "paid_native": paid_native, "records": records,
+        }])
+
+    def settle_donations(self, entries: List[dict]) -> bool:
+        """Decrement several debts by what was just paid, and record the payments.
+
+        One database transaction, deliberately, and one for *all* the assets. The debts
+        are decremented only after the payment transaction is on the wire, and the rows
+        that say so are written with them: two separate commits would let a crash
+        between them either pay the same debt twice or lose the record of a donation
+        that did go out.
+
+        Several assets at once because one Ergo transaction pays several debts -- an
+        output carries every asset it moves -- so settling one asset per commit would
+        reintroduce exactly that window between the assets of a single payout: one debt
+        discharged, the other paid again on the next tick.
+
+        Each entry is ``{ledger, contract_hash, token_id, paid_native, records}``, and
+        each record is one output: ``{tx_id, address, amount_mu}``, and nothing else.
+        The columns that are the same for every row of one payout -- direction, status,
+        purpose, ledger, contract -- are filled in here, so an entry carrying one of
+        those would collide with it.
+
+        Returns whether anything was written: an entry that paid nothing is skipped,
+        and a call with nothing left to write is ``False``.
+        """
         with SQLConnection._donation_lock:
             try:
-                remaining = self.donation_owed(ledger, contract_hash, token_id) - paid
-                if remaining < 0:
-                    logger.LOGGER(
-                        f"Donation payout on {ledger}/{token_id} paid {_plain(paid)} against a "
-                        f"debt of {_plain(remaining + paid)}; clamping the remainder to zero."
-                    )
-                    remaining = Decimal(0)
-                queries = [(
-                    "INSERT INTO donation_accrual (ledger, contract_hash, token_id, owed_native) "
-                    "VALUES (?, ?, ?, ?) "
-                    "ON CONFLICT (ledger, contract_hash, token_id) DO UPDATE SET "
-                    "owed_native = excluded.owed_native, updated_at = CURRENT_TIMESTAMP",
-                    (ledger, contract_hash, token_id, _plain(remaining))
-                )]
-                for record in records:
-                    queries.append((PAYMENT_INSERT, payment_insert_params(
-                        direction='out',
-                        status='accepted',
-                        purpose=PAYMENT_PURPOSE_DONATION,
-                        ledger=ledger,
-                        contract_hash=contract_hash,
-                        **record,
-                    )))
+                queries = []
+                for entry in entries:
+                    ledger = entry["ledger"]
+                    contract_hash = entry["contract_hash"]
+                    token_id = entry["token_id"]
+                    paid = _decimal_or_zero(entry.get("paid_native"))
+                    if paid <= 0:
+                        continue
+                    remaining = self.donation_owed(ledger, contract_hash, token_id) - paid
+                    if remaining < 0:
+                        logger.LOGGER(
+                            f"Donation payout on {ledger}/{token_id} paid {_plain(paid)} against a "
+                            f"debt of {_plain(remaining + paid)}; clamping the remainder to zero."
+                        )
+                        remaining = Decimal(0)
+                    queries.append((
+                        "INSERT INTO donation_accrual (ledger, contract_hash, token_id, owed_native) "
+                        "VALUES (?, ?, ?, ?) "
+                        "ON CONFLICT (ledger, contract_hash, token_id) DO UPDATE SET "
+                        "owed_native = excluded.owed_native, updated_at = CURRENT_TIMESTAMP",
+                        (ledger, contract_hash, token_id, _plain(remaining))
+                    ))
+                    for record in entry.get("records") or []:
+                        queries.append((PAYMENT_INSERT, payment_insert_params(
+                            direction='out',
+                            status='accepted',
+                            purpose=PAYMENT_PURPOSE_DONATION,
+                            ledger=ledger,
+                            contract_hash=contract_hash,
+                            token_id=token_id,
+                            **record,
+                        )))
+                if not queries:
+                    return False
                 self._execute2(queries)
                 return True
             except Exception as e:
-                logger.LOGGER(f'Failed to settle a donation on {ledger}/{token_id}: {e}')
+                logger.LOGGER(f'Failed to settle a donation payout: {e}')
                 return False
 
     def record_donation(self, *, ledger: str, tx_id: str, to_address: str,
