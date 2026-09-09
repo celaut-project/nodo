@@ -585,6 +585,7 @@ class ConfigManager(metaclass=Singleton):
                 _find_removed_keys,
                 ConfigValidationError,
                 validate_balancers_config,
+                validate_bitcoin_config,
                 validate_host_policy_config,
                 validate_pricing_config,
             )
@@ -612,6 +613,14 @@ class ConfigManager(metaclass=Singleton):
             # half-credit of zero would not make the node quote a wrong price -- it
             # would make every routing decision meaningless, silently.
             validate_balancers_config(self._config)
+
+            # The Bitcoin ledger block, if there is one. Structural only -- addresses
+            # are checked with arithmetic, never by asking a node -- so a node that
+            # cannot reach `bitcoind` still refuses a cold wallet with a typo in it
+            # rather than sweeping savings to an address nobody can spend.
+            validate_bitcoin_config(
+                self._config, warn=lambda message: self.log(f"[BITCOIN] {message}")
+            )
 
             # Note what is NOT here: the gateway port. Picking one writes a rule
             # into the host's firewall and a value into this file, and that used to
@@ -655,6 +664,14 @@ class ConfigManager(metaclass=Singleton):
             if isinstance(ledgers, dict):
                 for name, ledger in ledgers.items():
                     if not isinstance(ledger, dict):
+                        continue
+                    # Unless the ledger says its keys live somewhere else. A chain
+                    # whose wallet is held by its own node -- Bitcoin's is, in Core --
+                    # would otherwise be handed a BIP-39 mnemonic that nothing uses,
+                    # written into config.yaml and labelled a secret to back up. The
+                    # flag is a generic key in that ledger's own block, so nothing here
+                    # has to know which chains those are.
+                    if ledger.get("WALLET_KEYS_EXTERNAL"):
                         continue
                     configured = str(ledger.get("WALLET_MNEMONIC") or "").strip()
                     if not configured or configured == "auto":

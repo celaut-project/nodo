@@ -69,11 +69,12 @@ class PayoutTests(unittest.TestCase):
         stub = types.ModuleType("src.database.sql_connection")
         stub.SQLConnection = lambda: catalogue  # type: ignore[attr-defined]
 
+        # The minimum transfer is configured in whole ERG and converted by the
+        # contract, so the test states it the way an operator would.
+        min_transfer_erg = Decimal(min_transfer) / Decimal(10 ** 9)
         with mock.patch.dict(sys.modules, {"src.database.sql_connection": stub}), \
-                mock.patch.object(interface.sql_connection, "SQLConnection",
-                                  lambda: catalogue, create=True), \
-                mock.patch.object(interface, "_donation_min_transfer_nanoerg",
-                                  return_value=min_transfer), \
+                mock.patch("src.payment_system.donations.config.min_transfer",
+                           return_value=min_transfer_erg), \
                 mock.patch.object(interface, "SIMULATE_PAYMENTS", lambda: simulate), \
                 mock.patch.object(interface, "WALLET_MNEMONIC", lambda: "mnemonic"), \
                 mock.patch.object(interface, "_ergo_runtime",
@@ -218,6 +219,21 @@ class TickOrderTests(unittest.TestCase):
                                   side_effect=lambda: order.append("sweep")):
             interface.manager()
         self.assertEqual(order, ["donate", "sweep"])
+
+    def test_the_payout_rule_is_shared_rather_than_copied(self):
+        """Every payment system pays a donation the same way, through one place.
+
+        A second copy would be a second place for "decrement the debt only after the
+        transaction is on the wire, in the same transaction as the rows that record it"
+        to drift -- on the one path where drifting means paying the same debt twice.
+        """
+        import inspect
+
+        source = inspect.getsource(interface._pay_accrued_donations)
+        self.assertIn("pay_accrued", source)
+        # The bookkeeping belongs to the shared module, not to this contract.
+        self.assertNotIn("settle_donation", source)
+        self.assertNotIn("plan_payout", source)
 
     def test_the_sweep_no_longer_splits_off_a_donation(self):
         """Donating has nothing to do with the cold wallet any more.
