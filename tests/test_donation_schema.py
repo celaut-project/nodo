@@ -8,6 +8,10 @@ Two of them are load-bearing rather than defensive:
   ERG *and* in a token, in the same box.
 * ``donation_accrual``'s primary key is the payment *method*, so two assets settling
   through one contract owe two independent debts.
+* ``donation_payouts`` keys on the method **and the address**, which is what makes a
+  configured weight mean a share of everything the method has ever earned. Without it a
+  cut too small to send returns to a debt belonging to nobody and is split among
+  everybody on the next tick, so a small weight is never paid at all.
 
 They are also in the set the node creates on startup: `migrate` only runs from the
 setup scripts, so pulling new code and restarting is the whole upgrade path most
@@ -22,7 +26,8 @@ try:
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
-DONATION_TABLES = ("donation_accrual", "donations", "donation_scan_state")
+DONATION_TABLES = ("donation_accrual", "donation_payouts", "donations",
+                   "donation_scan_state")
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -142,6 +147,61 @@ class DonationSchemaTests(unittest.TestCase):
         ensure_columns(cursor, "payments", {"purpose": "TEXT DEFAULT NULL"})
         columns = {row[1] for row in cursor.execute("PRAGMA table_info(payments)")}
         self.assertIn("purpose", columns)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class DonationPayoutsSchemaTests(unittest.TestCase):
+    """What each wallet has been credited, per payment method."""
+
+    def setUp(self):
+        self.connection = sqlite3.connect(":memory:")
+        self.addCleanup(self.connection.close)
+        self.cursor = self.connection.cursor()
+        ensure_tables(self.cursor, ("donation_payouts",))
+
+    def _credit(self, address, paid, token_id="ERG"):
+        self.cursor.execute(
+            "INSERT INTO donation_payouts (ledger, contract_hash, token_id, address, "
+            "paid_native) VALUES ('ergo', 'p2pk', ?, ?, ?) "
+            "ON CONFLICT (ledger, contract_hash, token_id, address) DO UPDATE SET "
+            "paid_native = excluded.paid_native",
+            (token_id, address, str(paid)),
+        )
+
+    def _rows(self):
+        return [tuple(row) for row in self.cursor.execute(
+            "SELECT token_id, address, paid_native FROM donation_payouts "
+            "ORDER BY token_id, address"
+        ).fetchall()]
+
+    def test_one_row_per_wallet(self):
+        self._credit("9walletA", 100)
+        self._credit("9walletB", 250)
+        self.assertEqual(
+            self._rows(), [("ERG", "9walletA", "100"), ("ERG", "9walletB", "250")]
+        )
+
+    def test_the_same_wallet_is_updated_rather_than_duplicated(self):
+        # `paid_native` is cumulative, so a payout upserts it. Two rows for one wallet
+        # would make its entitlement depend on which row was read.
+        self._credit("9walletA", 100)
+        self._credit("9walletA", 300)
+        self.assertEqual(self._rows(), [("ERG", "9walletA", "300")])
+
+    def test_one_wallet_on_two_assets_is_two_independent_rows(self):
+        # An Ergo address receives any asset, so the same wallet is in both pay lists --
+        # but a credit in nanoERG says nothing about what it is owed in a token.
+        self._credit("9walletA", 100)
+        self._credit("9walletA", 7, token_id="ab" * 32)
+        self.assertEqual(
+            self._rows(),
+            [("ERG", "9walletA", "100"), ("ab" * 32, "9walletA", "7")],
+        )
+
+    def test_the_figure_is_an_exact_decimal_string(self):
+        # Same reason as the debt: a native amount is never stored through a float.
+        self._credit("9walletA", "1234567890123456789.5")
+        self.assertEqual(self._rows()[0][2], "1234567890123456789.5")
 
 
 if __name__ == "__main__":

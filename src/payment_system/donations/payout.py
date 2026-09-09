@@ -64,9 +64,8 @@ def pay_accrued(
         # Refused at startup, so an address that does not parse here means the config
         # changed underneath a running node. The bad entry is skipped rather than the
         # whole payout -- one unparseable wallet would otherwise block every donation
-        # for ever -- but it keeps its weight, so its share stays accrued instead of
-        # being paid to the wallets that happen to parse. Corrected, it is paid what it
-        # was always owed.
+        # for ever -- and its own entitlement is left untouched rather than shared out,
+        # so it keeps growing and is paid in full the moment the address is corrected.
         unpayable = {w.address for w in wallets if not valid_address(w.address)}
         for address in sorted(unpayable):
             LOGGER(
@@ -84,6 +83,12 @@ def pay_accrued(
             owed,
             wallets,
             unpayable=unpayable,
+            # What each wallet has already been credited, which is what makes its
+            # weight a share of everything this method has ever earned rather than a
+            # share of this one transaction. Without it a cut too small to go out
+            # returns to a debt belonging to nobody and is split among everybody on the
+            # next tick -- so a small weight is never paid at all.
+            paid_native=sql.donation_paid_by_address(ledger, contract_hash, asset),
             min_transfer_native=min_transfer,
             # The chain's own floors, in its own units. Passing them in native rather
             # than reading `settlement_floors_mu()` back is what keeps the comparison
@@ -134,6 +139,9 @@ def pay_accrued(
             token_id=asset,
             paid_native=plan.total_native,
             records=records_for(tx_id, plan.outputs, to_mu),
+            # Per wallet, so the next payout knows whose entitlement this discharged.
+            # In the same commit as the decrement, because they are one fact.
+            credited=plan.credited,
         ):
             # The transaction is on the chain and the debt is not discharged, so the
             # next tick will pay it again. Nothing here can undo it, and the debt row is
