@@ -623,6 +623,14 @@ def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
             f"got {network!r}"
         )
 
+    chosen = str(bitcoin.get("BACKEND") or "core").strip().lower()
+    if chosen not in ("core", "esplora"):
+        raise ConfigValidationError(
+            f"ledgers.bitcoin.BACKEND must be 'core' or 'esplora', got {chosen!r}. "
+            "'esplora' is a read-only HTTP API -- the node can be paid in BTC but not "
+            "pay in it; 'core' is a bitcoind that holds the wallet and signs."
+        )
+
     payments = bitcoin.get("payments")
     if not isinstance(payments, dict):
         return

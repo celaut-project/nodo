@@ -24,24 +24,34 @@ LEDGER = None if IMPORT_ERROR else celaut_pb2.Contract.Ledger(tags=["bitcoin"])
 TOKEN = "deposit-token-1"
 
 
+def _output(paid_to, amount_sat):
+    """One normalised output, as any backend reports one."""
+    return {
+        "script_hex": script_pubkey_from_address(paid_to).hex(),
+        "value_sat": amount_sat,
+        "op_return": None,
+    }
+
+
 def _tx(token=TOKEN, paid_to=ADDRESS, amount_sat=1_000, extra_outputs=()):
-    """A decoded transaction as `getrawtransaction ... true` returns one."""
+    """A transaction in the shape the *backend* hands the contract.
+
+    Normalised on purpose: Core reports a value in BTC as a float and an `OP_RETURN` as
+    an `asm` string, while an Esplora API reports satoshi integers and a hex script. A
+    fixture written in either one's dialect would be testing the contract against a
+    backend rather than against the shape it actually reads.
+    """
     outputs = []
     if token is not None:
         outputs.append({
-            "value": 0,
-            "scriptPubKey": {"type": "nulldata", "asm": f"OP_RETURN {token.encode().hex()}"},
+            "script_hex": "6a" + f"{len(token):02x}" + token.encode().hex(),
+            "value_sat": 0,
+            "op_return": token.encode("utf-8"),
         })
     if paid_to is not None:
-        outputs.append({
-            "value": str(Decimal(amount_sat) / 100_000_000),
-            "scriptPubKey": {
-                "type": "witness_v0_keyhash",
-                "hex": script_pubkey_from_address(paid_to).hex(),
-            },
-        })
+        outputs.append(_output(paid_to, amount_sat))
     outputs.extend(extra_outputs)
-    return {"vout": outputs}
+    return {"outputs": outputs}
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -86,20 +96,14 @@ class OpReturnValidationTests(unittest.TestCase):
     def test_only_the_outputs_paying_us_count(self):
         # Change back to the payer, and anything paying a third party, are not payments
         # to this node -- exactly as the donation indexer treats them.
-        paying_someone_else = _tx(amount_sat=1_000, extra_outputs=[{
-            "value": "0.001",
-            "scriptPubKey": {"type": "witness_v0_scripthash",
-                             "hex": script_pubkey_from_address(OTHER).hex()},
-        }])
+        paying_someone_else = _tx(
+            amount_sat=1_000, extra_outputs=[_output(OTHER, 100_000)]
+        )
         self.assertTrue(self._validate(1_000, {"tx-1": paying_someone_else}))
         self.assertFalse(self._validate(2_000, {"tx-1": paying_someone_else}))
 
     def test_several_outputs_to_us_in_one_transaction_are_summed(self):
-        split = _tx(amount_sat=600, extra_outputs=[{
-            "value": "0.00000400",
-            "scriptPubKey": {"type": "witness_v0_keyhash",
-                             "hex": script_pubkey_from_address(ADDRESS).hex()},
-        }])
+        split = _tx(amount_sat=600, extra_outputs=[_output(ADDRESS, 400)])
         self.assertTrue(self._validate(1_000, {"tx-1": split}))
 
     def test_a_payment_to_another_address_is_not_ours(self):
@@ -126,6 +130,14 @@ class OpReturnValidationTests(unittest.TestCase):
                 script=script_pubkey_from_address(OTHER),
             ))
 
+    def test_a_read_only_backend_will_not_mint_an_address_even_from_init(self):
+        # It cannot ask a node for one, and inventing one would strand payments aimed
+        # at whatever peers were already told.
+        with mock.patch.object(btc, "can_pay", return_value=False), \
+                mock.patch.object(btc.env_manager, "get", return_value=""):
+            with self.assertRaisesRegex(ValueError, "read-only"):
+                btc.ensure_receiving_address()
+
     def test_the_receiving_path_never_mints_an_address(self):
         """Minting here would check the payment against a script no payer was told.
 
@@ -147,10 +159,13 @@ class OpReturnValidationTests(unittest.TestCase):
         self.assertFalse(chain.new_address.called, "the payment path minted an address")
 
     def test_init_is_what_mints_and_stores_the_address(self):
+        # A wallet-bearing backend only: a read-only one cannot be asked for an address,
+        # which is why it requires RECEIVING_ADDRESS to be configured by hand.
         chain = mock.Mock()
         chain.new_address.return_value = ADDRESS
         stored = {}
         with mock.patch.object(btc, "backend", return_value=chain), \
+                mock.patch.object(btc, "can_pay", return_value=True), \
                 mock.patch.object(btc.env_manager, "get", return_value=""), \
                 mock.patch.object(btc.env_manager, "set",
                                   side_effect=lambda key, value: stored.__setitem__(key, value)), \

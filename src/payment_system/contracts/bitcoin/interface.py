@@ -43,8 +43,9 @@ from typing import Optional, Tuple
 from protos import celaut_pb2
 from src.database import sql_connection
 from src.payment_system.contracts.bitcoin import rate
-from src.payment_system.contracts.bitcoin.backend import BackendUnavailable, backend
-from src.payment_system.contracts.bitcoin.backend import configuration_reason
+from src.payment_system.contracts.bitcoin import backend as core_backend
+from src.payment_system.contracts.bitcoin import esplora as esplora_backend
+from src.payment_system.contracts.bitcoin.backend import BackendUnavailable
 from src.payment_system.sweeps import compute_sweep_amount
 from src.utils.bitcoin_units import (
     P2WPKH_DUST_SAT,
@@ -104,9 +105,47 @@ MIN_CONFIRMATIONS = lambda: max(1, int(env_manager.get("ledgers.bitcoin.payments
 TARGET_CONF = lambda: max(1, int(env_manager.get("ledgers.bitcoin.payments.TARGET_CONF", 6) or 6))
 MAX_FEE_RATE_SAT_VB = lambda: float(env_manager.get("ledgers.bitcoin.payments.MAX_FEE_RATE_SAT_VB", 100) or 100)
 RECEIVING_ADDRESS_KEY = "ledgers.bitcoin.payments.RECEIVING_ADDRESS"
+# How this node reaches Bitcoin. `core` is a bitcoind you trust with your wallet: it
+# signs, so it can pay as well as be paid. `esplora` is any public HTTP API: it holds no
+# key, so the node can only be *paid* -- which is the side that matters to a node
+# earning money, and it needs no infrastructure at all. See docs/BITCOIN.md.
+BACKENDS = {"core": core_backend, "esplora": esplora_backend}
+DEFAULT_BACKEND = "core"
+BACKEND = lambda: str(env_manager.get("ledgers.bitcoin.BACKEND") or DEFAULT_BACKEND).strip().lower()
 # Read per call, matching the registry's own gate for the simulated contract, so the two
 # can never disagree about whether this node is simulating.
 SIMULATE_PAYMENTS = lambda: bool(env_manager.get("general_flags.SIMULATE_PAYMENTS"))
+
+def _backend_module():
+    """The configured way of reaching Bitcoin."""
+    name = BACKEND()
+    module = BACKENDS.get(name)
+    if module is None:
+        raise BackendUnavailable(
+            f"ledgers.bitcoin.BACKEND={name!r} is not one of "
+            f"{', '.join(sorted(BACKENDS))}"
+        )
+    return module
+
+
+def backend():
+    """A handle on the chain. Built per call, holding no connection of its own."""
+    return _backend_module().backend()
+
+
+def can_pay() -> bool:
+    """Whether this node can *send* BTC, as opposed to only being paid in it.
+
+    False for a read-only backend, which holds no key. The payer walks the payment
+    systems it shares with a peer and settles through the first it can fund, so a
+    system that cannot sign simply has no funding and the walk moves on -- nothing is
+    broadcast, and nothing raises in the middle of a payment.
+    """
+    try:
+        return bool(getattr(_backend_module(), "backend")().can_pay)
+    except Exception:
+        return False
+
 
 bitcoin_ledger = celaut_pb2.Contract.Ledger(
     tags=[LEDGER],
@@ -159,7 +198,13 @@ def unavailable_reason() -> Optional[str]:
       price a million times wrong (see `rate.py`).
     * **No way to reach a node.** No RPC URL, or no credentials.
     """
-    return rate.rate_reason() or configuration_reason()
+    reason = rate.rate_reason()
+    if reason:
+        return reason
+    try:
+        return _backend_module().configuration_reason()
+    except BackendUnavailable as exc:
+        return str(exc)
 
 
 def ledger() -> celaut_pb2.Contract.Ledger:
@@ -266,6 +311,12 @@ def ensure_receiving_address() -> str:
         if "is not a valid" in str(exc):
             raise
 
+    if not can_pay():
+        raise ValueError(
+            f"{RECEIVING_ADDRESS_KEY} is not set and this node's Bitcoin backend is "
+            "read-only, so it cannot ask for an address. Set the address you want to "
+            "be paid at."
+        )
     address = backend().new_address()
     if not is_valid_bitcoin_address(address, network=NETWORK()):
         raise ValueError(
@@ -358,7 +409,17 @@ def init():
 
 
 def check_sender_balance(amount: int) -> bool:
-    """Whether this wallet can pay ``amount`` MU plus what the transaction costs."""
+    """Whether this wallet can pay ``amount`` MU plus what the transaction costs.
+
+    ``False`` outright on a read-only backend: it cannot sign, so it has no funding,
+    and the payer's walk moves to the next payment system without broadcasting.
+    """
+    if not can_pay():
+        LOGGER(
+            "The Bitcoin backend is read-only, so this node can be paid in BTC but "
+            "cannot pay in it. Trying another payment system."
+        )
+        return False
     try:
         required = rate.mu_to_satoshi(amount) + _fee_sat()
         available = backend().get_balance(MIN_CONFIRMATIONS())
@@ -456,18 +517,19 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
 
 
 def _op_return_tokens(transaction: dict) -> list:
-    """Every `OP_RETURN` payload in ``transaction``, decoded as text where possible."""
+    """Every `OP_RETURN` payload in ``transaction``, decoded as text where possible.
+
+    Reads the backend's normalised outputs, not any backend's JSON: Core reports an
+    `OP_RETURN` as an `asm` string and an Esplora API as a hex script, and this contract
+    knows neither.
+    """
     payloads = []
-    for output in transaction.get("vout") or []:
-        script = (output.get("scriptPubKey") or {})
-        if script.get("type") != "nulldata":
-            continue
-        asm = str(script.get("asm") or "")
-        parts = asm.split()
-        if len(parts) < 2:
+    for output in transaction.get("outputs") or []:
+        payload = output.get("op_return")
+        if not payload:
             continue
         try:
-            payloads.append(bytes.fromhex(parts[1]).decode("utf-8"))
+            payloads.append(bytes(payload).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             continue
     return payloads
@@ -480,13 +542,12 @@ def _paid_to_script(transaction: dict, script_hex: str) -> int:
     the payer, an output to a third party -- is not a payment to this node.
     """
     total = 0
-    for output in transaction.get("vout") or []:
-        script = (output.get("scriptPubKey") or {})
-        if str(script.get("hex") or "").lower() != script_hex:
+    for output in transaction.get("outputs") or []:
+        if str(output.get("script_hex") or "").lower() != script_hex:
             continue
         try:
-            total += int((Decimal(str(output.get("value") or 0)) * 100_000_000).to_integral_value())
-        except Exception:
+            total += int(output.get("value_sat") or 0)
+        except (TypeError, ValueError):
             continue
     return total
 

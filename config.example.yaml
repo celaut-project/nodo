@@ -1063,6 +1063,25 @@ ledgers:
   bitcoin:
     tags: [ bitcoin ]
     NETWORK: mainnet                 # mainnet | testnet | signet | regtest
+    # How this node reaches Bitcoin. Two very different asks:
+    #
+    #   esplora  A public HTTP API (blockstream.info, mempool.space, or your own).
+    #            No key anywhere and nothing to run, and this node can be PAID in BTC
+    #            -- which is the side that matters if you are earning. It cannot pay
+    #            out: the payer walks the systems it shares with a peer and settles
+    #            through the first it can fund, so BTC is simply skipped when paying.
+    #            You must set payments.RECEIVING_ADDRESS yourself; a read-only API
+    #            cannot be asked for an address.
+    #
+    #   core     A bitcoind you trust with your wallet, since Core is what signs. It
+    #            may be remote -- RPC_URL is a URL -- but "remote" here means your own
+    #            machine over a LAN or VPN, not somebody else's node.
+    #
+    # Ergo's posture is neither: a remote public node plus a mnemonic in this file. The
+    # equivalent for Bitcoin would mean a seed here and raw transaction signing, which
+    # is not implemented.
+    BACKEND: esplora
+    ESPLORA_URL: "https://blockstream.info/api"
     RPC_URL: "http://127.0.0.1:8332"
     # Core writes this file on every start, so the ordinary setup keeps no credential
     # in this file at all. RPC_USER / RPC_PASSWORD are the fallback.

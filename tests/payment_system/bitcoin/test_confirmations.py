@@ -97,6 +97,17 @@ class ConfirmationTests(unittest.TestCase):
 
         self.assertGreater(btc.DEPOSIT_TOKEN_TTL, ergo.DEPOSIT_TOKEN_TTL)
 
+    def test_a_read_only_backend_declines_to_pay_instead_of_failing_mid_payment(self):
+        """The refusal has to reach the payer where it can act on it.
+
+        Funding is the selection: the payer walks the systems it shares with a peer and
+        settles through the first it can fund. A backend that holds no key has no
+        funding, so it answers no to `check_sender_balance` and the walk moves on --
+        nothing is broadcast, and nothing raises halfway through a payment.
+        """
+        with mock.patch.object(btc, "can_pay", return_value=False):
+            self.assertFalse(btc.check_sender_balance(1_000_000))
+
     def test_this_contract_needs_no_unspent_output_and_no_sweep_pause(self):
         # Its proof is a confirmed transaction, so nothing breaks if the receiving
         # outputs are spent -- and it must not be blocked by a pause bounded far more

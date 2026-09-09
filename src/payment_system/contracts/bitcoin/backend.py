@@ -45,12 +45,17 @@ class BackendUnavailable(Exception):
 
 
 class ChainBackend:
-    """What the payment flow needs from a chain, and nothing else.
+    """Bitcoin Core over JSON-RPC: the full surface, reads and writes.
 
-    ``get_balance``, ``send_to``, ``list_received``, ``tx_status``, ``estimate_fee_rate``
-    and ``new_address``. A different implementation of these six is a different way to
-    reach Bitcoin, not a different contract.
+    The surface itself -- ``get_balance``, ``list_received``, ``tx_status``,
+    ``raw_transaction``, ``list_transactions``, ``estimate_fee_rate``, ``new_address``,
+    ``send_to``, ``send_many`` -- is what the payment flow asks for. A different
+    implementation of it is a different way to reach Bitcoin, not a different contract:
+    see ``esplora.py``, which implements the read half and refuses the rest.
     """
+
+    #: This backend holds a wallet, so it can sign and broadcast.
+    can_pay = True
 
     def __init__(self, url: str, wallet: Optional[str] = None,
                  auth: Optional[str] = None):
@@ -219,10 +224,44 @@ class ChainBackend:
         return dict(self._call("gettransaction", [str(txid), True]) or {})
 
     def raw_transaction(self, txid: str) -> Dict[str, Any]:
-        """The decoded transaction, for reading its outputs and its ``OP_RETURN``."""
-        return dict(
-            self._call("getrawtransaction", [str(txid), True], wallet_scoped=False) or {}
-        )
+        """The transaction's outputs, normalised (see :func:`normalise_outputs`)."""
+        decoded = self._call("getrawtransaction", [str(txid), True], wallet_scoped=False)
+        return {"outputs": _core_outputs(decoded or {})}
+
+
+def _core_outputs(decoded: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Core's ``getrawtransaction`` verbose output, in the shape the contract reads.
+
+    The contract must not know any backend's JSON: Core reports a value in BTC as a
+    float and an `OP_RETURN` as an `asm` string, while an Esplora API reports satoshi
+    integers and a hex script. Normalising here is what lets a second way of reaching
+    the chain be a different backend rather than a second contract.
+    """
+    from decimal import Decimal
+
+    outputs: List[Dict[str, Any]] = []
+    for output in decoded.get("vout") or []:
+        script = output.get("scriptPubKey") or {}
+        try:
+            value_sat = int(
+                (Decimal(str(output.get("value") or 0)) * 100_000_000).to_integral_value()
+            )
+        except Exception:
+            value_sat = 0
+        payload = None
+        if script.get("type") == "nulldata":
+            parts = str(script.get("asm") or "").split()
+            if len(parts) >= 2:
+                try:
+                    payload = bytes.fromhex(parts[1])
+                except ValueError:
+                    payload = None
+        outputs.append({
+            "script_hex": str(script.get("hex") or "").lower(),
+            "value_sat": value_sat,
+            "op_return": payload,
+        })
+    return outputs
 
 
 def _auth_from_config() -> Optional[str]:
