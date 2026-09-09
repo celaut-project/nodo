@@ -135,19 +135,24 @@ def list_peers():
             print(f"  Balance last update: {balance_last_update or 'None'}")
             print()
 
-            # Section: Payment contracts
-            # Every payment contract instance this peer has registered, across
-            # every ledger and contract type -- not just a single hardcoded one.
-            print("[Payment Contracts]")
+            # Section: Payment methods
+            # Every payment method this peer has registered, across every ledger,
+            # contract type and asset -- not just a single hardcoded one. A method is
+            # ledger + contract + asset, and the asset is the part that cannot be left
+            # out: on Ergo one contract is paid in ERG and in every token at the same
+            # address, so two rows here can differ in nothing else -- and each carries
+            # its own rate.
+            print("[Payment Methods]")
             if contracts:
                 for contract in contracts:
-                    print(f"  Ledger: {contract['ledger_tag']}")
+                    asset = contract.get('token_id') or 'native'
+                    print(f"  Ledger: {contract['ledger_tag']}  Asset: {asset}")
                     print(f"    Contract hash: {contract['contract_hash']}")
                     print(f"    Address:       {contract['address'] or 'N/A'}")
                     mu_per_unit = contract['mu_per_unit']
                     print(f"    MU per unit:   {mu_per_unit if mu_per_unit is not None else 'N/A'}")
             else:
-                print("  No payment contract registered for this peer.")
+                print("  No payment method registered for this peer.")
             print()
 
             # Section: Advertised rates

@@ -501,18 +501,27 @@ These are intended for development or advanced maintenance environments:
   `nodo reputation`
 
 - **pay**  
-  Pays a peer from this node's wallet, in **the ledger's own unit** — ERG for Ergo, BTC
-  for Bitcoin — whatever `ui.DISPLAY_UNIT` says, because what moves is an on-chain
-  transfer and the ledger denominates it. `--ledger <name>` is only needed when this
-  node offers more than one payment system, and then it is: two systems are two
-  currencies, and guessing would move money on a chain nobody named. Which system a
-  payment settles through is otherwise decided by funding — the node walks the systems
-  it shares with the peer and uses the first whose wallet can cover it, so a node
-  holding ERG and no BTC pays a peer that accepts both in ERG with no setting to that
-  effect. Stops cleanly before touching the wallet when the amount is below what the
-  ledger can settle, or when no payment system is shared with the peer.  
+  Pays a peer from this node's wallet, in **the asset's own unit** — ERG, BTC, whole
+  SigUSD — whatever `ui.DISPLAY_UNIT` says, because what moves is an on-chain transfer
+  and the asset denominates it.
+
+  `--payment-method <ledger>:<asset>` names which one, and `--ledger <name>` plus
+  `--asset <symbol|token id>` says the same thing the long way. It is only needed when
+  this node offers more than one payment method, and then it is needed: two methods are
+  two currencies, and guessing would move money nobody named. A *ledger* is not enough
+  on its own, because one Ergo contract is paid in ERG and in every configured token, at
+  different rates — the asset is matched by its symbol, its display-unit name or its
+  64-hex id. The named method is what the amount is read in **and** what the payment
+  settles through.
+
+  With nothing named, funding is the selection: the node walks the methods it shares
+  with the peer and uses the first whose wallet can cover it, so a node out of SigUSD but
+  holding ERG pays a peer that accepts both in ERG with no setting to that effect. Stops
+  cleanly before touching the wallet when the amount is below what the method can settle,
+  or when no payment method is shared with the peer.  
   **Example:**  
-  `sudo nodo pay <peer_id> 0.01 --ledger bitcoin`
+  `sudo nodo pay <peer_id> 0.01 --payment-method bitcoin:BTC`  
+  `sudo nodo pay <peer_id> 25 --payment-method ergo:SigUSD`
 
 - **donations**  
   What this node donates and whose donations it counts. Prints the share of earnings

@@ -36,46 +36,96 @@ from src.utils.config import ConfigManager
 from src.utils.monetary import format_mu
 
 
-def _contract_for(ledger: Optional[str]):
-    """The contract to pay through, and the reason when there is none.
+def _method_for(ledger: Optional[str], asset: Optional[str],
+                payment_method: Optional[str]):
+    """The payment method to pay through, and the reason when there is none.
 
-    With no ``--ledger`` and one payment system offered, that one. With several, the
-    operator has to say which: two payment systems are two currencies, and guessing
-    would move money on a chain nobody named.
+    A payment method is ``(ledger, contract, asset)``, so the ledger alone does not
+    name one: an Ergo P2PK contract is paid in ERG and in every configured token, at
+    different rates. ``--ledger ergo`` on a node that accepts SigUSD is exactly as
+    ambiguous as no flag at all on a node that also accepts Bitcoin.
+
+    Three ways to say the same thing, because they are the same thing:
+    ``--payment-method ergo:sigusd``, ``--ledger ergo --asset sigusd``, and -- when
+    only one method is offered -- nothing.
+
+    An asset is matched by its display symbol, its unit name or its id. The id is what
+    it *is* (a name is not an identity, anyone can mint a token called SigUSD), but an
+    operator typing a command has the symbol in front of them, and the two cannot
+    collide: an id is 64 hex characters.
     """
-    from src.payment_system.contracts.registry import attribute, contracts
+    from src.payment_system.contracts.registry import attribute, methods
+
+    if payment_method:
+        if ":" in payment_method:
+            named_ledger, named_asset = payment_method.split(":", 1)
+        else:
+            # `--payment-method ergo` is a ledger, and reads better as one than as an
+            # error about a missing colon.
+            named_ledger, named_asset = payment_method, ""
+        ledger = ledger or named_ledger.strip() or None
+        asset = asset or named_asset.strip() or None
 
     offered = {
-        c.LEDGER: c for c in contracts().values() if not attribute(c, "is_demo")
+        key: method for key, method in methods().items()
+        if not attribute(method, "is_demo")
     }
     if not offered:
         return None, (
             "this node offers no payment system, so it cannot pay anybody. Check "
             "`ledgers:` and that the ledger's runtime is reachable."
         )
+
+    def names(method) -> tuple:
+        """Every way an operator may name this method's asset."""
+        return tuple(str(name).lower() for name in (
+            method.asset, method.symbol, method.unit_name,
+        ) if name)
+
+    candidates = list(offered.values())
     if ledger:
-        contract = offered.get(ledger)
-        if contract is None:
+        candidates = [m for m in candidates if m.LEDGER == ledger]
+        if not candidates:
             return None, (
                 f"this node does not offer {ledger!r}. It offers: "
-                f"{', '.join(sorted(offered))}."
+                f"{', '.join(sorted({m.LEDGER for m in offered.values()}))}."
             )
-        return contract, None
-    if len(offered) > 1:
+    if asset:
+        wanted = asset.strip().lower()
+        matched = [m for m in candidates if wanted in names(m)]
+        if not matched:
+            return None, (
+                f"this node does not accept {asset!r}"
+                + (f" on {ledger}" if ledger else "")
+                + f". It accepts: {', '.join(_offered_names(candidates))}."
+            )
+        candidates = matched
+    if len(candidates) > 1:
         return None, (
-            "this node offers more than one payment system "
-            f"({', '.join(sorted(offered))}), so the amount is ambiguous. Say which "
-            "with --ledger <name>."
+            "this node offers more than one payment method "
+            f"({', '.join(_offered_names(candidates))}), so the amount is ambiguous. "
+            "Say which with --payment-method <ledger>:<asset>."
         )
-    return next(iter(offered.values())), None
+    return candidates[0], None
+
+
+def _offered_names(methods_) -> List[str]:
+    """How the offered methods are named back to an operator who has to pick one."""
+    return sorted(f"{m.LEDGER}:{_asset_name(m)}" for m in methods_)
+
+
+def _asset_name(method) -> str:
+    """The asset as a person reads it: its symbol when it has one, else its id."""
+    return str(method.symbol or method.asset)
 
 
 def _amount_to_mu(contract, amount: str) -> int:
-    """A whole-unit amount on ``contract``'s ledger, as this node's MU.
+    """A whole-unit amount of this method's asset, as this node's MU.
 
-    The amount stays in the ledger's own unit whatever `ui.DISPLAY_UNIT` says -- ERG for
-    Ergo, BTC for Bitcoin -- because what moves is an on-chain transfer and the ledger
-    denominates it, not the operator's presentation preference.
+    The amount stays in the asset's own unit whatever `ui.DISPLAY_UNIT` says -- ERG for
+    Ergo's native method, BTC for Bitcoin's, whole SigUSD for that token's -- because
+    what moves is an on-chain transfer and the asset denominates it, not the operator's
+    presentation preference.
 
     Converted through ``mu_per_unit()``, which is the same figure peers are told as
     ``ContractRate``, so what the operator types and what the peer credits are related
@@ -90,8 +140,8 @@ def _amount_to_mu(contract, amount: str) -> int:
     in_mu = typed * Decimal(contract.mu_per_unit())
     if in_mu != in_mu.to_integral_value():
         raise ValueError(
-            f"{amount} {getattr(contract, 'NATIVE_ASSET', '')} is not a whole number of "
-            "MU, and MU is the unit of account -- there is nothing smaller to express"
+            f"{amount} {_asset_name(contract)} is not a whole number of MU, and MU is "
+            "the unit of account -- there is nothing smaller to express"
         )
     return int(in_mu)
 
@@ -119,8 +169,15 @@ def _read_peer_balance(
     return balance_mu, mu_per_unit, peer.get("balance_last_update")
 
 
-def pay(peer_id: str, amount: str, ledger: Optional[str] = None) -> bool:
-    """Pay ``amount`` of ``ledger``'s own unit to ``peer_id``.
+def pay(peer_id: str, amount: str, ledger: Optional[str] = None,
+        asset: Optional[str] = None, payment_method: Optional[str] = None) -> bool:
+    """Pay ``amount`` whole units of one payment method's asset to ``peer_id``.
+
+    The method is named by ``--payment-method <ledger>:<asset>``, or by
+    ``--ledger``/``--asset``, or not at all when this node offers exactly one. It is
+    what the amount is read in *and* what the payment settles through: without the
+    second half the flag would only pick the rate, and a payment named in SigUSD could
+    settle in ERG.
 
     Success means the tx was submitted and the receiving peer accepted +
     validated the deposit server-side; afterwards this node's balance
@@ -135,11 +192,11 @@ def pay(peer_id: str, amount: str, ledger: Optional[str] = None) -> bool:
     )
     from src.database.access_functions.ledgers import get_peer_contract_instances
 
-    contract, refusal = _contract_for(ledger)
+    contract, refusal = _method_for(ledger, asset, payment_method)
     if contract is None:
         print(f"STOP: {refusal}", flush=True)
         return False
-    unit = getattr(contract, "NATIVE_ASSET", "") or contract.LEDGER
+    unit = _asset_name(contract) or contract.LEDGER
     contract_hash = contract.CONTRACT_HASH
 
     try:
@@ -176,23 +233,28 @@ def pay(peer_id: str, amount: str, ledger: Optional[str] = None) -> bool:
     # no-peer boundary; nothing sent. The stored row only reflects what the peer
     # advertised at handshake time, so before giving up we re-ask it: a peer that
     # had no payment contract back then may well advertise one now.
-    scripts: List[Tuple[bytes, object]] = list(
-        get_peer_contract_instances(contract_hash, peer_id)
+    # This method's instances, not the contract's: on Ergo every asset of a contract
+    # shares an address, so the contract's rows would say "yes, payable" for an asset
+    # the peer never advertised.
+    scripts: List[Tuple[bytes, object, str]] = list(
+        get_peer_contract_instances(contract_hash, peer_id, contract.asset)
     )
     if not scripts:
         from src.manager.manager import refresh_peer_instance
 
         print(
-            f"No {contract.LEDGER} payment contract known for peer {peer_id}; asking it "
-            "again ...",
+            f"No {contract.LEDGER} {unit} payment method known for peer {peer_id}; "
+            "asking it again ...",
             flush=True,
         )
         if refresh_peer_instance(peer_id=peer_id):
-            scripts = list(get_peer_contract_instances(contract_hash, peer_id))
+            scripts = list(
+                get_peer_contract_instances(contract_hash, peer_id, contract.asset)
+            )
     if not scripts:
         print(
-            f"STOP: peer {peer_id} has no known {contract.LEDGER} payment contract "
-            "instance (it does not advertise one). Nothing was broadcast.",
+            f"STOP: peer {peer_id} does not accept {unit} on {contract.LEDGER} (it "
+            "advertises no such payment method). Nothing was broadcast.",
             flush=True,
         )
         return False
@@ -210,6 +272,9 @@ def pay(peer_id: str, amount: str, ledger: Optional[str] = None) -> bool:
         peer_id=peer_id,
         amount=amount_mu,
         on_transaction_url=print_transaction_url,
+        # The method the operator named, so the payment settles in the asset the amount
+        # was read in rather than in whichever one happens to be funded first.
+        method=contract.key,
     )
     if not paid:
         print(

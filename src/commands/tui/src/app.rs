@@ -602,6 +602,11 @@ pub struct PeerContract {
     /// ledger row can't be resolved or carries no tag.
     pub ledger: String,
     pub contract_hash: String,
+    /// The asset this method settles in: a reserved native symbol ("ERG", "BTC") or a
+    /// token's 64-hex id. Part of the identity, not decoration -- on Ergo one contract
+    /// is paid in ERG and in every token at the same address, so two rows can differ in
+    /// nothing else, and each carries its own `mu_per_unit`.
+    pub asset: String,
     pub address: String,
     pub mu_per_unit: String,
 }
@@ -4603,12 +4608,15 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
         .collect()
 }
 
-/// Every payment contract instance a peer has registered. A peer's
-/// `contract_instance` rows aren't reachable from the uri join `get_peers`
-/// already runs, and before this the TUI surfaced none of it at all (issue #231).
+/// Every payment *method* a peer has registered. A peer's `contract_instance` rows
+/// aren't reachable from the uri join `get_peers` already runs, and before this the TUI
+/// surfaced none of it at all (issue #231). A method is ledger + contract + asset, so
+/// `token_id` comes back with the rest: without it two methods of one Ergo contract
+/// render as the same row twice, at two different rates.
 fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<PeerContract>> {
     let mut statement = connection.prepare(
-        "SELECT ci.contract_hash, ci.ledger_hash, ci.address, ci.mu_per_unit, l.content
+        "SELECT ci.contract_hash, ci.ledger_hash, ci.address, ci.mu_per_unit, l.content,
+                ci.token_id
          FROM contract_instance ci
          LEFT JOIN ledger l ON ci.ledger_hash = l.hash
          WHERE ci.peer_id = ?1",
@@ -4626,6 +4634,7 @@ fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<P
             Ok(PeerContract {
                 ledger,
                 contract_hash: row.get(0)?,
+                asset: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
                 address: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 // Not ERG-formatted: this is a rate (MU per unit of the contract),
                 // not a balance. For ERG the rate is the peg itself, 1e9.
@@ -6822,7 +6831,8 @@ mod tests {
                  CREATE TABLE uri (id INTEGER PRIMARY KEY, peer_id TEXT, ip TEXT, port INTEGER);
                  CREATE TABLE ledger (hash TEXT PRIMARY KEY, content BLOB);
                  CREATE TABLE contract_instance (id INTEGER PRIMARY KEY, address TEXT,
-                                    ledger_hash TEXT, contract_hash TEXT, peer_id TEXT,
+                                    ledger_hash TEXT, contract_hash TEXT,
+                                    token_id TEXT NOT NULL DEFAULT '', peer_id TEXT,
                                     mu_per_unit TEXT);
                  INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7, 'cli-7f3a');",
             )
@@ -6830,8 +6840,9 @@ mod tests {
         for (contract_hash, ledger_hash, address, ledger_content) in instances {
             connection
                 .execute(
-                    "INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit)
-                     VALUES (?1, ?2, ?3, 'peer-1', '500')",
+                    "INSERT INTO contract_instance (address, ledger_hash, contract_hash,
+                                                    token_id, peer_id, mu_per_unit)
+                     VALUES (?1, ?2, ?3, 'ERG', 'peer-1', '500')",
                     rusqlite::params![address, ledger_hash, contract_hash],
                 )
                 .unwrap();
