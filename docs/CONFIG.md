@@ -607,6 +607,19 @@ the protocol; what a donor gets is a bounded bonus in *other* nodes' peer select
 full mechanism, the two lists and why they are separate: [`DONATIONS.md`](DONATIONS.md).
 `nodo donations` prints what this node pays, what it counts, and what is accrued.
 
+### `ledgers.bitcoin`
+
+A second payment system, off until `payments.MU_PER_SATOSHI` is set — and that key has
+no default on purpose: a satoshi is worth about a million nanoERG, so borrowing
+`MU_PER_NANOERG`'s `1` would sell an hour of compute for a millionth of its price.
+Unset, the node does not offer Bitcoin at all rather than offering it mispriced.
+
+Its keys live in Bitcoin Core's wallet, not here: `WALLET_KEYS_EXTERNAL: true` is what
+tells the node not to generate a mnemonic for it. Back up bitcoind's wallet.
+
+Every key, what it does, and why on-chain BTC is for coarse node-to-node deposits rather
+than for a client topping up an instance: [`BITCOIN.md`](BITCOIN.md).
+
 > ⚠️ `WALLET_MNEMONIC` is a secret. The `nodo tui` Config editor masks secret
 > values; keep backups off-repo. Ergo transactions are **final and irreversible**
 > (see [`KyA.md`](KyA.md)).

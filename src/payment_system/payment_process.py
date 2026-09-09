@@ -39,10 +39,35 @@ deposit_generation_locked = False
 # How long a sweep waits for in-flight deposits before giving up on this iteration.
 DEPOSIT_DRAIN_TIMEOUT = 300
 
-# How long a deposit token may sit 'pending' before it is written off. A payment takes
-# seconds (submit the transaction, then call Payable), so an hour is not a deadline
-# anyone meets by accident -- and a client whose payment lands after it is refused.
-DEPOSIT_TOKEN_TTL = 3600
+# Fallback for how long a deposit token may sit 'pending' before it is written off,
+# used only when no contract says. The real figure comes from the contracts themselves
+# (`deposit_token_ttl` below), because how long a payment takes is a property of the
+# chain it settles on.
+DEFAULT_DEPOSIT_TOKEN_TTL = 3600
+
+
+def deposit_token_ttl() -> int:
+    """How long a pending deposit token is given before it is written off.
+
+    The **maximum** across every contract this node offers, and the reason is a
+    limitation worth stating plainly: a deposit token is issued by the *receiver*, in
+    `GenerateDepositToken`, before the payer has chosen which payment system to settle
+    through -- the token row has no contract on it and cannot have one without a change
+    to the wire. So there is no per-token TTL to apply; there is only one deadline, and
+    it has to be long enough for the slowest chain someone might pay us on.
+
+    The maximum rather than the minimum, because the two directions are not
+    symmetrical. Too short refuses a payment that is already on-chain -- money left the
+    payer and no balance arrived, the one direction an accounting error must never fall
+    in. Too long only delays this node's own cold-wallet sweep, which pays nobody.
+
+    What *is* per contract is the pause: see `_pause_and_drain_deposits`.
+    """
+    try:
+        ttls = _payment_envs().deposit_token_ttls().values()
+    except Exception:
+        return DEFAULT_DEPOSIT_TOKEN_TTL
+    return max(ttls, default=DEFAULT_DEPOSIT_TOKEN_TTL)
 
 auxiliar_script_reputation = {}
 auxiliar_script_reputation_lock = Lock()
@@ -637,29 +662,35 @@ def __check_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, tok
 def _pause_and_drain_deposits(timeout: int = DEPOSIT_DRAIN_TIMEOUT) -> bool:
     """Stop issuing deposit tokens and wait for the in-flight ones to settle.
 
-    ``ergo.manager`` sweeps the wallet by SPENDING its boxes, while
-    ``payment_process_validator`` proves an incoming payment by finding an
-    *unspent* box carrying the deposit token in R4. A sweep that consumes that box
-    turns a client's honest payment into a rejected one, so no sweep may run while
-    a deposit is still in flight. Generation is paused for the wait because
-    otherwise a busy node never reaches zero pending.
+    Ergo's ``manager`` sweeps the wallet by SPENDING its boxes, while its
+    ``payment_process_validator`` proves an incoming payment by finding an *unspent*
+    box carrying the deposit token in R4. A sweep that consumes that box turns a
+    client's honest payment into a rejected one, so no sweep may run while a deposit is
+    still in flight. Generation is paused for the wait because otherwise a busy node
+    never reaches zero pending.
 
-    Tokens past ``DEPOSIT_TOKEN_TTL`` are written off first, since a client's
+    **This is Ergo's problem, not every chain's.** A contract that proves payment from a
+    confirmed transaction -- Bitcoin's does -- needs no pause at all, and must not be
+    given one: its confirmations routinely take longer than this wait is bounded by, so
+    being dragged in would mean its manager never runs on a busy node. Which contracts
+    need it is theirs to declare (`envs.needs_unspent_proof`), and
+    `__manage_interfaces` runs the rest outside the pause entirely.
+
+    Tokens past `deposit_token_ttl()` are written off first, since a client's
     ``Payable`` call is the only thing that ever moves one out of 'pending'; without
     that, a single deposit nobody paid would block every future sweep. The timeout
     still bounds this iteration, for a token too young to expire but already dead:
     returning False skips the sweep, rather than wedging this thread and -- with
     generation paused -- locking out every future deposit as well.
-
-    The pause exists only because the validator needs the box unspent.
-    Proving payment from the confirmed transaction instead would remove the need
-    for it entirely.
     """
     global deposit_generation_locked
     deposit_generation_locked = True
-    expired = sc.expire_pending_deposit_tokens(DEPOSIT_TOKEN_TTL)
+    expired = sc.expire_pending_deposit_tokens(deposit_token_ttl())
     if expired:
-        _l.LOGGER(f"Expired {expired} deposit token(s) left unpaid for over {DEPOSIT_TOKEN_TTL}s.")
+        _l.LOGGER(
+            f"Expired {expired} deposit token(s) left unpaid for over "
+            f"{deposit_token_ttl()}s."
+        )
     deadline = monotonic() + timeout
     while sc.get_deposit_tokens(status="pending"):
         if monotonic() >= deadline:
@@ -668,33 +699,58 @@ def _pause_and_drain_deposits(timeout: int = DEPOSIT_DRAIN_TIMEOUT) -> bool:
     return True
 
 
+def _run_managers(managers: dict) -> None:
+    """Run each contract's periodic job, letting one failure not stop the others."""
+    for key, _manage in managers.items():
+        if not callable(_manage):
+            _l.LOGGER(f"Warning: {_manage} is not callable.")
+            continue
+        try:
+            _manage()
+        except JavaDependencyMissing:
+            log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
+        except Exception as e:
+            _l.LOGGER(f"Exception on manage interface {key}. {str(e)}")
+
+
 def __manage_interfaces():
     global deposit_generation_locked
     while True:
         sleep(PAYMENT_MANAGER_ITERATION_TIME)
         _l.LOGGER("Execute payment manager iteration.")
 
+        payment_envs = _payment_envs()
+        managers = payment_envs.manage_interfaces()
+        try:
+            pausing = set(payment_envs.needs_unspent_proof())
+        except Exception:
+            # A registry that cannot answer is treated as "everything needs the pause",
+            # which is the old behaviour and the cautious direction: a sweep that runs
+            # when it should not have can turn an honest payment into a rejected one.
+            pausing = set(managers)
+
+        # The contracts that do not need an unspent output run first and unconditionally.
+        # They must not wait behind a pending deposit token: on a chain whose
+        # confirmations take longer than the drain timeout, a busy node would never
+        # reach zero pending and their donations and sweeps would simply never happen.
+        _run_managers({k: v for k, v in managers.items() if k not in pausing})
+
+        paused_managers = {k: v for k, v in managers.items() if k in pausing}
+        if not paused_managers:
+            continue
+
         try:
             if not _pause_and_drain_deposits():
                 _l.LOGGER(
                     f"{len(sc.get_deposit_tokens(status='pending'))} deposit token(s) still "
-                    "pending after the drain timeout; skipping this iteration so their boxes "
+                    "pending after the drain timeout; skipping this iteration for the "
+                    "contracts that prove payment from an unspent output, so their boxes "
                     "stay unspent."
                 )
                 continue
 
             _l.LOGGER("No pending deposit token, now payment interfaces can be managed.")
-
-            for key, _manage in _payment_envs().manage_interfaces().items():
-                if callable(_manage):
-                    try:
-                        _manage()
-                    except JavaDependencyMissing:
-                        log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
-                    except Exception as e:
-                        _l.LOGGER(f"Exception on manage interface {key}. {str(e)}")
-                else:
-                    _l.LOGGER(f"Warning: {_manage} is not callable.")
+            _run_managers(paused_managers)
         finally:
             deposit_generation_locked = False
 

@@ -500,6 +500,20 @@ These are intended for development or advanced maintenance environments:
   **Example:**  
   `nodo reputation`
 
+- **pay**  
+  Pays a peer from this node's wallet, in **the ledger's own unit** — ERG for Ergo, BTC
+  for Bitcoin — whatever `ui.DISPLAY_UNIT` says, because what moves is an on-chain
+  transfer and the ledger denominates it. `--ledger <name>` is only needed when this
+  node offers more than one payment system, and then it is: two systems are two
+  currencies, and guessing would move money on a chain nobody named. Which system a
+  payment settles through is otherwise decided by funding — the node walks the systems
+  it shares with the peer and uses the first whose wallet can cover it, so a node
+  holding ERG and no BTC pays a peer that accepts both in ERG with no setting to that
+  effect. Stops cleanly before touching the wallet when the amount is below what the
+  ledger can settle, or when no payment system is shared with the peer.  
+  **Example:**  
+  `sudo nodo pay <peer_id> 0.01 --ledger bitcoin`
+
 - **donations**  
   What this node donates and whose donations it counts. Prints the share of earnings
   being donated, what has been paid out, what is accrued and not yet paid, both wallet
