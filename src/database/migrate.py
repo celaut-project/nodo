@@ -286,6 +286,11 @@ TABLES = {
             deposit_token TEXT DEFAULT NULL,
             ledger TEXT DEFAULT NULL,
             contract_hash TEXT DEFAULT NULL,
+            -- The asset the payment was made IN: a reserved native symbol ("ERG") or a
+            -- token's 64-hex id. `amount_mu` is deliberately ledger-neutral, so without
+            -- this a row cannot say what money moved -- and one contract settles in
+            -- several assets (see contract_instance).
+            token_id TEXT DEFAULT NULL,
             address TEXT DEFAULT NULL,
             amount_mu TEXT NOT NULL,
             purpose TEXT DEFAULT NULL,
@@ -460,6 +465,7 @@ def create_tables(cursor):
     # which is every row written before this column existed.
     ensure_columns(cursor, "payments", {
         "purpose": "TEXT DEFAULT NULL",
+        "token_id": "TEXT DEFAULT NULL",
     })
     ensure_columns(cursor, "uri", {
         "peer_id": "TEXT DEFAULT NULL",

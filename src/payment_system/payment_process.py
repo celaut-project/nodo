@@ -342,6 +342,9 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                         deposit_token=deposit_token,
                         ledger=_ledger_tag(ledger) or plan.ledger_tag,
                         contract_hash=contract_hash,
+                        # Which asset paid it: `amount_mu` is ledger-neutral, and one
+                        # contract settles in several assets at several rates.
+                        token_id=plan.asset,
                         address=_address_of(script),
                     )
 
@@ -664,6 +667,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         deposit_token=token,
         ledger=_ledger_tag(ledger),
         contract_hash=contract_hash,
+        token_id=asset,
     )
     _l.LOGGER(f"Pending deposit tokens updated, there are still {len(sc.get_deposit_tokens(status='pending'))} tokens in the queue.")
     return _r
