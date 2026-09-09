@@ -424,14 +424,36 @@ class FreeTierTests(unittest.TestCase):
             self.assertFalse(execution_cost.is_free(scarcity={"cpu": 0.1, "mem": 0.9, "disk": 0.1}))
 
 
+def _system(ledger_tag="ergo", contract_hash="ergo-contract"):
+    """The payment system a deposit is being sized for."""
+    from src.payment_system.mu_conversion import MatchingPaymentSystem
+
+    return MatchingPaymentSystem(
+        ledger_tag=ledger_tag, contract_hash=contract_hash,
+        local_mu_per_unit=1, peer_mu_per_unit=1,
+    )
+
+
 class DerivedDepositTests(unittest.TestCase):
+    def _floors(self, **by_contract):
+        return patch(
+            "src.payment_system.contracts.envs.settlement_floors",
+            return_value={
+                name: (lambda pair=pair: pair) for name, pair in by_contract.items()
+            },
+        )
+
     def test_a_deposit_keeps_the_fee_under_the_configured_share(self):
         from src.payment_system import deposits
-        from src.payment_system.contracts.ergo.interface import DEFAULT_FEE
+        from src.payment_system.contracts.ergo.interface import (
+            CONTRACT_HASH, DEFAULT_FEE, SAFE_MIN_BOX_VALUE,
+        )
 
-        with _config(**{"deposits.MAX_FEE_OVERHEAD": 0.02, "deposits.REFILL_BELOW": 0.2}):
-            full = deposits.full_deposit_mu()
-            threshold = deposits.refill_threshold_mu()
+        system = _system(contract_hash=CONTRACT_HASH)
+        with _config(**{"deposits.MAX_FEE_OVERHEAD": 0.02, "deposits.REFILL_BELOW": 0.2}), \
+                self._floors(**{CONTRACT_HASH: (DEFAULT_FEE, SAFE_MIN_BOX_VALUE)}):
+            full = deposits.full_deposit_mu(system)
+            threshold = deposits.refill_threshold_mu(system)
 
         self.assertLessEqual(DEFAULT_FEE / full, 0.02)
         self.assertEqual(format_mu(full), "0.05 ERG")
@@ -441,10 +463,16 @@ class DerivedDepositTests(unittest.TestCase):
         """Ergo refuses an output under its minimum box value, so a deposit smaller
         than min_box + fee cannot be paid at all."""
         from src.payment_system import deposits
-        from src.payment_system.contracts.ergo.interface import DEFAULT_FEE, SAFE_MIN_BOX_VALUE
+        from src.payment_system.contracts.ergo.interface import (
+            CONTRACT_HASH, DEFAULT_FEE, SAFE_MIN_BOX_VALUE,
+        )
 
-        with _config(**{"deposits.MAX_FEE_OVERHEAD": 1.0}):
-            self.assertGreaterEqual(deposits.full_deposit_mu(), SAFE_MIN_BOX_VALUE + DEFAULT_FEE)
+        with _config(**{"deposits.MAX_FEE_OVERHEAD": 1.0}), \
+                self._floors(**{CONTRACT_HASH: (DEFAULT_FEE, SAFE_MIN_BOX_VALUE)}):
+            self.assertGreaterEqual(
+                deposits.full_deposit_mu(_system(contract_hash=CONTRACT_HASH)),
+                SAFE_MIN_BOX_VALUE + DEFAULT_FEE,
+            )
 
     def test_the_floors_come_from_the_contracts_not_from_a_named_ledger(self):
         """Deposit sizing must not know which payment system it is sizing for.
@@ -458,30 +486,79 @@ class DerivedDepositTests(unittest.TestCase):
 
         # A contract that costs nothing to settle imposes no floor at all, so the only
         # thing left deciding the deposit is the fee-overhead rule against a zero fee.
-        with _config(), patch.object(deposits, "_ledger_floors", return_value=(0, 0)):
-            self.assertEqual(deposits.full_deposit_mu(), 0)
+        with _config(), self._floors(free=(0, 0)):
+            self.assertEqual(deposits.full_deposit_mu(_system(contract_hash="free")), 0)
 
         # And a stricter ledger raises it, without deposits.py naming any of them.
         with _config(**{"deposits.MAX_FEE_OVERHEAD": 0.02}), \
-             patch.object(deposits, "_ledger_floors", return_value=(2_000_000, 3_000_000)):
-            self.assertEqual(deposits.full_deposit_mu(), 100_000_000)
+                self._floors(costly=(2_000_000, 3_000_000)):
+            self.assertEqual(
+                deposits.full_deposit_mu(_system(contract_hash="costly")), 100_000_000
+            )
 
-    def test_the_strictest_contract_sets_the_floor(self):
-        """One figure has to be payable on every available system.
+    def test_each_system_is_sized_by_its_own_floors(self):
+        """The regression that matters, and it is why this is per system at all.
 
-        Deposit sizing runs before anyone has picked a contract, so it takes the maximum
-        rather than the cheapest — a deposit sized for a free ledger would be refused by
-        a chain that charges a fee.
+        The figure used to be one global maximum across every available contract,
+        because sizing happened before a contract had been chosen. With a second
+        payment system registered that silently prices every deposit at the most
+        expensive chain the node happens to support: Ergo's floors are around a
+        thousandth of a cent and Bitcoin's around a dollar (#340 §5), and Basis (#265),
+        whose floors are (0, 1), would inherit Ergo's and stop being worth anything.
         """
         from src.payment_system import deposits
 
-        with _config(**{"deposits.MAX_FEE_OVERHEAD": 1.0}), \
-             patch("src.payment_system.contracts.envs.settlement_floors", return_value={
-                 "free-contract": lambda: (0, 0),
-                 "costly-contract": lambda: (1_000_000, 1_000_000),
-             }):
-            self.assertEqual(deposits._ledger_floors(), (1_000_000, 1_000_000))
-            self.assertEqual(deposits.full_deposit_mu(), 2_000_000)
+        floors = self._floors(
+            cheap=(1_000_000, 1_000_000),
+            costly=(1_000_000_000, 500_000_000),
+        )
+        with _config(**{"deposits.MAX_FEE_OVERHEAD": 1.0}), floors:
+            cheap = deposits.full_deposit_mu(_system(contract_hash="cheap"))
+            costly = deposits.full_deposit_mu(_system(contract_hash="costly"))
+
+        self.assertEqual(cheap, 2_000_000)
+        self.assertEqual(costly, 1_500_000_000)
+        self.assertLess(
+            cheap, costly, "the cheap system must not inherit the costly one's floors"
+        )
+
+    def test_a_ledger_may_override_the_fee_overhead_share(self):
+        """2 % is right for Ergo and absurd on Bitcoin (#340 §5).
+
+        At 2 % a Bitcoin deposit is worth years of runtime up front, so the share is
+        per ledger, falling back to the global one for a ledger that says nothing.
+        """
+        from src.payment_system import deposits
+
+        with _config(**{
+            "deposits.MAX_FEE_OVERHEAD": 0.02,
+            "ledgers.bitcoin.payments.MAX_FEE_OVERHEAD": 0.25,
+        }), self._floors(btc=(1_000_000_000, 294)):
+            per_ledger = deposits.full_deposit_mu(
+                _system(ledger_tag="bitcoin", contract_hash="btc")
+            )
+            global_share = deposits.full_deposit_mu(
+                _system(ledger_tag="ergo", contract_hash="btc")
+            )
+
+        self.assertEqual(per_ledger, 4_000_000_000)
+        self.assertEqual(global_share, 50_000_000_000)
+
+    def test_a_system_whose_contract_is_gone_cannot_be_sized(self):
+        # Shared with the peer a moment ago and not offered now: a runtime that went
+        # away. Refused rather than sized against a floor of zero, which would build a
+        # transaction the chain refuses.
+        from src.payment_system import deposits
+
+        with _config(), self._floors(other=(0, 0)):
+            with self.assertRaisesRegex(ValueError, "no payment contract is available"):
+                deposits.full_deposit_mu(_system(contract_hash="vanished"))
+
+    def test_a_payment_that_settles_on_no_chain_has_no_floor(self):
+        from src.payment_system import deposits
+
+        with _config():
+            self.assertEqual(deposits.full_deposit_mu(None), 0)
 
     def test_a_simulated_contract_reports_no_settlement_floor(self):
         """The answer that makes the abstraction real rather than decorative."""
