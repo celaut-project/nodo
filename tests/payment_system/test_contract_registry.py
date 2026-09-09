@@ -180,10 +180,13 @@ class DispatchTests(unittest.TestCase):
         # display unit would mean whichever rate module imported last.
         clashing = mock.Mock()
         clashing.display_units.return_value = {"btc": {"SYMBOL": "BTC"}}
+        # Patched on `envs` rather than on `importlib`: the module imports the name
+        # once, at import time, so patching the package would leave the already-bound
+        # reference alone and this test would pass whatever the code did.
         with mock.patch.object(registry, "rate_modules", return_value=["a", "b"]), \
                 mock.patch("src.payment_system.contracts.envs.rate_modules",
                            return_value=["a", "b"]), \
-                mock.patch("importlib.import_module", return_value=clashing):
+                mock.patch.object(envs, "import_module", return_value=clashing):
             with self.assertRaisesRegex(ValueError, "display unit"):
                 envs.display_units()
 
