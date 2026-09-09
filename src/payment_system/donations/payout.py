@@ -79,16 +79,31 @@ def pay_accrued(
             )
             return False
 
+        # What each wallet has already been credited, which is what makes its weight a
+        # share of everything this method has ever earned rather than a share of this
+        # one transaction. Without it a cut too small to go out returns to a debt
+        # belonging to nobody and is split among everybody on the next tick -- so a
+        # small weight is never paid at all.
+        #
+        # Read once, here, before anything is broadcast, and carried into the settle
+        # below. `None` means the rows could not be read, which is not the same as
+        # "nobody has been paid": read that way, an accumulated claim -- an address
+        # unpayable for a month is owed the lot -- would be handed to whichever wallets
+        # clear the floor today. Nothing is lost by waiting a tick.
+        paid = sql.donation_paid_by_address(ledger, contract_hash, asset)
+        if paid is None:
+            LOGGER(
+                f"Not paying the donation on {ledger} yet: what each wallet has already "
+                "been credited could not be read, and paying without it would send one "
+                "wallet's share to another. The debt stays accrued."
+            )
+            return False
+
         plan = plan_payout(
             owed,
             wallets,
             unpayable=unpayable,
-            # What each wallet has already been credited, which is what makes its
-            # weight a share of everything this method has ever earned rather than a
-            # share of this one transaction. Without it a cut too small to go out
-            # returns to a debt belonging to nobody and is split among everybody on the
-            # next tick -- so a small weight is never paid at all.
-            paid_native=sql.donation_paid_by_address(ledger, contract_hash, asset),
+            paid_native=paid,
             min_transfer_native=min_transfer,
             # The chain's own floors, in its own units. Passing them in native rather
             # than reading `settlement_floors_mu()` back is what keeps the comparison
@@ -142,6 +157,7 @@ def pay_accrued(
             # Per wallet, so the next payout knows whose entitlement this discharged.
             # In the same commit as the decrement, because they are one fact.
             credited=plan.credited,
+            paid_before=paid,
         ):
             # The transaction is on the chain and the debt is not discharged, so the
             # next tick will pay it again. Nothing here can undo it, and the debt row is

@@ -50,7 +50,7 @@ class _Catalogue:
         return dict(self.paid)
 
     def settle_donation(self, *, ledger, contract_hash, token_id, paid_native, records,
-                        credited=()):
+                        credited=(), paid_before=None):
         self.settlements.append({
             "ledger": ledger,
             "token_id": token_id,
@@ -59,8 +59,14 @@ class _Catalogue:
             "credited": list(credited),
         })
         self.owed -= Decimal(str(paid_native))
+        # Against the map the payout planned with, exactly as the real one does: the
+        # credit is written after the transaction is on the wire, so re-reading here is
+        # a read whose failure could abort nothing.
+        base = paid_before if paid_before is not None else {}
         for address, amount in credited:
-            self.paid[address] = self.paid.get(address, Decimal(0)) + Decimal(str(amount))
+            self.paid[address] = (
+                Decimal(str(base.get(address, 0))) + Decimal(str(amount))
+            )
         return True
 
 
@@ -68,8 +74,8 @@ class _Catalogue:
 class PayoutTests(unittest.TestCase):
 
     def _pay(self, owed, *, wallets=None, simulate=False, min_transfer=2_000_000,
-             tx_id="tx-donation", balance=10 ** 12, paid=None):
-        catalogue = _Catalogue(owed, paid)
+             tx_id="tx-donation", balance=10 ** 12, paid=None, catalogue=None):
+        catalogue = catalogue if catalogue is not None else _Catalogue(owed, paid)
         sent = []
 
         def simple_send(ergo, amount, receiver_addresses, wallet_mnemonic, fee):
@@ -267,6 +273,39 @@ class PayoutTests(unittest.TestCase):
             owed = catalogue.owed
         self.assertGreater(received[WALLET_B], 0,
                            "the 1 % wallet was never paid anything at all")
+
+    def test_an_unreadable_credit_map_pays_nothing_rather_than_guessing(self):
+        """The direction a read failure has to fail in, and it is not the obvious one.
+
+        An empty map and an unreadable one are different facts. Read as "nobody has
+        been paid", a transient failure hands an accumulated claim to whichever wallets
+        clear the floor today -- an address that has been unpayable for a month is owed
+        the lot, and would get half of it. Nothing is lost by waiting a tick, so the
+        payout aborts before anything is broadcast.
+        """
+        unreadable = _Catalogue(11_000_000)
+        unreadable.donation_paid_by_address = lambda *_args: None
+        catalogue, sent = self._pay(11_000_000, min_transfer=0, catalogue=unreadable)
+        self.assertEqual(sent, [], "nothing may be broadcast without the credit map")
+        self.assertEqual(catalogue.settlements, [])
+        self.assertEqual(catalogue.owed, 11_000_000, "and the debt is untouched")
+
+    def test_the_credit_is_written_against_the_map_the_payout_planned_with(self):
+        """Not against a fresh read, which is the window that costs a double payment.
+
+        The credit is written after the transaction is on the wire, where a failed read
+        can abort nothing -- so reading again there would write each credit as though
+        the wallet had never been paid, wipe its history, and hand it its whole share
+        again on a later tick.
+        """
+        catalogue, _sent = self._pay(
+            11_000_000, wallets=[Wallet(WALLET_A, Decimal(1))], min_transfer=0,
+            paid={WALLET_A: 5_000_000},
+        )
+        [settlement] = catalogue.settlements
+        # 5e6 already credited plus this payout's 11e6 entitlement.
+        self.assertEqual(catalogue.paid[WALLET_A], Decimal(16_000_000))
+        self.assertEqual(settlement["credited"], [(WALLET_A, 11_000_000)])
 
     def test_nothing_owed_does_nothing(self):
         catalogue, sent = self._pay(0)

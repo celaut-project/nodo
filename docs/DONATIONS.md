@@ -83,7 +83,7 @@ reviewed as one.
 `nodo donations` prints both lists, what has reached **each** funded wallet, what is
 accrued, and which addresses are in one list and not the other. The per-wallet figure is
 there so a weight can be checked rather than trusted: a wallet given 0.1 % should be able
-to show that something arrived. The TUI's EARNINGS page shows the same.
+to show that something arrived. The TUI's EARNINGS page shows the same, per wallet.
 
 ## Paying: a share of earnings, accrued and then paid
 
