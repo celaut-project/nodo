@@ -7,6 +7,7 @@ from bee_rpc import client as beerpc
 from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
 from src.manager.ddns import ddns_tick
+from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
@@ -669,6 +670,10 @@ def manager_thread():
             scheduler_tick()
         except Exception:
             pass
+
+        # Node energy sample (issue #258). Self-gates to energy.SAMPLE_INTERVAL_SECONDS
+        # and never raises. Informational only — does not feed MU pricing or low_demand.
+        energy_tick()
 
         # Publish this node's public IP to its DDNS provider (OFF unless
         # ddns.ENABLED). Self-gates to ddns.INTERVAL_SECONDS and never raises.

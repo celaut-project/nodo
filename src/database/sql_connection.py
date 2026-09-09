@@ -832,6 +832,9 @@ class SQLConnection(metaclass=Singleton):
         self._execute('''
             DELETE FROM instance_consumption WHERE instance_id = ?
         ''', (id,))
+        self._execute('''
+            DELETE FROM instance_energy WHERE instance_id = ?
+        ''', (id,))
         with SQLConnection._consumption_lock:
             SQLConnection._consumption_windows.pop(id, None)
 
@@ -2623,25 +2626,69 @@ class SQLConnection(metaclass=Singleton):
             DELETE FROM deposit_tokens WHERE id = ?
         ''', (token_id,))
 
-    def insert_energy_record(self, cpu_percent: float, memory_usage: float,
-                           power_consumption: float, cost: float):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO energy_consumption
-            (timestamp, cpu_percent, memory_usage, power_consumption, cost)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (datetime.now(), cpu_percent, memory_usage, power_consumption, cost))
-        self.conn.commit()
+    def insert_energy_sample(
+        self,
+        energy_joules: float,
+        watts: float,
+        price_per_kwh: float,
+        currency: str,
+        backend: str,
+        is_floor: bool,
+    ) -> None:
+        """Persist one interval's energy and the tariff then in effect.
 
-    def get_latest_energy_records(self, limit: int = 100) -> Generator[Dict, None, None]:
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT * FROM energy_consumption
-            ORDER BY timestamp DESC LIMIT ?
-        ''', (limit,))
-        columns = [description[0] for description in cursor.description]
-        for row in cursor.fetchall():
-            yield dict(zip(columns, row))
+        Cost is not stored: it is ``energy_joules / 3.6e6 * price_per_kwh`` on
+        read, so a later tariff change does not rewrite history.
+        """
+        self._execute(
+            """
+            INSERT INTO energy_consumption
+            (timestamp, energy_joules, watts, price_per_kwh, currency, backend, is_floor)
+            VALUES (CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                float(energy_joules),
+                float(watts),
+                float(price_per_kwh),
+                str(currency or ""),
+                str(backend or ""),
+                1 if is_floor else 0,
+            ),
+        )
+
+    def replace_instance_energy(self, rows: Dict[str, Tuple[float, float]]) -> None:
+        """Replace the latest per-instance watt/share picture.
+
+        ``rows`` maps instance id to ``(watts, share_of_node)``. Instances not in
+        ``rows`` are dropped so a stopped guest cannot keep a stale share. Same
+        shape as ``instance_consumption``: one hot row, not a time series.
+        """
+        seen = []
+        for instance_id, (watts, share) in rows.items():
+            if not instance_id:
+                continue
+            seen.append(instance_id)
+            self._execute(
+                """
+                INSERT INTO instance_energy
+                    (instance_id, watts, share, sample_count, last_refresh)
+                VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT(instance_id) DO UPDATE SET
+                    watts = excluded.watts,
+                    share = excluded.share,
+                    sample_count = instance_energy.sample_count + 1,
+                    last_refresh = excluded.last_refresh
+                """,
+                (instance_id, float(watts), float(share)),
+            )
+        if seen:
+            placeholders = ",".join("?" * len(seen))
+            self._execute(
+                f"DELETE FROM instance_energy WHERE instance_id NOT IN ({placeholders})",
+                tuple(seen),
+            )
+        else:
+            self._execute("DELETE FROM instance_energy")
 
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     # Slot concept here refers to the number of urls. Slot should be renamed on all the code because is incorrectly used.

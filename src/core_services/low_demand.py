@@ -129,10 +129,10 @@ def consecutive_polls() -> int:
 def _current_cpu_percent() -> Optional[float]:
     """Best-effort current system CPU usage percent, or ``None`` if unavailable.
 
-    Uses the non-blocking ``psutil.cpu_percent(interval=None)`` form (unlike
-    ``power.py``'s blocking ``interval=1``) so a poll tick stays cheap; see open
-    question 4 in the design doc about the warm-up-call caveat of the non-blocking
-    form. Never raises.
+    Uses the non-blocking ``psutil.cpu_percent(interval=None)`` form, so a poll tick
+    costs nothing in wall time; the blocking form would sit on this thread for its
+    whole interval. See open question 4 in the design doc about the warm-up-call
+    caveat of the non-blocking form. Never raises.
     """
     try:
         import psutil

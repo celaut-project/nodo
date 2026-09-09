@@ -98,7 +98,7 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::vertical([
-        Constraint::Length(7),
+        Constraint::Length(9),
         Constraint::Length(7),
         Constraint::Min(6),
     ])
@@ -122,6 +122,8 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
             ),
             metric_line("Address", nonempty(&app.node_info.address, "—")),
             metric_line("Version", shorten(&app.node_info.version, 18)),
+            metric_line("Power", node_power_line(&app.node_energy)),
+            metric_line("Elec.", node_cost_line(&app.node_energy)),
         ],
         ACCENT,
     );
@@ -328,11 +330,11 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_instances_tree(frame, app, area);
         return;
     }
-    // 13 = 11 detail lines + the block's two border rows. The card carries the figures
+    // 14 = 12 detail lines + the block's two border rows. The card carries the figures
     // the row has no width for: the disk allocation, the vCPU allowance the CPU% is
-    // measured against, the cumulative disk/net totals, and the burn rate broken out
-    // per minute and per hour with the age and sample count of the average.
-    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(13)]).split(area);
+    // measured against, the cumulative disk/net totals, the burn rate, and the
+    // attributed watts (issue #258).
+    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(14)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
         let location = if instance.is_local() {
             "local".to_string()
@@ -455,6 +457,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             metric_line("Net", net_detail(instance)),
             metric_line("Balance", money.format_raw(&instance.balance)),
             metric_line("Burn", burn_detail(instance, money)),
+            metric_line("Energy", energy_detail(instance)),
         ];
         // `observe` attaches to a local process, so it is only offered for local
         // instances. Full id, so the line can be copied as-is.
@@ -546,6 +549,80 @@ fn format_burn_rate(mu_per_hour: Option<f64>, money: &Money) -> String {
     match mu_per_hour {
         Some(rate) if rate.is_finite() && rate >= 0.0 => money.format_mu(rate.round() as u64),
         _ => "—".to_string(),
+    }
+}
+
+/// A power reading, in whole watts once there are enough of them for the decimals to
+/// be noise. `—` covers "no sample" and "nothing to measure it with" alike; a `0 W`
+/// there would claim the machine is drawing nothing.
+fn format_watts(watts: Option<f64>) -> String {
+    match watts {
+        Some(value) if value.is_finite() && value >= 0.0 => {
+            if value < 10.0 {
+                format!("{value:.2} W")
+            } else {
+                format!("{value:.0} W")
+            }
+        }
+        _ => "—".to_string(),
+    }
+}
+
+/// The energy line for the detail card: what this guest drew, and how much of the
+/// node's own figure that is. The share is against the whole machine, so two guests'
+/// percentages plus the host's unattributed rest come to 100 — a guest using a
+/// twentieth of one core reads as a twentieth of one core, not as the whole node.
+fn energy_detail(instance: &Instance) -> String {
+    match (instance.energy_watts, instance.energy_share) {
+        (Some(watts), Some(share)) if watts.is_finite() && share.is_finite() => {
+            format!(
+                "{} · {:.0}% of node • CPU-share of measured draw",
+                format_watts(Some(watts)),
+                (share * 100.0).clamp(0.0, 100.0)
+            )
+        }
+        _ => "— • no samples yet".to_string(),
+    }
+}
+
+/// The NODE card's power line: the figure, and which source stands behind it. The
+/// source is named rather than described, because they are not interchangeable — a
+/// package counter, a rail, the power supply's input and a plug at the wall measure
+/// four different things, and `floor` says the number is short of the whole machine.
+/// A combined source arrives already named for its parts (`rapl+nvml`).
+fn node_power_line(energy: &crate::app::NodeEnergy) -> String {
+    match energy.watts {
+        Some(watts) if watts.is_finite() && watts >= 0.0 => {
+            let kind = if energy.backend.is_empty() {
+                "measured".to_string()
+            } else if energy.backend == "model" {
+                "model estimate".to_string()
+            } else if energy.is_floor {
+                format!("{} floor", energy.backend)
+            } else {
+                energy.backend.clone()
+            };
+            format!("{} · {}", format_watts(Some(watts)), kind)
+        }
+        _ => "—".to_string(),
+    }
+}
+
+fn node_cost_line(energy: &crate::app::NodeEnergy) -> String {
+    match energy.watts {
+        Some(watts)
+            if watts.is_finite() && watts >= 0.0 && energy.price_per_kwh > 0.0 =>
+        {
+            let per_hour = (watts / 1000.0) * energy.price_per_kwh;
+            let currency = if energy.currency.is_empty() {
+                "EUR"
+            } else {
+                energy.currency.as_str()
+            };
+            format!("{per_hour:.4} {currency}/h")
+        }
+        Some(_) => "— • no tariff".to_string(),
+        None => "—".to_string(),
     }
 }
 
@@ -3088,6 +3165,52 @@ fn visible_tail(lines: &[String], count: usize) -> String {
 #[cfg(test)]
 mod tests {
 
+    /// The power line has to say which of four different measurements it is showing.
+    /// A package counter, a rail, the supply's input and a plug at the wall are not
+    /// interchangeable, and naming one of them for another misreads by whatever the
+    /// missing parts of the machine draw.
+    mod power_line {
+        use super::super::node_power_line;
+        use crate::app::NodeEnergy;
+
+        fn line(watts: Option<f64>, backend: &str, is_floor: bool) -> String {
+            node_power_line(&NodeEnergy {
+                watts,
+                backend: backend.to_string(),
+                is_floor,
+                ..NodeEnergy::default()
+            })
+        }
+
+        #[test]
+        fn a_partial_source_is_named_and_marked_a_floor() {
+            assert_eq!(line(Some(12.0), "rapl", true), "12 W · rapl floor");
+            assert_eq!(line(Some(9.0), "hwmon", true), "9.00 W · hwmon floor");
+        }
+
+        #[test]
+        fn a_combined_source_keeps_the_names_of_its_parts() {
+            assert_eq!(line(Some(150.0), "rapl+nvml", true), "150 W · rapl+nvml floor");
+        }
+
+        #[test]
+        fn a_whole_machine_source_is_not_called_a_floor() {
+            assert_eq!(line(Some(200.0), "ipmi", false), "200 W · ipmi");
+            assert_eq!(line(Some(180.0), "smart_plug", false), "180 W · smart_plug");
+        }
+
+        #[test]
+        fn the_estimate_says_it_is_one() {
+            assert_eq!(line(Some(90.0), "model", false), "90 W · model estimate");
+        }
+
+        #[test]
+        fn no_sample_is_a_dash_and_never_a_zero() {
+            assert_eq!(line(None, "rapl", true), "—");
+            assert_eq!(line(f64::NAN.into(), "rapl", true), "—");
+        }
+    }
+
     /// The working day has to be legible as a day: which hours are open, where now is,
     /// and whether the thing is even being enforced. Drawn rather than described,
     /// because the layout is the feature -- these are the mistakes a reading of the
@@ -3998,6 +4121,8 @@ mod tests {
                 mu_per_hour: None,
                 consumption_samples: None,
                 consumption_age_secs: None,
+                energy_watts: None,
+                energy_share: None,
             }
         }
 
@@ -4104,6 +4229,8 @@ mod tests {
             mu_per_hour: Some(3_600_000_000.0),
             consumption_samples: Some(12),
             consumption_age_secs: Some(45.0),
+            energy_watts: Some(12.0),
+            energy_share: Some(0.3),
         }]);
         app.instances.state.select(Some(0));
         app.instances.state_id = Some("8f4e2c".to_string());
@@ -4127,6 +4254,8 @@ mod tests {
         assert!(text.contains("Burn/h"), "missing the burn-rate column header");
         assert!(text.contains("3.6 ERG"), "missing the per-hour burn rate");
         assert!(text.contains("12 samples"), "missing the burn-rate sample count");
+        assert!(text.contains("12 W"), "missing attributed watts");
+        assert!(text.contains("30% of node"), "missing energy share");
     }
 
     /// The EARNINGS page has to answer "is this machine worth leaving on" without
@@ -4884,6 +5013,8 @@ mod tests {
                 mu_per_hour: None,
                 consumption_samples: None,
                 consumption_age_secs: None,
+                energy_watts: None,
+                energy_share: None,
             }
         }
 
