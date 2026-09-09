@@ -33,8 +33,14 @@ implemented.
 
 ## What you need, and what for
 
-Two different asks, and which one applies depends on whether you want to be **paid** in
-BTC or to **pay** in it. `ledgers.bitcoin.BACKEND` chooses.
+Two different asks — to be **paid** in BTC, or to **pay** in it — and three ways to
+answer them. `ledgers.bitcoin.BACKEND` chooses.
+
+| | runs nothing | can be paid | can pay | where the key is |
+|---|---|---|---|---|
+| `esplora` | ✅ | ✅ | ❌ | nowhere |
+| `core` | ❌ you run a bitcoind | ✅ | ✅ | bitcoind's wallet, which you back up |
+| `service` | ✅ the node runs it | ✅ | ✅ | derived from a mnemonic in `config.yaml` |
 
 ### `esplora` — to be paid. Nothing to run, no key anywhere.
 
@@ -62,17 +68,93 @@ VPN. Not somebody else's public node.
 Back up **bitcoind's wallet**, not `config.yaml`. `nodo` neither generates nor stores a
 seed for this chain, and `WALLET_KEYS_EXTERNAL: true` is what tells it not to.
 
+### `service` — to pay, without running a bitcoind yourself
+
+The same Bitcoin Core, run by **this node** as a [core service](#running-your-own-node),
+with its wallet derived from a mnemonic the node holds. It signs like `core` and asks
+nothing of you like `esplora`: you back up one phrase, the way you already do for Ergo,
+and the node brings the rest up at boot.
+
+The trade is explicit and it is the whole of it: **the mnemonic is in `config.yaml`**.
+That is a real Bitcoin key in a file on this machine. A node that would rather hold none
+should stay on `esplora` — it can still be paid, which is the half that earns.
+
 ### How this compares to Ergo
 
-Ergo's posture is neither of these: `ledgers.ergo.NODE_URL` defaults to somebody else's
+Ergo's posture is the third one: `ledgers.ergo.NODE_URL` defaults to somebody else's
 public node and the wallet mnemonic lives in `config.yaml`, so the node runs no Ergo
-infrastructure *and* can both send and receive. The equivalent for Bitcoin would mean a
-seed in `config.yaml` plus raw segwit construction, BIP-143 sighashes and UTXO selection
-— every line of it money-moving, and none of it needed to be paid. It is not
-implemented; `esplora` is what gets the receiving side to the same "nothing to run".
+infrastructure *and* can both send and receive.
 
-Neither backend needs a JVM, so a node that will not run one can be paid in BTC even
-though it cannot be paid in ERG.
+Bitcoin cannot borrow the first half of that. There is no public node that will sign for
+you, and doing it here would mean raw segwit construction, BIP-143 sighashes and UTXO
+selection — every line of it money-moving, and none of it needed to be paid. So
+`service` borrows the *second* half instead: the mnemonic is nodo's, and the signing is
+still Core's. The node just runs the Core.
+
+No backend needs a JVM, so a node that will not run one can be paid in BTC even though
+it cannot be paid in ERG.
+
+## Running your own node
+
+`BACKEND: service` launches the `bitcoin-node` core service — a published bitcoind image
+— and talks to it exactly as it talks to any other Core. It is published for
+**linux/arm64**, the kind of board a node lives on; another architecture needs the build
+for it.
+
+```yaml
+core_services:
+  bitcoin-node: "<the published service id>"
+
+ledgers:
+  bitcoin:
+    BACKEND: service
+    WALLET_KEYS_EXTERNAL: false      # so the node mints a mnemonic, as it does for Ergo
+    WALLET_MNEMONIC: ""              # filled in on the next load; paste your own to reuse one
+    WALLET_PASSPHRASE: ""            # optional BIP-39 passphrase
+    RPC_USER: "nodo"                 # what nodo and the service authenticate with
+    RPC_PASSWORD: "<something long>"
+    WALLET_NAME: "nodo"
+    PRUNE_MIB: 10000                 # 0 keeps the whole chain and builds a txindex
+```
+
+All five are checked at startup, because each one missing gives a node that boots,
+advertises Bitcoin, and then cannot settle a payment — a failure that would otherwise
+surface as a payout that silently did not happen.
+
+**The environment the service reads.** One table, and it is the contract between this
+repo and the published image (`contracts/bitcoin/node_service.py:ENVIRONMENT`):
+
+| env | from | |
+|---|---|---|
+| `BITCOIN_MNEMONIC` | `WALLET_MNEMONIC` | required |
+| `BITCOIN_RPC_USER` / `BITCOIN_RPC_PASSWORD` | `RPC_USER` / `RPC_PASSWORD` | required |
+| `BITCOIN_NETWORK` | `NETWORK` | |
+| `BITCOIN_WALLET_NAME` | `WALLET_NAME` | |
+| `BITCOIN_PRUNE` | `PRUNE_MIB` | |
+| `BITCOIN_MNEMONIC_PASSPHRASE` | `WALLET_PASSPHRASE` | optional; unset ≠ empty |
+
+**The derivation is the service's contract, and it is the ordinary one**: `m/84'/0'/0'`
+on mainnet, `m/84'/1'/0'` on the test networks, P2WPKH — BIP-84. Any standard wallet
+opens the same funds from the same words. nodo derives nothing itself: it hands over the
+mnemonic and asks Core for an address, like every other `core` deployment.
+
+**Pruning, and what it costs.** `PRUNE_MIB: 0` keeps the whole chain (~700 GB) and builds
+a `txindex`; anything else prunes to about that size, which is what makes this runnable
+on a small board. Core's own floor is 550 MiB. A pruned node imports the wallet as *new*,
+so it sees only payments made from then on: **a mnemonic that already has history needs
+a full node to rescan**, or a rescan done elsewhere. Generate a fresh one and there is
+nothing to rescan.
+
+**Where the secret is, said plainly.** The mnemonic lives in `config.yaml` and is handed
+to the instance in its environment. The node records how each instance was launched, and
+that record redacts it — the key's *name* is kept, its value is not — so the wallet does
+not end up in the database as well. It is never sent to a peer, never logged, and never
+leaves this machine.
+
+**Attaching versus launching.** The payment path only ever *attaches* to a running
+instance; a service download there would hold a payment for as long as it takes. The
+launch happens at boot and on the periodic payment tick, which is also what brings the
+service back if it died.
 
 ## Configuration
 
@@ -256,9 +338,10 @@ Bitcoin. Donating in BTC today is a transfer, not a position in anybody's routin
   paid needs a scanner that is not written.
 - **Lightning**. It is a separate payment contract with its own rate and it slots into
   the same registry.
-- **Local signing.** Paying out needs a key, and this node does not hold a Bitcoin one:
-  the `core` backend delegates that to bitcoind. A seed in `config.yaml`, the way Ergo
-  does it, would need raw transaction construction and is not implemented.
+- **Raw transaction construction.** nodo builds no Bitcoin transaction and holds no
+  Bitcoin signing code: Core signs on every backend that can pay. What `service` changes
+  is *who runs the Core*, not who signs — which is why paying in BTC needed a node image
+  rather than a segwit implementation here.
 - **Per-deposit derived addresses**, above.
 
 ## See also

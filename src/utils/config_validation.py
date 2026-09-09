@@ -701,6 +701,79 @@ def validate_balancers_config(config: Dict[str, Any]) -> None:
 BITCOIN_NETWORKS = ("mainnet", "testnet", "signet", "regtest")
 
 
+def _validate_bitcoin_node_service(config: Dict[str, Any], bitcoin: Dict[str, Any]) -> None:
+    """The `service` backend needs three things to agree, and none of them can be guessed.
+
+    Refused rather than warned about: every one of these leaves a node that boots,
+    advertises Bitcoin, and then cannot settle a single payment -- and the reason would
+    surface as a failed payout on a tick nobody is watching.
+
+    * A **published service id**, because the node cannot invent one and a core service
+      with no id is not configured (see ``core_services.get_core_service_id``).
+    * A **mnemonic of its own**, which means ``WALLET_KEYS_EXTERNAL`` must be false: the
+      flag is what tells the config loader whether to mint one, and left true for this
+      backend the node would hold no Bitcoin key and the service would come up with no
+      wallet. The pair is checked rather than silently corrected because the honest
+      reading of "the keys are external" is "do not put a key in my config file", and
+      overriding that is not a decision this validator gets to make.
+
+      The *flag* is checked and the mnemonic's emptiness is not, deliberately: this runs
+      **before** the loader mints one, so refusing an empty value would refuse exactly
+      the setup the documentation asks for -- an operator who set the flag and left the
+      phrase blank for the node to fill in. With the flag false a mnemonic is what the
+      next few lines of the loader produce; if it somehow does not, the launch refuses
+      and says which key it wanted rather than starting a bitcoind with no wallet.
+    * ``RPC_USER`` **and** ``RPC_PASSWORD``, because they are what nodo and the service
+      agree on. Core's cookie is written inside the service's own filesystem, where nodo
+      cannot read it -- and a stale cookie from some other node on this host would
+      authenticate against the wrong wallet, which is worse than failing.
+    """
+    from src.core_services import BITCOIN_NODE, UNSET_PLACEHOLDER
+
+    entries = config.get("core_services")
+    service_id = ""
+    if isinstance(entries, dict):
+        service_id = str(entries.get(BITCOIN_NODE, "") or "").strip()
+    if not service_id or service_id == UNSET_PLACEHOLDER:
+        raise ConfigValidationError(
+            f"ledgers.bitcoin.BACKEND is 'service' but core_services.{BITCOIN_NODE} is "
+            "not set to a published service id, so there is no bitcoind for this node "
+            "to run. Set it, or use 'esplora' to be paid in BTC without running one."
+        )
+
+    if bitcoin.get("WALLET_KEYS_EXTERNAL"):
+        raise ConfigValidationError(
+            "ledgers.bitcoin.BACKEND is 'service' but WALLET_KEYS_EXTERNAL is true. "
+            "That flag says this node holds no Bitcoin key, and the service derives its "
+            "wallet from one: set it to false and the node mints a BIP-39 mnemonic into "
+            "ledgers.bitcoin.WALLET_MNEMONIC the way it does for Ergo, or paste your own."
+        )
+
+    for key in ("RPC_USER", "RPC_PASSWORD"):
+        if not str(bitcoin.get(key) or "").strip():
+            raise ConfigValidationError(
+                f"ledgers.bitcoin.{key} is required with BACKEND 'service': it is what "
+                "nodo and the service authenticate with. Core's cookie file lives inside "
+                "the service and cannot be read from here."
+            )
+
+    prune = bitcoin.get("PRUNE_MIB")
+    if prune not in (None, ""):
+        try:
+            kept = int(prune)
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError(
+                f"ledgers.bitcoin.PRUNE_MIB must be a whole number of MiB, got {prune!r}"
+            ) from exc
+        # Core's own floor. Below it bitcoind refuses to start, which is a failure an
+        # operator would meet as a service that never comes up.
+        if kept != 0 and kept < 550:
+            raise ConfigValidationError(
+                f"ledgers.bitcoin.PRUNE_MIB is {kept}: Core refuses to prune below 550 "
+                "MiB. Use 0 to keep the whole chain (and a txindex with it), or 550 and up."
+            )
+
+
 def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
     """Validate the Bitcoin ledger block, if there is one.
 
@@ -727,12 +800,16 @@ def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
         )
 
     chosen = str(bitcoin.get("BACKEND") or "core").strip().lower()
-    if chosen not in ("core", "esplora"):
+    if chosen not in ("core", "esplora", "service"):
         raise ConfigValidationError(
-            f"ledgers.bitcoin.BACKEND must be 'core' or 'esplora', got {chosen!r}. "
-            "'esplora' is a read-only HTTP API -- the node can be paid in BTC but not "
-            "pay in it; 'core' is a bitcoind that holds the wallet and signs."
+            f"ledgers.bitcoin.BACKEND must be 'core', 'esplora' or 'service', got "
+            f"{chosen!r}. 'esplora' is a read-only HTTP API -- the node can be paid in "
+            "BTC but not pay in it; 'core' is a bitcoind you run that holds the wallet "
+            "and signs; 'service' is a bitcoind the node runs itself as a core service, "
+            "with the wallet derived from a mnemonic it holds."
         )
+    if chosen == "service":
+        _validate_bitcoin_node_service(config, bitcoin)
 
     payments = bitcoin.get("payments")
     if not isinstance(payments, dict):

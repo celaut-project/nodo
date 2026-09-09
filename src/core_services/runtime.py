@@ -33,8 +33,14 @@ from src.utils.config import ConfigManager
 _env_manager = ConfigManager()
 
 
-def _find_running_endpoint(service_id: str) -> Optional[str]:
+def find_running_endpoint(service_id: str) -> Optional[str]:
     """Return the first ``http://<ip>:<port>`` of a running instance of ``service_id``.
+
+    Public, and the *only* thing a hot path should call: it reads the local instances
+    table and nothing else -- no download, no launch, no network. This is what
+    :func:`ensure_core_service_running` does first, and what a caller wants on its own
+    when "is it up?" must be answered without waiting for the answer to become yes. The
+    module has always named it without the underscore in its own prose; now it is.
 
     Queries the ``local_instances`` table for rows matching ``service_id``, parses each
     ``serialized_instance`` (a :class:`celaut.Instance` protobuf) and returns the first
@@ -156,7 +162,7 @@ def ensure_core_service_running(
     availability) without triggering a launch.
     """
     # (a) Already running?
-    endpoint = _find_running_endpoint(service_id)
+    endpoint = find_running_endpoint(service_id)
     if endpoint:
         return endpoint
 
@@ -192,4 +198,4 @@ def ensure_core_service_running(
             pass
 
     # Re-check for a now-running instance after acquire/launch.
-    return _find_running_endpoint(service_id)
+    return find_running_endpoint(service_id)
