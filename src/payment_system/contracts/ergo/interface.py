@@ -267,6 +267,17 @@ def get_amount_by_addr(mnemonic: str) -> int:
     return __confirmed_balance_nanoerg(__get_sender_addr(mnemonic=mnemonic))
 
 
+def transaction_history(limit: int = 10) -> list:
+    """Recent transactions at this node's wallet, normalised (see ``history.py``).
+
+    Delegated to a light sibling so `nodo tx_history` needs no JVM: it is a read, and
+    the command used to reach into this module's privates to do it.
+    """
+    from src.payment_system.contracts.ergo import history
+
+    return history.transaction_history(get_wallet_address(), limit=limit)
+
+
 def get_balance() -> Tuple[str, float]:
     """Return (address, confirmed balance in ERG) for the single wallet."""
     addr = __get_sender_addr(WALLET_MNEMONIC())

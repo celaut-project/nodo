@@ -69,22 +69,96 @@ class PrintPaymentInfoTests(unittest.TestCase):
         self.assertIn("node unreachable", out)
 
 
-class TxHistorySingleWalletTests(unittest.TestCase):
-    def test_uses_single_wallet_address(self):
-        import src.commands.tx_history as th
-        with mock.patch(
-            "src.payment_system.contracts.ergo.interface.get_wallet_address",
-            return_value="9walletADDR",
-        ):
-            self.assertEqual(th._get_wallet_address(), "9walletADDR")
+class TxHistoryTests(unittest.TestCase):
+    """One section per payment system, and no chain named in the command.
 
-    def test_only_one_wallet_section_rendered(self):
+    Every chain-shaped part of this used to live in the command: it read the Ergo
+    explorer, walked Ergo boxes to decide a direction, and reached into
+    `contracts.ergo.interface`'s privates to render nanoERG -- so "transaction
+    history" meant "Ergo's", and a second payment system had nowhere to appear.
+    """
+
+    def _rendered(self, *contracts_):
+        import io as _io
+        from contextlib import redirect_stdout
+
         import src.commands.tx_history as th
-        calls = []
-        with mock.patch.object(th, "_get_wallet_address", return_value="9walletADDR"), \
-             mock.patch.object(th, "_display_wallet_transactions", side_effect=lambda label, addr: calls.append(label)):
+
+        buf = _io.StringIO()
+        with mock.patch("src.payment_system.contracts.registry.contracts",
+                        return_value={c.CONTRACT_HASH: c for c in contracts_}), \
+                mock.patch.object(th, "_payments_by_tx_id", return_value={}), \
+                mock.patch.object(th, "_clients_by_deposit_token", return_value={}), \
+                redirect_stdout(buf):
             th.tx_history()
-        self.assertEqual(calls, ["Wallet"])  # exactly one wallet card, labelled "Wallet"
+        return buf.getvalue()
+
+    @staticmethod
+    def _history_contract(ledger="ergo", address="9walletADDR", rows=None, unit="ERG",
+                          decimals=9):
+        contract = mock.Mock()
+        contract.LEDGER = ledger
+        contract.CONTRACT_HASH = f"hash-{ledger}"
+        contract.is_demo = False
+        contract.get_wallet_address.return_value = address
+        contract.transaction_history.return_value = rows if rows is not None else [{
+            "id": "tx-1", "timestamp": 1_760_000_000, "confirmations": 3,
+            "direction": "in", "amount": 1_500_000_000, "unit": unit,
+            "decimals": decimals, "counterparties": ["9payerADDR"],
+            "deposit_tokens": [],
+        }]
+        return contract
+
+    def test_one_section_per_payment_system(self):
+        out = self._rendered(
+            self._history_contract(),
+            self._history_contract(ledger="bitcoin", address="bc1qxyz", rows=[{
+                "id": "tx-2", "timestamp": 1_760_000_100, "confirmations": 1,
+                "direction": "out", "amount": 50_000, "unit": "BTC", "decimals": 8,
+                "counterparties": ["bc1qpeer"], "deposit_tokens": [],
+            }]),
+        )
+        self.assertIn("[ergo] - Address: 9walletADDR", out)
+        self.assertIn("[bitcoin] - Address: bc1qxyz", out)
+
+    def test_each_amount_is_rendered_in_its_own_money(self):
+        out = self._rendered(
+            self._history_contract(),
+            self._history_contract(ledger="bitcoin", address="bc1qxyz", rows=[{
+                "id": "tx-2", "timestamp": 1_760_000_100, "confirmations": 1,
+                "direction": "out", "amount": 50_000, "unit": "BTC", "decimals": 8,
+                "counterparties": [], "deposit_tokens": [],
+            }]),
+        )
+        self.assertIn("1.500000000 ERG", out)
+        self.assertIn("0.00050000 BTC", out)
+
+    def test_a_timestamp_is_read_as_seconds(self):
+        # Each contract normalises its own chain's units; a page that divided by a
+        # thousand on behalf of one chain dated the other one to 1970.
+        out = self._rendered(self._history_contract())
+        self.assertNotIn("1970", out)
+        self.assertNotIn("N/A", out)
+
+    def test_a_system_that_cannot_be_read_says_so_rather_than_showing_nothing(self):
+        # An empty history reads as "this wallet was never used", which is a different
+        # claim from "the explorer did not answer".
+        broken = self._history_contract()
+        broken.transaction_history.side_effect = ValueError("explorer unreachable")
+        out = self._rendered(broken)
+        self.assertIn("Could not read the ergo history", out)
+        self.assertIn("explorer unreachable", out)
+
+    def test_a_node_with_no_payment_system_says_so(self):
+        self.assertIn("No payment system can report a history", self._rendered())
+
+    def test_a_contract_that_reports_no_history_is_skipped(self):
+        # The simulated contract has no chain to report one from.
+        no_history = mock.Mock(spec=["LEDGER", "CONTRACT_HASH", "is_demo"])
+        no_history.LEDGER, no_history.CONTRACT_HASH = "simulated", "hash-sim"
+        no_history.is_demo = False
+        self.assertIn("No payment system can report a history",
+                      self._rendered(no_history))
 
 
 if __name__ == "__main__":
