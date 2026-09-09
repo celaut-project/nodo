@@ -31,6 +31,10 @@ const WALLET_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 /// changes when somebody publishes a transaction -- minutes apart at best. `r` forces
 /// it, for the operator who has just been told a peer vouched for them.
 const REPUTATION_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
+/// How often the donation report is re-read. Slower still than reputation: it reads
+/// rows the node's own hourly indexing tick wrote, plus config, so refreshing it
+/// faster than the tick that fills it in would only re-read the same numbers.
+const DONATIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(600);
 /// How much demand history the SCHEDULE page reads back. A month shows the weekly shape
 /// without letting one unusual day set the scale of the whole chart.
 const DEMAND_HISTORY_DAYS: u16 = 30;
@@ -696,6 +700,81 @@ pub struct ClientDetail {
     pub deposits: Vec<DepositToken>,
     pub instances: Vec<ClientInstance>,
     pub payments: Vec<PaymentRow>,
+}
+
+/// One wallet of a donation list, as `nodo donations --json` reports it.
+///
+/// Weights are carried as text, exactly as written: they are money-adjacent decimals,
+/// and rendering one through an f64 would print 0.30000000000000004 next to a config
+/// file that says 0.3. `share` is the same weight normalised against its list, which is
+/// what actually decides how much this wallet gets.
+#[derive(Debug, Clone, Default)]
+pub struct DonationWallet {
+    pub address: String,
+    pub weight: String,
+    pub share: String,
+    /// Whether this address is also in the *other* list. A wallet this node funds but
+    /// does not count, or counts but does not fund, is the asymmetry an operator wants
+    /// to see -- see `NodeDonations::warnings`.
+    pub in_other_list: bool,
+}
+
+/// One ledger's donation state: what has gone out, what is waiting to, and to whom.
+#[derive(Debug, Clone, Default)]
+pub struct LedgerDonations {
+    pub ledger: String,
+    /// Share of incoming payments donated, as written in the config.
+    pub percentage: String,
+    /// What is accrued and not yet paid, per asset, in that asset's smallest native
+    /// unit. Text, not a number: it is stored exactly, fraction included, because a
+    /// 2 % cut of a small payment has one and discarding it would make the node donate
+    /// slightly less than it says it does.
+    pub owed: Vec<(String, String)>,
+    /// What has actually been paid out, in MU, so it renders in the display unit like
+    /// every other amount on the page.
+    pub paid_mu: u128,
+    pub paid_count: u64,
+    pub pay_wallets: Vec<DonationWallet>,
+    pub credit_wallets: Vec<DonationWallet>,
+}
+
+impl Identifiable for LedgerDonations {
+    fn id(&self) -> &str {
+        &self.ledger
+    }
+}
+
+/// What this node donates and what it counts, from `nodo donations --json`.
+///
+/// Read through the CLI rather than computed here, for the same reason the reputation
+/// page is: the credit arithmetic -- weight normalisation, the age multiplier, the
+/// saturating bonus -- decides where work is routed, and a second implementation of it
+/// in another language would be a second answer. The Python side is the one the
+/// balancer itself uses.
+#[derive(Debug, Clone, Default)]
+pub struct NodeDonations {
+    pub ledgers: Vec<LedgerDonations>,
+    /// `balancers.DONATION_WEIGHT`: the largest price premium the best donor can beat.
+    pub donation_weight: f64,
+    /// Per peer: its bonus in [0, 1) and what that adds to its score.
+    pub peers: HashMap<String, (f64, f64)>,
+    /// Which addresses are in one list and not the other, in words.
+    pub warnings: Vec<String>,
+    pub read_at: Option<i64>,
+    pub error: String,
+}
+
+impl NodeDonations {
+    /// Whether the report has come back at all. An empty read is not the same thing as
+    /// a node that donates nothing, and the card says which it is looking at.
+    pub fn is_read(&self) -> bool {
+        self.read_at.is_some() || !self.error.is_empty()
+    }
+
+    /// The bonus and score term for one peer, or `None` when it has no credit here.
+    pub fn for_peer(&self, peer_id: &str) -> Option<(f64, f64)> {
+        self.peers.get(peer_id).copied()
+    }
 }
 
 /// What one payment network has brought in, per window.
@@ -1831,6 +1910,8 @@ pub struct App {
     pub earnings: Vec<LedgerEarnings>,
     /// What the network stakes on this node, from `nodo reputation --json`.
     pub reputation: NodeReputation,
+    /// What this node donates and what it counts, from `nodo donations --json`.
+    pub donations: NodeDonations,
     /// The same report's opinions, as the page's selectable table.
     ///
     /// A `StatefulList` of its own rather than a cursor into `reputation.opinions`,
@@ -1884,6 +1965,8 @@ pub struct App {
     wallet_task: Option<JoinHandle<Result<NodeInfo, String>>>,
     last_reputation_refresh: Instant,
     reputation_task: Option<JoinHandle<Result<NodeReputation, String>>>,
+    last_donations_refresh: Instant,
+    donations_task: Option<JoinHandle<Result<NodeDonations, String>>>,
     /// In-flight background `nodo` command, if any (keeps the UI responsive).
     command_task: Option<JoinHandle<CommandOutcome>>,
     /// In-flight configuration transaction: write, restart, and revert on failure.
@@ -1924,6 +2007,7 @@ impl Default for App {
             guest_kernel_reserves: get_guest_kernel_reserves(&paths.config),
             earnings: Vec::new(),
             reputation: NodeReputation::default(),
+            donations: NodeDonations::default(),
             opinions: StatefulList::with_items(Vec::new()),
             peer_detail: None,
             client_detail: None,
@@ -1963,6 +2047,10 @@ impl Default for App {
                 .checked_sub(REPUTATION_REFRESH_INTERVAL)
                 .unwrap_or(now),
             reputation_task: None,
+            last_donations_refresh: now
+                .checked_sub(DONATIONS_REFRESH_INTERVAL)
+                .unwrap_or(now),
+            donations_task: None,
             command_task: None,
             config_task: None,
             config_follow_up: ConfigFollowUp::None,
@@ -3684,6 +3772,13 @@ impl App {
             self.last_reputation_refresh = Instant::now();
             self.reputation_task = Some(tokio::spawn(fetch_node_reputation()));
         }
+        self.poll_donations_task().await;
+        if self.donations_task.is_none()
+            && (force || self.last_donations_refresh.elapsed() >= DONATIONS_REFRESH_INTERVAL)
+        {
+            self.last_donations_refresh = Instant::now();
+            self.donations_task = Some(tokio::spawn(fetch_node_donations()));
+        }
     }
 
     fn refresh_local(&mut self, force: bool) {
@@ -3853,6 +3948,26 @@ impl App {
         }
     }
 
+    async fn poll_donations_task(&mut self) {
+        if !self
+            .donations_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let task = self.donations_task.take().unwrap();
+        match task.await {
+            Ok(Ok(donations)) => self.donations = donations,
+            // The previous report is kept and the error is carried on it: a failed read
+            // is not evidence that this node has stopped donating, and blanking the
+            // card would read as though it had.
+            Ok(Err(error)) => self.donations.error = error,
+            Err(error) => self.donations.error = format!("Donation read failed: {error}"),
+        }
+    }
+
     async fn poll_wallet_task(&mut self) {
         if !self
             .wallet_task
@@ -3923,6 +4038,28 @@ async fn fetch_node_reputation() -> Result<NodeReputation, String> {
     match report_line(&stdout) {
         Some(line) => parse_node_reputation(line),
         None => Err(nonblank_error(&String::from_utf8_lossy(&output.stderr))),
+    }
+}
+
+async fn fetch_node_donations() -> Result<NodeDonations, String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        Command::new("nodo").args(["donations", "--json"]).output(),
+    )
+    .await
+    .map_err(|_| "nodo donations timed out after 60 seconds".to_string())?
+    .map_err(|error| format!("Unable to run nodo donations: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match report_line(&stdout) {
+        Some(line) => parse_node_donations(line),
+        None => {
+            let stderr = first_line(&String::from_utf8_lossy(&output.stderr));
+            Err(if stderr.is_empty() {
+                "nodo donations produced no output".to_string()
+            } else {
+                stderr
+            })
+        }
     }
 }
 
@@ -4220,6 +4357,104 @@ fn parse_opinion(value: &serde_json::Value) -> NodeOpinion {
         burned_nanoerg: json_f64(Some(value), "burned_nanoerg"),
         backed_nanoerg: json_f64(Some(value), "backed_nanoerg"),
     }
+}
+
+pub fn parse_node_donations(output: &str) -> Result<NodeDonations, String> {
+    let document: serde_json::Value =
+        serde_json::from_str(output).map_err(|error| format!("unreadable report: {error}"))?;
+    if let Some(error) = document.get("error").and_then(|value| value.as_str()) {
+        return Err(error.to_string());
+    }
+
+    let wallets = |value: Option<&serde_json::Value>| -> Vec<DonationWallet> {
+        value
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| DonationWallet {
+                        address: json_str(item.get("address")),
+                        weight: json_str(item.get("weight")),
+                        share: json_str(item.get("normalised")),
+                        in_other_list: item
+                            .get("in_other_list")
+                            .and_then(|value| value.as_bool())
+                            .unwrap_or(false),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    let ledgers = document
+        .get("ledgers")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| LedgerDonations {
+                    ledger: json_str(item.get("ledger")),
+                    percentage: json_str(item.get("percentage")),
+                    owed: item
+                        .get("owed_native")
+                        .and_then(|value| value.as_object())
+                        .map(|owed| {
+                            let mut assets: Vec<(String, String)> = owed
+                                .iter()
+                                .map(|(asset, amount)| {
+                                    (asset.clone(), json_str(Some(amount)))
+                                })
+                                .collect();
+                            assets.sort();
+                            assets
+                        })
+                        .unwrap_or_default(),
+                    paid_mu: json_u128(item.get("paid_mu")),
+                    paid_count: item
+                        .get("paid_count")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                    pay_wallets: wallets(item.get("pay_wallets")),
+                    credit_wallets: wallets(item.get("credit_wallets")),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let peers = document
+        .get("peers")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let peer_id = json_str(item.get("peer_id"));
+                    if peer_id.is_empty() {
+                        return None;
+                    }
+                    Some((
+                        peer_id,
+                        (json_f64(Some(item), "bonus"), json_f64(Some(item), "score_term")),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(NodeDonations {
+        ledgers,
+        donation_weight: json_f64(Some(&document), "donation_weight"),
+        peers,
+        warnings: document
+            .get("warnings")
+            .and_then(|value| value.as_array())
+            .map(|items| items.iter().map(|item| json_str(Some(item))).collect())
+            .unwrap_or_default(),
+        // Present even on an empty report: it is what separates "read, and this node
+        // donates nothing" from "not read yet".
+        read_at: document.get("read_at").and_then(|value| value.as_i64()),
+        error: String::new(),
+    })
 }
 
 fn json_str(value: Option<&serde_json::Value>) -> String {
@@ -7698,6 +7933,86 @@ Cold Wallet: 9cold\n";
                 .unwrap_err();
             assert_eq!(error, "no node identity");
             assert!(parse_node_reputation("not json at all").is_err());
+        }
+    }
+
+    mod donation_report {
+        use super::*;
+
+        const REPORT: &str = r#"{
+            "read_at": 1800000000, "donation_weight": 0.3,
+            "ledgers": [{"ledger": "ergo", "percentage": "0.02",
+                         "min_transfer": "0.1", "min_confirmations": 10,
+                         "owed_native": {"ERG": "1200000.5"},
+                         "paid_mu": 41000000, "paid_count": 2, "scan_tip": 1500,
+                         "pay_wallets": [{"address": "9gGZ", "weight": "70",
+                                          "normalised": "0.7", "in_other_list": true},
+                                         {"address": "9fXX", "weight": "30",
+                                          "normalised": "0.3", "in_other_list": false}],
+                         "credit_wallets": [{"address": "9gGZ", "weight": "1",
+                                             "normalised": "1", "in_other_list": true}]}],
+            "peers": [{"peer_id": "peer-a", "bonus": 0.5, "score_term": 0.15}],
+            "unattributed_donors": ["9zzz"],
+            "warnings": ["ledgers.ergo: you fund 9fXX but do not count it."]
+        }"#;
+
+        #[test]
+        fn a_report_is_read_whole() {
+            let donations = parse_node_donations(REPORT).unwrap();
+
+            assert_eq!(donations.donation_weight, 0.3);
+            assert_eq!(donations.read_at, Some(1_800_000_000));
+            assert!(donations.is_read());
+            assert!(donations.error.is_empty());
+
+            let ergo = &donations.ledgers[0];
+            assert_eq!(ergo.ledger, "ergo");
+            assert_eq!(ergo.percentage, "0.02");
+            assert_eq!(ergo.paid_mu, 41_000_000);
+            assert_eq!(ergo.paid_count, 2);
+            // The fraction survives the round trip: it is a real part of the debt, and
+            // it is the difference between donating the configured share and slightly
+            // less than it.
+            assert_eq!(ergo.owed, vec![("ERG".to_string(), "1200000.5".to_string())]);
+            assert_eq!(ergo.pay_wallets.len(), 2);
+            // The weight as written and the share it actually pays are both carried:
+            // 70 and 30 pay what 0.7 and 0.3 pay, and only the share says so.
+            assert_eq!(ergo.pay_wallets[0].weight, "70");
+            assert_eq!(ergo.pay_wallets[0].share, "0.7");
+            assert!(ergo.pay_wallets[0].in_other_list);
+            assert!(!ergo.pay_wallets[1].in_other_list);
+        }
+
+        #[test]
+        fn a_peer_bonus_is_found_by_id_and_missing_means_none() {
+            let donations = parse_node_donations(REPORT).unwrap();
+
+            assert_eq!(donations.for_peer("peer-a"), Some((0.5, 0.15)));
+            // Not zero-with-credit: a peer nobody counted has no entry, and the card
+            // says "none counted" rather than drawing a bonus of 0.0000.
+            assert_eq!(donations.for_peer("peer-b"), None);
+        }
+
+        #[test]
+        fn a_failed_command_is_an_error_and_never_an_empty_verdict() {
+            // Read as a report, `{"error": …}` would say this node donates nothing and
+            // counts nobody -- a claim about the operator's configuration.
+            let error = parse_node_donations(r#"{"error": "no database", "read_at": 1}"#)
+                .unwrap_err();
+            assert_eq!(error, "no database");
+            assert!(parse_node_donations("not json at all").is_err());
+        }
+
+        #[test]
+        fn an_unread_report_is_not_a_node_that_donates_nothing() {
+            let pending = NodeDonations::default();
+            assert!(!pending.is_read());
+
+            let read = parse_node_donations(
+                r#"{"read_at": 1, "donation_weight": 0.0, "ledgers": [], "peers": []}"#,
+            )
+            .unwrap();
+            assert!(read.is_read(), "a report that came back empty has still come back");
         }
     }
 

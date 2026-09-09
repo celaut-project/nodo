@@ -62,6 +62,11 @@ def _manager_module():
     return manager
 
 
+def _donation_accrual():
+    from src.payment_system.donations import accrual
+    return accrual
+
+
 def _ledger_tag(ledger) -> Optional[str]:
     """The ledger's tag ("ergo"), for a row a person reads. Demo payments carry none."""
     tags = getattr(ledger, "tags", None)
@@ -445,7 +450,16 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
         return False
 
 
-def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, contract: bytes, script: bytes, token: str) -> bool:
+def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, contract: bytes,
+                             script: bytes, token: str, asset: str = "") -> bool:
+    """Prove and credit one incoming payment.
+
+    ``token`` is the *deposit* token -- the local UUID the payer wrote into the box'
+    R4, which is what links the payment back to the client who made it. ``asset`` is
+    the thing being paid *in*: the ledger's native unit ("ERG") or a token id. Two
+    different things have historically been called "token" around this code; these two
+    names are the distinction, and only the second one is money.
+    """
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         raise Exception(f"Deposit token {token} doesn't exists.")
     # Resolved once, up front, because the payment record needs it whichever way the
@@ -462,6 +476,16 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         ) and _manager_module().increase_local_balance_for_client(client_id=client_id, amount_mu=amount)  # TODO allow for containers too.
     except: _r = False
     sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
+    contract_hash = sha3_256(contract).hexdigest() if contract else None
+    if _r:
+        # A share of what just arrived is owed as a donation, in the asset it arrived
+        # in. Accrued here rather than paid here: see `donations.accrual`.
+        _donation_accrual().accrue(
+            amount_mu=amount,
+            ledger=_ledger_tag(ledger),
+            contract_hash=contract_hash,
+            asset=asset,
+        )
     # No tx id: an incoming payment is proved by an unspent box carrying the deposit
     # token in R4, and the transaction that created that box is not part of the proof.
     # The token is the link back to whoever paid, and it is on the row.
@@ -472,7 +496,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         client_id=client_id,
         deposit_token=token,
         ledger=_ledger_tag(ledger),
-        contract_hash=sha3_256(contract).hexdigest() if contract else None,
+        contract_hash=contract_hash,
     )
     _l.LOGGER(f"Pending deposit tokens updated, there are still {len(sc.get_deposit_tokens(status='pending'))} tokens in the queue.")
     return _r

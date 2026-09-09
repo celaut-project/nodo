@@ -459,10 +459,47 @@ ui:
     usd: { MU_PER_UNIT: 500000000, SYMBOL: "USD", DECIMALS: 2 }
 ```
 
+## `balancers`
+
+Every parameter of the peer-selection formula, and nothing else. `SOCIALIZATION_FACTOR`
+and `COST_AVERAGE_VARIATION` moved here from `costs:`, unchanged — they were always peer
+selection rather than pricing — and the rest of the formula now lives beside them.
+
+A candidate is ranked by an effective cost in log space:
+
+```
+score(peer)  = −ln(cost_mu) + SOCIALIZATION_FACTOR · r̂ + DONATION_WEIGHT · d̂
+score(local) = −ln(cost_mu) + LOCAL_BIAS              + DONATION_WEIGHT · d̂
+
+r̂ = r / (|r| + REPUTATION_HALF_CREDIT)   ∈ (−1, 1)   sign-preserving: a peer that
+                                                     failed us is still penalised
+d̂ = C / (C + DONATION_HALF_CREDIT)       ∈ [ 0, 1)   bonus only, never a penalty
+```
+
+Because price enters as a logarithm, **each weight is the maximum equivalent price
+discount**: a weight of `W` lets the best possible candidate on that term beat a price up
+to `e^W` higher, and never more. That is the whole reason for this shape — the previous
+one divided reputation by the network's total, which made it worth ~0.2 against a
+`log(cost)` of ~14, so price decided every comparison and reputation broke only near-exact
+ties.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `balancers.SOCIALIZATION_FACTOR` | `2` | Weight of a peer's reputation, i.e. the largest price premium reliability can beat (`e²` ≈ 7.4×). |
+| `balancers.REPUTATION_HALF_CREDIT` | `50` | Reputation at which half that weight is earned. A peer's standing no longer depends on how many peers exist. |
+| `balancers.COST_AVERAGE_VARIATION` | `1` | How much a quote's variance inflates its cost when candidates are compared. |
+| `balancers.DONATION_WEIGHT` | `0.3` | Weight of a peer's donation credit (`e^0.3` ≈ 35 % premium at most). **The safety parameter** — a high value closes the network to newcomers; see [`DONATIONS.md`](DONATIONS.md). |
+| `balancers.DONATION_HALF_CREDIT` | `"5000000000"` | Donation credit, in MU, at which half that weight is earned. |
+| `balancers.DONATION_AGE_SCALE` | `31536000` | One year, in seconds. An old donation weighs more: `1 + ln(1 + age / this)`. |
+| `balancers.LOCAL_BIAS` | `1.0` | How much this node prefers running work itself. `1.0` reproduces the existing policy exactly (local tolerates a price up to `e¹` ≈ 2.7× higher than a peer's); it used to be a flat reputation of 1 hidden inside a branch. |
+
+Weights must not be negative, and the half-credits must be positive — the node refuses
+the config otherwise. A negative donation weight would turn the count list into a
+punishment mechanism, which is what would make patching donations out rational.
+
 ## `costs`, `timing`, `client`
 
-What is left after pricing moved out: `SOCIALIZATION_FACTOR` and
-`COST_AVERAGE_VARIATION` (peer selection, not pricing), `TUNNEL_CHARGE_INTERVAL_KB`
+What is left after pricing and peer selection moved out: `TUNNEL_CHARGE_INTERVAL_KB`
 (how much traffic accumulates before it is billed) and `ALLOW_DEBT`; plus
 maintenance-loop timing and client slot/expiration policy.
 
@@ -559,7 +596,16 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | `""` | This node's reputation proof id (reconciled by `nodo sync_reputation_proof`). |
 | `ledgers.ergo.payments.HOT_WALLET_LIMITS` | `100` | Max ERG kept in the operational wallet before sweeping. |
 | `ledgers.ergo.payments.COLD_WALLET` | `""` | Public address to sweep excess to. Empty disables sweeping. Never a mnemonic. |
-| `ledgers.ergo.payments.DONATION_WALLET` / `DONATION_PERCENTAGE` | addr / `0.00` | Optional donation of a share of earnings. |
+| `ledgers.ergo.payments.DONATION_PERCENTAGE` | `"0.02"` | Share of **incoming payments** donated to the people who write this software. Applies to earnings, not to the sweep below, and works with no cold wallet. The transaction fee comes out of this share, never on top of it. Set it to `0` to opt out. |
+| `ledgers.ergo.payments.DONATION_WALLETS` | one address | Who this node funds: `{ address, weight }` entries. Weights are normalised and split what has accrued. A share below Ergo's minimum output stays accrued rather than being handed to the other wallets. |
+| `ledgers.ergo.payments.DONATION_MIN_TRANSFER` | `"0.1"` | Smallest donation payout (ERG, decimal string). Below it the debt keeps accruing. |
+| `ledgers.ergo.payments.DONATION_CREDIT_WALLETS` | one address | Whose contributions this node recognises when it routes work: `{ address, weight }` entries, normalised within the ledger. **A trust decision** — a bad pay list costs you, a bad count list is paid for by every peer you route to. |
+| `ledgers.ergo.payments.DONATION_MIN_CONFIRMATIONS` | `10` | Confirmations a donation needs before it counts. The mempool is never read. |
+
+Donations are read off the chain by every node independently and never announced over
+the protocol; what a donor gets is a bounded bonus in *other* nodes' peer selection. The
+full mechanism, the two lists and why they are separate: [`DONATIONS.md`](DONATIONS.md).
+`nodo donations` prints what this node pays, what it counts, and what is accrued.
 
 > ⚠️ `WALLET_MNEMONIC` is a secret. The `nodo tui` Config editor masks secret
 > values; keep backups off-repo. Ergo transactions are **final and irreversible**

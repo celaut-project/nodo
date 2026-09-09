@@ -1,7 +1,7 @@
 use crate::app::{
     format_bytes, format_bytes_compact, format_rate_compact, percent, segment_token, shorten,
     unix_now, App, DemandByHour,
-    Client, ClientDetail, ConfigEntry, EditKind, InputMode, Instance, Money, Page,
+    Client, ClientDetail, ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
     PaymentRow, Peer, PeerDetail, PriceEntry, ReputationEvent, ReputationTotals, Service,
     ServiceDetail, HISTORY_POINTS,
 };
@@ -947,11 +947,12 @@ fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
     // Prefer the roomy breakdown, but fall back to one line per contract rather
     // than let a short terminal clip the contracts away silently -- an empty
     // card reads as "no contract registered", the exact confusion #231 is about.
-    let full = peer_detail_lines(&app.money, selected, detail_source, false);
+    let donation = selected.and_then(|peer| app.donations.for_peer(&peer.id));
+    let full = peer_detail_lines(&app.money, selected, detail_source, donation, false);
     let detail = if full.len() as u16 + 2 <= available {
         full
     } else {
-        peer_detail_lines(&app.money, selected, detail_source, true)
+        peer_detail_lines(&app.money, selected, detail_source, donation, true)
     };
     let detail_height = (detail.len() as u16 + 2).min(available);
     let split = Layout::vertical([
@@ -1070,19 +1071,155 @@ fn draw_clients(frame: &mut Frame, app: &mut App, area: Rect) {
 fn draw_earnings(frame: &mut Frame, app: &mut App, area: Rect) {
     const MIN_OPINIONS_HEIGHT: u16 = 4;
     let notes = reputation_lines(app);
+    // What leaves belongs next to what came in: the donation is a share of the money
+    // in the card above, and an operator reading one figure needs the other to make
+    // sense of it.
+    let donations = donation_lines(app);
     // Two borders, the header, the blank line `header_row` puts under it, and a row
     // per payment network -- one placeholder row when there is none.
     let table_height = app.earnings.len().max(1) as u16 + 4;
     let rows = Layout::vertical([
         Constraint::Length(table_height),
+        Constraint::Length(donations.len() as u16 + 2),
         Constraint::Length(notes.len() as u16 + 2),
         Constraint::Min(MIN_OPINIONS_HEIGHT),
     ])
     .split(area);
 
     draw_money_taken_in(frame, app, rows[0]);
-    draw_card(frame, rows[1], "REPUTATION HELD ON THIS NODE", notes, ACCENT);
-    draw_opinions(frame, app, rows[2]);
+    draw_card(frame, rows[1], "DONATIONS PAID OUT", donations, Color::LightMagenta);
+    draw_card(frame, rows[2], "REPUTATION HELD ON THIS NODE", notes, ACCENT);
+    draw_opinions(frame, app, rows[3]);
+}
+
+/// What this node donates, what is waiting to go out, and to whom.
+///
+/// A non-zero donation default is only honest if the operator can see what it does, so
+/// this card exists to be read rather than to look tidy: the percentage as configured,
+/// the debt not yet paid, what has actually left, and the wallets that received it with
+/// their shares.
+///
+/// The two lists are drawn separately because they mean different things. Funding a
+/// wallet costs money; counting one is a free opinion that weighs other peers'
+/// donations when this node routes work. An address in one and not the other is
+/// usually an oversight, and it is named as such.
+fn donation_lines(app: &App) -> Vec<Line<'static>> {
+    let donations = &app.donations;
+    let mut lines = Vec::new();
+
+    if !donations.is_read() {
+        lines.push(Line::from(Span::styled(
+            "Reading the donation state…",
+            Style::default().fg(MUTED),
+        )));
+        return lines;
+    }
+    if !donations.error.is_empty() {
+        lines.push(Line::from(Span::styled(
+            donations.error.clone(),
+            Style::default().fg(WARN),
+        )));
+    }
+    if donations.ledgers.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No payment network is configured to donate.",
+            Style::default().fg(MUTED),
+        )));
+        return lines;
+    }
+
+    for ledger in &donations.ledgers {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}  ", ledger.ledger),
+                Style::default().fg(Color::White).bold(),
+            ),
+            Span::styled("donating ", Style::default().fg(MUTED)),
+            Span::styled(
+                format!("{} ", ledger.percentage),
+                Style::default().fg(Color::LightMagenta).bold(),
+            ),
+            Span::styled("of what comes in   ", Style::default().fg(MUTED)),
+            Span::styled("paid ", Style::default().fg(MUTED)),
+            Span::styled(
+                app.money.format_raw(&ledger.paid_mu.to_string()),
+                Style::default().fg(Color::LightGreen),
+            ),
+            Span::styled(
+                format!("  in {} transaction(s)", ledger.paid_count),
+                Style::default().fg(MUTED),
+            ),
+        ]));
+
+        // Accrued, not yet paid: shown in the asset's own smallest unit, not converted.
+        // A debt is incurred at the rate of the moment it was incurred, and rendering
+        // it through today's rate would put a number on screen that the node does not
+        // owe.
+        let owed = if ledger.owed.is_empty() {
+            "nothing waiting to go out".to_string()
+        } else {
+            ledger
+                .owed
+                .iter()
+                .map(|(asset, amount)| format!("{amount} {asset} (smallest unit)"))
+                .collect::<Vec<_>>()
+                .join("   ")
+        };
+        lines.push(Line::from(vec![
+            Span::styled("     accrued  ", Style::default().fg(MUTED)),
+            Span::styled(owed, Style::default().fg(Color::White)),
+        ]));
+
+        lines.extend(donation_wallet_lines("funding ", &ledger.pay_wallets, "nobody funded"));
+        lines.extend(donation_wallet_lines("counting", &ledger.credit_wallets, "nobody counted"));
+    }
+
+    for warning in &donations.warnings {
+        lines.push(Line::from(Span::styled(
+            format!("! {warning}"),
+            Style::default().fg(WARN),
+        )));
+    }
+    lines
+}
+
+/// One line per wallet of a list: where it goes and what share of the list it takes.
+///
+/// The share, not just the raw weight, because the raw weights are normalised before
+/// anything is split -- weights of 70 and 30 pay exactly what 0.7 and 0.3 pay, and an
+/// operator comparing the two would otherwise have nothing on screen saying so.
+fn donation_wallet_lines(
+    label: &str,
+    wallets: &[DonationWallet],
+    empty: &str,
+) -> Vec<Line<'static>> {
+    if wallets.is_empty() {
+        return vec![Line::from(vec![
+            Span::styled(format!("     {label}  "), Style::default().fg(MUTED)),
+            Span::styled(empty.to_string(), Style::default().fg(MUTED)),
+        ])];
+    }
+    wallets
+        .iter()
+        .map(|wallet| {
+            Line::from(vec![
+                Span::styled(format!("     {label}  "), Style::default().fg(MUTED)),
+                Span::styled(shorten(&wallet.address, 40), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("  share {}", wallet.share),
+                    Style::default().fg(MUTED),
+                ),
+                Span::styled(
+                    if wallet.in_other_list {
+                        String::new()
+                    } else {
+                        "  (not in the other list)".to_string()
+                    },
+                    Style::default().fg(WARN),
+                ),
+            ])
+        })
+        .collect()
 }
 
 /// What came in, per payment network, over each window.
@@ -1615,6 +1752,7 @@ fn peer_detail_lines(
     money: &Money,
     peer: Option<&Peer>,
     detail: Option<&PeerDetail>,
+    donation: Option<(f64, f64)>,
     compact: bool,
 ) -> Vec<Line<'static>> {
     let Some(peer) = peer else {
@@ -1658,6 +1796,20 @@ fn peer_detail_lines(
                 Span::styled(shorten(proof_id, 46), Style::default().fg(Color::White)),
             ]));
         }
+        // What this peer's on-chain donations earn it here, and only here: the credit
+        // is computed with *this* node's list of whose contributions it recognises, so
+        // it is this node's opinion and not a property of the peer. A peer with none
+        // is not being penalised -- the term is a bonus only.
+        lines.push(metric_line(
+            "Donation credit",
+            match donation {
+                Some((bonus, term)) => format!(
+                    "{bonus:.4}  •  +{term:.4} to its score (beats a price up to {:.0}% higher)",
+                    (term.exp() - 1.0) * 100.0
+                ),
+                None => "none counted by this node".to_string(),
+            },
+        ));
         lines.push(Line::from(""));
     }
 
@@ -4575,6 +4727,86 @@ mod tests {
         }
     }
 
+    mod donations_card {
+        use super::super::donation_lines;
+        use super::rendered;
+        use crate::app::{App, DonationWallet, LedgerDonations, NodeDonations};
+
+        fn wallet(address: &str, weight: &str, share: &str, in_other: bool) -> DonationWallet {
+            DonationWallet {
+                address: address.to_string(),
+                weight: weight.to_string(),
+                share: share.to_string(),
+                in_other_list: in_other,
+            }
+        }
+
+        fn donating_node() -> App {
+            let mut app = App::default();
+            app.donations = NodeDonations {
+                ledgers: vec![LedgerDonations {
+                    ledger: "ergo".to_string(),
+                    percentage: "0.02".to_string(),
+                    owed: vec![("ERG".to_string(), "1200000.5".to_string())],
+                    paid_mu: 41_000_000,
+                    paid_count: 2,
+                    pay_wallets: vec![
+                        wallet("9gGZaaaaaaaaaaaaaaaa", "0.7", "0.7", true),
+                        wallet("9fXXbbbbbbbbbbbbbbbb", "0.3", "0.3", false),
+                    ],
+                    credit_wallets: vec![wallet("9gGZaaaaaaaaaaaaaaaa", "1", "1", true)],
+                }],
+                donation_weight: 0.3,
+                peers: Default::default(),
+                warnings: vec!["ledgers.ergo: you fund 9fXX but do not count it.".to_string()],
+                read_at: Some(1_800_000_000),
+                error: String::new(),
+            };
+            app
+        }
+
+        #[test]
+        fn the_card_says_what_was_paid_and_what_is_still_owed() {
+            let text = rendered(donation_lines(&donating_node()));
+
+            assert!(text.contains("donating 0.02"), "{text}");
+            assert!(text.contains("in 2 transaction(s)"), "{text}");
+            // The accrued debt is shown in the asset's own smallest unit, fraction
+            // included, and never converted: it was incurred at the rate of the moment
+            // it was incurred.
+            assert!(text.contains("1200000.5 ERG"), "{text}");
+        }
+
+        #[test]
+        fn an_address_in_one_list_and_not_the_other_is_named() {
+            let text = rendered(donation_lines(&donating_node()));
+
+            assert!(text.contains("(not in the other list)"), "{text}");
+            assert!(text.contains("you fund 9fXX but do not count it."), "{text}");
+        }
+
+        #[test]
+        fn a_report_that_has_not_come_back_does_not_read_as_donating_nothing() {
+            let app = App::default();
+            let text = rendered(donation_lines(&app));
+
+            assert!(text.contains("Reading the donation state"), "{text}");
+            assert!(!text.contains("No payment network"), "{text}");
+        }
+
+        #[test]
+        fn a_node_that_donates_to_nobody_says_so_rather_than_drawing_an_empty_card() {
+            let mut app = App::default();
+            app.donations = NodeDonations {
+                read_at: Some(1),
+                ..Default::default()
+            };
+            let text = rendered(donation_lines(&app));
+
+            assert!(text.contains("No payment network is configured to donate."), "{text}");
+        }
+    }
+
     fn rendered(lines: Vec<Line<'static>>) -> String {
         lines
             .iter()
@@ -4590,7 +4822,7 @@ mod tests {
 
     #[test]
     fn peer_detail_prompts_when_nothing_is_selected() {
-        let text = rendered(peer_detail_lines(&Money::default(), None, None, false));
+        let text = rendered(peer_detail_lines(&Money::default(), None, None, None, false));
         assert!(text.contains("Select a peer"));
     }
 
@@ -4598,7 +4830,7 @@ mod tests {
     fn peer_detail_shows_ledger_contract_address_and_price() {
         // The whole point of issue #231: these four facts were only reachable
         // through a raw sqlite query before.
-        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![ergo_contract()])), None, false));
+        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![ergo_contract()])), None, None, false));
         assert!(text.contains("Payment contracts (1)"));
         assert!(text.contains("ergo"));
         assert!(text.contains("1c691f72deadbeef"));
@@ -4620,6 +4852,7 @@ mod tests {
             &Money::default(),
             Some(&peer_with(vec![ergo_contract(), second])),
             None,
+            None,
             false,
         ));
         assert!(text.contains("Payment contracts (2)"));
@@ -4632,7 +4865,7 @@ mod tests {
     fn peer_detail_says_so_when_no_contract_is_registered() {
         // Must stay distinguishable from "peer charges through something we
         // don't render", which is exactly what the old hardcoded lookup did.
-        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![])), None, false));
+        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![])), None, None, false));
         assert!(text.contains("No payment contract registered"));
     }
 
@@ -4719,6 +4952,7 @@ mod tests {
             &Money::default(),
             Some(&peer),
             Some(&history),
+            None,
             false,
         ));
 
@@ -4742,6 +4976,7 @@ mod tests {
             &Money::default(),
             Some(&peer),
             Some(&history),
+            None,
             false,
         ));
 
@@ -4759,6 +4994,7 @@ mod tests {
             &Money::default(),
             Some(&peer),
             Some(&history),
+            None,
             false,
         ));
 
@@ -5077,7 +5313,7 @@ mod tests {
     #[test]
     fn the_peer_card_shows_our_client_id_on_that_peer() {
         let peer = peer_with(vec![]);
-        let lines = peer_detail_lines(&Money::default(), Some(&peer), None, false);
+        let lines = peer_detail_lines(&Money::default(), Some(&peer), None, None, false);
         let text: String = lines
             .iter()
             .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
@@ -5088,7 +5324,7 @@ mod tests {
             remote_client_id: String::new(),
             ..peer
         };
-        let text: String = peer_detail_lines(&Money::default(), Some(&unregistered), None, false)
+        let text: String = peer_detail_lines(&Money::default(), Some(&unregistered), None, None, false)
             .iter()
             .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
             .collect();

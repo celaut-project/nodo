@@ -554,9 +554,52 @@ deposits:
   # The actual amount is the price of the resources it requested, for this long.
   INITIAL_RUNTIME_HOURS: 1.0
 
-costs:
+# Every parameter of the peer-selection formula, and nothing else. The score a
+# candidate is ranked by reads as an effective cost in log space:
+#
+#   score(peer)  = -ln(cost_mu) + SOCIALIZATION_FACTOR * r + DONATION_WEIGHT * d
+#   score(local) = -ln(cost_mu) + LOCAL_BIAS             + DONATION_WEIGHT * d
+#
+# where r and d are bounded: r in (-1, 1) and d in [0, 1). Each weight is therefore the
+# maximum equivalent price discount, in log space -- a weight of 0.3 means the best
+# imaginable donor beats a price up to e^0.3 (about 35 %) higher, and never more.
+#
+# SOCIALIZATION_FACTOR and COST_AVERAGE_VARIATION moved here from `costs:`, unchanged.
+# They were always peer selection rather than pricing, and this section is where the
+# rest of the formula now lives.
+balancers:
+  # Weight of a peer's reputation. Sign-preserving: a peer that failed us still gets a
+  # penalty, which is the point of measuring reliability at all.
   SOCIALIZATION_FACTOR: 2
+  # Reputation at which half of that weight is earned. No knowledge of the network's
+  # maximum is needed -- and a peer's standing no longer depends on how many peers
+  # exist, which it used to.
+  REPUTATION_HALF_CREDIT: 50
   COST_AVERAGE_VARIATION: 1
+  # Weight of a peer's donation credit. Bonus only, never a penalty: penalising
+  # non-donors is exactly what would make patching this out rational.
+  #
+  # Treat this as the safety parameter it is. A high value closes the network to
+  # newcomers, who cannot have old donations, and makes splitting one node into
+  # several identities profitable. 0.3 buys a generous tie-break, not dominance.
+  DONATION_WEIGHT: 0.3
+  # Donation credit (in this node's MU) at which half of that weight is earned.
+  DONATION_HALF_CREDIT: "5000000000"
+  # An old donation weighs more than a new one, by 1 + ln(1 + age / this). One year by
+  # default: a donation now counts 1.00, at one year 1.69, at five years 2.79.
+  #
+  # Why age *increases* the weight: each node keeps its own count list, so rewarding
+  # age makes "fund whoever you believe will be recognised later" a bet that pays off
+  # when that developer enters everyone else's list -- instead of everyone donating to
+  # whoever already receives donations.
+  DONATION_AGE_SCALE: 31536000
+  # How much this node prefers running work itself over delegating it. 1.0 reproduces
+  # today's policy exactly: local tolerates a price up to e^1 (about 2.7x) higher than
+  # a peer's. It used to be a flat reputation of 1 hidden inside a branch; it is a
+  # policy, so it is a setting.
+  LOCAL_BIAS: 1.0
+
+costs:
   # How much tunnelled traffic accumulates before it is billed. Smaller reacts faster to
   # an empty balance, larger costs less bookkeeping.
   TUNNEL_CHARGE_INTERVAL_KB: 1024
@@ -966,5 +1009,45 @@ ledgers:
       COLD_WALLET: ""
       # Minimum sweep amount (ERG, decimal string). Prevents dust transfers.
       COLD_WALLET_MIN_TRANSFER: "1"
-      DONATION_WALLET: "9gGZp7HRAFxgGWSwvS4hCbxM2RpkYr6pHvwpU4GPrpvxY7Y2nQo"
-      DONATION_PERCENTAGE: "0.00"
+      # --- Donations -------------------------------------------------------------
+      # Share of *incoming payments* donated to the people who write the software this
+      # node runs. It applies to earnings, not to the cold-wallet sweep above, and it
+      # works with no cold wallet configured at all.
+      #
+      # This is PER ASSET. The pair below is ERG's, because ERG is this ledger's native
+      # unit; a token settling through the same contract declares its own inside its
+      # own entry. The two wallet lists are NOT per asset -- an Ergo address receives
+      # whatever is sent to it.
+      #
+      # The transaction fee comes out of this share, not on top of it: what leaves the
+      # node is the percentage, fee included, so donating can never cost more than the
+      # figure set here.
+      #
+      # Donations cannot be mandatory -- this is open source, and a node can be patched
+      # to skip them. What makes 2% worth paying is that other nodes weigh a donation
+      # they can verify on-chain when they choose whom to delegate work to, so it buys
+      # a better position in their routing. Set it to 0 to opt out; that is one edit.
+      DONATION_PERCENTAGE: "0.02"
+      # Who this node funds. A prospective bet: it costs money, so this list is short.
+      # Weights are normalised, and they split what has been accrued. A share that
+      # would fall below Ergo's minimum output is not redistributed to the others --
+      # it stays accrued until it clears the floor, so a small weight is still paid.
+      DONATION_WALLETS:
+        - { address: "9gGZp7HRAFxgGWSwvS4hCbxM2RpkYr6pHvwpU4GPrpvxY7Y2nQo", weight: 1.0 }
+      # Minimum donation payout (ERG, decimal string). Prevents dust transfers; below
+      # it the debt simply keeps accruing.
+      DONATION_MIN_TRANSFER: "0.1"
+      # Whose contributions this node recognises when it routes work. A retrospective
+      # judgement: holding it is free, so this list is long and accumulates. Weights
+      # are normalised within the ledger and they weigh OTHER peers' donations.
+      #
+      # Read this list as a trust decision, not a preference. A bad pay list above
+      # costs the operator who set it; a bad entry here is paid for by every peer this
+      # node routes to, because it hands them credit for funding whoever is in it.
+      # Credit is always computed with the list as it stands, so adding an address
+      # activates every historical donation to it at once (see docs/DONATIONS.md).
+      DONATION_CREDIT_WALLETS:
+        - { address: "9gGZp7HRAFxgGWSwvS4hCbxM2RpkYr6pHvwpU4GPrpvxY7Y2nQo", weight: 1.0 }
+      # Confirmations a donation needs before it counts for anything. The mempool is
+      # never read.
+      DONATION_MIN_CONFIRMATIONS: 10
