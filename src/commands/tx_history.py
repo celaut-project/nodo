@@ -1,169 +1,179 @@
-import requests
+"""``nodo tx_history`` -- what this node has paid and been paid, per payment system.
+
+Every chain-shaped part of this used to live here: it read the Ergo explorer, walked
+Ergo boxes to decide whether a transaction was incoming, and reached into
+`contracts.ergo.interface`'s privates to render nanoERG. So "transaction history" meant
+"Ergo's", and a second payment system had nowhere to appear.
+
+Now each contract answers for its own chain, in one normalised shape
+(``contracts/<ledger>/history.py`` for Ergo, `listtransactions` for Bitcoin), and what
+is left here is the part that is nobody's chain: **who** was on the other side. The
+chain knows addresses; only this node knows which peer an address belonged to when it
+was paid, and which client a deposit token was issued to.
+"""
+
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional
+
 from src.utils.logger import LOGGER
 
 
-def tx_history():
-    """
-    Main command function to display transaction history for both sending and receiving wallets.
-    This function will be called from nodo.py when the tx_history command is executed.
+def tx_history(limit: int = 10):
+    """Print one section per payment system this node offers.
+
+    One section each rather than one merged list: two payment systems are two chains
+    with their own money and their own confirmation counts, and interleaving them by
+    timestamp would put figures in different units next to each other.
     """
     print("Transaction History")
     print("=" * 50)
-    
+
+    from src.payment_system.contracts.registry import attribute, contracts
+
+    offered = [
+        contract for contract in contracts().values()
+        if not attribute(contract, "is_demo")
+        and callable(getattr(contract, "transaction_history", None))
+    ]
+    if not offered:
+        print(
+            "No payment system can report a history. Configure a ledger under "
+            "`ledgers:` and check that its runtime is reachable."
+        )
+        return
+
+    # Resolved once for the whole page, not per section and not per transaction: both
+    # are a single query, and the second (every deposit token this node ever issued) is
+    # the only way an incoming payment can be attributed at all.
+    clients_by_token = _clients_by_deposit_token()
+
+    for index, contract in enumerate(offered):
+        if index:
+            print()
+        _display_contract_history(contract, clients_by_token, limit)
+
+
+def _display_contract_history(contract, clients_by_token: Dict[str, str], limit: int):
+    """One payment system's recent transactions."""
+    ledger = getattr(contract, "LEDGER", "?")
     try:
-        # Single wallet.
-        address = _get_wallet_address()
-        _display_wallet_transactions("Wallet", address)
-
+        address = contract.get_wallet_address()
     except Exception as e:
-        LOGGER(f"Error in tx_history command: {str(e)}")
-        print(f"Error retrieving transaction history: {str(e)}")
+        print(f"[{ledger}] - wallet unavailable: {e}")
+        return
 
-
-def _get_wallet_address() -> str:
-    """
-    Retrieve the single wallet address using existing Ergo utilities.
-
-    Raises:
-        Exception: If wallet configuration is missing or invalid
-    """
-    try:
-        from src.payment_system.contracts.ergo.interface import get_wallet_address
-
-        return get_wallet_address()
-
-    except Exception as e:
-        raise Exception(f"Failed to retrieve wallet address: {str(e)}")
-
-
-def _display_wallet_transactions(wallet_type: str, address: str):
-    """
-    Display transaction history for a specific wallet.
-    
-    Args:
-        wallet_type: Type of wallet (e.g., "Wallet")
-        address: Wallet address to fetch transactions for
-    """
-    print(f"[{wallet_type}] - Address: {address}")
+    print(f"[{ledger}] - Address: {address}")
     print("-" * 60)
-    
+
     try:
-        # Fetch transactions for this address
-        transactions = _get_address_transactions(address)
-
-        if not transactions:
-            print("No recent transactions found.")
-        else:
-            # Resolved once for the page, not per transaction: both lookups are a single
-            # query each, and the second (every deposit token this node ever issued) is
-            # the only way an incoming payment can be attributed at all.
-            payments = _payments_by_tx_id(transactions)
-            clients_by_token = _clients_by_deposit_token()
-
-            # Display each transaction
-            for i, tx in enumerate(transactions):
-                _display_transaction(tx, address, payments, clients_by_token)
-                if i < len(transactions) - 1:
-                    print()  # Add spacing between transactions
-
+        rows = contract.transaction_history(limit=limit)
     except Exception as e:
-        LOGGER(f"Error fetching transactions for {wallet_type}: {str(e)}")
-        print(f"Error fetching transactions: {str(e)}")
+        # "Could not look" is not "nothing happened": an empty list here would read as
+        # a wallet nobody has ever used.
+        LOGGER(f"Error fetching {ledger} transactions: {e}")
+        print(f"Could not read the {ledger} history: {e}")
+        return
+
+    if not rows:
+        print("No recent transactions found.")
+        return
+
+    payments = _payments_by_tx_id(rows)
+    for index, row in enumerate(rows):
+        _display_transaction(row, payments, clients_by_token)
+        if index < len(rows) - 1:
+            print()
 
 
-def _get_address_transactions(address: str, limit: int = 10) -> List[Dict]:
-    """
-    Fetch transaction history from Ergo Explorer API for a given address.
-    
-    Args:
-        address: Wallet address to fetch transactions for
-        limit: Maximum number of transactions to fetch (default: 10)
-        
-    Returns:
-        List of transaction dictionaries
-        
-    Raises:
-        Exception: If API request fails or returns invalid data
-    """
+def _display_transaction(row: Dict, payments: Dict[str, Dict],
+                         clients_by_token: Dict[str, str]):
+    """One normalised row, and whoever this node can name on the other side of it."""
     try:
-        from src.payment_system.contracts.ergo.interface import __init_ergo
-
-        # Get Explorer API URL from existing Ergo utilities
-        ergo = __init_ergo()
-        explorer_api = ergo.get_api_url()
-        
-        # Construct API URL for address transactions
-        url = f"{explorer_api}/api/v1/addresses/{address}/transactions"
-        params = {
-            'offset': 0,
-            'limit': limit
-        }
-        
-        # Make API request
-        response = requests.get(url, params=params, timeout=30)
-        
-        if response.status_code == 404:
-            # Address not found or no transactions
-            return []
-        elif response.status_code != 200:
-            raise Exception(f"API request failed with status {response.status_code}: {response.text}")
-        
-        # Parse JSON response
-        data = response.json()
-        
-        # Return the items list, or empty list if not present
-        return data.get('items', [])
-        
-    except requests.exceptions.Timeout:
-        raise Exception("Request timed out while fetching transactions")
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Network error while fetching transactions: {str(e)}")
-    except ValueError as e:
-        raise Exception(f"Invalid JSON response from API: {str(e)}")
-
-
-def _display_transaction(tx: Dict, address: str,
-                         payments: Optional[Dict[str, Dict]] = None,
-                         clients_by_token: Optional[Dict[str, str]] = None):
-    """
-    Display a single transaction in a formatted manner.
-
-    Args:
-        tx: Transaction dictionary from API response
-        address: Wallet address to determine transaction direction
-        payments: Local payment rows keyed by transaction id, for naming the peer
-        clients_by_token: client id per deposit token, for naming the payer
-    """
-    try:
-        from src.payment_system.contracts.ergo.interface import __nanoerg_to_erg
-
-        # Extract transaction details
-        tx_id = tx.get('id', 'N/A')
-        timestamp = tx.get('timestamp', 0)
-        confirmations = tx.get('numConfirmations', 0)
-
-        # Format timestamp
-        formatted_time = _format_timestamp(timestamp)
-
-        # Determine transaction direction and amount
-        direction, amount_nanoerg = _determine_transaction_direction(tx, address)
-        amount_erg = __nanoerg_to_erg(amount_nanoerg) if amount_nanoerg else 0.0
-
-        # Display transaction information
-        print(f"Transaction ID: {tx_id}")
-        print(f"Amount: {amount_erg:.9f} ERG")
-        print(f"Timestamp: {formatted_time}")
-        print(f"Confirmations: {confirmations}")
-        print(f"Direction: {direction}")
-        for line in _counterparty_lines(tx, address, direction,
-                                        payments or {}, clients_by_token or {}):
+        print(f"Transaction ID: {row.get('id') or 'N/A'}")
+        print(f"Amount: {_format_amount(row)}")
+        print(f"Timestamp: {_format_timestamp(row.get('timestamp') or 0)}")
+        print(f"Confirmations: {row.get('confirmations', 0)}")
+        print(f"Direction: {_DIRECTIONS.get(row.get('direction'), 'Unknown')}")
+        for line in _counterparty_lines(row, payments, clients_by_token):
             print(line)
-
     except Exception as e:
-        LOGGER(f"Error displaying transaction: {str(e)}")
-        print(f"Error displaying transaction: {str(e)}")
+        LOGGER(f"Error displaying transaction: {e}")
+        print(f"Error displaying transaction: {e}")
+
+
+_DIRECTIONS = {
+    "in": "Incoming",
+    "out": "Outgoing",
+    # Both sides of the same transaction: change coming back, or a wallet paying itself.
+    "internal": "Internal",
+    "unknown": "Unknown",
+}
+
+
+def _format_amount(row: Dict) -> str:
+    """A base-unit integer as its own money, never converted to MU.
+
+    What a chain moved is denominated by that chain. Rendering it in the operator's
+    display unit would put a converted figure next to a confirmation count, and the two
+    would be describing different things.
+    """
+    amount = int(row.get("amount") or 0)
+    decimals = int(row.get("decimals") or 0)
+    unit = row.get("unit") or ""
+    if decimals <= 0:
+        return f"{amount} {unit}".strip()
+    whole = amount / (10 ** decimals)
+    return f"{whole:.{decimals}f} {unit}".strip()
+
+
+def _counterparty_lines(row: Dict, payments: Dict[str, Dict],
+                        clients_by_token: Dict[str, str]) -> List[str]:
+    """Who was on the other side, named when this node can name them.
+
+    Three sources, most trustworthy first: the payment this node recorded when it made
+    it (exact -- it holds the peer id), the deposit token the transaction carries
+    (exact -- it holds the client id), and failing both the raw address, which is still
+    more than nothing.
+    """
+    lines: List[str] = []
+    outgoing = row.get("direction") == "out"
+
+    # Only outgoing rows can match here: an incoming payment is recorded without a
+    # transaction id, because the box or output proving it is not the transaction that
+    # made it.
+    payment = payments.get(row.get("id") or "")
+    if payment:
+        # A row means this node signed the transaction, which settles the direction more
+        # firmly than reading the chain does -- a contract reports "unknown" whenever
+        # the chain hands back inputs without addresses.
+        outgoing = payment.get("direction", "out") == "out"
+        if payment.get("peer_id"):
+            lines.append(f"To: peer {payment['peer_id']}")
+        if payment.get("purpose") == "donation":
+            lines.append("Purpose: donation")
+
+    if not outgoing:
+        for token in row.get("deposit_tokens") or []:
+            client_id = clients_by_token.get(token)
+            if client_id:
+                lines.append(f"From: client {client_id} (deposit token {token})")
+            else:
+                lines.append(f"From: an unknown deposit token {token}")
+            break
+
+    counterparties = [address for address in row.get("counterparties") or [] if address]
+    if counterparties:
+        label = "To address" if outgoing else "From address"
+        lines.append(f"{label}: {', '.join(counterparties)}")
+    elif not lines:
+        lines.append("Counterparty: unknown")
+
+    if payment and payment.get("status") == "unacknowledged":
+        lines.append(
+            "NOTE: this node never got an acknowledgement for this payment; the money "
+            "left but no balance was credited."
+        )
+    return lines
 
 
 def _payments_by_tx_id(transactions: List[Dict]) -> Dict[str, Dict]:
@@ -205,155 +215,17 @@ def _clients_by_deposit_token() -> Dict[str, str]:
         return {}
 
 
-def _counterparty_lines(tx: Dict, address: str, direction: str,
-                        payments: Dict[str, Dict],
-                        clients_by_token: Dict[str, str]) -> List[str]:
-    """Who was on the other side, named when this node can name them.
-
-    Three sources, most trustworthy first: the payment this node recorded when it made
-    it (exact -- it holds the peer id), the deposit token in R4 of an incoming box
-    (exact -- it holds the client id), and failing both, the raw address, which is
-    still more than the previous output gave.
-    """
-    lines: List[str] = []
-    outgoing = direction.startswith("Outgoing")
-
-    # Only outgoing rows can match here: an incoming payment is recorded without a
-    # transaction id, because the box proving it is not the transaction that made it.
-    payment = payments.get(tx.get('id') or '')
-    if payment:
-        # A row means this node signed the transaction, which settles the direction
-        # more firmly than matching addresses does -- `_determine_transaction_direction`
-        # reports "Unknown" whenever the explorer hands back inputs without addresses.
-        outgoing = payment.get('direction', 'out') == 'out'
-        if payment.get('peer_id'):
-            lines.append(f"To: peer {payment['peer_id']}")
-
-    if not outgoing:
-        for token in _deposit_tokens_in(tx):
-            client_id = clients_by_token.get(token)
-            if client_id:
-                lines.append(f"From: client {client_id} (deposit token {token})")
-                break
-            lines.append(f"From: an unknown deposit token {token}")
-            break
-
-    counterparties = _counterparty_addresses(tx, address, outgoing)
-    if counterparties:
-        label = "To address" if outgoing else "From address"
-        lines.append(f"{label}: {', '.join(counterparties)}")
-    elif not lines:
-        lines.append("Counterparty: unknown")
-
-    if payment and payment.get('status') == 'unacknowledged':
-        lines.append("Note: broadcast, but the peer never acknowledged it, so no "
-                     "balance was credited for it.")
-
-    return lines
-
-
-def _counterparty_addresses(tx: Dict, address: str, outgoing: bool) -> List[str]:
-    """Every address on the other side of this transaction, ours excluded.
-
-    Change goes back to the sender, so an outgoing transaction lists our own address
-    among its outputs; dropping it is what leaves the recipient.
-    """
-    boxes = tx.get('outputs', []) if outgoing else tx.get('inputs', [])
-    seen: List[str] = []
-    for box in boxes:
-        other = box.get('address')
-        if other and other != address and other not in seen:
-            seen.append(other)
-    return seen
-
-
-def _deposit_tokens_in(tx: Dict) -> List[str]:
-    """Deposit tokens carried in R4 of this transaction's outputs.
-
-    Mirrors what `payment_process_validator` reads: the register holds the token as
-    UTF-8 bytes, rendered by the explorer as hex. Anything that does not decode is
-    some other application's register and is skipped.
-    """
-    tokens: List[str] = []
-    for box in tx.get('outputs', []):
-        registers = box.get('additionalRegisters') or {}
-        rendered = (registers.get('R4') or {}).get('renderedValue')
-        if not rendered:
-            continue
-        try:
-            tokens.append(bytes.fromhex(rendered).decode('utf-8'))
-        except (ValueError, UnicodeDecodeError):
-            continue
-    return tokens
-
-
 def _format_timestamp(timestamp: int) -> str:
-    """
-    Convert Unix timestamp to human-readable format.
-    
-    Args:
-        timestamp: Unix timestamp in milliseconds
-        
-    Returns:
-        Formatted timestamp string
+    """A unix timestamp in **seconds** as a person reads it.
+
+    Seconds, not milliseconds. Each contract normalises its own chain's units before
+    this sees them -- Ergo's explorer reports milliseconds -- because a page that
+    divided by a thousand on behalf of one chain showed the other one a date in 1970.
     """
     try:
-        if timestamp == 0:
+        seconds = int(timestamp)
+        if seconds <= 0:
             return "N/A"
-        
-        # Convert from milliseconds to seconds
-        timestamp_seconds = timestamp / 1000
-        dt = datetime.fromtimestamp(timestamp_seconds)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-        
+        return datetime.fromtimestamp(seconds).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return "Invalid timestamp"
-
-
-def _determine_transaction_direction(tx: Dict, address: str) -> Tuple[str, int]:
-    """
-    Determine if transaction is incoming or outgoing for the given address.
-    
-    Args:
-        tx: Transaction dictionary
-        address: Wallet address to check against
-        
-    Returns:
-        Tuple of (direction_string, amount_in_nanoerg)
-    """
-    try:
-        inputs = tx.get('inputs', [])
-        outputs = tx.get('outputs', [])
-        
-        # Check if address is in inputs (outgoing transaction)
-        outgoing_amount = 0
-        for inp in inputs:
-            if inp.get('address') == address:
-                outgoing_amount += inp.get('value', 0)
-        
-        # Check if address is in outputs (incoming transaction)
-        incoming_amount = 0
-        for out in outputs:
-            if out.get('address') == address:
-                incoming_amount += out.get('value', 0)
-        
-        # Determine direction based on amounts
-        if outgoing_amount > 0 and incoming_amount > 0:
-            # Both incoming and outgoing (internal transaction)
-            net_amount = incoming_amount - outgoing_amount
-            if net_amount > 0:
-                return "Incoming (Internal)", net_amount
-            elif net_amount < 0:
-                return "Outgoing (Internal)", abs(net_amount)
-            else:
-                return "Internal", 0
-        elif outgoing_amount > 0:
-            return "Outgoing", outgoing_amount
-        elif incoming_amount > 0:
-            return "Incoming", incoming_amount
-        else:
-            return "Unknown", 0
-            
-    except Exception as e:
-        LOGGER(f"Error determining transaction direction: {str(e)}")
-        return "Unknown", 0

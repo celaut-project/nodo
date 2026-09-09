@@ -1095,10 +1095,26 @@ pub struct NodeInfo {
     pub version: String,
     pub address: String,
     pub reputation_proof: String,
-    pub wallet_address: String,
-    pub wallet_balance: Option<f64>,
-    pub cold_wallet_address: String,
+    /// One entry per payment system this node offers, in the order `nodo info` printed
+    /// them. A list rather than one wallet: two payment systems are two balances in two
+    /// places, held on different chains in different money, and only one of them can
+    /// pay any given peer -- so there is nothing to add up and nothing to pick.
+    pub wallets: Vec<LedgerWallet>,
     pub error: String,
+}
+
+/// One payment system's wallet, as `nodo info` reports it.
+#[derive(Debug, Clone, Default)]
+pub struct LedgerWallet {
+    /// Ledger tag: `ergo`, `bitcoin`. Empty for the older single-wallet output, which
+    /// named no ledger because there was only ever one.
+    pub ledger: String,
+    pub address: String,
+    pub balance: Option<f64>,
+    /// The chain's own symbol for its native unit -- ERG, BTC. Never converted to MU:
+    /// what a chain holds is denominated by that chain.
+    pub unit: String,
+    pub cold_address: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -4112,31 +4128,73 @@ pub fn parse_node_info(output: &str) -> NodeInfo {
             info.address = value.to_string();
         } else if let Some(value) = line.strip_prefix("Reputation Proof ID: ") {
             info.reputation_proof = value.to_string();
-        } else if let Some(value) = line.strip_prefix("Wallet: ") {
-            let (address, balance) = parse_wallet_line(value, ", Amount:");
-            info.wallet_address = address;
-            info.wallet_balance = balance;
-        } else if let Some(value) = line.strip_prefix("Cold Wallet: ") {
-            info.cold_wallet_address = value.trim().to_string();
+        } else if let Some((ledger, rest)) = split_wallet_line(line, "Wallet: ") {
+            let (address, balance, unit) = parse_wallet_line(&rest, ", Amount:");
+            info.wallets.push(LedgerWallet {
+                ledger,
+                address,
+                balance,
+                unit,
+                cold_address: String::new(),
+            });
+        } else if let Some((ledger, rest)) = split_wallet_line(line, "Cold Wallet: ") {
+            // Printed straight after its own wallet line, so it belongs to the last
+            // entry -- matched by ledger when there is one, because a contract that
+            // sweeps nowhere prints no cold line at all and the positions shift.
+            let cold = rest.trim().to_string();
+            let target = info
+                .wallets
+                .iter_mut()
+                .rev()
+                .find(|wallet| ledger.is_empty() || wallet.ledger == ledger);
+            if let Some(wallet) = target {
+                wallet.cold_address = cold;
+            }
         }
     }
     info
 }
 
-fn parse_wallet_line(value: &str, separator: &str) -> (String, Option<f64>) {
+/// Split `"<ledger>: <marker><rest>"`, or `"<marker><rest>"` with no ledger.
+///
+/// `nodo info` prints one block per payment system, each line prefixed with its ledger.
+/// The unprefixed form is the older single-wallet output, which named no ledger because
+/// there was only ever one -- kept so a TUI does not go blank against an older node.
+fn split_wallet_line(line: &str, marker: &str) -> Option<(String, String)> {
+    if let Some(rest) = line.strip_prefix(marker) {
+        return Some((String::new(), rest.to_string()));
+    }
+    let (ledger, rest) = line.split_once(": ")?;
+    if ledger.contains(' ') {
+        // "Nodo address: …" and friends: a label, not a ledger tag.
+        return None;
+    }
+    let rest = rest.strip_prefix(marker)?;
+    Some((ledger.trim().to_string(), rest.to_string()))
+}
+
+/// `"<address>, Amount: <n> <UNIT>"` -> the three of them.
+fn parse_wallet_line(value: &str, separator: &str) -> (String, Option<f64>, String) {
     match value.split_once(separator) {
-        Some((address, amount)) => (address.trim().to_string(), parse_erg_amount(amount)),
-        None => (value.to_string(), None),
+        Some((address, amount)) => {
+            let (balance, unit) = parse_amount_and_unit(amount);
+            (address.trim().to_string(), balance, unit)
+        }
+        None => (value.trim().to_string(), None, String::new()),
     }
 }
 
-fn parse_erg_amount(value: &str) -> Option<f64> {
-    value
-        .trim()
-        .trim_end_matches("ERGs")
-        .trim()
-        .parse::<f64>()
-        .ok()
+/// `"1.25 ERG"` -> `(Some(1.25), "ERG")`. The unit is whatever the chain calls it.
+///
+/// Read off the line rather than assumed: this used to trim a literal `"ERGs"`, which
+/// is exactly the kind of thing that silently stops parsing when a second chain
+/// appears and prints `BTC`.
+fn parse_amount_and_unit(value: &str) -> (Option<f64>, String) {
+    let value = value.trim();
+    match value.split_once(char::is_whitespace) {
+        Some((amount, unit)) => (amount.trim().parse::<f64>().ok(), unit.trim().to_string()),
+        None => (value.parse::<f64>().ok(), String::new()),
+    }
 }
 
 /// Peak instances held and work refused for a shut window, per hour of the clock.
@@ -6876,7 +6934,9 @@ mod tests {
     }
 
     #[test]
-    fn parses_nodo_info_wallets() {
+    fn parses_the_older_single_wallet_output() {
+        // No ledger named, because there was only ever one. Kept working so a TUI does
+        // not go blank against a node that has not been updated.
         let output = "Nodo service is currently running.\n\
 Nodo version: abc123\n\
 Nodo address: 10.0.0.1:5000\n\
@@ -6885,9 +6945,64 @@ Wallet: 9wallet, Amount: 1.25 ERGs\n\
 Cold Wallet: 9cold\n";
         let info = parse_node_info(output);
         assert_eq!(info.service_status, "running");
-        assert_eq!(info.wallet_address, "9wallet");
-        assert_eq!(info.wallet_balance, Some(1.25));
-        assert_eq!(info.cold_wallet_address, "9cold");
+        assert_eq!(info.wallets.len(), 1);
+        assert_eq!(info.wallets[0].address, "9wallet");
+        assert_eq!(info.wallets[0].balance, Some(1.25));
+        assert_eq!(info.wallets[0].cold_address, "9cold");
+    }
+
+    #[test]
+    fn parses_one_block_per_payment_system() {
+        let output = "Nodo service is currently running.\n\
+Reputation Proof ID: proof-id\n\
+ergo: Wallet: 9wallet, Amount: 1.25 ERG\n\
+ergo: Cold Wallet: 9cold\n\
+bitcoin: Wallet: bc1qxyz, Amount: 0.5 BTC\n";
+        let info = parse_node_info(output);
+
+        assert_eq!(info.wallets.len(), 2);
+        assert_eq!(info.wallets[0].ledger, "ergo");
+        assert_eq!(info.wallets[0].balance, Some(1.25));
+        // The unit comes off the line: it used to trim a literal "ERGs", which is
+        // exactly what stops parsing when a second chain starts printing BTC.
+        assert_eq!(info.wallets[0].unit, "ERG");
+        assert_eq!(info.wallets[0].cold_address, "9cold");
+
+        assert_eq!(info.wallets[1].ledger, "bitcoin");
+        assert_eq!(info.wallets[1].address, "bc1qxyz");
+        assert_eq!(info.wallets[1].balance, Some(0.5));
+        assert_eq!(info.wallets[1].unit, "BTC");
+        // Sweeping nowhere is the default, and it must not inherit the line above it.
+        assert_eq!(info.wallets[1].cold_address, "");
+    }
+
+    #[test]
+    fn a_cold_line_is_matched_by_ledger_and_not_by_position() {
+        // A contract that sweeps nowhere prints no cold line at all, so the lines do
+        // not alternate and a positional match would file one under the wrong chain.
+        let output = "bitcoin: Wallet: bc1qxyz, Amount: 0.5 BTC\n\
+ergo: Wallet: 9wallet, Amount: 1.25 ERG\n\
+ergo: Cold Wallet: 9cold\n";
+        let info = parse_node_info(output);
+        assert_eq!(info.wallets[0].cold_address, "");
+        assert_eq!(info.wallets[1].cold_address, "9cold");
+    }
+
+    #[test]
+    fn a_label_with_a_space_is_not_read_as_a_ledger() {
+        // "Nodo address: …" splits on ": " too; taking it for a ledger tag would
+        // invent a wallet out of every labelled line.
+        let info = parse_node_info("Nodo address: 10.0.0.1:5000\n");
+        assert!(info.wallets.is_empty());
+        assert_eq!(info.address, "10.0.0.1:5000");
+    }
+
+    #[test]
+    fn a_node_that_cannot_read_a_wallet_reports_no_balance_rather_than_zero() {
+        // `print_payment_info` says so in words when a wallet is unreachable; zero
+        // would read as an empty wallet, which is a different fact.
+        let info = parse_node_info("ergo: wallet unavailable (node unreachable)\n");
+        assert!(info.wallets.is_empty());
     }
 
     #[test]

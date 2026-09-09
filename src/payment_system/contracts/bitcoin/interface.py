@@ -262,6 +262,50 @@ def get_balance() -> Tuple[str, float]:
     return address, float(Decimal(backend().get_balance(MIN_CONFIRMATIONS())) / 100_000_000)
 
 
+def transaction_history(limit: int = 10) -> list:
+    """Recent wallet transactions, in the same normalised shape Ergo's answers in.
+
+    Core already knows which side the wallet is on -- it categorises each entry as a
+    send or a receive -- so there is no box-walking to do here. What it does not report
+    is the deposit token, which lives in the transaction's `OP_RETURN`, so an incoming
+    row costs one extra read to say who paid. Only for the handful of rows on screen.
+    """
+    chain = backend()
+    rows = []
+    for entry in chain.list_transactions(limit):
+        category = str(entry.get("category") or "")
+        if category not in ("send", "receive"):
+            # Immature coinbase, orphaned, or a category this node has no opinion about.
+            continue
+        try:
+            amount_sat = abs(int(
+                (Decimal(str(entry.get("amount") or 0)) * 100_000_000).to_integral_value()
+            ))
+        except Exception:
+            amount_sat = 0
+        tx_id = str(entry.get("txid") or "")
+        tokens = []
+        if category == "receive" and tx_id:
+            try:
+                tokens = _op_return_tokens(chain.raw_transaction(tx_id))
+            except Exception:
+                # The row is still worth showing without the token that names the payer.
+                tokens = []
+        counterparty = str(entry.get("address") or "")
+        rows.append({
+            "id": tx_id,
+            "timestamp": int(entry.get("time") or 0),
+            "confirmations": int(entry.get("confirmations") or 0),
+            "direction": "out" if category == "send" else "in",
+            "amount": amount_sat,
+            "unit": NATIVE_ASSET,
+            "decimals": 8,
+            "counterparties": [counterparty] if counterparty else [],
+            "deposit_tokens": tokens,
+        })
+    return rows
+
+
 def init():
     """Advertise this contract: the receiving address' `scriptPubKey` as the script."""
     contract = celaut_pb2.Contract(ledger=bitcoin_ledger)

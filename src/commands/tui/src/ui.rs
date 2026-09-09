@@ -220,43 +220,77 @@ fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
     ])
 }
 
+/// One block per payment system this node offers, and never a total.
+///
+/// Two payment systems are two balances in two places, held on different chains in
+/// different money, and only one of them can pay any given peer -- so adding them up
+/// would name a figure the operator cannot spend, and picking one would hide the other.
+/// The card used to be "ERGO WALLET" and read one wallet, which is why it went blank
+/// the moment `nodo info` started printing a block per contract.
 fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
-    let wallet = nonempty(&app.node_info.wallet_address, "not configured");
-    let cold = nonempty(&app.node_info.cold_wallet_address, "not configured");
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("Balance  ", Style::default().fg(MUTED)),
-            Span::styled(
-                format_balance(app.node_info.wallet_balance),
-                Style::default().fg(Color::LightGreen).bold(),
-            ),
-        ]),
-        Line::from(format!(
-            "Wallet {}  {}",
-            shorten(wallet, 28),
-            format_balance(app.node_info.wallet_balance)
-        )),
-        Line::from(format!(
-            "Cold   {}",
-            shorten(cold, 28)
-        )),
-        Line::from(format!(
-            "Proof  {}",
-            shorten(nonempty(&app.node_info.reputation_proof, "not registered"), 28)
-        )),
-        Line::from(Span::styled(
-            nonempty(
-                &app.node_info.error,
-                "On-chain ERG, not a node balance • refreshes every 60s",
-            ),
-            Style::default().fg(if app.node_info.error.is_empty() {
-                MUTED
-            } else {
-                WARN
-            }),
-        )),
-    ];
-    draw_card(frame, area, "ERGO WALLET", lines, Color::LightGreen);
+    let mut lines: Vec<Line> = Vec::new();
+
+    if app.node_info.wallets.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No payment system configured, so nobody can pay this node.",
+            Style::default().fg(WARN),
+        )));
+    }
+
+    for wallet in &app.node_info.wallets {
+        let balance = format_wallet_balance(wallet.balance, &wallet.unit);
+        let name = if wallet.ledger.is_empty() {
+            "Wallet".to_string()
+        } else {
+            wallet.ledger.to_uppercase()
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{name:<9}"), Style::default().fg(MUTED)),
+            Span::styled(balance, Style::default().fg(Color::LightGreen).bold()),
+        ]));
+        lines.push(Line::from(format!(
+            "  at   {}",
+            shorten(nonempty(&wallet.address, "not configured"), 28)
+        )));
+        // Only when there is one: a contract that sweeps nowhere is the default, and a
+        // "not configured" line per contract would be most of the card.
+        if !wallet.cold_address.is_empty() {
+            lines.push(Line::from(format!(
+                "  cold {}",
+                shorten(&wallet.cold_address, 28)
+            )));
+        }
+    }
+
+    lines.push(Line::from(format!(
+        "Proof    {}",
+        shorten(nonempty(&app.node_info.reputation_proof, "not registered"), 28)
+    )));
+    lines.push(Line::from(Span::styled(
+        nonempty(
+            &app.node_info.error,
+            "On-chain balances, not node balances • refreshes every 60s",
+        ),
+        Style::default().fg(if app.node_info.error.is_empty() {
+            MUTED
+        } else {
+            WARN
+        }),
+    )));
+
+    draw_card(frame, area, "WALLETS", lines, Color::LightGreen);
+}
+
+/// A balance with the unit the chain reported, or a dash when it could not be read.
+///
+/// The unit comes off the wire rather than being assumed: this card is no longer
+/// Ergo's, and a hard-coded "ERG" beside a Bitcoin balance would be a lie about money.
+fn format_wallet_balance(balance: Option<f64>, unit: &str) -> String {
+    match balance {
+        Some(amount) if unit.is_empty() => format!("{amount}"),
+        Some(amount) => format!("{amount} {unit}"),
+        None => "—".to_string(),
+    }
 }
 
 fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
@@ -3295,12 +3329,6 @@ fn selected_style() -> Style {
     Style::default().fg(Color::Black).bg(ACCENT).bold()
 }
 
-fn format_balance(balance: Option<f64>) -> String {
-    balance
-        .map(|amount| format!("{amount:.6} ERG"))
-        .unwrap_or_else(|| "—".to_string())
-}
-
 fn nonempty<'a>(value: &'a str, fallback: &'a str) -> &'a str {
     if value.trim().is_empty() {
         fallback
@@ -4727,6 +4755,83 @@ mod tests {
         }
     }
 
+    mod wallets_card {
+        use super::super::draw_ergo;
+        use crate::app::{App, LedgerWallet};
+        use ratatui::{backend::TestBackend, Terminal};
+
+        fn wallet(ledger: &str, address: &str, balance: Option<f64>, unit: &str,
+                  cold: &str) -> LedgerWallet {
+            LedgerWallet {
+                ledger: ledger.to_string(),
+                address: address.to_string(),
+                balance,
+                unit: unit.to_string(),
+                cold_address: cold.to_string(),
+            }
+        }
+
+        fn rendered(wallets: Vec<LedgerWallet>) -> String {
+            let mut app = App::default();
+            app.node_info.wallets = wallets;
+            let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+            terminal
+                .draw(|frame| draw_ergo(frame, &app, frame.size()))
+                .unwrap();
+            terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        }
+
+        #[test]
+        fn one_block_per_payment_system_and_never_a_total() {
+            let screen = rendered(vec![
+                wallet("ergo", "9walletaddr", Some(1.25), "ERG", "9coldaddr"),
+                wallet("bitcoin", "bc1qxyz", Some(0.5), "BTC", ""),
+            ]);
+
+            assert!(screen.contains("ERGO"), "{screen}");
+            assert!(screen.contains("BITCOIN"), "{screen}");
+            // Each figure in its own money. Adding them up would name an amount the
+            // operator cannot spend: they are on different chains.
+            assert!(screen.contains("1.25 ERG"), "{screen}");
+            assert!(screen.contains("0.5 BTC"), "{screen}");
+            assert!(!screen.contains("Total"), "{screen}");
+        }
+
+        #[test]
+        fn a_cold_wallet_is_shown_only_where_there_is_one() {
+            let screen = rendered(vec![
+                wallet("ergo", "9walletaddr", Some(1.25), "ERG", "9coldaddr"),
+                wallet("bitcoin", "bc1qxyz", Some(0.5), "BTC", ""),
+            ]);
+            assert!(screen.contains("9coldaddr"), "{screen}");
+            // Sweeping nowhere is the default; a "not configured" line per contract
+            // would be most of the card.
+            // The line prefix, not the word: "9coldaddr" contains "cold" too.
+            assert_eq!(screen.matches("  cold ").count(), 1, "{screen}");
+        }
+
+        #[test]
+        fn a_node_nobody_can_pay_says_so_rather_than_drawing_an_empty_card() {
+            let screen = rendered(Vec::new());
+            assert!(screen.contains("No payment system configured"), "{screen}");
+        }
+
+        #[test]
+        fn a_balance_that_could_not_be_read_is_not_shown_as_zero() {
+            // Zero would read as an empty wallet, which is a different fact from a
+            // wallet this node could not reach.
+            let screen = rendered(vec![wallet("ergo", "9walletaddr", None, "ERG", "")]);
+            assert!(screen.contains("—"), "{screen}");
+            assert!(!screen.contains("0 ERG"), "{screen}");
+        }
+    }
+
     mod donations_card {
         use super::super::donation_lines;
         use super::rendered;
@@ -5208,7 +5313,13 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = App::new();
         app.node_info.reputation_proof = "rep-proof-xyz".to_string();
-        app.node_info.wallet_address = "9walletaddr".to_string();
+        app.node_info.wallets = vec![crate::app::LedgerWallet {
+            ledger: "ergo".to_string(),
+            address: "9walletaddr".to_string(),
+            balance: Some(1.25),
+            unit: "ERG".to_string(),
+            cold_address: String::new(),
+        }];
         app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Overview).unwrap();
         terminal.draw(|frame| render(&mut app, frame)).unwrap();
         let screen = terminal
@@ -5218,8 +5329,8 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        // Proof now lives in the ERGO WALLET card, not the NETWORK summary card.
-        assert!(screen.contains("ERGO WALLET"));
+        // Proof lives in the wallets card, not the NETWORK summary card.
+        assert!(screen.contains("WALLETS"));
         assert!(screen.contains("rep-proof-xyz"));
         assert_eq!(screen.matches("rep-proof-xyz").count(), 1);
     }

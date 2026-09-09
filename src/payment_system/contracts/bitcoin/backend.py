@@ -200,6 +200,15 @@ class ChainBackend:
         )
         return list(result or [])
 
+    def list_transactions(self, limit: int) -> List[Dict[str, Any]]:
+        """The wallet's most recent transactions, newest first.
+
+        Core returns them oldest-first, which is the opposite of what a history page
+        wants, so they are reversed here rather than in every caller.
+        """
+        result = self._call("listtransactions", ["*", int(limit), 0, True]) or []
+        return list(reversed(list(result)))
+
     def tx_status(self, txid: str) -> Dict[str, Any]:
         """``gettransaction`` for ``txid``: its confirmations, and what it paid.
 
