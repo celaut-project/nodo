@@ -54,7 +54,7 @@ class _Catalogue:
 class PayoutTests(unittest.TestCase):
 
     def _pay(self, owed, *, wallets=None, simulate=False, min_transfer=2_000_000,
-             tx_id="tx-donation"):
+             tx_id="tx-donation", balance=10 ** 12):
         catalogue = _Catalogue(owed)
         sent = []
 
@@ -79,6 +79,10 @@ class PayoutTests(unittest.TestCase):
                 mock.patch.object(interface, "_ergo_runtime",
                                   return_value=(None, simple_send, None, None)), \
                 mock.patch.object(interface, "__init_ergo", lambda: object(), create=True), \
+                mock.patch.object(interface, "__get_sender_addr",
+                                  lambda mnemonic: object(), create=True), \
+                mock.patch.object(interface, "__confirmed_balance_nanoerg",
+                                  lambda address: balance, create=True), \
                 mock.patch(
                     "src.payment_system.donations.config.pay_wallets",
                     return_value=wallets if wallets is not None
@@ -177,6 +181,19 @@ class PayoutTests(unittest.TestCase):
             11_000_000, wallets=[Wallet("not-an-address", Decimal(1))]
         )
         self.assertEqual(sent, [])
+        self.assertEqual(catalogue.owed, 11_000_000)
+
+    def test_a_wallet_that_cannot_cover_the_payout_keeps_the_debt(self):
+        """The debt came out of money that arrived, but the wallet may have spent it.
+
+        Peer deposits and manual transfers come out of the same wallet, so the funds
+        can be gone by the time the tick fires. Checked before broadcasting so the log
+        names the reason and the debt is visibly kept rather than looking lost.
+        """
+        catalogue, sent = self._pay(11_000_000, balance=5_000_000)
+
+        self.assertEqual(sent, [])
+        self.assertEqual(catalogue.settlements, [])
         self.assertEqual(catalogue.owed, 11_000_000)
 
     def test_nothing_owed_does_nothing(self):

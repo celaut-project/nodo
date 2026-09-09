@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 from math import log
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional
+from time import monotonic
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER
@@ -23,6 +24,13 @@ from src.utils.logger import LOGGER
 # 1.00 to 1.69. See `age_multiplier`.
 DEFAULT_AGE_SCALE = 31536000
 DEFAULT_HALF_CREDIT = Decimal("5000000000")
+
+# How long a computed set of bonuses is reused. Short, because it also freezes the
+# counted list read from the config, and an operator who has just added a wallet should
+# see it take effect without restarting the node. Long enough that a burst of launches
+# costs one pass over the index rather than one each.
+CACHE_SECONDS = 60
+_cache: Optional[Tuple[float, Dict[str, float]]] = None
 
 
 def age_scale() -> Decimal:
@@ -137,10 +145,26 @@ def saturate(credit_mu: Decimal, half: Decimal) -> float:
 def bonus_by_peer() -> Dict[str, float]:
     """``d̂`` per peer, read from SQLite. Never raises, never touches the network.
 
+    Keyed as ``contract_instance.peer_id`` is, so **this node's own credit is under
+    ``LOCAL_PEER_ID``**, not under whatever name a caller happens to use for itself.
+    Our donations are read off the chain and counted with the same list as anybody
+    else's -- our wallet is our identity, so it is the same code path with no special
+    case -- and a caller that looks itself up by another name silently reads zero.
+
     An empty result means "no donation is recognised", which is also what a failed
     index looks like -- and that is the intended behaviour: every candidate gets zero,
     never some of them, so a half-filled index cannot tilt a routing decision.
+
+    Cached for :data:`CACHE_SECONDS`, because this runs on the routing path and reads
+    every donation the node has ever indexed. The index itself only changes when the
+    hourly scan finds something, so recomputing it per launch is work nobody asked for
+    -- and the rows never decay, so that work grows for ever. A failed computation is
+    never cached: it must not blank every candidate's credit for a whole window.
     """
+    global _cache
+    cached = _cache
+    if cached is not None and monotonic() - cached[0] < CACHE_SECONDS:
+        return cached[1]
     try:
         from src.database.sql_connection import SQLConnection
         from src.payment_system.contracts import envs
@@ -171,7 +195,19 @@ def bonus_by_peer() -> Dict[str, float]:
             scale=age_scale(),
         )
         half = half_credit()
-        return {peer_id: saturate(credit, half) for peer_id, credit in credits.items()}
+        bonuses = {peer_id: saturate(credit, half) for peer_id, credit in credits.items()}
+        _cache = (monotonic(), bonuses)
+        return bonuses
     except Exception as e:
         LOGGER(f"Could not compute donation credit; treating every candidate as zero: {e}")
         return {}
+
+
+def forget_cached_bonuses() -> None:
+    """Drop the cached credit, so the next read recomputes it.
+
+    For a caller that has just changed what the answer would be -- a fresh index, or a
+    test -- rather than for ordinary use, where the window expiring is the point.
+    """
+    global _cache
+    _cache = None

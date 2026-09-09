@@ -10,6 +10,7 @@ from src.utils.config import ConfigManager
 from src.utils.utils import from_amount
 from src.utils.logger import LOGGER as logger
 from src.utils.monetary import HOUR_SECONDS, format_mu
+from src.database.sql_connection import LOCAL_PEER_ID
 
 env_manager = ConfigManager()
 ERGO_LEDGER = "ergo"
@@ -87,7 +88,14 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
         # no special case. If this node funds someone it does not itself count, it earns
         # nothing here and slightly disfavours itself, which is honest: an operator who
         # does not recognise a contribution should not bill themselves credit for it.
-        donation_bonus: float = donation_bonuses.get(peer_id, 0.0)
+        #
+        # Translated, because two naming conventions meet here: this candidate is
+        # 'local' to the execution balancer and LOCAL_PEER_ID in `contract_instance`,
+        # which is what the donation index is keyed by. Looking it up by the balancer's
+        # name reads as zero -- and reads exactly like a node that has never donated.
+        donation_bonus: float = donation_bonuses.get(
+            LOCAL_PEER_ID if is_local else peer_id, 0.0
+        )
         reputation: float = 0.0 if is_local else compute_reputation(peer_id=peer_id)
 
         candidate_score = score(
