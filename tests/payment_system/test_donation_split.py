@@ -203,6 +203,15 @@ class DustAndRemainderTests(unittest.TestCase):
         self.assertIsNone(_plan(0, [Wallet("a", Decimal(1))]))
         self.assertIsNone(_plan("0.5", [Wallet("a", Decimal(1))]))
 
+    def test_a_wallet_owed_nothing_gets_no_output_even_with_no_floor(self):
+        # A chain with no minimum output -- the simulated contract reports (0, 0) -- must
+        # not turn "owed nothing" into an output of zero: a payment to nobody that still
+        # enlarges the transaction.
+        plan = _plan(10, [Wallet("a", Decimal(1)), Wallet("b", Decimal("0.0000001"))],
+                     fee=0, min_payable=0)
+        self.assertEqual([address for address, _ in plan.outputs], ["a"])
+        self.assertTrue(all(amount > 0 for _, amount in plan.outputs))
+
     def test_no_wallet_is_no_payout(self):
         self.assertIsNone(_plan(11_000_000, []))
 

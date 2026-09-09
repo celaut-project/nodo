@@ -717,6 +717,14 @@ pub struct DonationWallet {
     /// does not count, or counts but does not fund, is the asymmetry an operator wants
     /// to see -- see `NodeDonations::warnings`.
     pub in_other_list: bool,
+    /// What has actually reached this wallet, per asset, in that asset's smallest unit
+    /// and as written. Empty for a wallet that has never been paid, and empty for a
+    /// counted wallet, which this node pays nothing.
+    ///
+    /// It is here because a `share` is a claim and this is the only way to check it: a
+    /// wallet given 0.1 % should be able to show that something arrived. Per asset
+    /// because a credit in nanoERG says nothing about what it has had in a token.
+    pub paid: Vec<(String, String)>,
 }
 
 /// One ledger's donation state: what has gone out, what is waiting to, and to whom.
@@ -4438,6 +4446,22 @@ pub fn parse_node_donations(output: &str) -> Result<NodeDonations, String> {
                             .get("in_other_list")
                             .and_then(|value| value.as_bool())
                             .unwrap_or(false),
+                        paid: item
+                            .get("paid_native")
+                            .and_then(|value| value.as_object())
+                            .map(|assets| {
+                                let mut pairs: Vec<(String, String)> = assets
+                                    .iter()
+                                    .map(|(asset, amount)| {
+                                        (asset.clone(), json_str(Some(amount)))
+                                    })
+                                    .collect();
+                                // A map has no order and this is rendered, so it is
+                                // given one rather than left to the parser's.
+                                pairs.sort();
+                                pairs
+                            })
+                            .unwrap_or_default(),
                     })
                     .collect()
             })
