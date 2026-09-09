@@ -152,22 +152,33 @@ TABLES = {
             FOREIGN KEY (client_id) REFERENCES clients (id)
         )
     ''',
+    # Node energy samples (issue #258). Energy for the interval plus the tariff
+    # then in effect; cost is derived on read so a later price change does not
+    # rewrite history. RAPL readings are a CPU-package floor (is_floor=1).
     "energy_consumption": '''
         CREATE TABLE IF NOT EXISTS energy_consumption (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME,
-            cpu_percent REAL,
-            memory_usage REAL,
-            power_consumption REAL,
-            cost REAL
+            energy_joules REAL,
+            watts REAL,
+            price_per_kwh REAL,
+            currency TEXT,
+            backend TEXT,
+            is_floor INTEGER
         )
     ''',
-    "monitoring_config": '''
-        CREATE TABLE IF NOT EXISTS monitoring_config (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            max_power_limit REAL,
-            cost_per_kwh REAL,
-            last_updated DATETIME
+    # Latest per-instance share of measured node watts. Same shape as
+    # instance_consumption: one hot row, not a time series. Unattributed watts
+    # (host, idle, nodo itself) are not stored here — they are node_watts minus
+    # the sum of these rows.
+    "instance_energy": '''
+        CREATE TABLE IF NOT EXISTS instance_energy (
+            instance_id TEXT PRIMARY KEY,
+            watts REAL,
+            share REAL,
+            sample_count INTEGER,
+            last_refresh DATETIME,
+            FOREIGN KEY (instance_id) REFERENCES local_instances (id)
         )
     ''',
     "forced_execution_peer": '''
