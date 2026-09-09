@@ -224,7 +224,11 @@ def plan_payout(
     # in at most one pass per wallet.
     candidates = [
         (address, amount) for address, amount in owing
-        if amount >= min_payable_native and address not in unpayable
+        # `> 0` as well as the floor: a chain with no minimum output -- the simulated
+        # contract reports `(0, 0)` -- would otherwise make a wallet owed nothing a
+        # candidate and build it an output of zero, which is a payment to nobody that
+        # still enlarges the transaction.
+        if amount > 0 and amount >= min_payable_native and address not in unpayable
     ]
     while candidates:
         shares = _fee_shares(candidates, fee_native)
