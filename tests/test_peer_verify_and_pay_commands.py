@@ -213,30 +213,31 @@ class PayCommandTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "whole number of MU"):
             pv._amount_to_mu(contract, "0.05")
 
-    def test_several_payment_systems_without_a_ledger_is_refused(self):
-        """Two systems are two currencies, so the amount is ambiguous.
+    def test_several_payment_methods_without_a_selector_is_refused(self):
+        """Two methods are two currencies, so the amount is ambiguous.
 
-        Guessing would move money on a chain nobody named.
+        Guessing would move money nobody named. See
+        tests/test_payment_method_selector.py for the asset dimension of the same
+        question, which is where a ledger stops being a sufficient answer.
         """
-        first, second = mock.Mock(), mock.Mock()
-        first.LEDGER, second.LEDGER = "ergo", "bitcoin"
-        first.is_demo = second.is_demo = False
-        with mock.patch("src.payment_system.contracts.registry.contracts",
-                        return_value={"a": first, "b": second}):
-            contract, refusal = pv._contract_for(None)
+        from tests.test_payment_method_selector import method, offering
+
+        first, second = method("ergo", "ERG"), method("bitcoin", "BTC")
+        with offering(first, second):
+            contract, refusal = pv._method_for(None, None, None)
         self.assertIsNone(contract)
-        self.assertIn("--ledger", refusal)
+        self.assertIn("--payment-method", refusal)
 
     def test_a_named_ledger_the_node_does_not_offer_is_refused_by_name(self):
-        only = mock.Mock()
-        only.LEDGER, only.is_demo = "ergo", False
-        with mock.patch("src.payment_system.contracts.registry.contracts",
-                        return_value={"a": only}):
-            contract, refusal = pv._contract_for("bitcoin")
+        from tests.test_payment_method_selector import method, offering
+
+        only = method("ergo", "ERG")
+        with offering(only):
+            contract, refusal = pv._method_for("bitcoin", None, None)
             self.assertIsNone(contract)
             self.assertIn("ergo", refusal)
             # And the one it does offer needs no flag at all.
-            self.assertIs(pv._contract_for(None)[0], only)
+            self.assertIs(pv._method_for(None, None, None)[0], only)
 
     def test_rejects_invalid_amount(self):
         self.assertFalse(pv.pay("peer-1", "not-a-number"))

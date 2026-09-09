@@ -420,7 +420,8 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
     return False
 
 
-def __settlement_plans(peer_id: str, amount: int, *, floor: bool) -> Tuple[List[SettlementPlan], List[str]]:
+def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
+                       method=None) -> Tuple[List[SettlementPlan], List[str]]:
     """One :class:`SettlementPlan` per shared payment system, and why any were dropped.
 
     In the order the payer should try them (see `matching_payment_systems`), each with
@@ -436,6 +437,12 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool) -> Tuple[List[
     The peer's figure rounds down: its validator checks the payment is worth at least
     the MU it is asked to credit, and claiming one MU more than the transaction carries
     would have it reject a payment already on-chain.
+
+    ``method`` restricts the walk to one payment method, for an operator who named
+    one. Without it the flag would only pick the rate the typed amount is read at while
+    the payment still settled through whichever method happened to be funded first --
+    so `nodo pay --payment-method ergo:SigUSD 5` could convert five SigUSD and pay that
+    many MU worth of ERG.
 
     Returns an empty list rather than raising when no system can carry the amount; the
     reasons come back alongside so a caller can tell an operator which floor stopped it.
@@ -466,6 +473,16 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool) -> Tuple[List[
     floors_by_contract = payment_envs.settlement_floors()
     plans: List[SettlementPlan] = []
     refusals: List[str] = []
+
+    if method is not None:
+        wanted = [system for system in systems if system.key == method]
+        if not wanted:
+            refusals.append(
+                f"{method} is not a payment method shared with this peer; it shares "
+                f"{', '.join(str(system.key) for system in systems)}"
+            )
+            return [], refusals
+        systems = wanted
 
     for system in systems:
         where = str(system.key)
@@ -547,7 +564,7 @@ def deposit_refusal_reason(peer_id: str, amount: int) -> Optional[str]:
 
 
 def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
-                             floor: bool = False) -> bool:
+                             floor: bool = False, method=None) -> bool:
     """Deposit ``amount`` MU with ``peer_id``.
 
     ``amount`` is in *our* MU. What the peer is told is not: see `__deposit_amounts`.
@@ -564,12 +581,17 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
     before a deposit token is issued or the wallet is touched, rather than broadcast
     and rejected on-chain.
 
+    ``method`` restricts the payment to one payment method -- ``(ledger, contract,
+    asset)`` -- for an operator who named one on the command line. Left unset, funding
+    is the selection: the walk tries each shared method in candidate order and settles
+    through the first it can fund.
+
     Both floors are derived from what the ledger can settle, not configured; see
     src/payment_system/deposits.py.
     """
     try:
         plans, refusals = __settlement_plans(
-            peer_id=peer_id, amount=int(amount), floor=floor
+            peer_id=peer_id, amount=int(amount), floor=floor, method=method
         )
     except ValueError as exc:
         _l.LOGGER(f"Cannot deposit on peer {peer_id}: {exc}.")

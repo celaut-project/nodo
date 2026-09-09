@@ -68,10 +68,18 @@ class PaymentMethod:
     and a single-asset contract binds none of them and is forwarded to unchanged.
     """
 
-    def __init__(self, contract, asset: str, calls: Optional[Dict[str, Any]] = None):
+    def __init__(self, contract, asset: str, calls: Optional[Dict[str, Any]] = None,
+                 symbol: str = "", unit_name: str = ""):
         self.contract = contract
         self.asset = asset
         self._calls = dict(calls or {})
+        # How a person names this asset, as opposed to what identifies it. A command
+        # line is typed by someone reading a price, so `--asset sigusd` has to work --
+        # but the id stays the identity, and the two cannot collide because an id is 64
+        # hex characters. Defaults to the asset itself, which is right for a native
+        # unit: "ERG" is both its symbol and its id.
+        self.symbol = symbol or asset
+        self.unit_name = unit_name or ""
 
     @property
     def key(self) -> MethodKey:
@@ -80,9 +88,9 @@ class PaymentMethod:
     def __getattr__(self, name: str):
         """The bound call if this method has one, else the contract's own attribute.
 
-        Reached only for names not set on the instance, so `contract`, `asset` and
-        `key` above shadow nothing. A missing member raises `AttributeError` from the
-        contract, which is what `_usable` checks for up front.
+        Reached only for names not set on the instance, so `contract`, `asset`, `key`,
+        `symbol` and `unit_name` above shadow nothing. A missing member raises
+        `AttributeError` from the contract, which is what `_usable` checks for up front.
         """
         calls = self.__dict__.get("_calls") or {}
         if name in calls:

@@ -1063,9 +1063,11 @@ def methods():
     # This module *is* the contract: a method that overrides nothing has to forward
     # every call to it, so what a `PaymentMethod` wraps here is the module itself.
     _this_module = modules[__name__]
-    built = [PaymentMethod(_this_module, NATIVE_ASSET)]
+    built = [PaymentMethod(_this_module, NATIVE_ASSET, unit_name=rate.UNIT_NAME)]
     for asset in rate.assets():
-        built.append(PaymentMethod(_this_module, asset.token_id, calls={
+        built.append(PaymentMethod(_this_module, asset.token_id,
+                                   symbol=asset.symbol, unit_name=asset.unit_name,
+                                   calls={
             "mu_per_unit": partial(rate.mu_per_whole_unit, asset),
             "settlement_floors_mu": partial(_token_settlement_floors_mu, asset),
             "mu_to_native": partial(rate.mu_to_base_units_exact, asset=asset),
