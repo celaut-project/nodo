@@ -18,11 +18,29 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     registry = None  # type: ignore[assignment]
 
 
+class _both:
+    """Two patches applied as one context manager."""
+
+    def __init__(self, *patches):
+        self._patches = patches
+
+    def __enter__(self):
+        for patch in self._patches:
+            patch.start()
+        return self
+
+    def __exit__(self, *exc):
+        for patch in reversed(self._patches):
+            patch.stop()
+        return False
+
+
 def _contract(ledger="fake", contract="fake-type", **extra):
     module = mock.Mock()
     module.CONTRACT = contract
     module.CONTRACT_HASH = f"hash-of-{contract}"
     module.LEDGER = ledger
+    module.NATIVE_ASSET = extra.pop("asset", "FAKE")
     module.is_demo = False
     module.needs_unspent_proof = False
     module.DEPOSIT_TOKEN_TTL = 3600
@@ -137,42 +155,82 @@ class DispatchTests(unittest.TestCase):
     """`envs` is one comprehension per question, over whatever is offered."""
 
     def _envs(self, *modules):
-        return mock.patch.object(
-            envs, "contracts", return_value={m.CONTRACT_HASH: m for m in modules}
+        """Patch both families: what is per method, and what is per contract.
+
+        The split is not cosmetic. A rate, a floor and a validator depend on which
+        asset; `init` and the periodic `manager` job do not -- dispatched per asset the
+        tick would run `N + 1` times and pay `N + 1` fees for one piece of work.
+        """
+        from src.payment_system.contracts.registry import MethodKey, PaymentMethod
+
+        methods = {
+            MethodKey(m.LEDGER, m.CONTRACT_HASH, m.NATIVE_ASSET):
+                PaymentMethod(m, m.NATIVE_ASSET)
+            for m in modules
+        }
+        contracts_by_hash = {m.CONTRACT_HASH: m for m in modules}
+        return _both(
+            mock.patch.object(envs, "methods", return_value=methods),
+            mock.patch.object(envs, "contracts", return_value=contracts_by_hash),
         )
 
-    def test_every_dict_covers_every_offered_contract(self):
+    def test_the_per_method_dicts_cover_every_offered_method(self):
+        from src.payment_system.contracts.registry import MethodKey
+
         a, b = _contract(contract="a"), _contract(contract="b")
+        keys = {MethodKey(m.LEDGER, m.CONTRACT_HASH, m.NATIVE_ASSET) for m in (a, b)}
         with self._envs(a, b):
             for name in ("payment_process_validators", "available_payment_process",
-                         "check_sender_balances", "settlement_floors",
-                         "init_interfaces", "manage_interfaces"):
+                         "check_sender_balances", "settlement_floors"):
+                with self.subTest(dispatch=name):
+                    self.assertEqual(set(getattr(envs, name)()), keys)
+
+    def test_the_per_contract_dicts_are_keyed_by_contract(self):
+        # `init` and the periodic job are the contract's, not the asset's.
+        a, b = _contract(contract="a"), _contract(contract="b")
+        with self._envs(a, b):
+            for name in ("init_interfaces", "manage_interfaces"):
                 with self.subTest(dispatch=name):
                     self.assertEqual(
                         set(getattr(envs, name)()), {a.CONTRACT_HASH, b.CONTRACT_HASH}
                     )
 
     def test_demos_are_a_payer_side_notion_and_are_live(self):
+        from src.payment_system.contracts.registry import MethodKey
+
         real, demo = _contract(contract="real"), _contract(contract="demo", is_demo=True)
+        demo.is_demo = True
         with self._envs(real, demo):
-            self.assertEqual(envs.DEMOS, (demo.CONTRACT_HASH,))
+            self.assertEqual(
+                envs.DEMOS,
+                (MethodKey(demo.LEDGER, demo.CONTRACT_HASH, demo.NATIVE_ASSET),),
+            )
         with self._envs(real):
             # A live value, not a snapshot taken at import: it used to be computed the
             # first time anything imported the module.
             self.assertEqual(envs.DEMOS, ())
 
     def test_only_contracts_that_need_an_unspent_output_are_named(self):
+        # By contract, because what it gates is the contract's periodic job.
         needs, does_not = _contract(contract="ergo-like", needs_unspent_proof=True), _contract()
+        needs.needs_unspent_proof = True
+        does_not.needs_unspent_proof = False
         with self._envs(needs, does_not):
             self.assertEqual(envs.needs_unspent_proof(), (needs.CONTRACT_HASH,))
 
-    def test_each_contract_carries_its_own_deposit_ttl(self):
+    def test_each_method_carries_its_own_deposit_ttl(self):
+        from src.payment_system.contracts.registry import MethodKey
+
         fast = _contract(contract="fast", DEPOSIT_TOKEN_TTL=3600)
         slow = _contract(contract="slow", DEPOSIT_TOKEN_TTL=21600)
+        fast.DEPOSIT_TOKEN_TTL, slow.DEPOSIT_TOKEN_TTL = 3600, 21600
         with self._envs(fast, slow):
             self.assertEqual(
                 envs.deposit_token_ttls(),
-                {fast.CONTRACT_HASH: 3600, slow.CONTRACT_HASH: 21600},
+                {
+                    MethodKey(fast.LEDGER, fast.CONTRACT_HASH, fast.NATIVE_ASSET): 3600,
+                    MethodKey(slow.LEDGER, slow.CONTRACT_HASH, slow.NATIVE_ASSET): 21600,
+                },
             )
 
     def test_two_contracts_declaring_one_display_unit_is_a_configuration_error(self):

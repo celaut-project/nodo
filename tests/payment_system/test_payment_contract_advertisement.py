@@ -73,12 +73,18 @@ ERGO_CONTRACT_HASH = sha3_256(ERGO_CONTRACT.encode("utf-8")).hexdigest()
 
 def _contract(contract=ERGO_CONTRACT, ledger="ergo", asset="ERG", rate=1_000_000_000,
               is_demo=False):
-    """One registered payment contract, as `local_payment_methods` reads it."""
+    """One registered payment **method**, as `local_payment_methods` reads it.
+
+    A method, not a contract: one contract carries `1 + N` of them on Ergo, and the
+    asset is what tells them apart -- so it is on the object rather than derived from
+    the module.
+    """
     module = mock.Mock()
     module.CONTRACT = contract
     module.CONTRACT_HASH = sha3_256(contract.encode("utf-8")).hexdigest()
     module.LEDGER = ledger
     module.NATIVE_ASSET = asset
+    module.asset = asset
     module.is_demo = is_demo
     module.mu_per_unit.return_value = rate
     return module
@@ -92,22 +98,33 @@ def advertised(instances, offered=None):
     a test about the shape of the advertisement.
 
     ``instances`` rows are ``(script, ledger)``, optionally with a third element naming
-    which contract stored them -- so one call can give two contracts a row each.
+    which contract stored them -- so one call can give two methods a row each.
     """
+    from src.payment_system.contracts.registry import MethodKey
+
     offered = offered if offered is not None else [_contract()]
-    registry = {module.CONTRACT_HASH: module for module in offered}
-    by_hash = {}
+    registry = {
+        MethodKey(m.LEDGER, m.CONTRACT_HASH, m.asset): m for m in offered
+    }
+    by_method = {}
     for module in offered:
-        by_hash[module.CONTRACT_HASH] = [
+        by_method[(module.CONTRACT_HASH, module.asset)] = [
             row for row in instances
             if len(row) < 3 or row[2] == module.CONTRACT_HASH
         ]
 
-    def rows(contract_hash, peer_id="LOCAL"):
-        return iter([row[:2] for row in by_hash.get(contract_hash, [])])
+    def rows(contract_hash, peer_id="LOCAL", asset=None):
+        stored = by_method.get((contract_hash, asset or ""), [])
+        if not stored:
+            # A method whose asset was not named in the fixture still gets its rows,
+            # so a single-asset test does not have to spell the asset out.
+            stored = next(
+                (v for (h, _a), v in by_method.items() if h == contract_hash), []
+            )
+        return iter([(row[0], row[1], asset or "") for row in stored])
 
     with mock.patch(
-        "src.payment_system.contracts.registry.contracts", return_value=registry
+        "src.payment_system.contracts.registry.methods", return_value=registry
     ), mock.patch.object(ledgers, "get_peer_contract_instances", side_effect=rows):
         return list(ledgers.local_payment_methods())
 
@@ -172,6 +189,34 @@ class MultipleContractAdvertisementTests(unittest.TestCase):
 
     def _advertised(self, instances, offered):
         return advertised(instances, offered)
+
+    def test_two_assets_on_one_contract_are_advertised_separately(self):
+        """The advertisement side of the asset dimension.
+
+        Same contract, same script, same address; two assets, two rates. Yielded as one
+        `ContractRate` each -- as rows rather than as a nested field, which needs no
+        proto change and keeps ERG's advertisement byte-identical to what it always was.
+        """
+        native = _contract()
+        token = _contract(asset="ab" * 32, rate=20_000_000)
+        methods = self._advertised(
+            [(PROPOSITION_BYTES, ERGO_LEDGER, native.CONTRACT_HASH)],
+            [native, token],
+        )
+
+        by_asset = {get_token_id(m.contract): m for m in methods}
+        self.assertEqual(set(by_asset), {"ERG", "ab" * 32})
+        self.assertEqual(int(by_asset["ERG"].mu_per_unit.n), 1_000_000_000)
+        self.assertEqual(int(by_asset["ab" * 32].mu_per_unit.n), 20_000_000)
+        # One contract: the script and the type are the same for both, because on Ergo
+        # they genuinely are.
+        self.assertEqual(
+            {get_script(m.contract) for m in methods}, {PROPOSITION_BYTES}
+        )
+        self.assertEqual(
+            {get_contract_type(m.contract) for m in methods},
+            {ERGO_CONTRACT.encode("utf-8")},
+        )
 
     def test_each_contract_carries_its_own_asset_and_rate(self):
         ergo = _contract()

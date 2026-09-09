@@ -1467,7 +1467,7 @@ class SQLConnection(metaclass=Singleton):
             ``address``, and ``mu_per_unit`` (int, or None if unset/invalid).
         """
         rows = self._execute(
-            "SELECT contract_hash, ledger_hash, address, mu_per_unit "
+            "SELECT contract_hash, ledger_hash, address, token_id, mu_per_unit "
             "FROM contract_instance WHERE peer_id = ?",
             (peer_id,)
         ).fetchall()
@@ -1496,6 +1496,11 @@ class SQLConnection(metaclass=Singleton):
                 'contract_hash': row['contract_hash'],
                 'ledger_tag': ledger_tag,
                 'address': row['address'],
+                # A payment method is ledger + contract + asset. Without the asset, two
+                # rows of one contract look like one row duplicated with two different
+                # rates -- which is exactly what `_rates_by_payment_system` refuses as a
+                # conflicting advertisement.
+                'token_id': row['token_id'] or "",
                 'mu_per_unit': mu_per_unit,
             })
 
@@ -1756,6 +1761,11 @@ class SQLConnection(metaclass=Singleton):
         raw_script: bytes = get_script(contract)
         type_bytes: bytes = get_contract_type(contract) or raw_script or contract_shape_bytes(contract)
         instance_value: str = raw_script.hex() if raw_script else get_address(contract)
+        # Which asset this method settles in. It has always been advertised and this was
+        # the one place that dropped it -- so a node offering ERG and a token on the same
+        # contract wrote both rates to one row, and the second silently replaced the
+        # first. Every peer then converted ERG amounts at the token's rate.
+        asset: str = get_token_id(contract)
 
         ledger = self.check_if_ledger_exists(ledger_to_check=contract.ledger)
         ledger_str: bytes = ledger.SerializeToString()
@@ -1776,27 +1786,37 @@ class SQLConnection(metaclass=Singleton):
         # `mu_per_unit` at whatever it announced the first time we ever saw it.
         # Converting MU with a stale rate misprices delegation and, on the
         # payment path, gets a deposit rejected with the money already on-chain.
-        self._execute("INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit) "
-                    "VALUES (?,?,?,?,?) "
-                    "ON CONFLICT (address, ledger_hash, contract_hash, peer_id) "
+        self._execute("INSERT INTO contract_instance "
+                    "(address, ledger_hash, contract_hash, token_id, peer_id, mu_per_unit) "
+                    "VALUES (?,?,?,?,?,?) "
+                    "ON CONFLICT (address, ledger_hash, contract_hash, token_id, peer_id) "
                     "DO UPDATE SET mu_per_unit = excluded.mu_per_unit",
-                    (instance_value, ledger_hash, contract_hash, peer_id, gas_str))
+                    (instance_value, ledger_hash, contract_hash, asset, peer_id, gas_str))
 
-    def get_peer_contract_instances(self, contract_hash: str, peer_id: str = "LOCAL") -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger], None, None]:
+    def get_peer_contract_instances(self, contract_hash: str, peer_id: str = LOCAL_PEER_ID,
+                                    asset: Optional[str] = None
+                                    ) -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger, str], None, None]:
         """
         Retrieves all contract instances for a given contract hash and peer ID.
 
         Args:
             contract_hash (str): Contract hash
             peer_id (str): Peer ID, defaults to "LOCAL".
+            asset (str): Only the instances settling in this asset, when given. A
+                payment method is ledger + contract + asset, so a caller paying in one
+                asset must not be handed another's rows -- on Ergo they share a
+                contract, a script and an address, and differ only here.
 
         Yields:
-            Tuple[bytes, celaut_pb2.Contract.Ledger]: A tuple containing the address and the ledger of the contract instance.
+            Tuple[bytes, Ledger, str]: the raw script, the ledger, and the asset.
         """
-        cursor = self._execute(
-            "SELECT address, ledger_hash FROM contract_instance WHERE contract_hash = ? AND peer_id = ?",
-            (contract_hash, peer_id)
-        )
+        query = ("SELECT address, ledger_hash, token_id FROM contract_instance "
+                 "WHERE contract_hash = ? AND peer_id = ?")
+        params: tuple = (contract_hash, peer_id)
+        if asset is not None:
+            query += " AND token_id = ?"
+            params = params + (asset,)
+        cursor = self._execute(query, params)
         for row in cursor.fetchall():
             cursor = self._execute("SELECT content FROM ledger WHERE hash = ?", (row['ledger_hash'],))
             ledger_str = cursor.fetchone()['content']
@@ -1812,7 +1832,7 @@ class SQLConnection(metaclass=Singleton):
                 # Legacy/simulator instances stored a textual value.
                 script = stored.encode('utf-8')
 
-            yield script, ledger
+            yield script, ledger, (row['token_id'] or "")
 
     def peer_exists(self, peer_id: str) -> bool:
         """

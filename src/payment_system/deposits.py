@@ -57,18 +57,19 @@ def _floors_for(payment_system) -> Tuple[int, int]:
 
     from src.payment_system.contracts.envs import settlement_floors
 
-    read = settlement_floors().get(payment_system.contract_hash)
+    read = settlement_floors().get(payment_system.key)
     if read is None:
         # The system was shared with the peer a moment ago and its contract is not
         # offered now -- a runtime that went away. Nothing can be sized against it.
         raise ValueError(
-            f"no payment contract is available for {payment_system.ledger_tag}/"
-            f"{payment_system.contract_hash[:12]}, so a deposit cannot be sized for it"
+            f"no payment method is available for {payment_system.key}, so a deposit "
+            "cannot be sized for it"
         )
     return read()
 
 
-def _share(key: str, default: float, *, ledger_tag: Optional[str] = None) -> float:
+def _share(key: str, default: float, *, ledger_tag: Optional[str] = None,
+           asset: str = "") -> float:
     # Resolved per call, not captured at import, for the same reason as
     # `monetary._config`: ConfigManager is a replaceable singleton, so a module-level
     # binding would make a deposit's size depend on import order. The lookup is a dict hit.
@@ -78,7 +79,15 @@ def _share(key: str, default: float, *, ledger_tag: Optional[str] = None) -> flo
     # on Bitcoin the same 2 % demands a deposit worth years of runtime up front (§5).
     config = ConfigManager()
     value = None
-    if ledger_tag:
+    # Per *method* first: on Ergo a token settling through the same contract as ERG
+    # declares its own share, because what is right for a chain's native unit can be
+    # absurd for a token priced orders of magnitude away from it.
+    if ledger_tag and asset:
+        for entry in config.get(f"ledgers.{ledger_tag}.payments.ASSETS") or []:
+            if isinstance(entry, dict) and str(entry.get("TOKEN_ID") or "") == asset:
+                value = entry.get(key)
+                break
+    if value in (None, "") and ledger_tag:
         value = config.get(f"ledgers.{ledger_tag}.payments.{key}")
     if value in (None, ""):
         value = config.get(f"deposits.{key}", default)
@@ -97,7 +106,10 @@ def full_deposit_mu(payment_system=None) -> int:
     """
     fee, minimum_output = _floors_for(payment_system)
     ledger_tag = getattr(payment_system, "ledger_tag", None)
-    by_overhead = int(fee / _share("MAX_FEE_OVERHEAD", 0.02, ledger_tag=ledger_tag))
+    asset = getattr(payment_system, "asset", "") or ""
+    by_overhead = int(
+        fee / _share("MAX_FEE_OVERHEAD", 0.02, ledger_tag=ledger_tag, asset=asset)
+    )
     return max(by_overhead, minimum_output + fee)
 
 
@@ -109,6 +121,8 @@ def refill_threshold_mu(payment_system=None) -> int:
     on every single iteration).
     """
     ledger_tag = getattr(payment_system, "ledger_tag", None)
+    asset = getattr(payment_system, "asset", "") or ""
     return int(
-        full_deposit_mu(payment_system) * _share("REFILL_BELOW", 0.2, ledger_tag=ledger_tag)
+        full_deposit_mu(payment_system)
+        * _share("REFILL_BELOW", 0.2, ledger_tag=ledger_tag, asset=asset)
     )

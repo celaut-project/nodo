@@ -21,6 +21,17 @@ SECOND = "second-contract"
 SCRIPT = bytes.fromhex("0008cd03" + "77" * 32)
 
 
+def _key(contract_hash, ledger, asset):
+    """The triple the dispatch is keyed by: ledger, contract and asset."""
+    from src.payment_system.contracts.registry import MethodKey
+
+    return MethodKey(ledger, contract_hash, asset)
+
+
+FIRST_KEY = None if IMPORT_ERROR else _key(FIRST, "ergo", "ERG")
+SECOND_KEY = None if IMPORT_ERROR else _key(SECOND, "bitcoin", "BTC")
+
+
 class _Envs:
     """A registry with two payment systems, each with its own funding and figures."""
 
@@ -37,12 +48,12 @@ class _Envs:
                 return celaut_pb2.Contract(ledger=ledger)
             return process_payment
 
-        return {FIRST: process(FIRST), SECOND: process(SECOND)}
+        return {FIRST_KEY: process(FIRST), SECOND_KEY: process(SECOND)}
 
     def check_sender_balances(self):
         return {
-            FIRST: lambda amount: FIRST in self.funded,
-            SECOND: lambda amount: SECOND in self.funded,
+            FIRST_KEY: lambda amount: FIRST in self.funded,
+            SECOND_KEY: lambda amount: SECOND in self.funded,
         }
 
 
@@ -55,14 +66,14 @@ class PaymentSelectionTests(unittest.TestCase):
         told = []
         plans = plans or [
             payment_process.SettlementPlan(contract_hash=FIRST, ledger_tag="ergo",
-                                           amount=1_000, peer_amount=2_000),
+                                           asset="ERG", amount=1_000, peer_amount=2_000),
             payment_process.SettlementPlan(contract_hash=SECOND, ledger_tag="bitcoin",
-                                           amount=1_000, peer_amount=7),
+                                           asset="BTC", amount=1_000, peer_amount=7),
         ]
         with mock.patch.object(payment_process, "_payment_envs", return_value=envs), \
                 mock.patch.object(payment_process, "sc", mock.MagicMock()), \
                 mock.patch.object(payment_process, "get_peer_contract_instances",
-                                  side_effect=lambda *a, **k: iter([(SCRIPT, ledger)])), \
+                                  side_effect=lambda *a, **k: iter([(SCRIPT, ledger, "ERG")])), \
                 mock.patch.object(payment_process, "ledger_balancer",
                                   side_effect=lambda ledger_generator: ledger_generator), \
                 mock.patch.object(payment_process, "_reputation_interface"), \
@@ -115,9 +126,9 @@ class PaymentSelectionTests(unittest.TestCase):
         # away between matching and paying.
         plans = [
             payment_process.SettlementPlan(contract_hash="vanished", ledger_tag="ergo",
-                                           amount=1_000, peer_amount=2_000),
+                                           asset="ERG", amount=1_000, peer_amount=2_000),
             payment_process.SettlementPlan(contract_hash=SECOND, ledger_tag="bitcoin",
-                                           amount=1_000, peer_amount=7),
+                                           asset="BTC", amount=1_000, peer_amount=7),
         ]
         settled, envs, _ = self._pay(funded={SECOND}, plans=plans)
         self.assertEqual(settled.contract_hash, SECOND)
