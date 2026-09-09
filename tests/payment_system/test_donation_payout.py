@@ -30,26 +30,46 @@ WALLET_B = "9hHDQb26AjnJUXxcqriqY1mnhpLuUeC81C4pggtK7tupr92Ea1K"
 
 
 class _Catalogue:
-    """The donation rows, as the payout reads and writes them."""
+    """The donation rows, as the payout reads and writes them.
 
-    def __init__(self, owed):
+    Two rows, not one: the debt, and what each wallet has already been credited
+    against its share. The second is what makes a weight mean a share of everything
+    this method ever earned rather than a share of one transaction -- see
+    `tests/payment_system/test_donation_split.py::SequenceTests`.
+    """
+
+    def __init__(self, owed, paid=None):
         self.owed = Decimal(str(owed))
+        self.paid = {a: Decimal(str(v)) for a, v in (paid or {}).items()}
         self.settlements = []
 
     def donation_owed(self, ledger, contract_hash, token_id):
         return self.owed if token_id == "ERG" else Decimal(0)
 
+    def donation_paid_by_address(self, ledger, contract_hash, token_id):
+        return dict(self.paid)
+
+    def settle_donation(self, **entry):
+        """The single-asset entry point, which is what the ERG payout still calls."""
+        return self.settle_donations([entry])
+
     def settle_donations(self, entries):
         # One call for every asset a payout touched: the window between two commits is
-        # where a crash pays one debt twice.
+        # where a crash pays one debt twice -- or credits a wallet for money that never
+        # left, which is the same window seen from the other side.
         for entry in entries:
             self.settlements.append({
                 "ledger": entry["ledger"],
-                "token_id": entry["token_id"],
+                "token_id": entry.get("token_id"),
                 "paid_native": entry["paid_native"],
                 "records": entry["records"],
+                "credited": list(entry.get("credited") or ()),
             })
             self.owed -= Decimal(str(entry["paid_native"]))
+            for address, amount in entry.get("credited") or ():
+                self.paid[address] = (
+                    self.paid.get(address, Decimal(0)) + Decimal(str(amount))
+                )
         return True
 
 
@@ -57,8 +77,8 @@ class _Catalogue:
 class PayoutTests(unittest.TestCase):
 
     def _pay(self, owed, *, wallets=None, simulate=False, min_transfer=2_000_000,
-             tx_id="tx-donation", balance=10 ** 12):
-        catalogue = _Catalogue(owed)
+             tx_id="tx-donation", balance=10 ** 12, paid=None):
+        catalogue = _Catalogue(owed, paid)
         sent = []
 
         def send_assets(outputs, fee_nanoerg):
@@ -202,6 +222,63 @@ class PayoutTests(unittest.TestCase):
         self.assertEqual(sent, [])
         self.assertEqual(catalogue.settlements, [])
         self.assertEqual(catalogue.owed, 11_000_000)
+
+    def test_each_wallet_is_credited_what_the_payout_discharged_of_its_share(self):
+        """The row the next payout reads. Written in the same commit as the decrement.
+
+        Without it the next tick recomputes every cut from the live debt, and a cut too
+        small to go out is shared among everybody -- so the wallet that earned it never
+        gets it. The credit is the wallet's whole entitlement, the fee its own transfer
+        consumed included, because the debt is decremented by the outputs *and* the fee.
+        """
+        catalogue, sent = self._pay(
+            11_000_000,
+            wallets=[Wallet(WALLET_A, Decimal("0.7")), Wallet(WALLET_B, Decimal("0.3"))],
+            min_transfer=0,
+        )
+        [settlement] = catalogue.settlements
+        self.assertEqual(
+            settlement["credited"], [(WALLET_A, 7_700_000), (WALLET_B, 3_300_000)]
+        )
+        self.assertEqual(
+            sum(amount for _, amount in settlement["credited"]),
+            settlement["paid_native"],
+            "the credits have to add up to what the debt was decremented by",
+        )
+
+    def test_a_wallet_already_credited_its_share_is_not_paid_again(self):
+        # Its entitlement is what it is owed *minus* what it has had, so a wallet that
+        # has already received its weight of everything accrued gets nothing until more
+        # is earned -- and the other wallet takes what is left.
+        catalogue, sent = self._pay(
+            11_000_000,
+            wallets=[Wallet(WALLET_A, Decimal("0.5")), Wallet(WALLET_B, Decimal("0.5"))],
+            min_transfer=0,
+            paid={WALLET_A: 11_000_000},
+        )
+        self.assertEqual(sent[0]["receivers"], [WALLET_B])
+
+    def test_a_small_weight_is_paid_across_ticks_rather_than_never(self):
+        """The fix, through the real payout rather than through the arithmetic alone.
+
+        1 % of a 11e6 debt is below Ergo's minimum box value, so the first tick pays
+        only the big wallet. What the small wallet was owed stays owed *to it*, so a few
+        ticks later its entitlement clears the floor and it is paid.
+        """
+        wallets = [Wallet(WALLET_A, Decimal("0.99")), Wallet(WALLET_B, Decimal("0.01"))]
+        paid, received = {}, {WALLET_A: 0, WALLET_B: 0}
+        owed = Decimal(0)
+        for _ in range(12):
+            owed += Decimal(11_000_000)
+            catalogue, sent = self._pay(owed, wallets=wallets, min_transfer=0, paid=paid)
+            if not sent:
+                continue
+            for address, amount in zip(sent[0]["receivers"], sent[0]["amount"]):
+                received[address] += int(round(amount * 10 ** 9))
+            paid = catalogue.paid
+            owed = catalogue.owed
+        self.assertGreater(received[WALLET_B], 0,
+                           "the 1 % wallet was never paid anything at all")
 
     def test_nothing_owed_does_nothing(self):
         catalogue, sent = self._pay(0)

@@ -24,6 +24,7 @@ Two families live here, and the split is not cosmetic:
   for one piece of work, and an Ergo transaction carries several assets in one output,
   so the job is the contract's.
 """
+from importlib import import_module
 from textwrap import dedent
 from typing import Any, Callable, Dict, Optional, Tuple
 from contextlib import nullcontext
@@ -164,6 +165,52 @@ def resolve_method(ledger_tag: str, hash_: contract_hash, asset: str = ""):
     return None
 
 
+#: Where each ledger's donation scanner lives. Import paths rather than modules, so this
+#: file names no chain's package at import time and a ledger whose scanner will not
+#: import contributes nothing instead of taking the others down with it.
+DONATION_SCAN_MODULES = (
+    "src.payment_system.contracts.ergo.donation_scan",
+)
+
+
+def donation_scanners() -> Dict[ledger, Any]:
+    """Per LEDGER: how to read donations paid to an address on that chain.
+
+    Keyed by ledger tag rather than by contract or by method, unlike every other
+    dispatch in this file, and that is not an inconsistency: a counted donation wallet
+    is a property of the *chain*. One address receives whatever is sent to it, through
+    any contract and in any asset, so there is exactly one way to read what reached it.
+
+    Only the light scanning modules are imported, never a contract interface: indexing
+    what other nodes donated is a read, and it must not need a wallet, a signature or a
+    JVM. Each is tried on its own -- a payment stack that will not import contributes no
+    scanner rather than raising, so a node with no Java still routes and simply counts
+    no donations, and a second ledger's scanner is unaffected by the first's absence.
+    """
+    scanners: Dict[ledger, Any] = {}
+    for path in DONATION_SCAN_MODULES:
+        try:
+            module = import_module(path)
+        except Exception as exc:
+            LOGGER(f"No donation scanner from {path}: {exc}")
+            continue
+        tag = getattr(module, "LEDGER", "")
+        if tag:
+            scanners[tag] = module
+    return scanners
+
+
+def seconds_per_block(ledger_tag: str) -> int:
+    """How long a block takes on ``ledger_tag``; 0 when this node cannot say.
+
+    Donation age is measured in seconds, not blocks: an Ergo block is ~120 s and a
+    Bitcoin block ~600 s, so an age scale in blocks would weigh the same old donation
+    five times differently depending on the chain it was paid on.
+    """
+    scanner = donation_scanners().get(ledger_tag)
+    return int(getattr(scanner, "SECONDS_PER_BLOCK", 0) or 0)
+
+
 def needs_unspent_proof() -> Tuple[contract_hash, ...]:
     """Contracts whose validator needs an output still to be unspent.
 
@@ -263,8 +310,6 @@ def display_units() -> Dict[str, Dict[str, Any]]:
     race between them: this is a `dict.update`, so the second would silently win and an
     operator's chosen display unit would mean whichever one imported last.
     """
-    from importlib import import_module
-
     units: Dict[str, Dict[str, Any]] = {}
     for path in rate_modules():
         try:
