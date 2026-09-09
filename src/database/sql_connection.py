@@ -8,7 +8,7 @@ from collections import deque
 from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
-from typing import Any, Callable, Dict, Generator, Iterable, List, Tuple, Optional
+from typing import Any, Callable, Dict, Generator, Iterable, List, Sequence, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
 from protos import celaut_pb2
@@ -54,10 +54,14 @@ TRACEABILITY_TABLES = (
     "tunnel_traffic",
     "demand_history",
     # A donation debt survives a restart and is paid on a later tick, so losing the
-    # table loses money this node already owes. The other two are the on-chain credit
-    # index and its scan cursor; without them the balancer reads no donations at all
-    # and silently routes as though nobody had ever donated.
+    # table loses money this node already owes. `donation_payouts` is what each wallet
+    # has been credited against its share: losing it would reset every wallet's
+    # entitlement to its full weight of everything ever accrued, and the next tick
+    # would pay the whole history again. The last two are the on-chain credit index and
+    # its scan cursor; without them the balancer reads no donations at all and silently
+    # routes as though nobody had ever donated.
     "donation_accrual",
+    "donation_payouts",
     "donations",
     "donation_scan_state",
 )
@@ -2658,8 +2662,64 @@ class SQLConnection(metaclass=Singleton):
             })
         return debts
 
+    def donation_paid_by_address(self, ledger: str, contract_hash: str,
+                                 token_id: str) -> Dict[str, Decimal]:
+        """What each wallet has been credited on one method, cumulatively.
+
+        This is what makes a donation *weight* mean a share of everything the method
+        has ever earned rather than a share of one transaction. Without it a payout
+        recomputes every cut from the live debt, and a cut too small to go out returns
+        to a debt belonging to nobody -- to be split among everybody next tick. See
+        :func:`src.payment_system.donations.split.entitlements`.
+
+        An empty mapping for a method that has never paid out, which is the same thing
+        as every wallet being owed its full share.
+        """
+        paid: Dict[str, Decimal] = {}
+        try:
+            rows = self._execute(
+                "SELECT address, paid_native FROM donation_payouts "
+                "WHERE ledger = ? AND contract_hash = ? AND token_id = ?",
+                (ledger, contract_hash, token_id)
+            ).fetchall()
+        except Exception as e:
+            logger.LOGGER(
+                f'Failed to read what donation wallets have been paid on '
+                f'{ledger}/{token_id}: {e}'
+            )
+            return paid
+        for row in rows:
+            address = row['address']
+            if address:
+                paid[address] = _decimal_or_zero(row['paid_native'])
+        return paid
+
+    def donation_credits(self) -> List[dict]:
+        """Every wallet credit on every method, for the report an operator reads.
+
+        Ordered, like :meth:`donation_debts`, so `nodo donations` prints the same thing
+        twice. What it answers is the question the weights make an operator ask: has the
+        wallet I gave a small weight to actually been paid anything?
+        """
+        try:
+            rows = self._execute(
+                "SELECT ledger, contract_hash, token_id, address, paid_native "
+                "FROM donation_payouts ORDER BY ledger, token_id, address"
+            ).fetchall()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read the donation credits: {e}')
+            return []
+        return [{
+            "ledger": row["ledger"],
+            "contract_hash": row["contract_hash"],
+            "token_id": row["token_id"],
+            "address": row["address"],
+            "paid": _decimal_or_zero(row["paid_native"]),
+        } for row in rows]
+
     def settle_donation(self, *, ledger: str, contract_hash: str, token_id: str,
-                        paid_native: Decimal, records: List[dict]) -> bool:
+                        paid_native: Decimal, records: List[dict],
+                        credited: Sequence[Tuple[str, int]] = ()) -> bool:
         """Decrement one method's debt by what was just paid, and record the payments.
 
         The single-asset case of :meth:`settle_donations`, which is where the rule that
@@ -2667,7 +2727,7 @@ class SQLConnection(metaclass=Singleton):
         """
         return self.settle_donations([{
             "ledger": ledger, "contract_hash": contract_hash, "token_id": token_id,
-            "paid_native": paid_native, "records": records,
+            "paid_native": paid_native, "records": records, "credited": credited,
         }])
 
     def settle_donations(self, entries: List[dict]) -> bool:
@@ -2684,11 +2744,16 @@ class SQLConnection(metaclass=Singleton):
         reintroduce exactly that window between the assets of a single payout: one debt
         discharged, the other paid again on the next tick.
 
-        Each entry is ``{ledger, contract_hash, token_id, paid_native, records}``, and
-        each record is one output: ``{tx_id, address, amount_mu}``, and nothing else.
-        The columns that are the same for every row of one payout -- direction, status,
-        purpose, ledger, contract -- are filled in here, so an entry carrying one of
-        those would collide with it.
+        Each entry is ``{ledger, contract_hash, token_id, paid_native, records,
+        credited}``. Each record is one output: ``{tx_id, address, amount_mu}``, and
+        nothing else -- the columns that are the same for every row of one payout
+        (direction, status, purpose, ledger, contract, asset) are filled in here, so an
+        entry carrying one of those would collide with it.
+
+        ``credited`` is ``(address, amount)`` per wallet: what this payout discharged of
+        *that wallet's* entitlement, its share of the fee included. It rides in the same
+        commit for the same reason as everything else here -- a crash between the two
+        would either pay a wallet twice or credit it for money that never left.
 
         Returns whether anything was written: an entry that paid nothing is skipped,
         and a call with nothing left to write is ``False``.
@@ -2717,6 +2782,20 @@ class SQLConnection(metaclass=Singleton):
                         "owed_native = excluded.owed_native, updated_at = CURRENT_TIMESTAMP",
                         (ledger, contract_hash, token_id, _plain(remaining))
                     ))
+                    already = self.donation_paid_by_address(ledger, contract_hash, token_id)
+                    for address, amount in entry.get("credited") or ():
+                        if not address:
+                            continue
+                        total = already.get(address, Decimal(0)) + _decimal_or_zero(amount)
+                        queries.append((
+                            "INSERT INTO donation_payouts "
+                            "(ledger, contract_hash, token_id, address, paid_native) "
+                            "VALUES (?, ?, ?, ?, ?) "
+                            "ON CONFLICT (ledger, contract_hash, token_id, address) DO UPDATE "
+                            "SET paid_native = excluded.paid_native, "
+                            "    updated_at = CURRENT_TIMESTAMP",
+                            (ledger, contract_hash, token_id, address, _plain(total))
+                        ))
                     for record in entry.get("records") or []:
                         queries.append((PAYMENT_INSERT, payment_insert_params(
                             direction='out',

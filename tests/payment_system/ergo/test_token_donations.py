@@ -36,12 +36,18 @@ def _asset(decimals=2):
 class _Ledger:
     """The debt rows, and what was settled against them."""
 
-    def __init__(self, owed):
+    def __init__(self, owed, paid=None):
         self.owed = dict(owed)
+        # Per asset, then per wallet: a credit in nanoERG says nothing about what a
+        # wallet has had in a token, so the two debts are kept apart here as well.
+        self.paid = {asset: dict(by_address) for asset, by_address in (paid or {}).items()}
         self.settled = []
 
     def donation_owed(self, ledger, contract_hash, token_id):
         return Decimal(self.owed.get(token_id, 0))
+
+    def donation_paid_by_address(self, ledger, contract_hash, token_id):
+        return dict(self.paid.get(token_id, {}))
 
     def settle_donations(self, entries):
         self.settled.append(entries)
@@ -50,10 +56,13 @@ class _Ledger:
                 Decimal(self.owed.get(entry["token_id"], 0))
                 - Decimal(entry["paid_native"])
             )
+            by_address = self.paid.setdefault(entry["token_id"], {})
+            for address, amount in entry.get("credited") or ():
+                by_address[address] = by_address.get(address, Decimal(0)) + Decimal(amount)
         return True
 
-    def settle_donation(self, **kwargs):
-        return self.settle_donations([kwargs])
+    def settle_donation(self, **entry):
+        return self.settle_donations([entry])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -80,8 +89,8 @@ class TokenDonationPayoutTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def _pay(self, owed, *, assets=(), wallets=(WALLET_A,), nanoergs=10 * 10**9,
-             tokens=(), min_transfers=None):
-        ledger = _Ledger(owed)
+             tokens=(), min_transfers=None, paid=None):
+        ledger = _Ledger(owed, paid)
         min_transfers = min_transfers or {}
         balance = {"confirmed": {"nanoErgs": nanoergs, "tokens": [
             {"tokenId": token_id, "amount": amount} for token_id, amount in tokens
@@ -196,6 +205,39 @@ class TokenDonationPayoutTests(unittest.TestCase):
         ledger = self._pay({}, assets=[_asset()], tokens=[(TOKEN, 5_000)])
         self.assertEqual(self.sent, [])
         self.assertEqual(ledger.settled, [])
+
+    def test_each_asset_credits_its_wallets_in_its_own_unit(self):
+        """The per-wallet ledger is per asset too, and cannot be shared across them.
+
+        A wallet credited 5000 base units of SigUSD has had nothing in ERG. Merged into
+        one counter, its ERG entitlement would look already paid -- and it would stop
+        being funded in ERG entirely.
+        """
+        ledger = self._pay(
+            {"ERG": Decimal(2 * 10**9), TOKEN: Decimal(5_000)},
+            assets=[_asset()], tokens=[(TOKEN, 5_000)],
+        )
+        [entries] = ledger.settled
+        credited = {entry["token_id"]: dict(entry["credited"]) for entry in entries}
+        self.assertEqual(credited[TOKEN], {WALLET_A: 5_000})
+        self.assertEqual(credited["ERG"], {WALLET_A: 2 * 10**9})
+
+    def test_a_wallet_already_credited_a_token_is_not_paid_it_again(self):
+        """Its entitlement in that asset is spent, so the other wallet takes the debt.
+
+        With one wallet this says nothing: a live debt plus what that wallet has had
+        means it is simply owed the newer part. The claim only has content with two --
+        A has had its half of everything, so what is owed now is B's.
+        """
+        ledger = self._pay(
+            {TOKEN: Decimal(10_000)}, assets=[_asset()],
+            wallets=(WALLET_A, WALLET_B), tokens=[(TOKEN, 10_000)],
+            paid={TOKEN: {WALLET_A: 10_000}},
+        )
+        [(outputs, _fee)] = self.sent
+        self.assertEqual([address for address, _n, _t in outputs], [WALLET_B])
+        [entry] = ledger.settled[0]
+        self.assertEqual(dict(entry["credited"]), {WALLET_B: 10_000})
 
     def test_simulate_payments_broadcasts_nothing_and_keeps_the_debts(self):
         with mock.patch.object(interface, "SIMULATE_PAYMENTS", lambda: True):

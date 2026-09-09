@@ -66,7 +66,9 @@ ledgers:
 ```
 
 **`DONATION_WALLETS` — who we fund.** A prospective bet. It costs money, so the list is
-short. Weights are normalised and split what has accrued.
+short. Weights are normalised, and each wallet's weight is its share of everything this
+node has ever earned — not of whatever transaction happens to be going out, which is a
+different and much weaker promise (see "Paying" below).
 
 **`DONATION_CREDIT_WALLETS` — whose contributions we recognise.** A retrospective
 judgement. Holding it is free, so the list is long and accumulates. It weighs *other*
@@ -78,8 +80,10 @@ the whole network, because it hands peers credit for funding whoever is in it. A
 request adding an address to the shipped default is an economic act and should be
 reviewed as one.
 
-`nodo donations` prints both lists, what has been paid, what is accrued, and which
-addresses are in one list and not the other. The TUI's EARNINGS page shows the same.
+`nodo donations` prints both lists, what has reached **each** funded wallet, what is
+accrued, and which addresses are in one list and not the other. The per-wallet figure is
+there so a weight can be checked rather than trusted: a wallet given 0.1 % should be able
+to show that something arrived. The TUI's EARNINGS page shows the same.
 
 ## Paying: a share of earnings, accrued and then paid
 
@@ -103,17 +107,44 @@ counter is a rounding buffer of minutes or hours, not a deferral — the periodi
 pays as soon as a transaction is worth making:
 
 ```
-owed  ≥  max(DONATION_MIN_TRANSFER, outputs × minimum_output + fee)
+what would leave the node  ≥  DONATION_MIN_TRANSFER
+each output                ≥  the chain's minimum output, after bearing its share of the fee
 ```
 
 Three rules follow from that, and each is a deliberate choice:
 
 - **The fee comes out of the donation, never on top of it.** What leaves the node is the
   percentage, fee included, so donating can never cost more than the figure configured.
-- **A share that cannot go out stays owed.** When a wallet's cut falls below the minimum
-  output — or its address does not parse — that cut is *not* redistributed to the other
-  wallets. It waits. Redistributed, a wallet with a small weight would fall below the
-  floor every single time and never be paid at all.
+  The fee is borne by the wallets in *that* transaction, in proportion to what each
+  receives — never by weight across the whole list, which would bill a wallet too small
+  to be paid for every transaction it was not in.
+- **A share that cannot go out stays owed *to the wallet that earned it*.** When a
+  wallet's cut falls below the minimum output — or its address does not parse — that cut
+  is *not* redistributed to the other wallets, and it does not go back into a pool
+  either. It stays attributed.
+
+  This is the part that took two attempts. A payout is computed from what each wallet is
+  still owed, not from what the debt happens to be now:
+
+  ```
+  entitlement(wallet) = weight(wallet) × (everything ever accrued) − (already paid to it)
+  ```
+
+  The first version recomputed each cut from the live debt and returned what it could not
+  pay to a debt belonging to nobody. One tick later that money was split among everybody
+  again — so a wallet with a weight of 0.001 never cleared the floor, never got paid, and
+  its share ended up in the big wallets after all. The rule was in this document and in
+  every docstring; the tests agreed with the rule because each of them drove a single
+  payout, and the property is about a *sequence* of them. `donation_payouts` is the table
+  that remembers whose money is waiting, and `nodo donations` prints what has reached
+  each wallet so the claim above can be checked rather than trusted.
+
+  It holds for the unparseable address too: its entitlement simply accumulates and is
+  paid in full the moment the address is corrected.
+- **The minimum transfer bounds what leaves, not what is owed.** `DONATION_MIN_TRANSFER`
+  says "never make a transfer smaller than this". Compared against the debt it would let
+  a node with a 2 ERG minimum broadcast a transaction moving half of that — the two
+  figures differ by exactly what is being withheld — and pay a full fee for it.
 - **One tick, one transaction.** The debt is paid before the wallet's excess is swept to
   cold storage: the debt is owed, the sweep is discretionary.
 
