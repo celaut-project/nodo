@@ -150,6 +150,17 @@ def __mu_to_nanoerg(amount: int) -> int:
     return rate.mu_to_nanoerg(amount)
 
 
+def manager_iteration_time() -> int:
+    """How often this contract's periodic job should run, in seconds.
+
+    Per contract, because the job is per contract: a chain whose fee moves wants its
+    sweep considered more often than one whose fee is a constant. The generic loop used
+    to read *Ergo's* key for everybody, which meant a node without an `ledgers.ergo`
+    block could not even import the payment orchestrator.
+    """
+    return max(1, int(env_manager.get("ledgers.ergo.payments.PAYMENT_MANAGER_ITERATION_TIME", 86400) or 86400))
+
+
 def unavailable_reason() -> Optional[str]:
     """Why this contract cannot settle right now, or ``None`` when it can.
 

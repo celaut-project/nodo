@@ -93,6 +93,11 @@ def manager() -> None:
     return None
 
 
+def manager_iteration_time() -> int:
+    """Daily, like the others, though the job it schedules does nothing."""
+    return 86400
+
+
 def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> celaut_pb2.Contract:
     LOGGER(f"Process simulated payment for token {deposit_token} of {amount}")
     return celaut_pb2.Contract(

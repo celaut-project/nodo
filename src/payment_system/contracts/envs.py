@@ -166,6 +166,24 @@ def needs_unspent_proof() -> Tuple[contract_hash, ...]:
     )
 
 
+def manager_iteration_times() -> Dict[contract_hash, int]:
+    """Per contract: how often its periodic job should run, in seconds.
+
+    The orchestrator used to read one global figure out of **Ergo's** config block and
+    apply it to everybody, which meant a node with no `ledgers.ergo` block could not
+    import the payment orchestrator at all -- and that a second ledger's own interval,
+    which it declares in its own block, was simply ignored.
+    """
+    times: Dict[contract_hash, int] = {}
+    for hash_, contract in contracts().items():
+        read = getattr(contract, "manager_iteration_time", None)
+        try:
+            times[hash_] = int(read()) if callable(read) else 0
+        except Exception:
+            times[hash_] = 0
+    return {hash_: seconds for hash_, seconds in times.items() if seconds > 0}
+
+
 def deposit_token_ttls() -> Dict[contract_hash, int]:
     """Per contract: how long a deposit token may sit unpaid before it is written off.
 

@@ -24,11 +24,12 @@ FAST = "fast-contract"     # Ergo-like: two-minute blocks, needs an unspent outp
 SLOW = "slow-contract"     # Bitcoin-like: ten-minute blocks, proof is a confirmed tx
 
 
-def _envs(ttls, pausing=(), managers=None):
+def _envs(ttls, pausing=(), managers=None, intervals=None):
     return type("envs", (), {
         "deposit_token_ttls": staticmethod(lambda: dict(ttls)),
         "needs_unspent_proof": staticmethod(lambda: tuple(pausing)),
         "manage_interfaces": staticmethod(lambda: dict(managers or {})),
+        "manager_iteration_times": staticmethod(lambda: dict(intervals or {})),
     })
 
 
@@ -135,6 +136,75 @@ class SweepPauseTests(unittest.TestCase):
             except StopIteration:
                 pass
         drain.assert_called_once()
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ManagerIntervalTests(unittest.TestCase):
+    """Each contract's periodic job runs on its own schedule.
+
+    The loop used to read one figure out of **Ergo's** config block and apply it to
+    everybody -- so a second ledger's own interval, declared in its own block, was
+    ignored, and a node with no `ledgers.ergo` block could not even import the payment
+    orchestrator.
+    """
+
+    def test_the_loop_wakes_at_the_shortest_interval_asked_for(self):
+        self.assertEqual(
+            payment_process._manager_quantum({FAST: 3600, SLOW: 86400}), 3600
+        )
+
+    def test_no_contract_asking_falls_back_rather_than_busy_looping(self):
+        self.assertEqual(
+            payment_process._manager_quantum({}),
+            payment_process.DEFAULT_MANAGER_ITERATION_TIME,
+        )
+
+    def test_a_misconfigured_second_is_floored(self):
+        # A tick a minute, not a busy loop: the job spends real money and reads a chain.
+        self.assertEqual(
+            payment_process._manager_quantum({FAST: 1}),
+            payment_process.MIN_MANAGER_QUANTUM,
+        )
+
+    def test_a_contract_runs_only_when_its_own_interval_has_elapsed(self):
+        managers = {FAST: lambda: None, SLOW: lambda: None}
+        intervals = {FAST: 3600, SLOW: 86400}
+        last_run = {FAST: 0.0, SLOW: 0.0}
+
+        # An hour in: only the fast one is due.
+        due = payment_process._due_managers(managers, intervals, last_run, 3600.0)
+        self.assertEqual(set(due), {FAST})
+
+        # A day in: both.
+        due = payment_process._due_managers(managers, intervals, last_run, 86400.0)
+        self.assertEqual(set(due), {FAST, SLOW})
+
+    def test_a_contract_that_declares_no_interval_runs_every_pass(self):
+        # The old behaviour for anything that does not say.
+        due = payment_process._due_managers(
+            {FAST: lambda: None}, {}, {FAST: 0.0}, 1.0
+        )
+        self.assertEqual(set(due), {FAST})
+
+    def test_the_two_shipped_contracts_read_their_own_config_keys(self):
+        import inspect
+
+        from src.payment_system.contracts.bitcoin import interface as btc
+        from src.payment_system.contracts.ergo import interface as ergo
+
+        self.assertIn(
+            "ledgers.ergo.payments.PAYMENT_MANAGER_ITERATION_TIME",
+            inspect.getsource(ergo.manager_iteration_time),
+        )
+        self.assertIn(
+            "ledgers.bitcoin.payments.PAYMENT_MANAGER_ITERATION_TIME",
+            inspect.getsource(btc.manager_iteration_time),
+        )
+
+    def test_the_orchestrator_no_longer_names_a_ledger_for_this(self):
+        # The module-level read of Ergo's key is what crashed a node that removed the
+        # `ledgers.ergo` block: `int(None)`.
+        self.assertFalse(hasattr(payment_process, "PAYMENT_MANAGER_ITERATION_TIME"))
 
 
 if __name__ == "__main__":

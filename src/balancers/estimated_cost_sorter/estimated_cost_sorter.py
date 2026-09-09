@@ -1,4 +1,3 @@
-from hashlib import sha3_256
 from typing import Dict, Tuple, Generator
 from statistics import mean
 from protos import celaut_pb2
@@ -13,8 +12,11 @@ from src.utils.monetary import HOUR_SECONDS, format_mu
 from src.database.sql_connection import LOCAL_PEER_ID
 
 env_manager = ConfigManager()
-ERGO_LEDGER = "ergo"
-ERGO_CONTRACT_HASH = sha3_256("proveDlog(decodePoint())".encode("utf-8")).hexdigest()
+
+# This module used to recompute Ergo's ledger tag and contract hash for itself, which
+# is how a balancer ends up knowing which chain a node settles on. It does not need to:
+# ranking a candidate is about price, reliability and donations, and none of the three
+# is a property of a ledger. The registry is where contracts are named.
 
 
 def _parameter(key: str, default: float) -> float:
