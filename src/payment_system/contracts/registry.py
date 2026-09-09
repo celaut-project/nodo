@@ -114,6 +114,11 @@ CANDIDATES: Tuple[_Candidate, ...] = (
         "src.payment_system.contracts.ergo.interface",
         "src.payment_system.contracts.ergo.rate",
     ),
+    _Candidate(
+        "bitcoin",
+        "src.payment_system.contracts.bitcoin.interface",
+        "src.payment_system.contracts.bitcoin.rate",
+    ),
 )
 
 # Said once per process per contract, not per payment: this is reached from the payment
