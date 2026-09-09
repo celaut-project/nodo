@@ -18,14 +18,79 @@ payment depend on dictionary iteration order -- reproducible until the day it is
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib import import_module
-from typing import Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from protos import celaut_pb2
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER
 
 contract_hash = str
+
+
+@dataclass(frozen=True)
+class MethodKey:
+    """What identifies a payment method: a ledger, a contract **and an asset**.
+
+    Not a contract. On Ergo one P2PK contract is paid in ERG *and* in every EIP-4 token
+    held at the same address -- same script, same address, same ``contract_hash``,
+    different money -- so a contract carries `1 + N` methods and only this triple tells
+    them apart. On Bitcoin, and on a chain where a token *is* a contract (an ERC-20),
+    the triple degenerates to one method per contract and costs nothing.
+
+    Folding the asset into the contract type instead would have been cheaper and wrong:
+    it claims the script differs when it does not, which is only true on Ethereum.
+    """
+
+    ledger: str
+    contract_hash: str
+    #: The chain's reserved symbol for its native unit ("ERG", "BTC"), or a token's
+    #: 64-hex id -- which can never collide with a symbol.
+    asset: str
+
+    def __str__(self) -> str:
+        return f"{self.ledger}/{self.contract_hash[:12]}/{self.asset or 'native'}"
+
+
+class PaymentMethod:
+    """One way to be paid: a contract with one asset bound to it.
+
+    An *instance*, not a module, and that is the difference that makes `1 + N` methods
+    per contract expressible at all. A module can only be one method; a contract that
+    settles in several assets has to hand back one object per asset, with the asset
+    already bound, so `process_payment` and `payment_process_validator` keep the
+    signatures the rest of the flow calls them with.
+
+    Everything not overridden is the contract's own: `LEDGER`, `NATIVE_ASSET`,
+    `needs_unspent_proof`, and the per-contract jobs (`init`, `manager`). Only the calls
+    whose answer depends on *which asset* are bound -- a fee floor, a balance, a rate --
+    and a single-asset contract binds none of them and is forwarded to unchanged.
+    """
+
+    def __init__(self, contract, asset: str, calls: Optional[Dict[str, Any]] = None):
+        self.contract = contract
+        self.asset = asset
+        self._calls = dict(calls or {})
+
+    @property
+    def key(self) -> MethodKey:
+        return MethodKey(self.contract.LEDGER, self.contract.CONTRACT_HASH, self.asset)
+
+    def __getattr__(self, name: str):
+        """The bound call if this method has one, else the contract's own attribute.
+
+        Reached only for names not set on the instance, so `contract`, `asset` and
+        `key` above shadow nothing. A missing member raises `AttributeError` from the
+        contract, which is what `_usable` checks for up front.
+        """
+        calls = self.__dict__.get("_calls") or {}
+        if name in calls:
+            return calls[name]
+        return getattr(self.__dict__["contract"], name)
+
+    def __repr__(self) -> str:
+        return f"<PaymentMethod {self.key}>"
 
 
 @runtime_checkable
@@ -202,6 +267,34 @@ def contracts() -> Dict[contract_hash, PaymentContract]:
             )
             continue
         offered[module.CONTRACT_HASH] = module
+    return offered
+
+
+def methods() -> Dict[MethodKey, PaymentMethod]:
+    """Every payment method this node can settle through, keyed by its triple.
+
+    A contract that settles in more than one asset says so by exposing ``methods()``;
+    one that does not gets a single method bound to its native asset. Order follows the
+    registry's candidate order and then each contract's own, because the payer tries
+    candidates until one works and that walk has to be reproducible.
+    """
+    offered: Dict[MethodKey, PaymentMethod] = {}
+    for contract in contracts().values():
+        build = getattr(contract, "methods", None)
+        if callable(build):
+            try:
+                built = list(build())
+            except Exception as exc:
+                _report(
+                    contract.LEDGER,
+                    f"Payment contract {contract.LEDGER!r} could not build its payment "
+                    f"methods, so none of them is offered: {exc}",
+                )
+                continue
+        else:
+            built = [PaymentMethod(contract, getattr(contract, "NATIVE_ASSET", ""))]
+        for method in built:
+            offered[method.key] = method
     return offered
 
 

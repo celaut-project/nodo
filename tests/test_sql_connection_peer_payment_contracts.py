@@ -48,6 +48,7 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
             "contract_hash": "abc123",
             "ledger_hash": "deadbeef",
             "address": "0008cd0392",
+            "token_id": "ERG",
             "mu_per_unit": "9999999999999999438119489974413630815797154428513196965888",
         }
         ledger_row = {"content": self.ergo.SerializeToString()}
@@ -75,6 +76,7 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
             "contract_hash": "abc123",
             "ledger_hash": "deadbeef",
             "address": "addr",
+            "token_id": "ERG",
             "mu_per_unit": "5",
         }
         with patch.object(
@@ -90,6 +92,7 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
             "contract_hash": "abc123",
             "ledger_hash": "deadbeef",
             "address": "addr",
+            "token_id": "ERG",
             "mu_per_unit": None,
         }
         with patch.object(
@@ -104,8 +107,8 @@ class GetPeerPaymentContractsTests(unittest.TestCase):
         # The old code could only ever show one contract per peer; a peer with
         # several must not get truncated to the first.
         rows = [
-            {"contract_hash": "c1", "ledger_hash": "l1", "address": "a1", "mu_per_unit": "1"},
-            {"contract_hash": "c2", "ledger_hash": "l2", "address": "a2", "mu_per_unit": "2"},
+            {"contract_hash": "c1", "ledger_hash": "l1", "address": "a1", "token_id": "ERG", "mu_per_unit": "1"},
+            {"contract_hash": "c2", "ledger_hash": "l2", "address": "a2", "token_id": "ERG", "mu_per_unit": "2"},
         ]
         with patch.object(
             self.conn, "_execute",
@@ -127,9 +130,10 @@ class ContractInstanceRateIsUpsertedTests(unittest.TestCase):
     """
 
     STATEMENT = (
-        "INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit) "
-        "VALUES (?,?,?,?,?) "
-        "ON CONFLICT (address, ledger_hash, contract_hash, peer_id) "
+        "INSERT INTO contract_instance "
+        "(address, ledger_hash, contract_hash, token_id, peer_id, mu_per_unit) "
+        "VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT (address, ledger_hash, contract_hash, token_id, peer_id) "
         "DO UPDATE SET mu_per_unit = excluded.mu_per_unit"
     )
 
@@ -139,12 +143,34 @@ class ContractInstanceRateIsUpsertedTests(unittest.TestCase):
 
         db = sqlite3.connect(":memory:")
         db.execute(TABLES["contract_instance"])
-        row = ("addr", "ledger", "contract", "peer-1")
+        row = ("addr", "ledger", "contract", "ERG", "peer-1")
         db.execute(self.STATEMENT, (*row, "1000000000"))
         db.execute(self.STATEMENT, (*row, "2000000000"))
 
         stored = db.execute("SELECT mu_per_unit FROM contract_instance").fetchall()
         self.assertEqual(stored, [("2000000000",)])
+
+    def test_two_assets_on_one_contract_keep_two_rates(self):
+        """The bug the asset dimension exists to fix.
+
+        On Ergo one P2PK contract is paid in ERG and in every EIP-4 token at the same
+        address: same script, same address, same contract_hash. Keyed without the asset
+        the two rates land in one row and the second silently replaces the first -- so
+        every peer converts ERG amounts at the token's rate, and nothing raises.
+        """
+        import sqlite3
+        from src.database.migrate import TABLES
+
+        db = sqlite3.connect(":memory:")
+        db.execute(TABLES["contract_instance"])
+        token = "ab" * 32
+        db.execute(self.STATEMENT, ("addr", "ledger", "contract", "ERG", "LOCAL", "1"))
+        db.execute(self.STATEMENT, ("addr", "ledger", "contract", token, "LOCAL", "20000000"))
+
+        stored = dict(db.execute(
+            "SELECT token_id, mu_per_unit FROM contract_instance"
+        ).fetchall())
+        self.assertEqual(stored, {"ERG": "1", token: "20000000"})
 
 
 if __name__ == "__main__":

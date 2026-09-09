@@ -29,6 +29,10 @@ EXPECTED_ARGUMENTS = {"amount", "deposit_token", "ledger", "script"}
 
 CONTRACT_HASH = "1c691f72aad8533f1e0815cb6dd9f302637d5c60824c8a92684fe50cdd4b82bd"
 SCRIPT = bytes.fromhex("0008cd03" + "77" * 32)
+# Keyed by the payment method: ledger, contract and asset.
+METHOD = None if IMPORT_ERROR else __import__(
+    "src.payment_system.contracts.registry", fromlist=["MethodKey"]
+).MethodKey("ergo", CONTRACT_HASH, "ERG")
 
 
 class _Envs:
@@ -40,10 +44,10 @@ class _Envs:
         self._implementation = implementation
 
     def available_payment_process(self):
-        return {CONTRACT_HASH: self._implementation}
+        return {METHOD: self._implementation}
 
     def check_sender_balances(self):
-        return {CONTRACT_HASH: lambda amount: True}
+        return {METHOD: lambda amount: True}
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -71,12 +75,12 @@ class ProcessPaymentSignatureTests(unittest.TestCase):
         peer_payment_process = getattr(payment_process, "__peer_payment_process")
 
         plan = payment_process.SettlementPlan(
-            contract_hash=CONTRACT_HASH, ledger_tag="ergo",
+            contract_hash=CONTRACT_HASH, ledger_tag="ergo", asset="ERG",
             amount=1000, peer_amount=2000,
         )
         with mock.patch.object(payment_process, "_payment_envs", return_value=_Envs(implementation)), \
                 mock.patch.object(payment_process, "get_peer_contract_instances",
-                                  return_value=iter([(SCRIPT, ledger)])), \
+                                  return_value=iter([(SCRIPT, ledger, "ERG")])), \
                 mock.patch.object(payment_process, "ledger_balancer",
                                   side_effect=lambda ledger_generator: ledger_generator), \
                 mock.patch.object(payment_process, "__obtain_deposit_token",

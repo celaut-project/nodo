@@ -26,23 +26,32 @@ settlement_plans = getattr(payment_process, "__settlement_plans", None)
 ERGO = "1c691f72"
 
 
-def _system(local: int, peer: int, *, contract=None, ledger="ergo") -> "MatchingPaymentSystem":
+def _system(local: int, peer: int, *, contract=None, ledger="ergo",
+             asset="ERG") -> "MatchingPaymentSystem":
     return MatchingPaymentSystem(
-        ledger_tag=ledger, contract_hash=contract or ERGO,
+        ledger_tag=ledger, contract_hash=contract or ERGO, asset=asset,
         local_mu_per_unit=local, peer_mu_per_unit=peer,
     )
 
 
-def _envs(floors_by_contract, demos=()):
-    """A payment-envs registry with the floors each contract reports."""
+def _envs(floors_by_contract, demos=(), ledger="ergo", asset="ERG"):
+    """A payment-envs registry with the floors each *method* reports.
+
+    Keyed by the triple, as the real dispatch is: a method is ledger + contract +
+    asset, and on Ergo two assets share a contract and have different floors.
+    """
+    from src.payment_system.contracts.registry import MethodKey
+
+    floors = {}
+    for name, pair in floors_by_contract.items():
+        if isinstance(name, tuple):
+            key = MethodKey(name[1], name[0], name[2])
+        else:
+            key = MethodKey(ledger, name, asset)
+        floors[key] = (lambda pair=pair: pair)
     return type("envs", (), {
         "DEMOS": tuple(demos),
-        "settlement_floors": staticmethod(
-            lambda: {
-                name: (lambda pair=pair: pair)
-                for name, pair in floors_by_contract.items()
-            }
-        ),
+        "settlement_floors": staticmethod(lambda: floors),
     })
 
 
@@ -101,7 +110,7 @@ class SettlementPlanTests(unittest.TestCase):
                 _system(1_000_000_000, 2_000_000_000, contract="ergo-c", ledger="ergo"),
                 _system(1_000_000_000, 500_000_000, contract="btc-c", ledger="bitcoin"),
             ],
-            {"ergo-c": (0, 0), "btc-c": (0, 0)},
+            {("ergo-c", "ergo", "ERG"): (0, 0), ("btc-c", "bitcoin", "ERG"): (0, 0)},
         )
         self.assertEqual(
             [(p.ledger_tag, p.peer_amount) for p in plans],
@@ -121,7 +130,8 @@ class SettlementPlanTests(unittest.TestCase):
                 _system(1, 1, contract="cheap", ledger="ergo"),
                 _system(1, 1, contract="costly", ledger="bitcoin"),
             ],
-            {"cheap": (0, 1_000), "costly": (0, 100_000_000)},
+            {("cheap", "ergo", "ERG"): (0, 1_000),
+             ("costly", "bitcoin", "ERG"): (0, 100_000_000)},
         )
         self.assertEqual([p.contract_hash for p in plans], ["cheap"])
         self.assertEqual(len(refusals), 1)
@@ -208,7 +218,8 @@ class DepositRefusalReasonTests(unittest.TestCase):
                 _system(1, 1, contract="costly", ledger="bitcoin"),
                 _system(1, 1, contract="cheap", ledger="ergo"),
             ],
-            {"costly": (0, 100_000_000), "cheap": (0, 100)},
+            {("costly", "bitcoin", "ERG"): (0, 100_000_000),
+             ("cheap", "ergo", "ERG"): (0, 100)},
         ))
 
     def test_says_how_small_the_amount_is_and_against_what(self):
@@ -227,7 +238,8 @@ class DepositRefusalReasonTests(unittest.TestCase):
                 _system(1, 1, contract="ergo-c", ledger="ergo"),
                 _system(1, 1, contract="btc-c", ledger="bitcoin"),
             ],
-            {"ergo-c": (0, 1_000), "btc-c": (0, 100_000_000)},
+            {("ergo-c", "ergo", "ERG"): (0, 1_000),
+             ("btc-c", "bitcoin", "ERG"): (0, 100_000_000)},
         )
         self.assertIn("ergo", reason)
         self.assertIn("bitcoin", reason)

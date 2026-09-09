@@ -65,20 +65,26 @@ def accrue(
         from src.database.sql_connection import SQLConnection
         from src.payment_system.contracts import envs
 
-        to_native = envs.mu_to_native().get(contract_hash)
+        # By *method*, not by contract: one Ergo contract is paid in ERG and in every
+        # token at the same address, each at its own rate, so the wrong converter would
+        # denominate the debt in the wrong money.
+        method = envs.resolve_method(ledger, contract_hash, asset)
+        to_native = getattr(method, "mu_to_native", None) if method else None
         if to_native is None:
             return None
+
+        if method.asset != asset:
+            # The payer named no asset; this is which one it turned out to be. The share
+            # is re-read against it so a per-asset DONATION_PERCENTAGE also applies to a
+            # payment that left the symbol off the wire.
+            asset = method.asset
+            share = config.percentage(ledger, asset)
+            if share <= 0:
+                return None
 
         owed = to_native(int(amount_mu)) * share
         if owed <= 0:
             return None
-
-        # A payment that named no asset is paying the chain's native unit -- the only
-        # thing it can be paying while a contract settles in one asset. Resolved here
-        # rather than trusted as-is, because a debt accrued under the empty string is
-        # one no payout looks for: it would grow for ever and never be paid.
-        if not asset:
-            asset = envs.native_assets().get(contract_hash, "")
 
         new_total = SQLConnection().accrue_donation(
             ledger=ledger,
