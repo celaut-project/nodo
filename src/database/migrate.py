@@ -277,6 +277,7 @@ TABLES = {
             contract_hash TEXT DEFAULT NULL,
             address TEXT DEFAULT NULL,
             amount_mu TEXT NOT NULL,
+            purpose TEXT DEFAULT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''',
@@ -310,6 +311,68 @@ TABLES = {
             reputation_score INTEGER NOT NULL DEFAULT 0,
             reputation_index INTEGER NOT NULL DEFAULT 0
         )
+    ''',
+    # What this node owes in donations but has not paid yet. One row per payment
+    # METHOD -- (ledger, contract, asset) -- because a debt incurred in one asset is
+    # not a debt in another and cannot share a counter with it: paying it out would
+    # mean converting at whatever rate happens to be configured later.
+    #
+    # `owed_native` counts the asset's smallest native unit (nanoERG for ERG), never
+    # MU: a debt is incurred at the rate of the moment it was incurred, and storing it
+    # in MU would let a later rate change retroactively reinterpret it.
+    #
+    # It is an exact DECIMAL string, not an integer, and that is deliberate. A 2 % cut
+    # of a small payment has a fractional part; discarding it would make the effective
+    # long-run donation rate drift below the configured one, and always in the node's
+    # own favour. The fraction stays here and is paid once it grows into a whole unit.
+    "donation_accrual": '''
+        CREATE TABLE IF NOT EXISTS donation_accrual (
+            ledger TEXT NOT NULL,
+            contract_hash TEXT NOT NULL,
+            token_id TEXT NOT NULL,
+            owed_native TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ledger, contract_hash, token_id)
+        )
+    ''',
+    # Donations observed on-chain -- other peers' and our own. This is the credit
+    # source of truth, and it is read from the chain by every node independently: a
+    # peer telling us what it donated would be self-declared, therefore forgeable.
+    #
+    # The UNIQUE key is what makes a re-scan idempotent, so the indexer can be dumb
+    # about overlapping page boundaries and about reorgs near the tip. `token_id` is
+    # part of it because one Ergo transaction can pay the same address in ERG *and* in
+    # a token, in the same box -- without it the second asset would collide with the
+    # first and be lost.
+    #
+    # `peer_id` stays NULL until the donor address maps to a peer we know. The row is
+    # stored anyway: the peer may be discovered later, and the donation was real when
+    # it happened.
+    "donations": '''
+        CREATE TABLE IF NOT EXISTS donations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ledger TEXT NOT NULL,
+            tx_id TEXT NOT NULL,
+            to_address TEXT NOT NULL,
+            from_address TEXT NOT NULL,
+            peer_id TEXT DEFAULT NULL,
+            token_id TEXT NOT NULL,
+            amount_native TEXT NOT NULL,
+            tx_height INTEGER NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (ledger, tx_id, to_address, from_address, token_id)
+        )
+    ''',
+    # Where the incremental scan of each counted address got to, so a refresh resumes
+    # instead of re-reading a chain's whole history.
+    "donation_scan_state": '''
+        CREATE TABLE IF NOT EXISTS donation_scan_state (
+            ledger TEXT NOT NULL,
+            address TEXT NOT NULL,
+            last_scanned_height INTEGER NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ledger, address)
+        )
     '''
 }
 
@@ -323,6 +386,10 @@ INDEXES = (
     # Reputation events are only ever read for one subject at a time, newest first.
     "CREATE INDEX IF NOT EXISTS idx_reputation_events_subject "
     "ON reputation_events (subject_kind, subject_id, created_at)",
+    # The balancer aggregates a donor's credit on every routing decision, and the
+    # indexer looks a donation up by the address it paid.
+    "CREATE INDEX IF NOT EXISTS idx_donations_peer ON donations (peer_id)",
+    "CREATE INDEX IF NOT EXISTS idx_donations_from ON donations (ledger, from_address)",
 )
 
 
@@ -374,6 +441,14 @@ def create_tables(cursor):
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",
         "advertisement": "BLOB DEFAULT NULL",
+    })
+    # What a payment was *for*, as opposed to how far it got. A donation this node
+    # paid out of its own earnings is not a payment to a peer, and `status` cannot say
+    # so: it describes the lifecycle (communicated / accepted / rejected), which a
+    # donation has just as much as any other payment. NULL is an ordinary payment,
+    # which is every row written before this column existed.
+    ensure_columns(cursor, "payments", {
+        "purpose": "TEXT DEFAULT NULL",
     })
     ensure_columns(cursor, "uri", {
         "peer_id": "TEXT DEFAULT NULL",

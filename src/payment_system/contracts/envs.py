@@ -1,3 +1,4 @@
+from decimal import Decimal
 from textwrap import dedent
 from typing import Any, Callable, Dict, Tuple
 from contextlib import nullcontext
@@ -90,6 +91,61 @@ def display_units() -> Dict[str, Dict[str, Any]]:
         return units
     units.update(ergo_rate.display_units())
     return units
+
+
+def mu_to_native() -> Dict[contract_hash, Callable[[amount], Decimal]]:
+    """Per contract: MU -> the smallest native unit of what it settles in, exactly.
+
+    Only donations need this, and they need it because a debt has to be *stored* in
+    the asset it was incurred in: a debt kept in MU would be retroactively
+    reinterpreted the next time the operator changed that asset's rate.
+
+    Exact, fraction included -- unlike the conversions on the payment path, which
+    truncate so a transaction never claims more than is owed. A debt is accrued from
+    many payments and paid once, so a truncation per payment would shave a sub-unit
+    off each one, always in this node's favour.
+
+    A contract that settles on no chain contributes nothing rather than zero. The
+    simulated contract moves no money, so a share of a simulated payment is not a debt
+    to anybody, and accruing one would have the node donating real funds against
+    payments it never received.
+    """
+    ergo = _ergo_interface()
+    return {
+        ergo.CONTRACT_HASH: ergo.mu_to_native,
+    }
+
+
+def donation_scanners() -> Dict[ledger, Any]:
+    """Per LEDGER: how to read donations paid to an address on that chain.
+
+    Keyed by ledger tag rather than by contract, unlike every other dispatch here,
+    because a counted donation wallet is a property of the chain: one address receives
+    whatever is sent to it, through any contract and in any asset.
+
+    Only the light scanning module is imported, never ``ergo.interface``: indexing what
+    other nodes donated is a read, and it must not need a wallet, a signature or a JVM.
+    A payment stack that will not import contributes no scanner rather than raising, so
+    a node with no Java still routes -- it simply counts no donations.
+    """
+    scanners: Dict[ledger, Any] = {}
+    try:
+        from src.payment_system.contracts.ergo import donation_scan as ergo_donations
+    except (ImportError, ModuleNotFoundError, OSError):
+        return scanners
+    scanners[ergo_donations.LEDGER] = ergo_donations
+    return scanners
+
+
+def seconds_per_block(ledger_tag: str) -> int:
+    """How long a block takes on ``ledger_tag``; 0 when this node cannot say.
+
+    Donation age is measured in seconds, not blocks: an Ergo block is ~120 s and a
+    Bitcoin block ~600 s, so an age scale in blocks would weigh the same old donation
+    five times differently depending on the chain it was paid on.
+    """
+    scanner = donation_scanners().get(ledger_tag)
+    return int(getattr(scanner, "SECONDS_PER_BLOCK", 0) or 0)
 
 
 def settlement_floors() -> Dict[contract_hash, Callable[[], Tuple[amount, amount]]]:

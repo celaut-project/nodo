@@ -65,6 +65,11 @@ REMOVED_KEYS = (
     # guest kernel that was never installed.
     "ARM_SUPPORT",
     "X86_SUPPORT",
+    # Donations became a share of *earnings* paid to a weighted list of wallets, so the
+    # single wallet key is gone along with the split of the cold-wallet sweep that used
+    # it. Leaving it in place would read as configured and donate nothing: the sweep no
+    # longer looks at it, and with no cold wallet -- the default -- it never ran at all.
+    "DONATION_WALLET",
 )
 
 
@@ -430,12 +435,151 @@ def _warn_if_charges_cannot_settle(pricing: Dict[str, Any], rate: Decimal, warn)
         )
 
 
+def _validate_wallet_list(
+    payments: Dict[str, Any], key: str, *, ledger: str, network: str
+) -> List[Dict[str, Any]]:
+    """One donation wallet list: addresses valid for the chain, weights non-negative.
+
+    Returns the entries, so the caller can tell an empty list from a populated one.
+    """
+    entries = payments.get(key)
+    if entries in (None, ""):
+        return []
+    where = f"ledgers.{ledger}.payments.{key}"
+    if not isinstance(entries, list):
+        raise ConfigValidationError(
+            f"{where} must be a list of {{address, weight}} entries, got {entries!r}"
+        )
+
+    seen: Dict[str, int] = {}
+    total = Decimal(0)
+    for index, entry in enumerate(entries):
+        at = f"{where}[{index}]"
+        if not isinstance(entry, dict):
+            raise ConfigValidationError(f"{at} must be an {{address, weight}} mapping, got {entry!r}")
+        address = str(entry.get("address") or "").strip()
+        if not address:
+            raise ConfigValidationError(f"{at} has no address.")
+        if not is_valid_ergo_address(address, network=network):
+            raise ConfigValidationError(f"{at}.address is not a valid Ergo address: {address!r}")
+        if address in seen:
+            # Two rows for one address would double its weight without looking like it.
+            raise ConfigValidationError(
+                f"{at}.address duplicates {where}[{seen[address]}]: {address!r}. "
+                "Give the address one entry with the weight you mean."
+            )
+        seen[address] = index
+        try:
+            weight = Decimal(str(entry.get("weight", 0)).strip())
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            raise ConfigValidationError(
+                f"{at}.weight must be a number, got {entry.get('weight')!r}"
+            ) from exc
+        if not weight.is_finite() or weight < 0:
+            raise ConfigValidationError(f"{at}.weight must not be negative, got {weight}")
+        total += weight
+
+    if entries and total <= 0:
+        # Not the same thing as an empty list, and worth saying so: weights are
+        # normalised, so a total of zero has nothing to normalise by and the list pays
+        # (or counts) nobody -- while looking configured.
+        raise ConfigValidationError(
+            f"{where} has entries whose weights are all zero, so it splits nothing. "
+            "Remove the list to mean 'none', or give at least one entry a weight."
+        )
+    return entries
+
+
+def validate_donation_config(
+    payments: Dict[str, Any], *, ledger: str = "ergo", network: str = "mainnet", warn=None
+) -> None:
+    """Validate one ledger's donation block: the share, the two lists, the floors."""
+    _require_share(payments, f"ledgers.{ledger}.payments", "DONATION_PERCENTAGE")
+    if "DONATION_MIN_TRANSFER" in payments:
+        _require_nonneg_nanoerg(payments, "DONATION_MIN_TRANSFER", strictly_positive=False)
+    if "DONATION_MIN_CONFIRMATIONS" in payments:
+        raw = payments.get("DONATION_MIN_CONFIRMATIONS")
+        try:
+            confirmations = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError(
+                f"ledgers.{ledger}.payments.DONATION_MIN_CONFIRMATIONS must be an "
+                f"integer, got {raw!r}"
+            ) from exc
+        if confirmations < 0:
+            raise ConfigValidationError(
+                f"ledgers.{ledger}.payments.DONATION_MIN_CONFIRMATIONS must not be "
+                f"negative, got {confirmations}"
+            )
+
+    pay = _validate_wallet_list(payments, "DONATION_WALLETS", ledger=ledger, network=network)
+    _validate_wallet_list(payments, "DONATION_CREDIT_WALLETS", ledger=ledger, network=network)
+
+    if warn is None:
+        return
+    try:
+        share = Decimal(str(payments.get("DONATION_PERCENTAGE", 0) or 0).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return
+    if share > 0 and not pay:
+        # A warning rather than an error: the node runs, it just donates nothing. It is
+        # worth being loud about because the config reads as though it does.
+        warn(
+            f"ledgers.{ledger}.payments.DONATION_PERCENTAGE is {share} but "
+            "DONATION_WALLETS is empty, so nothing is accrued and nothing will ever be "
+            "donated. Add a wallet, or set the percentage to 0 to say so on purpose."
+        )
+
+
+# Every parameter of the peer-selection formula, and what it may be.
+#
+# The weights must not be negative, and that is a design constraint rather than a
+# sanity check: a negative donation weight would turn the count list into a punishment
+# mechanism, and punishing peers for not donating is exactly what would make patching
+# donations out of a node rational.
+BALANCER_NONNEG = ("SOCIALIZATION_FACTOR", "DONATION_WEIGHT", "LOCAL_BIAS", "COST_AVERAGE_VARIATION")
+BALANCER_POSITIVE = ("REPUTATION_HALF_CREDIT", "DONATION_HALF_CREDIT", "DONATION_AGE_SCALE")
+
+
+def validate_balancers_config(config: Dict[str, Any]) -> None:
+    """Validate the ``balancers:`` block: the shape of the peer-selection formula.
+
+    Absent keys are fine -- each has a default in code, and a node that never edits
+    this section gets today's behaviour. What is refused is a value that would make the
+    formula meaningless: a negative weight, or a half-credit of zero (which divides).
+    """
+    balancers = config.get("balancers")
+    if balancers in (None, ""):
+        return
+    if not isinstance(balancers, dict):
+        raise ConfigValidationError(f"'balancers' must be a mapping, got {balancers!r}")
+
+    for key in BALANCER_NONNEG:
+        _require_nonneg_number(balancers, "balancers", key)
+    for key in BALANCER_POSITIVE:
+        if key not in balancers:
+            continue
+        raw = balancers[key]
+        try:
+            value = Decimal(str(raw).strip())
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            raise ConfigValidationError(
+                f"balancers.{key} must be a number, got {raw!r}"
+            ) from exc
+        if not value.is_finite() or value <= 0:
+            raise ConfigValidationError(
+                f"balancers.{key} must be positive, got {raw!r}: it is the point at "
+                "which half the weight is earned, and the formula divides by it."
+            )
+
+
 def validate_ergo_config(
     config: Dict[str, Any],
     *,
     payments_enabled: bool = True,
     reputation_enabled: bool = True,
     network: str = "mainnet",
+    warn=None,
 ) -> None:
     """
     Validate the Ergo section of a fully-loaded config mapping. Raises
@@ -484,6 +628,7 @@ def validate_ergo_config(
             raise ConfigValidationError(
                 f"ledgers.ergo.payments.COLD_WALLET is not a valid Ergo address: {cold!r}"
             )
+        validate_donation_config(payments, ledger="ergo", network=network, warn=warn)
 
     if reputation_enabled:
         reputation = ergo.get("reputation")

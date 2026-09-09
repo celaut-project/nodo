@@ -80,9 +80,15 @@ excess = balance - HOT_WALLET_LIMITS - fee
 and sweeps `excess` to the cold wallet only when it is at least
 `COLD_WALLET_MIN_TRANSFER` **and** a valid Ergo output. The hot-wallet limit, the
 transaction fee, and the technical minimum box value are always retained. When
-`COLD_WALLET` is empty, nothing is swept. A configurable percentage
-(`DONATION_PERCENTAGE`, default 0%) of the swept amount may go to a donation wallet.
-Amounts, destination, and transaction id are logged; mnemonics never are.
+`COLD_WALLET` is empty, nothing is swept. Amounts, destination, and transaction id are
+logged; mnemonics never are.
+
+**Donations are not part of this.** They used to be a cut of the swept amount, which
+meant a node with no cold wallet — the default — donated nothing whatever its percentage
+said. A donation is now a share of *incoming payments*, accrued as it is earned and paid
+on the same periodic tick, out of a weighted list of wallets, with no relation to
+`COLD_WALLET` or `HOT_WALLET_LIMITS`. The debt is paid before the sweep runs, because the
+debt is owed and the sweep is discretionary. See [`DONATIONS.md`](DONATIONS.md).
 
 `HOT_WALLET_LIMITS` and `COLD_WALLET_MIN_TRANSFER` are decimal ERG strings, parsed once
 with `Decimal` into nanoERG; all subsequent arithmetic is integer nanoERG.

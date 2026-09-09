@@ -53,7 +53,22 @@ TRACEABILITY_TABLES = (
     "service_reputation",
     "tunnel_traffic",
     "demand_history",
+    # A donation debt survives a restart and is paid on a later tick, so losing the
+    # table loses money this node already owes. The other two are the on-chain credit
+    # index and its scan cursor; without them the balancer reads no donations at all
+    # and silently routes as though nobody had ever donated.
+    "donation_accrual",
+    "donations",
+    "donation_scan_state",
 )
+
+# Columns on an existing table that a database created before them will not have.
+# `ensure_tables` cannot add these -- `CREATE TABLE IF NOT EXISTS` never alters a table
+# that is already there -- and a donation payout writes `payments.purpose`, so without
+# this an in-place upgrade would fail to record every donation it pays.
+TRACEABILITY_COLUMNS = {
+    "payments": {"purpose": "TEXT DEFAULT NULL"},
+}
 
 
 def _as_int(value) -> int:
@@ -69,17 +84,70 @@ def _as_int(value) -> int:
         return 0
 
 
+# What a payment row was *for*. NULL means an ordinary payment: a deposit a client
+# paid us, or one we paid a peer. `status` is orthogonal and still says how far it got.
+PAYMENT_PURPOSE_DONATION = "donation"
+
+PAYMENT_INSERT = """
+    INSERT INTO payments (
+        tx_id, direction, status, peer_id, client_id, deposit_token,
+        ledger, contract_hash, address, amount_mu, purpose
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+
+def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
+                          peer_id=None, client_id=None, deposit_token=None,
+                          ledger=None, contract_hash=None, address=None,
+                          purpose=None) -> tuple:
+    """Bind one payment row for :data:`PAYMENT_INSERT`, in its column order.
+
+    Shared so a donation payout can write its rows in the *same* transaction that
+    decrements the debt they discharge (see :meth:`SQLConnection.settle_donation`),
+    without either place restating the column list.
+    """
+    return (tx_id, direction, status, peer_id, client_id, deposit_token,
+            ledger, contract_hash, address, str(int(amount_mu)), purpose)
+
+
+def _decimal_or_zero(value) -> Decimal:
+    """A stored decimal string read back, defaulting to zero.
+
+    Zero is the reading that cannot pay out money the node does not owe, which is the
+    direction an unreadable debt has to fail in.
+    """
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError, AttributeError):
+        return Decimal(0)
+    if not parsed.is_finite():
+        return Decimal(0)
+    return parsed
+
+
+def _plain(value: Decimal) -> str:
+    """A Decimal as a plain decimal string -- never scientific notation.
+
+    The debt round-trips through a TEXT column and is read back by other processes
+    (the TUI reads the database directly), so "1E-8" would be a different string for
+    the same number and an integer cast of it would be zero.
+    """
+    return format(value.normalize() if value else Decimal(0), "f")
+
+
 def _ensure_traceability_tables(connection) -> None:
     try:
-        from src.database.migrate import ensure_tables
+        from src.database.migrate import ensure_columns, ensure_tables
 
         cursor = connection.cursor()
         ensure_tables(cursor, TRACEABILITY_TABLES)
+        for table, columns in TRACEABILITY_COLUMNS.items():
+            ensure_columns(cursor, table, columns)
         connection.commit()
     except Exception as e:
         # A read-only or otherwise unusable database is the node's problem to report
         # elsewhere; it must not stop this constructor, which runs at import time.
-        logger.LOGGER(f'Could not ensure the payment and reputation tables exist: {e}')
+        logger.LOGGER(f'Could not ensure the traceability tables exist: {e}')
 
 
 class SQLConnection(metaclass=Singleton):
@@ -2429,7 +2497,7 @@ class SQLConnection(metaclass=Singleton):
                        tx_id: Optional[str] = None, peer_id: Optional[str] = None,
                        client_id: Optional[str] = None, deposit_token: Optional[str] = None,
                        ledger: Optional[str] = None, contract_hash: Optional[str] = None,
-                       address: Optional[str] = None) -> bool:
+                       address: Optional[str] = None, purpose: Optional[str] = None) -> bool:
         """Write down one payment. Returns whether the row landed.
 
         This never raises. Every caller is on a path where the money has already moved:
@@ -2445,24 +2513,299 @@ class SQLConnection(metaclass=Singleton):
             return False
 
         try:
-            self._execute('''
-                INSERT INTO payments (
-                    tx_id, direction, status, peer_id, client_id, deposit_token,
-                    ledger, contract_hash, address, amount_mu
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (tx_id, direction, status, peer_id, client_id, deposit_token,
-                  ledger, contract_hash, address, str(int(amount_mu))))
+            self._execute(PAYMENT_INSERT, payment_insert_params(
+                tx_id=tx_id, direction=direction, status=status, peer_id=peer_id,
+                client_id=client_id, deposit_token=deposit_token, ledger=ledger,
+                contract_hash=contract_hash, address=address, amount_mu=amount_mu,
+                purpose=purpose,
+            ))
             return True
         except Exception as e:
             logger.LOGGER(f'Failed to record the {direction} payment of {amount_mu} MU: {e}')
             return False
+
+    # ------------------------------------------------------------------ donations
+    # A donation debt is money this node owes but has not moved yet, and it is keyed by
+    # payment METHOD -- (ledger, contract, asset). Two assets settling through one
+    # contract owe two independent debts, each in its own smallest native unit: a debt
+    # incurred in SigUSD is not a debt in ERG, and paying one out of the other would
+    # mean converting at whatever rate happened to be configured at payout time.
+    #
+    # `_donation_lock` serialises the read-modify-write these do. `_execute` commits
+    # each statement on its own, so a plain SELECT-then-UPDATE is not atomic against
+    # the gRPC thread pool that accrues, nor against the manager tick that pays out --
+    # and both edit the same counter.
+    _donation_lock = Lock()
+
+    def donation_owed(self, ledger: str, contract_hash: str, token_id: str) -> Decimal:
+        """What this node owes on one payment method, in that asset's native unit."""
+        try:
+            row = self._execute(
+                "SELECT owed_native FROM donation_accrual "
+                "WHERE ledger = ? AND contract_hash = ? AND token_id = ?",
+                (ledger, contract_hash, token_id)
+            ).fetchone()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read the donation debt for {ledger}/{token_id}: {e}')
+            return Decimal(0)
+        return _decimal_or_zero(row['owed_native']) if row else Decimal(0)
+
+    def accrue_donation(self, ledger: str, contract_hash: str, token_id: str,
+                        amount_native: Decimal) -> Optional[Decimal]:
+        """Add ``amount_native`` to one method's debt; return the new total, or None.
+
+        The amount is stored exactly, fraction included. Rounding a 2 % cut of a small
+        payment down to a whole native unit here would discard the remainder on every
+        single payment, and always in this node's favour -- so the configured rate
+        would be an upper bound the node never actually pays. The fraction stays on the
+        row and is paid out once it has grown into a whole unit.
+
+        Never raises: the caller is on the path where a client's payment has already
+        been credited, and failing to write the debt must not undo that.
+        """
+        if amount_native is None:
+            return None
+        amount = _decimal_or_zero(amount_native)
+        if amount <= 0:
+            return None
+        with SQLConnection._donation_lock:
+            try:
+                owed = self.donation_owed(ledger, contract_hash, token_id) + amount
+                self._execute(
+                    "INSERT INTO donation_accrual (ledger, contract_hash, token_id, owed_native) "
+                    "VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT (ledger, contract_hash, token_id) DO UPDATE SET "
+                    "owed_native = excluded.owed_native, updated_at = CURRENT_TIMESTAMP",
+                    (ledger, contract_hash, token_id, _plain(owed))
+                )
+                return owed
+            except Exception as e:
+                logger.LOGGER(f'Failed to accrue a donation on {ledger}/{token_id}: {e}')
+                return None
+
+    def donation_debts(self) -> List[dict]:
+        """Every method that owes something, as ``{ledger, contract_hash, token_id, owed}``.
+
+        Ordered so a tick processes them the same way twice -- the payout builds one
+        transaction per contract out of these, and a set-ordered list would make which
+        assets share a transaction depend on dictionary iteration order.
+        """
+        try:
+            rows = self._execute(
+                "SELECT ledger, contract_hash, token_id, owed_native FROM donation_accrual "
+                "ORDER BY ledger, contract_hash, token_id"
+            ).fetchall()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read the donation debts: {e}')
+            return []
+        debts = []
+        for row in rows:
+            owed = _decimal_or_zero(row['owed_native'])
+            if owed <= 0:
+                continue
+            debts.append({
+                'ledger': row['ledger'],
+                'contract_hash': row['contract_hash'],
+                'token_id': row['token_id'],
+                'owed': owed,
+            })
+        return debts
+
+    def settle_donation(self, *, ledger: str, contract_hash: str, token_id: str,
+                        paid_native: Decimal, records: List[dict]) -> bool:
+        """Decrement a debt by what was just paid, and record the payments that paid it.
+
+        One transaction, deliberately. The debt is decremented only *after* the
+        transaction is on the wire, and the rows that say so are written with it: two
+        separate commits would let a crash between them either pay the same debt twice
+        or lose the record of a donation that did go out.
+
+        The decrement is a subtraction rather than a reset, so the fraction that was
+        below a whole native unit -- and anything accrued while the transaction was in
+        flight -- stays owed instead of being written off.
+        """
+        paid = _decimal_or_zero(paid_native)
+        if paid <= 0:
+            return False
+        with SQLConnection._donation_lock:
+            try:
+                remaining = self.donation_owed(ledger, contract_hash, token_id) - paid
+                if remaining < 0:
+                    logger.LOGGER(
+                        f"Donation payout on {ledger}/{token_id} paid {_plain(paid)} against a "
+                        f"debt of {_plain(remaining + paid)}; clamping the remainder to zero."
+                    )
+                    remaining = Decimal(0)
+                queries = [(
+                    "INSERT INTO donation_accrual (ledger, contract_hash, token_id, owed_native) "
+                    "VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT (ledger, contract_hash, token_id) DO UPDATE SET "
+                    "owed_native = excluded.owed_native, updated_at = CURRENT_TIMESTAMP",
+                    (ledger, contract_hash, token_id, _plain(remaining))
+                )]
+                for record in records:
+                    queries.append((PAYMENT_INSERT, payment_insert_params(
+                        direction='out',
+                        status='accepted',
+                        purpose=PAYMENT_PURPOSE_DONATION,
+                        ledger=ledger,
+                        contract_hash=contract_hash,
+                        **record,
+                    )))
+                self._execute2(queries)
+                return True
+            except Exception as e:
+                logger.LOGGER(f'Failed to settle a donation on {ledger}/{token_id}: {e}')
+                return False
+
+    def record_donation(self, *, ledger: str, tx_id: str, to_address: str,
+                        from_address: str, token_id: str, amount_native: str,
+                        tx_height: int, peer_id: Optional[str] = None) -> bool:
+        """Store one donation read off a chain. Idempotent by the table's UNIQUE key.
+
+        Returns whether this call is what inserted the row, so a scan can report what
+        it actually found rather than what it re-read. A row already there is left
+        alone -- including its `peer_id`, which a later pass may have resolved.
+        """
+        try:
+            cursor = self._execute(
+                "INSERT OR IGNORE INTO donations "
+                "(ledger, tx_id, to_address, from_address, peer_id, token_id, "
+                " amount_native, tx_height) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (ledger, tx_id, to_address, from_address, peer_id, token_id,
+                 str(amount_native), int(tx_height))
+            )
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.LOGGER(f'Failed to record a donation on {ledger} tx {tx_id}: {e}')
+            return False
+
+    def attribute_donations(self, ledger: str, from_address: str, peer_id: str) -> int:
+        """Attach a now-known donor to the donations already stored under its address.
+
+        A donation is stored whether or not its donor maps to a peer we know: the
+        transaction happened, and the peer may be introduced later. This is what
+        retroactively credits it, and it is why the indexer never has to re-read the
+        chain to pick up a peer discovered since.
+        """
+        try:
+            cursor = self._execute(
+                "UPDATE donations SET peer_id = ? WHERE ledger = ? AND from_address = ? "
+                "AND (peer_id IS NULL OR peer_id != ?)",
+                (peer_id, ledger, from_address, peer_id)
+            )
+            return cursor.rowcount or 0
+        except Exception as e:
+            logger.LOGGER(f'Failed to attribute donations from {from_address}: {e}')
+            return 0
+
+    def get_donations(self, peer_id: Optional[str] = None) -> List[dict]:
+        """Donations as the credit computation reads them.
+
+        With no ``peer_id``, every attributed donation, so one pass can build the whole
+        candidate set for a routing decision. Unattributed rows are left out: they are
+        kept for later, but they credit nobody until their donor maps to a peer.
+        """
+        query = ("SELECT ledger, tx_id, to_address, from_address, peer_id, token_id, "
+                 "amount_native, tx_height FROM donations WHERE peer_id IS NOT NULL")
+        params: tuple = ()
+        if peer_id is not None:
+            query += " AND peer_id = ?"
+            params = (peer_id,)
+        try:
+            rows = self._execute(query, params).fetchall()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read donations: {e}')
+            return []
+        return [dict(row) for row in rows]
+
+    def peer_by_contract_instance(self, instance_value: str) -> Optional[str]:
+        """Which peer announced ``instance_value`` as a payment contract instance.
+
+        ``"LOCAL"`` for our own, which is deliberate: this node's donations are read
+        off the chain and credited exactly like anybody else's, with no special case.
+
+        ``None`` when nobody announced it, and also when *several* peers did. Two peers
+        claiming one address is not a tie to break -- only one of them controls it, and
+        crediting the wrong one would hand a peer the donations another peer paid for.
+        """
+        try:
+            rows = self._execute(
+                "SELECT DISTINCT peer_id FROM contract_instance WHERE address = ?",
+                (instance_value,)
+            ).fetchall()
+        except Exception as e:
+            logger.LOGGER(f'Failed to look a payment address up: {e}')
+            return None
+        if len(rows) != 1:
+            if len(rows) > 1:
+                logger.LOGGER(
+                    f"{len(rows)} peers announce the same payment address; crediting a "
+                    "donation to it would name the wrong one, so it is left unattributed."
+                )
+            return None
+        return rows[0]['peer_id']
+
+    def donation_scan_cursor(self, ledger: str, address: str) -> int:
+        """The height an address' scan got to; 0 when it has never been scanned."""
+        try:
+            row = self._execute(
+                "SELECT last_scanned_height FROM donation_scan_state "
+                "WHERE ledger = ? AND address = ?",
+                (ledger, address)
+            ).fetchone()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read the donation scan cursor for {address}: {e}')
+            return 0
+        return _as_int(row['last_scanned_height']) if row else 0
+
+    def set_donation_scan_cursor(self, ledger: str, address: str, height: int) -> None:
+        """Advance an address' scan cursor. Never moves it backwards.
+
+        A scan that was truncated by its page cap, or that hit an unreachable
+        explorer, must not be able to report progress it did not make -- the next
+        refresh would then skip the transactions it never read.
+        """
+        try:
+            self._execute(
+                "INSERT INTO donation_scan_state (ledger, address, last_scanned_height) "
+                "VALUES (?, ?, ?) ON CONFLICT (ledger, address) DO UPDATE SET "
+                "last_scanned_height = MAX(last_scanned_height, excluded.last_scanned_height), "
+                "updated_at = CURRENT_TIMESTAMP",
+                (ledger, address, int(height))
+            )
+        except Exception as e:
+            logger.LOGGER(f'Failed to advance the donation scan cursor for {address}: {e}')
+
+    def donation_scan_tip(self, ledger: str) -> int:
+        """The highest height this node has indexed donations up to on ``ledger``.
+
+        Stands in for "the current height" when a donation's age is measured, which is
+        what keeps that measurement free of network I/O: a routing decision must never
+        wait on an explorer. It lags the real tip by the confirmation window and by
+        however long ago the last refresh ran, which moves an age by minutes -- against
+        an age scale of a year.
+        """
+        try:
+            row = self._execute(
+                "SELECT MAX(last_scanned_height) AS tip FROM donation_scan_state WHERE ledger = ?",
+                (ledger,)
+            ).fetchone()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read the donation scan tip for {ledger}: {e}')
+            return 0
+        return _as_int(row['tip']) if row else 0
+
+    def get_donation_payments(self, limit: int = 20) -> List[dict]:
+        """Donations this node has paid out, newest first."""
+        return self._payments_where("purpose = ?", (PAYMENT_PURPOSE_DONATION,), limit)
 
     def _payments_where(self, clause: str, params: tuple, limit: int) -> List[dict]:
         """Newest first, capped. Shared by the peer and client readers."""
         try:
             result = self._execute(f'''
                 SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
-                       ledger, contract_hash, address, amount_mu, created_at
+                       ledger, contract_hash, address, amount_mu, purpose, created_at
                 FROM payments WHERE {clause} ORDER BY created_at DESC, id DESC LIMIT ?
             ''', params + (int(limit),))
             return [dict(row) for row in result.fetchall()]

@@ -7,7 +7,7 @@ from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
 from src.gateway.iterables.resource_availability_iterable import GetResourceAvailabilityIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
-from src.utils.contract_xattrs import get_script, get_contract_type
+from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_full_node_peer_info
 from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_mu, \
@@ -184,6 +184,11 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 contract=contract_type,
                 script=raw_script,
                 token=payment.deposit_token,
+                # Which asset this payment settles in is on the wire and used to be
+                # dropped here. It is what says whose debt a donation accrues against:
+                # one contract can be paid in a chain's native unit and in a token, and
+                # inferring the asset from the ledger cannot tell those apart.
+                asset=get_token_id(payment.contract),
         ):
             raise Exception('Error: payment not valid.')
         log.LOGGER('Payment is valid.')
