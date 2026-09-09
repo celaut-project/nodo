@@ -172,5 +172,95 @@ class RateScaleWarningTests(unittest.TestCase):
         )
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class NodeServiceBackendTests(unittest.TestCase):
+    """`BACKEND: service` needs three things to agree, and none can be guessed.
+
+    Every one of them, missing, leaves a node that boots, advertises Bitcoin and then
+    cannot settle a single payment — a failure that would surface as a payout that did
+    not happen, on a tick nobody is watching. So they are refused at startup.
+    """
+
+    def _config(self, **overrides):
+        base = _config(rate="1000")
+        bitcoin = base["ledgers"]["bitcoin"]
+        bitcoin["BACKEND"] = "service"
+        bitcoin["WALLET_KEYS_EXTERNAL"] = False
+        bitcoin["WALLET_MNEMONIC"] = "twelve words that are not really twelve words"
+        bitcoin["RPC_USER"] = "nodo"
+        bitcoin["RPC_PASSWORD"] = "hunter2"
+        bitcoin.update(overrides)
+        base["core_services"] = {"bitcoin-node": "a1" * 32}
+        return base
+
+    def _validate(self, config):
+        validate_bitcoin_config(config)
+
+    def test_a_complete_service_configuration_is_accepted(self):
+        self._validate(self._config())
+
+    def test_an_unknown_backend_names_all_three(self):
+        config = self._config()
+        config["ledgers"]["bitcoin"]["BACKEND"] = "electrum"
+        with self.assertRaisesRegex(ConfigValidationError, "'core', 'esplora' or 'service'"):
+            self._validate(config)
+
+    def test_no_published_service_id_is_refused(self):
+        for entry in ({}, {"bitcoin-node": ""}, {"bitcoin-node": "<SET_ME>"}):
+            with self.subTest(core_services=entry):
+                config = self._config()
+                config["core_services"] = entry
+                with self.assertRaisesRegex(ConfigValidationError, "core_services.bitcoin-node"):
+                    self._validate(config)
+
+    def test_external_keys_and_a_derived_wallet_cannot_both_be_true(self):
+        """The flag is what tells the loader whether to mint a mnemonic.
+
+        Left true, the node holds no Bitcoin key and the service comes up with no
+        wallet. It is refused rather than silently corrected: "the keys are external"
+        honestly means "do not put a key in my config file", and overriding that is not
+        a validator's decision to make.
+        """
+        with self.assertRaisesRegex(ConfigValidationError, "WALLET_KEYS_EXTERNAL"):
+            self._validate(self._config(WALLET_KEYS_EXTERNAL=True))
+
+    def test_an_empty_mnemonic_is_accepted_because_the_loader_fills_it_in(self):
+        """The setup the documentation asks for, and it must boot.
+
+        Validation runs *before* the loader mints a mnemonic, so refusing an empty one
+        would refuse exactly the operator who set `WALLET_KEYS_EXTERNAL: false` and left
+        the phrase blank for the node to generate -- with an error telling them to do
+        what they had already done. The flag is the invariant; the emptiness is
+        transient, and a launch with no wallet is refused later, by name.
+        """
+        self._validate(self._config(WALLET_MNEMONIC=""))
+
+    def test_credentials_are_required_because_the_cookie_is_unreachable(self):
+        # Core writes it inside the service's own filesystem.
+        for key in ("RPC_USER", "RPC_PASSWORD"):
+            with self.subTest(key=key):
+                with self.assertRaisesRegex(ConfigValidationError, key):
+                    self._validate(self._config(**{key: ""}))
+
+    def test_a_prune_below_cores_own_floor_is_refused(self):
+        # bitcoind refuses to start below 550 MiB, which an operator would meet as a
+        # service that never comes up.
+        with self.assertRaisesRegex(ConfigValidationError, "550"):
+            self._validate(self._config(PRUNE_MIB=100))
+
+    def test_zero_means_the_whole_chain_and_is_allowed(self):
+        self._validate(self._config(PRUNE_MIB=0))
+
+    def test_a_prune_that_is_not_a_number_is_refused(self):
+        with self.assertRaisesRegex(ConfigValidationError, "PRUNE_MIB"):
+            self._validate(self._config(PRUNE_MIB="lots"))
+
+    def test_the_other_backends_are_unaffected_by_all_of_this(self):
+        # An esplora node still needs no service id, no mnemonic and no credentials.
+        config = _config(rate="1000")
+        config["ledgers"]["bitcoin"]["BACKEND"] = "esplora"
+        self._validate(config)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -806,6 +806,14 @@ core_services:
   # always preempted by real/paid `execute` requests. The published id is not wired yet;
   # leave as "<SET_ME>" until it is available. See docs/design/low-demand-fallback.md.
   low-demand-fallback: "<SET_ME>"
+  # bitcoin-node: a bitcoind this node runs itself, with its wallet derived from
+  # ledgers.bitcoin.WALLET_MNEMONIC. It is what makes `ledgers.bitcoin.BACKEND: service`
+  # work -- Bitcoin Core is what signs a Bitcoin transaction, so being able to PAY in BTC
+  # means having a Core with the keys, and this is that Core without the operator having
+  # to install one. Published for linux/arm64; a node on another architecture needs the
+  # build for it. The published id is not wired yet; leave as "<SET_ME>" until it is
+  # available. See docs/BITCOIN.md.
+  bitcoin-node: "<SET_ME>"
 
 # Opportunistic low-demand fallback scheduler (WIP — see docs/design/low-demand-fallback.md).
 # When ENABLED and the node is under ALL per-resource thresholds AND not serving real
@@ -1130,9 +1138,17 @@ ledgers:
     #            may be remote -- RPC_URL is a URL -- but "remote" here means your own
     #            machine over a LAN or VPN, not somebody else's node.
     #
-    # Ergo's posture is neither: a remote public node plus a mnemonic in this file. The
-    # equivalent for Bitcoin would mean a seed here and raw transaction signing, which
-    # is not implemented.
+    #   service  The same bitcoind, run by THIS node as a core service, with its wallet
+    #            derived from the mnemonic below. It signs like `core` and needs no
+    #            infrastructure like `esplora`: you back up one mnemonic, the way you
+    #            already do for Ergo, and the node brings the rest up at boot. Needs
+    #            core_services.bitcoin-node, RPC_USER/RPC_PASSWORD, and
+    #            WALLET_KEYS_EXTERNAL false. Read the "Running your own node" section of
+    #            docs/BITCOIN.md before turning it on: the mnemonic is a real key, in
+    #            this file.
+    #
+    # Ergo's posture is the third one: a mnemonic in this file, and the chain's own
+    # software doing the signing.
     BACKEND: esplora
     ESPLORA_URL: "https://blockstream.info/api"
     RPC_URL: "http://127.0.0.1:8332"
@@ -1142,9 +1158,37 @@ ledgers:
     RPC_USER: ""
     RPC_PASSWORD: ""
     WALLET_NAME: "nodo"
-    # This chain's keys live in Core's own wallet, not here, so nodo does not generate
-    # or hold a mnemonic for it. Back up bitcoind's wallet, not this file.
+    # With BACKEND core or esplora this chain's keys live in Core's own wallet or nowhere,
+    # not here, so nodo neither generates nor holds a mnemonic for it: back up bitcoind's
+    # wallet, not this file.
+    #
+    # With BACKEND `service` it is the other way round. Set this to false and the node
+    # mints a 12-word BIP-39 mnemonic into WALLET_MNEMONIC below on the next load, exactly
+    # as it does for Ergo, and hands it to the bitcoind it runs. THEN THIS FILE IS THE
+    # BACKUP, and it is the only one: the service's wallet is derived, not stored.
     WALLET_KEYS_EXTERNAL: true
+    # The wallet the `service` backend derives. 12 or 24 BIP-39 words. Leave empty with
+    # WALLET_KEYS_EXTERNAL false and one is generated; paste your own to reuse a wallet.
+    #
+    # It is derived at m/84'/0'/0' (m/84'/1'/0' on the test networks), P2WPKH -- BIP-84,
+    # the ordinary path -- so any standard wallet can open it from these words alone. A
+    # pruned service (PRUNE_MIB below) imports it as new and sees only payments made from
+    # then on: a mnemonic with history needs a full node to rescan, or a rescan done
+    # elsewhere.
+    #
+    # TREAT AS A SECRET. Unused by the other two backends.
+    WALLET_MNEMONIC: ""
+    # Optional BIP-39 passphrase for the above. A different wallet for the same words --
+    # and a second secret the words alone cannot recover, so set it only if you know you
+    # want one.
+    WALLET_PASSPHRASE: ""
+    # How much block history the `service` backend's bitcoind keeps, in MiB.
+    #
+    # 0 keeps everything and builds a txindex with it: roughly 700 GB, and the only way
+    # to rescan a mnemonic that already has history. Anything else prunes to about that
+    # size -- Core's own floor is 550 -- which is what makes this runnable on the kind of
+    # arm board a node lives on. Pruned, the wallet is imported as new (see above).
+    PRUNE_MIB: 10000
     payments:
       # What one satoshi buys, in MU. THERE IS NO DEFAULT, and that is deliberate: a
       # satoshi and a nanoERG are about six orders of magnitude apart in value, so

@@ -50,7 +50,7 @@ class _FakeConn:
 
 
 def _patch_db(rows=None, raise_on_execute=None, raise_on_connect=None):
-    """Patch sqlite3.connect + DATABASE_FILE config used by runtime._find_running_endpoint."""
+    """Patch sqlite3.connect + DATABASE_FILE config used by runtime.find_running_endpoint."""
     cursor = _FakeCursor(rows=rows, raise_on_execute=raise_on_execute)
 
     def fake_connect(_path):
@@ -71,33 +71,33 @@ class FindRunningEndpointTests(unittest.TestCase):
         cfg, conn = _patch_db(rows=rows)
         with cfg, conn:
             self.assertEqual(
-                runtime._find_running_endpoint("svc"), "http://10.0.0.5:9000"
+                runtime.find_running_endpoint("svc"), "http://10.0.0.5:9000"
             )
 
     def test_returns_none_when_no_rows(self):
         cfg, conn = _patch_db(rows=[])
         with cfg, conn:
-            self.assertIsNone(runtime._find_running_endpoint("svc"))
+            self.assertIsNone(runtime.find_running_endpoint("svc"))
 
     def test_missing_table_returns_none(self):
         # Simulate `no such table: local_instances`.
         cfg, conn = _patch_db(raise_on_execute=Exception("no such table: local_instances"))
         with cfg, conn:
-            self.assertIsNone(runtime._find_running_endpoint("svc"))
+            self.assertIsNone(runtime.find_running_endpoint("svc"))
 
     def test_unparseable_blob_returns_none(self):
         cfg, conn = _patch_db(rows=[(b"\xff\xff not a protobuf",)])
         with cfg, conn:
-            self.assertIsNone(runtime._find_running_endpoint("svc"))
+            self.assertIsNone(runtime.find_running_endpoint("svc"))
 
     def test_missing_database_file_returns_none(self):
         with patch.object(runtime._env_manager, "get", return_value=None):
-            self.assertIsNone(runtime._find_running_endpoint("svc"))
+            self.assertIsNone(runtime.find_running_endpoint("svc"))
 
     def test_connect_failure_returns_none(self):
         cfg, conn = _patch_db(raise_on_connect=sqlite3_error())
         with cfg, conn:
-            self.assertIsNone(runtime._find_running_endpoint("svc"))
+            self.assertIsNone(runtime.find_running_endpoint("svc"))
 
 
 def sqlite3_error():
@@ -146,7 +146,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
         acquire = MagicMock(return_value=True)
         launch = MagicMock()
         with patch.object(
-            runtime, "_find_running_endpoint", return_value="http://127.0.0.1:18080"
+            runtime, "find_running_endpoint", return_value="http://127.0.0.1:18080"
         ) as find, _stub_deps(acquire, launch):
             result = runtime.ensure_core_service_running("svc")
 
@@ -159,7 +159,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
         acquire = MagicMock(return_value=False)
         launch = MagicMock()
         with patch.object(
-            runtime, "_find_running_endpoint", return_value=None
+            runtime, "find_running_endpoint", return_value=None
         ) as find, _stub_deps(acquire, launch):
             result = runtime.ensure_core_service_running("svc", launch=False)
 
@@ -173,7 +173,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
         acquire = MagicMock(return_value=True)
         launch = MagicMock()
         with patch.object(
-            runtime, "_find_running_endpoint", return_value=None
+            runtime, "find_running_endpoint", return_value=None
         ), _stub_deps(acquire, launch):
             result = runtime.ensure_core_service_running("svc")
 
@@ -185,7 +185,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
         acquire = MagicMock(return_value=False)
         launch = MagicMock(side_effect=RuntimeError("no gateway"))
         with patch.object(
-            runtime, "_find_running_endpoint", return_value=None
+            runtime, "find_running_endpoint", return_value=None
         ), _stub_deps(acquire, launch):
             # Must not raise even though execute() blows up.
             result = runtime.ensure_core_service_running("svc")
@@ -199,7 +199,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
         launch = MagicMock()
         with patch.object(
             runtime,
-            "_find_running_endpoint",
+            "find_running_endpoint",
             side_effect=[None, "http://10.0.0.9:7000"],
         ), _stub_deps(acquire, launch):
             result = runtime.ensure_core_service_running("svc")
@@ -214,7 +214,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
         launch = MagicMock()
         download = MagicMock(return_value={"service_id": "svc"})
         with patch.object(
-            runtime, "_find_running_endpoint",
+            runtime, "find_running_endpoint",
             side_effect=[None, "http://10.0.0.9:7000"],
         ), _stub_deps(acquire, launch, download=download):
             result = runtime.ensure_core_service_running(
@@ -233,7 +233,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
         launch = MagicMock()
         download = MagicMock()
         with patch.object(
-            runtime, "_find_running_endpoint", return_value=None,
+            runtime, "find_running_endpoint", return_value=None,
         ), _stub_deps(acquire, launch, download=download):
             result = runtime.ensure_core_service_running("svc", source_url="   ")
 
@@ -248,7 +248,7 @@ class EnsureCoreServiceRunningTests(unittest.TestCase):
         launch = MagicMock()
         download = MagicMock(side_effect=RuntimeError("bad source"))
         with patch.object(
-            runtime, "_find_running_endpoint", return_value=None,
+            runtime, "find_running_endpoint", return_value=None,
         ), _stub_deps(acquire, launch, download=download):
             result = runtime.ensure_core_service_running(
                 "svc", source_url="https://src/manifest", launch=False

@@ -26,6 +26,23 @@ sc = SQLConnection()
 env_manager = ConfigManager()
 
 
+#: Env names whose *value* is a key, not a setting. The node launches services with
+#: secrets in their environment -- a source-application signing with the Ergo wallet
+#: (``SOURCE_MNEMONIC``), a bitcoind deriving its own from ``BITCOIN_MNEMONIC`` -- and
+#: this row is a record of how an instance was configured, not a second copy of the
+#: wallet. Matched as substrings, so a name nobody has thought of yet is still caught.
+_SECRET_ENV_MARKERS = ("MNEMONIC", "PASSWORD", "PASSPHRASE", "SECRET", "PRIVATE_KEY")
+
+#: What is stored instead. The key stays, so the record still answers the question it
+#: exists for -- *was* this instance given a mnemonic? -- without keeping the words.
+_REDACTED = "<redacted>"
+
+
+def _is_secret_env(name: str) -> bool:
+    upper = str(name).upper()
+    return any(marker in upper for marker in _SECRET_ENV_MARKERS)
+
+
 def _serialize_envs(config: Optional[celaut.Configuration]) -> str:
     """Serialize a Configuration's ``environment_variables`` map to JSON text.
 
@@ -34,11 +51,21 @@ def _serialize_envs(config: Optional[celaut.Configuration]) -> str:
     source-application was started as a seed signer (``SOURCE_SIGNER_MODE=seed``).
     Values are protobuf ``bytes``; they are decoded as UTF-8 (env vars are text).
     Returns ``None`` when there are no env vars, so the DB column stays NULL.
+
+    **A secret's value is not persisted**, only its name (see ``_SECRET_ENV_MARKERS``).
+    The env of a launched service is where the node's wallet goes when a service has to
+    sign with it, and this column would otherwise be a second plaintext copy of the
+    mnemonic — in a different file from ``config.yaml``, with different permissions, and
+    in every backup of the database. What reads this column wants a share discriminator
+    (``manager.shares.instance_env_values``), never a key, so nothing is lost by it.
     """
     if config is None or not config.environment_variables:
         return None
     envs = {
-        key: value.decode("utf-8", errors="replace")
+        key: (
+            _REDACTED if _is_secret_env(key)
+            else value.decode("utf-8", errors="replace")
+        )
         for key, value in config.environment_variables.items()
     }
     return json.dumps(envs, sort_keys=True) if envs else ""

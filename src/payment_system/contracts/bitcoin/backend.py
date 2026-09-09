@@ -224,7 +224,34 @@ class ChainBackend:
         return dict(self._call("gettransaction", [str(txid), True]) or {})
 
     def raw_transaction(self, txid: str) -> Dict[str, Any]:
-        """The transaction's outputs, normalised (see :func:`normalise_outputs`)."""
+        """The transaction's outputs, normalised (see :func:`normalise_outputs`).
+
+        Through the **wallet**, not through ``getrawtransaction``, and that is what makes
+        a pruned node work. ``getrawtransaction`` can only find an arbitrary confirmed
+        transaction when Core keeps a ``txindex``, and a ``txindex`` cannot be built on a
+        pruned node -- so asking for one here quietly required every operator to keep the
+        whole chain, for a lookup that never needs it: both callers pass a txid that came
+        out of a wallet call (``list_received`` or ``list_transactions``), so the
+        transaction is always one of this wallet's own.
+
+        Core hands the raw hex back on ``gettransaction``; decoding it is a local
+        operation with no index behind it. ``getrawtransaction`` stays as the fallback
+        for the case the wallet does not know the transaction after all, where a node
+        with a ``txindex`` can still answer and one without says so.
+        """
+        try:
+            wallet_entry = self._call("gettransaction", [str(txid), True]) or {}
+            raw_hex = wallet_entry.get("hex")
+            if raw_hex:
+                decoded = self._call(
+                    "decoderawtransaction", [str(raw_hex)], wallet_scoped=False
+                )
+                if decoded:
+                    return {"outputs": _core_outputs(decoded)}
+        except BackendUnavailable:
+            # Not this wallet's transaction, or a Core too old to return the hex. The
+            # index, if there is one, is the remaining way to look.
+            pass
         decoded = self._call("getrawtransaction", [str(txid), True], wallet_scoped=False)
         return {"outputs": _core_outputs(decoded or {})}
 
