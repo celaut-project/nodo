@@ -18,7 +18,7 @@ from src.payment_system.contracts.ergo.ergo_tree import (
     ergo_contract_from_proposition_bytes,
     proposition_bytes_from_address,
 )
-from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
+from src.utils.java_dependency import JavaDependencyMissing, ensure_ergpy_jvm, require_java_module
 from contextlib import contextmanager
 from contextvars import ContextVar
 from threading import Lock
@@ -50,6 +50,18 @@ CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 # collide with this. It is what `init()` already advertises as the `token_id` xattr.
 NATIVE_ASSET = "ERG"
 
+# This contract proves an incoming payment by finding an *unspent* box carrying the
+# deposit token in R4, so no sweep may spend that box while a deposit is in flight --
+# `payment_process._pause_and_drain_deposits` exists for exactly this. A chain that
+# proves payment from a confirmed transaction sets this False and is not paused.
+needs_unspent_proof = True
+# How long a deposit token may sit unpaid here before it is written off. Ergo confirms
+# in ~2 minutes and `process_payment` waits for two confirmations, so an hour is not a
+# deadline anyone meets by accident. It lives on the contract rather than in the config
+# because it describes the chain, which the contract knows and the operator should not
+# have to state.
+DEPOSIT_TOKEN_TTL = 3600
+
 # The node controls exactly ONE wallet. Clients pay directly to its P2PK address; excess is
 # swept to the cold wallet (a public address, never a mnemonic in Nodo).
 WALLET_MNEMONIC = lambda: env_manager.get("ledgers.ergo.WALLET_MNEMONIC")
@@ -60,9 +72,9 @@ COLD_WALLET = lambda: env_manager.get("ledgers.ergo.payments.COLD_WALLET") or ""
 # so the key has one unambiguous home rather than relying on `ConfigManager.get`'s
 # scan-every-section fallback for a dotless name.
 #
-# Plain truthiness, matching `contracts.envs.SIMULATED` exactly. That is deliberate: the
-# two must never disagree about whether this node is simulating, and a stricter parse
-# here would make them differ on a value one of them mis-reads.
+# Plain truthiness, matching the registry's own gate for the simulated contract
+# exactly. That is deliberate: the two must never disagree about whether this node is
+# simulating, and a stricter parse here would make them differ on a value one mis-reads.
 SIMULATE_PAYMENTS = lambda: bool(env_manager.get("general_flags.SIMULATE_PAYMENTS"))
 
 # Donations are a share of *earnings* and have nothing to do with this wallet's excess
@@ -142,6 +154,48 @@ def __mu_to_nanoerg(amount: int) -> int:
     turned every real charge into zero nanoERG.
     """
     return rate.mu_to_nanoerg(amount)
+
+
+def unavailable_reason() -> Optional[str]:
+    """Why this contract cannot settle right now, or ``None`` when it can.
+
+    Cheap on purpose -- a filesystem check for a Java runtime, no JVM start and no
+    network -- because the registry asks this on the payment path and on every
+    advertisement. It is what stops a node without Java from advertising a payment
+    method nobody can actually pay into: the failure used to surface at the first real
+    payment, with a peer's money already committed to the attempt.
+
+    A wallet-less config is *not* reported here: the mnemonic is validated at load
+    (`utils.config_validation`), and a node mid-setup should not have its payment
+    system disappear from its own logs for a reason config validation already gave.
+    """
+    from src.utils.java_dependency import ensure_java_runtime
+
+    try:
+        ensure_java_runtime(feature="Ergo payments")
+    except JavaDependencyMissing as exc:
+        return str(exc).strip().splitlines()[0] if str(exc).strip() else "Java is not installed"
+    return None
+
+
+def mu_per_unit() -> int:
+    """MU bought by one **whole** unit of this ledger -- one ERG, not one nanoERG.
+
+    What travels to peers as ``ContractRate.mu_per_unit``, and the only thing that makes
+    a price quoted in MU actionable to whoever reads it. Whole units rather than base
+    units because both sides convert through the same figure (``mu_conversion``): the
+    convention only has to be *shared*, and a whole unit is the one a person can check.
+    """
+    return rate.mu_per_erg()
+
+
+def ledger() -> celaut_pb2.Contract.Ledger:
+    """The ledger message this contract settles on, as peers receive it.
+
+    A function rather than the module-level object it returns, so the registry can ask
+    every contract the same question without importing each one's constants.
+    """
+    return ergo_ledger
 
 
 def mu_to_native(amount: int) -> Decimal:

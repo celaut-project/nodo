@@ -5,14 +5,23 @@ from unittest import mock
 from src.payment_system.contracts import envs
 
 
+def _contract(ledger="ergo", address="9walletADDR", balance=1.25, cold="9coldADDR",
+              unit="ERG"):
+    """One registered payment contract, as `print_payment_info` reads it."""
+    fake = mock.Mock()
+    fake.LEDGER = ledger
+    fake.NATIVE_ASSET = unit
+    fake.is_demo = False
+    fake.get_balance.return_value = (address, balance)
+    fake.COLD_WALLET.return_value = cold
+    return fake
+
+
 class PrintPaymentInfoTests(unittest.TestCase):
     def test_prints_one_wallet_line_and_optional_cold_wallet(self):
-        fake = mock.Mock()
-        fake.get_balance.return_value = ("9walletADDR", 1.25)
-        fake.COLD_WALLET.return_value = "9coldADDR"
-        with mock.patch.object(envs, "_ergo_interface", return_value=fake):
+        with mock.patch.object(envs, "contracts", return_value={"h": _contract()}):
             out = envs.print_payment_info()
-        self.assertIn("Wallet: 9walletADDR, Amount: 1.25 ERGs", out)
+        self.assertIn("Wallet: 9walletADDR, Amount: 1.25 ERG", out)
         self.assertIn("Cold Wallet: 9coldADDR", out)
         # No trace of the old two-wallet vocabulary.
         self.assertNotIn("Sending Wallet", out)
@@ -20,13 +29,44 @@ class PrintPaymentInfoTests(unittest.TestCase):
         self.assertNotIn("Total:", out)
 
     def test_omits_cold_wallet_line_when_unset(self):
-        fake = mock.Mock()
-        fake.get_balance.return_value = ("9walletADDR", 0.0)
-        fake.COLD_WALLET.return_value = ""
-        with mock.patch.object(envs, "_ergo_interface", return_value=fake):
+        with mock.patch.object(
+            envs, "contracts", return_value={"h": _contract(balance=0.0, cold="")}
+        ):
             out = envs.print_payment_info()
         self.assertIn("Wallet: 9walletADDR", out)
         self.assertNotIn("Cold Wallet:", out)
+
+    def test_one_block_per_contract_and_never_a_total(self):
+        """Two payment systems are two balances in two places.
+
+        Adding them up would name a figure the operator cannot spend: they are held on
+        different chains, in different money, and only one of them can pay any given
+        peer.
+        """
+        with mock.patch.object(envs, "contracts", return_value={
+            "h1": _contract(ledger="ergo", address="9erg", balance=1.25, unit="ERG"),
+            "h2": _contract(ledger="bitcoin", address="bc1q", balance=0.5, cold="",
+                            unit="BTC"),
+        }):
+            out = envs.print_payment_info()
+        self.assertIn("ergo: Wallet: 9erg, Amount: 1.25 ERG", out)
+        self.assertIn("bitcoin: Wallet: bc1q, Amount: 0.5 BTC", out)
+        self.assertNotIn("Total:", out)
+
+    def test_a_node_nobody_can_pay_says_so_rather_than_printing_nothing(self):
+        # An empty string would read as "no wallet configured yet" on a node whose
+        # payment stack simply failed to load.
+        with mock.patch.object(envs, "contracts", return_value={}):
+            out = envs.print_payment_info()
+        self.assertIn("No payment system is available", out)
+
+    def test_a_wallet_that_cannot_be_read_is_named_rather_than_omitted(self):
+        broken = _contract()
+        broken.get_balance.side_effect = RuntimeError("node unreachable")
+        with mock.patch.object(envs, "contracts", return_value={"h": broken}):
+            out = envs.print_payment_info()
+        self.assertIn("wallet unavailable", out)
+        self.assertIn("node unreachable", out)
 
 
 class TxHistorySingleWalletTests(unittest.TestCase):
