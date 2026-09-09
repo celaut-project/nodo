@@ -21,6 +21,7 @@ from src.payment_system.contracts.ergo.ergo_tree import (
 )
 from src.utils.java_dependency import JavaDependencyMissing, ensure_ergpy_jvm, require_java_module
 from contextlib import contextmanager
+from functools import partial
 from contextvars import ContextVar
 from threading import Lock
 from time import sleep
@@ -296,18 +297,31 @@ def get_balance() -> Tuple[str, float]:
 
 
 def init():
-    """Advertise the single payment contract: raw wallet propositionBytes as the script."""
+    """Advertise this contract's payment methods: ERG plus one per configured asset.
+
+    One row per *method*, all sharing the script, the type and the address and differing
+    only in ``token_id``. That is what an Ergo P2PK contract actually is: one script paid
+    in the native unit and in every EIP-4 token held at the same address, so the address
+    is not what tells the methods apart and the rate cannot live on one row for all of
+    them. ERG's row is byte-identical to the one this always wrote, ``token_id: "ERG"``
+    included.
+
+    Per *contract* rather than per method: ``envs.init_interfaces`` is keyed by contract,
+    so this runs once and registers all of them. There is one wallet and one address.
+    """
     proposition_bytes = get_wallet_proposition_bytes()
+    address = get_wallet_address()
     sql = sql_connection.SQLConnection()
-    contract = celaut_pb2.Contract(ledger=ergo_ledger)
-    set_token_id(contract, NATIVE_ASSET)
-    # Canonical value: raw ErgoTree/propositionBytes of the wallet's P2PK payment boxes.
-    set_script(contract, proposition_bytes)
-    # Stable type identity for cross-node matching (its sha3 == CONTRACT_HASH).
-    set_contract_type(contract, CONTRACT.encode("utf-8"))
-    # Derived address for local display/indexing only; never the source of truth.
-    set_address(contract, get_wallet_address())
-    sql.add_contract(contract=contract)
+    for asset in (NATIVE_ASSET, *(a.token_id for a in rate.assets())):
+        contract = celaut_pb2.Contract(ledger=ergo_ledger)
+        set_token_id(contract, asset)
+        # Canonical value: raw ErgoTree/propositionBytes of the wallet's P2PK payment boxes.
+        set_script(contract, proposition_bytes)
+        # Stable type identity for cross-node matching (its sha3 == CONTRACT_HASH).
+        set_contract_type(contract, CONTRACT.encode("utf-8"))
+        # Derived address for local display/indexing only; never the source of truth.
+        set_address(contract, address)
+        sql.add_contract(contract=contract)
 
 
 def check_sender_balance(amount: int) -> bool:
@@ -458,39 +472,110 @@ def _sweep_to_cold_wallet():
         LOGGER(f"Exception on cold sweep -> {str(e)}")
 
 
+def _ergo_token_class(jpype, org_appkit):
+    """``ErgoToken``, from whichever package this AppKit build puts it in.
+
+    It moved from ``org.ergoplatform.appkit`` to ``org.ergoplatform.sdk``; the
+    reputation system already carries this fallback and the payment path needs the same
+    one, or a token payment fails at signing time on one of the two builds.
+    """
+    try:
+        return org_appkit.ErgoToken
+    except AttributeError:
+        return jpype.JPackage("org").ergoplatform.sdk.ErgoToken
+
+
 # Function to process the payment, generating a transaction with the token in register R4
 def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> celaut_pb2.Contract:
-    with payment_lock:
-        amount = __mu_to_nanoerg(amount)
-        LOGGER(f"Process ergo platform payment for token {deposit_token} of {amount} nanoERG")
+    """Pay ``amount`` MU in ERG, the native unit of this ledger."""
+    return _settle(amount=amount, deposit_token=deposit_token, ledger=ledger,
+                   script=script, asset=None)
 
-        # Ergo rejects an output below the technical minimum box value, so a payment
-        # worth less than that cannot be settled on-chain at all. Fail loudly here
-        # instead of building a transaction the network will refuse.
-        if amount < SAFE_MIN_BOX_VALUE:
-            raise Exception(
-                f"Payment of {nanoerg_to_erg_str(amount)} ERG is below Ergo's minimum box "
-                f"value ({nanoerg_to_erg_str(SAFE_MIN_BOX_VALUE)} ERG). Nothing can be "
-                "settled for that amount; see deposits.MAX_FEE_OVERHEAD in the config."
+
+def _settle(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger,
+            script: bytes, asset) -> celaut_pb2.Contract:
+    """One payment, in ERG when ``asset`` is ``None`` and in that token otherwise.
+
+    One implementation rather than two, because everything that is *Ergo* here is shared
+    -- the wallet, the lock, the R4 deposit token, submitting, and waiting for two
+    confirmations -- and only the shape of the output box differs:
+
+    * In ERG the box **is** the payment: its value is the converted amount.
+    * In a token the box *carries* the payment: its value is the technical minimum a box
+      needs to exist (``SAFE_MIN_BOX_VALUE`` nanoERG, supplied by the payer along with
+      the fee, see #342 4.4) and the money is in its token list.
+
+    Anything else the input boxes happen to carry is returned to this wallet as change,
+    which AppKit builds. It is never sent to the payee: an asset nobody asked for is not
+    a payment, and forwarding one would mean paying for a transfer nobody requested.
+    """
+    with payment_lock:
+        if asset is None:
+            box_value = __mu_to_nanoerg(amount)
+            LOGGER(f"Process ergo platform payment for token {deposit_token} of {box_value} nanoERG")
+
+            # Ergo rejects an output below the technical minimum box value, so a payment
+            # worth less than that cannot be settled on-chain at all. Fail loudly here
+            # instead of building a transaction the network will refuse.
+            if box_value < SAFE_MIN_BOX_VALUE:
+                raise Exception(
+                    f"Payment of {nanoerg_to_erg_str(box_value)} ERG is below Ergo's minimum box "
+                    f"value ({nanoerg_to_erg_str(SAFE_MIN_BOX_VALUE)} ERG). Nothing can be "
+                    "settled for that amount; see deposits.MAX_FEE_OVERHEAD in the config."
+                )
+            token_units = 0
+        else:
+            token_units = rate.mu_to_base_units(amount, asset)
+            LOGGER(
+                f"Process ergo platform payment for token {deposit_token} of "
+                f"{rate.base_units_to_str(token_units, asset)} {asset.symbol}"
             )
+            # The smallest thing a token output can carry is one base unit. Below that
+            # there is nothing to put in the box, and a box with an empty token list is
+            # a payment of zero dressed as a payment.
+            if token_units < 1:
+                raise Exception(
+                    f"Payment of {amount} MU is less than one base unit of "
+                    f"{asset.symbol}, so there is nothing to settle; see "
+                    "deposits.MAX_FEE_OVERHEAD in the config."
+                )
+            # The carrier value, not the payment: it is ERG this node supplies so the
+            # token has a box to travel in.
+            box_value = SAFE_MIN_BOX_VALUE
 
         try:
             _, _, jpype, org_appkit = _ergo_runtime()
             ergo = __init_ergo()
             sender_address = __get_sender_addr(WALLET_MNEMONIC())
 
-            input_utxo = ergo.getInputBoxCovering(
-                amount_list=[amount],
-                sender_address=sender_address
-            )
+            if asset is None:
+                input_utxo = ergo.getInputBoxCovering(
+                    amount_list=[box_value],
+                    sender_address=sender_address
+                )
+            else:
+                # The inputs have to cover the token as well as the ERG, or the built
+                # transaction is short of the very thing it is paying in. `amount_list`
+                # is read by ergpy in whole ERG (`Parameters.OneErg * sum(...)`), and
+                # what this needs is the carrier box plus the fee.
+                input_utxo = ergo.getInputBoxCovering(
+                    amount_list=[__nanoerg_to_erg(box_value + DEFAULT_FEE)],
+                    sender_address=sender_address,
+                    tokenList=[[asset.token_id]],
+                    amount_tokens=[[token_units]],
+                )
             if not input_utxo:
                 raise Exception("No UTXO found for the contract address with the required token.")
 
             # ``script`` is the raw ErgoTree/propositionBytes; convert to an ErgoContract only
             # here, at the AppKit boundary. No textual-address decoding.
-            out_box = ergo._ctx.newTxBuilder() \
+            builder = ergo._ctx.newTxBuilder() \
                         .outBoxBuilder() \
-                        .value(amount) \
+                        .value(box_value)
+            if asset is not None:
+                ergo_token = _ergo_token_class(jpype, org_appkit)
+                builder = builder.tokens([ergo_token(asset.token_id, jpype.JLong(token_units))])
+            out_box = builder \
                         .registers([
                             org_appkit.ErgoValue.of(jpype.JString(deposit_token).getBytes("utf-8"))
                         ]) \
@@ -538,7 +623,9 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
                 if obj["numConfirmations"] > 1:
                     LOGGER(f"Tx {tx_id} verified.")
                     contract = celaut_pb2.Contract(ledger=ledger)
-                    set_token_id(contract, NATIVE_ASSET)
+                    # Which asset was paid, so the peer files the credit against the
+                    # method it advertised rather than against this contract's default.
+                    set_token_id(contract, NATIVE_ASSET if asset is None else asset.token_id)
                     set_script(contract, script)
                     set_contract_type(contract, CONTRACT.encode("utf-8"))
                     return contract
@@ -551,6 +638,42 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
 
 # Validate the payment by checking for an unspent box with the token in register R4 at the wallet.
 def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> bool:
+    """Prove an incoming ERG payment."""
+    return _validate(amount=amount, token=token, ledger=ledger, script=script, asset=None)
+
+
+def _box_token_amount(box_dict: dict, token_id: str) -> int:
+    """How much of ``token_id`` a box carries, scanning its whole asset list.
+
+    The **whole** list, never ``assets[0]``. The reputation reader can take the first
+    asset of a box because this node built that box and put exactly one token in it; a
+    payment box is built by the *payer*, so its asset order is the payer's choice and
+    reading position zero would reject an honest payment that happened to list another
+    token first -- with the money already on-chain.
+
+    A box carrying the same id twice is not something Ergo produces, but summing rather
+    than taking the first match costs nothing and cannot under-count.
+    """
+    total = 0
+    for entry in box_dict.get("assets") or []:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("tokenId") or "").lower() == token_id:
+            try:
+                total += int(entry.get("amount") or 0)
+            except (TypeError, ValueError):
+                continue
+    return total
+
+
+def _validate(amount: int, token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes,
+              asset) -> bool:
+    """Prove one incoming payment: ERG when ``asset`` is ``None``, that token otherwise.
+
+    Being paid in a token needs no ERG in this wallet at all -- the payer supplies both
+    the fee and the box the token travels in (#342 4.4) -- so nothing here reads this
+    node's own balance.
+    """
     try:
         assert LEDGER in ledger.tags, "Ledger does not match"
 
@@ -568,7 +691,10 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
             return False
 
         utxos = response.json()
-        expected = __mu_to_nanoerg(amount)
+        expected = (
+            __mu_to_nanoerg(amount) if asset is None
+            else rate.mu_to_base_units(amount, asset)
+        )
         for box_dict in utxos:
             if "additionalRegisters" in box_dict and "R4" in box_dict["additionalRegisters"]:
                 r4_value = box_dict["additionalRegisters"]["R4"]["renderedValue"]
@@ -579,10 +705,22 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
                     # so a correct payment routinely carries a few nanoERG more
                     # than the credit it asks for. Demanding equality rejected
                     # those with the money already on-chain. More than asked for
-                    # is never a problem -- the credit is what `expected` covers.
-                    if "value" in box_dict and box_dict["value"] >= expected:
+                    # is never a problem -- the credit is what `expected` covers,
+                    # and the excess stays in this wallet rather than being returned:
+                    # sending it back would mean building and paying for a
+                    # transaction nobody asked for.
+                    if asset is None:
+                        paid = box_dict.get("value")
+                        rendered = f"{paid} nanoERG"
+                    else:
+                        paid = _box_token_amount(box_dict, asset.token_id)
+                        rendered = f"{paid} base units of {asset.symbol}"
+                    if paid is not None and paid >= expected:
                         return True
-                    LOGGER(f"Insufficient amount for token {token}. Was {box_dict.get('value')} expected at least {expected}")
+                    LOGGER(
+                        f"Insufficient amount for token {token}. Was {rendered}, "
+                        f"expected at least {expected}"
+                    )
                     return False
 
         LOGGER(f"Token {token} not found in R4.")
@@ -591,3 +729,118 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
     except Exception as e:
         LOGGER(f"Error validating payment process: {str(e)}")
         return False
+
+
+def _token_settlement_floors_mu(asset) -> Tuple[int, int]:
+    """``(fee, smallest payable output)`` for a token method, in MU -- two assets in one pair.
+
+    The promise of this function is "both figures in MU", and for a token that is the
+    only scale that can hold both: the fee is paid in ERG and converts through
+    ``MU_PER_NANOERG``, while the smallest output is **one base unit of the token** and
+    converts through the token's own rate. `deposits.py` consumes MU and needs no more
+    than that (#342 5.4).
+
+    The fee counted here is the network fee *plus* the carrier box, because both are ERG
+    the payer parts with beyond the amount credited -- which is exactly what a fee
+    overhead is measuring. Charging only the network fee would size deposits as if the
+    carrier were free and let a token payment spend more on overhead than the operator's
+    ``MAX_FEE_OVERHEAD`` allows.
+    """
+    return (
+        rate.nanoerg_to_mu(DEFAULT_FEE + SAFE_MIN_BOX_VALUE),
+        rate.base_units_to_mu(1, asset),
+    )
+
+
+def _token_balance(total: Optional[dict], token_id: str) -> int:
+    """Confirmed balance of one token, in base units, out of a balance payload.
+
+    Takes the payload rather than an address so one read answers for every asset: the
+    explorer reports the ERG and the tokens of a wallet in the same response, and
+    asking twice would both double the calls on the payment path and let the two halves
+    of one decision see two different balances.
+    """
+    if not total:
+        return 0
+    return _box_token_amount(
+        {"assets": (total.get("confirmed") or {}).get("tokens") or []}, token_id
+    )
+
+
+def _token_check_sender_balance(amount: int, asset) -> bool:
+    """Can this wallet pay ``amount`` MU in ``asset``? Two assets have to answer yes.
+
+    A token transaction still pays its fee in ERG and still needs
+    ``SAFE_MIN_BOX_VALUE`` nanoERG to carry the token in the output, plus enough left to
+    build a change box. So a wallet full of the token and empty of ERG cannot pay --
+    which is the asymmetry of #342 4.4: such a node can be *paid* in the token
+    without ever holding ERG, but it cannot pay and cannot sweep.
+
+    Both shortfalls are named in the log, because "insufficient balance" on a wallet
+    visibly holding the token is a message an operator cannot act on.
+    """
+    try:
+        units = rate.mu_to_base_units(amount, asset)
+        # The carrier box the token travels in, the fee, and enough left to build a
+        # change box: a transaction that leaves nothing spendable behind cannot be built.
+        required_nanoerg = DEFAULT_FEE + SAFE_MIN_BOX_VALUE + SAFE_MIN_BOX_VALUE
+        # One read for both figures, so the two halves of this decision cannot disagree.
+        total = __balance_total(address=__get_sender_addr(WALLET_MNEMONIC()))
+        available_nanoerg = int(((total or {}).get("confirmed") or {}).get("nanoErgs") or 0)
+        available_units = _token_balance(total, asset.token_id)
+
+        missing = []
+        if available_units < units:
+            missing.append(
+                f"{asset.symbol}: required {rate.base_units_to_str(units, asset)}, "
+                f"available {rate.base_units_to_str(available_units, asset)}"
+            )
+        if available_nanoerg <= required_nanoerg:
+            missing.append(
+                f"ERG for the fee and the carrier box: required "
+                f"{nanoerg_to_erg_str(required_nanoerg)}, available "
+                f"{nanoerg_to_erg_str(available_nanoerg)}"
+            )
+        if missing:
+            LOGGER(f"Insufficient balance for the wallet. {'; '.join(missing)}.")
+            return False
+        return True
+    except Exception as e:
+        LOGGER(f"Error checking wallet balance: {str(e)}")
+        return False
+
+
+def methods():
+    """This contract's payment methods: ERG, plus one per configured asset.
+
+    ``1 + N`` from one module, one wallet and one lock. They share everything that is
+    Ergo's -- the wallet, ``payment_lock``, the AppKit session, the explorer client and
+    the ErgoTree helpers -- because a token on Ergo is not another contract: it is the
+    same P2PK script paid in different money (#342 4.1). Only the calls whose answer
+    depends on *which asset* are bound per method; everything else, including the
+    per-contract ``init`` and ``manager`` ticks, is forwarded to this module unchanged.
+
+    ERG comes first and the assets follow in the operator's declared order, because
+    that order is the payer's preference: the payment walk tries one method and falls
+    through to the next, so a node out of SigUSD but holding ERG pays in ERG with no
+    policy and no new setting -- and that has to be reproducible rather than
+    set-ordered.
+    """
+    from sys import modules
+
+    from src.payment_system.contracts.registry import PaymentMethod
+
+    # This module *is* the contract: a method that overrides nothing has to forward
+    # every call to it, so what a `PaymentMethod` wraps here is the module itself.
+    _this_module = modules[__name__]
+    built = [PaymentMethod(_this_module, NATIVE_ASSET)]
+    for asset in rate.assets():
+        built.append(PaymentMethod(_this_module, asset.token_id, calls={
+            "mu_per_unit": partial(rate.mu_per_whole_unit, asset),
+            "settlement_floors_mu": partial(_token_settlement_floors_mu, asset),
+            "mu_to_native": partial(rate.mu_to_base_units_exact, asset=asset),
+            "check_sender_balance": partial(_token_check_sender_balance, asset=asset),
+            "process_payment": partial(_settle, asset=asset),
+            "payment_process_validator": partial(_validate, asset=asset),
+        }))
+    return built
