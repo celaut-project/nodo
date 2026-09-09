@@ -1029,9 +1029,13 @@ ledgers:
       # a better position in their routing. Set it to 0 to opt out; that is one edit.
       DONATION_PERCENTAGE: "0.02"
       # Who this node funds. A prospective bet: it costs money, so this list is short.
-      # Weights are normalised, and they split what has been accrued. A share that
-      # would fall below Ergo's minimum output is not redistributed to the others --
-      # it stays accrued until it clears the floor, so a small weight is still paid.
+      # Weights are normalised, and each one is a share of everything this node has
+      # ever earned -- not of whatever transaction happens to be going out, which is a
+      # weaker and different promise. So a share that would fall below Ergo's minimum
+      # output is not redistributed to the others and is not returned to a common pot
+      # either: it stays owed to THAT wallet until it clears the floor. A weight of
+      # 0.001 is paid eventually rather than never, and `nodo donations` prints what
+      # has actually reached each address so you can check it.
       DONATION_WALLETS:
         - { address: "9gGZp7HRAFxgGWSwvS4hCbxM2RpkYr6pHvwpU4GPrpvxY7Y2nQo", weight: 1.0 }
       # Minimum donation payout (ERG, decimal string). Prevents dust transfers; below

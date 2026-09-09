@@ -2622,7 +2622,7 @@ class SQLConnection(metaclass=Singleton):
         return debts
 
     def donation_paid_by_address(self, ledger: str, contract_hash: str,
-                                 token_id: str) -> Dict[str, Decimal]:
+                                 token_id: str) -> Optional[Dict[str, Decimal]]:
         """What each wallet has been credited on one method, cumulatively.
 
         This is what makes a donation *weight* mean a share of everything the method
@@ -2632,9 +2632,14 @@ class SQLConnection(metaclass=Singleton):
         :func:`src.payment_system.donations.split.entitlements`.
 
         An empty mapping for a method that has never paid out, which is the same thing
-        as every wallet being owed its full share.
+        as every wallet being owed its full share -- and **None** when the rows could
+        not be read, which is a different fact and must not be confused with it. Read as
+        "nobody has been paid", a transient read failure hands an accumulated claim to
+        whichever wallets clear the floor today: an address unpayable for a month is
+        owed the lot, and would get half. So the caller aborts instead and the debt
+        waits for the next tick. ``donation_owed`` already fails in that direction;
+        this now matches it.
         """
-        paid: Dict[str, Decimal] = {}
         try:
             rows = self._execute(
                 "SELECT address, paid_native FROM donation_payouts "
@@ -2646,7 +2651,8 @@ class SQLConnection(metaclass=Singleton):
                 f'Failed to read what donation wallets have been paid on '
                 f'{ledger}/{token_id}: {e}'
             )
-            return paid
+            return None
+        paid: Dict[str, Decimal] = {}
         for row in rows:
             address = row['address']
             if address:
@@ -2678,7 +2684,8 @@ class SQLConnection(metaclass=Singleton):
 
     def settle_donation(self, *, ledger: str, contract_hash: str, token_id: str,
                         paid_native: Decimal, records: List[dict],
-                        credited: Sequence[Tuple[str, int]] = ()) -> bool:
+                        credited: Sequence[Tuple[str, int]] = (),
+                        paid_before: Optional[Dict[str, Decimal]] = None) -> bool:
         """Decrement a debt by what was just paid, and record the payments that paid it.
 
         One transaction, deliberately. The debt is decremented only *after* the
@@ -2699,6 +2706,12 @@ class SQLConnection(metaclass=Singleton):
         *that wallet's* entitlement, its share of the fee included. It rides in the same
         commit as the decrement because the two are one fact -- a crash between them
         would either pay a wallet twice or credit it for money that never left.
+
+        ``paid_before`` is the cumulative map the payout planned against, carried in
+        rather than re-read here. This runs after the transaction is on the wire, where
+        a failed read can abort nothing: read again and a transient failure would write
+        each credit as though the wallet had never been paid, wiping its history and
+        handing it its whole share a second time on a later tick.
         """
         paid = _decimal_or_zero(paid_native)
         if paid <= 0:
@@ -2719,11 +2732,14 @@ class SQLConnection(metaclass=Singleton):
                     "owed_native = excluded.owed_native, updated_at = CURRENT_TIMESTAMP",
                     (ledger, contract_hash, token_id, _plain(remaining))
                 )]
-                already = self.donation_paid_by_address(ledger, contract_hash, token_id)
+                # The map the payout planned against, never a fresh read: see the note
+                # on `paid_before` above.
+                already = paid_before or {}
                 for address, amount in credited or ():
                     if not address:
                         continue
-                    total = already.get(address, Decimal(0)) + _decimal_or_zero(amount)
+                    total = (_decimal_or_zero(already.get(address, 0))
+                             + _decimal_or_zero(amount))
                     queries.append((
                         "INSERT INTO donation_payouts "
                         "(ledger, contract_hash, token_id, address, paid_native) "
