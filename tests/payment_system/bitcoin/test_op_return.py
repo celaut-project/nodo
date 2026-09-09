@@ -126,6 +126,45 @@ class OpReturnValidationTests(unittest.TestCase):
                 script=script_pubkey_from_address(OTHER),
             ))
 
+    def test_the_receiving_path_never_mints_an_address(self):
+        """Minting here would check the payment against a script no payer was told.
+
+        `payment_process_validator` runs on the receiving side. An address minted from
+        it would be one nobody has been advertised, so a payment that is already
+        on-chain would be measured against the wrong script and rejected -- and it
+        would rewrite config.yaml from the payment path, which is not where that
+        belongs. `init()` is the one place that may mint.
+        """
+        chain = mock.Mock()
+        with mock.patch.object(btc, "backend", return_value=chain), \
+                mock.patch.object(btc.env_manager, "get", return_value=""), \
+                mock.patch.object(btc.env_manager, "set") as setter:
+            self.assertFalse(btc.payment_process_validator(
+                amount=1_000, token=TOKEN, ledger=LEDGER,
+                script=script_pubkey_from_address(ADDRESS),
+            ))
+        self.assertFalse(setter.called, "the payment path rewrote the config")
+        self.assertFalse(chain.new_address.called, "the payment path minted an address")
+
+    def test_init_is_what_mints_and_stores_the_address(self):
+        chain = mock.Mock()
+        chain.new_address.return_value = ADDRESS
+        stored = {}
+        with mock.patch.object(btc, "backend", return_value=chain), \
+                mock.patch.object(btc.env_manager, "get", return_value=""), \
+                mock.patch.object(btc.env_manager, "set",
+                                  side_effect=lambda key, value: stored.__setitem__(key, value)), \
+                mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \
+                mock.patch.object(btc.sql_connection, "SQLConnection") as sql:
+            btc.init()
+
+        self.assertEqual(stored.get(btc.RECEIVING_ADDRESS_KEY), ADDRESS)
+        # Advertised as the raw scriptPubKey, never as a readable address.
+        contract = sql.return_value.add_contract.call_args.kwargs["contract"]
+        from src.utils.contract_xattrs import get_script, get_token_id
+        self.assertEqual(get_script(contract), script_pubkey_from_address(ADDRESS))
+        self.assertEqual(get_token_id(contract), "BTC")
+
     def test_a_transaction_reorged_out_between_the_two_checks_is_rejected(self):
         """The payer counted confirmations; by the time we look, they are gone.
 

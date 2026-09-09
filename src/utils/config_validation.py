@@ -406,13 +406,23 @@ def _validate_pricing_by_arch(pricing: Dict[str, Any]) -> None:
             _require_whole_mu(entry, f"pricing.BY_ARCH.{arch}", key)
 
 
-def _warn_if_charges_cannot_settle(pricing: Dict[str, Any], rate: Decimal, warn) -> None:
-    """Do prices and the payment rate still live on the same scale?
+def _warn_if_charges_cannot_settle(
+    pricing: Dict[str, Any], rate: Decimal, warn, *,
+    rate_key: str = "ledgers.ergo.payments.MU_PER_NANOERG",
+    unit: str = "nanoERG",
+) -> None:
+    """Do prices and **this** payment system's rate still live on the same scale?
 
     This is the failure the gas model actually shipped with: charges of order 1e2 and a
     conversion factor of 1e58, so every real charge became zero on-chain and nothing
-    could ever be settled. Configuring prices (MU) and the rate (MU per nanoERG)
+    could ever be settled. Configuring prices (MU) and the rate (MU per base unit)
     separately makes it reachable again, so it is checked rather than assumed.
+
+    Asked once per registered payment system rather than only of Ergo. A second system
+    makes this *more* likely, not less: a satoshi is worth about a million nanoERG, so
+    a rate borrowed from one chain by analogy with the other misprices the node by six
+    orders of magnitude -- and the direction that matters is per system, because a node
+    can be priced correctly for one and absurdly for the other at the same time.
 
     A warning, not an error: a node may legitimately price everything at zero, and an
     operator mid-edit should not be locked out of their own config.
@@ -424,14 +434,13 @@ def _warn_if_charges_cannot_settle(pricing: Dict[str, Any], rate: Decimal, warn)
         reference_mu = Decimal(str(reference if reference not in (None, "") else 0))
     except (InvalidOperation, ValueError, TypeError):
         return
-    if reference_mu <= 0:
+    if reference_mu <= 0 or rate <= 0:
         return
     if reference_mu / rate < 1:
         warn(
             f"pricing.RAM_MU_PER_GIB_HOUR={reference_mu} MU is worth less than one "
-            f"nanoERG at ledgers.ergo.payments.MU_PER_NANOERG={rate}, so an hour of a "
-            "GiB of memory settles as nothing on-chain. Raise the prices or lower the "
-            "rate; see docs/PRICING.md."
+            f"{unit} at {rate_key}={rate}, so an hour of a GiB of memory settles as "
+            "nothing on-chain. Raise the prices or lower the rate; see docs/PRICING.md."
         )
 
 
@@ -667,6 +676,53 @@ def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
             "ledgers.bitcoin.payments.MU_PER_SATOSHI is 1, which is MU_PER_NANOERG's "
             "value. A satoshi is worth about a million nanoERG, so this sells an hour "
             "of compute for roughly a millionth of its price. See docs/BITCOIN.md."
+        )
+
+    # And the check that two payment systems are on *compatible* scales, which needs no
+    # market data at all: their two rates imply an exchange rate between the chains, and
+    # an implausible one is a rate borrowed from the other by analogy.
+    #
+    # Deliberately not Ergo's per-charge settle-check applied here. On-chain Bitcoin
+    # cannot settle a single GiB-hour by design -- §5 of the issue that added this
+    # spells out the arithmetic, and the prepaid-deposit model is what absorbs it -- so
+    # that check fires on a correctly configured node, and a warning that sounds on the
+    # shipped config trains operators to ignore warnings.
+    if warn is not None:
+        _warn_if_the_two_rates_disagree(config, rate_value, warn)
+
+
+def _warn_if_the_two_rates_disagree(config: Dict[str, Any], mu_per_satoshi: Decimal,
+                                    warn) -> None:
+    """Do this node's two payment rates imply a believable world?
+
+    ``MU_PER_NANOERG`` and ``MU_PER_SATOSHI`` are each "MU per base unit", so their
+    ratio *is* this node's opinion about what a satoshi is worth in nanoERG -- and since
+    one BTC is 1e8 satoshi and one ERG is 1e9 nanoERG, they imply a BTC/ERG price
+    without anybody having to supply one.
+
+    A config implying that one BTC is worth less than one ERG is not a market view, it
+    is a rate copied from the other chain by analogy. That is the mistake worth catching
+    here, and it is catchable with arithmetic rather than with a price feed.
+    """
+    ergo = ((config.get("ledgers") or {}).get("ergo") or {}).get("payments") or {}
+    raw = ergo.get("MU_PER_NANOERG")
+    if raw in (None, ""):
+        return
+    try:
+        mu_per_nanoerg = Decimal(str(raw).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return
+    if mu_per_nanoerg <= 0 or mu_per_satoshi <= 0:
+        return
+
+    # value(BTC)/value(ERG) = (1e8 x value(sat)) / (1e9 x value(nanoERG))
+    implied = (mu_per_satoshi / mu_per_nanoerg) / 10
+    if implied < 1:
+        warn(
+            f"ledgers.bitcoin.payments.MU_PER_SATOSHI={mu_per_satoshi} and "
+            f"ledgers.ergo.payments.MU_PER_NANOERG={mu_per_nanoerg} together say one "
+            f"BTC is worth {implied} ERG, which is not a market anyone trades in. One "
+            "of the two rates was probably copied from the other; see docs/BITCOIN.md."
         )
 
 

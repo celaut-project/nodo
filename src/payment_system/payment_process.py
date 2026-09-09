@@ -31,7 +31,12 @@ env_manager = ConfigManager()
 
 COMMUNICATION_ATTEMPTS = int(env_manager.get("COMMUNICATION_ATTEMPTS"))
 COMMUNICATION_ATTEMPTS_DELAY = int(env_manager.get("COMMUNICATION_ATTEMPTS_DELAY"))
-PAYMENT_MANAGER_ITERATION_TIME = int(env_manager.get("ledgers.ergo.payments.PAYMENT_MANAGER_ITERATION_TIME"))
+# How often the manager loop wakes up when no contract says otherwise, and the floor on
+# how often it may. The interval itself is each contract's own -- it used to be read
+# from *Ergo's* config block and applied to everybody, so a node with no `ledgers.ergo`
+# block could not even import this module.
+DEFAULT_MANAGER_ITERATION_TIME = 86400
+MIN_MANAGER_QUANTUM = 60
 
 sc = SQLConnection()
 deposit_generation_locked = False
@@ -713,14 +718,52 @@ def _run_managers(managers: dict) -> None:
             _l.LOGGER(f"Exception on manage interface {key}. {str(e)}")
 
 
+def _manager_quantum(intervals: dict) -> int:
+    """How long to sleep before looking again.
+
+    The shortest interval any contract asked for, floored so a misconfigured second
+    means a tick a minute rather than a busy loop. One loop with a quantum rather than
+    a thread per contract: the pause below is a node-wide state, and two threads
+    entering it would take turns locking each other out of deposit generation.
+    """
+    if not intervals:
+        return DEFAULT_MANAGER_ITERATION_TIME
+    return max(MIN_MANAGER_QUANTUM, min(intervals.values()))
+
+
+def _due_managers(managers: dict, intervals: dict, last_run: dict, now: float) -> dict:
+    """The contracts whose own interval has elapsed. Never raises.
+
+    A contract that declares no interval runs every quantum, which is the old
+    behaviour for anything that does not say.
+    """
+    due = {}
+    for hash_, manage in managers.items():
+        interval = intervals.get(hash_)
+        previous = last_run.get(hash_)
+        if interval is None or previous is None or now - previous >= interval:
+            due[hash_] = manage
+    return due
+
+
 def __manage_interfaces():
     global deposit_generation_locked
+    last_run: dict = {}
     while True:
-        sleep(PAYMENT_MANAGER_ITERATION_TIME)
-        _l.LOGGER("Execute payment manager iteration.")
-
         payment_envs = _payment_envs()
+        try:
+            intervals = payment_envs.manager_iteration_times()
+        except Exception:
+            intervals = {}
+        sleep(_manager_quantum(intervals))
+
         managers = payment_envs.manage_interfaces()
+        managers = _due_managers(managers, intervals, last_run, monotonic())
+        if not managers:
+            continue
+        _l.LOGGER("Execute payment manager iteration.")
+        for hash_ in managers:
+            last_run[hash_] = monotonic()
         try:
             pausing = set(payment_envs.needs_unspent_proof())
         except Exception:

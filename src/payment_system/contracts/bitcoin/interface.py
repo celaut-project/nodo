@@ -142,6 +142,11 @@ def transaction_id_reporting(reporter):
         _transaction_id_reporter.reset(token)
 
 
+def manager_iteration_time() -> int:
+    """How often this contract's periodic job should run, in seconds."""
+    return max(1, int(env_manager.get("ledgers.bitcoin.payments.PAYMENT_MANAGER_ITERATION_TIME", 86400) or 86400))
+
+
 def unavailable_reason() -> Optional[str]:
     """Why this contract cannot settle right now, or ``None`` when it can.
 
@@ -220,22 +225,46 @@ def settlement_floors_mu() -> Tuple[int, int]:
 
 
 def get_wallet_address() -> str:
-    """The one address this node is paid into, stable across restarts.
+    """The one address this node is paid into. **Reads; never mints.**
 
     One address, deliberately: the advertised ``script`` has to be a fixed
     `scriptPubKey` for a payer to build against, and rotating it would strand payments
-    aimed at the old one. Asked of Core once and written back to the config, the same
-    way this node persists the values it derives for Ergo -- so it survives a restart
-    without the operator having to choose an address by hand.
+    aimed at the old one.
+
+    Minting belongs to `ensure_receiving_address`, which `init()` calls, and this must
+    not do it -- it is reached from `payment_process_validator`, on the receiving path.
+    An address minted there would be one no payer was ever told about, so the validator
+    would check an incoming payment against the wrong script and reject a payment that
+    is already on-chain. It would also rewrite `config.yaml` from the payment path,
+    which is not where that belongs.
     """
     configured = str(env_manager.get(RECEIVING_ADDRESS_KEY) or "").strip()
-    if configured:
-        if not is_valid_bitcoin_address(configured, network=NETWORK()):
-            raise ValueError(
-                f"{RECEIVING_ADDRESS_KEY}={configured!r} is not a valid "
-                f"{NETWORK()} address. Clear it and the node will ask bitcoind for one."
-            )
-        return configured
+    if not configured:
+        raise ValueError(
+            f"{RECEIVING_ADDRESS_KEY} is not set, so this node has no Bitcoin address "
+            "to be paid at. It is filled in when the payment interfaces are "
+            "initialised; check the node log for why that did not happen."
+        )
+    if not is_valid_bitcoin_address(configured, network=NETWORK()):
+        raise ValueError(
+            f"{RECEIVING_ADDRESS_KEY}={configured!r} is not a valid "
+            f"{NETWORK()} address. Clear it and the node will ask bitcoind for one."
+        )
+    return configured
+
+
+def ensure_receiving_address() -> str:
+    """The receiving address, asking Core for one the first time and storing it.
+
+    Called from `init()` only. Written back to the config the same way this node
+    persists the other values it derives, so what peers are told stays the same across
+    restarts without the operator having to choose an address by hand.
+    """
+    try:
+        return get_wallet_address()
+    except ValueError as exc:
+        if "is not a valid" in str(exc):
+            raise
 
     address = backend().new_address()
     if not is_valid_bitcoin_address(address, network=NETWORK()):
@@ -307,15 +336,24 @@ def transaction_history(limit: int = 10) -> list:
 
 
 def init():
-    """Advertise this contract: the receiving address' `scriptPubKey` as the script."""
+    """Advertise this contract: the receiving address' `scriptPubKey` as the script.
+
+    The one place that may mint an address, because it is the one place that runs
+    before anybody has been told what to pay.
+    """
+    address = ensure_receiving_address()
+    script = script_pubkey_from_address(address, network=NETWORK())
+    if script is None:
+        raise ValueError(f"{address} is not a segwit address, so it has no scriptPubKey")
+
     contract = celaut_pb2.Contract(ledger=bitcoin_ledger)
     set_token_id(contract, NATIVE_ASSET)
     # Canonical value: the raw scriptPubKey a payer builds its output against.
-    set_script(contract, get_wallet_script())
+    set_script(contract, script)
     # Stable type identity for cross-node matching (its sha3 == CONTRACT_HASH).
     set_contract_type(contract, CONTRACT.encode("utf-8"))
     # Derived address for local display only; never the source of truth.
-    set_address(contract, get_wallet_address())
+    set_address(contract, address)
     sql_connection.SQLConnection().add_contract(contract=contract)
 
 
