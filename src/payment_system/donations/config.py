@@ -69,7 +69,9 @@ def _asset_block(ledger: str, asset: str) -> Dict[str, Any]:
         for entry in assets:
             if not isinstance(entry, dict):
                 continue
-            if str(entry.get("TOKEN_ID") or "").strip() == asset:
+            # Case-insensitively: a missed match here reads the ledger's donation
+            # percentage for a token that declared its own.
+            if str(entry.get("TOKEN_ID") or "").strip().lower() == str(asset).lower():
                 return entry
     return payments
 

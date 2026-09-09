@@ -779,6 +779,13 @@ def _settle(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger,
             sender_address = __get_sender_addr(WALLET_MNEMONIC())
 
             if asset is None:
+                # NOTE: `box_value` is nanoERG and ergpy reads `amount_list` in whole
+                # ERG (`Parameters.OneErg * sum(...)`), so this asks for 1e9 times the
+                # payment. `getCoveringBoxesFor` cannot cover that and hands back the
+                # boxes it did load, which do cover the real amount -- so it works, by
+                # accident. Left as it is rather than corrected blind: it is the
+                # settled ERG path and there is no Ergo node here to try the fix
+                # against. The token branch below passes the figure honestly.
                 input_utxo = ergo.getInputBoxCovering(
                     amount_list=[box_value],
                     sender_address=sender_address
