@@ -88,6 +88,12 @@ def _as_int(value) -> int:
 # paid us, or one we paid a peer. `status` is orthogonal and still says how far it got.
 PAYMENT_PURPOSE_DONATION = "donation"
 
+# How this node refers to *itself* in `contract_instance.peer_id`. Named here because
+# two different conventions meet over it: the catalogue writes "LOCAL", while the
+# execution balancer calls the same candidate 'local'. Anything joining the two has to
+# translate, and a mismatch is silent -- it reads as "this node has no such row".
+LOCAL_PEER_ID = "LOCAL"
+
 PAYMENT_INSERT = """
     INSERT INTO payments (
         tx_id, direction, status, peer_id, client_id, deposit_token,
@@ -1733,7 +1739,7 @@ class SQLConnection(metaclass=Singleton):
         # If the loop finishes without finding a match, return the same.
         return ledger_to_check
 
-    def add_contract(self, contract: celaut_pb2.Contract, peer_id: str = "LOCAL", mu_per_unit: int = 0):
+    def add_contract(self, contract: celaut_pb2.Contract, peer_id: str = LOCAL_PEER_ID, mu_per_unit: int = 0):
         """
         Adds a contract to the database.
 
@@ -2623,6 +2629,11 @@ class SQLConnection(metaclass=Singleton):
         The decrement is a subtraction rather than a reset, so the fraction that was
         below a whole native unit -- and anything accrued while the transaction was in
         flight -- stays owed instead of being written off.
+
+        Each entry of ``records`` is one output: ``{tx_id, address, amount_mu}``, and
+        nothing else. The columns that are the same for every row of one payout --
+        direction, status, purpose, ledger, contract -- are filled in here, so an entry
+        carrying one of those would collide with it.
         """
         paid = _decimal_or_zero(paid_native)
         if paid <= 0:

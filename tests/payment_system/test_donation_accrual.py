@@ -66,6 +66,11 @@ class AccrualTests(unittest.TestCase):
         )
         self.rates.start()
         self.addCleanup(self.rates.stop)
+        self.natives = mock.patch.object(
+            envs, "native_assets", return_value={CONTRACT: "ERG"}
+        )
+        self.natives.start()
+        self.addCleanup(self.natives.stop)
         self.wallets = mock.patch(
             "src.payment_system.donations.config.pay_wallets",
             return_value=[object()],
@@ -122,6 +127,19 @@ class AccrualTests(unittest.TestCase):
             contract_hash="a-contract-with-no-native-unit", asset="ERG",
         ))
         self.assertEqual(self.recorder.debts, {})
+
+    def test_a_payment_that_names_no_asset_owes_the_chains_native_unit(self):
+        """Not a debt of its own under the empty string.
+
+        A payer that advertises no ``token_id`` is paying the chain's own unit -- the
+        only thing it can be paying while a contract settles in one asset. Accrued
+        under "", the debt would be one no payout ever looks for: it would grow for
+        ever and never be paid, and nothing would raise.
+        """
+        self._accrue(1_000_000, asset="")
+        self.assertEqual(
+            self.recorder.debts, {("ergo", CONTRACT, "ERG"): Decimal("20000")}
+        )
 
     def test_a_payment_with_no_ledger_accrues_nothing(self):
         self.assertIsNone(accrual.accrue(

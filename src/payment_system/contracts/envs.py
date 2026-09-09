@@ -116,6 +116,23 @@ def mu_to_native() -> Dict[contract_hash, Callable[[amount], Decimal]]:
     }
 
 
+def native_assets() -> Dict[contract_hash, str]:
+    """Per contract: the reserved symbol its ledger names its own native unit by.
+
+    What an asset is called is normally read off the wire -- a payment says what it
+    settles in. This answers the case where it says nothing: a payer that advertises no
+    ``token_id`` is paying the chain's own unit, and that is the only thing it *can* be
+    paying if the contract settles in one asset.
+
+    Without this, an unnamed asset would accrue its debt under the empty string, which
+    no payout looks for: the debt would grow for ever and never be paid, silently.
+    """
+    ergo = _ergo_interface()
+    return {
+        ergo.CONTRACT_HASH: ergo.NATIVE_ASSET,
+    }
+
+
 def donation_scanners() -> Dict[ledger, Any]:
     """Per LEDGER: how to read donations paid to an address on that chain.
 

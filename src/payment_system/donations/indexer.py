@@ -111,6 +111,12 @@ def refresh() -> int:
             LOGGER(f"Donation indexing failed for {ledger}: {e}")
     if total:
         LOGGER(f"Indexed {total} new donation(s).")
+        # The credit is cached off the routing path, so a scan that found something has
+        # to say so -- otherwise a donation is indexed and then ignored until the cache
+        # window happens to expire.
+        from src.payment_system.donations.credit import forget_cached_bonuses
+
+        forget_cached_bonuses()
     return total
 
 

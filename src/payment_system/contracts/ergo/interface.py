@@ -56,8 +56,14 @@ WALLET_MNEMONIC = lambda: env_manager.get("ledgers.ergo.WALLET_MNEMONIC")
 ERGO_NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
 COLD_WALLET = lambda: env_manager.get("ledgers.ergo.payments.COLD_WALLET") or ""
 # Read per call, not captured at import, so a test (and the TUI's restart-into-a-new-
-# config) sees the value the node is actually running with.
-SIMULATE_PAYMENTS = lambda: bool(env_manager.get("SIMULATE_PAYMENTS"))
+# config) sees the value the node is actually running with -- and by its explicit path,
+# so the key has one unambiguous home rather than relying on `ConfigManager.get`'s
+# scan-every-section fallback for a dotless name.
+#
+# Plain truthiness, matching `contracts.envs.SIMULATED` exactly. That is deliberate: the
+# two must never disagree about whether this node is simulating, and a stricter parse
+# here would make them differ on a value one of them mis-reads.
+SIMULATE_PAYMENTS = lambda: bool(env_manager.get("general_flags.SIMULATE_PAYMENTS"))
 
 # Donations are a share of *earnings* and have nothing to do with this wallet's excess
 # being swept to cold storage: they are accrued when a payment arrives and paid on the
@@ -375,6 +381,20 @@ def _pay_accrued_donations():
             return
 
         _, simple_send, _, _ = _ergo_runtime()
+        # The debt was accrued out of money that arrived, so the wallet should hold it
+        # -- but a peer deposit or a manual transfer may have spent it since. Checked
+        # before broadcasting so the log says "not enough ERG" rather than whatever
+        # AppKit raises, and so the debt is visibly kept rather than looking lost.
+        required = plan.total_native + SAFE_MIN_BOX_VALUE
+        available = __confirmed_balance_nanoerg(__get_sender_addr(WALLET_MNEMONIC()))
+        if available < required:
+            LOGGER(
+                f"Not paying the donation yet: it needs {nanoerg_to_erg_str(required)} ERG "
+                f"(outputs, fee and a change box) and the wallet holds "
+                f"{nanoerg_to_erg_str(available)} ERG. The debt stays accrued."
+            )
+            return
+
         # The same lock a deposit takes. Without it a donation and a payment can pick
         # the same input box and one of them becomes a double spend.
         with payment_lock:

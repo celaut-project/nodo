@@ -73,6 +73,13 @@ def accrue(
         if owed <= 0:
             return None
 
+        # A payment that named no asset is paying the chain's native unit -- the only
+        # thing it can be paying while a contract settles in one asset. Resolved here
+        # rather than trusted as-is, because a debt accrued under the empty string is
+        # one no payout looks for: it would grow for ever and never be paid.
+        if not asset:
+            asset = envs.native_assets().get(contract_hash, "")
+
         new_total = SQLConnection().accrue_donation(
             ledger=ledger,
             contract_hash=contract_hash,
