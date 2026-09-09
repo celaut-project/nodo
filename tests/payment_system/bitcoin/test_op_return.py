@@ -126,6 +126,26 @@ class OpReturnValidationTests(unittest.TestCase):
                 script=script_pubkey_from_address(OTHER),
             ))
 
+    def test_a_transaction_reorged_out_between_the_two_checks_is_rejected(self):
+        """The payer counted confirmations; by the time we look, they are gone.
+
+        `listreceivedbyaddress` is asked for transactions with at least
+        MIN_CONFIRMATIONS, so one that left the chain is simply not there -- and the
+        answer is no rather than an exception, which is what makes the orchestrator
+        record it as a refused deposit instead of crediting a client for nothing.
+        """
+        chain = mock.Mock()
+        chain.list_received.return_value = [{"txids": []}]
+        with mock.patch.object(btc, "backend", return_value=chain), \
+                mock.patch.object(btc, "get_wallet_address", return_value=ADDRESS), \
+                mock.patch.object(btc.rate, "mu_per_satoshi", return_value=Decimal(1)), \
+                mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \
+                mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: 1):
+            self.assertFalse(btc.payment_process_validator(
+                amount=1_000, token=TOKEN, ledger=LEDGER,
+                script=script_pubkey_from_address(ADDRESS),
+            ))
+
     def test_a_transaction_that_cannot_be_read_does_not_answer_no(self):
         """Could not look is not did not pay.
 

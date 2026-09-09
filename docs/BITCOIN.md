@@ -1,0 +1,217 @@
+# Bitcoin
+
+`nodo` can be paid in BTC. This mirrors [`ERGO.md`](ERGO.md), and the first thing to
+read is not how to configure it but what it is *for*.
+
+## On-chain Bitcoin is for coarse, infrequent deposits
+
+A transaction here costs real money, and that changes what the feature is. With an
+illustrative market — **example arithmetic, not a quoted price** — of ERG at $0.50 and
+BTC at $100,000, and a 184 vB transaction at 5 sat/vB:
+
+| | Ergo | Bitcoin |
+|---|---|---|
+| transaction fee | 0.001 ERG ≈ $0.0005 | ~920 sat ≈ $0.92 |
+| minimum output | 0.001 ERG ≈ $0.0005 | 294 sat ≈ $0.29 |
+| smallest settleable deposit | ≈ $0.001 | ≈ **$1.21** |
+| full deposit at 2 % fee overhead | 0.05 ERG ≈ $0.025 | 46,000 sat ≈ **$46** |
+
+Two conclusions follow, and both are shipped as defaults rather than left to be
+discovered:
+
+- **This is node-to-node, not client-topping-up.** The prepaid-deposit model already
+  fits — one large deposit spent down by many maintenance ticks — but
+  `MAX_FEE_OVERHEAD` has to be far looser than Ergo's or the node demands years of
+  runtime up front. Bitcoin's block ships at `0.25`, not `0.02`.
+- **The free tier is unaffected.** A new client's credit is granted locally and settled
+  by nobody.
+
+Lightning is what would make BTC usable at this node's ordinary charge sizes. It is a
+separate payment contract with its own rate, and it slots into the same registry — the
+work in issue #340 is what makes it a small change instead of a rewrite. It is not
+implemented.
+
+## What you need
+
+A Bitcoin node you control. `nodo` talks to it over JSON-RPC and holds no key: Core
+signs, broadcasts, counts confirmations and keeps the wallet. That means **no new
+runtime and no JVM** — a node that will not run a JVM can be paid in BTC even though it
+cannot be paid in ERG.
+
+Back up **bitcoind's wallet**, not `config.yaml`. Unlike Ergo, `nodo` neither generates
+nor stores a seed for this chain, and it does not write one into your config.
+
+## Configuration
+
+```yaml
+ledgers:
+  bitcoin:
+    tags: [ bitcoin ]
+    NETWORK: mainnet                 # mainnet | testnet | signet | regtest
+    RPC_URL: "http://127.0.0.1:8332"
+    RPC_COOKIE_PATH: "~/.bitcoin/.cookie"   # or RPC_USER / RPC_PASSWORD
+    WALLET_NAME: "nodo"
+    WALLET_KEYS_EXTERNAL: true       # the keys are Core's, not this file's
+    payments:
+      MU_PER_SATOSHI: ""             # you must set this -- see below
+      MIN_CONFIRMATIONS: 1
+      TARGET_CONF: 6
+      MAX_FEE_RATE_SAT_VB: 100
+      HOT_WALLET_LIMITS: "0.05"
+      COLD_WALLET: ""
+      COLD_WALLET_MIN_TRANSFER: "0.01"
+      MAX_FEE_OVERHEAD: 0.25
+      RECEIVING_ADDRESS: ""          # filled in by the node
+```
+
+The cookie is preferred and is what Core writes on every start, so the ordinary setup
+keeps no credential in `config.yaml` at all. `RPC_USER` / `RPC_PASSWORD` are the
+fallback. The RPC password is never written to a log, a URL or an error message.
+
+### `MU_PER_SATOSHI` has no default, on purpose
+
+This is the one setting you cannot skip, and leaving it empty is a working state: **the
+node simply does not offer Bitcoin.**
+
+MU is `nodo`'s unit of account and has no intrinsic value; each payment contract says
+what one MU is worth in its own money. A satoshi and a nanoERG are about **six orders of
+magnitude apart**, so copying Ergo's `MU_PER_NANOERG: 1` by analogy would sell an hour
+of compute for roughly a millionth of its price. That is the exact failure
+[`PRICING.md`](PRICING.md) exists to prevent, and the one the old gas model shipped
+with — so there is no borrowed default to fall into.
+
+Work it out against your own market:
+
+```
+MU_PER_SATOSHI = MU_PER_NANOERG × (value of one nanoERG / value of one satoshi)
+```
+
+At $0.50/ERG and $100,000/BTC with `MU_PER_NANOERG: 1`, that is about `2000000`. The
+node warns at startup if you set it to `1`, because 1 is `MU_PER_NANOERG`'s value and
+copying it is the specific mistake worth naming.
+
+Until it is set: the contract is not registered, nothing is advertised to peers, `btc`
+is not offered as a display unit, and `nodo donations` shows no Bitcoin block. Nothing
+half-works.
+
+## How a payment is tied to its deposit
+
+Ergo writes the deposit token into register `R4` of the box it pays. Bitcoin has no
+register, so `nodo` uses the literal translation: **one static receiving address, plus an
+`OP_RETURN` output carrying the token.**
+
+- The advertised `script` xattr is one fixed `scriptPubKey` — the bytes, never a
+  human-readable address, exactly as Ergo advertises propositionBytes.
+- The receiving address is asked of Core once and written back to
+  `payments.RECEIVING_ADDRESS`, so what peers are told stays the same across restarts.
+- It costs ~43 extra vB and reuses one address. That is the same privacy posture Ergo
+  already has here.
+
+The alternative — an xpub advertised, one derived address per deposit — is better for
+privacy and cheaper, but it publishes that account's whole receiving history to every
+peer that reads `GetPeerInfo`. Not in this version.
+
+### Validation, and what "at least" means
+
+A payment is accepted when a transaction with at least `MIN_CONFIRMATIONS`
+confirmations carries the deposit token in an `OP_RETURN` and pays **at least** the
+expected amount to this node's script.
+
+At least, not exactly: the payer converts our MU figure from its own scale and has to
+round down to a whole MU of ours, so a correct payment routinely carries a little more
+than the credit it asks for. Demanding equality would reject payments with the money
+already on-chain. Anything extra is simply kept — the same rule Ergo applies to an
+overpayment.
+
+## Confirmations, and the two Ergo-shaped constants around them
+
+The payer waits, exactly as it does on Ergo: `process_payment` polls until
+`MIN_CONFIRMATIONS` and only then tells the peer. The receiver therefore validates
+something already final and answers accepted-or-rejected in one call, with no
+intermediate deposit-token state. That also disposes of RBF for free — a confirmed
+transaction cannot be replaced — leaving only a shallow reorg, which is what
+`MIN_CONFIRMATIONS` is the knob for. A transaction Core reports with *negative*
+confirmations has been replaced or reorged out; that is not "not yet", and `nodo` stops
+rather than polling until the deposit token expires.
+
+What is genuinely different is only how *long* the wait is, and that broke two constants
+sized for Ergo:
+
+- **The deposit-token deadline.** One hour is generous on Ergo and short enough on
+  Bitcoin to expire an honest payer's token before their transaction confirms. This
+  contract declares six hours, and the node takes the **maximum** across the payment
+  systems it offers. A token is issued before the payer has chosen a system — the row
+  has no contract on it — so there is one deadline, and it has to be long enough for the
+  slowest chain someone might pay on. Too short refuses money that is already on-chain;
+  too long only delays this node's own sweep.
+- **The sweep pause.** Ergo's validator needs the paid box still *unspent*, so no sweep
+  may run while a deposit is in flight. Bitcoin proves payment from a confirmed
+  transaction, so it needs no pause — and must not be given one, since its confirmations
+  routinely take longer than that wait is bounded by. Contracts declare this
+  (`needs_unspent_proof`), and the ones that do not need it run their tick regardless.
+
+## Fees
+
+Bitcoin's fee is a market price, not a constant, so this contract's floors move:
+`settlement_floors_mu()` reports `estimatesmartfee(TARGET_CONF) × 184 vB` and the
+network's dust threshold, read per call and never cached.
+
+`MAX_FEE_RATE_SAT_VB` is a ceiling, and above it a payment is **refused rather than
+clamped**. A transaction built below the market rate does not fail — it sits unconfirmed
+until its deposit token expires, which is worse than not sending it. Raise the ceiling
+or wait for fees to fall.
+
+## Paying a peer
+
+```
+nodo pay <peer_id> <amount> --ledger bitcoin
+```
+
+The amount is in BTC, whatever `ui.DISPLAY_UNIT` says: what moves is an on-chain
+transfer, and the ledger denominates it. `--ledger` is only required when this node
+offers more than one payment system — and then it is required, because two systems are
+two currencies and guessing would move money on a chain nobody named.
+
+Which system a payment actually settles through is decided by **funding**: `nodo` walks
+the systems it shares with the peer and uses the first one whose wallet can cover the
+amount. So a node holding ERG and no BTC pays a peer that accepts both in ERG, with no
+setting to that effect.
+
+## Cold storage
+
+Same shape as Ergo's, in integer satoshi:
+
+```
+excess = balance - HOT_WALLET_LIMITS - fee
+```
+
+swept only when it is at least `COLD_WALLET_MIN_TRANSFER` **and** above the dust
+threshold. `COLD_WALLET` must be a valid address **for the configured network** — an
+address valid on another one is refused, because sweeping savings to it would send funds
+nobody on this chain can spend. The check is bech32/base58check arithmetic and needs no
+node, so a node that cannot reach `bitcoind` still refuses a typo.
+
+## Donations
+
+The circuit is the one [`DONATIONS.md`](DONATIONS.md) describes, per payment system.
+Bitcoin declares its own percentage, its own minimum payout and its own wallet lists,
+accrues its debt in satoshi, and pays it on this contract's tick against this contract's
+floors. A debt in BTC is not a debt in ERG and is never paid out of it.
+
+## What is not here
+
+- **Reputation stays on Ergo.** A node's identity key is not an Ergo wallet key either;
+  proofs are Ergo boxes. A node can accept BTC and publish reputation on Ergo, or accept
+  BTC and publish none.
+- **Lightning**, and **Esplora / receive-only nodes**. The backend surface is narrow on
+  purpose — `get_balance`, `send_to`, `send_many`, `list_received`, `tx_status`,
+  `estimate_fee_rate`, `new_address` — so a read-only HTTP backend can be put behind it
+  later. It is not implemented.
+- **Per-deposit derived addresses**, above.
+
+## See also
+
+- [`ERGO.md`](ERGO.md) — the other payment system, and the single-wallet model.
+- [`PRICING.md`](PRICING.md) — MU, what one is worth, and how a quote is built.
+- [`CONFIG.md`](CONFIG.md) — every key.
+- [`DONATIONS.md`](DONATIONS.md) — the donation circuit this contract ships.

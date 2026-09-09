@@ -18,6 +18,31 @@ METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MAIN_DIR = env_manager.get("MAIN_DIR")
 
+def take_option(argv, flag):
+    """Split ``argv`` into its positionals and one option's value.
+
+    Written here rather than reached for with argparse: this dispatcher is a `match` on
+    `sys.argv[1]` and every other command reads its arguments positionally, so one
+    option parser for one flag keeps that shape instead of half-converting it.
+
+    Accepts both `--flag value` and `--flag=value`. An unknown `--option` is left out of
+    the positionals rather than treated as one, so a typo cannot silently become an
+    amount.
+    """
+    positionals, value, expecting = [], None, False
+    for argument in argv:
+        if expecting:
+            value, expecting = argument, False
+            continue
+        if argument == flag:
+            expecting = True
+        elif argument.startswith(f"{flag}="):
+            value = argument.split("=", 1)[1]
+        elif not argument.startswith("--"):
+            positionals.append(argument)
+    return positionals, value
+
+
 def gateway_port():
     """The assigned gateway port, or None -- resolved on demand, never at import.
 
@@ -763,12 +788,23 @@ if __name__ == '__main__':
                 os._exit(0 if ok else 1)
 
             case "pay":
-                if len(sys.argv) < 4:
-                    print("Usage: nodo pay <peer_id> <amount_erg>", flush=True)
+                # The amount is in the ledger's own unit -- ERG for Ergo, BTC for
+                # Bitcoin -- because what moves is an on-chain transfer and the ledger
+                # denominates it. `--ledger` is only needed when this node offers more
+                # than one payment system, and then it *is* needed: two systems are two
+                # currencies, and guessing would move money on a chain nobody named.
+                pay_args, pay_ledger = take_option(sys.argv[2:], "--ledger")
+                if len(pay_args) < 2:
+                    print(
+                        "Usage: nodo pay <peer_id> <amount> [--ledger <name>]",
+                        flush=True,
+                    )
                     os._exit(1)
                 try:
                     from src.commands.pay import pay
-                    ok = pay(peer_id=sys.argv[2], amount_erg=sys.argv[3])
+                    ok = pay(
+                        peer_id=pay_args[0], amount=pay_args[1], ledger=pay_ledger
+                    )
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
                     os._exit(1)
