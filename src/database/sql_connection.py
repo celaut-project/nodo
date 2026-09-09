@@ -2663,7 +2663,7 @@ class SQLConnection(metaclass=Singleton):
         return debts
 
     def donation_paid_by_address(self, ledger: str, contract_hash: str,
-                                 token_id: str) -> Dict[str, Decimal]:
+                                 token_id: str) -> Optional[Dict[str, Decimal]]:
         """What each wallet has been credited on one method, cumulatively.
 
         This is what makes a donation *weight* mean a share of everything the method
@@ -2673,9 +2673,14 @@ class SQLConnection(metaclass=Singleton):
         :func:`src.payment_system.donations.split.entitlements`.
 
         An empty mapping for a method that has never paid out, which is the same thing
-        as every wallet being owed its full share.
+        as every wallet being owed its full share -- and **None** when the rows could
+        not be read, which is a different fact and must not be confused with it. Read as
+        "nobody has been paid", a transient read failure hands an accumulated claim to
+        whichever wallets clear the floor today: an address unpayable for a month is
+        owed the lot, and would get half. So the caller aborts instead and the debt
+        waits for the next tick. ``donation_owed`` already fails in that direction;
+        this now matches it.
         """
-        paid: Dict[str, Decimal] = {}
         try:
             rows = self._execute(
                 "SELECT address, paid_native FROM donation_payouts "
@@ -2687,7 +2692,8 @@ class SQLConnection(metaclass=Singleton):
                 f'Failed to read what donation wallets have been paid on '
                 f'{ledger}/{token_id}: {e}'
             )
-            return paid
+            return None
+        paid: Dict[str, Decimal] = {}
         for row in rows:
             address = row['address']
             if address:
@@ -2719,15 +2725,17 @@ class SQLConnection(metaclass=Singleton):
 
     def settle_donation(self, *, ledger: str, contract_hash: str, token_id: str,
                         paid_native: Decimal, records: List[dict],
-                        credited: Sequence[Tuple[str, int]] = ()) -> bool:
+                        credited: Sequence[Tuple[str, int]] = (),
+                        paid_before: Optional[Dict[str, Decimal]] = None) -> bool:
         """Decrement one method's debt by what was just paid, and record the payments.
 
-        The single-asset case of :meth:`settle_donations`, which is where the rule that
-        makes this safe is written down.
+        The single-asset case of :meth:`settle_donations`, which is where the rules that
+        make this safe are written down.
         """
         return self.settle_donations([{
             "ledger": ledger, "contract_hash": contract_hash, "token_id": token_id,
             "paid_native": paid_native, "records": records, "credited": credited,
+            "paid_before": paid_before,
         }])
 
     def settle_donations(self, entries: List[dict]) -> bool:
@@ -2745,15 +2753,21 @@ class SQLConnection(metaclass=Singleton):
         discharged, the other paid again on the next tick.
 
         Each entry is ``{ledger, contract_hash, token_id, paid_native, records,
-        credited}``. Each record is one output: ``{tx_id, address, amount_mu}``, and
-        nothing else -- the columns that are the same for every row of one payout
-        (direction, status, purpose, ledger, contract, asset) are filled in here, so an
-        entry carrying one of those would collide with it.
+        credited, paid_before}``. Each record is one output: ``{tx_id, address,
+        amount_mu}``, and nothing else -- the columns that are the same for every row of
+        one payout (direction, status, purpose, ledger, contract, asset) are filled in
+        here, so an entry carrying one of those would collide with it.
 
         ``credited`` is ``(address, amount)`` per wallet: what this payout discharged of
         *that wallet's* entitlement, its share of the fee included. It rides in the same
         commit for the same reason as everything else here -- a crash between the two
         would either pay a wallet twice or credit it for money that never left.
+
+        ``paid_before`` is the cumulative map that payout planned against, carried in
+        rather than re-read here. This runs after the transaction is on the wire, where
+        a failed read can abort nothing: read again and a transient failure would write
+        each credit as though the wallet had never been paid, wiping its history and
+        handing it its whole share a second time on a later tick.
 
         Returns whether anything was written: an entry that paid nothing is skipped,
         and a call with nothing left to write is ``False``.
@@ -2782,11 +2796,14 @@ class SQLConnection(metaclass=Singleton):
                         "owed_native = excluded.owed_native, updated_at = CURRENT_TIMESTAMP",
                         (ledger, contract_hash, token_id, _plain(remaining))
                     ))
-                    already = self.donation_paid_by_address(ledger, contract_hash, token_id)
+                    # The map the payout planned against, never a fresh read: see the
+                    # note on `paid_before` above.
+                    already = entry.get("paid_before") or {}
                     for address, amount in entry.get("credited") or ():
                         if not address:
                             continue
-                        total = already.get(address, Decimal(0)) + _decimal_or_zero(amount)
+                        total = (_decimal_or_zero(already.get(address, 0))
+                                 + _decimal_or_zero(amount))
                         queries.append((
                             "INSERT INTO donation_payouts "
                             "(ledger, contract_hash, token_id, address, paid_native) "
@@ -2957,11 +2974,17 @@ class SQLConnection(metaclass=Singleton):
         return self._payments_where("purpose = ?", (PAYMENT_PURPOSE_DONATION,), limit)
 
     def _payments_where(self, clause: str, params: tuple, limit: int) -> List[dict]:
-        """Newest first, capped. Shared by the peer and client readers."""
+        """Newest first, capped. Shared by the peer and client readers.
+
+        ``token_id`` is in the projection because ``amount_mu`` is deliberately
+        ledger-neutral: without the asset, two rows of one tick paying two assets on one
+        contract are indistinguishable, and a figure in MU cannot say what money moved.
+        """
         try:
             result = self._execute(f'''
                 SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
-                       ledger, contract_hash, address, amount_mu, purpose, created_at
+                       ledger, contract_hash, token_id, address, amount_mu, purpose,
+                       created_at
                 FROM payments WHERE {clause} ORDER BY created_at DESC, id DESC LIMIT ?
             ''', params + (int(limit),))
             return [dict(row) for row in result.fetchall()]
@@ -2990,7 +3013,7 @@ class SQLConnection(metaclass=Singleton):
         try:
             result = self._execute(f'''
                 SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
-                       ledger, contract_hash, address, amount_mu, created_at
+                       ledger, contract_hash, token_id, address, amount_mu, created_at
                 FROM payments WHERE tx_id IN ({placeholders})
             ''', tuple(ids))
             return {row['tx_id']: dict(row) for row in result.fetchall()}

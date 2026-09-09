@@ -228,16 +228,32 @@ node, so a node that cannot reach `bitcoind` still refuses a typo.
 
 ## Donations
 
-The circuit is the one [`DONATIONS.md`](DONATIONS.md) describes, per payment system.
-Bitcoin declares its own percentage, its own minimum payout and its own wallet lists,
-accrues its debt in satoshi, and pays it on this contract's tick against this contract's
-floors. A debt in BTC is not a debt in ERG and is never paid out of it.
+**Half the circuit, and the half that costs money.** Bitcoin *pays* donations exactly as
+[`DONATIONS.md`](DONATIONS.md) describes: it declares its own percentage, its own minimum
+payout and its own wallet lists, accrues its debt in satoshi, and pays it on this
+contract's tick against this contract's floors. A debt in BTC is not a debt in ERG and is
+never paid out of it. Each funded wallet's share is a share of everything this node has
+ever earned in BTC, and what has reached it is on `nodo donations`.
+
+**It does not yet *count* them.** The other half of that circuit reads a chain for
+donations other peers paid, and that needs a Bitcoin scanner --
+`contracts/bitcoin/donation_scan.py`, answering the five calls the indexer makes, which
+`contracts/ergo/donation_scan.py` answers for Ergo. There is none, so
+`envs.donation_scanners()` has no Bitcoin entry, no peer's BTC donation is ever indexed,
+and `DONATION_CREDIT_WALLETS` on this ledger credits nobody.
+
+That asymmetry is worth knowing before setting a Bitcoin percentage above zero: what
+makes donating worth anything is that *other* nodes weigh it when they route work. They
+weigh what they can read, and a node whose peers only scan Ergo reads nothing on
+Bitcoin. Donating in BTC today is a transfer, not a position in anybody's routing.
 
 ## What is not here
 
 - **Reputation stays on Ergo.** A node's identity key is not an Ergo wallet key either;
   proofs are Ergo boxes. A node can accept BTC and publish reputation on Ergo, or accept
   BTC and publish none.
+- **Counting donations paid on Bitcoin**, above: paying works, indexing what others
+  paid needs a scanner that is not written.
 - **Lightning**. It is a separate payment contract with its own rate and it slots into
   the same registry.
 - **Local signing.** Paying out needs a key, and this node does not hold a Bitcoin one:

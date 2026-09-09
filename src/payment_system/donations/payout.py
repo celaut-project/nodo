@@ -67,16 +67,33 @@ def _payable_wallets(ledger: str, valid_address: Callable[[str], bool]):
 
 
 def _plan_debt(sql, *, ledger: str, contract_hash: str, debt: Debt, wallets, unpayable):
-    """What to pay on one asset, or ``None`` when a transaction is not yet worth it."""
+    """What to pay on one asset, and the credit map it was planned against.
+
+    ``(None, None)`` when a transaction is not yet worth making -- or when what the
+    wallets have already been credited could not be read, which must not be taken for
+    "nobody has been paid": that hands an accumulated claim to whichever wallets clear
+    the floor today. The map comes back with the plan so the settle uses the same one,
+    rather than reading it again once the transaction is already on the wire.
+    """
     owed = sql.donation_owed(ledger, contract_hash, debt.asset)
     if owed <= 0:
-        return None
+        return None, None
     if len(unpayable) == len(wallets):
         LOGGER(
             f"{debt.render(int(owed))} is owed in donations on {ledger} but no valid "
             "wallet is configured to receive it; it stays accrued."
         )
-        return None
+        return None, None
+
+    paid = sql.donation_paid_by_address(ledger, contract_hash, debt.asset)
+    if paid is None:
+        LOGGER(
+            f"Not paying the {debt.asset} donation on {ledger} yet: what each wallet "
+            "has already been credited could not be read, and paying without it would "
+            "send one wallet's share to another. The debt stays accrued."
+        )
+        return None, None
+
     plan = plan_payout(
         owed,
         wallets,
@@ -85,7 +102,7 @@ def _plan_debt(sql, *, ledger: str, contract_hash: str, debt: Debt, wallets, unp
         # everything this method has ever earned rather than a share of one
         # transaction. A debt in one asset says nothing about what a wallet has had in
         # another, so this is read for the asset being planned.
-        paid_native=sql.donation_paid_by_address(ledger, contract_hash, debt.asset),
+        paid_native=paid,
         min_transfer_native=debt.min_transfer,
         # The chain's own floors, in its own units. Passing them in native rather
         # than reading `settlement_floors_mu()` back is what keeps the comparison
@@ -101,8 +118,8 @@ def _plan_debt(sql, *, ledger: str, contract_hash: str, debt: Debt, wallets, unp
             f"{debt.render(debt.fee)}, minimum output "
             f"{debt.render(debt.minimum_output)}); it stays accrued."
         )
-        return None
-    return plan
+        return None, None
+    return plan, paid
 
 
 def pay_accrued_together(
@@ -142,10 +159,10 @@ def pay_accrued_together(
 
         planned = []
         for debt in debts:
-            plan = _plan_debt(sql, ledger=ledger, contract_hash=contract_hash,
-                              debt=debt, wallets=wallets, unpayable=unpayable)
+            plan, paid = _plan_debt(sql, ledger=ledger, contract_hash=contract_hash,
+                                    debt=debt, wallets=wallets, unpayable=unpayable)
             if plan is not None:
-                planned.append((debt, plan))
+                planned.append((debt, plan, paid))
         if not planned:
             return False
 
@@ -154,7 +171,7 @@ def pay_accrued_together(
         outputs: List[Tuple[str, dict]] = []
         index = {}
         totals: dict = {}
-        for debt, plan in planned:
+        for debt, plan, _paid in planned:
             for address, amount in plan.outputs:
                 if address not in index:
                     index[address] = len(outputs)
@@ -164,7 +181,7 @@ def pay_accrued_together(
 
         rendered = "; ".join(
             f"{debt.render(amount)} -> {address}"
-            for debt, plan in planned for address, amount in plan.outputs
+            for debt, plan, _paid in planned for address, amount in plan.outputs
         )
         if simulate:
             LOGGER(
@@ -196,9 +213,11 @@ def pay_accrued_together(
             "token_id": debt.asset,
             "paid_native": plan.total_native,
             "records": records_for(tx_id, plan.outputs, debt.to_mu),
-            # Per wallet, so the next payout knows whose entitlement this discharged.
+            # Per wallet, so the next payout knows whose entitlement this discharged,
+            # against the same map it was planned with.
             "credited": plan.credited,
-        } for debt, plan in planned]):
+            "paid_before": paid,
+        } for debt, plan, paid in planned]):
             # The transaction is on the chain and the debts are not discharged, so the
             # next tick will pay them again. Nothing here can undo it, and the debt rows
             # are the only thing that could have stopped the repeat -- so this is said
@@ -209,7 +228,7 @@ def pay_accrued_together(
                 "tick. Check the donation_accrual rows against `nodo tx_history` before "
                 "the next payment manager iteration."
             )
-        for debt, plan in planned:
+        for debt, plan, _paid in planned:
             if plan.withheld_native > 0:
                 LOGGER(
                     f"{plan.withheld_native} base units of {debt.asset} stay accrued on "
@@ -266,16 +285,31 @@ def pay_accrued(
             )
             return False
 
+        # What each wallet has already been credited, which is what makes its weight a
+        # share of everything this method has ever earned rather than a share of this
+        # one transaction. Without it a cut too small to go out returns to a debt
+        # belonging to nobody and is split among everybody on the next tick -- so a
+        # small weight is never paid at all.
+        #
+        # Read once, here, before anything is broadcast, and carried into the settle
+        # below. `None` means the rows could not be read, which is not the same as
+        # "nobody has been paid": read that way, an accumulated claim -- an address
+        # unpayable for a month is owed the lot -- would be handed to whichever wallets
+        # clear the floor today. Nothing is lost by waiting a tick.
+        paid = sql.donation_paid_by_address(ledger, contract_hash, asset)
+        if paid is None:
+            LOGGER(
+                f"Not paying the donation on {ledger} yet: what each wallet has already "
+                "been credited could not be read, and paying without it would send one "
+                "wallet's share to another. The debt stays accrued."
+            )
+            return False
+
         plan = plan_payout(
             owed,
             wallets,
             unpayable=unpayable,
-            # What each wallet has already been credited, which is what makes its
-            # weight a share of everything this method has ever earned rather than a
-            # share of this one transaction. Without it a cut too small to go out
-            # returns to a debt belonging to nobody and is split among everybody on the
-            # next tick -- so a small weight is never paid at all.
-            paid_native=sql.donation_paid_by_address(ledger, contract_hash, asset),
+            paid_native=paid,
             min_transfer_native=min_transfer,
             # The chain's own floors, in its own units. Passing them in native rather
             # than reading `settlement_floors_mu()` back is what keeps the comparison
@@ -329,6 +363,7 @@ def pay_accrued(
             # Per wallet, so the next payout knows whose entitlement this discharged.
             # In the same commit as the decrement, because they are one fact.
             credited=plan.credited,
+            paid_before=paid,
         ):
             # The transaction is on the chain and the debt is not discharged, so the
             # next tick will pay it again. Nothing here can undo it, and the debt row is
