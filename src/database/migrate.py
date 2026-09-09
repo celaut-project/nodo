@@ -335,6 +335,37 @@ TABLES = {
             PRIMARY KEY (ledger, contract_hash, token_id)
         )
     ''',
+    # What each donation wallet has already been credited against its share, per
+    # payment method. This is what makes a *weight* mean something over time rather
+    # than per transaction.
+    #
+    # Without it a payout recomputes every wallet's cut from whatever the debt happens
+    # to be now, and a cut that could not go out -- below the chain's minimum output,
+    # or an address that does not parse -- goes back into an unowned debt and is split
+    # among everybody on the next tick. A wallet with a weight of 0.001 then never
+    # clears the floor and never gets paid at all: its share is quietly handed to the
+    # big wallets, which is exactly what the module promises not to do. Holding the
+    # share only works if the ledger remembers *whose* it is.
+    #
+    # `paid_native` is cumulative and monotonic, in the asset's smallest native unit,
+    # and it counts what the wallet's donations cost the debt -- its outputs plus the
+    # portion of the fee its own transfers consumed. That is the figure that makes
+    # `weight x everything ever accrued - paid` the wallet's outstanding entitlement:
+    # crediting only the output would leave every paid fee looking still owed.
+    #
+    # A row survives a wallet leaving the config, so a wallet removed and later put
+    # back is not paid twice for the same history.
+    "donation_payouts": '''
+        CREATE TABLE IF NOT EXISTS donation_payouts (
+            ledger TEXT NOT NULL,
+            contract_hash TEXT NOT NULL,
+            token_id TEXT NOT NULL,
+            address TEXT NOT NULL,
+            paid_native TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ledger, contract_hash, token_id, address)
+        )
+    ''',
     # Donations observed on-chain -- other peers' and our own. This is the credit
     # source of truth, and it is read from the chain by every node independently: a
     # peer telling us what it donated would be self-declared, therefore forgeable.

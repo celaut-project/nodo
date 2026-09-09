@@ -21,13 +21,25 @@ from decimal import Decimal
 from typing import Dict, List, Optional
 
 
-def _wallet_json(wallet, normalised: Dict[str, Decimal], other: set) -> dict:
-    return {
+def _wallet_json(wallet, normalised: Dict[str, Decimal], other: set,
+                 paid: Optional[Dict[str, Dict[str, str]]] = None) -> dict:
+    """One wallet list entry, and -- for a pay list -- what has reached it.
+
+    ``paid`` is per asset, because a credit in nanoERG says nothing about what a wallet
+    has had in a token. It is the figure that makes a *weight* checkable: a wallet given
+    0.1 % of this node's earnings should be able to show that something arrived, and the
+    first version of this circuit could not, because a cut too small to send went back
+    into a debt belonging to nobody and was shared out again on the next tick.
+    """
+    entry = {
         "address": wallet.address,
         "weight": str(wallet.weight),
         "normalised": str(normalised.get(wallet.address, Decimal(0))),
         "in_other_list": wallet.address in other,
     }
+    if paid is not None:
+        entry["paid_native"] = paid.get(wallet.address, {})
+    return entry
 
 
 def _coherence_warnings(ledger: str, funded: set, counted: set) -> List[str]:
@@ -67,6 +79,14 @@ def report(now: Optional[int] = None) -> dict:
         (row["ledger"], row["token_id"]): row["owed"]
         for row in sql.donation_debts()
     }
+    # What each wallet has been credited, per ledger and per asset. Read from the rows
+    # the payout writes rather than from the payment log: a payment row is one output,
+    # and what a weight is measured against is the running total.
+    credited: Dict[str, Dict[str, Dict[str, str]]] = {}
+    for row in sql.donation_credits():
+        by_address = credited.setdefault(row["ledger"] or "", {})
+        by_address.setdefault(row["address"] or "", {})[row["token_id"] or ""] = str(row["paid"])
+
     paid: Dict[str, dict] = {}
     for row in sql.get_donation_payments(limit=1000):
         entry = paid.setdefault(row.get("ledger") or "", {"mu": 0, "count": 0})
@@ -109,7 +129,10 @@ def report(now: Optional[int] = None) -> dict:
             "paid_mu": paid.get(ledger, {}).get("mu", 0),
             "paid_count": paid.get(ledger, {}).get("count", 0),
             "scan_tip": sql.donation_scan_tip(ledger),
-            "pay_wallets": [_wallet_json(w, pay_normalised, counted) for w in pay],
+            "pay_wallets": [
+                _wallet_json(w, pay_normalised, counted, credited.get(ledger, {}))
+                for w in pay
+            ],
             "credit_wallets": [_wallet_json(w, count_normalised, funded) for w in count],
         })
 
@@ -168,6 +191,17 @@ def _print_report(data: dict) -> None:
                     f"    {wallet['address']}  weight {wallet['weight']} "
                     f"(share {wallet['normalised']})"
                 )
+                # What has actually reached it, which is what makes the weight above a
+                # claim an operator can check rather than take on trust.
+                reached = wallet.get("paid_native") or {}
+                if reached:
+                    for asset, amount in sorted(reached.items()):
+                        print(
+                            f"      paid so far: {amount} "
+                            f"({asset or 'native'}, smallest unit)"
+                        )
+                else:
+                    print("      paid so far: nothing yet")
         else:
             print("  Funding: nobody")
         if ledger["credit_wallets"]:
