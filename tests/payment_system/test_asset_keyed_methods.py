@@ -137,6 +137,22 @@ class AssetKeyedMethodTests(unittest.TestCase):
             "peer_id": "LOCAL",
         })
 
+    def test_the_same_id_in_either_case_is_one_asset(self):
+        """A token id is hex, and a peer may advertise it in either case.
+
+        Stored as advertised, the same asset becomes two rows with two rates -- and the
+        method keyed on one is simply not found by the other. The symptom is not a wrong
+        payment but a peer quietly unpayable in that token, which nobody debugs.
+        """
+        self._advertise(TOKEN.upper(), 20_000_000)
+        self._advertise(TOKEN, 25_000_000)
+        self.assertEqual(self._rows(), [{"token_id": TOKEN, "mu_per_unit": "25000000"}])
+
+    def test_a_native_symbol_keeps_its_case(self):
+        # "ERG" is a reserved symbol, not an id, and it travels as advertised.
+        self._advertise("ERG", 1)
+        self.assertEqual(self._rows()[0]["token_id"], "ERG")
+
     def test_two_peers_advertising_the_same_asset_are_two_rows(self):
         self._advertise(TOKEN, 1, peer_id="peer-1")
         self._advertise(TOKEN, 2, peer_id="peer-2")

@@ -49,6 +49,23 @@ class MethodKey:
     #: 64-hex id -- which can never collide with a symbol.
     asset: str
 
+    def __post_init__(self):
+        """Normalise a token id's case, here and nowhere else.
+
+        An id is 64 hex characters and explorers, config files and peers render it in
+        either case, so `AB..` and `ab..` are the same asset -- but they are different
+        dict keys, and a method keyed by one is simply not found by the other. The
+        symptom is not a wrong payment, it is a peer that quietly becomes unpayable in
+        that token, which is the kind of thing nobody debugs.
+
+        Only an id is touched. A reserved native symbol ("ERG", "BTC") is left exactly
+        as it is: it travels on the wire and in the database as advertised, and it
+        cannot be 64 hex characters.
+        """
+        raw = str(self.asset or "")
+        if len(raw) == 64 and all(c in "0123456789abcdefABCDEF" for c in raw):
+            object.__setattr__(self, "asset", raw.lower())
+
     def __str__(self) -> str:
         return f"{self.ledger}/{self.contract_hash[:12]}/{self.asset or 'native'}"
 

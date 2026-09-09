@@ -84,7 +84,11 @@ def _share(key: str, default: float, *, ledger_tag: Optional[str] = None,
     # absurd for a token priced orders of magnitude away from it.
     if ledger_tag and asset:
         for entry in config.get(f"ledgers.{ledger_tag}.payments.ASSETS") or []:
-            if isinstance(entry, dict) and str(entry.get("TOKEN_ID") or "") == asset:
+            # Case-insensitively: a token id is hex, an operator may paste it in
+            # either case, and a missed match here silently applies the ledger's share
+            # to a token the operator gave its own.
+            if (isinstance(entry, dict)
+                    and str(entry.get("TOKEN_ID") or "").strip().lower() == asset.lower()):
                 value = entry.get(key)
                 break
     if value in (None, "") and ledger_tag:

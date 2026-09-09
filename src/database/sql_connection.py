@@ -120,6 +120,18 @@ def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
             ledger, contract_hash, token_id, address, str(int(amount_mu)), purpose)
 
 
+def _normalized_asset(asset) -> str:
+    """A token id in lowercase; anything else untouched.
+
+    The same rule as :class:`MethodKey`, applied where the row is written. Only a 64-hex
+    id is case-folded -- a reserved native symbol ("ERG") travels as advertised.
+    """
+    raw = str(asset or "")
+    if len(raw) == 64 and all(c in "0123456789abcdefABCDEF" for c in raw):
+        return raw.lower()
+    return raw
+
+
 def _decimal_or_zero(value) -> Decimal:
     """A stored decimal string read back, defaulting to zero.
 
@@ -1769,7 +1781,11 @@ class SQLConnection(metaclass=Singleton):
         # the one place that dropped it -- so a node offering ERG and a token on the same
         # contract wrote both rates to one row, and the second silently replaced the
         # first. Every peer then converted ERG amounts at the token's rate.
-        asset: str = get_token_id(contract)
+        # Normalised the way `MethodKey` normalises it: a token id is 64 hex characters
+        # and a peer may advertise it in either case, while this column is queried by
+        # exact match. Stored as advertised, the same asset would be two rows with two
+        # rates and neither would be found by the method keyed on the other.
+        asset: str = _normalized_asset(get_token_id(contract))
 
         ledger = self.check_if_ledger_exists(ledger_to_check=contract.ledger)
         ledger_str: bytes = ledger.SerializeToString()

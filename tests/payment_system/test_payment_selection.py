@@ -203,6 +203,13 @@ class PaymentSelectionTests(unittest.TestCase):
         # asks for its own asset by name.
         self.assertEqual(asked, [(FIRST, TOKEN)])
 
+    def test_a_token_id_in_either_case_is_the_same_method(self):
+        # The dispatch is a dict lookup, so a case difference is not a near miss: it is
+        # a method that does not exist. `MethodKey` folds an id's case for that reason,
+        # and only an id's -- a native symbol travels as advertised.
+        self.assertEqual(_key(FIRST, "ergo", TOKEN.upper()), _key(FIRST, "ergo", TOKEN))
+        self.assertNotEqual(_key(FIRST, "ergo", "erg"), _key(FIRST, "ergo", "ERG"))
+
     def test_a_system_the_node_cannot_process_is_skipped(self):
         # Shared with the peer a moment ago and not offered now: a runtime that went
         # away between matching and paying.
