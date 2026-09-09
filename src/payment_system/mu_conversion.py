@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha3_256
-from typing import TYPE_CHECKING, Iterable, Mapping, Optional
+from typing import TYPE_CHECKING, Iterable, List, Mapping, Optional
 
 if TYPE_CHECKING:
     from src.database.sql_connection import SQLConnection
@@ -90,15 +90,30 @@ def _local_rates() -> dict[tuple[str, str], int]:
     return rates
 
 
-def matching_payment_system(
+def matching_payment_systems(
         peer_id: str,
         connection: Optional["SQLConnection"] = None,
-) -> MatchingPaymentSystem:
-    """Return the sole payment system shared with ``peer_id``.
+) -> List[MatchingPaymentSystem]:
+    """Every payment system shared with ``peer_id``, in the order to try them.
 
-    Choosing between several settlement methods is policy, not a conversion
-    detail.  Until that policy exists, refusing an ambiguous request is safer
-    than silently choosing a wallet or currency.
+    This used to be a single system and it *raised* when two nodes shared more than
+    one: "payment selection is not implemented". Two nodes that both accepted ERG and
+    BTC would therefore have been unable to pay each other at all -- strictly worse
+    than accepting one currency each.
+
+    There is still no preference policy, and none is needed: **funding is the
+    selection**. The payer walks this list and settles through the first system whose
+    wallet can cover the amount, which is the whole requirement. Ordering can become a
+    policy the day there is a reason to prefer one over another.
+
+    The order is the registry's own candidate order, not alphabetical: it is what
+    `local_payment_methods` yields, so the payer's preference is declared in one place
+    (``contracts/registry.py``) instead of falling out of how contract hashes happen to
+    sort. Deterministic either way -- and it has to be, or which system settles a
+    payment would vary between runs.
+
+    Raises only when there is nothing shared at all, which is a real failure: no amount
+    of retrying finds a currency two nodes do not both accept.
     """
     if connection is None:
         # Keep the arithmetic helpers importable on their own (including in
@@ -110,25 +125,44 @@ def matching_payment_system(
     peer_rates = _rates_by_payment_system(
         connection.get_peer_payment_contracts(peer_id), owner=f"peer {peer_id!r}"
     )
-    matches = sorted(set(local_rates).intersection(peer_rates))
-    if not matches:
+    shared = [key for key in local_rates if key in peer_rates]
+    if not shared:
         raise ValueError(
             f"no common payment system is registered for peer {peer_id!r}"
         )
-    if len(matches) != 1:
-        rendered = ", ".join(f"{ledger}/{contract[:12]}" for ledger, contract in matches)
-        raise ValueError(
-            f"multiple common payment systems are registered for peer {peer_id!r} "
-            f"({rendered}); payment selection is not implemented"
+    return [
+        MatchingPaymentSystem(
+            ledger_tag=ledger_tag,
+            contract_hash=contract_hash,
+            local_mu_per_unit=local_rates[(ledger_tag, contract_hash)],
+            peer_mu_per_unit=peer_rates[(ledger_tag, contract_hash)],
         )
+        for ledger_tag, contract_hash in shared
+    ]
 
-    ledger_tag, contract_hash = matches[0]
-    return MatchingPaymentSystem(
-        ledger_tag=ledger_tag,
-        contract_hash=contract_hash,
-        local_mu_per_unit=local_rates[matches[0]],
-        peer_mu_per_unit=peer_rates[matches[0]],
-    )
+
+def matching_payment_system(
+        peer_id: str,
+        connection: Optional["SQLConnection"] = None,
+) -> MatchingPaymentSystem:
+    """The first payment system shared with ``peer_id``.
+
+    For the callers that need *a rate* rather than a settlement: converting a balance a
+    peer holds for us, a cost it just metered, a configuration we are about to quote it.
+    Those produce one figure and cannot "try the next one".
+
+    Taking the first is sound rather than arbitrary. MU is each node's own scale, so the
+    ratio between two nodes' MU is a property of the pair, not of the route: with both
+    sides configured coherently every shared system gives the same answer, and where
+    they disagree it is because one operator's rates are inconsistent with each other --
+    which is what the startup settle-check reports, and not something a conversion can
+    paper over.
+
+    The *payment* path must not use this. It has to convert at the rate of the contract
+    that actually settled, which is why `matching_payment_systems` exists and why the
+    conversion now lives inside the payer's loop.
+    """
+    return matching_payment_systems(peer_id, connection)[0]
 
 
 def convert_mu(

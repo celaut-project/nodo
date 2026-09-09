@@ -3,7 +3,8 @@ from threading import Thread
 from time import monotonic, sleep
 from datetime import datetime, timedelta
 from threading import Lock
-from typing import Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 from contextlib import nullcontext
 from bee_rpc import client as bee
 from src.payment_system.exceptions import DoubleSpendingAttempt
@@ -45,6 +46,29 @@ DEPOSIT_TOKEN_TTL = 3600
 
 auxiliar_script_reputation = {}
 auxiliar_script_reputation_lock = Lock()
+
+
+@dataclass(frozen=True)
+class SettlementPlan:
+    """One way to pay a peer: through which contract, and for how much on each side.
+
+    Both figures belong to *this* contract, and that is the point. They used to be
+    resolved once, up front, from whichever payment system happened to be picked -- and
+    then handed to a loop that was free to settle through a different one. With a single
+    contract the two can never disagree. With two they can, silently: the node pays over
+    Bitcoin and tells the peer a figure converted at Ergo's rate, so `Payable` claims a
+    credit the transaction does not carry and the peer's validator rejects a payment
+    that is already on-chain.
+    """
+
+    contract_hash: str
+    #: ``None`` for a payment that settles on no chain.
+    ledger_tag: Optional[str]
+    #: What leaves our wallet, in our MU, after this contract's own floors.
+    amount: int
+    #: What the peer is told to credit, in the peer's MU, at this contract's rate.
+    peer_amount: int
+    is_demo: bool = False
 
 
 def _payment_envs():
@@ -134,26 +158,50 @@ def __obtain_deposit_token(peer_id) -> Optional[str]:
         _l.LOGGER(f"Error generating deposit token: {str(e)}")
         return
 
-def __peer_payment_process(peer_id: str, amount: int, peer_amount: int,
-                           on_transaction_url=None) -> bool:
+def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
+                           on_transaction_url=None) -> Optional[SettlementPlan]:
+    """Try each plan in turn; the first one that settles and is acknowledged wins.
+
+    **Funding is the selection.** There is no preference policy and none is needed:
+    whichever system this node has money on is the one that pays. The loop already
+    skipped a contract whose wallet could not fund the amount; what is new is that the
+    figures it uses are that contract's own, so the amount the peer is told always
+    belongs to the contract that actually settled (#340 §4.4).
+
+    Returns the plan that settled, not just success: the caller has to credit the peer
+    the figure *that* contract converted, and with several candidates it cannot know
+    which one that was. Truthy on success and ``None`` on failure, so it still reads as
+    a boolean at a call site that only asks whether the money moved.
+    """
     payment_envs = _payment_envs()
     deposit_token = None
+    processes = payment_envs.available_payment_process()
+    balances = payment_envs.check_sender_balances()
 
-    # Attempt payment processing for each available payment process
-    for contract_hash, process_payment in payment_envs.available_payment_process().items():
-        
-        # In the case where we have different payment methods for the same ledger, ex: other payment method on Ergo, we should reorganize the envs dictionaries to avoid check sender balances multiple times.
-        
-        check_balance = payment_envs.check_sender_balances()[contract_hash]
-        if not check_balance(amount):
-            _l.LOGGER(f"Insufficient balance for contract {contract_hash[:6]}.")
+    for plan in plans:
+        contract_hash = plan.contract_hash
+        amount = plan.amount
+        peer_amount = plan.peer_amount
+        process_payment = processes.get(contract_hash)
+        if process_payment is None:
+            # Shared with the peer, but this node cannot settle it right now -- a
+            # runtime that went away between matching and paying.
+            _l.LOGGER(f"No payment process available for contract {contract_hash[:6]}.")
+            continue
+
+        check_balance = balances.get(contract_hash)
+        if check_balance and not check_balance(amount):
+            _l.LOGGER(
+                f"Insufficient balance for contract {contract_hash[:6]}; trying the "
+                "next payment system."
+            )
             continue
         
         if not deposit_token:
             deposit_token = __obtain_deposit_token(peer_id=peer_id)
             if not deposit_token:
                 _l.LOGGER("No deposit token available.")
-                return False
+                return None
             else:
                 _l.LOGGER("Deposit token obtained.")
         
@@ -161,7 +209,7 @@ def __peer_payment_process(peer_id: str, amount: int, peer_amount: int,
             # Get all available ledgers for this peer and contract
             
             scripts = get_peer_contract_instances(contract_hash, peer_id)
-            ledgers = ledger_balancer(ledger_generator=scripts) if contract_hash not in payment_envs.DEMOS else [("", "")]
+            ledgers = [("", "")] if plan.is_demo else ledger_balancer(ledger_generator=scripts)
             
             for script, ledger in ledgers:
                 
@@ -183,15 +231,18 @@ def __peer_payment_process(peer_id: str, amount: int, peer_amount: int,
                 submitted_tx: list = []
 
                 try:
+                    # Reported against *this* contract: with two payment systems, a
+                    # hook resolved from another one would attach a transaction id to
+                    # the wrong payment.
                     report_url = getattr(payment_envs, "transaction_url_reporting", None)
                     reporting_context = (
-                        report_url(on_transaction_url)
+                        report_url(on_transaction_url, contract_hash=contract_hash)
                         if callable(report_url)
                         else nullcontext()
                     )
                     report_id = getattr(payment_envs, "transaction_id_reporting", None)
                     id_context = (
-                        report_id(submitted_tx.append)
+                        report_id(submitted_tx.append, contract_hash=contract_hash)
                         if callable(report_id)
                         else nullcontext()
                     )
@@ -243,7 +294,7 @@ def __peer_payment_process(peer_id: str, amount: int, peer_amount: int,
                         tx_id=submitted_tx[-1] if submitted_tx else None,
                         peer_id=peer_id,
                         deposit_token=deposit_token,
-                        ledger=_ledger_tag(ledger),
+                        ledger=_ledger_tag(ledger) or plan.ledger_tag,
                         contract_hash=contract_hash,
                         address=_address_of(script),
                     )
@@ -255,7 +306,7 @@ def __peer_payment_process(peer_id: str, amount: int, peer_amount: int,
                         peer_id=peer_id, amount=10,  # TODO On envs.
                         reason=Reason.PAYMENT_COMMUNICATED
                     )
-                    return True
+                    return plan
                 else:
                     _l.LOGGER(f"Failed to communicate payment for contract {contract_hash}")
                     record('unacknowledged')
@@ -267,12 +318,14 @@ def __peer_payment_process(peer_id: str, amount: int, peer_amount: int,
             _l.LOGGER(f"No compatible contract found for {contract_hash}")
         except JavaDependencyMissing:
             log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
-            return False
+            # Not a bail-out: the JVM is missing for every Ergo-backed contract, but
+            # another ledger's plan is still worth trying.
+            continue
         except Exception as e:
             _l.LOGGER(f"Unhandled exception on payment process for {contract_hash}: {e}")
 
-    _l.LOGGER("No available payment process.")
-    return False
+    _l.LOGGER("No payment system settled this deposit.")
+    return None
 
 
 # Helper function for payment communication retries
@@ -318,75 +371,126 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
     return False
 
 
-def __deposit_amounts(peer_id: str, amount: int, *, floor: bool) -> Tuple[int, int]:
-    """``(what leaves our wallet, what the peer is told)``, each in its own MU.
+def __settlement_plans(peer_id: str, amount: int, *, floor: bool) -> Tuple[List[SettlementPlan], List[str]]:
+    """One :class:`SettlementPlan` per shared payment system, and why any were dropped.
 
-    The ledger's minimum output is a floor on the *value moved*, so it is checked
-    against our own figure first and the peer's is derived from whatever we end
-    up moving.  ``floor`` decides what happens below it, and it is the same flag
-    that already separates the two callers: the automatic refill named no figure
-    and is raised to the smallest settleable amount, while an operator who typed
-    one gets an error rather than a larger payment they did not ask for.
+    In the order the payer should try them (see `matching_payment_systems`), each with
+    its own floors applied and its own rate used for the peer's figure. Every part of
+    that is per system, because every part of it differs per chain: a fee, a minimum
+    output, and how many of the peer's MU one unit buys.
 
-    The peer's figure rounds down: its validator checks the payment is worth at
-    least the MU it is asked to credit, and claiming a MU more than the
-    transaction carries would have it reject a payment already on-chain.
+    ``floor`` is the same flag that already separates the two callers. The automatic
+    refill named no figure, so it is raised -- to a full deposit for that system, and
+    then to that ledger's minimum output if it is still below it. An operator who typed
+    an amount gets that amount or a reason, never a larger payment they did not ask for.
+
+    The peer's figure rounds down: its validator checks the payment is worth at least
+    the MU it is asked to credit, and claiming one MU more than the transaction carries
+    would have it reject a payment already on-chain.
+
+    Returns an empty list rather than raising when no system can carry the amount; the
+    reasons come back alongside so a caller can tell an operator which floor stopped it.
+    Raises only when there is no shared system at all.
     """
-    from src.payment_system.mu_conversion import convert_mu, matching_payment_system
+    from src.payment_system.deposits import full_deposit_mu
+    from src.payment_system.mu_conversion import convert_mu, matching_payment_systems
 
     payment_envs = _payment_envs()
     try:
-        payment_system = matching_payment_system(peer_id, connection=sc)
+        systems = matching_payment_systems(peer_id, connection=sc)
     except ValueError:
-        if not payment_envs.DEMOS:
+        demos = tuple(payment_envs.DEMOS)
+        if not demos:
             raise
         # A simulated payment settles on no ledger: there is no rate to convert
         # through, and no on-chain value for a floor to protect.
-        return amount, amount
-
-    floors = payment_envs.settlement_floors().get(payment_system.contract_hash)
-    minimum_output_mu = floors()[1] if floors else 0
-    if amount < minimum_output_mu:
-        if not floor:
-            raise ValueError(
-                f"{format_mu(amount)} is below the smallest output this ledger can "
-                f"create ({format_mu(minimum_output_mu)}), so it cannot be settled "
-                "at all; nothing was broadcast"
+        return [
+            SettlementPlan(
+                contract_hash=demos[0], ledger_tag=None,
+                amount=amount, peer_amount=amount, is_demo=True,
             )
-        _l.LOGGER(
-            f"Raising the automatic deposit for {peer_id} from {format_mu(amount)} "
-            f"to {format_mu(minimum_output_mu)}: below that the ledger refuses to "
-            "create the output at all."
-        )
-        amount = minimum_output_mu
+        ], []
 
-    peer_amount = convert_mu(
-        amount,
-        from_mu_per_unit=payment_system.local_mu_per_unit,
-        to_mu_per_unit=payment_system.peer_mu_per_unit,
-    )
-    if peer_amount <= 0:
-        raise ValueError(
-            f"{format_mu(amount)} is worth less than a single one of the peer's MU"
+    floors_by_contract = payment_envs.settlement_floors()
+    plans: List[SettlementPlan] = []
+    refusals: List[str] = []
+
+    for system in systems:
+        where = f"{system.ledger_tag}/{system.contract_hash[:12]}"
+        system_amount = int(amount)
+        try:
+            if floor:
+                system_amount = max(system_amount, full_deposit_mu(system))
+            read_floors = floors_by_contract.get(system.contract_hash)
+            minimum_output_mu = read_floors()[1] if read_floors else 0
+        except Exception as e:
+            # A moving fee that cannot be read right now, or a contract that has gone
+            # away since the systems were matched. The others are still worth trying.
+            refusals.append(f"{where}: could not read what it can settle ({e})")
+            continue
+
+        if system_amount < minimum_output_mu:
+            if not floor:
+                refusals.append(
+                    f"{where}: {format_mu(system_amount)} is below the smallest output "
+                    f"it can create ({format_mu(minimum_output_mu)}), so it cannot be "
+                    "settled at all"
+                )
+                continue
+            _l.LOGGER(
+                f"Raising the automatic deposit for {peer_id} on {where} from "
+                f"{format_mu(system_amount)} to {format_mu(minimum_output_mu)}: below "
+                "that the ledger refuses to create the output at all."
+            )
+            system_amount = minimum_output_mu
+
+        peer_amount = convert_mu(
+            system_amount,
+            from_mu_per_unit=system.local_mu_per_unit,
+            to_mu_per_unit=system.peer_mu_per_unit,
         )
-    return amount, peer_amount
+        if peer_amount <= 0:
+            refusals.append(
+                f"{where}: {format_mu(system_amount)} is worth less than a single one "
+                "of the peer's MU"
+            )
+            continue
+
+        plans.append(SettlementPlan(
+            contract_hash=system.contract_hash,
+            ledger_tag=system.ledger_tag,
+            amount=system_amount,
+            peer_amount=peer_amount,
+        ))
+
+    return plans, refusals
 
 
 def deposit_refusal_reason(peer_id: str, amount: int) -> Optional[str]:
     """Why ``amount`` of our MU cannot be deposited on ``peer_id``, or None if it can.
 
-    The same check `increase_deposit_on_peer` makes, offered up front so a command
-    can print the reason to the operator instead of a bare failure. Runs the real
-    thing rather than re-deriving the floors, so the message an operator reads
-    cannot drift from the rule that actually stops the payment.
+    The same check `increase_deposit_on_peer` makes, offered up front so a command can
+    print the reason to the operator instead of a bare failure. Runs the real thing
+    rather than re-deriving the floors, so the message an operator reads cannot drift
+    from the rule that actually stops the payment.
+
+    "Can" means *any* shared payment system can carry it: a figure below Bitcoin's dust
+    limit is not refused when the same peer also accepts ERG. When none can, every
+    reason is reported rather than the first, because an operator choosing a new amount
+    needs to know which floor to clear.
 
     Reads only local rows -- no wallet, no chain, no deposit token.
     """
     try:
-        __deposit_amounts(peer_id=peer_id, amount=int(amount), floor=False)
-        return None
+        plans, refusals = __settlement_plans(peer_id=peer_id, amount=int(amount), floor=False)
     except ValueError as exc:
         return str(exc)
+    if plans:
+        return None
+    reasons = "; ".join(refusals) or f"no payment system can settle {format_mu(int(amount))}"
+    # Said once, about the whole answer rather than about each reason: what an operator
+    # needs to know is that the refusal happened before anything touched a chain.
+    return f"{reasons}; nothing was broadcast"
 
 
 def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
@@ -410,34 +514,47 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
     Both floors are derived from what the ledger can settle, not configured; see
     src/payment_system/deposits.py.
     """
-    if floor:
-        from src.payment_system.deposits import full_deposit_mu
-
-        amount = max(int(amount), full_deposit_mu())
-    else:
-        amount = int(amount)
-
     try:
-        amount, peer_amount = __deposit_amounts(peer_id=peer_id, amount=amount, floor=floor)
+        plans, refusals = __settlement_plans(
+            peer_id=peer_id, amount=int(amount), floor=floor
+        )
     except ValueError as exc:
         _l.LOGGER(f"Cannot deposit on peer {peer_id}: {exc}.")
         return False
+    if not plans:
+        for refusal in refusals:
+            _l.LOGGER(f"Cannot deposit on peer {peer_id}: {refusal}.")
+        return False
+    for refusal in refusals:
+        # Not fatal: another system can carry it. Still worth reading -- it is the
+        # difference between "this peer is expensive to pay" and "this peer is unpayable".
+        _l.LOGGER(f"Skipping a payment system for peer {peer_id}: {refusal}.")
 
     _l.LOGGER(
-        f"Increase deposit on peer {peer_id} by {format_mu(amount)} "
-        f"(credited there as {peer_amount} of its own MU)"
+        "Increase deposit on peer {} by {} (credited there as {} of its own MU), "
+        "through {}".format(
+            peer_id,
+            format_mu(plans[0].amount),
+            plans[0].peer_amount,
+            " or ".join(
+                f"{plan.ledger_tag or 'simulated'}/{plan.contract_hash[:12]}"
+                for plan in plans
+            ),
+        )
     )
     try:
-        if __peer_payment_process(
+        settled = __peer_payment_process(
             peer_id=peer_id,
-            amount=amount,
-            peer_amount=peer_amount,
+            plans=plans,
             on_transaction_url=on_transaction_url,
-        ):
-            # The peer's MU, because that is the scale `balance_on_other_peer`
-            # reads back from its Metrics and the scale `delegate_execution`
-            # compares a cost against.
-            if sc.add_balance_to_peer(peer_id=peer_id, balance_mu=peer_amount):
+        )
+        if settled:
+            # The peer's MU, because that is the scale `balance_on_other_peer` reads
+            # back from its Metrics and the scale `delegate_execution` compares a cost
+            # against -- and *this* contract's conversion of it, because a figure from
+            # another candidate would credit the peer an amount its own validator never
+            # saw.
+            if sc.add_balance_to_peer(peer_id=peer_id, balance_mu=settled.peer_amount):
                 return True
             else:
                 _l.LOGGER(f'Failed to update the balance for peer {peer_id} on DB')

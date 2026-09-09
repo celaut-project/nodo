@@ -34,6 +34,7 @@ class _Envs:
     def __init__(self, submitted_tx_id=TX_ID):
         self._submitted_tx_id = submitted_tx_id
         self._reporter = None
+        self.reported_for = None
 
     def available_payment_process(self):
         def process_payment(amount, deposit_token, ledger, script):
@@ -47,7 +48,11 @@ class _Envs:
         return {CONTRACT_HASH: lambda amount: True}
 
     @contextmanager
-    def transaction_id_reporting(self, reporter):
+    def transaction_id_reporting(self, reporter, contract_hash=None):
+        # `contract_hash` is what makes the hook the *settling* contract's: with two
+        # payment systems, an id reported through another one would be filed against
+        # the wrong payment.
+        self.reported_for = contract_hash
         self._reporter = reporter
         try:
             yield
@@ -90,7 +95,13 @@ class OutgoingPaymentRecordTests(unittest.TestCase):
                 mock.patch.object(payment_process, "__attempt_payment_communication",
                                   side_effect=communicate, create=True):
             paid = peer_payment_process(
-                peer_id="peer-1", amount=amount, peer_amount=peer_amount
+                peer_id="peer-1",
+                # Both figures belong to the contract that will settle, which is what
+                # makes them a plan rather than two arguments that can drift apart.
+                plans=[payment_process.SettlementPlan(
+                    contract_hash=CONTRACT_HASH, ledger_tag="ergo",
+                    amount=amount, peer_amount=peer_amount,
+                )],
             )
 
         connection.record_payment.assert_called_once()
@@ -99,7 +110,11 @@ class OutgoingPaymentRecordTests(unittest.TestCase):
     def test_an_acknowledged_payment_records_the_peer_the_amount_and_the_transaction(self):
         paid, row = self._pay(communicated=True)
 
+        # Truthy, and specifically the plan that settled: the caller credits the peer
+        # the figure *that* contract converted.
         self.assertTrue(paid)
+        self.assertEqual(paid.contract_hash, CONTRACT_HASH)
+        self.assertEqual(paid.peer_amount, 2000)
         self.assertEqual(row["direction"], "out")
         self.assertEqual(row["status"], "communicated")
         self.assertEqual(row["peer_id"], "peer-1")
