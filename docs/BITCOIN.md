@@ -31,15 +31,48 @@ separate payment contract with its own rate, and it slots into the same registry
 work in issue #340 is what makes it a small change instead of a rewrite. It is not
 implemented.
 
-## What you need
+## What you need, and what for
 
-A Bitcoin node you control. `nodo` talks to it over JSON-RPC and holds no key: Core
-signs, broadcasts, counts confirmations and keeps the wallet. That means **no new
-runtime and no JVM** — a node that will not run a JVM can be paid in BTC even though it
-cannot be paid in ERG.
+Two different asks, and which one applies depends on whether you want to be **paid** in
+BTC or to **pay** in it. `ledgers.bitcoin.BACKEND` chooses.
 
-Back up **bitcoind's wallet**, not `config.yaml`. Unlike Ergo, `nodo` neither generates
-nor stores a seed for this chain, and it does not write one into your config.
+### `esplora` — to be paid. Nothing to run, no key anywhere.
+
+A public HTTP API: blockstream.info, mempool.space, or one you host. `nodo` reads the
+chain through it and holds no Bitcoin key at all, so it can be paid in BTC and **cannot
+pay in it**. That is not a half-working state: the payer walks the payment systems it
+shares with a peer and settles through the first one it can fund, so a node with a
+read-only Bitcoin backend simply pays in something else. Nothing is broadcast and
+nothing fails halfway through a payment.
+
+You must set `payments.RECEIVING_ADDRESS` yourself — a read-only API cannot be asked
+for an address, and one invented later would strand payments aimed at the one peers were
+already told. The contract is not offered until it is set.
+
+This is the shipped default, because being paid is the side that matters to a node that
+is earning.
+
+### `core` — to pay. A bitcoind you trust with your wallet.
+
+Bitcoin Core over JSON-RPC. Core signs, broadcasts, counts confirmations and keeps the
+wallet, so `nodo` still holds no key — but the node has to be one you would hand your
+wallet to. `RPC_URL` is a URL, so it may be **remote**: your own machine over a LAN or a
+VPN. Not somebody else's public node.
+
+Back up **bitcoind's wallet**, not `config.yaml`. `nodo` neither generates nor stores a
+seed for this chain, and `WALLET_KEYS_EXTERNAL: true` is what tells it not to.
+
+### How this compares to Ergo
+
+Ergo's posture is neither of these: `ledgers.ergo.NODE_URL` defaults to somebody else's
+public node and the wallet mnemonic lives in `config.yaml`, so the node runs no Ergo
+infrastructure *and* can both send and receive. The equivalent for Bitcoin would mean a
+seed in `config.yaml` plus raw segwit construction, BIP-143 sighashes and UTXO selection
+— every line of it money-moving, and none of it needed to be paid. It is not
+implemented; `esplora` is what gets the receiving side to the same "nothing to run".
+
+Neither backend needs a JVM, so a node that will not run one can be paid in BTC even
+though it cannot be paid in ERG.
 
 ## Configuration
 
@@ -48,7 +81,9 @@ ledgers:
   bitcoin:
     tags: [ bitcoin ]
     NETWORK: mainnet                 # mainnet | testnet | signet | regtest
-    RPC_URL: "http://127.0.0.1:8332"
+    BACKEND: esplora                 # esplora (be paid) | core (also pay)
+    ESPLORA_URL: "https://blockstream.info/api"
+    RPC_URL: "http://127.0.0.1:8332"        # BACKEND: core only
     RPC_COOKIE_PATH: "~/.bitcoin/.cookie"   # or RPC_USER / RPC_PASSWORD
     WALLET_NAME: "nodo"
     WALLET_KEYS_EXTERNAL: true       # the keys are Core's, not this file's
@@ -203,10 +238,11 @@ floors. A debt in BTC is not a debt in ERG and is never paid out of it.
 - **Reputation stays on Ergo.** A node's identity key is not an Ergo wallet key either;
   proofs are Ergo boxes. A node can accept BTC and publish reputation on Ergo, or accept
   BTC and publish none.
-- **Lightning**, and **Esplora / receive-only nodes**. The backend surface is narrow on
-  purpose — `get_balance`, `send_to`, `send_many`, `list_received`, `tx_status`,
-  `estimate_fee_rate`, `new_address` — so a read-only HTTP backend can be put behind it
-  later. It is not implemented.
+- **Lightning**. It is a separate payment contract with its own rate and it slots into
+  the same registry.
+- **Local signing.** Paying out needs a key, and this node does not hold a Bitcoin one:
+  the `core` backend delegates that to bitcoind. A seed in `config.yaml`, the way Ergo
+  does it, would need raw transaction construction and is not implemented.
 - **Per-deposit derived addresses**, above.
 
 ## See also
