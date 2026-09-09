@@ -93,12 +93,76 @@ def _deposit_tokens(transaction: dict) -> List[str]:
     return tokens
 
 
+def _token_movements(transaction: dict, address: str) -> List[tuple]:
+    """``(token id, direction, amount in base units)`` per token this address moved.
+
+    The same net question as ``_direction_and_amount``, asked per asset: an Ergo box
+    carries ERG *and* a token list, so one transaction can move several currencies and a
+    history that reported only the value would show a token payment as its carrier box
+    -- 0.001 ERG, with the money invisible.
+
+    Every token in the box, never ``assets[0]``: this reads boxes built by whoever sent
+    them, so the order is theirs.
+    """
+    spent: Dict[str, int] = {}
+    received: Dict[str, int] = {}
+    for key, boxes in (("in", transaction.get("inputs")),
+                       ("out", transaction.get("outputs"))):
+        for box in boxes or []:
+            if box.get("address") != address:
+                continue
+            side = spent if key == "in" else received
+            for entry in box.get("assets") or []:
+                if not isinstance(entry, dict):
+                    continue
+                token_id = str(entry.get("tokenId") or "")
+                if not token_id:
+                    continue
+                try:
+                    side[token_id] = side.get(token_id, 0) + int(entry.get("amount") or 0)
+                except (TypeError, ValueError):
+                    continue
+
+    movements = []
+    for token_id in list(received) + [t for t in spent if t not in received]:
+        net = received.get(token_id, 0) - spent.get(token_id, 0)
+        if net > 0:
+            movements.append((token_id, "in", net))
+        elif net < 0:
+            movements.append((token_id, "out", abs(net)))
+    return movements
+
+
+def _rendering_for(token_id: str) -> tuple:
+    """``(unit, decimals)`` for a token, as configured -- or its id when it is not.
+
+    A token this node does not accept still shows up in its own wallet's history, and it
+    has to be named by something. The id is what it *is*, so an unconfigured one is
+    shown shortened rather than guessed at from the minter's self-declared registers.
+    """
+    from src.payment_system.contracts.ergo import rate
+
+    try:
+        asset = rate.asset_for(token_id)
+    except ValueError:
+        # A malformed ASSETS list is a startup error; reading a history is not where an
+        # operator should discover it, and a name is not worth failing the read for.
+        asset = None
+    if asset is None:
+        return f"{token_id[:12]}…", 0
+    return asset.symbol, asset.decimals
+
+
 def transaction_history(address: str, limit: int = 10) -> List[Dict]:
     """The last ``limit`` transactions at ``address``, normalised.
 
     Each row: ``id``, ``timestamp`` (unix seconds), ``confirmations``, ``direction``
     (``in`` / ``out`` / ``internal`` / ``unknown``), ``amount`` in the asset's base
     units, ``unit`` for rendering, ``counterparties`` and ``deposit_tokens``.
+
+    One row per asset a transaction moved, not one per transaction: an Ergo box carries
+    ERG and a token list at once, so a token payment reported as a single row would show
+    0.001 ERG -- its carrier box -- with the money it actually moved invisible.
 
     Raises on a failure to read, so the command can say "could not look" rather than
     printing an empty history that reads as "nothing ever happened here".
@@ -122,17 +186,33 @@ def transaction_history(address: str, limit: int = 10) -> List[Dict]:
     rows: List[Dict] = []
     for transaction in items:
         direction, amount = _direction_and_amount(transaction, address)
-        rows.append({
+        # The explorer reports milliseconds; every other timestamp in this node is
+        # seconds, and mixing the two shows a 1970 date or a year 55000 one.
+        common = {
             "id": str(transaction.get("id") or ""),
-            # The explorer reports milliseconds; every other timestamp in this node is
-            # seconds, and mixing the two shows a 1970 date or a year 55000 one.
             "timestamp": int(transaction.get("timestamp") or 0) // 1000,
             "confirmations": int(transaction.get("numConfirmations") or 0),
+            "counterparties": _counterparties(transaction, address, direction == "out"),
+            "deposit_tokens": _deposit_tokens(transaction),
+        }
+        rows.append({
+            **common,
             "direction": direction,
             "amount": amount,
             "unit": "ERG",
             "decimals": 9,
-            "counterparties": _counterparties(transaction, address, direction == "out"),
-            "deposit_tokens": _deposit_tokens(transaction),
         })
+        # One row per asset the transaction moved, sharing its id. Kept as separate rows
+        # rather than folded into one: each is an amount in its own money, and the ERG
+        # row of a token payment is the carrier box and the fee, which is worth seeing
+        # for what it is.
+        for token_id, token_direction, token_amount in _token_movements(transaction, address):
+            unit, decimals = _rendering_for(token_id)
+            rows.append({
+                **common,
+                "direction": token_direction,
+                "amount": token_amount,
+                "unit": unit,
+                "decimals": decimals,
+            })
     return rows
