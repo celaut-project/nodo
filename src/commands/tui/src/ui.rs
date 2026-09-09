@@ -1244,6 +1244,25 @@ fn donation_wallet_lines(
                     Style::default().fg(MUTED),
                 ),
                 Span::styled(
+                    // What has actually reached it, which is what makes the share above
+                    // a claim an operator can check rather than take on trust. Nothing
+                    // is shown for a counted wallet: this node pays it nothing.
+                    if wallet.paid.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            "  paid {}",
+                            wallet
+                                .paid
+                                .iter()
+                                .map(|(asset, amount)| format!("{amount} {asset}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    },
+                    Style::default().fg(GOOD),
+                ),
+                Span::styled(
                     if wallet.in_other_list {
                         String::new()
                     } else {
@@ -4857,6 +4876,18 @@ mod tests {
                 weight: weight.to_string(),
                 share: share.to_string(),
                 in_other_list: in_other,
+                paid: Vec::new(),
+            }
+        }
+
+        /// The same wallet, with something having actually reached it.
+        fn paid_wallet(address: &str, share: &str, paid: &[(&str, &str)]) -> DonationWallet {
+            DonationWallet {
+                paid: paid
+                    .iter()
+                    .map(|(asset, amount)| (asset.to_string(), amount.to_string()))
+                    .collect(),
+                ..wallet(address, share, share, true)
             }
         }
 
@@ -4894,6 +4925,59 @@ mod tests {
             // included, and never converted: it was incurred at the rate of the moment
             // it was incurred.
             assert!(text.contains("1200000.5 ERG"), "{text}");
+        }
+
+        #[test]
+        fn what_has_reached_each_funded_wallet_is_shown() {
+            // A share is a claim; this is the only thing on the card that can check it.
+            // A wallet given a small share should be able to show that something
+            // arrived -- and before the payout kept a per-wallet ledger, nothing had.
+            let mut app = donating_node();
+            app.donations.ledgers[0].pay_wallets = vec![
+                paid_wallet("9big", "0.999", &[("ERG", "3959899899")]),
+                paid_wallet("9small", "0.001", &[("ERG", "3267327")]),
+            ];
+            let text = rendered(donation_lines(&app));
+
+            assert!(text.contains("paid 3959899899 ERG"));
+            assert!(text.contains("paid 3267327 ERG"));
+        }
+
+        #[test]
+        fn a_wallet_that_has_never_been_paid_shows_no_figure_at_all() {
+            // Rather than "0", which reads as a payout that went wrong rather than as
+            // one that has not happened yet. Counted wallets show nothing either: this
+            // node pays them nothing. Asserted on the wallet renderer rather than on
+            // the whole card, whose own header carries a "paid <total>" of its own.
+            let unpaid = rendered(super::super::donation_wallet_lines(
+                "funding",
+                &[wallet("9nobody", "1", "1", true)],
+                "nobody",
+            ));
+            assert!(!unpaid.contains("paid"));
+
+            let paid = rendered(super::super::donation_wallet_lines(
+                "funding",
+                &[paid_wallet("9somebody", "1", &[("ERG", "1000000")])],
+                "nobody",
+            ));
+            assert!(paid.contains("paid 1000000 ERG"));
+        }
+
+        #[test]
+        fn each_asset_is_shown_separately() {
+            // A credit in nanoERG says nothing about what a wallet has had in a token,
+            // and the two cannot be added up.
+            let mut app = donating_node();
+            app.donations.ledgers[0].pay_wallets = vec![paid_wallet(
+                "9both",
+                "1",
+                &[("ERG", "1000000"), ("abababab", "4200")],
+            )];
+            let text = rendered(donation_lines(&app));
+
+            assert!(text.contains("1000000 ERG"));
+            assert!(text.contains("4200 abababab"));
         }
 
         #[test]

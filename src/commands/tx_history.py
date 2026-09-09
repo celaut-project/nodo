@@ -150,7 +150,13 @@ def _counterparty_lines(row: Dict, payments: Dict[str, Dict],
         if payment.get("peer_id"):
             lines.append(f"To: peer {payment['peer_id']}")
         if payment.get("purpose") == "donation":
-            lines.append("Purpose: donation")
+            # `purpose` is what makes it a donation; the asset is what says which money
+            # it was paid in. One tick can pay a debt in two assets, and both rows carry
+            # the same transaction id and a deliberately ledger-neutral `amount_mu`.
+            asset = payment.get("token_id") or ""
+            lines.append(
+                f"Purpose: donation ({asset})" if asset else "Purpose: donation"
+            )
 
     if not outgoing:
         for token in row.get("deposit_tokens") or []:

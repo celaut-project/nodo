@@ -83,7 +83,7 @@ reviewed as one.
 `nodo donations` prints both lists, what has reached **each** funded wallet, what is
 accrued, and which addresses are in one list and not the other. The per-wallet figure is
 there so a weight can be checked rather than trusted: a wallet given 0.1 % should be able
-to show that something arrived. The TUI's EARNINGS page shows the same.
+to show that something arrived. The TUI's EARNINGS page shows the same, per wallet.
 
 ## Paying: a share of earnings, accrued and then paid
 
@@ -169,10 +169,11 @@ tokens"). `DONATION_PERCENTAGE` and `DONATION_MIN_TRANSFER` are per asset, insid
 `ASSETS` entry; the two wallet lists are not, because an Ergo address receives anything.
 
 Every donation paid is recorded in the `payments` table with `purpose = 'donation'`, its
-transaction id, its destination and the `token_id` it was paid in — `amount_mu` is
-deliberately ledger-neutral, so without the asset two rows of one tick paying two assets
-would be indistinguishable. `nodo tx_history` and the TUI use it to tell a donation apart
-from a payment to a peer. With `general_flags.SIMULATE_PAYMENTS` on, the node accrues and
+transaction id, its destination and the `token_id` it was paid in. `purpose` is what
+tells a donation apart from a payment to a peer — that is what `nodo tx_history` and the
+TUI read — and `token_id` is what says which money it was: `amount_mu` is deliberately
+ledger-neutral, so without the asset two rows of one tick paying two assets would be
+indistinguishable. `nodo tx_history` prints it beside the purpose. With `general_flags.SIMULATE_PAYMENTS` on, the node accrues and
 logs but broadcasts nothing.
 
 ## Counting: read from the chain, by every node, independently

@@ -57,12 +57,15 @@ class _Ledger:
                 - Decimal(entry["paid_native"])
             )
             by_address = self.paid.setdefault(entry["token_id"], {})
+            # Against the map the payout planned with, exactly as the real one does.
+            base = entry.get("paid_before") or {}
             for address, amount in entry.get("credited") or ():
-                by_address[address] = by_address.get(address, Decimal(0)) + Decimal(amount)
+                by_address[address] = Decimal(str(base.get(address, 0))) + Decimal(amount)
         return True
 
     def settle_donation(self, **entry):
         return self.settle_donations([entry])
+
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -89,8 +92,8 @@ class TokenDonationPayoutTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def _pay(self, owed, *, assets=(), wallets=(WALLET_A,), nanoergs=10 * 10**9,
-             tokens=(), min_transfers=None, paid=None):
-        ledger = _Ledger(owed, paid)
+             tokens=(), min_transfers=None, paid=None, ledger=None):
+        ledger = ledger if ledger is not None else _Ledger(owed, paid)
         min_transfers = min_transfers or {}
         balance = {"confirmed": {"nanoErgs": nanoergs, "tokens": [
             {"tokenId": token_id, "amount": amount} for token_id, amount in tokens
@@ -238,6 +241,16 @@ class TokenDonationPayoutTests(unittest.TestCase):
         self.assertEqual([address for address, _n, _t in outputs], [WALLET_B])
         [entry] = ledger.settled[0]
         self.assertEqual(dict(entry["credited"]), {WALLET_B: 10_000})
+
+    def test_an_unreadable_credit_map_pays_no_asset_rather_than_guessing(self):
+        # Per asset: what cannot be read for one asset stops that asset's payout, and
+        # an unreadable map is not "nobody has been paid" -- read that way, a claim
+        # accumulated by an unpayable address goes to whoever clears the floor today.
+        unreadable = _Ledger({"ERG": Decimal(2 * 10**9), TOKEN: Decimal(5_000)})
+        unreadable.donation_paid_by_address = lambda *_args: None
+        self._pay({}, assets=[_asset()], tokens=[(TOKEN, 5_000)], ledger=unreadable)
+        self.assertEqual(self.sent, [])
+        self.assertEqual(unreadable.settled, [])
 
     def test_simulate_payments_broadcasts_nothing_and_keeps_the_debts(self):
         with mock.patch.object(interface, "SIMULATE_PAYMENTS", lambda: True):
