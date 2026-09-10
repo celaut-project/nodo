@@ -1900,27 +1900,32 @@ fn peer_detail_lines(
 
     if peer.contracts.is_empty() {
         lines.push(Line::from(Span::styled(
-            "No payment contract registered for this peer.",
+            "No payment method registered for this peer.",
             Style::default().fg(WARN),
         )));
         return lines;
     }
 
     lines.push(Line::from(Span::styled(
-        format!("Payment contracts ({})", peer.contracts.len()),
+        format!("Payment methods ({})", peer.contracts.len()),
         Style::default().fg(ACCENT).bold(),
     )));
     for contract in &peer.contracts {
+        // The asset names the money: on Ergo one contract is paid in ERG and in every
+        // token at the same address, so the ledger alone would label two different
+        // rates identically. A 64-hex token id is shortened; a symbol is not.
+        let asset = shorten(nonempty(&contract.asset, &contract.ledger.to_uppercase()), 12);
         if compact {
             lines.push(Line::from(vec![
                 Span::styled("  ● ", Style::default().fg(GOOD)),
                 Span::styled(contract.ledger.clone(), Style::default().fg(GOOD).bold()),
                 Span::styled(
                     format!(
-                        "  {}  {}  1 {} = {} MU",
+                        "  {}  {}  {}  1 {} = {} MU",
+                        asset,
                         shorten(&contract.contract_hash, 14),
                         shorten(nonempty(&contract.address, "—"), 14),
-                        contract.ledger.to_uppercase(),
+                        asset,
                         nonempty(&contract.mu_per_unit, "—")
                     ),
                     Style::default().fg(Color::White),
@@ -1932,7 +1937,7 @@ fn peer_detail_lines(
             Span::styled("  ● ", Style::default().fg(GOOD)),
             Span::styled(contract.ledger.clone(), Style::default().fg(GOOD).bold()),
             Span::styled(
-                format!("  contract {}", shorten(&contract.contract_hash, 24)),
+                format!("  {}  contract {}", asset, shorten(&contract.contract_hash, 24)),
                 Style::default().fg(Color::White),
             ),
         ]));
@@ -1949,11 +1954,7 @@ fn peer_detail_lines(
                 // What this peer says one unit of its ledger buys in ITS MU. This is
                 // what makes a price it quotes convertible into money we understand,
                 // so it is stated as an equation rather than as a bare number.
-                format!(
-                    "1 {} = {} MU",
-                    contract.ledger.to_uppercase(),
-                    nonempty(&contract.mu_per_unit, "—")
-                ),
+                format!("1 {} = {} MU", asset, nonempty(&contract.mu_per_unit, "—")),
                 Style::default().fg(Color::White),
             ),
         ]));
@@ -4775,8 +4776,21 @@ mod tests {
         crate::app::PeerContract {
             ledger: "ergo".to_string(),
             contract_hash: "1c691f72deadbeef".to_string(),
+            asset: "ERG".to_string(),
             address: "0008cd0392aabbcc".to_string(),
             mu_per_unit: "1000000000".to_string(),
+        }
+    }
+
+    /// A second method on the SAME contract, differing only in its asset. This is what
+    /// an Ergo token is: one script, one address, another currency and another rate.
+    fn token_contract() -> crate::app::PeerContract {
+        crate::app::PeerContract {
+            ledger: "ergo".to_string(),
+            contract_hash: "1c691f72deadbeef".to_string(),
+            asset: "ab".repeat(32),
+            address: "0008cd0392aabbcc".to_string(),
+            mu_per_unit: "20000000".to_string(),
         }
     }
 
@@ -5026,12 +5040,12 @@ mod tests {
         // The whole point of issue #231: these four facts were only reachable
         // through a raw sqlite query before.
         let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![ergo_contract()])), None, None, false));
-        assert!(text.contains("Payment contracts (1)"));
+        assert!(text.contains("Payment methods (1)"));
         assert!(text.contains("ergo"));
         assert!(text.contains("1c691f72deadbeef"));
         assert!(text.contains("0008cd0392aabbcc"));
         // The rate reads as an equation: what one unit of that ledger buys in MU.
-        assert!(text.contains("1 ERGO = 1000000000 MU"));
+        assert!(text.contains("1 ERG = 1000000000 MU"));
     }
 
     #[test]
@@ -5040,6 +5054,7 @@ mod tests {
         let second = crate::app::PeerContract {
             ledger: "simulator".to_string(),
             contract_hash: "abc123".to_string(),
+            asset: "SIM".to_string(),
             address: "sim-address".to_string(),
             mu_per_unit: "500".to_string(),
         };
@@ -5050,10 +5065,29 @@ mod tests {
             None,
             false,
         ));
-        assert!(text.contains("Payment contracts (2)"));
+        assert!(text.contains("Payment methods (2)"));
         assert!(text.contains("ergo"));
         assert!(text.contains("simulator"));
         assert!(text.contains("sim-address"));
+    }
+
+    #[test]
+    fn peer_detail_tells_two_assets_of_one_contract_apart() {
+        // Keyed by the contract alone these two rows are the same row twice, at two
+        // different rates -- and an operator reading "1 ERG = 20000000 MU" would see
+        // this node's ERG rate as the token's.
+        let text = rendered(peer_detail_lines(
+            &Money::default(),
+            Some(&peer_with(vec![ergo_contract(), token_contract()])),
+            None,
+            None,
+            false,
+        ));
+        assert!(text.contains("Payment methods (2)"));
+        assert!(text.contains("1 ERG = 1000000000 MU"));
+        // The id is shortened for the width, so match its head rather than all 64.
+        assert!(text.contains("ababab"));
+        assert!(text.contains("= 20000000 MU"));
     }
 
     #[test]
@@ -5061,7 +5095,7 @@ mod tests {
         // Must stay distinguishable from "peer charges through something we
         // don't render", which is exactly what the old hardcoded lookup did.
         let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![])), None, None, false));
-        assert!(text.contains("No payment contract registered"));
+        assert!(text.contains("No payment method registered"));
     }
 
     fn payment(status: &str, tx_id: &str, amount: &str) -> PaymentRow {
@@ -5278,7 +5312,7 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(screen.contains("SELECTED PEER"));
-        assert!(screen.contains("Payment contracts (1)"));
+        assert!(screen.contains("Payment methods (1)"));
         // The table itself stays lean -- no contract columns were added to it.
         assert!(screen.contains("Reputation proof"));
         assert!(!screen.contains("Ledger  "));
@@ -5296,6 +5330,7 @@ mod tests {
         let second = crate::app::PeerContract {
             ledger: "simulator".to_string(),
             contract_hash: "abc123def456".to_string(),
+            asset: "SIM".to_string(),
             address: "sim-address".to_string(),
             mu_per_unit: "500".to_string(),
         };
@@ -5310,7 +5345,7 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(screen.contains("PEERS • 1 connected"));
-        assert!(screen.contains("Payment contracts (2)"));
+        assert!(screen.contains("Payment methods (2)"));
         assert!(screen.contains("ergo"));
         assert!(screen.contains("simulator"));
     }

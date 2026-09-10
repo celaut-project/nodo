@@ -23,6 +23,11 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 CONTRACT_HASH = "1c691f72aad8533f1e0815cb6dd9f302637d5c60824c8a92684fe50cdd4b82bd"
 SCRIPT = bytes.fromhex("0008cd03" + "77" * 32)
+# The dispatch is keyed by the payment method -- ledger, contract and asset -- because
+# one contract carries several of them on Ergo.
+METHOD = None if IMPORT_ERROR else __import__(
+    "src.payment_system.contracts.registry", fromlist=["MethodKey"]
+).MethodKey("ergo", CONTRACT_HASH, "ERG")
 TX_ID = "9d0f1c2b3a4e5d6c7b8a99887766554433221100ffeeddccbbaa998877665544"
 
 
@@ -42,17 +47,17 @@ class _Envs:
                 self._reporter(self._submitted_tx_id)
             return celaut_pb2.Contract(ledger=ledger)
 
-        return {CONTRACT_HASH: process_payment}
+        return {METHOD: process_payment}
 
     def check_sender_balances(self):
-        return {CONTRACT_HASH: lambda amount: True}
+        return {METHOD: lambda amount: True}
 
     @contextmanager
-    def transaction_id_reporting(self, reporter, contract_hash=None):
-        # `contract_hash` is what makes the hook the *settling* contract's: with two
-        # payment systems, an id reported through another one would be filed against
-        # the wrong payment.
-        self.reported_for = contract_hash
+    def transaction_id_reporting(self, reporter, method=None):
+        # `method` is what makes the hook the *settling* method's: with several payment
+        # methods -- and one Ergo contract carries several -- an id reported through
+        # another one would be filed against the wrong payment.
+        self.reported_for = method
         self._reporter = reporter
         try:
             yield
@@ -86,7 +91,7 @@ class OutgoingPaymentRecordTests(unittest.TestCase):
                                return_value=envs or _Envs()), \
                 mock.patch.object(payment_process, "sc", connection), \
                 mock.patch.object(payment_process, "get_peer_contract_instances",
-                                  return_value=iter([(SCRIPT, ledger)])), \
+                                  return_value=iter([(SCRIPT, ledger, "ERG")])), \
                 mock.patch.object(payment_process, "ledger_balancer",
                                   side_effect=lambda ledger_generator: ledger_generator), \
                 mock.patch.object(payment_process, "_reputation_interface"), \
@@ -99,7 +104,7 @@ class OutgoingPaymentRecordTests(unittest.TestCase):
                 # Both figures belong to the contract that will settle, which is what
                 # makes them a plan rather than two arguments that can drift apart.
                 plans=[payment_process.SettlementPlan(
-                    contract_hash=CONTRACT_HASH, ledger_tag="ergo",
+                    contract_hash=CONTRACT_HASH, ledger_tag="ergo", asset="ERG",
                     amount=amount, peer_amount=peer_amount,
                 )],
             )

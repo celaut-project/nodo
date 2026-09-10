@@ -69,7 +69,9 @@ def _asset_block(ledger: str, asset: str) -> Dict[str, Any]:
         for entry in assets:
             if not isinstance(entry, dict):
                 continue
-            if str(entry.get("TOKEN_ID") or "").strip() == asset:
+            # Case-insensitively: a missed match here reads the ledger's donation
+            # percentage for a token that declared its own.
+            if str(entry.get("TOKEN_ID") or "").strip().lower() == str(asset).lower():
                 return entry
     return payments
 
@@ -80,6 +82,27 @@ def _decimal(value: Any) -> Optional[Decimal]:
     except (InvalidOperation, ValueError, TypeError, AttributeError):
         return None
     return parsed if parsed.is_finite() else None
+
+
+def assets(ledger: str) -> List[str]:
+    """The non-native assets declared under this ledger's ``ASSETS``, in order.
+
+    A config *shape*, not a chain fact, which is why it can live here: the ledger's own
+    contract decides what an asset id means, and this only needs to know which ids the
+    operator declared so a report can show the percentage that applies to each. A ledger
+    with no ``ASSETS`` list -- every ledger but Ergo, today -- has none.
+    """
+    declared = _payments_block(ledger).get("ASSETS")
+    if not isinstance(declared, list):
+        return []
+    found: List[str] = []
+    for entry in declared:
+        if not isinstance(entry, dict):
+            continue
+        token_id = str(entry.get("TOKEN_ID") or "").strip()
+        if token_id and token_id not in found:
+            found.append(token_id)
+    return found
 
 
 def percentage(ledger: str, asset: str) -> Decimal:

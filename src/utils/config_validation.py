@@ -444,6 +444,109 @@ def _warn_if_charges_cannot_settle(
         )
 
 
+def _validate_ergo_assets(payments: Dict[str, Any], *, config: Dict[str, Any], warn):
+    """``ledgers.ergo.payments.ASSETS``: the tokens this node accepts, if any.
+
+    The rules themselves live in the contract's own rate module and are *called* from
+    here rather than restated: a rule enforced at startup but not when the list is read
+    gives a config the node boots on and then refuses to settle through, and one
+    enforced only when reading surfaces as a payment failure instead of a startup error.
+
+    Refused rather than warned about, unlike the scale checks below: a mistyped token id
+    or a duplicated display unit is not a judgement call, and a node that started with
+    one would advertise a payment method it cannot honour.
+    """
+    # Imported here, not at module scope: this module is reached from `utils.config`
+    # while it loads, and the rate module reads config through it.
+    from src.payment_system.contracts.ergo import rate as ergo_rate
+
+    raw = payments.get("ASSETS") or []
+    try:
+        assets = ergo_rate.parse_assets(raw)
+    except ValueError as exc:
+        raise ConfigValidationError(str(exc)) from exc
+
+    declared_units = (config.get("ui") or {}).get("UNITS") or {}
+    for asset, entry in zip(assets, raw):
+        where = f"ledgers.ergo.payments.ASSETS[{asset.symbol}]"
+        if asset.unit_name in declared_units:
+            # `monetary.display_unit` prefers what a payment contract contributes, so
+            # the operator's own block would be silently ignored rather than clash.
+            raise ConfigValidationError(
+                f"{where}.UNIT_NAME={asset.unit_name!r} is also declared under "
+                f"ui.UNITS.{asset.unit_name}. A unit name has to say which money it is, "
+                "so rename one -- the asset's would win, and the hand-declared block "
+                "would be read by nobody."
+            )
+        # Amounts in whole units of the asset, the same decimal-string shape as ERG's.
+        # A limit finer than the asset's own decimals cannot be expressed in it at all,
+        # and reading as zero would silently sweep or donate everything.
+        for key in ("HOT_WALLET_LIMITS", "COLD_WALLET_MIN_TRANSFER",
+                    "DONATION_MIN_TRANSFER"):
+            if entry.get(key) in (None, ""):
+                continue
+            try:
+                ergo_rate.whole_to_base_units(entry.get(key), asset,
+                                              what=f"{where}.{key}")
+            except ValueError as exc:
+                raise ConfigValidationError(str(exc)) from exc
+        # Per method, for the same reason the ledger has its own: what is right for a
+        # chain's native unit is absurd for a token priced far from it.
+        _require_share(entry, where, "MAX_FEE_OVERHEAD", strictly_positive=True)
+        _require_share(entry, where, "DONATION_PERCENTAGE")
+
+    if assets and warn is not None:
+        _warn_if_asset_rates_are_implausible(payments, assets, warn)
+    return assets
+
+
+def _warn_if_asset_rates_are_implausible(payments: Dict[str, Any], assets, warn) -> None:
+    """Are an asset's rate and ERG's on the same scale?
+
+    ``MU_PER_NANOERG`` and an asset's ``MU_PER_UNIT`` are each "MU per base unit", so
+    their ratio *is* this node's opinion about what the token is worth in ERG -- no
+    price feed needed. And the two have to be coherent whether or not the operator
+    prices anything in ERG, because a token method's fee floor is denominated in ERG
+    while its minimum output is in the token: deposit sizing is wrong by exactly the
+    ratio between them (#342 4.4).
+
+    A warning rather than an error, like every other scale check here: an operator may
+    be mid-edit, and a token really can be worth very little.
+    """
+    raw = payments.get("MU_PER_NANOERG", 1)
+    try:
+        mu_per_nanoerg = Decimal(str(raw if raw not in (None, "") else 1).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return
+    if mu_per_nanoerg <= 0:
+        return
+
+    for asset in assets:
+        where = f"ledgers.ergo.payments.ASSETS[{asset.symbol}]"
+        # value(whole token)/value(ERG), from the two rates alone.
+        implied = (asset.mu_per_base_unit * (Decimal(10) ** asset.decimals)) / (
+            mu_per_nanoerg * Decimal(1_000_000_000)
+        )
+        if implied <= 0:
+            continue
+        if implied < Decimal("0.000000001"):
+            warn(
+                f"{where}.MU_PER_UNIT={asset.mu_per_base_unit} and "
+                f"ledgers.ergo.payments.MU_PER_NANOERG={mu_per_nanoerg} together say "
+                f"one whole {asset.symbol} is worth {implied} ERG -- less than a single "
+                "nanoERG, so nothing priced in it can settle. One of the two rates is "
+                "probably out by a power of ten; see docs/PRICING.md."
+            )
+        elif implied > Decimal(1_000_000):
+            warn(
+                f"{where}.MU_PER_UNIT={asset.mu_per_base_unit} and "
+                f"ledgers.ergo.payments.MU_PER_NANOERG={mu_per_nanoerg} together say "
+                f"one whole {asset.symbol} is worth {implied} ERG, which is not a market "
+                "anyone trades in. Check DECIMALS and MU_PER_UNIT: MU_PER_UNIT is MU "
+                "per BASE unit, not per whole unit."
+            )
+
+
 def _validate_wallet_list(
     payments: Dict[str, Any], key: str, *, ledger: str, network: str, address_check=None
 ) -> List[Dict[str, Any]]:
@@ -789,6 +892,7 @@ def validate_ergo_config(
             raise ConfigValidationError(
                 f"ledgers.ergo.payments.COLD_WALLET is not a valid Ergo address: {cold!r}"
             )
+        _validate_ergo_assets(payments, config=config, warn=warn)
         validate_donation_config(payments, ledger="ergo", network=network, warn=warn)
 
     if reputation_enabled:

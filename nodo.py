@@ -18,29 +18,43 @@ METADATA_REGISTRY = env_manager.get("METADATA_REGISTRY")
 DATABASE_FILE = env_manager.get("DATABASE_FILE")
 MAIN_DIR = env_manager.get("MAIN_DIR")
 
-def take_option(argv, flag):
-    """Split ``argv`` into its positionals and one option's value.
+def take_options(argv, *flags):
+    """Split ``argv`` into its positionals and the values of the named options.
 
     Written here rather than reached for with argparse: this dispatcher is a `match` on
     `sys.argv[1]` and every other command reads its arguments positionally, so one
-    option parser for one flag keeps that shape instead of half-converting it.
+    option parser keeps that shape instead of half-converting it.
+
+    Every flag is consumed in one pass, which is what a second flag needs: an option's
+    *value* is a bare word, so parsing one flag at a time would leave the next one's
+    value looking exactly like a positional -- and `nodo pay peer 5 --ledger ergo
+    --asset sigusd` would read "ergo" as a third argument.
 
     Accepts both `--flag value` and `--flag=value`. An unknown `--option` is left out of
     the positionals rather than treated as one, so a typo cannot silently become an
     amount.
     """
-    positionals, value, expecting = [], None, False
+    wanted = set(flags)
+    positionals, values, expecting = [], {}, None
     for argument in argv:
         if expecting:
-            value, expecting = argument, False
+            values[expecting], expecting = argument, None
             continue
-        if argument == flag:
-            expecting = True
-        elif argument.startswith(f"{flag}="):
-            value = argument.split("=", 1)[1]
+        if argument in wanted:
+            expecting = argument
+        elif argument.startswith("--") and "=" in argument:
+            flag, value = argument.split("=", 1)
+            if flag in wanted:
+                values[flag] = value
         elif not argument.startswith("--"):
             positionals.append(argument)
-    return positionals, value
+    return positionals, values
+
+
+def take_option(argv, flag):
+    """One option's value, for a command that takes exactly one."""
+    positionals, values = take_options(argv, flag)
+    return positionals, values.get(flag)
 
 
 def gateway_port():
@@ -788,22 +802,33 @@ if __name__ == '__main__':
                 os._exit(0 if ok else 1)
 
             case "pay":
-                # The amount is in the ledger's own unit -- ERG for Ergo, BTC for
-                # Bitcoin -- because what moves is an on-chain transfer and the ledger
-                # denominates it. `--ledger` is only needed when this node offers more
-                # than one payment system, and then it *is* needed: two systems are two
-                # currencies, and guessing would move money on a chain nobody named.
-                pay_args, pay_ledger = take_option(sys.argv[2:], "--ledger")
+                # The amount is in the asset's own unit -- ERG for Ergo, BTC for
+                # Bitcoin, whole SigUSD for that token -- because what moves is an
+                # on-chain transfer and the asset denominates it.
+                #
+                # A payment method is a ledger AND an asset, so the ledger alone is not
+                # a selector: one Ergo contract is paid in ERG and in every configured
+                # token, at different rates. Naming one is only needed when this node
+                # offers more than one, and then it *is* needed -- guessing would move
+                # money nobody named.
+                pay_args, pay_options = take_options(
+                    sys.argv[2:], "--payment-method", "--ledger", "--asset"
+                )
                 if len(pay_args) < 2:
                     print(
-                        "Usage: nodo pay <peer_id> <amount> [--ledger <name>]",
+                        "Usage: nodo pay <peer_id> <amount> "
+                        "[--payment-method <ledger>:<asset>] [--ledger <name>] "
+                        "[--asset <symbol|token id>]",
                         flush=True,
                     )
                     os._exit(1)
                 try:
                     from src.commands.pay import pay
                     ok = pay(
-                        peer_id=pay_args[0], amount=pay_args[1], ledger=pay_ledger
+                        peer_id=pay_args[0], amount=pay_args[1],
+                        ledger=pay_options.get("--ledger"),
+                        asset=pay_options.get("--asset"),
+                        payment_method=pay_options.get("--payment-method"),
                     )
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)

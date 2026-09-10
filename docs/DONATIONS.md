@@ -168,9 +168,32 @@ Three rules follow from that, and each is a deliberate choice:
 - **One tick, one transaction.** The debt is paid before the wallet's excess is swept to
   cold storage: the debt is owed, the sweep is discretionary.
 
+### Several assets, one transaction
+
+A debt is per payment **method** — `(ledger, contract, asset)` — so a node paid in ERG
+and in a token owes two independent debts, each in its own base unit, and a debt in one
+cannot be paid out of the other. They are still paid **together**: one Ergo output
+carries several assets, so a payout per asset would pay a fee per asset, and each of
+those fees is money donated on top of the configured share. Each donation wallet gets one
+box carrying everything it is owed, and every debt is decremented in a single database
+transaction — the window between two commits is exactly where a crash pays one asset's
+debt twice.
+
+The fee is where the asymmetry shows. An Ergo fee is paid in ERG, and a debt in SigUSD
+cannot pay it. So ERG's debt declares the fee — which is what keeps the promise above
+true for ERG — and a token's declares none, meaning **a token donation costs the node
+ERG it never accrued**: the fee, plus a carrier box for any wallet owed only tokens. The
+node says so on the log line rather than letting that ERG leave silently, and a wallet
+with no ERG cannot pay a token donation at all (see [`ERGO.md`](ERGO.md), "Native
+tokens"). `DONATION_PERCENTAGE` and `DONATION_MIN_TRANSFER` are per asset, inside each
+`ASSETS` entry; the two wallet lists are not, because an Ergo address receives anything.
+
 Every donation paid is recorded in the `payments` table with `purpose = 'donation'`, its
-transaction id and its destination, so `nodo tx_history` and the TUI can tell it apart
-from a payment to a peer. With `general_flags.SIMULATE_PAYMENTS` on, the node accrues and
+transaction id, its destination and the `token_id` it was paid in. `purpose` is what
+tells a donation apart from a payment to a peer — that is what `nodo tx_history` and the
+TUI read — and `token_id` is what says which money it was: `amount_mu` is deliberately
+ledger-neutral, so without the asset two rows of one tick paying two assets would be
+indistinguishable. `nodo tx_history` prints it beside the purpose. With `general_flags.SIMULATE_PAYMENTS` on, the node accrues and
 logs but broadcasts nothing.
 
 ## Counting: read from the chain, by every node, independently

@@ -50,7 +50,7 @@ class _Sql:
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DonationsReportTests(unittest.TestCase):
-    def _report(self, credits):
+    def _report(self, credits, assets=()):
         debts = [{"ledger": "ergo", "contract_hash": "p2pk", "token_id": "ERG",
                   "owed": Decimal(500)}]
         wallets = [Wallet(BIG, Decimal("0.999")), Wallet(SMALL, Decimal("0.001"))]
@@ -64,8 +64,11 @@ class DonationsReportTests(unittest.TestCase):
                            return_value=[]), \
                 mock.patch("src.payment_system.donations.config.credit_weights",
                            return_value={}), \
+                mock.patch("src.payment_system.donations.config.assets",
+                           return_value=list(assets)), \
                 mock.patch("src.payment_system.donations.config.percentage",
-                           return_value=Decimal("0.02")), \
+                           side_effect=lambda _l, asset: Decimal(
+                               "0.05" if asset else "0.02")), \
                 mock.patch("src.payment_system.donations.config.min_transfer",
                            return_value=Decimal("0.1")), \
                 mock.patch("src.payment_system.donations.config.min_confirmations",
@@ -76,10 +79,10 @@ class DonationsReportTests(unittest.TestCase):
                            return_value=[]):
             return command.report(now=0)
 
-    def _printed(self, credits):
+    def _printed(self, credits, assets=()):
         buffer = io.StringIO()
         with redirect_stdout(buffer):
-            command._print_report(self._report(credits))
+            command._print_report(self._report(credits, assets))
         return buffer.getvalue()
 
     def _credit(self, address, paid, token_id="ERG"):
@@ -115,6 +118,24 @@ class DonationsReportTests(unittest.TestCase):
         # operator checking a weight needs both.
         report = self._report([self._credit(BIG, 99_900)])
         self.assertEqual(report["ledgers"][0]["owed_native"], {"ERG": "500"})
+
+    def test_a_declared_token_reports_its_own_terms(self):
+        """Both figures are per payment *method*, so one pair per ledger is the native
+        unit's and says nothing about a token settling through the same contract.
+
+        Shown for every declared asset rather than only for the ones with a debt: an
+        operator configuring a token needs to see what applies to it before the first
+        payment arrives, not after.
+        """
+        [ledger] = self._report([], assets=[TOKEN])["ledgers"]
+        self.assertEqual(ledger["percentage"], "0.02", "the native unit's")
+        self.assertEqual(ledger["assets"][TOKEN]["percentage"], "0.05")
+        printed = self._printed([], assets=[TOKEN])
+        self.assertIn(f"{TOKEN}: donating 0.05", printed)
+
+    def test_a_ledger_with_no_declared_asset_reports_none(self):
+        [ledger] = self._report([])["ledgers"]
+        self.assertEqual(ledger["assets"], {})
 
     def test_a_report_with_no_credits_at_all_still_renders(self):
         # A node that has never paid a donation: every wallet is owed its full share.

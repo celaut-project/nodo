@@ -1020,8 +1020,14 @@ ledgers:
       # whatever is sent to it.
       #
       # The transaction fee comes out of this share, not on top of it: what leaves the
-      # node is the percentage, fee included, so donating can never cost more than the
-      # figure set here.
+      # node is the percentage, fee included, so donating in ERG can never cost more
+      # than the figure set here.
+      #
+      # A TOKEN donation is the exception, and it cannot be otherwise: an Ergo fee is
+      # paid in ERG, and a debt in a token cannot pay it. So paying a token donation
+      # also costs this node some ERG -- the fee, plus one minimum box value per wallet
+      # owed only tokens -- which no debt covers. A wallet with no ERG cannot pay a
+      # token donation at all. See docs/DONATIONS.md.
       #
       # Donations cannot be mandatory -- this is open source, and a node can be patched
       # to skip them. What makes 2% worth paying is that other nodes weigh a donation
@@ -1055,6 +1061,49 @@ ledgers:
       # Confirmations a donation needs before it counts for anything. The mempool is
       # never read.
       DONATION_MIN_CONFIRMATIONS: 10
+      # --- Native tokens ---------------------------------------------------------
+      # Assets other than ERG this node accepts. Empty by default: a node that has not
+      # opted in behaves exactly as it did before this existed.
+      #
+      # An Ergo P2PK address holds ERG and every EIP-4 token at once, so each entry is
+      # NOT another payment contract -- it is the same contract, the same wallet and
+      # the same address, paid in different money. Each becomes its own payment method,
+      # advertised with its own rate, and peers pick between them by price.
+      #
+      # BEING PAID in a token needs no ERG at all: the payer supplies both the fee and
+      # the box the token travels in. PAYING one, and SWEEPING one to cold storage,
+      # both need ERG in this wallet -- a token-only wallet cannot do either, and the
+      # node says so at startup.
+      #
+      # MU_PER_NANOERG above stays REQUIRED even for an operator who prices nothing in
+      # ERG: a token method's fee floor is denominated in ERG, and deposit sizing needs
+      # both rates on the same scale. If the two do not reflect the real ERG/token
+      # ratio, deposits are wrong by exactly that ratio (the node warns at startup).
+      ASSETS: []
+      # ASSETS:
+      #   # The token's 64-hex id, never its name: anyone can mint a token called
+      #   # "SigUSD", so a name is not an identity. This node never resolves one.
+      #   - TOKEN_ID: "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0"
+      #     SYMBOL: "SigUSD"            # shown to people; never used to match a box
+      #     UNIT_NAME: "sigusd"         # display unit; unique across assets and ui.UNITS
+      #     # Stated here, NOT read from the minter's EIP-4 registers: those are
+      #     # self-declared, and a wrong one misprices this node by a power of ten.
+      #     DECIMALS: 2
+      #     # MU per BASE unit -- one cent of a 2-decimal token -- exactly as
+      #     # MU_PER_NANOERG is MU per base unit of ERG. Static config: for a
+      #     # stablecoin that is the point, for a volatile token it means re-setting
+      #     # this by hand.
+      #     MU_PER_UNIT: 20000000
+      #     # Per asset, in whole units of it (decimal string), like ERG's above.
+      #     HOT_WALLET_LIMITS: "1000"
+      #     COLD_WALLET_MIN_TRANSFER: "10"
+      #     # Overrides the ledger's (and deposits.MAX_FEE_OVERHEAD): what is right for
+      #     # a chain's native unit is absurd for a token priced far away from it.
+      #     MAX_FEE_OVERHEAD: 0.02
+      #     # Donations for this method. The wallet lists above are NOT repeated: an
+      #     # Ergo address receives any asset, so they are per ledger.
+      #     DONATION_PERCENTAGE: "0.02"
+      #     DONATION_MIN_TRANSFER: "10"
 
   # A second payment system, off until you fill in MU_PER_SATOSHI below. Being paid in
   # BTC needs a Bitcoin node you control -- the same posture this project takes

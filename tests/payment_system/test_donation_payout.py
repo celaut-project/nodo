@@ -44,29 +44,36 @@ class _Catalogue:
         self.settlements = []
 
     def donation_owed(self, ledger, contract_hash, token_id):
-        return self.owed
+        return self.owed if token_id == "ERG" else Decimal(0)
 
     def donation_paid_by_address(self, ledger, contract_hash, token_id):
         return dict(self.paid)
 
-    def settle_donation(self, *, ledger, contract_hash, token_id, paid_native, records,
-                        credited=(), paid_before=None):
-        self.settlements.append({
-            "ledger": ledger,
-            "token_id": token_id,
-            "paid_native": paid_native,
-            "records": records,
-            "credited": list(credited),
-        })
-        self.owed -= Decimal(str(paid_native))
-        # Against the map the payout planned with, exactly as the real one does: the
-        # credit is written after the transaction is on the wire, so re-reading here is
-        # a read whose failure could abort nothing.
-        base = paid_before if paid_before is not None else {}
-        for address, amount in credited:
-            self.paid[address] = (
-                Decimal(str(base.get(address, 0))) + Decimal(str(amount))
-            )
+    def settle_donation(self, **entry):
+        """The single-asset entry point, which is what the ERG payout still calls."""
+        return self.settle_donations([entry])
+
+    def settle_donations(self, entries):
+        # One call for every asset a payout touched: the window between two commits is
+        # where a crash pays one debt twice -- or credits a wallet for money that never
+        # left, which is the same window seen from the other side.
+        for entry in entries:
+            self.settlements.append({
+                "ledger": entry["ledger"],
+                "token_id": entry.get("token_id"),
+                "paid_native": entry["paid_native"],
+                "records": entry["records"],
+                "credited": list(entry.get("credited") or ()),
+            })
+            self.owed -= Decimal(str(entry["paid_native"]))
+            # Against the map the payout planned with, exactly as the real one does:
+            # the credit is written after the transaction is on the wire, so re-reading
+            # here would be a read whose failure could abort nothing.
+            base = entry.get("paid_before") or {}
+            for address, amount in entry.get("credited") or ():
+                self.paid[address] = (
+                    Decimal(str(base.get(address, 0))) + Decimal(str(amount))
+                )
         return True
 
 
@@ -78,11 +85,15 @@ class PayoutTests(unittest.TestCase):
         catalogue = catalogue if catalogue is not None else _Catalogue(owed, paid)
         sent = []
 
-        def simple_send(ergo, amount, receiver_addresses, wallet_mnemonic, fee):
+        def send_assets(outputs, fee_nanoerg):
+            # `outputs` is [(address, nanoERG, [(token_id, base units)])]: one box per
+            # destination carrying every asset it is owed, which is what makes a tick
+            # one transaction rather than one per asset.
             sent.append({
-                "amount": amount,
-                "receivers": receiver_addresses,
-                "fee": fee,
+                "amount": [nanoerg / 10 ** 9 for _a, nanoerg, _t in outputs],
+                "receivers": [address for address, _n, _t in outputs],
+                "tokens": [tokens for _a, _n, tokens in outputs],
+                "fee": fee_nanoerg / 10 ** 9,
             })
             return tx_id
 
@@ -97,13 +108,12 @@ class PayoutTests(unittest.TestCase):
                            return_value=min_transfer_erg), \
                 mock.patch.object(interface, "SIMULATE_PAYMENTS", lambda: simulate), \
                 mock.patch.object(interface, "WALLET_MNEMONIC", lambda: "mnemonic"), \
-                mock.patch.object(interface, "_ergo_runtime",
-                                  return_value=(None, simple_send, None, None)), \
-                mock.patch.object(interface, "__init_ergo", lambda: object(), create=True), \
+                mock.patch.object(interface, "_send_assets", side_effect=send_assets), \
                 mock.patch.object(interface, "__get_sender_addr",
-                                  lambda mnemonic: object(), create=True), \
-                mock.patch.object(interface, "__confirmed_balance_nanoerg",
-                                  lambda address: balance, create=True), \
+                                  lambda mnemonic: object()), \
+                mock.patch.object(
+                    interface, "__balance_total",
+                    lambda address: {"confirmed": {"nanoErgs": balance, "tokens": []}}), \
                 mock.patch(
                     "src.payment_system.donations.config.pay_wallets",
                     return_value=wallets if wallets is not None

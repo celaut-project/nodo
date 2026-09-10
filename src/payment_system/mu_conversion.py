@@ -23,21 +23,45 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class MatchingPaymentSystem:
-    """The one contract/ledger pair through which two nodes can settle."""
+    """One payment method two nodes share: a ledger, a contract **and an asset**.
+
+    The asset is the third dimension and not a detail. On Ergo a single P2PK contract
+    is paid in ERG *and* in any EIP-4 token: same script, same address, same
+    contract_hash, different money. Keyed without it, a node advertising two assets
+    would look like one advertising one contract twice at two different rates -- and
+    the rate is what makes a price quoted in MU actionable.
+    """
 
     ledger_tag: str
     contract_hash: str
     local_mu_per_unit: int
     peer_mu_per_unit: int
+    #: The chain's reserved symbol for its native unit ("ERG", "BTC"), or a token's
+    #: 64-hex id. Empty only for a payment that settles on no chain.
+    asset: str = ""
+
+    @property
+    def key(self) -> "MethodKey":
+        """What the payment dispatch is keyed by."""
+        from src.payment_system.contracts.registry import MethodKey
+
+        return MethodKey(self.ledger_tag, self.contract_hash, self.asset)
 
 
 def _rates_by_payment_system(
         contracts: Iterable[Mapping[str, object]],
         *,
         owner: str,
-) -> dict[tuple[str, str], int]:
-    """Index valid advertised rates, rejecting conflicting duplicate rows."""
-    rates: dict[tuple[str, str], int] = {}
+) -> dict[tuple[str, str, str], int]:
+    """Index valid advertised rates by ``(ledger, contract, asset)``.
+
+    Keyed on the asset too, and that is what stops a legitimate advertisement reading
+    as a contradiction: two assets on one Ergo contract carry two different rates, and
+    without the asset in the key the second would look like the first row disagreeing
+    with itself. A genuine conflict -- the same method advertised twice at two rates --
+    is still refused.
+    """
+    rates: dict[tuple[str, str, str], int] = {}
     for contract in contracts:
         ledger_tag = contract.get("ledger_tag")
         contract_hash = contract.get("contract_hash")
@@ -51,17 +75,17 @@ def _rates_by_payment_system(
         if rate <= 0:
             continue
 
-        key = (str(ledger_tag), str(contract_hash))
+        key = (str(ledger_tag), str(contract_hash), str(contract.get("token_id") or ""))
         previous = rates.setdefault(key, rate)
         if previous != rate:
             raise ValueError(
-                f"{owner} advertises conflicting MU rates for payment system "
-                f"{key[0]}/{key[1][:12]}."
+                f"{owner} advertises conflicting MU rates for payment method "
+                f"{key[0]}/{key[1][:12]}/{key[2] or 'native'}."
             )
     return rates
 
 
-def _local_rates() -> dict[tuple[str, str], int]:
+def _local_rates() -> dict[tuple[str, str, str], int]:
     """Our own rates, read from what we advertise rather than from the database.
 
     The ``LOCAL`` row in ``contract_instance`` is written by each ledger's
@@ -72,10 +96,10 @@ def _local_rates() -> dict[tuple[str, str], int]:
     receives from us, so both sides key on the same numbers.
     """
     from src.payment_system.ledgers import local_payment_methods
-    from src.utils.contract_xattrs import get_contract_type
+    from src.utils.contract_xattrs import get_contract_type, get_token_id
     from src.utils.utils import from_amount
 
-    rates: dict[tuple[str, str], int] = {}
+    rates: dict[tuple[str, str, str], int] = {}
     for advertised in local_payment_methods():
         ledger = advertised.contract.ledger
         # Same derivation `add_contract` uses for the peer rows this is matched
@@ -86,7 +110,12 @@ def _local_rates() -> dict[tuple[str, str], int]:
         rate = from_amount(advertised.mu_per_unit)
         if rate <= 0:
             continue
-        rates[(ledger.tags[0], sha3_256(type_bytes).hexdigest())] = rate
+        key = (
+            ledger.tags[0],
+            sha3_256(type_bytes).hexdigest(),
+            get_token_id(advertised.contract),
+        )
+        rates[key] = rate
     return rates
 
 
@@ -134,10 +163,11 @@ def matching_payment_systems(
         MatchingPaymentSystem(
             ledger_tag=ledger_tag,
             contract_hash=contract_hash,
-            local_mu_per_unit=local_rates[(ledger_tag, contract_hash)],
-            peer_mu_per_unit=peer_rates[(ledger_tag, contract_hash)],
+            asset=asset,
+            local_mu_per_unit=local_rates[(ledger_tag, contract_hash, asset)],
+            peer_mu_per_unit=peer_rates[(ledger_tag, contract_hash, asset)],
         )
-        for ledger_tag, contract_hash in shared
+        for ledger_tag, contract_hash, asset in shared
     ]
 
 
