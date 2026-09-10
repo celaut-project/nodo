@@ -80,9 +80,15 @@ excess = balance - HOT_WALLET_LIMITS - fee
 and sweeps `excess` to the cold wallet only when it is at least
 `COLD_WALLET_MIN_TRANSFER` **and** a valid Ergo output. The hot-wallet limit, the
 transaction fee, and the technical minimum box value are always retained. When
-`COLD_WALLET` is empty, nothing is swept. A configurable percentage
-(`DONATION_PERCENTAGE`, default 0%) of the swept amount may go to a donation wallet.
-Amounts, destination, and transaction id are logged; mnemonics never are.
+`COLD_WALLET` is empty, nothing is swept. Amounts, destination, and transaction id are
+logged; mnemonics never are.
+
+**Donations are not part of this.** They used to be a cut of the swept amount, which
+meant a node with no cold wallet — the default — donated nothing whatever its percentage
+said. A donation is now a share of *incoming payments*, accrued as it is earned and paid
+on the same periodic tick, out of a weighted list of wallets, with no relation to
+`COLD_WALLET` or `HOT_WALLET_LIMITS`. The debt is paid before the sweep runs, because the
+debt is owed and the sweep is discretionary. See [`DONATIONS.md`](DONATIONS.md).
 
 `HOT_WALLET_LIMITS` and `COLD_WALLET_MIN_TRANSFER` are decimal ERG strings, parsed once
 with `Decimal` into nanoERG; all subsequent arithmetic is integer nanoERG.
@@ -295,8 +301,18 @@ token supply is chosen freely by whoever mints the proof, so weighing the raw co
 rewards minting a larger supply — which costs nothing. The share is supply-independent,
 which is what makes two proofs comparable.
 
-The node's own proof is reported separately and left out of the totals — a node
-vouching for itself is not reputation.
+The **subject's** own proof is reported separately and left out of the totals — a node
+vouching for itself is not reputation. Which proofs those are comes from the subject: the
+config for this node, the proofs the peer announced in its signed advertisement for a
+peer. Reading a peer against our own proof id instead counted its self-vouch as the
+network's verdict, which mattered because every node that has submitted holds such a box
+(`submit_to_ledger` always publishes one, addressed to its own identity key) and a node
+with no peers assigns its **whole** supply to it.
+
+Being announced, that list is voluntary. A proof kept off the advertisement is
+indistinguishable from a third party's here, however much was burned into it, and minting
+a proof is free — so this separation is what makes the report honest, not what would make
+the figure safe to route on (issue #353).
 
 ###### Why there is no "reputation earned this week"
 

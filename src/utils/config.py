@@ -584,6 +584,7 @@ class ConfigManager(metaclass=Singleton):
             from src.utils.config_validation import (
                 _find_removed_keys,
                 ConfigValidationError,
+                validate_balancers_config,
                 validate_host_policy_config,
                 validate_pricing_config,
             )
@@ -606,6 +607,11 @@ class ConfigManager(metaclass=Singleton):
             # ceiling the operator set and a window that does not parse leaves the node
             # open all night, so a malformed one stops here rather than being guessed at.
             validate_host_policy_config(self._config)
+
+            # The shape of the peer-selection formula. A negative weight or a
+            # half-credit of zero would not make the node quote a wrong price -- it
+            # would make every routing decision meaningless, silently.
+            validate_balancers_config(self._config)
 
             # Note what is NOT here: the gateway port. Picking one writes a rule
             # into the host's firewall and a value into this file, and that used to
@@ -733,6 +739,7 @@ class ConfigManager(metaclass=Singleton):
                 self._config,
                 payments_enabled=payments_enabled,
                 reputation_enabled=reputation_enabled,
+                warn=lambda message: self.log(f"[DONATIONS] {message}"),
             )
 
     def get(self, key: str, default: Any = None) -> Any:

@@ -1,4 +1,5 @@
 from src.reputation_system.envs import ergo_ledger
+from decimal import Decimal
 from typing import Optional, Tuple
 from protos import celaut_pb2
 import requests
@@ -8,7 +9,7 @@ from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.utils.logger import LOGGER
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import set_address, set_script, set_token_id, set_contract_type
-from src.utils.ergo_units import erg_to_nanoerg, nanoerg_to_erg_str
+from src.utils.ergo_units import erg_to_nanoerg, is_valid_ergo_address, nanoerg_to_erg_str
 # This ledger's MU rate and its conversions. A separate, light module on purpose: it is
 # also what `monetary.display_unit` resolves ERG through, and that runs on log lines, so
 # it must not pull in everything below.
@@ -44,22 +45,37 @@ LEDGER = "ergo"  # or "ergo-testnet" for Ergo testnet.
 # ErgoTree travels per-instance as the raw ``script`` xattr (propositionBytes).
 CONTRACT = "proveDlog(decodePoint())"
 CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
+# How this ledger names its own native unit on the wire and in the database. A reserved
+# symbol rather than an id: an EIP-4 token is named by its 64-hex id, which can never
+# collide with this. It is what `init()` already advertises as the `token_id` xattr.
+NATIVE_ASSET = "ERG"
 
 # The node controls exactly ONE wallet. Clients pay directly to its P2PK address; excess is
 # swept to the cold wallet (a public address, never a mnemonic in Nodo).
 WALLET_MNEMONIC = lambda: env_manager.get("ledgers.ergo.WALLET_MNEMONIC")
 ERGO_NODE_URL = lambda: env_manager.get("ledgers.ergo.NODE_URL")
 COLD_WALLET = lambda: env_manager.get("ledgers.ergo.payments.COLD_WALLET") or ""
-ERGO_DONATION_WALLET = lambda: env_manager.get("ledgers.ergo.payments.DONATION_WALLET") or ""
+# Read per call, not captured at import, so a test (and the TUI's restart-into-a-new-
+# config) sees the value the node is actually running with -- and by its explicit path,
+# so the key has one unambiguous home rather than relying on `ConfigManager.get`'s
+# scan-every-section fallback for a dotless name.
+#
+# Plain truthiness, matching `contracts.envs.SIMULATED` exactly. That is deliberate: the
+# two must never disagree about whether this node is simulating, and a stricter parse
+# here would make them differ on a value one of them mis-reads.
+SIMULATE_PAYMENTS = lambda: bool(env_manager.get("general_flags.SIMULATE_PAYMENTS"))
+
+# Donations are a share of *earnings* and have nothing to do with this wallet's excess
+# being swept to cold storage: they are accrued when a payment arrives and paid on the
+# tick below, out of `donations.config`'s weighted wallet list. The single
+# `DONATION_WALLET` key and the split of the sweep that used it are gone.
 
 
-def _clamp(value: float, maximum: float, minimum: float) -> float:
-    return max(minimum, min(value, maximum))
+def _donation_min_transfer_nanoerg() -> int:
+    """Smallest donation payout worth making, parsed from whole ERG to nanoERG."""
+    from src.payment_system.donations import config as donation_config
 
-
-def DONATION_PERCENTAGE() -> float:
-    raw = env_manager.get("ledgers.ergo.payments.DONATION_PERCENTAGE") or "0"
-    return _clamp(float(raw), 1.0, 0.0)
+    return erg_to_nanoerg(donation_config.min_transfer(LEDGER, NATIVE_ASSET))
 
 
 def _hot_wallet_limit_nanoerg() -> int:
@@ -126,6 +142,15 @@ def __mu_to_nanoerg(amount: int) -> int:
     turned every real charge into zero nanoERG.
     """
     return rate.mu_to_nanoerg(amount)
+
+
+def mu_to_native(amount: int) -> Decimal:
+    """MU -> nanoERG, exactly. What a donation debt on this ledger is counted in.
+
+    The generic donation code reaches this through ``contracts.envs.mu_to_native``; it
+    never names nanoERG, and this is where the name is answered.
+    """
+    return rate.mu_to_nanoerg_exact(amount)
 
 
 def settlement_floors_mu() -> Tuple[int, int]:
@@ -205,7 +230,7 @@ def init():
     proposition_bytes = get_wallet_proposition_bytes()
     sql = sql_connection.SQLConnection()
     contract = celaut_pb2.Contract(ledger=ergo_ledger)
-    set_token_id(contract, "ERG")
+    set_token_id(contract, NATIVE_ASSET)
     # Canonical value: raw ErgoTree/propositionBytes of the wallet's P2PK payment boxes.
     set_script(contract, proposition_bytes)
     # Stable type identity for cross-node matching (its sha3 == CONTRACT_HASH).
@@ -254,6 +279,189 @@ def compute_sweep_amount(
 
 
 def manager():
+    """One periodic tick for this contract: pay what is owed, then sweep what is spare.
+
+    Donations first, deliberately. A donation is a debt this node already incurred
+    against payments it has been paid; the sweep only moves the node's own funds
+    between its own wallets and pays nobody, so it takes what is left rather than
+    what it would have taken before the debt was settled.
+
+    One tick per *contract*, not per asset. Once this contract settles in more than
+    one asset (#342) a tick dispatched per asset would run N+1 times and pay N+1 fees
+    for one job -- and an Ergo transaction carries several assets in one output, so the
+    outputs of every asset owed belong in the single transaction built below.
+    """
+    _pay_accrued_donations()
+    _sweep_to_cold_wallet()
+
+
+def _donation_records(tx_id: str, outputs) -> list:
+    """The payment rows one donation transaction produces, in MU for the ledger-neutral
+    columns and with the destination address on each.
+
+    ``peer_id`` is left unset on purpose: a donation goes to a wallet, and the wallet
+    of a developer is not a peer this node routes work to. What makes it a donation
+    rather than an ordinary outgoing payment is ``purpose``.
+    """
+    return [
+        {
+            "tx_id": tx_id,
+            "address": address,
+            "amount_mu": rate.nanoerg_to_mu(amount_nano),
+        }
+        for address, amount_nano in outputs
+    ]
+
+
+def _pay_accrued_donations():
+    """Pay the donation debt accrued on this contract, if a transaction is worth making."""
+    from src.payment_system.donations import config as donation_config
+    from src.payment_system.donations.split import plan_payout
+
+    try:
+        sql = sql_connection.SQLConnection()
+        owed = sql.donation_owed(LEDGER, CONTRACT_HASH, NATIVE_ASSET)
+        if owed <= 0:
+            return
+
+        wallets = donation_config.pay_wallets(LEDGER)
+        # Refused at startup, so an address that does not parse here means the config
+        # changed underneath a running node. The bad entry is skipped rather than the
+        # whole payout -- one unparseable wallet would otherwise block every donation
+        # for ever -- and its own entitlement is left untouched rather than shared out,
+        # so it keeps growing and is paid in full the moment the address is corrected.
+        unpayable = {
+            wallet.address for wallet in wallets
+            if not is_valid_ergo_address(wallet.address)
+        }
+        for address in sorted(unpayable):
+            LOGGER(
+                f"Skipping donation wallet {address!r}: not a valid Ergo address. Its "
+                "share stays accrued."
+            )
+        if len(unpayable) == len(wallets):
+            LOGGER(
+                f"{nanoerg_to_erg_str(int(owed))} ERG is owed in donations but no valid "
+                "wallet is configured to receive it; it stays accrued."
+            )
+            return
+
+        # What each wallet has already been credited, which is what makes its weight a
+        # share of everything this method has ever earned rather than a share of this
+        # one transaction. Without it a cut too small to go out returns to a debt
+        # belonging to nobody and is split among everybody on the next tick -- so a
+        # small weight is never paid at all.
+        #
+        # Read once, here, before anything is broadcast, and carried into the settle
+        # below. `None` means the rows could not be read, which is not the same as
+        # "nobody has been paid": read that way, an accumulated claim -- an address
+        # unpayable for a month is owed the lot -- would be handed to whichever wallets
+        # clear the floor today. Nothing is lost by waiting a tick.
+        paid = sql.donation_paid_by_address(LEDGER, CONTRACT_HASH, NATIVE_ASSET)
+        if paid is None:
+            LOGGER(
+                "Not paying the donation yet: what each wallet has already been "
+                "credited could not be read, and paying without it would send one "
+                "wallet's share to another. The debt stays accrued."
+            )
+            return
+
+        plan = plan_payout(
+            owed,
+            wallets,
+            unpayable=unpayable,
+            paid_native=paid,
+            min_transfer_native=_donation_min_transfer_nanoerg(),
+            # This chain's own floors, in its own units. Passing them in native rather
+            # than reading `settlement_floors_mu()` back is what keeps the comparison
+            # honest: the debt is native, and a floor in MU would be wrong by exactly
+            # MU_PER_NANOERG -- invisible at the default of 1, silently wrong after.
+            min_payable_native=SAFE_MIN_BOX_VALUE,
+            fee_native=DEFAULT_FEE,
+        )
+        if plan is None:
+            LOGGER(
+                f"Donation debt of {nanoerg_to_erg_str(int(owed))} ERG is not yet worth a "
+                f"transaction (min transfer {nanoerg_to_erg_str(_donation_min_transfer_nanoerg())} "
+                f"ERG, fee {nanoerg_to_erg_str(DEFAULT_FEE)} ERG, minimum output "
+                f"{nanoerg_to_erg_str(SAFE_MIN_BOX_VALUE)} ERG); it stays accrued."
+            )
+            return
+
+        rendered = ", ".join(
+            f"{nanoerg_to_erg_str(amount)} ERG -> {address}"
+            for address, amount in plan.outputs
+        )
+        if SIMULATE_PAYMENTS():
+            LOGGER(
+                f"SIMULATE_PAYMENTS is on: would donate {rendered} (fee "
+                f"{nanoerg_to_erg_str(plan.fee_native)} ERG). Nothing broadcast, and the "
+                "debt stays owed."
+            )
+            return
+
+        _, simple_send, _, _ = _ergo_runtime()
+        # The debt was accrued out of money that arrived, so the wallet should hold it
+        # -- but a peer deposit or a manual transfer may have spent it since. Checked
+        # before broadcasting so the log says "not enough ERG" rather than whatever
+        # AppKit raises, and so the debt is visibly kept rather than looking lost.
+        required = plan.total_native + SAFE_MIN_BOX_VALUE
+        available = __confirmed_balance_nanoerg(__get_sender_addr(WALLET_MNEMONIC()))
+        if available < required:
+            LOGGER(
+                f"Not paying the donation yet: it needs {nanoerg_to_erg_str(required)} ERG "
+                f"(outputs, fee and a change box) and the wallet holds "
+                f"{nanoerg_to_erg_str(available)} ERG. The debt stays accrued."
+            )
+            return
+
+        # The same lock a deposit takes. Without it a donation and a payment can pick
+        # the same input box and one of them becomes a double spend.
+        with payment_lock:
+            tx = simple_send(
+                ergo=__init_ergo(),
+                amount=[__nanoerg_to_erg(amount) for _, amount in plan.outputs],
+                receiver_addresses=[address for address, _ in plan.outputs],
+                wallet_mnemonic=WALLET_MNEMONIC(),
+                fee=__nanoerg_to_erg(plan.fee_native),
+            )
+        tx_id = str(tx) if tx else ""
+        LOGGER(f"Donation tx -> {tx_id}: {rendered}")
+
+        # Only now, and in one transaction with the rows that record it: the debt is
+        # discharged by a transaction that exists, and a crash between the two cannot
+        # pay it twice or lose the record of it.
+        if not sql.settle_donation(
+            ledger=LEDGER,
+            contract_hash=CONTRACT_HASH,
+            token_id=NATIVE_ASSET,
+            paid_native=plan.total_native,
+            records=_donation_records(tx_id, plan.outputs),
+            # Per wallet, so the next payout knows whose entitlement this discharged.
+            # In the same commit as the decrement, because they are one fact.
+            credited=plan.credited,
+            paid_before=paid,
+        ):
+            # The transaction is on the chain and the debt is not discharged, so the
+            # next tick will pay it again. Nothing here can undo an Ergo transaction,
+            # and the debt row is the only thing that could have stopped the repeat --
+            # so this is said as loudly as a log line can say it.
+            LOGGER(
+                f"[ERROR] Donation tx {tx_id} was broadcast but the debt could not be "
+                f"decremented: {nanoerg_to_erg_str(plan.total_native)} ERG may be donated "
+                "again on the next tick. Check the donation_accrual row against "
+                "`nodo tx_history` before the next payment manager iteration."
+            )
+        if plan.withheld_native > 0:
+            LOGGER(
+                f"{plan.withheld_native} nanoERG stays accrued: a share below Ergo's "
+                "minimum output, plus the sub-unit remainder."
+            )
+    except Exception as e:
+        LOGGER(f"Exception while paying accrued donations -> {str(e)}")
+
+
+def _sweep_to_cold_wallet():
     """Sweep excess from the single wallet to the cold wallet when both thresholds are met."""
     LOGGER("Exec ergo interface manager (single-wallet cold sweep).")
     try:
@@ -281,17 +489,8 @@ def manager():
             )
             return
 
-        # Optional donation split (percentage of the swept amount), integer nanoERG.
-        donation_wallet = ERGO_DONATION_WALLET()
-        donation_pct = DONATION_PERCENTAGE()
-        donation_nano = int(sweep_nano * donation_pct)
-
         receiver_addresses = [cold_wallet]
         amounts_nano = [sweep_nano]
-        if donation_wallet and donation_nano >= SAFE_MIN_BOX_VALUE:
-            amounts_nano = [sweep_nano - donation_nano, donation_nano]
-            receiver_addresses = [cold_wallet, donation_wallet]
-            LOGGER(f"Donation split: {nanoerg_to_erg_str(donation_nano)} ERG -> donation wallet.")
 
         LOGGER(
             f"Sweeping {nanoerg_to_erg_str(sweep_nano)} ERG from the wallet to cold wallet "
@@ -390,7 +589,7 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
                 if obj["numConfirmations"] > 1:
                     LOGGER(f"Tx {tx_id} verified.")
                     contract = celaut_pb2.Contract(ledger=ledger)
-                    set_token_id(contract, "ERG")
+                    set_token_id(contract, NATIVE_ASSET)
                     set_script(contract, script)
                     set_contract_type(contract, CONTRACT.encode("utf-8"))
                     return contract

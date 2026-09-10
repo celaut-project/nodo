@@ -11,6 +11,7 @@ from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
+from src.payment_system.donations.indexer import tick as donations_tick
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
 from src.payment_system.mu_conversion import peer_mu_in_local
@@ -678,6 +679,11 @@ def manager_thread():
         # Publish this node's public IP to its DDNS provider (OFF unless
         # ddns.ENABLED). Self-gates to ddns.INTERVAL_SECONDS and never raises.
         ddns_tick()
+
+        # Read what other nodes donated, off each chain, into SQLite (issue #282).
+        # Self-gates to its own hourly interval and never raises. This is the only
+        # place donations are read from a network: the balancer reads the rows.
+        donations_tick()
 
         sleep(MANAGER_ITERATION_TIME)
         if DEBUG_MODE():
