@@ -18,7 +18,7 @@ from unittest import mock
 
 IMPORT_ERROR = None
 try:
-    from src.payment_system.contracts import envs
+    from src.payment_system.contracts import envs, registry
     from src.payment_system.contracts.ergo import rate
     from src.payment_system.donations import accrual
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -26,6 +26,14 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     accrual = None  # type: ignore[assignment]
 
 CONTRACT = "1c691f72aad8533f1e0815cb6dd9f302637d5c60824c8a92684fe50cdd4b82bd"
+
+
+def _method(asset, native="ERG"):
+    """One registered payment method: an asset bound to a converter of its own."""
+    contract = mock.Mock()
+    contract.LEDGER, contract.CONTRACT_HASH, contract.NATIVE_ASSET = "ergo", CONTRACT, native
+    contract.mu_to_native = lambda mu: Decimal(mu)
+    return registry.PaymentMethod(contract, asset)
 
 
 class _Recorder:
@@ -60,17 +68,17 @@ class AccrualTests(unittest.TestCase):
         patcher = mock.patch.dict(sys.modules, {"src.database.sql_connection": module})
         patcher.start()
         self.addCleanup(patcher.stop)
-        # One MU is one nanoERG, the shipped default.
-        self.rates = mock.patch.object(
-            envs, "mu_to_native", return_value={CONTRACT: lambda mu: Decimal(mu)}
+        # One MU is one nanoERG, the shipped default. Registered as a *method*: a
+        # contract paid in several assets converts each one at its own rate, so what
+        # the accrual resolves is a method and not a contract.
+        self.methods = mock.patch.object(
+            envs, "methods", return_value={
+                registry.MethodKey("ergo", CONTRACT, "ERG"): _method("ERG"),
+                registry.MethodKey("ergo", CONTRACT, "a" * 64): _method("a" * 64),
+            }
         )
-        self.rates.start()
-        self.addCleanup(self.rates.stop)
-        self.natives = mock.patch.object(
-            envs, "native_assets", return_value={CONTRACT: "ERG"}
-        )
-        self.natives.start()
-        self.addCleanup(self.natives.stop)
+        self.methods.start()
+        self.addCleanup(self.methods.stop)
         self.wallets = mock.patch(
             "src.payment_system.donations.config.pay_wallets",
             return_value=[object()],
@@ -124,7 +132,7 @@ class AccrualTests(unittest.TestCase):
         # not owed to anybody. It contributes no converter, and this is what that means.
         self.assertIsNone(accrual.accrue(
             amount_mu=1_000_000, ledger="ergo",
-            contract_hash="a-contract-with-no-native-unit", asset="ERG",
+            contract_hash="a-contract-that-registers-no-method", asset="ERG",
         ))
         self.assertEqual(self.recorder.debts, {})
 

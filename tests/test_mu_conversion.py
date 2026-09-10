@@ -17,19 +17,23 @@ class MuConversionTests(unittest.TestCase):
     def test_selects_the_single_common_contract_and_converts_in_both_directions(self):
         connection = Mock()
         connection.get_peer_payment_contracts.return_value = [
-            {"ledger_tag": "ergo", "contract_hash": "p2pk", "mu_per_unit": 2_000_000_000}
+            {"ledger_tag": "ergo", "contract_hash": "p2pk", "token_id": "ERG",
+             "mu_per_unit": 2_000_000_000}
         ]
 
         # Our own rate comes from what we advertise, never from the LOCAL row:
         # nothing ever writes a rate into it (see `_local_rates`).
         with patch(
             "src.payment_system.mu_conversion._local_rates",
-            return_value={("ergo", "p2pk"): 1_000_000_000},
+            return_value={("ergo", "p2pk", "ERG"): 1_000_000_000},
         ):
             payment_system = matching_payment_system("peer-a", connection=connection)
 
         self.assertEqual(payment_system.local_mu_per_unit, 1_000_000_000)
         self.assertEqual(payment_system.peer_mu_per_unit, 2_000_000_000)
+        # A payment method is ledger + contract + asset, and the asset is what the
+        # dispatch is keyed by.
+        self.assertEqual(payment_system.asset, "ERG")
         self.assertEqual(
             convert_mu(1_000_000, from_mu_per_unit=1_000_000_000, to_mu_per_unit=2_000_000_000),
             2_000_000,
@@ -65,10 +69,59 @@ class MuConversionTests(unittest.TestCase):
     def _two_shared(self):
         connection = Mock()
         connection.get_peer_payment_contracts.return_value = [
-            {"ledger_tag": "ergo", "contract_hash": "a", "mu_per_unit": 1},
-            {"ledger_tag": "bitcoin", "contract_hash": "b", "mu_per_unit": 2},
+            {"ledger_tag": "ergo", "contract_hash": "a", "token_id": "ERG", "mu_per_unit": 1},
+            {"ledger_tag": "bitcoin", "contract_hash": "b", "token_id": "BTC", "mu_per_unit": 2},
         ]
         return connection
+
+    def test_two_assets_on_one_contract_are_two_payment_systems(self):
+        """The case the asset dimension exists for.
+
+        On Ergo one P2PK contract is paid in ERG and in every EIP-4 token at the same
+        address: same script, same address, same contract_hash. Keyed without the asset
+        these two rows read as one contract advertised twice at two different rates --
+        which `_rates_by_payment_system` refuses as a contradiction, so the peer would
+        become unpayable rather than payable in two currencies.
+        """
+        token = "ab" * 32
+        connection = Mock()
+        connection.get_peer_payment_contracts.return_value = [
+            {"ledger_tag": "ergo", "contract_hash": "p2pk", "token_id": "ERG",
+             "mu_per_unit": 1_000_000_000},
+            {"ledger_tag": "ergo", "contract_hash": "p2pk", "token_id": token,
+             "mu_per_unit": 20_000_000},
+        ]
+        with patch(
+            "src.payment_system.mu_conversion._local_rates",
+            return_value={
+                ("ergo", "p2pk", "ERG"): 1_000_000_000,
+                ("ergo", "p2pk", token): 20_000_000,
+            },
+        ):
+            systems = matching_payment_systems("peer-a", connection=connection)
+
+        self.assertEqual([s.asset for s in systems], ["ERG", token])
+        self.assertEqual([s.contract_hash for s in systems], ["p2pk", "p2pk"])
+        # Each carries its own rate, which is the whole point: one row for both would
+        # have every peer converting ERG amounts at the token's rate.
+        self.assertEqual([s.local_mu_per_unit for s in systems], [1_000_000_000, 20_000_000])
+
+    def test_the_same_method_advertised_twice_at_two_rates_is_still_refused(self):
+        # A genuine contradiction, as opposed to two assets: same ledger, same
+        # contract, same asset, two rates.
+        connection = Mock()
+        connection.get_peer_payment_contracts.return_value = [
+            {"ledger_tag": "ergo", "contract_hash": "p2pk", "token_id": "ERG",
+             "mu_per_unit": 1},
+            {"ledger_tag": "ergo", "contract_hash": "p2pk", "token_id": "ERG",
+             "mu_per_unit": 2},
+        ]
+        with patch(
+            "src.payment_system.mu_conversion._local_rates",
+            return_value={("ergo", "p2pk", "ERG"): 1},
+        ):
+            with self.assertRaisesRegex(ValueError, "conflicting MU rates"):
+                matching_payment_systems("peer-a", connection=connection)
 
     def test_two_shared_systems_are_both_offered(self):
         """Sharing two currencies used to mean being unable to pay at all.
@@ -83,7 +136,7 @@ class MuConversionTests(unittest.TestCase):
             "src.payment_system.mu_conversion._local_rates",
             # Insertion order is the registry's candidate order, which is the payer's
             # preference -- not alphabetical, and not whatever the hashes sort to.
-            return_value={("bitcoin", "b"): 20, ("ergo", "a"): 10},
+            return_value={("bitcoin", "b", "BTC"): 20, ("ergo", "a", "ERG"): 10},
         ):
             systems = matching_payment_systems("peer-a", connection=connection)
 
@@ -101,7 +154,7 @@ class MuConversionTests(unittest.TestCase):
         connection = self._two_shared()
         with patch(
             "src.payment_system.mu_conversion._local_rates",
-            return_value={("bitcoin", "b"): 20, ("ergo", "a"): 10},
+            return_value={("bitcoin", "b", "BTC"): 20, ("ergo", "a", "ERG"): 10},
         ):
             system = matching_payment_system("peer-a", connection=connection)
         self.assertEqual(system.ledger_tag, "bitcoin")
@@ -111,11 +164,11 @@ class MuConversionTests(unittest.TestCase):
         # accept.
         connection = Mock()
         connection.get_peer_payment_contracts.return_value = [
-            {"ledger_tag": "bitcoin", "contract_hash": "b", "mu_per_unit": 2},
+            {"ledger_tag": "bitcoin", "contract_hash": "b", "token_id": "BTC", "mu_per_unit": 2},
         ]
         with patch(
             "src.payment_system.mu_conversion._local_rates",
-            return_value={("ergo", "a"): 1},
+            return_value={("ergo", "a", "ERG"): 1},
         ):
             with self.assertRaisesRegex(ValueError, "no common payment system"):
                 matching_payment_systems("peer-a", connection=connection)

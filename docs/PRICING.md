@@ -74,6 +74,48 @@ is a setting, not a definition, because the next ledger will need its own. ERG�
 (1e9) is **not** configurable and lives in the code: it is fixed by the Ergo protocol,
 and making it a setting would only allow defining a wrong Ergo.
 
+### A rate per asset, not per ledger
+
+A ledger is not a currency. An Ergo P2PK address holds ERG **and** every EIP-4 token sent
+to it — one script, one address, one `contract_hash` — so what carries a rate is a
+**payment method**: `(ledger, contract, asset)`. Each configured asset declares its own
+`MU_PER_UNIT`, in MU per **base** unit, exactly as `MU_PER_NANOERG` is MU per base unit
+of ERG:
+
+```yaml
+ledgers:
+  ergo:
+    payments:
+      MU_PER_NANOERG: 1
+      ASSETS:
+        - TOKEN_ID: "003bd19d…"   # 64 hex characters; never a name
+          SYMBOL: "SigUSD"
+          UNIT_NAME: "sigusd"     # unique across assets and ui.UNITS
+          DECIMALS: 2             # stated, not read from the minter's registers
+          MU_PER_UNIT: 20000000   # MU per cent
+```
+
+Three things follow, and they are the reason this is config and not a lookup:
+
+**`MU_PER_UNIT` is static.** For a stablecoin that is the point. For a volatile token it
+means the operator re-sets it by hand, and a stale figure misprices every quote until
+they do. Reading it from an on-chain oracle is the obvious follow-up and a separate trust
+decision.
+
+**The two rates have to be coherent.** Their ratio *is* this node's opinion about what
+the token is worth in ERG, so no price feed is needed to notice that one of them is out
+by a power of ten: the node warns when the pair implies a whole token worth less than a
+nanoERG (nothing priced in it could settle) or more than a million ERG (`MU_PER_UNIT`
+read as "per whole unit"). This matters even for an operator who prices nothing in ERG,
+because a token method's fee floor is denominated in ERG while its minimum output is one
+base unit of the token — deposit sizing is wrong by exactly the ratio between them.
+
+**`UNIT_NAME` contributes a display unit.** One per asset, derived from the ledger like
+`erg` is, so `ui.DISPLAY_UNIT: sigusd` shows every figure in SigUSD. Two assets claiming
+one name, or an asset claiming a name already under `ui.UNITS`, is a **startup error**:
+the merge is a `dict.update`, so the second would silently win and every amount an
+operator reads would be off by the ratio between the two.
+
 **What the operator reads and types is a third thing again.**
 
 ```yaml
@@ -120,9 +162,15 @@ through `format_mu` (`src/utils/monetary.py`), and every operator-supplied amoun
 parsed from it by `parse_to_mu`, which refuses anything that would not land on a whole MU
 rather than rounding it.
 
-The exception is `nodo pay <peer> <amount>`, whose amount stays in **ERG** whatever the
-display unit says: what it moves is an on-chain ERG transfer, denominated by the ledger
-rather than by a presentation preference.
+The exception is `nodo pay <peer> <amount>`, whose amount stays in the unit of the
+**asset being paid** whatever the display unit says — ERG, BTC, whole SigUSD — because
+what it moves is an on-chain transfer, denominated by the asset rather than by a
+presentation preference. Which asset is named with `--payment-method <ledger>:<asset>`
+(or `--ledger` and `--asset`), and it is needed exactly when this node offers more than
+one method: the ledger alone stopped being an answer once one Ergo contract could be
+paid in ERG and in a token, at different rates. The named method is what the amount is
+read in *and* what the payment settles through; without a name, funding is the selection
+and the payer settles through the first method it can fund.
 
 ## The price vector
 

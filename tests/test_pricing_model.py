@@ -424,22 +424,31 @@ class FreeTierTests(unittest.TestCase):
             self.assertFalse(execution_cost.is_free(scarcity={"cpu": 0.1, "mem": 0.9, "disk": 0.1}))
 
 
-def _system(ledger_tag="ergo", contract_hash="ergo-contract"):
-    """The payment system a deposit is being sized for."""
+def _system(ledger_tag="ergo", contract_hash="ergo-contract", asset="ERG"):
+    """The payment method a deposit is being sized for.
+
+    A method is ledger + contract + asset: on Ergo two assets share a contract and a
+    script, and their floors differ -- a token's minimum output is one base unit of the
+    token while its fee is paid in ERG.
+    """
     from src.payment_system.mu_conversion import MatchingPaymentSystem
 
     return MatchingPaymentSystem(
-        ledger_tag=ledger_tag, contract_hash=contract_hash,
+        ledger_tag=ledger_tag, contract_hash=contract_hash, asset=asset,
         local_mu_per_unit=1, peer_mu_per_unit=1,
     )
 
 
 class DerivedDepositTests(unittest.TestCase):
-    def _floors(self, **by_contract):
+    def _floors(self, *, asset="ERG", ledger="ergo", **by_contract):
+        """The floors dispatch, keyed by payment method as the real one is."""
+        from src.payment_system.contracts.registry import MethodKey
+
         return patch(
             "src.payment_system.contracts.envs.settlement_floors",
             return_value={
-                name: (lambda pair=pair: pair) for name, pair in by_contract.items()
+                MethodKey(ledger, name, asset): (lambda pair=pair: pair)
+                for name, pair in by_contract.items()
             },
         )
 
@@ -533,16 +542,49 @@ class DerivedDepositTests(unittest.TestCase):
         with _config(**{
             "deposits.MAX_FEE_OVERHEAD": 0.02,
             "ledgers.bitcoin.payments.MAX_FEE_OVERHEAD": 0.25,
-        }), self._floors(btc=(1_000_000_000, 294)):
+            "ledgers.bitcoin.payments.ASSETS": [],
+            "ledgers.ergo.payments.ASSETS": [],
+        }), self._floors(ledger="bitcoin", asset="BTC", btc=(1_000_000_000, 294)):
             per_ledger = deposits.full_deposit_mu(
-                _system(ledger_tag="bitcoin", contract_hash="btc")
+                _system(ledger_tag="bitcoin", contract_hash="btc", asset="BTC")
             )
+        with _config(**{
+            "deposits.MAX_FEE_OVERHEAD": 0.02,
+            "ledgers.bitcoin.payments.MAX_FEE_OVERHEAD": 0.25,
+            "ledgers.ergo.payments.ASSETS": [],
+        }), self._floors(ledger="ergo", asset="BTC", btc=(1_000_000_000, 294)):
             global_share = deposits.full_deposit_mu(
-                _system(ledger_tag="ergo", contract_hash="btc")
+                _system(ledger_tag="ergo", contract_hash="btc", asset="BTC")
             )
 
         self.assertEqual(per_ledger, 4_000_000_000)
         self.assertEqual(global_share, 50_000_000_000)
+
+    def test_a_method_may_override_the_fee_overhead_share(self):
+        """A token settling through the same contract as ERG declares its own share.
+
+        What is right for a chain's native unit can be absurd for a token priced orders
+        of magnitude away from it, and the two share a contract -- so the override has
+        to be per method, not per ledger.
+        """
+        from src.payment_system import deposits
+
+        token = "ab" * 32
+        with _config(**{
+            "deposits.MAX_FEE_OVERHEAD": 0.02,
+            "ledgers.ergo.payments.ASSETS": [
+                {"TOKEN_ID": token, "MAX_FEE_OVERHEAD": 0.5},
+            ],
+        }), self._floors(asset=token, c=(1_000_000, 1)):
+            per_method = deposits.full_deposit_mu(_system(contract_hash="c", asset=token))
+        with _config(**{
+            "deposits.MAX_FEE_OVERHEAD": 0.02,
+            "ledgers.ergo.payments.ASSETS": [],
+        }), self._floors(asset="ERG", c=(1_000_000, 1)):
+            native = deposits.full_deposit_mu(_system(contract_hash="c"))
+
+        self.assertEqual(per_method, 2_000_000)
+        self.assertEqual(native, 50_000_000)
 
     def test_a_system_whose_contract_is_gone_cannot_be_sized(self):
         # Shared with the peer a moment ago and not offered now: a runtime that went
@@ -550,8 +592,8 @@ class DerivedDepositTests(unittest.TestCase):
         # transaction the chain refuses.
         from src.payment_system import deposits
 
-        with _config(), self._floors(other=(0, 0)):
-            with self.assertRaisesRegex(ValueError, "no payment contract is available"):
+        with _config(**{"ledgers.ergo.payments.ASSETS": []}), self._floors(other=(0, 0)):
+            with self.assertRaisesRegex(ValueError, "no payment method is available"):
                 deposits.full_deposit_mu(_system(contract_hash="vanished"))
 
     def test_a_payment_that_settles_on_no_chain_has_no_floor(self):

@@ -38,12 +38,16 @@ class LedgerBalancerTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
 
     def test_an_available_ledger_is_yielded_unchanged(self):
-        [(script, ledger)], _ = self._balance([(self.script, self.ergo)])
+        [(script, ledger, asset)], _ = self._balance([(self.script, self.ergo, "ERG")])
         self.assertEqual(script, self.script)
         self.assertEqual(ledger.prose, "Ergo chain")
+        # The asset rides through untouched: whether a *ledger* is reachable says
+        # nothing about which of its assets a payment is in, and dropping it would
+        # leave the payer unable to tell two methods of one contract apart.
+        self.assertEqual(asset, "ERG")
 
     def test_an_unavailable_ledger_is_filtered_out(self):
-        result, _ = self._balance([(self.script, self.ergo)], available=False)
+        result, _ = self._balance([(self.script, self.ergo, "ERG")], available=False)
         self.assertEqual(result, [])
 
     def test_an_unavailable_ledger_stays_filtered_on_a_repeat(self):

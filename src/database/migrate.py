@@ -78,18 +78,29 @@ TABLES = {
             double_spending_retry_time DATETIME DEFAULT NULL
         )
     ''',
+    # A payment method is ledger + contract + **asset**, not ledger + contract. On Ergo
+    # one P2PK contract is paid in ERG *and* in any EIP-4 token: same script, same
+    # address, same contract_hash, different asset. `token_id` is that third dimension --
+    # the reserved symbol of the chain's native unit ("ERG", "BTC") or a token's 64-hex
+    # id, which can never collide with a symbol.
+    #
+    # It is part of the unique key because `mu_per_unit` lives on this row and
+    # `add_contract` upserts it: without the asset, a node advertising ERG and SigUSD
+    # would overwrite its own ERG rate with the SigUSD one, in the same row, and every
+    # peer would convert ERG amounts at the SigUSD rate. Nothing would raise.
     "contract_instance": '''
         CREATE TABLE IF NOT EXISTS contract_instance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             address TEXT,
             ledger_hash TEXT,
             contract_hash TEXT,
+            token_id TEXT NOT NULL DEFAULT '',
             peer_id TEXT NOT NULL,
             mu_per_unit TEXT,
             FOREIGN KEY (ledger_hash) REFERENCES ledger (id),
             FOREIGN KEY (contract_hash) REFERENCES contract (hash),
             FOREIGN KEY (peer_id) REFERENCES peer (id),
-            UNIQUE (address, ledger_hash, contract_hash, peer_id)
+            UNIQUE (address, ledger_hash, contract_hash, token_id, peer_id)
         )
     ''',
     # mem_limit, disk_space and the CFS pair (cpu_period/cpu_quota) are what the
@@ -275,6 +286,11 @@ TABLES = {
             deposit_token TEXT DEFAULT NULL,
             ledger TEXT DEFAULT NULL,
             contract_hash TEXT DEFAULT NULL,
+            -- The asset the payment was made IN: a reserved native symbol ("ERG") or a
+            -- token's 64-hex id. `amount_mu` is deliberately ledger-neutral, so without
+            -- this a row cannot say what money moved -- and one contract settles in
+            -- several assets (see contract_instance).
+            token_id TEXT DEFAULT NULL,
             address TEXT DEFAULT NULL,
             amount_mu TEXT NOT NULL,
             purpose TEXT DEFAULT NULL,
@@ -480,6 +496,7 @@ def create_tables(cursor):
     # which is every row written before this column existed.
     ensure_columns(cursor, "payments", {
         "purpose": "TEXT DEFAULT NULL",
+        "token_id": "TEXT DEFAULT NULL",
     })
     ensure_columns(cursor, "uri", {
         "peer_id": "TEXT DEFAULT NULL",
@@ -489,6 +506,7 @@ def create_tables(cursor):
     })
     retire_slot_table(cursor)
     ensure_peer_address_uniqueness(cursor)
+    widen_contract_instance_uniqueness(cursor)
 
 
 def retire_slot_table(cursor) -> None:
@@ -545,6 +563,57 @@ def ensure_peer_address_uniqueness(cursor) -> None:
         )
     except sqlite3.Error as e:
         print(f"Error enforcing peer address uniqueness: {e}")
+
+
+def widen_contract_instance_uniqueness(cursor) -> None:
+    """Make ``contract_instance`` unique per *asset*, rebuilding the table if it is not.
+
+    A payment method is ledger + contract + asset, so the row that carries a method's
+    rate has to be unique per asset. An older database declares
+    ``UNIQUE (address, ledger_hash, contract_hash, peer_id)``, which SQLite cannot
+    ALTER away -- and leaving it is not an option twice over: two assets on one contract
+    would collide on insert, and `add_contract`'s ``ON CONFLICT`` names the five columns,
+    so against the old constraint every peer registration would fail outright.
+
+    The issue that added the asset dimension says no migration is provided, on the
+    grounds that nodo is not in production. This goes further because the failure mode
+    is not "the feature is missing" but "peer registration raises on every call", and
+    the file already rebuilds a table when it has to (see `retire_slot_table`).
+
+    Idempotent: a no-op once the constraint is the wide one.
+    """
+    try:
+        cursor.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='contract_instance'"
+        )
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return
+        declared = " ".join(str(row[0]).split())
+        if "token_id" in declared and "contract_hash, token_id, peer_id" in declared:
+            return
+
+        print("Rebuilding 'contract_instance' so a payment method is unique per asset.")
+        cursor.execute("PRAGMA table_info(contract_instance)")
+        columns = [info[1] for info in cursor.fetchall()]
+        has_token = "token_id" in columns
+
+        cursor.execute("ALTER TABLE contract_instance RENAME TO contract_instance_old")
+        cursor.execute(TABLES["contract_instance"])
+        # An older row carries no asset. It is the chain's native unit by construction:
+        # that is the only thing anything could have been advertising before the
+        # dimension existed. Left empty rather than guessed at a symbol, because the
+        # contract's own `NATIVE_ASSET` is what names it and this file knows no ledgers.
+        token_column = "token_id" if has_token else "''"
+        cursor.execute(
+            "INSERT OR IGNORE INTO contract_instance "
+            "(address, ledger_hash, contract_hash, token_id, peer_id, mu_per_unit) "
+            f"SELECT address, ledger_hash, contract_hash, {token_column}, peer_id, "
+            "mu_per_unit FROM contract_instance_old"
+        )
+        cursor.execute("DROP TABLE contract_instance_old")
+    except sqlite3.Error as e:
+        print(f"Error widening the contract_instance uniqueness: {e}")
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:

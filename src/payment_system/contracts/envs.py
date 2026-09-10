@@ -10,18 +10,33 @@ Two rules hold across all of them:
 * **A contract that cannot settle is not offered.** The registry drops a ledger whose
   runtime is missing and says so once, so these dicts describe what this node can
   actually do rather than what it was configured to hope for.
-* **Keyed by ``contract_hash``**, which is the stable, wallet-independent identity peers
-  match on -- not by ledger. One ledger can carry more than one contract, and one
-  contract more than one asset (#342).
+* **Keyed by the payment method**, ``(ledger, contract, asset)`` -- not by contract and
+  not by ledger. One ledger carries more than one contract, and on Ergo one contract
+  carries more than one asset: the same script paid in ERG and in every EIP-4 token at
+  the same address. Only the triple tells those apart.
+
+Two families live here, and the split is not cosmetic:
+
+* **Per method** -- what to validate with, what to pay with, what a floor is, what a
+  rate is. All of it depends on which asset.
+* **Per contract** -- `init`, the periodic `manager` job, its interval, a wallet
+  balance. A tick dispatched per *asset* would run `N + 1` times and pay `N + 1` fees
+  for one piece of work, and an Ergo transaction carries several assets in one output,
+  so the job is the contract's.
 """
-from decimal import Decimal
 from importlib import import_module
 from textwrap import dedent
 from typing import Any, Callable, Dict, Optional, Tuple
 from contextlib import nullcontext
 
 from protos import celaut_pb2
-from src.payment_system.contracts.registry import attribute, contracts, rate_modules
+from src.payment_system.contracts.registry import (
+    MethodKey,
+    attribute,
+    contracts,
+    methods,
+    rate_modules,
+)
 from src.utils.logger import LOGGER
 
 contract_hash = str
@@ -35,8 +50,17 @@ contract_ledger = celaut_pb2.Contract
 
 
 def contract_for(hash_: contract_hash):
-    """One registered contract by hash, or ``None`` when it is not offered."""
+    """One registered contract by hash, or ``None`` when it is not offered.
+
+    By contract, for the jobs that are per contract. Anything that depends on *which
+    asset* is keyed by :class:`MethodKey` and comes from ``methods()``.
+    """
     return contracts().get(hash_)
+
+
+def method_for(key: MethodKey):
+    """One registered payment method by its triple, or ``None``."""
+    return methods().get(key)
 
 
 def __getattr__(name: str):
@@ -59,34 +83,39 @@ def demos() -> Tuple[contract_hash, ...]:
     that read it out of `GetPeerInfo` and paid through it would have paid into nothing.
     """
     return tuple(
-        hash_ for hash_, contract in contracts().items()
-        if attribute(contract, "is_demo")
+        key for key, method in methods().items()
+        if attribute(method, "is_demo")
     )
 
 
 def payment_process_validators() -> Dict[contract_hash, validate_token]:
     return {
-        hash_: contract.payment_process_validator
-        for hash_, contract in contracts().items()
+        key: method.payment_process_validator
+        for key, method in methods().items()
     }
 
 
 def available_payment_process() -> Dict[contract_hash, Callable[[amount, token, ledger, script], contract_ledger]]:
     return {
-        hash_: contract.process_payment
-        for hash_, contract in contracts().items()
+        key: method.process_payment
+        for key, method in methods().items()
     }
 
 
 def check_sender_balances() -> Dict[contract_hash, Callable[[amount], bool]]:
     return {
-        hash_: contract.check_sender_balance
-        for hash_, contract in contracts().items()
+        key: method.check_sender_balance
+        for key, method in methods().items()
     }
 
 
-def settlement_floors() -> Dict[contract_hash, Callable[[], Tuple[amount, amount]]]:
-    """Per contract: ``(fee, smallest payable output)`` in MU.
+def settlement_floors() -> Dict[MethodKey, Callable[[], Tuple[amount, amount]]]:
+    """Per method: ``(fee, smallest payable output)`` in MU.
+
+    Both figures in MU, and that promise is load-bearing rather than tidy: a token
+    method's fee is paid in the chain's *native* unit while its minimum output is one
+    base unit of the token, so the two are denominated in different assets. MU is the
+    one scale that can carry both, and it is what `deposits.py` consumes.
 
     What a deposit has to clear before it can be settled at all. Kept here with the rest
     of the per-contract dispatch so `deposits.py` can size a deposit without naming a
@@ -97,8 +126,8 @@ def settlement_floors() -> Dict[contract_hash, Callable[[], Tuple[amount, amount
     constant reports a moving number here.
     """
     return {
-        hash_: contract.settlement_floors_mu
-        for hash_, contract in contracts().items()
+        key: method.settlement_floors_mu
+        for key, method in methods().items()
     }
 
 
@@ -110,46 +139,30 @@ def manage_interfaces() -> Dict[contract_hash, Callable[[], None]]:
     return {hash_: contract.manager for hash_, contract in contracts().items()}
 
 
-def mu_to_native() -> Dict[contract_hash, Callable[[amount], Decimal]]:
-    """Per contract: MU -> the smallest native unit of what it settles in, exactly.
+def resolve_method(ledger_tag: str, hash_: contract_hash, asset: str = ""):
+    """The registered method a proved payment names, or ``None`` if there is none.
 
-    Only donations need this, and they need it because a debt has to be *stored* in
-    the asset it was incurred in: a debt kept in MU would be retroactively
-    reinterpreted the next time the operator changed that asset's rate.
+    An unnamed asset resolves to the contract's *native* one: a payer that advertises no
+    ``token_id`` is paying the chain's own unit, the only thing it can be paying. That
+    is resolved here rather than carried through empty, because a debt accrued under the
+    empty string is one no payout ever looks for -- it would grow for ever and never be
+    paid, and nothing would raise.
 
-    Exact, fraction included -- unlike the conversions on the payment path, which
-    truncate so a transaction never claims more than is owed. A debt is accrued from
-    many payments and paid once, so a truncation per payment would shave a sub-unit
-    off each one, always in this node's favour.
-
-    A contract that settles on no chain contributes nothing rather than zero. The
-    simulated contract moves no money, so a share of a simulated payment is not a debt
-    to anybody, and accruing one would have the node donating real funds against
-    payments it never received.
+    Only donations resolve a method this way, and what they take from it is
+    ``mu_to_native``: a debt has to be *stored* in the asset it was incurred in, because
+    one kept in MU would be retroactively reinterpreted the next time the operator
+    changed that asset's rate. A contract that settles on no chain exposes no converter
+    at all, rather than a zero one -- a share of a simulated payment is not a debt to
+    anybody, and accruing one would have the node donating real funds against payments
+    it never received.
     """
-    return {
-        hash_: contract.mu_to_native
-        for hash_, contract in contracts().items()
-        if hasattr(contract, "mu_to_native")
-    }
-
-
-def native_assets() -> Dict[contract_hash, str]:
-    """Per contract: the reserved symbol its ledger names its own native unit by.
-
-    What an asset is called is normally read off the wire -- a payment says what it
-    settles in. This answers the case where it says nothing: a payer that advertises no
-    ``token_id`` is paying the chain's own unit, and that is the only thing it *can* be
-    paying if the contract settles in one asset.
-
-    Without this, an unnamed asset would accrue its debt under the empty string, which
-    no payout looks for: the debt would grow for ever and never be paid, silently.
-    """
-    return {
-        hash_: contract.NATIVE_ASSET
-        for hash_, contract in contracts().items()
-        if hasattr(contract, "NATIVE_ASSET")
-    }
+    registered = methods()
+    if asset:
+        return registered.get(MethodKey(ledger_tag, hash_, asset))
+    for key, method in registered.items():
+        if key.contract_hash == hash_ and key.asset == getattr(method, "NATIVE_ASSET", ""):
+            return method
+    return None
 
 
 #: Where each ledger's donation scanner lives. Import paths rather than modules, so this
@@ -207,6 +220,9 @@ def needs_unspent_proof() -> Tuple[contract_hash, ...]:
     proves payment from a confirmed transaction needs no pause and must not be dragged
     into one: its confirmations can take longer than the whole wait is bounded by.
     """
+    # By *contract*, because what it gates is the contract's periodic job: the sweep
+    # that would spend the box its own validator has to find unspent. A contract needs
+    # the pause if any of its methods does.
     return tuple(
         hash_ for hash_, contract in contracts().items()
         if attribute(contract, "needs_unspent_proof")
@@ -240,32 +256,32 @@ def deposit_token_ttls() -> Dict[contract_hash, int]:
     on-chain, which is the one direction an accounting error must never fall in.
     """
     return {
-        hash_: int(attribute(contract, "DEPOSIT_TOKEN_TTL"))
-        for hash_, contract in contracts().items()
+        key: int(attribute(method, "DEPOSIT_TOKEN_TTL"))
+        for key, method in methods().items()
     }
 
 
-def _reporting(hash_: Optional[contract_hash], hook: str, reporter):
-    """A contract's reporting context manager, or a no-op.
+def _reporting(hash_: Optional[MethodKey], hook: str, reporter):
+    """A method's reporting context manager, or a no-op.
 
-    Resolved per contract because the payer enters it around *one* contract's
-    `process_payment`: with two payment systems, reporting through a contract that is
-    not the one settling would attach a transaction id to the wrong payment.
+    Resolved per method because the payer enters it around *one* method's
+    `process_payment`: with several payment methods, reporting through one that is not
+    the one settling would attach a transaction id to the wrong payment.
     """
-    contract = contract_for(hash_) if hash_ else None
-    factory = getattr(contract, hook, None) if contract else None
+    method = methods().get(hash_) if hash_ else None
+    factory = getattr(method, hook, None) if method else None
     if not callable(factory):
         return nullcontext()
     return factory(reporter)
 
 
-def transaction_url_reporting(reporter, contract_hash: Optional[str] = None):
-    """Report a submitted transaction's URL to the caller, for the given contract."""
-    return _reporting(contract_hash, "transaction_url_reporting", reporter)
+def transaction_url_reporting(reporter, method: Optional[MethodKey] = None):
+    """Report a submitted transaction's URL to the caller, for the given method."""
+    return _reporting(method, "transaction_url_reporting", reporter)
 
 
-def transaction_id_reporting(reporter, contract_hash: Optional[str] = None):
-    """Report a submitted transaction's *id* to the caller, for the given contract.
+def transaction_id_reporting(reporter, method: Optional[MethodKey] = None):
+    """Report a submitted transaction's *id* to the caller, for the given method.
 
     Kept separate from the URL hook rather than folded into it. The URL is presentation
     -- `nodo pay` prints a link for a human to click -- while the id is the record: it

@@ -124,6 +124,17 @@ def report(now: Optional[int] = None) -> dict:
             "ledger": ledger,
             "percentage": str(config.percentage(ledger, "")),
             "min_transfer": str(config.min_transfer(ledger, "")),
+            # Per asset, for the ones the operator declared beyond the native unit.
+            # Both figures are per payment *method*, so a single pair per ledger is the
+            # native unit's and says nothing about a token settling through the same
+            # contract -- which may donate a different share, with a different floor.
+            "assets": {
+                asset: {
+                    "percentage": str(config.percentage(ledger, asset)),
+                    "min_transfer": str(config.min_transfer(ledger, asset)),
+                }
+                for asset in config.assets(ledger)
+            },
             "min_confirmations": config.min_confirmations(ledger),
             "owed_native": owed,
             "paid_mu": paid.get(ledger, {}).get("mu", 0),
@@ -184,6 +195,11 @@ def _print_report(data: dict) -> None:
             f"  Paid out: {ledger['paid_mu']} MU over {ledger['paid_count']} transaction(s)"
         )
         print(f"  Minimum payout: {ledger['min_transfer']} (whole units)")
+        for asset, terms in sorted((ledger.get("assets") or {}).items()):
+            print(
+                f"    {asset}: donating {terms['percentage']}, minimum payout "
+                f"{terms['min_transfer']} (whole units)"
+            )
         if ledger["pay_wallets"]:
             print("  Funding:")
             for wallet in ledger["pay_wallets"]:

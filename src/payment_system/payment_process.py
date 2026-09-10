@@ -94,11 +94,23 @@ class SettlementPlan:
     contract_hash: str
     #: ``None`` for a payment that settles on no chain.
     ledger_tag: Optional[str]
-    #: What leaves our wallet, in our MU, after this contract's own floors.
+    #: What leaves our wallet, in our MU, after this method's own floors.
     amount: int
-    #: What the peer is told to credit, in the peer's MU, at this contract's rate.
+    #: What the peer is told to credit, in the peer's MU, at this method's rate.
     peer_amount: int
+    #: Which asset this settles in: the chain's reserved symbol for its native unit, or
+    #: a token's 64-hex id. A method is ledger + contract + asset, and two assets on one
+    #: contract are two different payments with two different rates and two different
+    #: floors -- so the plan carries it and every lookup below is keyed by it.
+    asset: str = ""
     is_demo: bool = False
+
+    @property
+    def key(self):
+        """The payment method this plan settles through."""
+        from src.payment_system.contracts.registry import MethodKey
+
+        return MethodKey(self.ledger_tag or "", self.contract_hash, self.asset)
 
 
 def _payment_envs():
@@ -210,16 +222,17 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
 
     for plan in plans:
         contract_hash = plan.contract_hash
+        method = plan.key
         amount = plan.amount
         peer_amount = plan.peer_amount
-        process_payment = processes.get(contract_hash)
+        process_payment = processes.get(method)
         if process_payment is None:
             # Shared with the peer, but this node cannot settle it right now -- a
             # runtime that went away between matching and paying.
             _l.LOGGER(f"No payment process available for contract {contract_hash[:6]}.")
             continue
 
-        check_balance = balances.get(contract_hash)
+        check_balance = balances.get(method)
         if check_balance and not check_balance(amount):
             _l.LOGGER(
                 f"Insufficient balance for contract {contract_hash[:6]}; trying the "
@@ -238,10 +251,13 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
         try:
             # Get all available ledgers for this peer and contract
             
-            scripts = get_peer_contract_instances(contract_hash, peer_id)
+            # This method's instances only: on Ergo the assets of one contract share
+            # a script and an address, so paying in one asset against another's rows
+            # would build the output at the right address for the wrong money.
+            scripts = get_peer_contract_instances(contract_hash, peer_id, plan.asset)
             ledgers = [("", "")] if plan.is_demo else ledger_balancer(ledger_generator=scripts)
             
-            for script, ledger in ledgers:
+            for script, ledger, _asset in ledgers:
                 
                 with auxiliar_script_reputation_lock:
                     # Check if contract address is in the auxiliar dictionary        TODO use reputation instead.
@@ -266,13 +282,13 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                     # the wrong payment.
                     report_url = getattr(payment_envs, "transaction_url_reporting", None)
                     reporting_context = (
-                        report_url(on_transaction_url, contract_hash=contract_hash)
+                        report_url(on_transaction_url, method=method)
                         if callable(report_url)
                         else nullcontext()
                     )
                     report_id = getattr(payment_envs, "transaction_id_reporting", None)
                     id_context = (
-                        report_id(submitted_tx.append, contract_hash=contract_hash)
+                        report_id(submitted_tx.append, method=method)
                         if callable(report_id)
                         else nullcontext()
                     )
@@ -326,6 +342,9 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                         deposit_token=deposit_token,
                         ledger=_ledger_tag(ledger) or plan.ledger_tag,
                         contract_hash=contract_hash,
+                        # Which asset paid it: `amount_mu` is ledger-neutral, and one
+                        # contract settles in several assets at several rates.
+                        token_id=plan.asset,
                         address=_address_of(script),
                     )
 
@@ -402,15 +421,8 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
 
 
 def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
-                       contract_hash: Optional[str] = None) -> Tuple[List[SettlementPlan], List[str]]:
+                       method=None) -> Tuple[List[SettlementPlan], List[str]]:
     """One :class:`SettlementPlan` per shared payment system, and why any were dropped.
-
-    ``contract_hash`` restricts the answer to that one system, for a caller who named
-    the chain rather than leaving the choice to funding. Naming one and settling on
-    another is never right: the amount was read in *that* ledger's unit and checked
-    against *that* ledger's floors, so carrying it to a different chain moves a figure
-    nobody typed over a currency nobody chose. A named system that is not shared with
-    the peer comes back as a refusal, never as a fallback to the others.
 
     In the order the payer should try them (see `matching_payment_systems`), each with
     its own floors applied and its own rate used for the peer's figure. Every part of
@@ -425,6 +437,13 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
     The peer's figure rounds down: its validator checks the payment is worth at least
     the MU it is asked to credit, and claiming one MU more than the transaction carries
     would have it reject a payment already on-chain.
+
+    ``method`` restricts the walk to one payment method, for a caller who named one
+    rather than leaving the choice to funding. Without it the flag would only pick the
+    rate the typed amount is read at while the payment still settled through whichever
+    method happened to be funded first -- so `nodo pay --payment-method ergo:SigUSD 5`
+    could convert five SigUSD and pay that many MU worth of ERG. A named method that is
+    not shared with the peer comes back as a refusal, never as a fallback to the others.
 
     Returns an empty list rather than raising when no system can carry the amount; the
     reasons come back alongside so a caller can tell an operator which floor stopped it.
@@ -442,41 +461,43 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
             raise
         # A simulated payment settles on no ledger: there is no rate to convert
         # through, and no on-chain value for a floor to protect.
-        if contract_hash and contract_hash not in demos:
+        if method is not None and method not in demos:
             return [], [
-                f"{contract_hash[:12]} is not shared with peer {peer_id}, and the only "
-                "system left is a simulated one"
+                f"{method} is not shared with this peer, and the only method left is "
+                "a simulated one"
             ]
+        demo = method if method is not None else demos[0]
         return [
             SettlementPlan(
-                contract_hash=contract_hash or demos[0], ledger_tag=None,
+                contract_hash=getattr(demo, "contract_hash", demo),
+                ledger_tag=getattr(demo, "ledger", None),
+                asset=getattr(demo, "asset", ""),
                 amount=amount, peer_amount=amount, is_demo=True,
             )
         ], []
-
-    if contract_hash:
-        wanted = [system for system in systems if system.contract_hash == contract_hash]
-        if not wanted:
-            offered = ", ".join(
-                f"{system.ledger_tag}/{system.contract_hash[:12]}" for system in systems
-            ) or "none"
-            return [], [
-                f"{contract_hash[:12]} is not shared with peer {peer_id} "
-                f"(it offers: {offered})"
-            ]
-        systems = wanted
 
     floors_by_contract = payment_envs.settlement_floors()
     plans: List[SettlementPlan] = []
     refusals: List[str] = []
 
+    if method is not None:
+        wanted = [system for system in systems if system.key == method]
+        if not wanted:
+            offered = ", ".join(str(system.key) for system in systems) or "none"
+            refusals.append(
+                f"{method} is not a payment method shared with this peer; it shares "
+                f"{offered}"
+            )
+            return [], refusals
+        systems = wanted
+
     for system in systems:
-        where = f"{system.ledger_tag}/{system.contract_hash[:12]}"
+        where = str(system.key)
         system_amount = int(amount)
         try:
             if floor:
                 system_amount = max(system_amount, full_deposit_mu(system))
-            read_floors = floors_by_contract.get(system.contract_hash)
+            read_floors = floors_by_contract.get(system.key)
             minimum_output_mu = read_floors()[1] if read_floors else 0
         except Exception as e:
             # A moving fee that cannot be read right now, or a contract that has gone
@@ -514,6 +535,7 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
         plans.append(SettlementPlan(
             contract_hash=system.contract_hash,
             ledger_tag=system.ledger_tag,
+            asset=system.asset,
             amount=system_amount,
             peer_amount=peer_amount,
         ))
@@ -521,8 +543,7 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
     return plans, refusals
 
 
-def deposit_refusal_reason(peer_id: str, amount: int,
-                           contract_hash: Optional[str] = None) -> Optional[str]:
+def deposit_refusal_reason(peer_id: str, amount: int, method=None) -> Optional[str]:
     """Why ``amount`` of our MU cannot be deposited on ``peer_id``, or None if it can.
 
     The same check `increase_deposit_on_peer` makes, offered up front so a command can
@@ -535,15 +556,15 @@ def deposit_refusal_reason(peer_id: str, amount: int,
     reason is reported rather than the first, because an operator choosing a new amount
     needs to know which floor to clear.
 
-    ``contract_hash`` narrows "any" to the one system the caller named, so a command
-    that asked for a chain is told about *that* chain's floor rather than being cleared
-    by a floor it will not settle against.
+    ``method`` narrows "any" to the one payment method the caller named, so a command
+    that asked for a method is told about *that* method's floor rather than being
+    cleared by a floor it will not settle against.
 
     Reads only local rows -- no wallet, no chain, no deposit token.
     """
     try:
         plans, refusals = __settlement_plans(
-            peer_id=peer_id, amount=int(amount), floor=False, contract_hash=contract_hash
+            peer_id=peer_id, amount=int(amount), floor=False, method=method
         )
     except ValueError as exc:
         return str(exc)
@@ -556,8 +577,7 @@ def deposit_refusal_reason(peer_id: str, amount: int,
 
 
 def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
-                             floor: bool = False,
-                             contract_hash: Optional[str] = None) -> bool:
+                             floor: bool = False, method=None) -> bool:
     """Deposit ``amount`` MU with ``peer_id``.
 
     ``amount`` is in *our* MU. What the peer is told is not: see `__deposit_amounts`.
@@ -574,19 +594,20 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
     before a deposit token is issued or the wallet is touched, rather than broadcast
     and rejected on-chain.
 
+    ``method`` settles through that payment method -- ``(ledger, contract, asset)`` --
+    and through no other. It is for the operator who named one on the command line,
+    whose amount was read in that method's own unit; without it the walk is free to
+    settle through a different one, which would move a figure typed in one currency
+    over another. Left unset, funding is the selection: the walk tries each shared
+    method in candidate order and settles through the first it can fund, which is what
+    the automatic refill wants, having typed no unit at all.
+
     Both floors are derived from what the ledger can settle, not configured; see
     src/payment_system/deposits.py.
-
-    ``contract_hash`` settles through that system and no other. It is for the caller who
-    named a chain -- ``nodo pay --ledger`` -- whose amount was read in that ledger's own
-    unit; without it the walk is free to settle on a different chain, which would move a
-    figure typed in one currency over another. The automatic refill passes nothing,
-    because there funding is the selection and no unit was typed.
     """
     try:
         plans, refusals = __settlement_plans(
-            peer_id=peer_id, amount=int(amount), floor=floor,
-            contract_hash=contract_hash,
+            peer_id=peer_id, amount=int(amount), floor=floor, method=method
         )
     except ValueError as exc:
         _l.LOGGER(f"Cannot deposit on peer {peer_id}: {exc}.")
@@ -659,7 +680,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
     try:
         _r = bool(client_id) and __check_payment_process(
             amount=amount, ledger=ledger, token=token,
-            contract=contract, script=script
+            contract=contract, script=script, asset=asset,
         ) and _manager_module().increase_local_balance_for_client(client_id=client_id, amount_mu=amount)  # TODO allow for containers too.
     except: _r = False
     sc.update_deposit_token(token_id=token, status="payed" if _r else "rejected")
@@ -684,12 +705,14 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         deposit_token=token,
         ledger=_ledger_tag(ledger),
         contract_hash=contract_hash,
+        token_id=asset,
     )
     _l.LOGGER(f"Pending deposit tokens updated, there are still {len(sc.get_deposit_tokens(status='pending'))} tokens in the queue.")
     return _r
 
 
-def __check_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, token: str, contract: bytes, script: bytes) -> bool:
+def __check_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, token: str,
+                            contract: bytes, script: bytes, asset: str = "") -> bool:
     _l.LOGGER('Check payment process to ' + token + ' of ' + str(amount))
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         _l.LOGGER(f"No token {token} in pending deposit_tokens")
@@ -700,7 +723,17 @@ def __check_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, tok
         _l.LOGGER(f"Client id {client_id} not in clients.")
         return False
 
-    _validator = _payment_envs().payment_process_validators()[sha3_256(contract).hexdigest()]
+    from src.payment_system.contracts.registry import MethodKey
+
+    # Keyed by the method the payment names, not by the contract: on Ergo one contract
+    # validates ERG and every token at the same address, and each has its own rate, so
+    # the wrong validator would check the amount against the wrong money.
+    key = MethodKey(_ledger_tag(ledger) or "", sha3_256(contract).hexdigest(), asset)
+    validators = _payment_envs().payment_process_validators()
+    _validator = validators.get(key)
+    if _validator is None:
+        _l.LOGGER(f"No payment method registered for {key}; refusing the deposit.")
+        return False
     return _validator(amount, token, ledger, script)
 
 

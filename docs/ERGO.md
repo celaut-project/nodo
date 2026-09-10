@@ -43,7 +43,7 @@ The payment system between nodes is also implemented on **Ergo**. Here's how it 
 - Each node shares its **wallet** payment address with its clients.
 - Clients (other nodes or external entities) register with the node and receive a **private key** to authenticate themselves.
 
-#### 2. ERG Deposits
+#### 2. Deposits (ERG, and any configured token)
 
 - To increase their balance, the client generates a **deposit token** — a **local identifier (UUID)** created and stored in the client's SQLite database, **not** an on-chain EIP-4 asset — and creates a normal **Ergo transaction** transferring a certain amount of native ERG, embedding that identifier in register **R4** of the transaction.
 - The client then notifies the node once the transaction carrying the deposit token has been transferred.
@@ -53,6 +53,56 @@ The payment system between nodes is also implemented on **Ergo**. Here's how it 
 - The node verifies that the **deposit token** (the R4 identifier) belongs to the client.
 - If valid and the funds have been transferred to the node's **wallet**, the client's balance is increased according to the amount of ERGs received. The node's unit of account is pegged at 1 MU = 1 nanoERG, so the credit is exact (see [`PRICING.md`](PRICING.md)).
 - The deposit token is then marked `payed` (the legal states are `pending` / `payed` / `rejected`).
+
+#### 3b. Native tokens
+
+An Ergo P2PK address holds ERG **and** every EIP-4 token sent to it. One address, one
+script, one `contract_hash` — several currencies. So a node with tokens configured under
+`ledgers.ergo.payments.ASSETS` does not gain a second payment contract: it gains a
+**payment method** per asset on the contract it already had, each advertised with its own
+`mu_per_unit`. A payment method is `(ledger, contract, asset)`, and peers pick between
+them by price.
+
+An asset is identified by its **64-hex token id**, never by a name. Anyone can mint a
+token called `SigUSD`, so nodo never resolves a name, never asks an explorer for "the
+token called X", and never accepts a box because a name matched. `DECIMALS` is configured
+too, rather than read from the minter's EIP-4 registers: those are self-declared, and a
+wrong one misprices the node by a power of ten.
+
+**Being paid in a token needs no ERG at all.** The payer supplies both the fee and the
+`SAFE_MIN_BOX_VALUE` nanoERG box the token travels in. Everything else does need ERG of
+this node's own:
+
+| Operation | Needs ERG in this wallet? |
+| --- | --- |
+| Accept a token payment | No — the payer pays the fee and the carrier box |
+| Pay a peer in a token | Yes — the fee, the carrier box, and a change box |
+| Sweep tokens to the cold wallet | Yes — the fee and the box they move in |
+| Pay a token donation | Yes — the fee, plus a carrier box per donation wallet |
+
+The node warns at startup when tokens are configured and the wallet cannot cover a fee
+and a box, naming exactly those three things it will not be able to do. `nodo pay` names
+whichever side is short rather than saying "insufficient balance" on a wallet visibly
+holding the token.
+
+`MU_PER_NANOERG` stays **required** for an operator who prices nothing in ERG: a token
+method's fee floor is denominated in ERG while its minimum output is one base unit of the
+token, so deposit sizing needs both rates on the same scale. The node warns when the two
+imply an implausible ERG price for the token — their ratio *is* its opinion about that
+price, and no market data is needed to see that one of them is out by a power of ten.
+
+Proving an incoming token payment scans the **whole** asset list of each unspent box for
+the configured id. Never position zero: nodo builds its own reputation proof boxes and so
+may read `assets[0]` there, but a payment box is built by the payer, and its asset order
+is the payer's choice. Anything else the box carries is **kept, never returned** — the
+same rule an ERG overpayment already gets. Returning an asset would mean building and
+paying for a transaction nobody asked for.
+
+Sweeping and donating are per **contract**, not per asset: one Ergo output carries several
+assets, so one tick moves everything over its limits in one transaction and pays
+everything it owes in one more. `HOT_WALLET_LIMITS` and `COLD_WALLET_MIN_TRANSFER` are per
+asset, in whole units of it; `COLD_WALLET` is shared, because an Ergo address receives
+anything.
 
 #### 4. Wallet Management in the Nodo
 
@@ -347,4 +397,9 @@ The payment system implements these fields:
 - `contract`/`script` xattr: the raw ErgoTree/propositionBytes of the box that receives each payment
 - `ledger`: Identifies the ledger system as `"ergo"`
 - `script`: the raw **ErgoTree / propositionBytes** of the wallet's P2PK payment box
-- `token_id`: `"ERG"` for native-ERG payments
+- `token_id`: which asset this method settles in — the reserved symbol `"ERG"` for
+  native-ERG payments, or a token's 64-hex id. This is the third dimension of a payment
+  method, and it is why a node can advertise `N + 1` `ContractRate`s that share
+  `ledger`, `contract_type` and `script` and differ only here and in `mu_per_unit`.
+  Advertising a token needs no proto change: it is another row, not a nested field, and
+  ERG's row stays byte-identical to what it always was.

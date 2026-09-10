@@ -101,23 +101,39 @@ LOCAL_PEER_ID = "LOCAL"
 PAYMENT_INSERT = """
     INSERT INTO payments (
         tx_id, direction, status, peer_id, client_id, deposit_token,
-        ledger, contract_hash, address, amount_mu, purpose
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ledger, contract_hash, token_id, address, amount_mu, purpose
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
 def payment_insert_params(*, direction: str, status: str, amount_mu, tx_id=None,
                           peer_id=None, client_id=None, deposit_token=None,
-                          ledger=None, contract_hash=None, address=None,
+                          ledger=None, contract_hash=None, token_id=None, address=None,
                           purpose=None) -> tuple:
     """Bind one payment row for :data:`PAYMENT_INSERT`, in its column order.
 
     Shared so a donation payout can write its rows in the *same* transaction that
-    decrements the debt they discharge (see :meth:`SQLConnection.settle_donation`),
+    decrements the debt they discharge (see :meth:`SQLConnection.settle_donations`),
     without either place restating the column list.
+
+    ``token_id`` is the asset the payment was made *in*, which is what makes the row
+    say what money moved: ``amount_mu`` is deliberately ledger-neutral, so two rows of
+    one tick paying two assets on one contract would otherwise be indistinguishable.
     """
     return (tx_id, direction, status, peer_id, client_id, deposit_token,
-            ledger, contract_hash, address, str(int(amount_mu)), purpose)
+            ledger, contract_hash, token_id, address, str(int(amount_mu)), purpose)
+
+
+def _normalized_asset(asset) -> str:
+    """A token id in lowercase; anything else untouched.
+
+    The same rule as :class:`MethodKey`, applied where the row is written. Only a 64-hex
+    id is case-folded -- a reserved native symbol ("ERG") travels as advertised.
+    """
+    raw = str(asset or "")
+    if len(raw) == 64 and all(c in "0123456789abcdefABCDEF" for c in raw):
+        return raw.lower()
+    return raw
 
 
 def _decimal_or_zero(value) -> Decimal:
@@ -1471,7 +1487,7 @@ class SQLConnection(metaclass=Singleton):
             ``address``, and ``mu_per_unit`` (int, or None if unset/invalid).
         """
         rows = self._execute(
-            "SELECT contract_hash, ledger_hash, address, mu_per_unit "
+            "SELECT contract_hash, ledger_hash, address, token_id, mu_per_unit "
             "FROM contract_instance WHERE peer_id = ?",
             (peer_id,)
         ).fetchall()
@@ -1500,6 +1516,11 @@ class SQLConnection(metaclass=Singleton):
                 'contract_hash': row['contract_hash'],
                 'ledger_tag': ledger_tag,
                 'address': row['address'],
+                # A payment method is ledger + contract + asset. Without the asset, two
+                # rows of one contract look like one row duplicated with two different
+                # rates -- which is exactly what `_rates_by_payment_system` refuses as a
+                # conflicting advertisement.
+                'token_id': row['token_id'] or "",
                 'mu_per_unit': mu_per_unit,
             })
 
@@ -1760,6 +1781,15 @@ class SQLConnection(metaclass=Singleton):
         raw_script: bytes = get_script(contract)
         type_bytes: bytes = get_contract_type(contract) or raw_script or contract_shape_bytes(contract)
         instance_value: str = raw_script.hex() if raw_script else get_address(contract)
+        # Which asset this method settles in. It has always been advertised and this was
+        # the one place that dropped it -- so a node offering ERG and a token on the same
+        # contract wrote both rates to one row, and the second silently replaced the
+        # first. Every peer then converted ERG amounts at the token's rate.
+        # Normalised the way `MethodKey` normalises it: a token id is 64 hex characters
+        # and a peer may advertise it in either case, while this column is queried by
+        # exact match. Stored as advertised, the same asset would be two rows with two
+        # rates and neither would be found by the method keyed on the other.
+        asset: str = _normalized_asset(get_token_id(contract))
 
         ledger = self.check_if_ledger_exists(ledger_to_check=contract.ledger)
         ledger_str: bytes = ledger.SerializeToString()
@@ -1780,27 +1810,37 @@ class SQLConnection(metaclass=Singleton):
         # `mu_per_unit` at whatever it announced the first time we ever saw it.
         # Converting MU with a stale rate misprices delegation and, on the
         # payment path, gets a deposit rejected with the money already on-chain.
-        self._execute("INSERT INTO contract_instance (address, ledger_hash, contract_hash, peer_id, mu_per_unit) "
-                    "VALUES (?,?,?,?,?) "
-                    "ON CONFLICT (address, ledger_hash, contract_hash, peer_id) "
+        self._execute("INSERT INTO contract_instance "
+                    "(address, ledger_hash, contract_hash, token_id, peer_id, mu_per_unit) "
+                    "VALUES (?,?,?,?,?,?) "
+                    "ON CONFLICT (address, ledger_hash, contract_hash, token_id, peer_id) "
                     "DO UPDATE SET mu_per_unit = excluded.mu_per_unit",
-                    (instance_value, ledger_hash, contract_hash, peer_id, gas_str))
+                    (instance_value, ledger_hash, contract_hash, asset, peer_id, gas_str))
 
-    def get_peer_contract_instances(self, contract_hash: str, peer_id: str = "LOCAL") -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger], None, None]:
+    def get_peer_contract_instances(self, contract_hash: str, peer_id: str = LOCAL_PEER_ID,
+                                    asset: Optional[str] = None
+                                    ) -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger, str], None, None]:
         """
         Retrieves all contract instances for a given contract hash and peer ID.
 
         Args:
             contract_hash (str): Contract hash
             peer_id (str): Peer ID, defaults to "LOCAL".
+            asset (str): Only the instances settling in this asset, when given. A
+                payment method is ledger + contract + asset, so a caller paying in one
+                asset must not be handed another's rows -- on Ergo they share a
+                contract, a script and an address, and differ only here.
 
         Yields:
-            Tuple[bytes, celaut_pb2.Contract.Ledger]: A tuple containing the address and the ledger of the contract instance.
+            Tuple[bytes, Ledger, str]: the raw script, the ledger, and the asset.
         """
-        cursor = self._execute(
-            "SELECT address, ledger_hash FROM contract_instance WHERE contract_hash = ? AND peer_id = ?",
-            (contract_hash, peer_id)
-        )
+        query = ("SELECT address, ledger_hash, token_id FROM contract_instance "
+                 "WHERE contract_hash = ? AND peer_id = ?")
+        params: tuple = (contract_hash, peer_id)
+        if asset is not None:
+            query += " AND token_id = ?"
+            params = params + (asset,)
+        cursor = self._execute(query, params)
         for row in cursor.fetchall():
             cursor = self._execute("SELECT content FROM ledger WHERE hash = ?", (row['ledger_hash'],))
             ledger_str = cursor.fetchone()['content']
@@ -1816,7 +1856,7 @@ class SQLConnection(metaclass=Singleton):
                 # Legacy/simulator instances stored a textual value.
                 script = stored.encode('utf-8')
 
-            yield script, ledger
+            yield script, ledger, (row['token_id'] or "")
 
     def peer_exists(self, peer_id: str) -> bool:
         """
@@ -2507,7 +2547,8 @@ class SQLConnection(metaclass=Singleton):
                        tx_id: Optional[str] = None, peer_id: Optional[str] = None,
                        client_id: Optional[str] = None, deposit_token: Optional[str] = None,
                        ledger: Optional[str] = None, contract_hash: Optional[str] = None,
-                       address: Optional[str] = None, purpose: Optional[str] = None) -> bool:
+                       token_id: Optional[str] = None, address: Optional[str] = None,
+                       purpose: Optional[str] = None) -> bool:
         """Write down one payment. Returns whether the row landed.
 
         This never raises. Every caller is on a path where the money has already moved:
@@ -2526,8 +2567,8 @@ class SQLConnection(metaclass=Singleton):
             self._execute(PAYMENT_INSERT, payment_insert_params(
                 tx_id=tx_id, direction=direction, status=status, peer_id=peer_id,
                 client_id=client_id, deposit_token=deposit_token, ledger=ledger,
-                contract_hash=contract_hash, address=address, amount_mu=amount_mu,
-                purpose=purpose,
+                contract_hash=contract_hash, token_id=token_id, address=address,
+                amount_mu=amount_mu, purpose=purpose,
             ))
             return True
         except Exception as e:
@@ -2686,82 +2727,108 @@ class SQLConnection(metaclass=Singleton):
                         paid_native: Decimal, records: List[dict],
                         credited: Sequence[Tuple[str, int]] = (),
                         paid_before: Optional[Dict[str, Decimal]] = None) -> bool:
-        """Decrement a debt by what was just paid, and record the payments that paid it.
+        """Decrement one method's debt by what was just paid, and record the payments.
 
-        One transaction, deliberately. The debt is decremented only *after* the
-        transaction is on the wire, and the rows that say so are written with it: two
-        separate commits would let a crash between them either pay the same debt twice
-        or lose the record of a donation that did go out.
+        The single-asset case of :meth:`settle_donations`, which is where the rules that
+        make this safe are written down.
+        """
+        return self.settle_donations([{
+            "ledger": ledger, "contract_hash": contract_hash, "token_id": token_id,
+            "paid_native": paid_native, "records": records, "credited": credited,
+            "paid_before": paid_before,
+        }])
 
-        The decrement is a subtraction rather than a reset, so the fraction that was
-        below a whole native unit -- and anything accrued while the transaction was in
-        flight -- stays owed instead of being written off.
+    def settle_donations(self, entries: List[dict]) -> bool:
+        """Decrement several debts by what was just paid, and record the payments.
 
-        Each entry of ``records`` is one output: ``{tx_id, address, amount_mu}``, and
-        nothing else. The columns that are the same for every row of one payout --
-        direction, status, purpose, ledger, contract -- are filled in here, so an entry
-        carrying one of those would collide with it.
+        One database transaction, deliberately, and one for *all* the assets. The debts
+        are decremented only after the payment transaction is on the wire, and the rows
+        that say so are written with them: two separate commits would let a crash
+        between them either pay the same debt twice or lose the record of a donation
+        that did go out.
+
+        Several assets at once because one Ergo transaction pays several debts -- an
+        output carries every asset it moves -- so settling one asset per commit would
+        reintroduce exactly that window between the assets of a single payout: one debt
+        discharged, the other paid again on the next tick.
+
+        Each entry is ``{ledger, contract_hash, token_id, paid_native, records,
+        credited, paid_before}``. Each record is one output: ``{tx_id, address,
+        amount_mu}``, and nothing else -- the columns that are the same for every row of
+        one payout (direction, status, purpose, ledger, contract, asset) are filled in
+        here, so an entry carrying one of those would collide with it.
 
         ``credited`` is ``(address, amount)`` per wallet: what this payout discharged of
         *that wallet's* entitlement, its share of the fee included. It rides in the same
-        commit as the decrement because the two are one fact -- a crash between them
+        commit for the same reason as everything else here -- a crash between the two
         would either pay a wallet twice or credit it for money that never left.
 
-        ``paid_before`` is the cumulative map the payout planned against, carried in
+        ``paid_before`` is the cumulative map that payout planned against, carried in
         rather than re-read here. This runs after the transaction is on the wire, where
         a failed read can abort nothing: read again and a transient failure would write
         each credit as though the wallet had never been paid, wiping its history and
         handing it its whole share a second time on a later tick.
+
+        Returns whether anything was written: an entry that paid nothing is skipped,
+        and a call with nothing left to write is ``False``.
         """
-        paid = _decimal_or_zero(paid_native)
-        if paid <= 0:
-            return False
         with SQLConnection._donation_lock:
             try:
-                remaining = self.donation_owed(ledger, contract_hash, token_id) - paid
-                if remaining < 0:
-                    logger.LOGGER(
-                        f"Donation payout on {ledger}/{token_id} paid {_plain(paid)} against a "
-                        f"debt of {_plain(remaining + paid)}; clamping the remainder to zero."
-                    )
-                    remaining = Decimal(0)
-                queries = [(
-                    "INSERT INTO donation_accrual (ledger, contract_hash, token_id, owed_native) "
-                    "VALUES (?, ?, ?, ?) "
-                    "ON CONFLICT (ledger, contract_hash, token_id) DO UPDATE SET "
-                    "owed_native = excluded.owed_native, updated_at = CURRENT_TIMESTAMP",
-                    (ledger, contract_hash, token_id, _plain(remaining))
-                )]
-                # The map the payout planned against, never a fresh read: see the note
-                # on `paid_before` above.
-                already = paid_before or {}
-                for address, amount in credited or ():
-                    if not address:
+                queries = []
+                for entry in entries:
+                    ledger = entry["ledger"]
+                    contract_hash = entry["contract_hash"]
+                    token_id = entry["token_id"]
+                    paid = _decimal_or_zero(entry.get("paid_native"))
+                    if paid <= 0:
                         continue
-                    total = (_decimal_or_zero(already.get(address, 0))
-                             + _decimal_or_zero(amount))
+                    remaining = self.donation_owed(ledger, contract_hash, token_id) - paid
+                    if remaining < 0:
+                        logger.LOGGER(
+                            f"Donation payout on {ledger}/{token_id} paid {_plain(paid)} against a "
+                            f"debt of {_plain(remaining + paid)}; clamping the remainder to zero."
+                        )
+                        remaining = Decimal(0)
                     queries.append((
-                        "INSERT INTO donation_payouts "
-                        "(ledger, contract_hash, token_id, address, paid_native) "
-                        "VALUES (?, ?, ?, ?, ?) "
-                        "ON CONFLICT (ledger, contract_hash, token_id, address) DO UPDATE "
-                        "SET paid_native = excluded.paid_native, "
-                        "    updated_at = CURRENT_TIMESTAMP",
-                        (ledger, contract_hash, token_id, address, _plain(total))
+                        "INSERT INTO donation_accrual (ledger, contract_hash, token_id, owed_native) "
+                        "VALUES (?, ?, ?, ?) "
+                        "ON CONFLICT (ledger, contract_hash, token_id) DO UPDATE SET "
+                        "owed_native = excluded.owed_native, updated_at = CURRENT_TIMESTAMP",
+                        (ledger, contract_hash, token_id, _plain(remaining))
                     ))
-                for record in records:
-                    queries.append((PAYMENT_INSERT, payment_insert_params(
-                        direction='out',
-                        status='accepted',
-                        purpose=PAYMENT_PURPOSE_DONATION,
-                        ledger=ledger,
-                        contract_hash=contract_hash,
-                        **record,
-                    )))
+                    # The map the payout planned against, never a fresh read: see the
+                    # note on `paid_before` above.
+                    already = entry.get("paid_before") or {}
+                    for address, amount in entry.get("credited") or ():
+                        if not address:
+                            continue
+                        total = (_decimal_or_zero(already.get(address, 0))
+                                 + _decimal_or_zero(amount))
+                        queries.append((
+                            "INSERT INTO donation_payouts "
+                            "(ledger, contract_hash, token_id, address, paid_native) "
+                            "VALUES (?, ?, ?, ?, ?) "
+                            "ON CONFLICT (ledger, contract_hash, token_id, address) DO UPDATE "
+                            "SET paid_native = excluded.paid_native, "
+                            "    updated_at = CURRENT_TIMESTAMP",
+                            (ledger, contract_hash, token_id, address, _plain(total))
+                        ))
+                    for record in entry.get("records") or []:
+                        queries.append((PAYMENT_INSERT, payment_insert_params(
+                            direction='out',
+                            status='accepted',
+                            purpose=PAYMENT_PURPOSE_DONATION,
+                            ledger=ledger,
+                            contract_hash=contract_hash,
+                            token_id=token_id,
+                            **record,
+                        )))
+                if not queries:
+                    return False
                 self._execute2(queries)
                 return True
             except Exception as e:
-                logger.LOGGER(f'Failed to settle a donation on {ledger}/{token_id}: {e}')
+                logger.LOGGER(f'Failed to settle a donation payout: {e}')
                 return False
 
     def record_donation(self, *, ledger: str, tx_id: str, to_address: str,
@@ -2907,11 +2974,17 @@ class SQLConnection(metaclass=Singleton):
         return self._payments_where("purpose = ?", (PAYMENT_PURPOSE_DONATION,), limit)
 
     def _payments_where(self, clause: str, params: tuple, limit: int) -> List[dict]:
-        """Newest first, capped. Shared by the peer and client readers."""
+        """Newest first, capped. Shared by the peer and client readers.
+
+        ``token_id`` is in the projection because ``amount_mu`` is deliberately
+        ledger-neutral: without the asset, two rows of one tick paying two assets on one
+        contract are indistinguishable, and a figure in MU cannot say what money moved.
+        """
         try:
             result = self._execute(f'''
                 SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
-                       ledger, contract_hash, address, amount_mu, purpose, created_at
+                       ledger, contract_hash, token_id, address, amount_mu, purpose,
+                       created_at
                 FROM payments WHERE {clause} ORDER BY created_at DESC, id DESC LIMIT ?
             ''', params + (int(limit),))
             return [dict(row) for row in result.fetchall()]
@@ -2940,7 +3013,7 @@ class SQLConnection(metaclass=Singleton):
         try:
             result = self._execute(f'''
                 SELECT id, tx_id, direction, status, peer_id, client_id, deposit_token,
-                       ledger, contract_hash, address, amount_mu, created_at
+                       ledger, contract_hash, token_id, address, amount_mu, created_at
                 FROM payments WHERE tx_id IN ({placeholders})
             ''', tuple(ids))
             return {row['tx_id']: dict(row) for row in result.fetchall()}

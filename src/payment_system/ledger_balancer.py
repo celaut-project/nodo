@@ -31,7 +31,10 @@ def ledger_balancer(ledger_generator: Generator[LedgerInstance, None, None]) \
     # skipped instead of being yielded on its next occurrence.
     availability: Dict[str, bool] = {}
 
-    for script, ledger in ledger_generator:
+    # The asset rides through untouched: whether a *ledger* is reachable says nothing
+    # about which of its assets a payment is in, and dropping it here would leave the
+    # payer unable to tell two methods of one contract apart.
+    for script, ledger, *asset in ledger_generator:
         key = SQLConnection.ledger_key(ledger)
 
         if key not in availability:
@@ -40,4 +43,4 @@ def ledger_balancer(ledger_generator: Generator[LedgerInstance, None, None]) \
                 log(f"Ledger {key[:16]}… is not available for script {script[:6].hex()}.")
 
         if availability[key]:
-            yield (script, ledger)
+            yield (script, ledger, asset[0] if asset else "")
