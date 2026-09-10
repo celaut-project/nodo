@@ -34,6 +34,12 @@ def _system(local: int, peer: int, *, contract=None, ledger="ergo",
     )
 
 
+def _method(contract, ledger="ergo", asset="ERG"):
+    from src.payment_system.contracts.registry import MethodKey
+
+    return MethodKey(ledger, contract, asset)
+
+
 def _envs(floors_by_contract, demos=(), ledger="ergo", asset="ERG"):
     """A payment-envs registry with the floors each *method* reports.
 
@@ -66,7 +72,8 @@ class SettlementPlanTests(unittest.TestCase):
     rejects a payment that is already on-chain (#340 §4.4).
     """
 
-    def _plans(self, amount, systems, floors_by_contract, *, floor=False, demos=()):
+    def _plans(self, amount, systems, floors_by_contract, *, floor=False, demos=(),
+               method=None):
         envs = _envs(floors_by_contract, demos)
         with patch.object(payment_process, "format_mu", str), patch(
             "src.payment_system.mu_conversion.matching_payment_systems",
@@ -79,7 +86,9 @@ class SettlementPlanTests(unittest.TestCase):
             "src.payment_system.contracts.envs.settlement_floors",
             envs.settlement_floors,
         ):
-            return settlement_plans(peer_id="peer-a", amount=amount, floor=floor)
+            return settlement_plans(
+                peer_id="peer-a", amount=amount, floor=floor, method=method,
+            )
 
     def test_the_peer_is_told_its_own_mu(self):
         # One ERG buys twice as many MU on the peer, so our 1_000_000 MU of value
@@ -134,6 +143,74 @@ class SettlementPlanTests(unittest.TestCase):
              ("costly", "bitcoin", "ERG"): (0, 100_000_000)},
         )
         self.assertEqual([p.contract_hash for p in plans], ["cheap"])
+        self.assertEqual(len(refusals), 1)
+        self.assertIn("bitcoin", refusals[0])
+
+    def test_a_named_method_is_the_only_one_planned_for(self):
+        """`nodo pay --payment-method bitcoin:BTC` must settle on Bitcoin.
+
+        The amount was read in that method's own unit and checked against that method's
+        floors and wallet, so a walk free to settle through the next funded method would
+        move a figure typed in one currency over another (#340 §4).
+        """
+        plans, refusals = self._plans(
+            1_000_000,
+            [
+                _system(1_000_000_000, 2_000_000_000, contract="ergo-c", ledger="ergo"),
+                _system(1_000_000_000, 500_000_000, contract="btc-c", ledger="bitcoin",
+                        asset="BTC"),
+            ],
+            {("ergo-c", "ergo", "ERG"): (0, 0), ("btc-c", "bitcoin", "BTC"): (0, 0)},
+            method=_method("btc-c", ledger="bitcoin", asset="BTC"),
+        )
+        self.assertEqual(refusals, [])
+        self.assertEqual([(p.contract_hash, p.ledger_tag, p.asset) for p in plans],
+                         [("btc-c", "bitcoin", "BTC")])
+
+    def test_a_named_method_the_peer_does_not_share_is_refused_not_replaced(self):
+        # Falling back to the other method is the failure this guards: the operator would
+        # be told the payment succeeded, having named a currency it never moved.
+        plans, refusals = self._plans(
+            1_000_000,
+            [_system(1_000_000_000, 2_000_000_000, contract="ergo-c", ledger="ergo")],
+            {"ergo-c": (0, 0)},
+            method=_method("btc-c", ledger="bitcoin", asset="BTC"),
+        )
+        self.assertEqual(plans, [])
+        self.assertEqual(len(refusals), 1)
+        self.assertIn("btc-c", refusals[0])
+        self.assertIn("ergo", refusals[0])
+
+    def test_two_assets_on_one_contract_are_two_methods_to_name_between(self):
+        # The reason narrowing is keyed by the triple: on Ergo the token and the native
+        # unit share a contract hash, so a contract is not enough to say which money the
+        # operator asked to move.
+        plans, refusals = self._plans(
+            1_000_000,
+            [
+                _system(1_000_000_000, 2_000_000_000, contract="ergo-c", asset="ERG"),
+                _system(2_000_000, 4_000_000, contract="ergo-c", asset="SigUSD"),
+            ],
+            {("ergo-c", "ergo", "ERG"): (0, 0), ("ergo-c", "ergo", "SigUSD"): (0, 0)},
+            method=_method("ergo-c", asset="SigUSD"),
+        )
+        self.assertEqual(refusals, [])
+        self.assertEqual([p.asset for p in plans], ["SigUSD"])
+
+    def test_naming_a_method_still_applies_that_methods_floors(self):
+        # Narrowing must not become a way past the floor check: below the named method's
+        # minimum output there is no transaction to build, and another method's ability
+        # to carry the figure is irrelevant once one has been named.
+        plans, refusals = self._plans(
+            1_000,
+            [
+                _system(1, 1, contract="cheap", ledger="ergo"),
+                _system(1, 1, contract="costly", ledger="bitcoin", asset="BTC"),
+            ],
+            {("cheap", "ergo", "ERG"): (0, 1), ("costly", "bitcoin", "BTC"): (0, 100_000_000)},
+            method=_method("costly", ledger="bitcoin", asset="BTC"),
+        )
+        self.assertEqual(plans, [])
         self.assertEqual(len(refusals), 1)
         self.assertIn("bitcoin", refusals[0])
 

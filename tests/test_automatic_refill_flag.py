@@ -46,6 +46,8 @@ class AutomaticRefillFlagTests(unittest.TestCase):
                                   return_value=0) as balance, \
                 mock.patch.object(maintain_module, "refill_threshold_mu", return_value=200), \
                 mock.patch.object(maintain_module, "full_deposit_mu", return_value=1000), \
+                mock.patch.object(maintain_module, "matching_payment_system",
+                                  return_value=mock.MagicMock()), \
                 mock.patch.object(maintain_module, "_payment_process_module",
                                   return_value=payments):
             maintain_module.peer_deposits()

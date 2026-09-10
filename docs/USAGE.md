@@ -496,7 +496,11 @@ These are intended for development or advanced maintenance environments:
   `--json` for the machine-readable report the TUI's EARNINGS page reads. Beside each
   share it reports what that share cost: the ERG burned into the publishing proof, which
   the contract makes unrecoverable, apportioned by the share committed. Minting a proof
-  is free, so the two figures have to be read together.  
+  is free, so the two figures have to be read together. The subject's vouch for itself is
+  listed apart and left out of the standing — every node that has submitted holds one, and
+  a node with no peers assigns its whole supply to it — but only the proofs it announced
+  can be recognised as its own, so this separates the honest case and does not defend
+  against a proof kept off its advertisement (issue #353).  
   **Example:**  
   `nodo reputation`
 
@@ -511,14 +515,16 @@ These are intended for development or advanced maintenance environments:
   two currencies, and guessing would move money nobody named. A *ledger* is not enough
   on its own, because one Ergo contract is paid in ERG and in every configured token, at
   different rates — the asset is matched by its symbol, its display-unit name or its
-  64-hex id. The named method is what the amount is read in **and** what the payment
-  settles through.
+  64-hex id. A method that *is* named is where the payment settles or it does not
+  happen: the amount was read in that method's unit and checked against its floors and
+  wallet, and a peer that does not share it is refused, naming what it does offer.
 
-  With nothing named, funding is the selection: the node walks the methods it shares
-  with the peer and uses the first whose wallet can cover it, so a node out of SigUSD but
-  holding ERG pays a peer that accepts both in ERG with no setting to that effect. Stops
-  cleanly before touching the wallet when the amount is below what the method can settle,
-  or when no payment method is shared with the peer.  
+  Where none is named — the automatic refill, `increase_peer_deposit` — funding is the
+  selection: the node walks the methods it shares with the peer and uses the first whose
+  wallet can cover it, so a node out of SigUSD but holding ERG tops up a peer that
+  accepts both in ERG with no setting to that effect. Stops cleanly before touching the
+  wallet when the amount is below what the method can settle, or when no payment method
+  is shared with the peer.  
   **Example:**  
   `sudo nodo pay <peer_id> 0.01 --payment-method bitcoin:BTC`  
   `sudo nodo pay <peer_id> 25 --payment-method ergo:SigUSD`
