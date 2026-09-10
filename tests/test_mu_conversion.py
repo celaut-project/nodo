@@ -9,6 +9,7 @@ from src.payment_system.mu_conversion import (
     convert_mu,
     estimated_cost_for_local,
     matching_payment_system,
+    matching_payment_systems,
 )
 
 
@@ -61,19 +62,63 @@ class MuConversionTests(unittest.TestCase):
         self.assertEqual(local_quote.init_maintenance_cost.n, "200")
         self.assertEqual(local_quote.max_maintenance_cost.n, "300")
 
-    def test_refuses_an_ambiguous_payment_system(self):
+    def _two_shared(self):
         connection = Mock()
-        contracts = [
+        connection.get_peer_payment_contracts.return_value = [
             {"ledger_tag": "ergo", "contract_hash": "a", "mu_per_unit": 1},
-            {"ledger_tag": "other", "contract_hash": "b", "mu_per_unit": 2},
+            {"ledger_tag": "bitcoin", "contract_hash": "b", "mu_per_unit": 2},
+        ]
+        return connection
+
+    def test_two_shared_systems_are_both_offered(self):
+        """Sharing two currencies used to mean being unable to pay at all.
+
+        `matching_payment_system` raised "payment selection is not implemented" on more
+        than one match, so two nodes that both accepted ERG and BTC were worse off than
+        two that accepted one each. Funding is the selection: the payer walks this list
+        and settles through the first system it can fund.
+        """
+        connection = self._two_shared()
+        with patch(
+            "src.payment_system.mu_conversion._local_rates",
+            # Insertion order is the registry's candidate order, which is the payer's
+            # preference -- not alphabetical, and not whatever the hashes sort to.
+            return_value={("bitcoin", "b"): 20, ("ergo", "a"): 10},
+        ):
+            systems = matching_payment_systems("peer-a", connection=connection)
+
+        self.assertEqual(
+            [(s.ledger_tag, s.contract_hash) for s in systems],
+            [("bitcoin", "b"), ("ergo", "a")],
+        )
+        # Each carries the pair of rates for its own system, not another's.
+        self.assertEqual((systems[0].local_mu_per_unit, systems[0].peer_mu_per_unit), (20, 2))
+        self.assertEqual((systems[1].local_mu_per_unit, systems[1].peer_mu_per_unit), (10, 1))
+
+    def test_the_singular_form_takes_the_first_for_quoting(self):
+        # For the callers that need a rate rather than a settlement, and so cannot try
+        # the next one: a balance held on a peer, a cost it metered, a quote.
+        connection = self._two_shared()
+        with patch(
+            "src.payment_system.mu_conversion._local_rates",
+            return_value={("bitcoin", "b"): 20, ("ergo", "a"): 10},
+        ):
+            system = matching_payment_system("peer-a", connection=connection)
+        self.assertEqual(system.ledger_tag, "bitcoin")
+
+    def test_no_shared_system_at_all_still_raises(self):
+        # Not a retry case: no amount of trying finds a currency two nodes do not both
+        # accept.
+        connection = Mock()
+        connection.get_peer_payment_contracts.return_value = [
+            {"ledger_tag": "bitcoin", "contract_hash": "b", "mu_per_unit": 2},
         ]
         with patch(
             "src.payment_system.mu_conversion._local_rates",
-            return_value={("ergo", "a"): 1, ("other", "b"): 2},
+            return_value={("ergo", "a"): 1},
         ):
-            connection.get_peer_payment_contracts.return_value = contracts
-            with self.assertRaisesRegex(ValueError, "multiple common payment systems"):
-                matching_payment_system("peer-a", connection=connection)
+            with self.assertRaisesRegex(ValueError, "no common payment system"):
+                matching_payment_systems("peer-a", connection=connection)
 
     def test_rounding_never_goes_in_our_favour(self):
         # 2 MU of ours is worth 1.33... of theirs. What we hand them rounds down

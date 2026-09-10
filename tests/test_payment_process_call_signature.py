@@ -70,6 +70,10 @@ class ProcessPaymentSignatureTests(unittest.TestCase):
 
         peer_payment_process = getattr(payment_process, "__peer_payment_process")
 
+        plan = payment_process.SettlementPlan(
+            contract_hash=CONTRACT_HASH, ledger_tag="ergo",
+            amount=1000, peer_amount=2000,
+        )
         with mock.patch.object(payment_process, "_payment_envs", return_value=_Envs(implementation)), \
                 mock.patch.object(payment_process, "get_peer_contract_instances",
                                   return_value=iter([(SCRIPT, ledger)])), \
@@ -77,7 +81,7 @@ class ProcessPaymentSignatureTests(unittest.TestCase):
                                   side_effect=lambda ledger_generator: ledger_generator), \
                 mock.patch.object(payment_process, "__obtain_deposit_token",
                                   return_value="deposit-token-1", create=True):
-            peer_payment_process(peer_id="peer-1", amount=1000, peer_amount=2000)
+            peer_payment_process(peer_id="peer-1", plans=[plan])
 
         # Only the call into the ledger implementation is under test here; what the
         # orchestrator does afterwards (peer round-trips, balance bookkeeping) is not.

@@ -1055,3 +1055,82 @@ ledgers:
       # Confirmations a donation needs before it counts for anything. The mempool is
       # never read.
       DONATION_MIN_CONFIRMATIONS: 10
+
+  # A second payment system, off until you fill in MU_PER_SATOSHI below. Being paid in
+  # BTC needs a Bitcoin node you control -- the same posture this project takes
+  # everywhere else -- and no new runtime: nodo talks to it over JSON-RPC.
+  #
+  # Read docs/BITCOIN.md before turning this on. On-chain Bitcoin is for coarse,
+  # infrequent, node-to-node deposits: at a realistic fee rate a single transaction
+  # costs about a dollar, so the smallest deposit that can be settled at all is worth
+  # roughly that, and MAX_FEE_OVERHEAD has to be far looser than Ergo's.
+  bitcoin:
+    tags: [ bitcoin ]
+    NETWORK: mainnet                 # mainnet | testnet | signet | regtest
+    # How this node reaches Bitcoin. Two very different asks:
+    #
+    #   esplora  A public HTTP API (blockstream.info, mempool.space, or your own).
+    #            No key anywhere and nothing to run, and this node can be PAID in BTC
+    #            -- which is the side that matters if you are earning. It cannot pay
+    #            out: the payer walks the systems it shares with a peer and settles
+    #            through the first it can fund, so BTC is simply skipped when paying.
+    #            You must set payments.RECEIVING_ADDRESS yourself; a read-only API
+    #            cannot be asked for an address.
+    #
+    #   core     A bitcoind you trust with your wallet, since Core is what signs. It
+    #            may be remote -- RPC_URL is a URL -- but "remote" here means your own
+    #            machine over a LAN or VPN, not somebody else's node.
+    #
+    # Ergo's posture is neither: a remote public node plus a mnemonic in this file. The
+    # equivalent for Bitcoin would mean a seed here and raw transaction signing, which
+    # is not implemented.
+    BACKEND: esplora
+    ESPLORA_URL: "https://blockstream.info/api"
+    RPC_URL: "http://127.0.0.1:8332"
+    # Core writes this file on every start, so the ordinary setup keeps no credential
+    # in this file at all. RPC_USER / RPC_PASSWORD are the fallback.
+    RPC_COOKIE_PATH: "~/.bitcoin/.cookie"
+    RPC_USER: ""
+    RPC_PASSWORD: ""
+    WALLET_NAME: "nodo"
+    # This chain's keys live in Core's own wallet, not here, so nodo does not generate
+    # or hold a mnemonic for it. Back up bitcoind's wallet, not this file.
+    WALLET_KEYS_EXTERNAL: true
+    payments:
+      # What one satoshi buys, in MU. THERE IS NO DEFAULT, and that is deliberate: a
+      # satoshi and a nanoERG are about six orders of magnitude apart in value, so
+      # copying MU_PER_NANOERG's 1 by analogy would misprice this node by a factor of a
+      # million. Left empty, the node does not offer Bitcoin at all -- which is the only
+      # answer that cannot quietly sell an hour of compute for a millionth of its price.
+      #
+      # Work it out against your own market: MU_PER_SATOSHI = (MU per nanoERG) x
+      # (value of a nanoERG / value of a satoshi). At $0.50/ERG and $100,000/BTC that is
+      # about 2000000 -- an example, not a quoted price.
+      MU_PER_SATOSHI: ""
+      # Confirmations before a payment counts. 1 is enough at these amounts; raise it if
+      # you are being paid enough that a shallow reorg would matter.
+      MIN_CONFIRMATIONS: 1
+      TARGET_CONF: 6                 # blocks, for the fee estimate
+      # Refuse to pay above this rather than paying it. A fee spike must not be able to
+      # size a deposit into the sky, and a transaction built below the market rate does
+      # not fail -- it sits unconfirmed until its deposit token expires.
+      MAX_FEE_RATE_SAT_VB: 100
+      PAYMENT_MANAGER_ITERATION_TIME: 86400
+      # Maximum balance (BTC, decimal string) retained in the operational wallet.
+      HOT_WALLET_LIMITS: "0.05"
+      # Public Bitcoin address funds are swept to. Empty disables sweeping. Never a seed.
+      COLD_WALLET: ""
+      COLD_WALLET_MIN_TRANSFER: "0.01"
+      # Per-system override of deposits.MAX_FEE_OVERHEAD. 2% is right for Ergo and
+      # absurd here: at 2% a Bitcoin deposit is worth years of runtime up front.
+      MAX_FEE_OVERHEAD: 0.25
+      # Donations, in the shape docs/DONATIONS.md describes, per payment system. The
+      # percentage applies to incoming payments, not to the cold-wallet sweep.
+      DONATION_PERCENTAGE: "0.02"
+      DONATION_MIN_TRANSFER: "0.0005"
+      DONATION_WALLETS: []
+      DONATION_CREDIT_WALLETS: []
+      DONATION_MIN_CONFIRMATIONS: 6
+      # Filled in by the node the first time it asks bitcoind for an address, so what it
+      # advertises to peers stays the same across restarts.
+      RECEIVING_ADDRESS: ""

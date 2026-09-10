@@ -3,8 +3,9 @@
 It printed an id, an amount, a timestamp and a direction -- everything except the
 one thing a payment is about. The counterparty address was in the explorer response
 all along and was dropped; the *identity* behind it was never on chain to begin with,
-so it comes from what this node recorded when it paid, or from the deposit token an
-incoming box carries in R4 (the same register the node validates payments with).
+so it comes from what this node recorded when it paid, or from the deposit token the
+transaction carries -- Ergo's in register R4, Bitcoin's in an `OP_RETURN`, both reported
+the same way by their contract.
 
 The fallbacks are the point of these tests: a wallet has activity nodo did not make,
 and a node upgraded mid-life has transactions older than its payments table. Neither
@@ -17,69 +18,68 @@ from unittest import mock
 
 import src.commands.tx_history as tx_history
 
-# Only the wiring test needs the Ergo interface (for the ERG formatter), and it cannot
-# be imported without a JVM. The resolution tests below are pure and always run --
-# which is the point of keeping them free of it.
-IMPORT_ERROR = None
-try:
-    from src.payment_system.contracts.ergo import interface as ergo_interface
-except Exception as import_exc:  # pragma: no cover - environment-dependent
-    IMPORT_ERROR = import_exc
-    ergo_interface = None  # type: ignore[assignment]
+# Every test here is now pure: the rows are the normalised shape each contract
+# answers in, so naming a counterparty needs no chain, no explorer and no JVM. Walking
+# Ergo boxes to produce those rows is Ergo's own business and is tested with it.
 
 OURS = "9ourWALLETaddress"
 THEIRS = "9theirCONTRACTaddress"
 
 
-def _tx(tx_id="tx-1", inputs=(), outputs=()):
+def _row(tx_id="tx-1", direction="out", counterparties=(THEIRS,), deposit_tokens=(),
+         amount=1_000_000):
+    """One transaction as a payment contract reports it, chain-shape already resolved."""
     return {
         "id": tx_id,
-        "timestamp": 1_700_000_000_000,
-        "numConfirmations": 12,
-        "inputs": list(inputs),
-        "outputs": list(outputs),
+        "timestamp": 1_700_000_000,
+        "confirmations": 12,
+        "direction": direction,
+        "amount": amount,
+        "unit": "ERG",
+        "decimals": 9,
+        "counterparties": list(counterparties),
+        "deposit_tokens": list(deposit_tokens),
     }
-
-
-def _box(address, value=1_000_000, r4_token=None):
-    box = {"address": address, "value": value}
-    if r4_token is not None:
-        box["additionalRegisters"] = {
-            "R4": {"renderedValue": r4_token.encode("utf-8").hex()}
-        }
-    return box
 
 
 class CounterpartyLineTests(unittest.TestCase):
 
     def test_an_outgoing_payment_names_the_peer_it_was_recorded_against(self):
-        tx = _tx(outputs=[_box(THEIRS), _box(OURS, value=50)])  # second output is change
         lines = tx_history._counterparty_lines(
-            tx, OURS, "Outgoing",
+            _row(),
             payments={"tx-1": {"peer_id": "peer-1", "status": "communicated"}},
             clients_by_token={},
         )
 
         self.assertIn("To: peer peer-1", lines)
         self.assertIn(f"To address: {THEIRS}", lines)
-        # Change coming back to us is not a counterparty.
-        self.assertNotIn(f"To address: {OURS}", lines)
+
+    def test_a_donation_says_what_it_was_for(self):
+        # `purpose` is orthogonal to `status`, so a donation reads as a donation rather
+        # than as a payment to a peer nobody can name.
+        lines = tx_history._counterparty_lines(
+            _row(counterparties=("9devWALLET",)),
+            payments={"tx-1": {"status": "accepted", "purpose": "donation"}},
+            clients_by_token={},
+        )
+        self.assertIn("Purpose: donation", lines)
 
     def test_a_payment_the_peer_never_acknowledged_says_so(self):
-        tx = _tx(outputs=[_box(THEIRS)])
         lines = tx_history._counterparty_lines(
-            tx, OURS, "Outgoing",
+            _row(),
             payments={"tx-1": {"peer_id": "peer-1", "status": "unacknowledged"}},
             clients_by_token={},
         )
 
-        self.assertTrue(any("never acknowledged" in line for line in lines))
+        self.assertTrue(any("never got an acknowledgement" in line for line in lines))
 
-    def test_a_recorded_payment_settles_the_direction_the_explorer_could_not(self):
-        """Inputs without addresses make the direction "Unknown"; our own row does not."""
-        tx = _tx(inputs=[{"value": 2_000_000}], outputs=[_box(THEIRS)])
+    def test_a_recorded_payment_settles_the_direction_the_chain_could_not(self):
+        """A chain that reports inputs without addresses cannot say which side we are on.
+
+        Our own row can: it exists because this node signed the transaction.
+        """
         lines = tx_history._counterparty_lines(
-            tx, OURS, "Unknown",
+            _row(direction="unknown"),
             payments={"tx-1": {"peer_id": "peer-1", "direction": "out",
                                "status": "communicated"}},
             clients_by_token={},
@@ -89,10 +89,9 @@ class CounterpartyLineTests(unittest.TestCase):
         self.assertIn(f"To address: {THEIRS}", lines)
 
     def test_an_incoming_payment_is_named_by_the_deposit_token_it_carries(self):
-        tx = _tx(inputs=[_box("9payerADDRESS")],
-                 outputs=[_box(OURS, r4_token="deposit-token-1")])
         lines = tx_history._counterparty_lines(
-            tx, OURS, "Incoming",
+            _row(direction="in", counterparties=("9payerADDRESS",),
+                 deposit_tokens=("deposit-token-1",)),
             payments={},
             clients_by_token={"deposit-token-1": "client-1"},
         )
@@ -100,48 +99,53 @@ class CounterpartyLineTests(unittest.TestCase):
         self.assertTrue(any("From: client client-1" in line for line in lines))
         self.assertIn("From address: 9payerADDRESS", lines)
 
-    def test_an_unknown_transaction_still_shows_the_raw_address(self):
-        tx = _tx(tx_id="tx-unknown", outputs=[_box(THEIRS)])
+    def test_a_deposit_token_this_node_never_issued_is_still_reported(self):
         lines = tx_history._counterparty_lines(
-            tx, OURS, "Outgoing", payments={}, clients_by_token={}
+            _row(direction="in", counterparties=("9payerADDRESS",),
+                 deposit_tokens=("someone-elses",)),
+            payments={}, clients_by_token={},
+        )
+        self.assertTrue(any("unknown deposit token" in line for line in lines))
+
+    def test_an_unknown_transaction_still_shows_the_raw_address(self):
+        # A wallet has activity nodo did not make, and a node upgraded mid-life has
+        # transactions older than its payments table. Neither may print less than the
+        # address, and neither may raise.
+        lines = tx_history._counterparty_lines(
+            _row(tx_id="tx-unknown"), payments={}, clients_by_token={}
         )
 
         self.assertEqual(lines, [f"To address: {THEIRS}"])
 
-    def test_a_register_that_is_not_a_deposit_token_is_ignored(self):
-        """R4 belongs to whatever application wrote it; ours is UTF-8, others are not."""
-        tx = _tx(inputs=[_box("9payerADDRESS")], outputs=[_box(OURS)])
-        tx["outputs"][0]["additionalRegisters"] = {"R4": {"renderedValue": "ffff"}}
-
+    def test_a_transaction_with_nobody_on_the_other_side_says_so(self):
         lines = tx_history._counterparty_lines(
-            tx, OURS, "Incoming", payments={}, clients_by_token={}
+            _row(counterparties=()), payments={}, clients_by_token={}
         )
+        self.assertEqual(lines, ["Counterparty: unknown"])
 
-        self.assertEqual(lines, ["From address: 9payerADDRESS"])
 
-
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class DisplayWiringTests(unittest.TestCase):
     """The lookups have to reach the printer, which is where wiring like this dies."""
 
     def test_the_peer_is_printed_under_the_transaction(self):
-        tx = _tx(inputs=[_box(OURS, value=2_000_000)], outputs=[_box(THEIRS)])
+        contract = mock.Mock()
+        contract.LEDGER = "ergo"
+        contract.get_wallet_address.return_value = OURS
+        contract.transaction_history.return_value = [_row(amount=2_000_000)]
 
-        with mock.patch.object(tx_history, "_get_address_transactions", return_value=[tx]), \
-                mock.patch.object(tx_history, "_payments_by_tx_id",
-                                  return_value={"tx-1": {"peer_id": "peer-1",
-                                                         "status": "communicated"}}), \
-                mock.patch.object(tx_history, "_clients_by_deposit_token", return_value={}), \
-                mock.patch.object(ergo_interface, "__nanoerg_to_erg",
-                                  create=True, side_effect=lambda value: value / 10 ** 9):
+        with mock.patch.object(tx_history, "_payments_by_tx_id",
+                               return_value={"tx-1": {"peer_id": "peer-1",
+                                                      "status": "communicated"}}):
             output = io.StringIO()
             with redirect_stdout(output):
-                tx_history._display_wallet_transactions("Wallet", OURS)
+                tx_history._display_contract_history(contract, {}, 10)
 
         printed = output.getvalue()
         self.assertIn("Transaction ID: tx-1", printed)
         self.assertIn("To: peer peer-1", printed)
         self.assertIn(f"To address: {THEIRS}", printed)
+        # The amount in the chain's own money, with its own decimals.
+        self.assertIn("0.002000000 ERG", printed)
 
 
 if __name__ == "__main__":

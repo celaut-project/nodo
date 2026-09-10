@@ -93,7 +93,7 @@ GROUPS: List[Group] = [
             ("increase_peer_deposit <peer> <amount>", "top up what a peer holds for us"),
             ("credit_client <client> <amount>", "give a client balance on this node"),
             ("debit_client <client> <amount>", "take that balance back"),
-            ("pay <peer> <amount>", "pay a peer, and show the balance left"),
+            ("pay <peer> <amount> [--ledger <name>]", "pay a peer in its own unit"),
             ("tx_history", "payments made and received"),
         ],
     ),
