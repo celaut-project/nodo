@@ -625,6 +625,26 @@ def peer_deposits(debug_mode: bool = False):
         except JavaDependencyMissing:
             log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
             increased = False
+        except Exception as e:
+            # Whatever a contract's backend raises when it cannot be reached or will
+            # not act. Sizing a deposit reaches the network now -- `refill_threshold_mu`
+            # asks the settling contract for its floors, and Bitcoin's are a live fee
+            # rate -- so this block fails for reasons that have nothing to do with this
+            # peer: an unreachable bitcoind, an Esplora that timed out, or a fee above
+            # `MAX_FEE_RATE_SAT_VB`, which the backend reports by raising because
+            # refusing to pay is the right answer.
+            #
+            # Caught by no contract's exception type on purpose: this loop must not
+            # import a ledger to know what it throws, and the next ledger will throw
+            # something else.
+            #
+            # Contained per peer and never re-raised. `manager_thread` calls
+            # `peer_deposits` bare inside its `while True`, on a daemon thread with no
+            # supervisor (`serve.py`), so one escaping exception ends billing, sweeps,
+            # the activity window and the donation indexer for the life of the process
+            # -- while the gRPC server keeps answering, so the node looks healthy.
+            log.LOGGER(f"Could not top up peer {peer_id}: {type(e).__name__}: {e}")
+            continue
 
         if not increased:
             log.LOGGER(f"[ERROR] Manager error: the peer {peer_id} could not be increased.")

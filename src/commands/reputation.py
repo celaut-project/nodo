@@ -74,7 +74,7 @@ def report(reputation: NodeReputation, now: Optional[int] = None) -> dict:
     now = int(time.time()) if now is None else now
     return {
         "node_id": reputation.node_id,
-        "own_proof_id": reputation.own_proof_id,
+        "own_proof_ids": list(reputation.own_proof_ids),
         "read_at": now,
         "errors": reputation.errors,
         "standing": _totals_json(totals(reputation.opinions)),
@@ -123,7 +123,13 @@ def _print_report(data: dict) -> None:
     # Named by the node it is about, because the same command answers for a peer.
     print(f"Reputation held on node {data['node_id']}")
     print("=" * 50)
-    print(f"This node's proof: {data['own_proof_id'] or 'none published yet'}")
+    # The subject's own proofs, not ours: the same command answers for a peer, and
+    # printing our proof id under a peer's name said the opposite of what it meant.
+    own_proofs = data.get("own_proof_ids") or []
+    print(
+        "Publishes through: "
+        + (", ".join(own_proofs) if own_proofs else "no proof announced")
+    )
 
     partial = bool(data["errors"])
     for ledger, error in (data["errors"] or {}).items():
@@ -175,13 +181,13 @@ def _print_report(data: dict) -> None:
     if data["own"]:
         print()
         print(
-            "This node's own proof stakes "
+            "Its own proof stakes "
             + ", ".join(
                 f"{'+' if opinion['positive'] else '-'}{_format_share(opinion['weight'])}"
                 for opinion in data["own"]
             )
-            + " on it, and is left out of the figures above: our own vote is not what "
-            "the network thinks. "
+            + " on itself, and is left out of the figures above: a node vouching for "
+            "itself is not reputation. "
             + _format_erg(sum(o.get("burned_nanoerg", 0) for o in data["own"][:1]))
             + " is sunk into that proof."
         )

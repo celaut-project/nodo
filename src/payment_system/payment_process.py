@@ -438,11 +438,12 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
     the MU it is asked to credit, and claiming one MU more than the transaction carries
     would have it reject a payment already on-chain.
 
-    ``method`` restricts the walk to one payment method, for an operator who named
-    one. Without it the flag would only pick the rate the typed amount is read at while
-    the payment still settled through whichever method happened to be funded first --
-    so `nodo pay --payment-method ergo:SigUSD 5` could convert five SigUSD and pay that
-    many MU worth of ERG.
+    ``method`` restricts the walk to one payment method, for a caller who named one
+    rather than leaving the choice to funding. Without it the flag would only pick the
+    rate the typed amount is read at while the payment still settled through whichever
+    method happened to be funded first -- so `nodo pay --payment-method ergo:SigUSD 5`
+    could convert five SigUSD and pay that many MU worth of ERG. A named method that is
+    not shared with the peer comes back as a refusal, never as a fallback to the others.
 
     Returns an empty list rather than raising when no system can carry the amount; the
     reasons come back alongside so a caller can tell an operator which floor stopped it.
@@ -460,7 +461,12 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
             raise
         # A simulated payment settles on no ledger: there is no rate to convert
         # through, and no on-chain value for a floor to protect.
-        demo = demos[0]
+        if method is not None and method not in demos:
+            return [], [
+                f"{method} is not shared with this peer, and the only method left is "
+                "a simulated one"
+            ]
+        demo = method if method is not None else demos[0]
         return [
             SettlementPlan(
                 contract_hash=getattr(demo, "contract_hash", demo),
@@ -477,9 +483,10 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
     if method is not None:
         wanted = [system for system in systems if system.key == method]
         if not wanted:
+            offered = ", ".join(str(system.key) for system in systems) or "none"
             refusals.append(
                 f"{method} is not a payment method shared with this peer; it shares "
-                f"{', '.join(str(system.key) for system in systems)}"
+                f"{offered}"
             )
             return [], refusals
         systems = wanted
@@ -536,7 +543,7 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
     return plans, refusals
 
 
-def deposit_refusal_reason(peer_id: str, amount: int) -> Optional[str]:
+def deposit_refusal_reason(peer_id: str, amount: int, method=None) -> Optional[str]:
     """Why ``amount`` of our MU cannot be deposited on ``peer_id``, or None if it can.
 
     The same check `increase_deposit_on_peer` makes, offered up front so a command can
@@ -549,10 +556,16 @@ def deposit_refusal_reason(peer_id: str, amount: int) -> Optional[str]:
     reason is reported rather than the first, because an operator choosing a new amount
     needs to know which floor to clear.
 
+    ``method`` narrows "any" to the one payment method the caller named, so a command
+    that asked for a method is told about *that* method's floor rather than being
+    cleared by a floor it will not settle against.
+
     Reads only local rows -- no wallet, no chain, no deposit token.
     """
     try:
-        plans, refusals = __settlement_plans(peer_id=peer_id, amount=int(amount), floor=False)
+        plans, refusals = __settlement_plans(
+            peer_id=peer_id, amount=int(amount), floor=False, method=method
+        )
     except ValueError as exc:
         return str(exc)
     if plans:
@@ -581,10 +594,13 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
     before a deposit token is issued or the wallet is touched, rather than broadcast
     and rejected on-chain.
 
-    ``method`` restricts the payment to one payment method -- ``(ledger, contract,
-    asset)`` -- for an operator who named one on the command line. Left unset, funding
-    is the selection: the walk tries each shared method in candidate order and settles
-    through the first it can fund.
+    ``method`` settles through that payment method -- ``(ledger, contract, asset)`` --
+    and through no other. It is for the operator who named one on the command line,
+    whose amount was read in that method's own unit; without it the walk is free to
+    settle through a different one, which would move a figure typed in one currency
+    over another. Left unset, funding is the selection: the walk tries each shared
+    method in candidate order and settles through the first it can fund, which is what
+    the automatic refill wants, having typed no unit at all.
 
     Both floors are derived from what the ledger can settle, not configured; see
     src/payment_system/deposits.py.

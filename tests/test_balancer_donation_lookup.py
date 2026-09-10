@@ -84,5 +84,44 @@ class DonationLookupTests(unittest.TestCase):
         )
 
 
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class UnreadablePeerRowTests(unittest.TestCase):
+    """A peer whose score cannot be read costs that candidate's bonus, not the sort.
+
+    ``get_reputation`` answers "unknown" with ``None`` -- a missing row, or any sqlite
+    error -- and the sort is eager (PEP 289: a generator expression evaluates its
+    outermost iterable at once), so one ``float(None)`` used to take every candidate
+    down with it and surface in ``launch_service`` as a bare ``StopIteration``. The
+    window is real: ``nodo disconnect`` deletes the row, and the quote loop spends one
+    ``GetServiceEstimatedCost`` round-trip per peer before anything is scored.
+
+    The donation term has always been careful about exactly this -- every candidate
+    scores zero, never some of them. Issue #352.
+    """
+
+    def test_a_peer_with_no_readable_row_scores_zero_rather_than_none(self):
+        from src.reputation_system import interface
+
+        with mock.patch.object(interface.sc, "get_reputation", return_value=None):
+            self.assertEqual(interface.compute_reputation(peer_id="gone"), 0.0)
+
+    def test_the_sort_survives_a_peer_deleted_mid_decision(self):
+        # Patched at the database, so the real `compute_reputation` runs: mocking it
+        # would mock away the fix and pass either way.
+        from src.reputation_system import interface
+
+        candidates = {"local": _cost(1000), "vanished": _cost(10), "kept": _cost(100)}
+
+        def get_reputation(peer_id):
+            return None if peer_id == "vanished" else 0.0
+
+        with mock.patch.object(sorter, "bonus_by_peer", return_value={}), \
+                mock.patch.object(interface.sc, "get_reputation", side_effect=get_reputation):
+            order = [peer_id for peer_id, _ in sorter.estimated_cost_sorter(candidates)]
+
+        # Cheapest first, and the peer that lost its row is still ranked on its price.
+        self.assertEqual(order, ["vanished", "kept", "local"])
+
+
 if __name__ == "__main__":
     unittest.main()

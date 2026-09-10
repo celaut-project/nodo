@@ -31,7 +31,9 @@ class AmountSerializationTests(unittest.TestCase):
 class PeerDepositRefillTests(unittest.TestCase):
     def test_underfunded_peer_is_refilled_without_debug_mode(self):
         from src.manager import maintain
+        from src.payment_system import deposits
 
+        system = unittest.mock.MagicMock(ledger_tag="ergo")
         payment_module = unittest.mock.MagicMock()
         payment_module.increase_deposit_on_peer.return_value = True
 
@@ -39,15 +41,24 @@ class PeerDepositRefillTests(unittest.TestCase):
              patch.object(maintain, "is_peer_available", return_value=True), \
              patch.object(maintain.SQLConnection, "get_peer_expiry_unix_timestamp", return_value=0), \
              patch.object(maintain, "balance_on_other_peer", return_value=0), \
+             patch.object(maintain, "matching_payment_system", return_value=system), \
+             patch.object(deposits, "_floors_for", return_value=(1_000, 300)), \
              patch.object(maintain, "_payment_process_module", return_value=payment_module):
             maintain.peer_deposits(debug_mode=False)
+            # Read inside the patch, so the figure compared against comes from the
+            # same injected floor the run used.
+            expected = maintain.full_deposit_mu(system)
 
         payment_module.increase_deposit_on_peer.assert_called_once()
-        # A peer at zero is topped up to a full deposit, whose size is derived from
-        # the ledger's own floor rather than configured.
+        # A peer at zero is topped up to a full deposit, whose size is derived from the
+        # ledger's own floor rather than configured -- so the floor is injected and the
+        # derivation is the real one, read back the same way. The deposit is sized for
+        # the system that will settle it, which is why the peer needs one at all: with
+        # no system there are no floors, a full deposit is zero, and a peer at zero is
+        # already "funded".
         self.assertEqual(
             payment_module.increase_deposit_on_peer.call_args.kwargs["amount"],
-            maintain.full_deposit_mu(),
+            expected,
         )
 
 

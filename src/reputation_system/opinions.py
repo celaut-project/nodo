@@ -32,7 +32,7 @@ are therefore reported apart, and netted only where a single figure is asked for
 """
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 
 @dataclass(frozen=True)
@@ -199,11 +199,20 @@ class NodeReputation:
     dropped, and kept *apart* rather than counted: a node vouching for itself is not
     reputation, and an operator who cannot see it would wonder where the stake behind
     their own proof went.
+
+    That separation is hygiene for the report, not a defence. The proofs it filters on
+    are the ones the subject *announced*, and minting a proof is free -- so an opinion
+    published about a node from a proof it never announced is indistinguishable from a
+    third party's here, whatever was burned into it. What to do about that is issue
+    #353, and it has to be settled before this figure is allowed to route anything.
     """
 
     node_id: str
-    #: This node's own reputation proof, whose opinions are in :attr:`own`.
-    own_proof_id: str
+    #: The reputation proofs :attr:`node_id` itself publishes through, whose opinions
+    #: are in :attr:`own`. The *subject's*, never the reader's: filtering a peer's
+    #: standing by our own proof id left the peer's self-vouch counted as network
+    #: reputation, which is what issue #351 was.
+    own_proof_ids: Tuple[str, ...]
     #: What everybody else stakes on this node.
     opinions: List[Opinion]
     #: What this node's own proof stakes on it.
@@ -216,18 +225,34 @@ class NodeReputation:
         return totals(self.opinions)
 
 
-def split_own(opinions: Iterable[Opinion], own_proof_id: str) -> Tuple[List[Opinion], List[Opinion]]:
+def split_own(
+    opinions: Iterable[Opinion],
+    own_proof_ids: Union[str, Iterable[str]],
+) -> Tuple[List[Opinion], List[Opinion]]:
     """``(others, own)``, splitting on which proof published each opinion.
+
+    ``own_proof_ids`` are the proofs the **subject** publishes through, so ``own`` is
+    the subject's own voice and ``others`` is the network's verdict on it. Passing the
+    reader's proof id instead makes this filter out the reader's opinion and count the
+    subject's self-vouch as reputation (issue #351).
 
     Identity is the proof id, not the owner wallet: the wallet behind a proof is on the
     box (R7), but two proofs owned by one wallet are still two publishers, and only the
-    proof this node publishes through is this node's own voice.
+    proofs the subject publishes through are the subject's own voice. A node may hold
+    several (`commands.verify_reputation`), so this takes a collection of them.
+
+    A bare string is read as one id rather than iterated character by character. The
+    failure mode of a filter like this one is to silently exclude nothing, which is how
+    #351 stayed invisible, and a mistyped call should not add a second way to get there.
     """
     opinions = list(opinions)
-    if not own_proof_id:
+    if isinstance(own_proof_ids, str):
+        own_proof_ids = (own_proof_ids,)
+    wanted = {proof_id for proof_id in own_proof_ids if proof_id}
+    if not wanted:
         return opinions, []
-    own = [opinion for opinion in opinions if opinion.proof_id == own_proof_id]
-    others = [opinion for opinion in opinions if opinion.proof_id != own_proof_id]
+    own = [opinion for opinion in opinions if opinion.proof_id in wanted]
+    others = [opinion for opinion in opinions if opinion.proof_id not in wanted]
     return others, own
 
 
