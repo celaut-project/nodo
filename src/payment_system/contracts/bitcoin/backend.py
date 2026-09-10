@@ -6,7 +6,7 @@ dependency and no JVM**. Core signs, broadcasts, counts confirmations and keeps 
 watch-only view of the receiving address; nothing here holds a key or builds a script.
 
 The surface is deliberately narrow, and named for what the payment flow asks rather than
-for Core's method names, so a read-only HTTP backend (Esplora) can be put behind the
+for Core's method names, so a read-only HTTP backend (`explorer`) can be put behind the
 same calls later for a node that only wants to *receive*. That is not implemented here;
 the door is just left open.
 
@@ -51,7 +51,7 @@ class ChainBackend:
     ``raw_transaction``, ``list_transactions``, ``estimate_fee_rate``, ``new_address``,
     ``send_to``, ``send_many`` -- is what the payment flow asks for. A different
     implementation of it is a different way to reach Bitcoin, not a different contract:
-    see ``esplora.py``, which implements the read half and refuses the rest.
+    see ``explorer.py``, which implements the read half and refuses the rest.
     """
 
     #: This backend holds a wallet, so it can sign and broadcast.

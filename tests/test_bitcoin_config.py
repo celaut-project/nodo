@@ -202,7 +202,7 @@ class NodeServiceBackendTests(unittest.TestCase):
     def test_an_unknown_backend_names_all_three(self):
         config = self._config()
         config["ledgers"]["bitcoin"]["BACKEND"] = "electrum"
-        with self.assertRaisesRegex(ConfigValidationError, "'core', 'esplora' or 'service'"):
+        with self.assertRaisesRegex(ConfigValidationError, "'core', 'explorer' or 'service'"):
             self._validate(config)
 
     def test_no_published_service_id_is_refused(self):
@@ -256,9 +256,9 @@ class NodeServiceBackendTests(unittest.TestCase):
             self._validate(self._config(PRUNE_MIB="lots"))
 
     def test_the_other_backends_are_unaffected_by_all_of_this(self):
-        # An esplora node still needs no service id, no mnemonic and no credentials.
+        # An explorer node still needs no service id, no mnemonic and no credentials.
         config = _config(rate="1000")
-        config["ledgers"]["bitcoin"]["BACKEND"] = "esplora"
+        config["ledgers"]["bitcoin"]["BACKEND"] = "explorer"
         self._validate(config)
 
 

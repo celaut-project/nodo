@@ -3,7 +3,7 @@
 The third way of reaching Bitcoin, and the one that finally lets a node **pay** in it
 without asking anything of its operator's infrastructure:
 
-* ``esplora`` is a public HTTP API. No key, nothing to run, and the node can only be
+* ``explorer`` is a public HTTP API. No key, nothing to run, and the node can only be
   paid -- which is the half that matters when you are earning.
 * ``core`` is a bitcoind the operator installed and trusts with a wallet. It signs, so
   the node can pay, but somebody has to run it and back it up.
@@ -28,7 +28,7 @@ networks, P2WPKH, which is the address type ``new_address`` asks Core for.
 Ergo's) and is passed to the instance as an environment variable, which the node also
 records against the instance -- redacted, see ``local_execution._serialize_envs``. It is
 never sent to a peer, never logged, and never leaves this machine. A node that would
-rather hold no Bitcoin key at all should stay on ``esplora``: it can still be paid.
+rather hold no Bitcoin key at all should stay on ``explorer``: it can still be paid.
 
 **Attaching versus launching**, because the difference is a hung payment path. This
 module's ``backend()`` only *attaches* to an instance that is already running: it is
