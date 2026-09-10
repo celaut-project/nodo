@@ -401,8 +401,16 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
     return False
 
 
-def __settlement_plans(peer_id: str, amount: int, *, floor: bool) -> Tuple[List[SettlementPlan], List[str]]:
+def __settlement_plans(peer_id: str, amount: int, *, floor: bool,
+                       contract_hash: Optional[str] = None) -> Tuple[List[SettlementPlan], List[str]]:
     """One :class:`SettlementPlan` per shared payment system, and why any were dropped.
+
+    ``contract_hash`` restricts the answer to that one system, for a caller who named
+    the chain rather than leaving the choice to funding. Naming one and settling on
+    another is never right: the amount was read in *that* ledger's unit and checked
+    against *that* ledger's floors, so carrying it to a different chain moves a figure
+    nobody typed over a currency nobody chose. A named system that is not shared with
+    the peer comes back as a refusal, never as a fallback to the others.
 
     In the order the payer should try them (see `matching_payment_systems`), each with
     its own floors applied and its own rate used for the peer's figure. Every part of
@@ -434,12 +442,29 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool) -> Tuple[List[
             raise
         # A simulated payment settles on no ledger: there is no rate to convert
         # through, and no on-chain value for a floor to protect.
+        if contract_hash and contract_hash not in demos:
+            return [], [
+                f"{contract_hash[:12]} is not shared with peer {peer_id}, and the only "
+                "system left is a simulated one"
+            ]
         return [
             SettlementPlan(
-                contract_hash=demos[0], ledger_tag=None,
+                contract_hash=contract_hash or demos[0], ledger_tag=None,
                 amount=amount, peer_amount=amount, is_demo=True,
             )
         ], []
+
+    if contract_hash:
+        wanted = [system for system in systems if system.contract_hash == contract_hash]
+        if not wanted:
+            offered = ", ".join(
+                f"{system.ledger_tag}/{system.contract_hash[:12]}" for system in systems
+            ) or "none"
+            return [], [
+                f"{contract_hash[:12]} is not shared with peer {peer_id} "
+                f"(it offers: {offered})"
+            ]
+        systems = wanted
 
     floors_by_contract = payment_envs.settlement_floors()
     plans: List[SettlementPlan] = []
@@ -496,7 +521,8 @@ def __settlement_plans(peer_id: str, amount: int, *, floor: bool) -> Tuple[List[
     return plans, refusals
 
 
-def deposit_refusal_reason(peer_id: str, amount: int) -> Optional[str]:
+def deposit_refusal_reason(peer_id: str, amount: int,
+                           contract_hash: Optional[str] = None) -> Optional[str]:
     """Why ``amount`` of our MU cannot be deposited on ``peer_id``, or None if it can.
 
     The same check `increase_deposit_on_peer` makes, offered up front so a command can
@@ -509,10 +535,16 @@ def deposit_refusal_reason(peer_id: str, amount: int) -> Optional[str]:
     reason is reported rather than the first, because an operator choosing a new amount
     needs to know which floor to clear.
 
+    ``contract_hash`` narrows "any" to the one system the caller named, so a command
+    that asked for a chain is told about *that* chain's floor rather than being cleared
+    by a floor it will not settle against.
+
     Reads only local rows -- no wallet, no chain, no deposit token.
     """
     try:
-        plans, refusals = __settlement_plans(peer_id=peer_id, amount=int(amount), floor=False)
+        plans, refusals = __settlement_plans(
+            peer_id=peer_id, amount=int(amount), floor=False, contract_hash=contract_hash
+        )
     except ValueError as exc:
         return str(exc)
     if plans:
@@ -524,7 +556,8 @@ def deposit_refusal_reason(peer_id: str, amount: int) -> Optional[str]:
 
 
 def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
-                             floor: bool = False) -> bool:
+                             floor: bool = False,
+                             contract_hash: Optional[str] = None) -> bool:
     """Deposit ``amount`` MU with ``peer_id``.
 
     ``amount`` is in *our* MU. What the peer is told is not: see `__deposit_amounts`.
@@ -543,10 +576,17 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
 
     Both floors are derived from what the ledger can settle, not configured; see
     src/payment_system/deposits.py.
+
+    ``contract_hash`` settles through that system and no other. It is for the caller who
+    named a chain -- ``nodo pay --ledger`` -- whose amount was read in that ledger's own
+    unit; without it the walk is free to settle on a different chain, which would move a
+    figure typed in one currency over another. The automatic refill passes nothing,
+    because there funding is the selection and no unit was typed.
     """
     try:
         plans, refusals = __settlement_plans(
-            peer_id=peer_id, amount=int(amount), floor=floor
+            peer_id=peer_id, amount=int(amount), floor=floor,
+            contract_hash=contract_hash,
         )
     except ValueError as exc:
         _l.LOGGER(f"Cannot deposit on peer {peer_id}: {exc}.")

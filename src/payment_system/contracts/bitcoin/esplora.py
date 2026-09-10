@@ -138,15 +138,42 @@ class EsploraBackend:
         """Transactions paying ``address`` with at least ``min_conf`` confirmations.
 
         Shaped like Core's ``listreceivedbyaddress`` so the contract reads one thing.
+
+        Paginated to the end, because the caller is looking for one particular payment
+        rather than browsing recent ones. ``/address/:addr/txs`` returns only the newest
+        page, so on a node paid by several peers a deposit that has slipped past it
+        would read as "no confirmed transaction carries the token" -- rejecting a
+        payment already on-chain, with the money in this node's wallet. Continued with
+        ``/txs/chain/:last_seen_txid``, which is Esplora's own way of walking back.
         """
         tip = self._tip_height()
-        txs = self._get(f"/address/{address}/txs") or []
-        txids = [
-            str(tx.get("txid"))
-            for tx in txs
-            if self._confirmations(tx.get("status") or {}, tip) >= int(min_conf)
-            and tx.get("txid")
-        ]
+        txids: List[str] = []
+        seen: set = set()
+        path = f"/address/{address}/txs"
+        while True:
+            page = self._get(path) or []
+            fresh = [
+                entry for entry in page
+                if entry.get("txid") and str(entry["txid"]) not in seen
+            ]
+            if not fresh:
+                break
+            cursor = None
+            for entry in fresh:
+                tx_id = str(entry["txid"])
+                seen.add(tx_id)
+                status = entry.get("status") or {}
+                if status.get("confirmed"):
+                    # Only a confirmed transaction can be the cursor: the first page
+                    # carries the mempool too, and `/txs/chain` walks the chain.
+                    cursor = tx_id
+                if self._confirmations(status, tip) >= int(min_conf):
+                    txids.append(tx_id)
+            # A short page is the last one. The first page also carries the mempool, so
+            # it can be longer than PAGE_SIZE; only a *short* one ends the walk.
+            if len(page) < PAGE_SIZE or cursor is None:
+                break
+            path = f"/address/{address}/txs/chain/{cursor}"
         return [{"txids": txids}] if txids else []
 
     def tx_status(self, txid: str) -> Dict[str, Any]:

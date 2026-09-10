@@ -505,10 +505,13 @@ These are intended for development or advanced maintenance environments:
   for Bitcoin — whatever `ui.DISPLAY_UNIT` says, because what moves is an on-chain
   transfer and the ledger denominates it. `--ledger <name>` is only needed when this
   node offers more than one payment system, and then it is: two systems are two
-  currencies, and guessing would move money on a chain nobody named. Which system a
-  payment settles through is otherwise decided by funding — the node walks the systems
-  it shares with the peer and uses the first whose wallet can cover it, so a node
-  holding ERG and no BTC pays a peer that accepts both in ERG with no setting to that
+  currencies, and guessing would move money on a chain nobody named. A ledger that *is*
+  named is where the payment settles or it does not happen: the amount was read in that
+  ledger's unit and checked against its floors and wallet, and a peer that does not
+  share it is refused, naming what it does offer. Where none is named — the automatic
+  refill, `increase_peer_deposit` — funding decides: the node walks the systems it
+  shares with the peer and uses the first whose wallet can cover it, so a node holding
+  ERG and no BTC tops up a peer that accepts both in ERG with no setting to that
   effect. Stops cleanly before touching the wallet when the amount is below what the
   ledger can settle, or when no payment system is shared with the peer.  
   **Example:**  
