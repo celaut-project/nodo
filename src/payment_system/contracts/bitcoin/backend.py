@@ -226,33 +226,49 @@ class ChainBackend:
     def raw_transaction(self, txid: str) -> Dict[str, Any]:
         """The transaction's outputs, normalised (see :func:`normalise_outputs`).
 
-        Through the **wallet**, not through ``getrawtransaction``, and that is what makes
-        a pruned node work. ``getrawtransaction`` can only find an arbitrary confirmed
-        transaction when Core keeps a ``txindex``, and a ``txindex`` cannot be built on a
-        pruned node -- so asking for one here quietly required every operator to keep the
-        whole chain, for a lookup that never needs it: both callers pass a txid that came
-        out of a wallet call (``list_received`` or ``list_transactions``), so the
-        transaction is always one of this wallet's own.
+        Asked of the **wallet**, not of ``getrawtransaction``. Core answers
+        ``getrawtransaction`` for a transaction still in the mempool and, otherwise,
+        only when it was started with ``-txindex=1`` or is given the block that carries
+        it -- and a ``txindex`` cannot be built on a pruned node at all. Every txid
+        reaching here has been mined: they come from ``list_received`` filtered by
+        confirmations, and from ``list_transactions``. So the plain call answers error
+        -5 for exactly the payments this has to read, and one layer up that reads back
+        as "no confirmed transaction carries the token" -- a payment rejected with the
+        money already in this node's wallet.
 
-        Core hands the raw hex back on ``gettransaction``; decoding it is a local
-        operation with no index behind it. ``getrawtransaction`` stays as the fallback
-        for the case the wallet does not know the transaction after all, where a node
-        with a ``txindex`` can still answer and one without says so.
+        The wallet's own index is enough, because both callers only ever ask about
+        transactions that pay an address of ours, and it needs no chain behind it:
+        ``verbose`` returns the same ``decoded`` object ``getrawtransaction`` would
+        have, and a Core that does not send one still sends the raw ``hex``, which
+        decodes locally. Failing both, the wallet reports which block holds the
+        transaction, and ``getrawtransaction`` given that block needs no index either.
         """
         try:
-            wallet_entry = self._call("gettransaction", [str(txid), True]) or {}
-            raw_hex = wallet_entry.get("hex")
-            if raw_hex:
-                decoded = self._call(
-                    "decoderawtransaction", [str(raw_hex)], wallet_scoped=False
-                )
-                if decoded:
-                    return {"outputs": _core_outputs(decoded)}
+            found = dict(self._call("gettransaction", [str(txid), True, True]) or {})
         except BackendUnavailable:
-            # Not this wallet's transaction, or a Core too old to return the hex. The
-            # index, if there is one, is the remaining way to look.
-            pass
-        decoded = self._call("getrawtransaction", [str(txid), True], wallet_scoped=False)
+            # A Core too old for `verbose` refuses the call on its parameters alone.
+            # Worth one more round trip: the alternative is rejecting a real payment.
+            try:
+                found = dict(self._call("gettransaction", [str(txid), True]) or {})
+            except BackendUnavailable:
+                # Not this wallet's transaction after all. The index, if the node kept
+                # one, is the remaining way to look; a pruned node says it cannot,
+                # which is the honest answer rather than an empty one.
+                found = {}
+
+        decoded = found.get("decoded")
+        if not decoded and found.get("hex"):
+            # No `decoded`, but the bytes are here: decoding them is local, with no
+            # index and no block lookup behind it.
+            decoded = self._call(
+                "decoderawtransaction", [str(found["hex"])], wallet_scoped=False
+            )
+        if not decoded:
+            blockhash = found.get("blockhash")
+            params: List[Any] = [str(txid), True]
+            if blockhash:
+                params.append(str(blockhash))
+            decoded = self._call("getrawtransaction", params, wallet_scoped=False)
         return {"outputs": _core_outputs(decoded or {})}
 
 

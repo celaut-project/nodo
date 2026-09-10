@@ -15,6 +15,8 @@ from unittest import mock
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
     from src.payment_system.contracts.bitcoin.backend import (
         BackendUnavailable,
         ChainBackend,
@@ -87,7 +89,10 @@ class PrunedLookupTests(unittest.TestCase):
             "getrawtransaction": DECODED,
         })
         chain.raw_transaction(TXID)
-        self.assertEqual(calls, ["gettransaction", "getrawtransaction"])
+        # Twice, because the first refusal is indistinguishable from a Core too old for
+        # `verbose` -- and asking again costs one round trip against rejecting a real
+        # payment.
+        self.assertEqual(calls, ["gettransaction", "gettransaction", "getrawtransaction"])
 
     def test_a_wallet_entry_with_no_hex_falls_back_too(self):
         # Older Core versions do not return the raw hex on `gettransaction`.

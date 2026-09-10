@@ -215,7 +215,7 @@ def pay(peer_id: str, amount: str, ledger: Optional[str] = None,
     # an operator's figure is refused rather than quietly raised (see
     # `increase_deposit_on_peer`). Also catches a peer we share no payment system
     # with, which is the same kind of "nothing was broadcast" answer.
-    refusal = deposit_refusal_reason(peer_id, amount_mu)
+    refusal = deposit_refusal_reason(peer_id, amount_mu, method=contract.key)
     if refusal:
         print(f"STOP: {refusal}.", flush=True)
         return False
@@ -272,8 +272,10 @@ def pay(peer_id: str, amount: str, ledger: Optional[str] = None,
         peer_id=peer_id,
         amount=amount_mu,
         on_transaction_url=print_transaction_url,
-        # The method the operator named, so the payment settles in the asset the amount
-        # was read in rather than in whichever one happens to be funded first.
+        # Settle through the method the operator named, and through no other. `amount`
+        # was read in this method's own unit and checked against this method's floors
+        # and wallet, so letting the payer walk on to another one would move a figure
+        # typed in one currency over a different one.
         method=contract.key,
     )
     if not paid:
