@@ -810,9 +810,13 @@ core_services:
   # ledgers.bitcoin.WALLET_MNEMONIC. It is what makes `ledgers.bitcoin.BACKEND: service`
   # work -- Bitcoin Core is what signs a Bitcoin transaction, so being able to PAY in BTC
   # means having a Core with the keys, and this is that Core without the operator having
-  # to install one. Published for linux/arm64; a node on another architecture needs the
-  # build for it. The published id is not wired yet; leave as "<SET_ME>" until it is
-  # available. See docs/BITCOIN.md.
+  # to install one.
+  #
+  # Source: https://github.com/celaut-basics/bitcoin-node (linux/arm64; another
+  # architecture needs a build for it). An id here is a CONTENT HASH, so it comes from
+  # packing that source -- `nodo pack .` prints it -- rather than from the repository:
+  # what this node runs is the image, and the id is what says which one. Leave as
+  # "<SET_ME>" until you have packed it. See docs/BITCOIN.md.
   bitcoin-node: "<SET_ME>"
 
 # Opportunistic low-demand fallback scheduler (WIP — see docs/design/low-demand-fallback.md).

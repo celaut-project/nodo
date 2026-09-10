@@ -96,10 +96,19 @@ it cannot be paid in ERG.
 
 ## Running your own node
 
-`BACKEND: service` launches the `bitcoin-node` core service — a published bitcoind image
-— and talks to it exactly as it talks to any other Core. It is published for
-**linux/arm64**, the kind of board a node lives on; another architecture needs the build
+`BACKEND: service` launches the `bitcoin-node` core service — a bitcoind image whose
+wallet is derived from the mnemonic below — and talks to it exactly as it talks to any
+other Core. Its source is
+[`celaut-basics/bitcoin-node`](https://github.com/celaut-basics/bitcoin-node), built for
+**linux/arm64**, the kind of board a node lives on; another architecture needs a build
 for it.
+
+The id in `core_services` is a **content hash**, so it comes from packing that source
+(`nodo pack .` prints it), not from the repository: what runs is the image, and the id is
+what says which one. That is also what makes the service auditable — the words that hold
+the money are turned into a key by 200 lines of standard library you can read, checked
+against the published BIP-39 and BIP-32 vectors, and the service refuses to serve a
+wallet whose master fingerprint is not the one those words derive.
 
 ```yaml
 core_services:
