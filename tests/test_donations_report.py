@@ -57,7 +57,7 @@ class DonationsReportTests(unittest.TestCase):
         with mock.patch("src.database.sql_connection.SQLConnection",
                         return_value=_Sql(debts, credits)), \
                 mock.patch("src.payment_system.contracts.envs.donation_scanners",
-                           return_value=["ergo"]), \
+                           return_value={"ergo": object()}), \
                 mock.patch("src.payment_system.donations.config.pay_wallets",
                            return_value=wallets), \
                 mock.patch("src.payment_system.donations.config.credit_wallets",

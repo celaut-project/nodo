@@ -106,7 +106,8 @@ funds arrived, can quote what an execution will cost before it starts, and lets 
 deposit behind a running instance grow or shrink while it runs.
 
 What settles on a ledger is denominated by that ledger, not by anybody's display unit.
-The flow for the ledger implemented here is in [`ERGO.md`](ERGO.md), and what things
+The flow for each implemented ledger is in [`ERGO.md`](ERGO.md) and
+[`BITCOIN.md`](BITCOIN.md) — a node may offer either, both or neither — and what things
 cost is in [`PRICING.md`](PRICING.md).
 
 ## Address and token provisioning

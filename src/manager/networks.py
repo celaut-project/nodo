@@ -44,6 +44,14 @@ def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
     except socket.gaierror:
         raise ValueError(f"Cannot resolve domain: {domain}")
 
+# Which ledger tags resolve to no peer instances at all, and why. A payment system is
+# not a service this node can be pointed at: `bitcoin` is reached over its own node's
+# JSON-RPC, configured under `ledgers.bitcoin`, and there is no URI to advertise for it.
+# Named here rather than left to fall through the loop below, so the answer is a
+# statement instead of an accident.
+LEDGERS_WITHOUT_URIS = ("bitcoin",)
+
+
 def resolve_ergo_network() -> List[celaut.Instance.Uri]:
     return []
 
@@ -73,6 +81,9 @@ def resolve_network(
     # UnboundLocalError (it previously did for tag "*").
     uris: List[celaut.Instance.Uri] = []
     for tag in network.tags:
+        if tag in LEDGERS_WITHOUT_URIS:
+            continue
+
         if "ergo" in tag:
             uris = resolve_ergo_network()
             if uris:

@@ -13,67 +13,102 @@ ended up refilling peers with an amount worth exactly one transaction fee.
 Instead the operator states how much of a deposit may be lost to the fee
 (``deposits.MAX_FEE_OVERHEAD``) and the amount follows from it.
 
-**No ledger is named in this module.** The floors are asked of each payment contract
-through ``contracts.envs.settlement_floors``, the same dispatch the rest of the payment
-flow uses, so adding a second payment system does not mean editing deposit sizing. This
-used to import Ergo's ``DEFAULT_FEE`` and ``SAFE_MIN_BOX_VALUE`` directly, which imposed
-Ergo's box-value floor on every contract -- including the simulated one, whose payments
-never reach a chain.
+**No ledger is named in this module.** The floors are asked of the payment contract
+that is going to settle, through ``contracts.envs.settlement_floors`` -- the same
+dispatch the rest of the payment flow uses -- so adding a second payment system does not
+mean editing deposit sizing. This used to import Ergo's ``DEFAULT_FEE`` and
+``SAFE_MIN_BOX_VALUE`` directly, which imposed Ergo's box-value floor on every contract,
+including the simulated one, whose payments never reach a chain.
+
+**And they are asked per system, not collapsed across all of them.** Every figure here
+takes the payment system it is sizing for. The alternative -- one global figure, the
+strictest floor across every contract -- is what the code did until Bitcoin made it
+visible, and it silently prices every deposit at the most expensive chain the node
+happens to support (#340 §5).
 """
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 from src.utils.config import ConfigManager
 
 
-def _ledger_floors() -> Tuple[int, int]:
-    """The strictest ``(fee, minimum output)`` across the available contracts, in MU.
+def _floors_for(payment_system) -> Tuple[int, int]:
+    """``(fee, minimum output)`` in MU, for the system that will actually settle.
 
-    The strictest, because deposit sizing has no contract in hand: it produces one figure,
-    used before anyone has chosen which contract will settle it. Taking the maximum makes
-    that figure payable on every available system rather than only the cheapest. A contract
-    with no fee and no minimum reports ``(0, 0)`` and so never raises the floor.
+    Per system, and that is the whole point. This used to take the **maximum** across
+    every available contract, because it produced one figure before anyone had chosen
+    which contract would settle it -- so with a second payment system registered, every
+    deposit inherited the strictest chain's fee and dust limit. Ergo's floors are around
+    a thousandth of a cent and Bitcoin's are around a dollar, so that "safe" maximum
+    inflates an Ergo deposit by roughly three orders of magnitude (#340 §5), and Basis
+    (#265), whose floors are `(0, 1)`, would inherit Ergo's and stop being worth
+    anything at all.
 
-    ``settlement_floors`` either yields at least one contract or raises
-    ``JavaDependencyMissing``, so there is no empty case to handle here. It can raise, which
-    is why callers in the manager loop size deposits inside their guarded block.
+    ``payment_system`` may be ``None`` for a payment that settles on no chain at all --
+    the simulated contract -- which imposes no floor because there is nothing to pay a
+    fee to.
 
     Imported lazily: the contract dispatch reaches the whole payment stack, and this is
     read from the manager loop.
     """
+    if payment_system is None:
+        return 0, 0
+
     from src.payment_system.contracts.envs import settlement_floors
 
-    floors = [read() for read in settlement_floors().values()]
-    return max(fee for fee, _ in floors), max(minimum for _, minimum in floors)
+    read = settlement_floors().get(payment_system.contract_hash)
+    if read is None:
+        # The system was shared with the peer a moment ago and its contract is not
+        # offered now -- a runtime that went away. Nothing can be sized against it.
+        raise ValueError(
+            f"no payment contract is available for {payment_system.ledger_tag}/"
+            f"{payment_system.contract_hash[:12]}, so a deposit cannot be sized for it"
+        )
+    return read()
 
 
-def _share(key: str, default: float) -> float:
+def _share(key: str, default: float, *, ledger_tag: Optional[str] = None) -> float:
     # Resolved per call, not captured at import, for the same reason as
     # `monetary._config`: ConfigManager is a replaceable singleton, so a module-level
     # binding would make a deposit's size depend on import order. The lookup is a dict hit.
-    value = float(ConfigManager().get(f"deposits.{key}", default))
+    #
+    # A ledger may override it, because a share that is right for one chain is absurd on
+    # another: 2 % fee overhead on Ergo is a deposit worth a fraction of a cent, while
+    # on Bitcoin the same 2 % demands a deposit worth years of runtime up front (§5).
+    config = ConfigManager()
+    value = None
+    if ledger_tag:
+        value = config.get(f"ledgers.{ledger_tag}.payments.{key}")
+    if value in (None, ""):
+        value = config.get(f"deposits.{key}", default)
+    value = float(value)
     if not 0 < value <= 1:
-        raise ValueError(f"deposits.{key} must be a share in (0, 1], got {value}.")
+        where = f"ledgers.{ledger_tag}.payments.{key}" if ledger_tag else f"deposits.{key}"
+        raise ValueError(f"{where} must be a share in (0, 1], got {value}.")
     return value
 
 
-def full_deposit_mu() -> int:
-    """The amount to top a peer up to.
+def full_deposit_mu(payment_system=None) -> int:
+    """The amount to top a peer up to, sized for the system that will settle it.
 
     Large enough that the transaction fee stays under ``MAX_FEE_OVERHEAD`` of it, and
-    never below what the ledger can actually settle.
+    never below what that ledger can actually settle.
     """
-    fee, minimum_output = _ledger_floors()
-    by_overhead = int(fee / _share("MAX_FEE_OVERHEAD", 0.02))
+    fee, minimum_output = _floors_for(payment_system)
+    ledger_tag = getattr(payment_system, "ledger_tag", None)
+    by_overhead = int(fee / _share("MAX_FEE_OVERHEAD", 0.02, ledger_tag=ledger_tag))
     return max(by_overhead, minimum_output + fee)
 
 
-def refill_threshold_mu() -> int:
+def refill_threshold_mu(payment_system=None) -> int:
     """Balance on a peer below which it gets topped up again.
 
     A share of a full deposit rather than an independent constant, so the two cannot be
     configured into contradicting each other (a threshold above the deposit would refill
     on every single iteration).
     """
-    return int(full_deposit_mu() * _share("REFILL_BELOW", 0.2))
+    ledger_tag = getattr(payment_system, "ledger_tag", None)
+    return int(
+        full_deposit_mu(payment_system) * _share("REFILL_BELOW", 0.2, ledger_tag=ledger_tag)
+    )

@@ -56,6 +56,46 @@ CONTRACT = """
     Date: [Date]
 """.encode('utf-8')
 CONTRACT_HASH = sha3_256(CONTRACT).hexdigest()
+LEDGER = "simulated"
+# A simulated payment settles on no chain, so nothing here can be double-spent and
+# there is no box for a sweep to consume.
+needs_unspent_proof = False
+is_demo = True
+
+
+def ledger() -> celaut_pb2.Contract.Ledger:
+    """A ledger tag that names itself for what it is.
+
+    Carried so the registry can treat this contract like any other; nothing resolves a
+    node URL or a chain from it, because there is neither.
+    """
+    return celaut_pb2.Contract.Ledger(
+        tags=[LEDGER],
+        prose="Simulated payments: nothing settles, nothing moves.",
+        formal=b"",
+    )
+
+
+def init() -> None:
+    """Register nothing, deliberately.
+
+    Every other contract writes a LOCAL row here so peers can read what this node
+    accepts. This one must not: a simulated payment moves no money, so a peer that read
+    it out of `GetPeerInfo` and paid through it would have paid into nothing. The flag
+    exists to let a node exercise its own payment path, not to offer that path to
+    others -- which is why `envs.DEMOS` exists on the *payer's* side only.
+    """
+    return None
+
+
+def manager() -> None:
+    """Nothing to sweep and nothing owed: no wallet, no chain, no fee."""
+    return None
+
+
+def manager_iteration_time() -> int:
+    """Daily, like the others, though the job it schedules does nothing."""
+    return 86400
 
 
 def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> celaut_pb2.Contract:

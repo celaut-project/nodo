@@ -406,13 +406,23 @@ def _validate_pricing_by_arch(pricing: Dict[str, Any]) -> None:
             _require_whole_mu(entry, f"pricing.BY_ARCH.{arch}", key)
 
 
-def _warn_if_charges_cannot_settle(pricing: Dict[str, Any], rate: Decimal, warn) -> None:
-    """Do prices and the payment rate still live on the same scale?
+def _warn_if_charges_cannot_settle(
+    pricing: Dict[str, Any], rate: Decimal, warn, *,
+    rate_key: str = "ledgers.ergo.payments.MU_PER_NANOERG",
+    unit: str = "nanoERG",
+) -> None:
+    """Do prices and **this** payment system's rate still live on the same scale?
 
     This is the failure the gas model actually shipped with: charges of order 1e2 and a
     conversion factor of 1e58, so every real charge became zero on-chain and nothing
-    could ever be settled. Configuring prices (MU) and the rate (MU per nanoERG)
+    could ever be settled. Configuring prices (MU) and the rate (MU per base unit)
     separately makes it reachable again, so it is checked rather than assumed.
+
+    Asked once per registered payment system rather than only of Ergo. A second system
+    makes this *more* likely, not less: a satoshi is worth about a million nanoERG, so
+    a rate borrowed from one chain by analogy with the other misprices the node by six
+    orders of magnitude -- and the direction that matters is per system, because a node
+    can be priced correctly for one and absurdly for the other at the same time.
 
     A warning, not an error: a node may legitimately price everything at zero, and an
     operator mid-edit should not be locked out of their own config.
@@ -424,19 +434,18 @@ def _warn_if_charges_cannot_settle(pricing: Dict[str, Any], rate: Decimal, warn)
         reference_mu = Decimal(str(reference if reference not in (None, "") else 0))
     except (InvalidOperation, ValueError, TypeError):
         return
-    if reference_mu <= 0:
+    if reference_mu <= 0 or rate <= 0:
         return
     if reference_mu / rate < 1:
         warn(
             f"pricing.RAM_MU_PER_GIB_HOUR={reference_mu} MU is worth less than one "
-            f"nanoERG at ledgers.ergo.payments.MU_PER_NANOERG={rate}, so an hour of a "
-            "GiB of memory settles as nothing on-chain. Raise the prices or lower the "
-            "rate; see docs/PRICING.md."
+            f"{unit} at {rate_key}={rate}, so an hour of a GiB of memory settles as "
+            "nothing on-chain. Raise the prices or lower the rate; see docs/PRICING.md."
         )
 
 
 def _validate_wallet_list(
-    payments: Dict[str, Any], key: str, *, ledger: str, network: str
+    payments: Dict[str, Any], key: str, *, ledger: str, network: str, address_check=None
 ) -> List[Dict[str, Any]]:
     """One donation wallet list: addresses valid for the chain, weights non-negative.
 
@@ -460,8 +469,11 @@ def _validate_wallet_list(
         address = str(entry.get("address") or "").strip()
         if not address:
             raise ConfigValidationError(f"{at} has no address.")
-        if not is_valid_ergo_address(address, network=network):
-            raise ConfigValidationError(f"{at}.address is not a valid Ergo address: {address!r}")
+        valid = address_check or is_valid_ergo_address
+        if not valid(address, network=network):
+            raise ConfigValidationError(
+                f"{at}.address is not a valid {ledger.capitalize()} address: {address!r}"
+            )
         if address in seen:
             # Two rows for one address would double its weight without looking like it.
             raise ConfigValidationError(
@@ -491,11 +503,19 @@ def _validate_wallet_list(
 
 
 def validate_donation_config(
-    payments: Dict[str, Any], *, ledger: str = "ergo", network: str = "mainnet", warn=None
+    payments: Dict[str, Any], *, ledger: str = "ergo", network: str = "mainnet", warn=None,
+    address_check=None,
 ) -> None:
-    """Validate one ledger's donation block: the share, the two lists, the floors."""
+    """Validate one ledger's donation block: the share, the two lists, the floors.
+
+    ``address_check`` is the chain's own address validator, because an address only
+    means anything on its own chain -- a Bitcoin donation wallet checked against Ergo's
+    base58 rules would be refused for the wrong reason, or worse, accepted.
+    """
     _require_share(payments, f"ledgers.{ledger}.payments", "DONATION_PERCENTAGE")
-    if "DONATION_MIN_TRANSFER" in payments:
+    if "DONATION_MIN_TRANSFER" in payments and address_check is None:
+        # Ergo's amounts are ERG decimal strings; another ledger's are checked by its
+        # own caller, in its own units.
         _require_nonneg_nanoerg(payments, "DONATION_MIN_TRANSFER", strictly_positive=False)
     if "DONATION_MIN_CONFIRMATIONS" in payments:
         raw = payments.get("DONATION_MIN_CONFIRMATIONS")
@@ -512,8 +532,10 @@ def validate_donation_config(
                 f"negative, got {confirmations}"
             )
 
-    pay = _validate_wallet_list(payments, "DONATION_WALLETS", ledger=ledger, network=network)
-    _validate_wallet_list(payments, "DONATION_CREDIT_WALLETS", ledger=ledger, network=network)
+    pay = _validate_wallet_list(payments, "DONATION_WALLETS", ledger=ledger,
+                                network=network, address_check=address_check)
+    _validate_wallet_list(payments, "DONATION_CREDIT_WALLETS", ledger=ledger,
+                          network=network, address_check=address_check)
 
     if warn is None:
         return
@@ -571,6 +593,145 @@ def validate_balancers_config(config: Dict[str, Any]) -> None:
                 f"balancers.{key} must be positive, got {raw!r}: it is the point at "
                 "which half the weight is earned, and the formula divides by it."
             )
+
+
+BITCOIN_NETWORKS = ("mainnet", "testnet", "signet", "regtest")
+
+
+def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
+    """Validate the Bitcoin ledger block, if there is one.
+
+    Structural only: addresses are checked against the configured network with bech32
+    and base58check arithmetic, never by asking a node. That matters more here than it
+    did for Ergo -- a cold wallet is where an operator's savings go, and validating it
+    over RPC would mean a node that cannot reach `bitcoind` accepts a typo silently and
+    sweeps to nowhere.
+    """
+    from src.utils.bitcoin_units import btc_to_satoshi, is_valid_bitcoin_address
+
+    ledgers = config.get("ledgers")
+    if not isinstance(ledgers, dict):
+        return
+    bitcoin = ledgers.get("bitcoin")
+    if not isinstance(bitcoin, dict):
+        return
+
+    network = str(bitcoin.get("NETWORK") or "mainnet").strip()
+    if network not in BITCOIN_NETWORKS:
+        raise ConfigValidationError(
+            f"ledgers.bitcoin.NETWORK must be one of {', '.join(BITCOIN_NETWORKS)}, "
+            f"got {network!r}"
+        )
+
+    chosen = str(bitcoin.get("BACKEND") or "core").strip().lower()
+    if chosen not in ("core", "esplora"):
+        raise ConfigValidationError(
+            f"ledgers.bitcoin.BACKEND must be 'core' or 'esplora', got {chosen!r}. "
+            "'esplora' is a read-only HTTP API -- the node can be paid in BTC but not "
+            "pay in it; 'core' is a bitcoind that holds the wallet and signs."
+        )
+
+    payments = bitcoin.get("payments")
+    if not isinstance(payments, dict):
+        return
+
+    for key in ("HOT_WALLET_LIMITS", "COLD_WALLET_MIN_TRANSFER", "DONATION_MIN_TRANSFER"):
+        if payments.get(key) in (None, ""):
+            continue
+        try:
+            btc_to_satoshi(payments[key])
+        except ValueError as exc:
+            raise ConfigValidationError(f"ledgers.bitcoin.payments.{key}: {exc}") from exc
+
+    for key in ("COLD_WALLET", "RECEIVING_ADDRESS"):
+        address = str(payments.get(key) or "").strip()
+        if address and not is_valid_bitcoin_address(address, network=network):
+            raise ConfigValidationError(
+                f"ledgers.bitcoin.payments.{key} is not a valid {network} Bitcoin "
+                f"address: {address!r}. An address valid on another network is refused "
+                "too -- sweeping to it would send funds nobody on this chain can spend."
+            )
+
+    rate = payments.get("MU_PER_SATOSHI")
+    # An unset rate means this node does not offer Bitcoin at all -- the shipped default
+    # -- so everything below is still checked for shape but nothing is *warned* about.
+    # A dormant ledger must not talk at every startup about a donation it will never pay.
+    offered = rate not in (None, "")
+    dormant_warn = warn if offered else None
+
+    _require_share(payments, "ledgers.bitcoin.payments", "DONATION_PERCENTAGE")
+    _require_share(payments, "ledgers.bitcoin.payments", "MAX_FEE_OVERHEAD",
+                   strictly_positive=True)
+    validate_donation_config(payments, ledger="bitcoin", network=network,
+                             warn=dormant_warn, address_check=is_valid_bitcoin_address)
+
+    if not offered:
+        return
+    try:
+        rate_value = Decimal(str(rate).strip())
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ConfigValidationError(
+            f"ledgers.bitcoin.payments.MU_PER_SATOSHI must be a number, got {rate!r}"
+        ) from exc
+    if rate_value <= 0:
+        raise ConfigValidationError(
+            f"ledgers.bitcoin.payments.MU_PER_SATOSHI must be positive, got {rate_value}"
+        )
+    if warn is not None and rate_value == 1:
+        # The specific mistake worth naming: 1 is what MU_PER_NANOERG is, and copying it
+        # here misprices the node by about a million.
+        warn(
+            "ledgers.bitcoin.payments.MU_PER_SATOSHI is 1, which is MU_PER_NANOERG's "
+            "value. A satoshi is worth about a million nanoERG, so this sells an hour "
+            "of compute for roughly a millionth of its price. See docs/BITCOIN.md."
+        )
+
+    # And the check that two payment systems are on *compatible* scales, which needs no
+    # market data at all: their two rates imply an exchange rate between the chains, and
+    # an implausible one is a rate borrowed from the other by analogy.
+    #
+    # Deliberately not Ergo's per-charge settle-check applied here. On-chain Bitcoin
+    # cannot settle a single GiB-hour by design -- §5 of the issue that added this
+    # spells out the arithmetic, and the prepaid-deposit model is what absorbs it -- so
+    # that check fires on a correctly configured node, and a warning that sounds on the
+    # shipped config trains operators to ignore warnings.
+    if warn is not None:
+        _warn_if_the_two_rates_disagree(config, rate_value, warn)
+
+
+def _warn_if_the_two_rates_disagree(config: Dict[str, Any], mu_per_satoshi: Decimal,
+                                    warn) -> None:
+    """Do this node's two payment rates imply a believable world?
+
+    ``MU_PER_NANOERG`` and ``MU_PER_SATOSHI`` are each "MU per base unit", so their
+    ratio *is* this node's opinion about what a satoshi is worth in nanoERG -- and since
+    one BTC is 1e8 satoshi and one ERG is 1e9 nanoERG, they imply a BTC/ERG price
+    without anybody having to supply one.
+
+    A config implying that one BTC is worth less than one ERG is not a market view, it
+    is a rate copied from the other chain by analogy. That is the mistake worth catching
+    here, and it is catchable with arithmetic rather than with a price feed.
+    """
+    ergo = ((config.get("ledgers") or {}).get("ergo") or {}).get("payments") or {}
+    raw = ergo.get("MU_PER_NANOERG")
+    if raw in (None, ""):
+        return
+    try:
+        mu_per_nanoerg = Decimal(str(raw).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        return
+    if mu_per_nanoerg <= 0 or mu_per_satoshi <= 0:
+        return
+
+    # value(BTC)/value(ERG) = (1e8 x value(sat)) / (1e9 x value(nanoERG))
+    implied = (mu_per_satoshi / mu_per_nanoerg) / 10
+    if implied < 1:
+        warn(
+            f"ledgers.bitcoin.payments.MU_PER_SATOSHI={mu_per_satoshi} and "
+            f"ledgers.ergo.payments.MU_PER_NANOERG={mu_per_nanoerg} together say one "
+            f"BTC is worth {implied} ERG, which is not a market anyone trades in. One "
+            "of the two rates was probably copied from the other; see docs/BITCOIN.md."
+        )
 
 
 def validate_ergo_config(

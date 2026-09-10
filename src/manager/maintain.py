@@ -14,6 +14,7 @@ from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.payment_system.donations.indexer import tick as donations_tick
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.payment_system.deposits import full_deposit_mu, refill_threshold_mu
+from src.payment_system.mu_conversion import matching_payment_system
 from src.payment_system.mu_conversion import peer_mu_in_local
 from src.reputation_system.reasons import Reason
 from src.utils import activity_window, demand_history
@@ -586,7 +587,12 @@ def peer_deposits(debug_mode: bool = False):
         # stop every instance from being charged, which is how the `UnboundLocalError`
         # this function used to hold managed to take the whole node's billing down.
         try:
-            refill_below = refill_threshold_mu()
+            # Sized for the system that will actually settle it -- the first one the
+            # payer will try. One global figure would take the strictest floor across
+            # every contract this node supports, so a node that also accepts Bitcoin
+            # would demand a Bitcoin-sized deposit to top up an Ergo peer (#340 §5).
+            payment_system = matching_payment_system(peer_id)
+            refill_below = refill_threshold_mu(payment_system)
             if peer_balance >= refill_below:
                 if debug_mode:
                     log.LOGGER(f"Peer {peer_id} has sufficient deposit: {format_mu(peer_balance)}.")
@@ -596,7 +602,8 @@ def peer_deposits(debug_mode: bool = False):
             # `floor=True` raises this to a full deposit if it is smaller, so log what
             # will actually be sent rather than the shortfall -- the two differ whenever
             # the peer still holds something.
-            to_increase = max(full_deposit_mu() - peer_balance, full_deposit_mu())
+            full_deposit = full_deposit_mu(payment_system)
+            to_increase = max(full_deposit - peer_balance, full_deposit)
             if debug_mode:
                 log.LOGGER(
                     f"Insufficient balance for {peer_id}:\n"
@@ -608,9 +615,36 @@ def peer_deposits(debug_mode: bool = False):
             increased = _payment_process_module().increase_deposit_on_peer(
                 peer_id=peer_id, amount=to_increase, floor=True
             )
+        except ValueError as e:
+            # No payment system shared with this peer, or none that can size a deposit.
+            # Skipped rather than raised: this loop is the manager thread and nothing
+            # above it catches anything, so one unpayable peer must not stop every
+            # instance from being charged.
+            log.LOGGER(f"Cannot size a deposit for peer {peer_id}: {e}")
+            continue
         except JavaDependencyMissing:
             log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
             increased = False
+        except Exception as e:
+            # Whatever a contract's backend raises when it cannot be reached or will
+            # not act. Sizing a deposit reaches the network now -- `refill_threshold_mu`
+            # asks the settling contract for its floors, and Bitcoin's are a live fee
+            # rate -- so this block fails for reasons that have nothing to do with this
+            # peer: an unreachable bitcoind, an Esplora that timed out, or a fee above
+            # `MAX_FEE_RATE_SAT_VB`, which the backend reports by raising because
+            # refusing to pay is the right answer.
+            #
+            # Caught by no contract's exception type on purpose: this loop must not
+            # import a ledger to know what it throws, and the next ledger will throw
+            # something else.
+            #
+            # Contained per peer and never re-raised. `manager_thread` calls
+            # `peer_deposits` bare inside its `while True`, on a daemon thread with no
+            # supervisor (`serve.py`), so one escaping exception ends billing, sweeps,
+            # the activity window and the donation indexer for the life of the process
+            # -- while the gRPC server keeps answering, so the node looks healthy.
+            log.LOGGER(f"Could not top up peer {peer_id}: {type(e).__name__}: {e}")
+            continue
 
         if not increased:
             log.LOGGER(f"[ERROR] Manager error: the peer {peer_id} could not be increased.")

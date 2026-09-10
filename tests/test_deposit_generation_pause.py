@@ -68,7 +68,11 @@ class DepositGenerationPauseTests(unittest.TestCase):
             sc.expire_pending_deposit_tokens.return_value = 2
             sc.get_deposit_tokens.return_value = []
             self.assertTrue(payment_process._pause_and_drain_deposits(timeout=60))
-        sc.expire_pending_deposit_tokens.assert_called_once_with(payment_process.DEPOSIT_TOKEN_TTL)
+        # The deadline comes from the contracts now, not from a module constant: how
+        # long a payment takes is a property of the chain it settles on.
+        sc.expire_pending_deposit_tokens.assert_called_once_with(
+            payment_process.deposit_token_ttl()
+        )
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

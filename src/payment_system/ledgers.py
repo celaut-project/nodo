@@ -1,14 +1,9 @@
-from hashlib import sha3_256
 from typing import Generator
 from protos import celaut_pb2 as celaut
 from src.database.access_functions.ledgers import get_peer_contract_instances
 from src.utils.utils import to_amount
 from src.utils.logger import LOGGER
-from src.payment_system.contracts.ergo.rate import mu_per_erg
 from src.utils.contract_xattrs import set_contract_type, set_script, set_token_id
-
-CONTRACT = "proveDlog(decodePoint())"
-CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 
 
 def register_local_contracts() -> None:
@@ -47,6 +42,10 @@ def register_local_contracts() -> None:
 def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
     """Advertise this node's payment contracts, in the form peers must receive.
 
+    One ``ContractRate`` per registered contract per stored instance, each with its own
+    ``token_id`` and its own rate. It used to yield Ergo's and only Ergo's, which is why
+    "nodo allows the simultaneous use of multiple ledgers" had never been true.
+
     ``get_peer_contract_instances`` yields the stored instance value as raw bytes:
     for Ergo that is the wallet's ErgoTree/propositionBytes, exactly what
     ``interface.init()`` registered. That value is what a paying peer feeds to
@@ -64,18 +63,38 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
     the caller's job (see ``src.gateway.utils``), so answering GetPeerInfo never
     depends on the ledger runtime being reachable.
     """
-    for script, ledger in get_peer_contract_instances(CONTRACT_HASH):
+    from src.payment_system.contracts.registry import attribute, contracts
 
-        contract_ledger = celaut.Contract()
-        contract_ledger.ledger.CopyFrom(ledger)
-        set_script(contract_ledger, script)
-        set_contract_type(contract_ledger, CONTRACT.encode("utf-8"))
-        set_token_id(contract_ledger, "ERG")
+    for contract in contracts().values():
+        # A contract that settles on no chain is never advertised: a peer that read it
+        # out of GetPeerInfo and paid through it would have paid into nothing.
+        if attribute(contract, "is_demo"):
+            continue
+        try:
+            rate = int(contract.mu_per_unit())
+        except Exception as e:
+            # A malformed rate is a configuration error, and advertising the contract
+            # without one would have peers convert this node's prices by guessing.
+            LOGGER(
+                f"Not advertising {contract.LEDGER}: its MU rate could not be read ({e})."
+            )
+            continue
+        if rate <= 0:
+            LOGGER(f"Not advertising {contract.LEDGER}: its MU rate is not positive.")
+            continue
 
-        # What one unit of this contract is worth, in this node's MU. This is the only
-        # thing that makes a price quoted in MU actionable to whoever reads it, so it
-        # travels with every advertisement.
-        yield celaut.ContractRate(
-            contract=contract_ledger,
-            mu_per_unit=to_amount(mu_per_erg()),
-        )
+        for script, ledger in get_peer_contract_instances(contract.CONTRACT_HASH):
+
+            contract_ledger = celaut.Contract()
+            contract_ledger.ledger.CopyFrom(ledger)
+            set_script(contract_ledger, script)
+            set_contract_type(contract_ledger, contract.CONTRACT.encode("utf-8"))
+            set_token_id(contract_ledger, getattr(contract, "NATIVE_ASSET", ""))
+
+            # What one unit of this contract is worth, in this node's MU. This is the
+            # only thing that makes a price quoted in MU actionable to whoever reads
+            # it, so it travels with every advertisement.
+            yield celaut.ContractRate(
+                contract=contract_ledger,
+                mu_per_unit=to_amount(rate),
+            )

@@ -10,8 +10,11 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
+from hashlib import sha3_256
+
 from protos import celaut_pb2
 from src.commands import verify_reputation as vr
+from src.payment_system.mu_conversion import MatchingPaymentSystem
 from src.utils.contract_xattrs import get_token_id, set_token_id
 
 
@@ -169,15 +172,71 @@ class OneCheckTwoAudiencesTests(unittest.TestCase):
         self.assertIn("not compatible", reason)
 
 
+# The peer shares Ergo with us, at the shipped rate on both sides.
+PAY_SYSTEM = MatchingPaymentSystem(
+    ledger_tag="ergo",
+    contract_hash=sha3_256("proveDlog(decodePoint())".encode("utf-8")).hexdigest(),
+    local_mu_per_unit=1_000_000_000,
+    peer_mu_per_unit=1_000_000_000,
+)
+
+
 class PayCommandTests(unittest.TestCase):
     """`pay(peer_id, amount_erg)` reuses the single-wallet payment flow and, on
     success, reads back this node's balance registered on the peer."""
 
-    def test_erg_to_mu_uses_the_peg(self):
-        # 1 MU == 1 nanoERG, so 2 ERG is exactly 2e9 MU. No configured factor is
-        # involved any more -- the old GAS_PER_ERG put a payment 49 orders of
-        # magnitude away from any charge the node computed.
-        self.assertEqual(pv._erg_to_mu("2"), 2_000_000_000)
+    def test_the_amount_is_converted_through_the_contracts_own_rate(self):
+        """1 MU == 1 nanoERG by default, so 2 ERG is exactly 2e9 MU.
+
+        Converted through `mu_per_unit()` -- the same figure peers are told as
+        `ContractRate` -- so what the operator types and what the peer credits are
+        related by one number rather than by two conversions that can disagree.
+        """
+        from src.payment_system.contracts.ergo import interface as ergo
+
+        self.assertEqual(pv._amount_to_mu(ergo, "2"), 2_000_000_000)
+
+    def test_each_ledger_reads_the_amount_in_its_own_unit(self):
+        # The same typed string means different money on different chains, which is
+        # exactly why --ledger exists once a node offers more than one.
+        contract = mock.Mock()
+        contract.mu_per_unit.return_value = 200_000_000_000_000  # MU per whole BTC
+        contract.NATIVE_ASSET = "BTC"
+        self.assertEqual(pv._amount_to_mu(contract, "0.001"), 200_000_000_000)
+
+    def test_an_amount_that_is_not_a_whole_number_of_mu_is_refused(self):
+        # MU is the unit of account; there is nothing smaller to express, so a figure
+        # that would need a fraction of one is refused rather than rounded.
+        contract = mock.Mock()
+        contract.mu_per_unit.return_value = 10
+        contract.NATIVE_ASSET = "BTC"
+        with self.assertRaisesRegex(ValueError, "whole number of MU"):
+            pv._amount_to_mu(contract, "0.05")
+
+    def test_several_payment_systems_without_a_ledger_is_refused(self):
+        """Two systems are two currencies, so the amount is ambiguous.
+
+        Guessing would move money on a chain nobody named.
+        """
+        first, second = mock.Mock(), mock.Mock()
+        first.LEDGER, second.LEDGER = "ergo", "bitcoin"
+        first.is_demo = second.is_demo = False
+        with mock.patch("src.payment_system.contracts.registry.contracts",
+                        return_value={"a": first, "b": second}):
+            contract, refusal = pv._contract_for(None)
+        self.assertIsNone(contract)
+        self.assertIn("--ledger", refusal)
+
+    def test_a_named_ledger_the_node_does_not_offer_is_refused_by_name(self):
+        only = mock.Mock()
+        only.LEDGER, only.is_demo = "ergo", False
+        with mock.patch("src.payment_system.contracts.registry.contracts",
+                        return_value={"a": only}):
+            contract, refusal = pv._contract_for("bitcoin")
+            self.assertIsNone(contract)
+            self.assertIn("ergo", refusal)
+            # And the one it does offer needs no flag at all.
+            self.assertIs(pv._contract_for(None)[0], only)
 
     def test_rejects_invalid_amount(self):
         self.assertFalse(pv.pay("peer-1", "not-a-number"))
@@ -192,13 +251,22 @@ class PayCommandTests(unittest.TestCase):
         import src.payment_system.payment_process as payment_process
         import src.database.access_functions.ledgers as ledgers
 
+        # A fresh iterator per call, not one shared: the command asks for the peer's
+        # instances, and so does the advertisement read behind `deposit_refusal_reason`.
+        # A single `iter(...)` is exhausted by whoever gets there first.
+        rows = list(scripts)
         patches = [
             mock.patch.object(ergo_iface, "check_sender_balance",
                               return_value=balance_ok),
             mock.patch.object(ledgers, "get_peer_contract_instances",
-                              return_value=iter(scripts)),
+                              side_effect=lambda *a, **k: iter(list(rows))),
             mock.patch.object(payment_process, "increase_deposit_on_peer",
                               return_value=paid),
+            # The peer shares Ergo with us, at the same rate. Patched rather than left
+            # to the catalogue: this is a test about the command, and resolving a real
+            # payment system would need advertised rows on both sides.
+            mock.patch("src.payment_system.mu_conversion.matching_payment_systems",
+                       return_value=[PAY_SYSTEM]),
         ]
         if readback is not None:
             patches.append(

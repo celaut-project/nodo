@@ -48,11 +48,19 @@ it is the node's own accounting unit, like a ledger's internal cents.
 **What an MU is worth belongs to the payment contract, not to MU.** A contract declares
 how many MU one of its units buys; that is exactly what `ContractRate.mu_per_unit`
 carries on the wire, so a peer reading a price can convert it into money it understands.
-It also belongs there *in the code*: the rate and its conversions live in
-`src/payment_system/contracts/ergo/rate.py`, not in the accounting core, which names no
-ledger. Ergo is the default and currently the only implemented payment system, not a
-peg — a peer may accept it, not accept it, or accept others alongside it (see
-[`CONCEPTS.md`](CONCEPTS.md), "Payment systems"):
+It also belongs there *in the code*: each rate and its conversions live in that
+contract's own `rate.py` — `contracts/ergo/rate.py`, `contracts/bitcoin/rate.py` — not
+in the accounting core, which names no ledger. Ergo is the default; **Bitcoin is
+implemented alongside it** ([`BITCOIN.md`](BITCOIN.md)), and a node may offer either,
+both, or neither. Neither is a peg — a peer may accept one, the other, or others
+alongside them (see [`CONCEPTS.md`](CONCEPTS.md), "Payment systems").
+
+Two consequences worth knowing before configuring a second one. **Each system's rate is
+its own, and they must agree about what an MU is worth**: a satoshi is worth about a
+million nanoERG, so `MU_PER_SATOSHI` cannot borrow `MU_PER_NANOERG`'s value, and the
+node warns at startup if it does. And **each system's floors are its own** — Bitcoin's
+fee and dust limit are orders of magnitude above Ergo's, so a deposit is sized for the
+system that will settle it rather than for the most expensive one the node supports:
 
 ```yaml
 ledgers:
