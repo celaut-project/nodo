@@ -22,6 +22,13 @@ SOURCE_APPLICATION = "source-application"
 # by id like any other core service so the node can download+launch it on demand
 # via :func:`src.core_services.runtime.ensure_core_service_running`.
 PACKER = "packer"
+# A bitcoind this node runs itself, seeded from a mnemonic it holds. Bitcoin Core is
+# what signs a Bitcoin transaction -- nodo builds no raw ones -- so being able to *pay*
+# in BTC means having a Core with the keys. Run as a core service, that Core is
+# infrastructure the node brings up on its own rather than something the operator has to
+# install, and the wallet is derived from a mnemonic like Ergo's. See
+# `src/payment_system/contracts/bitcoin/node_service.py` and docs/BITCOIN.md.
+BITCOIN_NODE = "bitcoin-node"
 # Opportunistic best-effort tenant the node runs only when it has spare capacity
 # and no real workloads; always preempted by real/paid execute requests. See
 # :mod:`src.core_services.low_demand` and ``docs/design/low-demand-fallback.md``.

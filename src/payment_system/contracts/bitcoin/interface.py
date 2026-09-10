@@ -45,6 +45,7 @@ from src.database import sql_connection
 from src.payment_system.contracts.bitcoin import rate
 from src.payment_system.contracts.bitcoin import backend as core_backend
 from src.payment_system.contracts.bitcoin import esplora as esplora_backend
+from src.payment_system.contracts.bitcoin import node_service as node_service_backend
 from src.payment_system.contracts.bitcoin.backend import BackendUnavailable
 from src.payment_system.sweeps import compute_sweep_amount
 from src.utils.bitcoin_units import (
@@ -108,8 +109,14 @@ RECEIVING_ADDRESS_KEY = "ledgers.bitcoin.payments.RECEIVING_ADDRESS"
 # How this node reaches Bitcoin. `core` is a bitcoind you trust with your wallet: it
 # signs, so it can pay as well as be paid. `esplora` is any public HTTP API: it holds no
 # key, so the node can only be *paid* -- which is the side that matters to a node
-# earning money, and it needs no infrastructure at all. See docs/BITCOIN.md.
-BACKENDS = {"core": core_backend, "esplora": esplora_backend}
+# earning money, and it needs no infrastructure at all. `service` is a bitcoind the node
+# runs itself as a core service, with the wallet derived from a mnemonic it holds: it
+# signs like `core` and needs no infrastructure like `esplora`. See docs/BITCOIN.md.
+BACKENDS = {
+    "core": core_backend,
+    "esplora": esplora_backend,
+    "service": node_service_backend,
+}
 DEFAULT_BACKEND = "core"
 BACKEND = lambda: str(env_manager.get("ledgers.bitcoin.BACKEND") or DEFAULT_BACKEND).strip().lower()
 # Read per call, matching the registry's own gate for the simulated contract, so the two
@@ -131,6 +138,26 @@ def _backend_module():
 def backend():
     """A handle on the chain. Built per call, holding no connection of its own."""
     return _backend_module().backend()
+
+
+def _prepare_backend() -> None:
+    """Let the backend bring up whatever it runs, if it runs anything.
+
+    An optional hook, and only `service` has one: it launches the bitcoind this node
+    keeps as a core service. Called from the two places allowed to take their time --
+    boot and the periodic tick -- and never from the payment path, where a service
+    download would hold a payment for as long as it takes.
+
+    Never raises. A backend that cannot come up is one this contract cannot settle
+    through, which `configuration_reason` and the payment walk already handle; failing
+    here would take down the whole contract registration instead.
+    """
+    try:
+        prepare = getattr(_backend_module(), "prepare", None)
+        if callable(prepare):
+            prepare()
+    except Exception as e:
+        LOGGER(f"Could not prepare the bitcoin backend: {e}")
 
 
 def can_pay() -> bool:
@@ -390,8 +417,11 @@ def init():
     """Advertise this contract: the receiving address' `scriptPubKey` as the script.
 
     The one place that may mint an address, because it is the one place that runs
-    before anybody has been told what to pay.
+    before anybody has been told what to pay -- which is also why the backend gets to
+    bring up its own infrastructure here: on the `service` backend the address comes
+    from a bitcoind this node has to have started first.
     """
+    _prepare_backend()
     address = ensure_receiving_address()
     script = script_pubkey_from_address(address, network=NETWORK())
     if script is None:
@@ -621,7 +651,13 @@ def manager():
     Same order and same reasoning as Ergo's: a donation is a debt this node already
     incurred against payments it was paid, while the sweep only moves its own funds
     between its own wallets and pays nobody.
+
+    The tick is also where a backend that runs something gets to notice it is no longer
+    running: a bitcoind core service that died, or never came up because the node was
+    started before its network was, is brought back here rather than staying down until
+    somebody restarts the daemon.
     """
+    _prepare_backend()
     _pay_accrued_donations()
     _sweep_to_cold_wallet()
 
