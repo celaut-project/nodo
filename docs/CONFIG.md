@@ -614,14 +614,27 @@ no default on purpose: a satoshi is worth about a million nanoERG, so borrowing
 `MU_PER_NANOERG`'s `1` would sell an hour of compute for a millionth of its price.
 Unset, the node does not offer Bitcoin at all rather than offering it mispriced.
 
-Its keys live in Bitcoin Core's wallet, not here: `WALLET_KEYS_EXTERNAL: true` is what
-tells the node not to generate a mnemonic for it. Back up bitcoind's wallet.
+`BACKEND` decides what this node can do and where the key is. With `esplora` (a public
+HTTP API) there is no key anywhere and the node can only be *paid*. With `core` the key
+is in the wallet of a bitcoind you run and back up, and `WALLET_KEYS_EXTERNAL: true` is
+what tells the node not to generate a mnemonic for it.
 
-Every key, what it does, and why on-chain BTC is for coarse node-to-node deposits rather
-than for a client topping up an instance: [`BITCOIN.md`](BITCOIN.md).
+With `service` the node runs the bitcoind itself, as the `bitcoin-node` core service,
+and derives its wallet from `WALLET_MNEMONIC` here — Ergo's posture, with Core still
+doing the signing. That needs `WALLET_KEYS_EXTERNAL: false` (so the node mints the
+mnemonic), `RPC_USER`/`RPC_PASSWORD` (Core's cookie lives inside the service and cannot
+be read from here) and `core_services.bitcoin-node`. `PRUNE_MIB` sizes the chain it
+keeps: `0` is the whole ~700 GB with a `txindex`, anything else prunes to about that many
+MiB. All of it is checked at startup.
 
-> ⚠️ `WALLET_MNEMONIC` is a secret. The `nodo tui` Config editor masks secret
-> values; keep backups off-repo. Ergo transactions are **final and irreversible**
+Every key, what it does, the BIP-84 path the service derives at, and why on-chain BTC is
+for coarse node-to-node deposits rather than for a client topping up an instance:
+[`BITCOIN.md`](BITCOIN.md).
+
+> ⚠️ `WALLET_MNEMONIC` is a secret — on either ledger. With Bitcoin's `service`
+> backend this file is the *only* backup of that wallet: the service derives its keys
+> and stores none. The `nodo tui` Config editor masks secret values; keep backups
+> off-repo. Ergo and Bitcoin transactions are both **final and irreversible**
 > (see [`KyA.md`](KyA.md)).
 
 ## `general_flags`, `misc`, `logs`, `low_demand`, `publisher`

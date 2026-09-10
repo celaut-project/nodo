@@ -229,26 +229,40 @@ class ChainBackend:
         Asked of the **wallet**, not of ``getrawtransaction``. Core answers
         ``getrawtransaction`` for a transaction still in the mempool and, otherwise,
         only when it was started with ``-txindex=1`` or is given the block that carries
-        it. Every txid reaching here has been mined: they come from ``list_received``
-        filtered by confirmations, and from ``list_transactions``. So the plain call
-        answers error -5 for exactly the payments this has to read, and one layer up
-        that reads back as "no confirmed transaction carries the token" -- a payment
-        rejected with the money already in this node's wallet.
+        it -- and a ``txindex`` cannot be built on a pruned node at all. Every txid
+        reaching here has been mined: they come from ``list_received`` filtered by
+        confirmations, and from ``list_transactions``. So the plain call answers error
+        -5 for exactly the payments this has to read, and one layer up that reads back
+        as "no confirmed transaction carries the token" -- a payment rejected with the
+        money already in this node's wallet.
 
         The wallet's own index is enough, because both callers only ever ask about
-        transactions that pay an address of ours. ``verbose`` returns the same
-        ``decoded`` object ``getrawtransaction`` would have; where it is not returned,
-        the wallet still reports which block holds the transaction, and
-        ``getrawtransaction`` given that block needs no index either.
+        transactions that pay an address of ours, and it needs no chain behind it:
+        ``verbose`` returns the same ``decoded`` object ``getrawtransaction`` would
+        have, and a Core that does not send one still sends the raw ``hex``, which
+        decodes locally. Failing both, the wallet reports which block holds the
+        transaction, and ``getrawtransaction`` given that block needs no index either.
         """
         try:
             found = dict(self._call("gettransaction", [str(txid), True, True]) or {})
         except BackendUnavailable:
             # A Core too old for `verbose` refuses the call on its parameters alone.
             # Worth one more round trip: the alternative is rejecting a real payment.
-            found = dict(self._call("gettransaction", [str(txid), True]) or {})
+            try:
+                found = dict(self._call("gettransaction", [str(txid), True]) or {})
+            except BackendUnavailable:
+                # Not this wallet's transaction after all. The index, if the node kept
+                # one, is the remaining way to look; a pruned node says it cannot,
+                # which is the honest answer rather than an empty one.
+                found = {}
 
         decoded = found.get("decoded")
+        if not decoded and found.get("hex"):
+            # No `decoded`, but the bytes are here: decoding them is local, with no
+            # index and no block lookup behind it.
+            decoded = self._call(
+                "decoderawtransaction", [str(found["hex"])], wallet_scoped=False
+            )
         if not decoded:
             blockhash = found.get("blockhash")
             params: List[Any] = [str(txid), True]

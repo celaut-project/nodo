@@ -103,12 +103,50 @@ class SerializeEnvsTests(unittest.TestCase):
     def test_serializes_env_map_sorted_json(self):
         cfg = celaut_pb2.Configuration()
         cfg.environment_variables["SOURCE_SIGNER_MODE"] = b"seed"
-        cfg.environment_variables["SOURCE_MNEMONIC"] = b"word word word"
+        cfg.environment_variables["INSTANCE_LABEL"] = b"packer-3"
         out = _serialize_envs(cfg)
         # sort_keys keeps output deterministic regardless of insertion order.
         self.assertEqual(
-            out, '{"SOURCE_MNEMONIC": "word word word", "SOURCE_SIGNER_MODE": "seed"}'
+            out, '{"INSTANCE_LABEL": "packer-3", "SOURCE_SIGNER_MODE": "seed"}'
         )
+
+    def test_a_secret_is_recorded_by_name_and_not_by_value(self):
+        """The env of a launched service is where this node's wallet goes.
+
+        A source-application signing with the Ergo seed takes ``SOURCE_MNEMONIC``; a
+        bitcoind deriving its own wallet takes ``BITCOIN_MNEMONIC``. Persisted verbatim,
+        this column is a second plaintext copy of the mnemonic -- in a different file
+        from ``config.yaml``, with different permissions, and in every backup of the
+        database.
+
+        The key stays, so the row still answers the question it exists for: *was* this
+        instance launched as a signer? What reads it wants a share discriminator
+        (``manager.shares.instance_env_values``), never a key.
+        """
+        cfg = celaut_pb2.Configuration()
+        cfg.environment_variables["SOURCE_SIGNER_MODE"] = b"seed"
+        cfg.environment_variables["SOURCE_MNEMONIC"] = b"word word word"
+        cfg.environment_variables["BITCOIN_MNEMONIC"] = b"twelve other words"
+        cfg.environment_variables["BITCOIN_RPC_PASSWORD"] = b"hunter2"
+        cfg.environment_variables["BITCOIN_MNEMONIC_PASSPHRASE"] = b"a second secret"
+        out = _serialize_envs(cfg)
+
+        for secret in (b"word word word", b"twelve other words", b"hunter2",
+                       b"a second secret"):
+            self.assertNotIn(secret.decode(), out)
+        for name in ("SOURCE_MNEMONIC", "BITCOIN_MNEMONIC", "BITCOIN_RPC_PASSWORD",
+                     "BITCOIN_MNEMONIC_PASSPHRASE"):
+            self.assertIn(name, out)
+        # And the setting beside them is untouched: this is not a blanket redaction.
+        self.assertIn('"SOURCE_SIGNER_MODE": "seed"', out)
+
+    def test_secrets_are_matched_by_substring_rather_than_by_a_list(self):
+        # A name nobody has thought of yet still has to be caught: the cost of missing
+        # one is a wallet in a database, and the cost of over-matching is a setting
+        # shown as "<redacted>" in a record nothing reads for settings.
+        cfg = celaut_pb2.Configuration()
+        cfg.environment_variables["SOME_FUTURE_SERVICE_MNEMONIC_WORDS"] = b"leak me"
+        self.assertNotIn("leak me", _serialize_envs(cfg))
 
 
 if __name__ == "__main__":
