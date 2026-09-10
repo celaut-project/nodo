@@ -57,7 +57,8 @@ class SettlementPlanTests(unittest.TestCase):
     rejects a payment that is already on-chain (#340 §4.4).
     """
 
-    def _plans(self, amount, systems, floors_by_contract, *, floor=False, demos=()):
+    def _plans(self, amount, systems, floors_by_contract, *, floor=False, demos=(),
+               contract_hash=None):
         envs = _envs(floors_by_contract, demos)
         with patch.object(payment_process, "format_mu", str), patch(
             "src.payment_system.mu_conversion.matching_payment_systems",
@@ -70,7 +71,10 @@ class SettlementPlanTests(unittest.TestCase):
             "src.payment_system.contracts.envs.settlement_floors",
             envs.settlement_floors,
         ):
-            return settlement_plans(peer_id="peer-a", amount=amount, floor=floor)
+            return settlement_plans(
+                peer_id="peer-a", amount=amount, floor=floor,
+                contract_hash=contract_hash,
+            )
 
     def test_the_peer_is_told_its_own_mu(self):
         # One ERG buys twice as many MU on the peer, so our 1_000_000 MU of value
@@ -124,6 +128,57 @@ class SettlementPlanTests(unittest.TestCase):
             {"cheap": (0, 1_000), "costly": (0, 100_000_000)},
         )
         self.assertEqual([p.contract_hash for p in plans], ["cheap"])
+        self.assertEqual(len(refusals), 1)
+        self.assertIn("bitcoin", refusals[0])
+
+    def test_a_named_system_is_the_only_one_planned_for(self):
+        """`nodo pay --ledger bitcoin` must settle on Bitcoin.
+
+        The amount was read in that ledger's own unit and checked against that ledger's
+        floors and wallet, so a walk free to settle on the next funded system would move
+        a figure typed in one currency over another (#340 §4).
+        """
+        plans, refusals = self._plans(
+            1_000_000,
+            [
+                _system(1_000_000_000, 2_000_000_000, contract="ergo-c", ledger="ergo"),
+                _system(1_000_000_000, 500_000_000, contract="btc-c", ledger="bitcoin"),
+            ],
+            {"ergo-c": (0, 0), "btc-c": (0, 0)},
+            contract_hash="btc-c",
+        )
+        self.assertEqual(refusals, [])
+        self.assertEqual([(p.contract_hash, p.ledger_tag) for p in plans],
+                         [("btc-c", "bitcoin")])
+
+    def test_a_named_system_the_peer_does_not_share_is_refused_not_replaced(self):
+        # Falling back to the other chain is the failure this guards: the operator would
+        # be told the payment succeeded, having named a chain it never touched.
+        plans, refusals = self._plans(
+            1_000_000,
+            [_system(1_000_000_000, 2_000_000_000, contract="ergo-c", ledger="ergo")],
+            {"ergo-c": (0, 0)},
+            contract_hash="btc-c",
+        )
+        self.assertEqual(plans, [])
+        self.assertEqual(len(refusals), 1)
+        self.assertIn("btc-c", refusals[0])
+        self.assertIn("ergo", refusals[0])
+
+    def test_naming_a_system_still_applies_that_systems_floors(self):
+        # Narrowing must not become a way past the floor check: below the named chain's
+        # minimum output there is no transaction to build, and the other chain's ability
+        # to carry the figure is irrelevant once a chain has been named.
+        plans, refusals = self._plans(
+            1_000,
+            [
+                _system(1, 1, contract="cheap", ledger="ergo"),
+                _system(1, 1, contract="costly", ledger="bitcoin"),
+            ],
+            {"cheap": (0, 1), "costly": (0, 100_000_000)},
+            contract_hash="costly",
+        )
+        self.assertEqual(plans, [])
         self.assertEqual(len(refusals), 1)
         self.assertIn("bitcoin", refusals[0])
 

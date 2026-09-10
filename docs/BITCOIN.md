@@ -158,6 +158,22 @@ than the credit it asks for. Demanding equality would reject payments with the m
 already on-chain. Anything extra is simply kept — the same rule Ergo applies to an
 overpayment.
 
+**No transaction index is needed, and none of these reads asks for one.** Every
+transaction the validator looks at pays an address of this node's own wallet, so it is
+read with `gettransaction` rather than `getrawtransaction` — which Core answers from the
+mempool and otherwise only under `-txindex=1` or when given the block. Since the payer
+waits for confirmations before saying anything, the transaction has always left the
+mempool by the time it is validated, and the wrong RPC would answer "not found" for
+precisely the payments that did arrive.
+
+The two reads behind that answer are deliberately unwilling to conclude "no payment":
+address history is walked to the end rather than one page deep, and a transaction that
+carries the token but pays too little does not settle the question either, because the
+same token can appear in more than one confirmed transaction. Whatever cannot be read
+leaves the verdict open rather than closing it — the money is already in this node's
+wallet, so answering "nothing arrived" would keep somebody else's BTC and credit them
+nothing, and nothing revisits that answer later.
+
 ## Confirmations, and the two Ergo-shaped constants around them
 
 The payer waits, exactly as it does on Ergo: `process_payment` polls until
@@ -196,6 +212,12 @@ clamped**. A transaction built below the market rate does not fail — it sits u
 until its deposit token expires, which is worse than not sending it. Raise the ceiling
 or wait for fees to fall.
 
+Because the floors move, reading them can fail — an unreachable node, or a rate above
+that ceiling — and sizing a deposit is on the manager's path. A failure there costs that
+peer its top-up for that tick and says so in the log; it never propagates, because the
+manager thread also bills instances, sweeps and pays donations, and it has no supervisor
+to restart it.
+
 ## Paying a peer
 
 ```
@@ -207,10 +229,16 @@ transfer, and the ledger denominates it. `--ledger` is only required when this n
 offers more than one payment system — and then it is required, because two systems are
 two currencies and guessing would move money on a chain nobody named.
 
-Which system a payment actually settles through is decided by **funding**: `nodo` walks
-the systems it shares with the peer and uses the first one whose wallet can cover the
-amount. So a node holding ERG and no BTC pays a peer that accepts both in ERG, with no
-setting to that effect.
+**A named ledger is where the payment settles, or it does not happen.** The amount was
+read in that ledger's unit and checked against that ledger's floors and wallet, so
+carrying it to another chain would move a figure typed in one currency over a different
+one. A peer that does not share the named system is a clean refusal naming what it does
+offer, never a quiet fall back to the other chain.
+
+Where **no** ledger is named — the automatic refill, `nodo increase_peer_deposit` — the
+choice is decided by **funding**: `nodo` walks the systems it shares with the peer and
+uses the first one whose wallet can cover the amount. So a node holding ERG and no BTC
+tops up a peer that accepts both in ERG, with no setting to that effect.
 
 ## Cold storage
 

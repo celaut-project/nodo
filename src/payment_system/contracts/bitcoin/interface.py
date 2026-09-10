@@ -601,7 +601,12 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
                     f"{satoshi_to_btc_str(paid)} BTC, expected at least "
                     f"{satoshi_to_btc_str(expected)} BTC."
                 )
-                return False
+                # Keep looking, like the branch above: one transaction paying too
+                # little is not a verdict on the rest. A token can appear in more than
+                # one confirmed transaction -- the payer re-pays a token whose `Payable`
+                # went unacknowledged -- and deciding on the first would reject a
+                # payment another transaction covers in full.
+                continue
 
         LOGGER(f"No confirmed bitcoin transaction carries the token {token}.")
         return False
