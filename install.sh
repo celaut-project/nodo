@@ -403,6 +403,68 @@ install_shell_completion() {
 
 install_shell_completion
 
+ask_donation_percentage() {
+  # Asked out loud, here, for the same reason the gateway port is: this is the last
+  # moment in an install that has an operator watching the terminal.
+  #
+  # The default is 2 %, and a default nobody is told about is not consent. Defaults are
+  # the cheapest lever there is -- almost nobody edits them -- so the honest version of
+  # shipping a non-zero one is showing the number and making "0" one keystroke away.
+  local yq_bin="$TARGET_DIR/bin/yq"
+  local config_file="$TARGET_DIR/config.yaml"
+  local key='.ledgers.ergo.payments.DONATION_PERCENTAGE'
+  local suggested="0.02"
+  local current="" answer=""
+
+  [ -x "$yq_bin" ] && [ -f "$config_file" ] || return 0
+  current="$("$yq_bin" -r "$key // \"\"" "$config_file" 2>/dev/null || true)"
+  [ -n "$current" ] && [ "$current" != "null" ] && suggested="$current"
+
+  # An unattended install keeps whatever the config says and stays silent; a scripted
+  # one can name the share without a prompt.
+  if [ -n "${NODO_DONATION_PERCENTAGE:-}" ]; then
+    answer="$NODO_DONATION_PERCENTAGE"
+  elif [ -t 0 ]; then
+    printf "\n------------------------------------------------------------\n"
+    printf " Donations\n"
+    printf "------------------------------------------------------------\n"
+    printf " nodo can donate a share of what this node EARNS to the people who\n"
+    printf " write it. It applies to incoming payments, not to your savings, and\n"
+    printf " the transaction fee comes out of that share -- never on top of it.\n\n"
+    printf " It is not charity for its own sake: other nodes read donations off the\n"
+    printf " chain and weigh them when they choose whom to delegate work to, so it\n"
+    printf " buys a better position in their routing. Nothing here is enforced --\n"
+    printf " this is open source, and you can set it to 0 now or edit it later.\n\n"
+    printf " Who is funded, and whose contributions this node recognises, are the\n"
+    printf " two wallet lists under ledgers.ergo.payments in config.yaml.\n"
+    printf " See docs/DONATIONS.md.\n\n"
+    read -r -p " Share of earnings to donate [$suggested]: " answer
+  else
+    return 0
+  fi
+
+  answer="$(printf '%s' "$answer" | tr -d '[:space:]')"
+  [ -z "$answer" ] && answer="$suggested"
+  # A share, so a fraction of one. A malformed answer is refused rather than coerced:
+  # "2" meant as a percentage would donate everything.
+  if ! printf '%s' "$answer" | grep -Eq '^(0|1)(\.[0-9]+)?$|^\.[0-9]+$'; then
+    printf " '%s' is not a share between 0 and 1; keeping %s.\n" "$answer" "$suggested"
+    return 0
+  fi
+
+  if "$yq_bin" -i "$key = \"$answer\"" "$config_file" 2>/dev/null; then
+    if [ "$answer" = "0" ]; then
+      printf " Donations off. Change DONATION_PERCENTAGE in config.yaml to turn them on.\n"
+    else
+      printf " Donating %s of incoming payments. Edit config.yaml to change it.\n" "$answer"
+    fi
+  else
+    printf " Could not write the donation share; config.yaml keeps %s.\n" "$suggested"
+  fi
+}
+
+ask_donation_percentage
+
 assign_gateway_port() {
   # Explicitly, here: this is the last moment in an install that has root AND an
   # operator watching the terminal, and opening the port is something only they can

@@ -496,9 +496,24 @@ These are intended for development or advanced maintenance environments:
   `--json` for the machine-readable report the TUI's EARNINGS page reads. Beside each
   share it reports what that share cost: the ERG burned into the publishing proof, which
   the contract makes unrecoverable, apportioned by the share committed. Minting a proof
-  is free, so the two figures have to be read together.  
+  is free, so the two figures have to be read together. The subject's vouch for itself is
+  listed apart and left out of the standing — every node that has submitted holds one, and
+  a node with no peers assigns its whole supply to it — but only the proofs it announced
+  can be recognised as its own, so this separates the honest case and does not defend
+  against a proof kept off its advertisement (issue #353).  
   **Example:**  
   `nodo reputation`
+
+- **donations**  
+  What this node donates and whose donations it counts. Prints the share of earnings
+  being donated, what has been paid out, what is accrued and not yet paid, both wallet
+  lists with their weights, and the donation credit each peer currently earns in the
+  balancer. It also names any address that is in one list and not the other — funding a
+  developer this node does not count costs money and earns it no credit of its own.
+  `--json` is the report the TUI's EARNINGS page reads. Read-only: nothing is signed or
+  spent. See [DONATIONS.md](DONATIONS.md).  
+  **Example:**  
+  `nodo donations`
 
 - **submit_reputation**  
   Forces the submission of reputation information. Writes the resulting proof id to
@@ -635,7 +650,10 @@ tunnels page was removed because nodo does not use it.
   [ERGO.md](ERGO.md#why-there-is-no-reputation-earned-this-week)). Every proof that has
   staked something on this node is listed underneath. Money comes from the catalogue and
   is live; the reputation half is `nodo reputation` re-read every five minutes, and `r`
-  re-reads it now.
+  re-reads it now. Between them sits what *leaves*: the share of earnings this node
+  donates, what is still accrued, and the wallets it funds and counts, from
+  `nodo donations` re-read every ten minutes. A peer's own donation credit, and the
+  bonus it earns in routing, are on its card on the Peers page.
 - On Services, `e` executes the selected service and `d` deletes it.
 - On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are

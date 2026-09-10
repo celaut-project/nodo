@@ -745,6 +745,11 @@ if __name__ == '__main__':
                 ok = reputation(argv=sys.argv[2:])
                 os._exit(0 if ok else 1)
 
+            case "donations":
+                from src.commands.donations import donations
+                ok = donations(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
             case "verify_reputation":
                 if len(sys.argv) < 3:
                     print("Usage: nodo verify_reputation <peer_id>", flush=True)

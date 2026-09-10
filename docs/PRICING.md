@@ -364,8 +364,16 @@ There is no balance migration: no node runs in production, so balances reset.
 | `INIT_COST_CONFIGURATION_FACTOR`, `MAINTENANCE_COST_CONFIGURATION_FACTOR` | gone; they scaled a unitless number |
 | `EXPONENTIAL_COST_FACTOR` (module constant) | `pricing.SCARCITY_CURVE`, applied per resource |
 
-`COST_AVERAGE_VARIATION` and `SOCIALIZATION_FACTOR` are untouched: they belong to peer
-selection, not to pricing.
+`COST_AVERAGE_VARIATION` and `SOCIALIZATION_FACTOR` keep their roles unchanged, and have
+moved to the `balancers:` block with the rest of the peer-selection formula — which is
+what these two paragraphs were already arguing for. They belong to peer selection, not
+to pricing.
+
+Peer selection is now three terms rather than two: price, reputation, and donation
+credit, plus an explicit `LOCAL_BIAS` for how much this node prefers running work itself.
+Each weight is the maximum equivalent price discount, because price enters the score as a
+logarithm. See [`CONFIG.md`](CONFIG.md#balancers) for the formula and
+[`DONATIONS.md`](DONATIONS.md) for what the donation term is and why it is bounded.
 
 ## Files changed
 

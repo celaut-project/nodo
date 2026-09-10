@@ -77,6 +77,18 @@ def mu_to_nanoerg(amount_mu: int) -> int:
     return int(Decimal(int(amount_mu)) / mu_per_nanoerg())
 
 
+def mu_to_nanoerg_exact(amount_mu: int) -> Decimal:
+    """MU -> nanoERG, keeping the fraction. For a debt, not for a transaction.
+
+    :func:`mu_to_nanoerg` truncates, which is right when the figure is about to become
+    an output: never claim more than is owed. A donation debt is the opposite case --
+    it is accumulated over many payments and paid once, so truncating each conversion
+    would shave a sub-unit off every one of them and always in this node's favour. The
+    fraction is kept on the accrual row and paid when it grows into a whole nanoERG.
+    """
+    return Decimal(int(amount_mu)) / mu_per_nanoerg()
+
+
 def nanoerg_to_mu(nanoerg: int) -> int:
     """nanoERG -> MU, for crediting a payment that arrived."""
     return int(Decimal(int(nanoerg)) * mu_per_nanoerg())

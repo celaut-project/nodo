@@ -13,7 +13,7 @@
 - **Alpha Version**: **Nodo** is in its alpha phase, meaning there may be bugs and issues. Full functionality and security of the software are not guaranteed.
 - **Payment System**: All transactions are processed via the Ergo platform, and each can be viewed through the Ergo explorer.
 - **Reputation System**: Nodes generate reputation proofs stored on the Ergo platform. These proofs influence the level of trust within the network.
-- **Donation Models**: Nodes can choose to donate a portion of their earnings to a specified address in the `ERGO_DONATION_WALLET` environment variable, with the default value being 0.
+- **Donation Models**: A node donates a share of its **earnings** — 2% by default — to the wallets listed in `ledgers.ergo.payments.DONATION_WALLETS`. The installer asks for this figure and shows the suggested value; setting `DONATION_PERCENTAGE` to `0` opts out, and one edit of `config.yaml` changes it at any time. Nothing is enforced: what a donation buys is a bounded bonus in *other* nodes' peer selection, computed from the chain. See `docs/DONATIONS.md`.
 - **Alternative Payments**: Although Ergo is currently used for transactions, other payment systems may be integrated into **Nodo** in the future.
 
 **Nodo** developers cannot offer assistance in cases of asset loss, hacking, or theft of private keys.

@@ -79,6 +79,33 @@ def _b58decode(data: str) -> bytes:
     return b"\x00" * pad + body
 
 
+def p2pk_public_key_from_address(address: str, network: str = "mainnet") -> Union[bytes, None]:
+    """The 33-byte compressed public key inside a P2PK address, or ``None``.
+
+    The inverse of what ``ergo_tree.p2pk_proposition_bytes_from_pk`` builds, and the
+    reason it is here rather than there: this needs base58, which this module owns, and
+    it must not need a JVM. Composing the two turns an address read off an explorer
+    into the propositionBytes the database stores a payment contract instance by --
+    which is how a donation seen on-chain is matched to the peer that announced it.
+
+    ``None`` for anything that is not a valid P2PK address on this network: a script
+    address (P2S/P2SH) has no single public key, and a malformed one has nothing.
+    """
+    if not is_valid_ergo_address(address, network=network):
+        return None
+    try:
+        raw = _b58decode(address)
+    except ValueError:
+        return None
+    prefix = raw[0]
+    # P2PK only: 0x01 on mainnet, 0x11 on testnet. A P2S address encodes a whole
+    # script, and its bytes are not a key.
+    if prefix not in (0x01, 0x11):
+        return None
+    key = raw[1:-4]
+    return key if len(key) == 33 else None
+
+
 def is_valid_ergo_address(address: str, network: str = "mainnet") -> bool:
     """
     Structurally validate an Ergo address: base58 decodes, the header byte matches the

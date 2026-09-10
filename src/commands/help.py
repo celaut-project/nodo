@@ -87,6 +87,7 @@ GROUPS: List[Group] = [
         "Money",
         "amounts in ui.DISPLAY_UNIT, ERG by default",
         [
+            ("donations", "who we fund, who we count (--json)"),
             ("increase_deposit <instance> <amount>", "fund a running instance"),
             ("decrease_deposit <instance> <amount>", "take funds back out of it"),
             ("increase_peer_deposit <peer> <amount>", "top up what a peer holds for us"),
