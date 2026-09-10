@@ -36,14 +36,34 @@ donated would be self-declared, therefore forgeable, and therefore worthless.
 
 ## Reputation and donation credit are not the same thing
 
+Three things, because `nodo` has two different reputations and only one of them routes:
+
 | | earned by | purchasable | in the balancer |
 |---|---|---|---|
-| **Reputation** | behaving well — paying, returning instances, staying up | no | bonus *and* penalty |
-| **Donation credit** | contributing money, verifiably on-chain | yes, that is the point | bonus only |
+| **Local reputation** (`peer.reputation_score`) | behaving well towards *this* node — taking our payments, answering `GetPeerInfo` | no | bonus *and* penalty, at `SOCIALIZATION_FACTOR` |
+| **On-chain reputation** (opinions on Ergo's reputation contract) | other proofs staking part of themselves on you, backed by irrecoverably burned ERG | **yes, by burning** | **not weighed at all** |
+| **Donation credit** | contributing money, verifiably on-chain | yes, that is the point | bonus only, at `DONATION_WEIGHT` |
 
-They must never be merged. If reputation weighed money, reputation would become
-purchasable, and with it access to delegated work: a well-funded actor would become the
-most "reliable" peer in the network without having served a single instance.
+The term the balancer weighs is the one this node observed itself: `compute_reputation`
+is our own event log and nothing else (`src/reputation_system/interface.py`). It cannot
+be bought, because the only way to raise it is to take our payments and answer our
+calls.
+
+On-chain reputation is a different quantity that shares the name, and it **is** bought —
+by design. An opinion is worth `share × burned ERG`, minting a proof is free, and the ERG
+put into one can never come back out, which is the ecosystem's only Sybil resistance (see
+[`ERGO.md`](ERGO.md)). The traffic between the two is one-way: `submit_to_ledger`
+publishes our local scores as staked opinions, and nothing is read back. What the ledgers
+say is what `nodo reputation` reports, and it routes nothing.
+
+**Do not merge them, and do not import the second into the first without recalibrating.**
+At `SOCIALIZATION_FACTOR = 2` against `DONATION_WEIGHT = 0.3`, the same ERG spent on
+burning rather than donating would buy 6.7× the bonus — recognised by every node instead
+of only those listing the wallet you funded, instantly instead of accruing with age, and
+destroyed instead of funding the development donations exist to pay for. Filtering out a
+node's opinion about itself does not close that: a second proof costs nothing to mint and
+nothing on-chain ties it to its owner. That is issue #353, and it has to be settled before
+the on-chain figure goes anywhere near the balancer.
 
 ## The two wallet lists
 
@@ -247,8 +267,14 @@ Two tensions are contained by the ceiling rather than removed:
   newcomers.**
 - The curve is concave, so ten nodes with 1 ERG donated collect more aggregate bonus than
   one node with 10 ERG. The brake is that each identity needs real capacity and its own
-  reliability score, which cannot be bought — but if `DONATION_WEIGHT` is ever raised
-  much, splitting identities becomes profitable.
+  *locally observed* reliability score, which cannot be bought — but if `DONATION_WEIGHT`
+  is ever raised much, splitting identities becomes profitable.
+
+At `0.3` the ceiling is deliberately modest against the term beside it. With
+`MU_PER_NANOERG: 1` the half credit is 5 ERG, so donating it earns `0.15`, and the whole
+ceiling is `0.30` — while one successful paid delegation (`+10`, `PAYMENT_COMMUNICATED`)
+is already worth `0.33`. Donating buys a tie-break; being a peer worth delegating to is
+worth more, which is the intended ordering.
 
 Weights are non-negative only. There are no exclusion lists and no negative weights:
 turning the count list into a punishment mechanism is what would make forking rational.

@@ -301,8 +301,18 @@ token supply is chosen freely by whoever mints the proof, so weighing the raw co
 rewards minting a larger supply — which costs nothing. The share is supply-independent,
 which is what makes two proofs comparable.
 
-The node's own proof is reported separately and left out of the totals — a node
-vouching for itself is not reputation.
+The **subject's** own proof is reported separately and left out of the totals — a node
+vouching for itself is not reputation. Which proofs those are comes from the subject: the
+config for this node, the proofs the peer announced in its signed advertisement for a
+peer. Reading a peer against our own proof id instead counted its self-vouch as the
+network's verdict, which mattered because every node that has submitted holds such a box
+(`submit_to_ledger` always publishes one, addressed to its own identity key) and a node
+with no peers assigns its **whole** supply to it.
+
+Being announced, that list is voluntary. A proof kept off the advertisement is
+indistinguishable from a third party's here, however much was burned into it, and minting
+a proof is free — so this separation is what makes the report honest, not what would make
+the figure safe to route on (issue #353).
 
 ###### Why there is no "reputation earned this week"
 

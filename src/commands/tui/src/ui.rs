@@ -1415,7 +1415,13 @@ fn reputation_lines(app: &App) -> Vec<Line<'static>> {
         format!(
             "node {}   proof {}",
             shorten(nonempty(&reputation.node_id, "unknown"), 20),
-            shorten(nonempty(&reputation.own_proof_id, "none published"), 20),
+            shorten(
+                nonempty(
+                    reputation.own_proof_ids.first().map_or("", String::as_str),
+                    "none published",
+                ),
+                20,
+            ),
         ),
         Style::default().fg(MUTED),
     )));
@@ -4500,7 +4506,7 @@ mod tests {
             let reputation = NodeReputation {
                 node_id: "ed6df5dfbea1f0932dc7fdd25d0f0543f6086ef110fc888f1acd5c89af4c84b8"
                     .to_string(),
-                own_proof_id: "aa".repeat(32),
+                own_proof_ids: vec!["aa".repeat(32)],
                 standing: totals(0.5, 0.125),
                 opinions: vec![
                     // A proof with 10 ERG sunk into it, and one sitting at the
