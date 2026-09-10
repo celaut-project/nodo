@@ -224,8 +224,37 @@ class ChainBackend:
         return dict(self._call("gettransaction", [str(txid), True]) or {})
 
     def raw_transaction(self, txid: str) -> Dict[str, Any]:
-        """The transaction's outputs, normalised (see :func:`normalise_outputs`)."""
-        decoded = self._call("getrawtransaction", [str(txid), True], wallet_scoped=False)
+        """The transaction's outputs, normalised (see :func:`normalise_outputs`).
+
+        Asked of the **wallet**, not of ``getrawtransaction``. Core answers
+        ``getrawtransaction`` for a transaction still in the mempool and, otherwise,
+        only when it was started with ``-txindex=1`` or is given the block that carries
+        it. Every txid reaching here has been mined: they come from ``list_received``
+        filtered by confirmations, and from ``list_transactions``. So the plain call
+        answers error -5 for exactly the payments this has to read, and one layer up
+        that reads back as "no confirmed transaction carries the token" -- a payment
+        rejected with the money already in this node's wallet.
+
+        The wallet's own index is enough, because both callers only ever ask about
+        transactions that pay an address of ours. ``verbose`` returns the same
+        ``decoded`` object ``getrawtransaction`` would have; where it is not returned,
+        the wallet still reports which block holds the transaction, and
+        ``getrawtransaction`` given that block needs no index either.
+        """
+        try:
+            found = dict(self._call("gettransaction", [str(txid), True, True]) or {})
+        except BackendUnavailable:
+            # A Core too old for `verbose` refuses the call on its parameters alone.
+            # Worth one more round trip: the alternative is rejecting a real payment.
+            found = dict(self._call("gettransaction", [str(txid), True]) or {})
+
+        decoded = found.get("decoded")
+        if not decoded:
+            blockhash = found.get("blockhash")
+            params: List[Any] = [str(txid), True]
+            if blockhash:
+                params.append(str(blockhash))
+            decoded = self._call("getrawtransaction", params, wallet_scoped=False)
         return {"outputs": _core_outputs(decoded or {})}
 
 
