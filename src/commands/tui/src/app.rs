@@ -903,7 +903,10 @@ impl Identifiable for NodeOpinion {
 #[derive(Debug, Clone, Default)]
 pub struct NodeReputation {
     pub node_id: String,
-    pub own_proof_id: String,
+    /// The proofs the subject publishes through, whose opinions are in `own`. Plural
+    /// because a node may announce several, and the subject's rather than the reader's
+    /// (issue #351). This page only ever asks about this node, which announces one.
+    pub own_proof_ids: Vec<String>,
     /// Everything staked on this node, whenever it was staked.
     ///
     /// The only aggregate there is. Reputation is a stock, not a flow, and the chain
@@ -4328,7 +4331,18 @@ pub fn parse_node_reputation(output: &str) -> Result<NodeReputation, String> {
 
     Ok(NodeReputation {
         node_id: json_str(document.get("node_id")),
-        own_proof_id: json_str(document.get("own_proof_id")),
+        own_proof_ids: document
+            .get("own_proof_ids")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .filter(|item| !item.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
         standing: totals(document.get("standing")),
         opinions: opinions("opinions"),
         own: opinions("own"),
@@ -7864,7 +7878,7 @@ Cold Wallet: 9cold\n";
         }
 
         const REPORT: &str = r#"{
-            "node_id": "ed6d", "own_proof_id": "aa11", "read_at": 1800000000,
+            "node_id": "ed6d", "own_proof_ids": ["aa11"], "read_at": 1800000000,
             "errors": {},
             "standing": {"positive": 0.5, "negative": 0.125, "net": 0.375,
                          "positive_proofs": 1, "negative_proofs": 1},
@@ -7885,7 +7899,7 @@ Cold Wallet: 9cold\n";
             let reputation = parse_node_reputation(REPORT).unwrap();
 
             assert_eq!(reputation.node_id, "ed6d");
-            assert_eq!(reputation.own_proof_id, "aa11");
+            assert_eq!(reputation.own_proof_ids, vec!["aa11".to_string()]);
             assert_eq!(reputation.standing.positive, 0.5);
             assert_eq!(reputation.standing.negative, 0.125);
             assert_eq!(reputation.standing.proofs(), 2);
@@ -7925,7 +7939,7 @@ Cold Wallet: 9cold\n";
         #[test]
         fn a_ledger_that_could_not_be_read_is_named_beside_the_figures() {
             let reputation = parse_node_reputation(
-                r#"{"node_id": "ed6d", "own_proof_id": "", "read_at": 1,
+                r#"{"node_id": "ed6d", "own_proof_ids": [], "read_at": 1,
                      "errors": {"ergo": "explorer unreachable"},
                      "standing": {"positive": 0.0, "negative": 0.0,
                                   "positive_proofs": 0, "negative_proofs": 0},
@@ -7941,7 +7955,7 @@ Cold Wallet: 9cold\n";
             // stdout. Parsing the whole stream would fail, and the page would report
             // an unreadable chain on a node whose chain is perfectly readable.
             // One line, as `nodo reputation --json` prints it.
-            let report = r#"{"node_id": "ed6d", "read_at": 1, "own_proof_id": "", "standing": {}, "opinions": [], "own": []}"#;
+            let report = r#"{"node_id": "ed6d", "read_at": 1, "own_proof_ids": [], "standing": {}, "opinions": [], "own": []}"#;
             let noisy = format!("Generated new node identity mnemonic\n{report}\n");
             let reputation = parse_node_reputation(report_line(&noisy).unwrap()).unwrap();
             assert_eq!(reputation.node_id, "ed6d");

@@ -156,17 +156,49 @@ class OpinionArithmeticTests(unittest.TestCase):
         self.assertEqual((figures.positive, figures.negative), (0.0, 0.0))
         self.assertEqual(figures.proofs, 0)
 
-    def test_our_own_proof_is_split_off_rather_than_counted(self):
+    def test_the_subjects_own_proof_is_split_off_rather_than_counted(self):
+        theirs, ours = split_own(
+            [opinion(proof=PROOF), opinion(proof=OWN_PROOF)], [OWN_PROOF]
+        )
+        self.assertEqual([item.proof_id for item in theirs], [PROOF])
+        self.assertEqual([item.proof_id for item in ours], [OWN_PROOF])
+
+    def test_with_no_proof_of_its_own_nothing_is_split_off(self):
+        theirs, ours = split_own([opinion()], [])
+        self.assertEqual(len(theirs), 1)
+        self.assertEqual(ours, [])
+
+    def test_every_proof_the_subject_publishes_through_is_split_off(self):
+        # A node can announce more than one proof (`commands.verify_reputation`), and
+        # each is its own voice. Filtering on one of them counts the rest as network
+        # reputation -- the shape of issue #351, one proof further along.
+        second = "bb" * 32
+        theirs, ours = split_own(
+            [opinion(proof=PROOF), opinion(proof=OWN_PROOF), opinion(proof=second)],
+            [OWN_PROOF, second],
+        )
+        self.assertEqual([item.proof_id for item in theirs], [PROOF])
+        self.assertEqual({item.proof_id for item in ours}, {OWN_PROOF, second})
+
+    def test_one_proof_id_may_be_passed_as_a_bare_string(self):
+        # Not iterated character by character. A filter whose failure mode is to
+        # exclude nothing hides its own bug, which is how #351 went unnoticed.
         theirs, ours = split_own(
             [opinion(proof=PROOF), opinion(proof=OWN_PROOF)], OWN_PROOF
         )
         self.assertEqual([item.proof_id for item in theirs], [PROOF])
         self.assertEqual([item.proof_id for item in ours], [OWN_PROOF])
 
-    def test_with_no_proof_of_our_own_nothing_is_split_off(self):
-        theirs, ours = split_own([opinion()], "")
-        self.assertEqual(len(theirs), 1)
-        self.assertEqual(ours, [])
+    def test_a_self_vouch_is_not_reported_as_what_the_network_thinks(self):
+        # Issue #351. Every node that has submitted holds a box about itself:
+        # `submit_to_ledger` always appends `(None, 1, None)`, and with no peers known
+        # it assigns its whole supply to that one self-opinion -- which read as
+        # +100% of a proof, backed by everything burned into it, entirely self-declared.
+        self_vouch = opinion(proof=OWN_PROOF, amount=4, assigned=4, burned=10 ** 10)
+        network, own = split_own([self_vouch], [OWN_PROOF])
+        self.assertEqual(totals(network).positive, 0.0)
+        self.assertEqual(totals(network).positive_backing, 0.0)
+        self.assertEqual([item.proof_id for item in own], [OWN_PROOF])
 
     def test_a_share_is_weighed_against_what_its_proof_had_to_give_up(self):
         # Minting a proof is free, so the share alone cannot separate a costly opinion
@@ -408,7 +440,7 @@ class ReportTests(unittest.TestCase):
     def reputation(self, opinions, own=()):
         return NodeReputation(
             node_id=NODE_ID,
-            own_proof_id=OWN_PROOF,
+            own_proof_ids=(OWN_PROOF,),
             opinions=list(opinions),
             own=list(own),
             errors={},
@@ -434,10 +466,71 @@ class ReportTests(unittest.TestCase):
     def test_the_report_names_the_node_and_carries_the_opinions_behind_it(self):
         data = report(self.reputation([opinion()], own=[opinion(proof=OWN_PROOF)]), now=NOW)
         self.assertEqual(data["node_id"], NODE_ID)
-        self.assertEqual(data["own_proof_id"], OWN_PROOF)
+        self.assertEqual(data["own_proof_ids"], [OWN_PROOF])
         self.assertEqual([item["proof_id"] for item in data["opinions"]], [PROOF])
         self.assertEqual([item["proof_id"] for item in data["own"]], [OWN_PROOF])
         self.assertEqual(data["read_at"], NOW)
+
+
+class OwnProofResolutionTests(unittest.TestCase):
+    """Whose voice is set aside is decided by the subject, not by the reader.
+
+    Issue #351: the own-proof lookup read our own config whatever node it was asked
+    about, so ``nodo reputation <peer>`` filtered out *our* opinion and counted the
+    peer's self-vouch as what the network thinks of it.
+    """
+
+    def _peer_announcing(self, *proof_ids):
+        from protos import celaut_pb2
+        from src.utils.contract_xattrs import set_token_id
+
+        peer = celaut_pb2.Peer()
+        for proof_id in proof_ids:
+            set_token_id(peer.reputation_proofs.add(), proof_id)
+        return peer.SerializeToString()
+
+    def test_a_peers_own_proofs_come_from_the_advertisement_it_signed(self):
+        from src.reputation_system import interface
+
+        second = "bb" * 32
+        with mock.patch.object(
+            interface.sc,
+            "get_peer_advertisement",
+            return_value=self._peer_announcing(OWN_PROOF, second),
+        ):
+            self.assertEqual(interface._own_proof_ids(NODE_ID), (OWN_PROOF, second))
+
+    def test_our_own_proof_comes_from_the_config_and_not_from_an_advertisement(self):
+        from src.reputation_system import interface
+
+        with mock.patch.object(interface, "env_manager") as env, \
+                mock.patch(
+                    "src.identity.node_identity.get_node_public_key_hex",
+                    return_value=NODE_ID,
+                ), \
+                mock.patch.object(
+                    interface.sc,
+                    "get_peer_advertisement",
+                    side_effect=AssertionError("read the database for our own proof"),
+                ):
+            env.get.return_value = OWN_PROOF
+            self.assertEqual(interface._own_proof_ids(NODE_ID), (OWN_PROOF,))
+
+    def test_a_peer_that_announced_no_proof_has_nothing_set_aside(self):
+        from src.reputation_system import interface
+
+        with mock.patch.object(interface.sc, "get_peer_advertisement", return_value=None):
+            self.assertEqual(interface._own_proof_ids(NODE_ID), ())
+
+    def test_an_unreadable_advertisement_sets_nothing_aside_rather_than_raising(self):
+        # The figures then include whatever the peer published about itself, and the log
+        # says so. Failing the whole read would tell the operator less.
+        from src.reputation_system import interface
+
+        with mock.patch.object(
+            interface.sc, "get_peer_advertisement", return_value=b"\xff\xff not a Peer"
+        ):
+            self.assertEqual(interface._own_proof_ids(NODE_ID), ())
 
 
 if __name__ == "__main__":

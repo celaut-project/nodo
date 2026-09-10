@@ -496,7 +496,11 @@ These are intended for development or advanced maintenance environments:
   `--json` for the machine-readable report the TUI's EARNINGS page reads. Beside each
   share it reports what that share cost: the ERG burned into the publishing proof, which
   the contract makes unrecoverable, apportioned by the share committed. Minting a proof
-  is free, so the two figures have to be read together.  
+  is free, so the two figures have to be read together. The subject's vouch for itself is
+  listed apart and left out of the standing — every node that has submitted holds one, and
+  a node with no peers assigns its whole supply to it — but only the proofs it announced
+  can be recognised as its own, so this separates the honest case and does not defend
+  against a proof kept off its advertisement (issue #353).  
   **Example:**  
   `nodo reputation`
 
