@@ -33,12 +33,51 @@ def _purge_modules(prefix: str) -> None:
 
 
 class JavaDependencyLazyImportTests(unittest.TestCase):
-    def test_java_runtime_requires_configured_java_home_instead_of_system_java(self):
+    def test_a_node_with_no_java_anywhere_is_refused(self):
         from src.utils.java_dependency import ensure_java_runtime
 
-        with mock.patch.dict("os.environ", {"JAVA_HOME": "/definitely/missing/java-home"}, clear=False):
+        with mock.patch.dict("os.environ", {"JAVA_HOME": "/definitely/missing/java-home"}, clear=False), \
+                mock.patch("src.utils.java_dependency.ConfigManager") as config, \
+                mock.patch("shutil.which", return_value=None):
+            config.return_value.get.return_value = "/definitely/missing/java-home"
             with self.assertRaises(JavaDependencyMissing):
                 ensure_java_runtime(feature="pagos Ergo o reputacion")
+
+    def test_java_on_the_path_is_accepted_once_both_configured_paths_are_stale(self):
+        """A stale path must not un-advertise a ledger the machine can still settle on.
+
+        `unavailable_reason` calls this on every advertisement, and
+        `registry.contracts()` drops a contract that reports one -- so a `JAVA_HOME`
+        that has moved took Ergo out of `GetPeerInfo` entirely and left the node with no
+        payment method at all, on a machine with a perfectly good `java` in front of it.
+        """
+        from src.utils.java_dependency import ensure_java_runtime, forget_stale_java_homes
+
+        forget_stale_java_homes()
+        self.addCleanup(forget_stale_java_homes)
+        with mock.patch.dict("os.environ", {"JAVA_HOME": "/definitely/missing/java-home"}, clear=False), \
+                mock.patch("src.utils.java_dependency.ConfigManager") as config, \
+                mock.patch("shutil.which", return_value="/usr/bin/java"), \
+                mock.patch("src.utils.logger.LOGGER") as logger:
+            config.return_value.get.return_value = "/also/gone/java-home"
+            ensure_java_runtime(feature="Ergo payments")
+
+        # And the stale paths are named where an operator will see them, rather than
+        # leaving one `_report` line per process as the only trace.
+        said = " ".join(str(call.args[0]) for call in logger.call_args_list)
+        self.assertIn("/definitely/missing/java-home", said)
+        self.assertIn("/also/gone/java-home", said)
+        self.assertIn("dependencies.java.JAVA_HOME", said)
+
+    def test_a_configured_runtime_is_still_preferred_over_the_path(self):
+        # The operator named one; `PATH` is the last resort, not the first answer.
+        from src.utils.java_dependency import ensure_java_runtime
+
+        with mock.patch.dict("os.environ", {"JAVA_HOME": "/opt/java"}, clear=False), \
+                mock.patch("os.path.exists", return_value=True), \
+                mock.patch("shutil.which", return_value=None) as which:
+            ensure_java_runtime(feature="Ergo payments")
+        which.assert_not_called()
 
     def test_startup_modules_do_not_have_eager_java_imports(self):
         targets = {

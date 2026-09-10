@@ -20,7 +20,8 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     btc = None  # type: ignore[assignment]
 
 COLD = "bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3"
-FEE = 920  # 184 vB at 5 sat/vB
+FEE = 920  # 184 vB at 5 sat/vB: a payment, with its OP_RETURN
+SWEEP_FEE = 705  # 141 vB at 5 sat/vB: one output and change, and no OP_RETURN
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -95,7 +96,23 @@ class SweepTests(unittest.TestCase):
         chain.send_to.assert_called_once()
         address, amount = chain.send_to.call_args.args
         self.assertEqual(address, COLD)
-        self.assertEqual(amount, 10_000_000 - 5_000_000 - 920)
+        # The fee reserved for the decision is this transaction's own shape -- one
+        # output and change, no `OP_RETURN` -- not the 184 vB of a payment.
+        self.assertEqual(amount, 10_000_000 - 5_000_000 - SWEEP_FEE)
+
+    def test_core_is_given_the_rate_and_takes_the_fee_out_of_the_sweep(self):
+        """The fee follows the transaction Core really builds, not a guessed vsize.
+
+        A sweep moves most of a balance, so Core spends however many UTXOs that balance
+        is split across and the vsize cannot be known here. Handing it a rate and
+        letting it subtract the fee from the output puts the difference on the amount
+        that leaves -- money already being parted with -- rather than on the retained
+        hot balance, and it cannot fail funding for want of an input.
+        """
+        chain = self._sweep(balance=10_000_000)
+        options = chain.send_to.call_args.kwargs
+        self.assertEqual(options["fee_rate_sat_vb"], 5.0)
+        self.assertTrue(options["subtract_fee_from_amount"])
 
     def test_no_cold_wallet_means_nothing_is_swept(self):
         self.assertEqual(self._sweep(balance=10_000_000, cold="").send_to.call_count, 0)

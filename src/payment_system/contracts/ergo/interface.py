@@ -171,6 +171,12 @@ def unavailable_reason() -> Optional[str]:
     method nobody can actually pay into: the failure used to surface at the first real
     payment, with a peer's money already committed to the attempt.
 
+    "Without Java" means without one anywhere, `PATH` included (`ensure_java_runtime`).
+    A configured `JAVA_HOME` that has gone stale is a misconfiguration to say out loud,
+    not a reason to stop offering a ledger the machine can still settle on: dropping the
+    contract here removes the node's only payment method, and a node that offers none
+    cannot pay anybody.
+
     A wallet-less config is *not* reported here: the mnemonic is validated at load
     (`utils.config_validation`), and a node mid-setup should not have its payment
     system disappear from its own logs for a reason config validation already gave.
