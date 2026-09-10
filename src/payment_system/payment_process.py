@@ -777,8 +777,22 @@ def _pause_and_drain_deposits(timeout: int = DEPOSIT_DRAIN_TIMEOUT) -> bool:
     return True
 
 
-def _run_managers(managers: dict) -> None:
-    """Run each contract's periodic job, letting one failure not stop the others."""
+def _run_managers(managers: dict, last_run: Optional[dict] = None) -> None:
+    """Run each contract's periodic job, letting one failure not stop the others.
+
+    ``last_run`` is stamped here, per contract, once that contract has actually had its
+    turn -- and not by the caller before the run. The two differ whenever a contract
+    does not get to run at all: the drain below can time out and send the paused
+    contracts away untouched, and stamped in advance they are recorded as having run, so
+    `_due_managers` skips them until a whole interval has passed. That is a day by
+    default, and with Bitcoin registered it stops being rare -- `deposit_token_ttl()` is
+    the maximum across contracts, so one pending Bitcoin deposit holds the pending set
+    non-empty for hours.
+
+    Stamped after the call rather than before it, including when the job raised: what
+    the interval bounds is how often this node spends money reading a chain, and a
+    contract whose backend is down would otherwise be retried every quantum.
+    """
     for key, _manage in managers.items():
         if not callable(_manage):
             _l.LOGGER(f"Warning: {_manage} is not callable.")
@@ -789,6 +803,9 @@ def _run_managers(managers: dict) -> None:
             log_java_dependency_warning(_l.LOGGER, feature="Ergo payments or reputation")
         except Exception as e:
             _l.LOGGER(f"Exception on manage interface {key}. {str(e)}")
+        finally:
+            if last_run is not None:
+                last_run[key] = monotonic()
 
 
 def _manager_quantum(intervals: dict) -> int:
@@ -835,8 +852,6 @@ def __manage_interfaces():
         if not managers:
             continue
         _l.LOGGER("Execute payment manager iteration.")
-        for hash_ in managers:
-            last_run[hash_] = monotonic()
         try:
             pausing = set(payment_envs.needs_unspent_proof())
         except Exception:
@@ -849,7 +864,9 @@ def __manage_interfaces():
         # They must not wait behind a pending deposit token: on a chain whose
         # confirmations take longer than the drain timeout, a busy node would never
         # reach zero pending and their donations and sweeps would simply never happen.
-        _run_managers({k: v for k, v in managers.items() if k not in pausing})
+        _run_managers(
+            {k: v for k, v in managers.items() if k not in pausing}, last_run
+        )
 
         paused_managers = {k: v for k, v in managers.items() if k in pausing}
         if not paused_managers:
@@ -866,7 +883,7 @@ def __manage_interfaces():
                 continue
 
             _l.LOGGER("No pending deposit token, now payment interfaces can be managed.")
-            _run_managers(paused_managers)
+            _run_managers(paused_managers, last_run)
         finally:
             deposit_generation_locked = False
 

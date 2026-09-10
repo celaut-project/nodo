@@ -242,6 +242,28 @@ class TheThreeUnitsTests(unittest.TestCase):
         })
         self.assertEqual(len(warnings), 1)
         self.assertIn("RAM_MU_PER_GIB_HOUR", warnings[0])
+        # And it names the key and the unit it is really talking about. They used to
+        # arrive as parameters no caller ever passed, so the signature promised a check
+        # asked of every payment system while only Ergo could ever be the subject.
+        self.assertIn("ledgers.ergo.payments.MU_PER_NANOERG", warnings[0])
+        self.assertIn("nanoERG", warnings[0])
+
+    def test_the_per_charge_check_is_ergos_alone(self):
+        """Bitcoin is asked a different question, and this one would misfire on it.
+
+        On-chain Bitcoin cannot settle a single GiB-hour by design (§5 of the issue
+        that added it); the prepaid-deposit model is what absorbs that. Asked here it
+        would fire on a correctly configured node, which is how operators learn to
+        ignore warnings -- so `validate_bitcoin_config` asks
+        `_warn_if_the_two_rates_disagree` instead, and this takes no parameters that
+        suggest otherwise.
+        """
+        import inspect
+
+        from src.utils import config_validation
+
+        signature = inspect.signature(config_validation._warn_if_charges_cannot_settle)
+        self.assertEqual(list(signature.parameters), ["pricing", "rate", "warn"])
 
 
 class PerResourcePricingTests(unittest.TestCase):

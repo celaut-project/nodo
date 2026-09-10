@@ -406,23 +406,21 @@ def _validate_pricing_by_arch(pricing: Dict[str, Any]) -> None:
             _require_whole_mu(entry, f"pricing.BY_ARCH.{arch}", key)
 
 
-def _warn_if_charges_cannot_settle(
-    pricing: Dict[str, Any], rate: Decimal, warn, *,
-    rate_key: str = "ledgers.ergo.payments.MU_PER_NANOERG",
-    unit: str = "nanoERG",
-) -> None:
-    """Do prices and **this** payment system's rate still live on the same scale?
+def _warn_if_charges_cannot_settle(pricing: Dict[str, Any], rate: Decimal, warn) -> None:
+    """Do prices and Ergo's rate still live on the same scale?
 
     This is the failure the gas model actually shipped with: charges of order 1e2 and a
     conversion factor of 1e58, so every real charge became zero on-chain and nothing
     could ever be settled. Configuring prices (MU) and the rate (MU per base unit)
     separately makes it reachable again, so it is checked rather than assumed.
 
-    Asked once per registered payment system rather than only of Ergo. A second system
-    makes this *more* likely, not less: a satoshi is worth about a million nanoERG, so
-    a rate borrowed from one chain by analogy with the other misprices the node by six
-    orders of magnitude -- and the direction that matters is per system, because a node
-    can be priced correctly for one and absurdly for the other at the same time.
+    Ergo's, and only Ergo's. This once carried a `rate_key`/`unit` pair so it could be
+    asked of each registered payment system, and no caller ever passed one: Bitcoin
+    cannot answer it. On-chain Bitcoin does not settle a single GiB-hour by design, so
+    the check fires on a correctly configured node -- see `_warn_if_the_two_rates_-
+    disagree`, which is what asks the scale question of Bitcoin instead, and which needs
+    no per-charge arithmetic at all. The parameters are gone rather than left dead so
+    the signature stops promising a second caller that is not coming.
 
     A warning, not an error: a node may legitimately price everything at zero, and an
     operator mid-edit should not be locked out of their own config.
@@ -439,8 +437,9 @@ def _warn_if_charges_cannot_settle(
     if reference_mu / rate < 1:
         warn(
             f"pricing.RAM_MU_PER_GIB_HOUR={reference_mu} MU is worth less than one "
-            f"{unit} at {rate_key}={rate}, so an hour of a GiB of memory settles as "
-            "nothing on-chain. Raise the prices or lower the rate; see docs/PRICING.md."
+            f"nanoERG at ledgers.ergo.payments.MU_PER_NANOERG={rate}, so an hour of a "
+            "GiB of memory settles as nothing on-chain. Raise the prices or lower the "
+            "rate; see docs/PRICING.md."
         )
 
 

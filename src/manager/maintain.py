@@ -1,6 +1,7 @@
 from time import sleep
 import os
 import time
+import traceback
 
 from bee_rpc import client as beerpc
 
@@ -638,11 +639,10 @@ def peer_deposits(debug_mode: bool = False):
             # import a ledger to know what it throws, and the next ledger will throw
             # something else.
             #
-            # Contained per peer and never re-raised. `manager_thread` calls
-            # `peer_deposits` bare inside its `while True`, on a daemon thread with no
-            # supervisor (`serve.py`), so one escaping exception ends billing, sweeps,
-            # the activity window and the donation indexer for the life of the process
-            # -- while the gRPC server keeps answering, so the node looks healthy.
+            # Contained per peer and never re-raised. The loop above it is guarded
+            # (`_manager_loop`), so an escaping exception no longer ends billing for the
+            # life of the process -- but it would still cost every *other* peer this
+            # pass, and put the whole tick on a backoff, for one unreachable node.
             log.LOGGER(f"Could not top up peer {peer_id}: {type(e).__name__}: {e}")
             continue
 
@@ -654,6 +654,13 @@ def peer_deposits(debug_mode: bool = False):
 
 def check_dev_clients():
     ensure_dev_client_pools()
+
+
+# How long to wait after a tick that raised, before trying the next one. The loop is
+# guarded, so a failure that persists -- an unreachable database, a chain that answers
+# nothing -- would otherwise be retried as fast as the machine can raise, filling the
+# log and burning a core for no work done.
+MANAGER_FAILURE_BACKOFF = 30
 
 
 def manager_thread():
@@ -676,50 +683,83 @@ def manager_thread():
             _reputation_interface().submit_reputation(force_submit=True)
         except JavaDependencyMissing:
             log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
-    
+
+    _manager_loop()
+
+
+def _manager_loop() -> None:
+    """Run the maintenance pass for ever, and survive a pass that raises.
+
+    Every tick function this loop calls promises never to raise, and each of those
+    promises is held up separately. That is a convention, not a structure, and the cost
+    of one slip is out of all proportion to it: this runs on a daemon thread started in
+    `serve.py` with nothing above it, so an escaping exception ends billing, the sweeps,
+    the activity window and the donation indexer for the life of the process -- while
+    the gRPC server keeps answering, so the node looks healthy from outside.
+
+    A guard, not a supervisor. The thread is not restarted and no state is rebuilt: the
+    next pass reads everything it needs from the database and the config anyway, so
+    logging what happened and going round again is the whole of the recovery. What is
+    deliberately not caught is `BaseException`: a `KeyboardInterrupt` is the node being
+    stopped, and swallowing it would make this loop the reason it will not.
+    """
     short_interval_count = 0
     while True:
-        if short_interval_count == int(SHORT_INTERVAL_COUNT):
-            short_interval_count = 0
-            
-            # Functions to be executed every long interval
-            check_ergo_node_availability()
-            # submit_reputation()    TODO  https://github.com/celaut-project/nodo/issues/80
-            check_dev_clients()
-            if wanted_services_retry: 
-                check_wanted_service(wanted_services_retry.pop())
-        
-        # Functions to be executed every short interval
-        if wanted_services:
-            check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
-        maintain_vmachines(debug_mode=DEBUG_MODE())
-        maintain_delegated_instances(debug_mode=DEBUG_MODE())
-        enforce_activity_window(debug_mode=DEBUG_MODE())
-        maintain_clients(debug_mode=DEBUG_MODE())
-        peer_deposits(debug_mode=DEBUG_MODE())
-
-        # Opportunistic low-demand fallback scheduler (OFF unless low_demand.ENABLED).
-        # Self-gates to low_demand.POLL_INTERVAL and never raises; see
-        # src/core_services/low_demand.py and docs/design/low-demand-fallback.md.
         try:
-            scheduler_tick()
+            short_interval_count = _manager_pass(short_interval_count)
         except Exception:
-            pass
+            log.LOGGER(
+                "[ERROR] The manager thread's maintenance pass raised. Billing, sweeps "
+                f"and the periodic ticks resume in {MANAGER_FAILURE_BACKOFF}s; the "
+                "function that raised is a bug, since every tick this loop calls is "
+                f"meant to contain its own failures.\n{traceback.format_exc()}"
+            )
+            sleep(MANAGER_FAILURE_BACKOFF)
 
-        # Node energy sample (issue #258). Self-gates to energy.SAMPLE_INTERVAL_SECONDS
-        # and never raises. Informational only — does not feed MU pricing or low_demand.
-        energy_tick()
 
-        # Publish this node's public IP to its DDNS provider (OFF unless
-        # ddns.ENABLED). Self-gates to ddns.INTERVAL_SECONDS and never raises.
-        ddns_tick()
+def _manager_pass(short_interval_count: int) -> int:
+    """One maintenance pass, ending in the wait. Returns the next interval count."""
+    if short_interval_count == int(SHORT_INTERVAL_COUNT):
+        short_interval_count = 0
+        
+        # Functions to be executed every long interval
+        check_ergo_node_availability()
+        # submit_reputation()    TODO  https://github.com/celaut-project/nodo/issues/80
+        check_dev_clients()
+        if wanted_services_retry: 
+            check_wanted_service(wanted_services_retry.pop())
+    
+    # Functions to be executed every short interval
+    if wanted_services:
+        check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
+    maintain_vmachines(debug_mode=DEBUG_MODE())
+    maintain_delegated_instances(debug_mode=DEBUG_MODE())
+    enforce_activity_window(debug_mode=DEBUG_MODE())
+    maintain_clients(debug_mode=DEBUG_MODE())
+    peer_deposits(debug_mode=DEBUG_MODE())
 
-        # Read what other nodes donated, off each chain, into SQLite (issue #282).
-        # Self-gates to its own hourly interval and never raises. This is the only
-        # place donations are read from a network: the balancer reads the rows.
-        donations_tick()
+    # Opportunistic low-demand fallback scheduler (OFF unless low_demand.ENABLED).
+    # Self-gates to low_demand.POLL_INTERVAL and never raises; see
+    # src/core_services/low_demand.py and docs/design/low-demand-fallback.md.
+    try:
+        scheduler_tick()
+    except Exception:
+        pass
 
-        sleep(MANAGER_ITERATION_TIME)
-        if DEBUG_MODE():
-            log.LOGGER(f"Long interval count: {short_interval_count}/{SHORT_INTERVAL_COUNT}.")
-        short_interval_count += 1
+    # Node energy sample (issue #258). Self-gates to energy.SAMPLE_INTERVAL_SECONDS
+    # and never raises. Informational only — does not feed MU pricing or low_demand.
+    energy_tick()
+
+    # Publish this node's public IP to its DDNS provider (OFF unless
+    # ddns.ENABLED). Self-gates to ddns.INTERVAL_SECONDS and never raises.
+    ddns_tick()
+
+    # Read what other nodes donated, off each chain, into SQLite (issue #282).
+    # Self-gates to its own hourly interval and never raises. This is the only
+    # place donations are read from a network: the balancer reads the rows.
+    donations_tick()
+
+    sleep(MANAGER_ITERATION_TIME)
+    if DEBUG_MODE():
+        log.LOGGER(f"Long interval count: {short_interval_count}/{SHORT_INTERVAL_COUNT}.")
+    return short_interval_count + 1

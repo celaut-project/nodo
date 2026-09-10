@@ -150,15 +150,19 @@ class ChainBackend:
         return float(btc_per_kvb) * 100_000_000 / 1000
 
     def send_to(self, address: str, amount_sat: int, *, op_return: Optional[bytes] = None,
-                fee_rate_sat_vb: Optional[float] = None) -> str:
+                fee_rate_sat_vb: Optional[float] = None,
+                subtract_fee_from_amount: bool = False) -> str:
         """Pay one address, optionally carrying ``op_return``. Returns the txid."""
         return self.send_many(
-            [(address, amount_sat)], op_return=op_return, fee_rate_sat_vb=fee_rate_sat_vb
+            [(address, amount_sat)], op_return=op_return,
+            fee_rate_sat_vb=fee_rate_sat_vb,
+            subtract_fee_from_outputs=[0] if subtract_fee_from_amount else None,
         )
 
     def send_many(self, outputs: List[Tuple[str, int]], *,
                   op_return: Optional[bytes] = None,
-                  fee_rate_sat_vb: Optional[float] = None) -> str:
+                  fee_rate_sat_vb: Optional[float] = None,
+                  subtract_fee_from_outputs: Optional[List[int]] = None) -> str:
         """Pay several addresses in one transaction, and return the txid.
 
         One transaction rather than one each, because the fee is per transaction: a
@@ -186,6 +190,14 @@ class ChainBackend:
         options: Dict[str, Any] = {"changePosition": len(core_outputs)}
         if fee_rate_sat_vb is not None:
             options["fee_rate"] = float(fee_rate_sat_vb)
+        if subtract_fee_from_outputs:
+            # Let Core take the real fee out of the named outputs instead of out of the
+            # inputs it selects. The caller that wants this is moving a balance it has
+            # already decided to part with -- a cold sweep -- and it is the only way to
+            # size such a transaction without knowing in advance how many UTXOs Core
+            # will spend: an output shrinks by the difference, where an input shortfall
+            # would fail the funding outright.
+            options["subtractFeeFromOutputs"] = [int(i) for i in subtract_fee_from_outputs]
         funded = self._call("fundrawtransaction", [raw, options])
         signed = self._call("signrawtransactionwithwallet", [funded["hex"]])
         if not signed.get("complete"):
