@@ -38,18 +38,19 @@ answer them. `ledgers.bitcoin.BACKEND` chooses.
 
 | | runs nothing | can be paid | can pay | where the key is |
 |---|---|---|---|---|
-| `esplora` | ✅ | ✅ | ❌ | nowhere |
+| `explorer` | ✅ | ✅ | ❌ | nowhere |
 | `core` | ❌ you run a bitcoind | ✅ | ✅ | bitcoind's wallet, which you back up |
 | `service` | ✅ the node runs it | ✅ | ✅ | derived from a mnemonic in `config.yaml` |
 
-### `esplora` — to be paid. Nothing to run, no key anywhere.
+### `explorer` — to be paid. Nothing to run, no key anywhere.
 
-A public HTTP API: blockstream.info, mempool.space, or one you host. `nodo` reads the
-chain through it and holds no Bitcoin key at all, so it can be paid in BTC and **cannot
-pay in it**. That is not a half-working state: the payer walks the payment systems it
-shares with a peer and settles through the first one it can fund, so a node with a
-read-only Bitcoin backend simply pays in something else. Nothing is broadcast and
-nothing fails halfway through a payment.
+A public HTTP API: blockstream.info, mempool.space, or one you host — any of them, so
+long as it speaks the Esplora HTTP API, which is what `EXPLORER_URL` points at. `nodo`
+reads the chain through it and holds no Bitcoin key at all, so it can be paid in BTC
+and **cannot pay in it**. That is not a half-working state: the payer walks the payment
+systems it shares with a peer and settles through the first one it can fund, so a node
+with a read-only Bitcoin backend simply pays in something else. Nothing is broadcast
+and nothing fails halfway through a payment.
 
 You must set `payments.RECEIVING_ADDRESS` yourself — a read-only API cannot be asked
 for an address, and one invented later would strand payments aimed at the one peers were
@@ -72,12 +73,12 @@ seed for this chain, and `WALLET_KEYS_EXTERNAL: true` is what tells it not to.
 
 The same Bitcoin Core, run by **this node** as a [core service](#running-your-own-node),
 with its wallet derived from a mnemonic the node holds. It signs like `core` and asks
-nothing of you like `esplora`: you back up one phrase, the way you already do for Ergo,
+nothing of you like `explorer`: you back up one phrase, the way you already do for Ergo,
 and the node brings the rest up at boot.
 
 The trade is explicit and it is the whole of it: **the mnemonic is in `config.yaml`**.
 That is a real Bitcoin key in a file on this machine. A node that would rather hold none
-should stay on `esplora` — it can still be paid, which is the half that earns.
+should stay on `explorer` — it can still be paid, which is the half that earns.
 
 ### How this compares to Ergo
 
@@ -172,8 +173,8 @@ ledgers:
   bitcoin:
     tags: [ bitcoin ]
     NETWORK: mainnet                 # mainnet | testnet | signet | regtest
-    BACKEND: esplora                 # esplora (be paid) | core (also pay)
-    ESPLORA_URL: "https://blockstream.info/api"
+    BACKEND: explorer                # explorer (be paid) | core (also pay)
+    EXPLORER_URL: "https://blockstream.info/api"
     RPC_URL: "http://127.0.0.1:8332"        # BACKEND: core only
     RPC_COOKIE_PATH: "~/.bitcoin/.cookie"   # or RPC_USER / RPC_PASSWORD
     WALLET_NAME: "nodo"

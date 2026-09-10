@@ -738,7 +738,7 @@ def _validate_bitcoin_node_service(config: Dict[str, Any], bitcoin: Dict[str, An
         raise ConfigValidationError(
             f"ledgers.bitcoin.BACKEND is 'service' but core_services.{BITCOIN_NODE} is "
             "not set to a published service id, so there is no bitcoind for this node "
-            "to run. Set it, or use 'esplora' to be paid in BTC without running one."
+            "to run. Set it, or use 'explorer' to be paid in BTC without running one."
         )
 
     if bitcoin.get("WALLET_KEYS_EXTERNAL"):
@@ -800,10 +800,10 @@ def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
         )
 
     chosen = str(bitcoin.get("BACKEND") or "core").strip().lower()
-    if chosen not in ("core", "esplora", "service"):
+    if chosen not in ("core", "explorer", "service"):
         raise ConfigValidationError(
-            f"ledgers.bitcoin.BACKEND must be 'core', 'esplora' or 'service', got "
-            f"{chosen!r}. 'esplora' is a read-only HTTP API -- the node can be paid in "
+            f"ledgers.bitcoin.BACKEND must be 'core', 'explorer' or 'service', got "
+            f"{chosen!r}. 'explorer' is a read-only HTTP API -- the node can be paid in "
             "BTC but not pay in it; 'core' is a bitcoind you run that holds the wallet "
             "and signs; 'service' is a bitcoind the node runs itself as a core service, "
             "with the wallet derived from a mnemonic it holds."

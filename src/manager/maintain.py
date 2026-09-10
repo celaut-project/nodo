@@ -630,7 +630,7 @@ def peer_deposits(debug_mode: bool = False):
             # not act. Sizing a deposit reaches the network now -- `refill_threshold_mu`
             # asks the settling contract for its floors, and Bitcoin's are a live fee
             # rate -- so this block fails for reasons that have nothing to do with this
-            # peer: an unreachable bitcoind, an Esplora that timed out, or a fee above
+            # peer: an unreachable bitcoind, an explorer that timed out, or a fee above
             # `MAX_FEE_RATE_SAT_VB`, which the backend reports by raising because
             # refusing to pay is the right answer.
             #

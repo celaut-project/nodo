@@ -44,7 +44,7 @@ from protos import celaut_pb2
 from src.database import sql_connection
 from src.payment_system.contracts.bitcoin import rate
 from src.payment_system.contracts.bitcoin import backend as core_backend
-from src.payment_system.contracts.bitcoin import esplora as esplora_backend
+from src.payment_system.contracts.bitcoin import explorer as explorer_backend
 from src.payment_system.contracts.bitcoin import node_service as node_service_backend
 from src.payment_system.contracts.bitcoin.backend import BackendUnavailable
 from src.payment_system.sweeps import compute_sweep_amount
@@ -107,14 +107,14 @@ TARGET_CONF = lambda: max(1, int(env_manager.get("ledgers.bitcoin.payments.TARGE
 MAX_FEE_RATE_SAT_VB = lambda: float(env_manager.get("ledgers.bitcoin.payments.MAX_FEE_RATE_SAT_VB", 100) or 100)
 RECEIVING_ADDRESS_KEY = "ledgers.bitcoin.payments.RECEIVING_ADDRESS"
 # How this node reaches Bitcoin. `core` is a bitcoind you trust with your wallet: it
-# signs, so it can pay as well as be paid. `esplora` is any public HTTP API: it holds no
+# signs, so it can pay as well as be paid. `explorer` is any public HTTP API: it holds no
 # key, so the node can only be *paid* -- which is the side that matters to a node
 # earning money, and it needs no infrastructure at all. `service` is a bitcoind the node
 # runs itself as a core service, with the wallet derived from a mnemonic it holds: it
-# signs like `core` and needs no infrastructure like `esplora`. See docs/BITCOIN.md.
+# signs like `core` and needs no infrastructure like `explorer`. See docs/BITCOIN.md.
 BACKENDS = {
     "core": core_backend,
-    "esplora": esplora_backend,
+    "explorer": explorer_backend,
     "service": node_service_backend,
 }
 DEFAULT_BACKEND = "core"
