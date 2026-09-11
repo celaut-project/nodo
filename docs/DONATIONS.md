@@ -36,34 +36,70 @@ donated would be self-declared, therefore forgeable, and therefore worthless.
 
 ## Reputation and donation credit are not the same thing
 
-Three things, because `nodo` has two different reputations and only one of them routes:
+Three things, because `nodo` has two different reputations and they are not
+interchangeable:
 
 | | earned by | purchasable | in the balancer |
 |---|---|---|---|
-| **Local reputation** (`peer.reputation_score`) | behaving well towards *this* node — taking our payments, answering `GetPeerInfo` | no | bonus *and* penalty, at `SOCIALIZATION_FACTOR` |
-| **On-chain reputation** (opinions on Ergo's reputation contract) | other proofs staking part of themselves on you, backed by irrecoverably burned ERG | **yes, by burning** | **not weighed at all** |
-| **Donation credit** | contributing money, verifiably on-chain | yes, that is the point | bonus only, at `DONATION_WEIGHT` |
+| **Local reputation** (`peer.reputation_score`) | behaving well towards *this* node — taking our payments, answering `GetPeerInfo` | no — the only way to raise it is to behave well towards us | bonus *and* penalty, at `SOCIALIZATION_FACTOR` (`2`) |
+| **On-chain reputation** (opinions on Ergo's reputation contract) | other proofs staking part of themselves on you, backed by irrecoverably burned ERG | **yes, by burning — that is what the burn is** | bonus *and* penalty, at `ONCHAIN_REPUTATION_WEIGHT` (`0.1`), and **only after each publisher is re-weighed by its local standing with us and capped** |
+| **Donation credit** | contributing money, verifiably on-chain | yes, that is the point | bonus only, at `DONATION_WEIGHT` (`0.3`) |
 
-The term the balancer weighs is the one this node observed itself: `compute_reputation`
-is our own event log and nothing else (`src/reputation_system/interface.py`). It cannot
-be bought, because the only way to raise it is to take our payments and answer our
-calls.
+### What actually protects the routing decision
 
-On-chain reputation is a different quantity that shares the name, and it **is** bought —
-by design. An opinion is worth `share × burned ERG`, minting a proof is free, and the ERG
-put into one can never come back out, which is the ecosystem's only Sybil resistance (see
-[`ERGO.md`](ERGO.md)). The traffic between the two is one-way: `submit_to_ledger`
-publishes our local scores as staked opinions, and nothing is read back. What the ledgers
-say is what `nodo reputation` reports, and it routes nothing.
+Not "reputation is not purchasable" — that was only ever true of the first row. Three
+different things protect the three terms, and they are worth naming separately:
 
-**Do not merge them, and do not import the second into the first without recalibrating.**
-At `SOCIALIZATION_FACTOR = 2` against `DONATION_WEIGHT = 0.3`, the same ERG spent on
-burning rather than donating would buy 6.7× the bonus — recognised by every node instead
-of only those listing the wallet you funded, instantly instead of accruing with age, and
-destroyed instead of funding the development donations exist to pay for. Filtering out a
-node's opinion about itself does not close that: a second proof costs nothing to mint and
-nothing on-chain ties it to its owner. That is issue #353, and it has to be settled before
-the on-chain figure goes anywhere near the balancer.
+- **The local term is locally observed.** `compute_reputation` is our own event log and
+  nothing else (`src/reputation_system/interface.py`). Nobody can pay to move it; they
+  can only take our payments and answer our calls.
+- **The donation term is bought by design**, and that is fine, because it is bounded
+  (`d̂ ∈ [0, 1)`), it is a bonus only, and what it buys is the funding of the software
+  every node here runs.
+- **The on-chain term is bought by design too** — an opinion is worth `share × burned
+  ERG`, minting a proof is free, and the ERG put into one can never come back out, which
+  is the ecosystem's only Sybil resistance (see [`ERGO.md`](ERGO.md)). So it is **not
+  imported as it stands**. What is imported is each opinion's credibility *to us*: a
+  publisher's verdict is multiplied by that publisher's standing in our own local table,
+  capped per publisher, and then saturated. A proof belonging to no peer we have ever
+  transacted with weighs zero no matter how much was burned into it, which is what makes
+  the term a transitive extension of local observation rather than a second purchasable
+  channel. `burned_nanoerg` appears nowhere in the balancer.
+
+The traffic used to be one-way: `submit_to_ledger` publishes our local scores as staked
+opinions and nothing was read back. It is now a loop, but a lossy one on purpose — what
+comes back is priced by us, not by whoever spent the most.
+
+### Why the weight, not the shape, is the safety parameter
+
+**Read `ONCHAIN_REPUTATION_WEIGHT / DONATION_WEIGHT` as the exchange rate between
+destroying one ERG and donating one.** At the shipped `0.1 / 0.3`, a donated ERG is worth
+three times a burned one, and the node **refuses a config where the burn weighs more**
+(`validate_balancers_config`).
+
+That inequality has to be deliberate, because every other advantage already sits on the
+burn's side:
+
+- **Universal recognition.** One contract, one filter, every node reads the same boxes.
+  Donation credit only counts for nodes whose `DONATION_CREDIT_WALLETS` lists the wallet
+  you funded — recognition rate ρ < 1, and ρ ≈ 0 for a developer nobody lists yet.
+- **Instant.** No `DONATION_AGE_SCALE` to wait out (1.00 now, 1.69 at a year).
+- **Sign-preserving**, not bonus-only.
+
+Reusing `SOCIALIZATION_FACTOR = 2` for the import would have handed the burn 6.7× the
+log-space bonus of a donation on top of all that, and a rational operator would have
+stopped donating and burned instead — destroying the money rather than funding the
+development donations exist to pay for. That is the substitution issue #353 records, and
+the separate weight is what closes it.
+
+Filtering out a node's opinion about itself does **not** close it, and is not claimed to:
+a second proof costs nothing to mint, nothing on-chain ties it to its owner, and R7 is a
+wallet — wallets are free too. `split_own` is hygiene for the report (issue #351). The
+defence is that an unattributable proof has no local standing, so it is inaudible.
+
+The price of that defence is real and paid by newcomers: **an unknown rater counts for
+nothing**, so a node whose only vouchers are peers we have never dealt with scores zero
+here. `LOCAL_BIAS` and the donation term are what newcomers have.
 
 ## The two wallet lists
 

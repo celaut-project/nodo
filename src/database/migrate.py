@@ -420,6 +420,30 @@ TABLES = {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (ledger, address)
         )
+    ''',
+    # What the ledgers say about each peer we know, read off the chain on the periodic
+    # tick and never on the routing path (issue #353). One row per (ledger, subject,
+    # publishing proof): the publisher's boxes about one subject are netted into a
+    # single `verdict` before they get here, which is what stops a proof that split its
+    # stake into ten boxes from counting ten times.
+    #
+    # `publisher_peer_id` is the peer that proved it owns the proof -- announced in its
+    # advertisement *and* carrying an owner attestation it signed. It is NOT NULL on
+    # purpose, unlike `donations.peer_id`: an unattributable donation is money that
+    # really moved and can be credited when its donor is introduced, while an opinion is
+    # re-read in full on every refresh, so nothing is lost by dropping it. What the row
+    # is worth is decided at read time from this node's own score for that publisher
+    # (`onchain_credit`), so the price burned into a proof never appears here at all.
+    "onchain_opinions": '''
+        CREATE TABLE IF NOT EXISTS onchain_opinions (
+            ledger TEXT NOT NULL,
+            subject_id TEXT NOT NULL,
+            proof_id TEXT NOT NULL,
+            publisher_peer_id TEXT NOT NULL,
+            verdict REAL NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ledger, subject_id, proof_id)
+        )
     '''
 }
 
@@ -437,6 +461,10 @@ INDEXES = (
     # indexer looks a donation up by the address it paid.
     "CREATE INDEX IF NOT EXISTS idx_donations_peer ON donations (peer_id)",
     "CREATE INDEX IF NOT EXISTS idx_donations_from ON donations (ledger, from_address)",
+    # The balancer reads every attributable opinion in one pass per routing decision,
+    # and the indexer replaces one subject's rows at a time.
+    "CREATE INDEX IF NOT EXISTS idx_onchain_opinions_subject "
+    "ON onchain_opinions (ledger, subject_id)",
 )
 
 

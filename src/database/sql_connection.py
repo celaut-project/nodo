@@ -64,6 +64,11 @@ TRACEABILITY_TABLES = (
     "donation_payouts",
     "donations",
     "donation_scan_state",
+    # What the ledgers say about each peer, read on the periodic tick. Without it the
+    # balancer's on-chain term reads as zero for every candidate -- which is the safe
+    # direction, but silently: the node would route as though nobody had ever vouched
+    # for anybody.
+    "onchain_opinions",
 )
 
 # Columns on an existing table that a database created before them will not have.
@@ -2968,6 +2973,68 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Failed to read the donation scan tip for {ledger}: {e}')
             return 0
         return _as_int(row['tip']) if row else 0
+
+    def replace_onchain_opinions(self, ledger: str, subject_id: str,
+                                 rows: List[Tuple[str, str, float]]) -> bool:
+        """Set what ``ledger`` says about ``subject_id`` to exactly ``rows``. Atomic.
+
+        ``rows`` are ``(proof id, publisher peer id, verdict)``, already netted per proof
+        by the caller. Replace rather than upsert, because an opinion can be *withdrawn*:
+        revising a reputation box spends it and writes a new one, so a proof that pulled
+        its stake back leaves no row behind to update, and an upsert would keep crediting
+        a peer for a vouch that no longer exists on the chain.
+
+        One transaction for the delete and the inserts, so a reader between the two never
+        sees a subject with half its standing -- the balancer takes one pass over the
+        whole table and would otherwise silently rank that peer as though the network had
+        withdrawn its opinion.
+
+        Returns whether the write succeeded. A failure leaves the previous rows in place:
+        the chain said something last hour, and a database error is not the network
+        changing its mind.
+        """
+        statements: List[Tuple[str, tuple]] = [(
+            "DELETE FROM onchain_opinions WHERE ledger = ? AND subject_id = ?",
+            (ledger, subject_id),
+        )]
+        for proof_id, publisher_peer_id, verdict in rows:
+            statements.append((
+                "INSERT INTO onchain_opinions "
+                "(ledger, subject_id, proof_id, publisher_peer_id, verdict) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (ledger, subject_id, str(proof_id), str(publisher_peer_id), float(verdict)),
+            ))
+        try:
+            self._execute2(statements)
+            return True
+        except Exception as e:
+            logger.LOGGER(
+                f'Failed to store the on-chain opinions about {subject_id}: {e}'
+            )
+            return False
+
+    def get_onchain_opinions(self, subject_id: Optional[str] = None) -> List[dict]:
+        """Attributable on-chain opinions, as the balancer's on-chain term reads them.
+
+        With no ``subject_id``, every row, so one pass builds the whole candidate set for
+        a routing decision -- the same shape and the same reason as ``get_donations``.
+
+        An empty list on a read failure, never an exception. The term this feeds must
+        score every candidate zero rather than some of them, and a routing decision has
+        to complete (issues #352, #353).
+        """
+        query = ("SELECT ledger, subject_id, proof_id, publisher_peer_id, verdict "
+                 "FROM onchain_opinions")
+        params: tuple = ()
+        if subject_id is not None:
+            query += " WHERE subject_id = ?"
+            params = (subject_id,)
+        try:
+            rows = self._execute(query, params).fetchall()
+        except Exception as e:
+            logger.LOGGER(f'Failed to read the on-chain opinions: {e}')
+            return []
+        return [dict(row) for row in rows]
 
     def get_donation_payments(self, limit: int = 20) -> List[dict]:
         """Donations this node has paid out, newest first."""

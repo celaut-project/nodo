@@ -468,13 +468,33 @@ selection rather than pricing — and the rest of the formula now lives beside t
 A candidate is ranked by an effective cost in log space:
 
 ```
-score(peer)  = −ln(cost_mu) + SOCIALIZATION_FACTOR · r̂ + DONATION_WEIGHT · d̂
+score(peer)  = −ln(cost_mu) + SOCIALIZATION_FACTOR · r̂ + ONCHAIN_REPUTATION_WEIGHT · ô
+                            + DONATION_WEIGHT · d̂
 score(local) = −ln(cost_mu) + LOCAL_BIAS              + DONATION_WEIGHT · d̂
 
 r̂ = r / (|r| + REPUTATION_HALF_CREDIT)   ∈ (−1, 1)   sign-preserving: a peer that
                                                      failed us is still penalised
+ô = S / (|S| + ONCHAIN_REPUTATION_HALF_CREDIT)  ∈ (−1, 1)
+    S = Σ_p trust(p) · sign(v_p) · min(|v_p|, ONCHAIN_PUBLISHER_CAP)
+    trust(p) = max(0, r̂(p))   — the publisher's standing in OUR table
+    v_p      = the share of its own proof p stakes on this peer, netted
 d̂ = C / (C + DONATION_HALF_CREDIT)       ∈ [ 0, 1)   bonus only, never a penalty
 ```
+
+`local` gets neither reputation term: this node holds no evidence about itself, and what
+the chain says about it is what it published.
+
+`ô` is the *on-chain* reputation — a different quantity that shares the name and, unlike
+`r̂`, one that can be bought (an opinion is worth `share × burned ERG`). It is deliberately
+not a bare import: each publisher's verdict is multiplied by **that publisher's standing in
+this node's own peer table** and capped, so a proof belonging to no peer we have dealt with
+weighs zero however much was burned into it, and no single publisher carries the term.
+`trust` reuses `REPUTATION_HALF_CREDIT` rather than adding a knob: a peer lends us exactly
+the credibility our own ranking already gives it. It is clamped at zero rather than
+sign-preserving — a peer we distrust is silenced, not inverted, or paying a distrusted peer
+to badmouth a rival would promote that rival. The chain is read on an hourly tick into
+SQLite; a routing decision does no network I/O, and an index that has never filled scores
+**every** candidate zero, never some.
 
 Because price enters as a logarithm, **each weight is the maximum equivalent price
 discount**: a weight of `W` lets the best possible candidate on that term beat a price up
@@ -486,7 +506,10 @@ ties.
 | Key | Default | Meaning |
 |---|---|---|
 | `balancers.SOCIALIZATION_FACTOR` | `2` | Weight of a peer's reputation, i.e. the largest price premium reliability can beat (`e²` ≈ 7.4×). |
-| `balancers.REPUTATION_HALF_CREDIT` | `50` | Reputation at which half that weight is earned. A peer's standing no longer depends on how many peers exist. |
+| `balancers.REPUTATION_HALF_CREDIT` | `50` | Reputation at which half that weight is earned. A peer's standing no longer depends on how many peers exist. Also the half-credit for `trust(p)` in the on-chain term. |
+| `balancers.ONCHAIN_REPUTATION_WEIGHT` | `0.1` | Weight of what the **ledgers** say about a peer (`e^0.1` ≈ 11 % premium at most). **Read `ONCHAIN_REPUTATION_WEIGHT / DONATION_WEIGHT` as the exchange rate between destroying one ERG and donating one** — at `0.1 / 0.3` a donated ERG is worth three burned ones, on purpose. The node **refuses** a config where this exceeds `DONATION_WEIGHT`: on-chain reputation is bought by burning, and weighing the burn higher makes donating the worse buy, so the money that funds this software gets destroyed instead. See [`DONATIONS.md`](DONATIONS.md) and issue #353. |
+| `balancers.ONCHAIN_REPUTATION_HALF_CREDIT` | `1.0` | Summed, trusted, capped verdict `S` at which half that weight is earned. `1.0` is four fully-trusted publishers at the cap — a coalition, not a purchase. |
+| `balancers.ONCHAIN_PUBLISHER_CAP` | `0.25` | The most any one publisher may contribute to `S`, so no single proof — however trusted, however funded — carries the term alone. |
 | `balancers.COST_AVERAGE_VARIATION` | `1` | How much a quote's variance inflates its cost when candidates are compared. |
 | `balancers.DONATION_WEIGHT` | `0.3` | Weight of a peer's donation credit (`e^0.3` ≈ 35 % premium at most). **The safety parameter** — a high value closes the network to newcomers; see [`DONATIONS.md`](DONATIONS.md). |
 | `balancers.DONATION_HALF_CREDIT` | `"5000000000"` | Donation credit, in MU, at which half that weight is earned. |
@@ -495,7 +518,10 @@ ties.
 
 Weights must not be negative, and the half-credits must be positive — the node refuses
 the config otherwise. A negative donation weight would turn the count list into a
-punishment mechanism, which is what would make patching donations out rational.
+punishment mechanism, which is what would make patching donations out rational. And
+`ONCHAIN_REPUTATION_WEIGHT` must not exceed `DONATION_WEIGHT`, for the reason in that
+row: it is the one comparison in this block that decides an incentive rather than a
+ranking.
 
 ## `costs`, `timing`, `client`
 

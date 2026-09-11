@@ -661,8 +661,14 @@ def validate_donation_config(
 # sanity check: a negative donation weight would turn the count list into a punishment
 # mechanism, and punishing peers for not donating is exactly what would make patching
 # donations out of a node rational.
-BALANCER_NONNEG = ("SOCIALIZATION_FACTOR", "DONATION_WEIGHT", "LOCAL_BIAS", "COST_AVERAGE_VARIATION")
-BALANCER_POSITIVE = ("REPUTATION_HALF_CREDIT", "DONATION_HALF_CREDIT", "DONATION_AGE_SCALE")
+BALANCER_NONNEG = (
+    "SOCIALIZATION_FACTOR", "DONATION_WEIGHT", "LOCAL_BIAS", "COST_AVERAGE_VARIATION",
+    "ONCHAIN_REPUTATION_WEIGHT",
+)
+BALANCER_POSITIVE = (
+    "REPUTATION_HALF_CREDIT", "DONATION_HALF_CREDIT", "DONATION_AGE_SCALE",
+    "ONCHAIN_REPUTATION_HALF_CREDIT", "ONCHAIN_PUBLISHER_CAP",
+)
 
 
 def validate_balancers_config(config: Dict[str, Any]) -> None:
@@ -695,6 +701,48 @@ def validate_balancers_config(config: Dict[str, Any]) -> None:
                 f"balancers.{key} must be positive, got {raw!r}: it is the point at "
                 "which half the weight is earned, and the formula divides by it."
             )
+
+    _require_burning_is_not_the_better_buy(balancers)
+
+
+def _require_burning_is_not_the_better_buy(balancers: Dict[str, Any]) -> None:
+    """``ONCHAIN_REPUTATION_WEIGHT <= DONATION_WEIGHT``. Refused, not warned about.
+
+    The ratio between the two is the exchange rate this node offers between destroying
+    one ERG and donating one, and the direction of that inequality is the whole economics
+    of issue #353. On-chain reputation is bought by burning -- an opinion is worth
+    ``share x burned ERG`` and minting a proof is free -- while donation credit is bought
+    by funding the development the node runs on. Let the burn weigh more and a rational
+    operator stops donating, and the money is destroyed instead of paying for the
+    software: the incentive ``docs/DONATIONS.md`` is built on inverts.
+
+    Every other advantage already sits on the burn's side of the comparison, which is why
+    equality is the *most* this may be rather than a comfortable middle: a burn is
+    recognised by every node reading the same contract, a donation only by the nodes
+    listing the wallet that was funded; a burn counts instantly, a donation accrues with
+    ``DONATION_AGE_SCALE``; a burn is sign-preserving, a donation is a bonus only.
+
+    A hard refusal rather than a warning, because the failure is silent and slow: the node
+    boots, routes, and quietly prices the wrong incentive for as long as nobody reads the
+    config back.
+    """
+    if "ONCHAIN_REPUTATION_WEIGHT" not in balancers:
+        return
+    try:
+        onchain = Decimal(str(balancers["ONCHAIN_REPUTATION_WEIGHT"]).strip())
+        donation = Decimal(str(balancers.get("DONATION_WEIGHT", "0.3")).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        # Shape is the other loops' job; they have already raised for anything unusable.
+        return
+    if onchain > donation:
+        raise ConfigValidationError(
+            f"balancers.ONCHAIN_REPUTATION_WEIGHT ({onchain}) must not exceed "
+            f"balancers.DONATION_WEIGHT ({donation}). The ratio between them is the "
+            "exchange rate between destroying one ERG and donating one: on-chain "
+            "reputation is bought by burning, and weighing the burn higher makes "
+            "donating the worse buy, so the money that funds this software gets "
+            "destroyed instead. Lower the first, or raise DONATION_WEIGHT to match."
+        )
 
 
 BITCOIN_NETWORKS = ("mainnet", "testnet", "signet", "regtest")
