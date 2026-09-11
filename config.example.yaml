@@ -575,6 +575,27 @@ balancers:
   # maximum is needed -- and a peer's standing no longer depends on how many peers
   # exist, which it used to.
   REPUTATION_HALF_CREDIT: 50
+  # Weight of what the LEDGERS say about a peer -- a different quantity that shares the
+  # name, and the one that can be bought: an opinion is worth share x burned ERG, and
+  # minting a proof is free. It gets its own weight for exactly that reason.
+  #
+  # Read ONCHAIN_REPUTATION_WEIGHT / DONATION_WEIGHT as the exchange rate between
+  # destroying one ERG and donating one. At 0.1 / 0.3 an ERG donated is worth three
+  # times an ERG burned, on purpose: a donation funds the development this node runs
+  # on, a burn destroys the money. The node refuses a config where this exceeds
+  # DONATION_WEIGHT, which would make burning the better buy.
+  #
+  # It is not a bare import of what the chain says. Each opinion is weighed by the
+  # publisher's standing in THIS node's own peer table, so a proof belonging to no peer
+  # we have dealt with weighs zero however much was burned into it, and each publisher
+  # is capped. See docs/DONATIONS.md and issue #353.
+  ONCHAIN_REPUTATION_WEIGHT: 0.1
+  # Summed trusted verdict at which half of that weight is earned. 1.0 is four
+  # fully-trusted publishers at the per-publisher cap.
+  ONCHAIN_REPUTATION_HALF_CREDIT: 1.0
+  # The most any single publisher may contribute to that sum. A quarter, so no one
+  # proof -- however trusted, however funded -- carries the term on its own.
+  ONCHAIN_PUBLISHER_CAP: 0.25
   COST_AVERAGE_VARIATION: 1
   # Weight of a peer's donation credit. Bonus only, never a penalty: penalising
   # non-donors is exactly what would make patching this out rational.
