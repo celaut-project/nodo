@@ -34,6 +34,14 @@ from src.utils.logger import LOGGER
 # socket does not hold the payment path or the manager tick.
 TIMEOUT_SECONDS = 30
 
+#: The label Core files this node's receiving address under. It is how the address is
+#: found again after a restart, instead of being remembered somewhere else.
+RECEIVE_LABEL = "nodo"
+
+#: `RPC_WALLET_INVALID_LABEL_NAME`. Core's answer when no address carries a label, which
+#: is "none", not a failure.
+LABEL_NOT_FOUND = -11
+
 
 class BackendUnavailable(Exception):
     """The node could not be reached or would not answer.
@@ -43,13 +51,22 @@ class BackendUnavailable(Exception):
     gets rejected with the money already on-chain.
     """
 
+    def __init__(self, message: str, *, code: Optional[int] = None):
+        super().__init__(message)
+        #: Core's JSON-RPC error code when bitcoind answered and said no, and ``None``
+        #: when the call never got that far. A caller that wants to treat one specific
+        #: refusal as an ordinary answer -- an empty label, say -- needs to tell the
+        #: two apart, and the message is prose.
+        self.code = code
+
 
 class ChainBackend:
     """Bitcoin Core over JSON-RPC: the full surface, reads and writes.
 
     The surface itself -- ``get_balance``, ``list_received``, ``tx_status``,
-    ``raw_transaction``, ``list_transactions``, ``estimate_fee_rate``, ``new_address``,
-    ``send_to``, ``send_many`` -- is what the payment flow asks for. A different
+    ``raw_transaction``, ``list_transactions``, ``estimate_fee_rate``,
+    ``receive_address``, ``new_address``, ``send_to``, ``send_many`` -- is what the
+    payment flow asks for. A different
     implementation of it is a different way to reach Bitcoin, not a different contract:
     see ``explorer.py``, which implements the read half and refuses the rest.
     """
@@ -107,7 +124,8 @@ class ChainBackend:
         if error:
             raise BackendUnavailable(
                 f"bitcoind {method}: {error.get('message', 'unknown error')} "
-                f"(code {error.get('code')})"
+                f"(code {error.get('code')})",
+                code=error.get("code"),
             )
         return body.get("result")
 
@@ -125,13 +143,39 @@ class ChainBackend:
         btc = self._call("getbalance", ["*", int(min_conf)])
         return int((Decimal(str(btc)) * 100_000_000).to_integral_value())
 
-    def new_address(self, label: str = "nodo") -> str:
-        """A receiving address for this node's wallet.
+    def new_address(self, label: str = RECEIVE_LABEL) -> str:
+        """A receiving address for this node's wallet. **Mints one.**
 
         P2WPKH, named explicitly rather than left to Core's default, so the advertised
-        contract and the fee/vsize estimate describe the same kind of output.
+        contract and the fee/vsize estimate describe the same kind of output. The label
+        is what makes the address findable again afterwards: see `receive_address`.
         """
         return str(self._call("getnewaddress", [label, "bech32"]))
+
+    def receive_address(self, label: str = RECEIVE_LABEL) -> str:
+        """The address this wallet is already paid at, or ``""``. **Never mints.**
+
+        Core is asked rather than a stored answer being trusted, because Core is the
+        only thing that knows which addresses its wallet is actually watching: an
+        address it is not watching is one whose payments it will not report and whose
+        output it cannot spend. The label is what "this node's address" means here --
+        it survives restarts, and it is why the answer is the same on every call.
+
+        ``""`` for a wallet that has none yet, which is a state `init` resolves by
+        minting one, and no other caller may. Several addresses under the label -- an
+        operator who labelled others by hand -- resolve to the first in sorted order:
+        arbitrary, but the same arbitrary choice on every call and every restart, which
+        is the only property that matters.
+        """
+        try:
+            labelled = self._call("getaddressesbylabel", [label]) or {}
+        except BackendUnavailable as exc:
+            # Core refuses a label no address carries, which is not a failure: it is
+            # the answer "none", and it must not read as "I could not reach bitcoind".
+            if exc.code != LABEL_NOT_FOUND:
+                raise
+            return ""
+        return sorted(labelled)[0] if labelled else ""
 
     def estimate_fee_rate(self, target_conf: int) -> Optional[float]:
         """Fee rate in sat/vB for confirmation within ``target_conf`` blocks.

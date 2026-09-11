@@ -32,6 +32,7 @@ does not need (its proof is a confirmed transaction, not an unspent output).
 """
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from decimal import Decimal
@@ -137,11 +138,22 @@ WAIT_TX_SLEEP_TIME = 15  # seconds between them -- a block is ~10 minutes
 payment_lock = Lock()  # Ensures the same UTXO is not spent for more than it holds.
 
 NETWORK = lambda: str(env_manager.get("ledgers.bitcoin.NETWORK") or "mainnet")
-COLD_WALLET = lambda: env_manager.get("ledgers.bitcoin.payments.COLD_WALLET") or ""
+COLD_WALLET_KEY = "ledgers.bitcoin.payments.COLD_WALLET"
+COLD_WALLET = lambda: env_manager.get(COLD_WALLET_KEY) or ""
 MIN_CONFIRMATIONS = lambda: max(1, int(env_manager.get("ledgers.bitcoin.payments.MIN_CONFIRMATIONS", 1) or 1))
 TARGET_CONF = lambda: max(1, int(env_manager.get("ledgers.bitcoin.payments.TARGET_CONF", 6) or 6))
 MAX_FEE_RATE_SAT_VB = lambda: float(env_manager.get("ledgers.bitcoin.payments.MAX_FEE_RATE_SAT_VB", 100) or 100)
-RECEIVING_ADDRESS_KEY = "ledgers.bitcoin.payments.RECEIVING_ADDRESS"
+# Where the address Core gave us is kept. A *cache*, not configuration: nothing asks
+# the operator to choose it, Core remains the source of truth, and losing the file
+# costs one RPC call. It is what lets a node whose bitcoind is down still know what it
+# advertised -- and so still check an incoming payment against it.
+RECEIVE_ADDRESS_CACHE_FILE = "bitcoind_receive_address"
+# How often the cached copy is rewritten from a live answer, in reads. Every read would
+# be a file write on the payment path; never would let the file rot behind a wallet
+# that was replaced, or stay gone after somebody cleared the cache directory.
+ADDRESS_CACHE_REWRITE_EVERY = 20
+_address_reads = 0
+_address_on_disk: Optional[str] = None
 # How this node reaches Bitcoin. `core` is a bitcoind you trust with your wallet: it
 # signs, so it can pay as well as be paid. `explorer` is any public HTTP API: it holds no
 # key, so the node can only be *paid* -- which is the side that matters to a node
@@ -174,6 +186,82 @@ def _backend_module():
 def backend():
     """A handle on the chain. Built per call, holding no connection of its own."""
     return _backend_module().backend()
+
+
+def _signs() -> bool:
+    """Whether this node's Bitcoin backend holds a key, from config alone.
+
+    Distinct from `can_pay`, which builds the backend and so answers False for a
+    signing backend that is merely unreachable. This one has to be decided without a
+    socket, because it decides *which address this node is paid at* -- and that must
+    not change because bitcoind happened to be down.
+    """
+    return bool(getattr(_backend_module(), "CAN_SIGN", True))
+
+
+def _address_cache_path() -> Optional[str]:
+    """``CACHE/bitcoind_receive_address``, or None where no cache is configured."""
+    cache = str(env_manager.get("CACHE") or "").strip()
+    return os.path.join(cache, RECEIVE_ADDRESS_CACHE_FILE) if cache else None
+
+
+def _read_cached_address() -> str:
+    """The last address Core gave this node, or ``""``. Never raises."""
+    path = _address_cache_path()
+    if not path:
+        return ""
+    try:
+        with open(path, "r") as file:
+            return file.read().strip()
+    except OSError:
+        return ""
+
+
+def _remember_address(address: str) -> None:
+    """Keep ``address`` on disk, so a bitcoind that dies does not take it with it.
+
+    Written whenever it differs from what was last written, and once every
+    `ADDRESS_CACHE_REWRITE_EVERY` reads otherwise -- which is what notices a cache
+    directory somebody cleared, without putting a file write on every payment.
+
+    Best-effort throughout: failing to write costs the fallback the next time bitcoind
+    is unreachable, and raising here would fail an advertisement, or a payment
+    validation, over a file.
+    """
+    global _address_reads, _address_on_disk
+    _address_reads += 1
+    if address == _address_on_disk and _address_reads % ADDRESS_CACHE_REWRITE_EVERY:
+        return
+    path = _address_cache_path()
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as file:
+            file.write(f"{address}\n")
+        _address_on_disk = address
+    except OSError as e:
+        LOGGER(f"Could not cache this node's Bitcoin receiving address in {path}: {e}")
+
+
+def _address_from_core() -> str:
+    """What Core says this node is paid at, or the last thing it said. ``""`` if neither.
+
+    Core first, because it is the only thing that knows which addresses its wallet is
+    watching -- and an address it does not watch is one whose payments it will not
+    report and whose output it cannot spend. The cache second, because a bitcoind that
+    is down must not stop this node checking a payment against the script it already
+    advertised.
+    """
+    try:
+        address = backend().receive_address()
+    except BackendUnavailable as exc:
+        LOGGER(f"Could not ask bitcoind for this node's receiving address: {exc}")
+        return _read_cached_address()
+    if address:
+        _remember_address(address)
+        return address
+    return _read_cached_address()
 
 
 def _prepare_backend() -> None:
@@ -339,55 +427,72 @@ def get_wallet_address() -> str:
     `scriptPubKey` for a payer to build against, and rotating it would strand payments
     aimed at the old one.
 
+    Where it comes from is what the backend decides. One that signs is paid into its
+    own wallet, so Core is asked which address that is; one that cannot sign holds no
+    wallet at all and is paid at the cold wallet.
+
     Minting belongs to `ensure_receiving_address`, which `init()` calls, and this must
     not do it -- it is reached from `payment_process_validator`, on the receiving path.
     An address minted there would be one no payer was ever told about, so the validator
     would check an incoming payment against the wrong script and reject a payment that
-    is already on-chain. It would also rewrite `config.yaml` from the payment path,
-    which is not where that belongs.
+    is already on-chain.
     """
-    configured = str(env_manager.get(RECEIVING_ADDRESS_KEY) or "").strip()
-    if not configured:
+    if not _signs():
+        address = str(COLD_WALLET()).strip()
+        if not address:
+            raise ValueError(
+                f"{COLD_WALLET_KEY} is not set, so this node has no Bitcoin address to "
+                "be paid at. A read-only backend holds no key, so it is paid into the "
+                "cold wallet directly -- set it to the address you want to be paid at."
+            )
+    else:
+        address = _address_from_core()
+        if not address:
+            raise ValueError(
+                "this node has no Bitcoin receiving address: bitcoind holds none under "
+                f"the {core_backend.RECEIVE_LABEL!r} label, and none is cached in "
+                f"{RECEIVE_ADDRESS_CACHE_FILE}. One is minted when the payment "
+                "interfaces are initialised; check the node log for why that did not "
+                "happen."
+            )
+    if not is_valid_bitcoin_address(address, network=NETWORK()):
         raise ValueError(
-            f"{RECEIVING_ADDRESS_KEY} is not set, so this node has no Bitcoin address "
-            "to be paid at. It is filled in when the payment interfaces are "
-            "initialised; check the node log for why that did not happen."
+            f"{address!r} is not a valid {NETWORK()} address, and it is what this node "
+            f"would be paid at. Check ledgers.bitcoin.NETWORK against the wallet behind "
+            f"ledgers.bitcoin.BACKEND."
         )
-    if not is_valid_bitcoin_address(configured, network=NETWORK()):
-        raise ValueError(
-            f"{RECEIVING_ADDRESS_KEY}={configured!r} is not a valid "
-            f"{NETWORK()} address. Clear it and the node will ask bitcoind for one."
-        )
-    return configured
+    return address
 
 
 def ensure_receiving_address() -> str:
-    """The receiving address, asking Core for one the first time and storing it.
+    """The receiving address, asking Core to mint one the first time.
 
-    Called from `init()` only. Written back to the config the same way this node
-    persists the other values it derives, so what peers are told stays the same across
-    restarts without the operator having to choose an address by hand.
+    Called from `init()` only: the one place allowed to mint, because it is the one
+    place that runs before anybody has been told what to pay. What is minted carries
+    the label Core files it under, which is how every later call finds the same address
+    again -- so nothing about it has to be written into `config.yaml`.
+
+    Nothing is minted on a read-only backend: it is paid at the cold wallet the
+    operator already configured, and an unset one is an error rather than something to
+    invent an answer for.
     """
     try:
         return get_wallet_address()
     except ValueError as exc:
-        if "is not a valid" in str(exc):
+        # An address on the wrong network is a misconfiguration, not an absence:
+        # minting against the same wallet would only produce another address nobody
+        # on this chain can pay to.
+        if not _signs() or "is not a valid" in str(exc):
             raise
 
-    if not can_pay():
-        raise ValueError(
-            f"{RECEIVING_ADDRESS_KEY} is not set and this node's Bitcoin backend is "
-            "read-only, so it cannot ask for an address. Set the address you want to "
-            "be paid at."
-        )
     address = backend().new_address()
     if not is_valid_bitcoin_address(address, network=NETWORK()):
         raise ValueError(
             f"bitcoind returned {address!r}, which is not a valid {NETWORK()} address. "
             "Check ledgers.bitcoin.NETWORK against the node you are pointing at."
         )
-    env_manager.set(RECEIVING_ADDRESS_KEY, address)
-    LOGGER(f"This node will be paid in BTC at {address} (stored in config.yaml).")
+    _remember_address(address)
+    LOGGER(f"This node will be paid in BTC at {address}.")
     return address
 
 
@@ -783,6 +888,11 @@ def _sweep_to_cold_wallet():
     """
     LOGGER("Exec bitcoin interface manager (cold sweep).")
     try:
+        if not _signs():
+            # A read-only backend is paid at the cold wallet, so there is no hot
+            # balance to move and no key that could move one.
+            LOGGER("BTC payments land in the cold wallet already; nothing to sweep.")
+            return
         cold_wallet = COLD_WALLET()
         if not cold_wallet:
             LOGGER("No BTC cold wallet configured; skipping sweep.")

@@ -22,8 +22,10 @@ What that buys, and what it does not:
   payer falls through to another payment system -- funding is the selection, and a
   wallet that cannot sign has no funding. Nothing is broadcast and nothing raises
   mid-payment.
-* It cannot mint a receiving address either, so `RECEIVING_ADDRESS` has to be
-  configured by hand. That is checked before the contract is offered.
+* It cannot mint a receiving address either, and it holds no hot wallet it could
+  sweep to cold later -- so it is paid into `COLD_WALLET` directly, which is the one
+  Bitcoin address an operator running this backend has any reason to own. That is
+  checked before the contract is offered.
 
 Signing locally instead -- a seed in `config.yaml`, like Ergo's -- would need raw
 segwit construction, BIP-143 sighashes and UTXO selection. Every line of that moves
@@ -36,7 +38,13 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from src.payment_system.contracts.bitcoin.backend import BackendUnavailable
+from src.utils.bitcoin_units import script_pubkey_from_address
 from src.utils.config import ConfigManager
+
+#: This backend holds no key. Read by the contract to decide where it is paid: a backend
+#: that signs is paid into its own hot wallet, this one into the cold wallet.
+CAN_SIGN = False
+COLD_WALLET_KEY = "ledgers.bitcoin.payments.COLD_WALLET"
 
 TIMEOUT_SECONDS = 30
 # How many transactions one address page returns. Esplora's own page size; asking for
@@ -281,14 +289,26 @@ def _op_return_payload(script_hex: str) -> Optional[bytes]:
     return None
 
 
+def receiving_address() -> str:
+    """The address this node is paid at on a read-only backend: the cold wallet.
+
+    A backend that signs is paid into a hot wallet and sweeps the excess to cold. This
+    one holds no key, so there is no hot wallet to be paid into and nothing that could
+    ever move a coin out of one -- which leaves the cold wallet as the address payers
+    should be sent to in the first place, and leaves the operator one address to own
+    rather than two.
+
+    ``""`` when it is unset; the caller decides how loudly that matters.
+    """
+    return str(ConfigManager().get(COLD_WALLET_KEY) or "").strip()
+
+
 def _receiving_address() -> str:
-    address = str(
-        ConfigManager().get("ledgers.bitcoin.payments.RECEIVING_ADDRESS") or ""
-    ).strip()
+    address = receiving_address()
     if not address:
         raise BackendUnavailable(
-            "ledgers.bitcoin.payments.RECEIVING_ADDRESS is not set. A read-only backend "
-            "cannot ask a node for one, so it has to be configured by hand."
+            f"{COLD_WALLET_KEY} is not set. A read-only backend cannot ask a node for "
+            "an address, and it is paid into the cold wallet directly."
         )
     return address
 
@@ -301,10 +321,18 @@ def configuration_reason() -> Optional[str]:
     config = ConfigManager()
     if not str(config.get("ledgers.bitcoin.EXPLORER_URL") or "").strip():
         return "ledgers.bitcoin.EXPLORER_URL is not set"
-    if not str(config.get("ledgers.bitcoin.payments.RECEIVING_ADDRESS") or "").strip():
+    cold_wallet = receiving_address()
+    if not cold_wallet:
         return (
-            "ledgers.bitcoin.payments.RECEIVING_ADDRESS is not set, and a read-only "
-            "backend cannot ask a node for one -- set the address you want to be paid at"
+            f"{COLD_WALLET_KEY} is not set, and a read-only backend cannot ask a node "
+            "for an address -- it is paid into the cold wallet directly, so set the "
+            "address you want to be paid at"
+        )
+    network = str(config.get("ledgers.bitcoin.NETWORK") or "mainnet").strip()
+    if script_pubkey_from_address(cold_wallet, network=network) is None:
+        return (
+            f"{COLD_WALLET_KEY}={cold_wallet!r} is not a segwit {network} address, and "
+            "it is what payers are advertised as a scriptPubKey on this backend"
         )
     return None
 

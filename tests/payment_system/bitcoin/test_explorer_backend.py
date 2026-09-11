@@ -168,10 +168,12 @@ class FeeEstimateTests(unittest.TestCase):
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ConfigurationTests(unittest.TestCase):
 
-    def _reason(self, url="https://example.invalid/api", address=ADDRESS):
+    def _reason(self, url="https://example.invalid/api", address=ADDRESS,
+                network="mainnet"):
         values = {
             "ledgers.bitcoin.EXPLORER_URL": url,
-            "ledgers.bitcoin.payments.RECEIVING_ADDRESS": address,
+            "ledgers.bitcoin.NETWORK": network,
+            "ledgers.bitcoin.payments.COLD_WALLET": address,
         }
         with mock.patch.object(
             explorer.ConfigManager(), "get",
@@ -185,15 +187,40 @@ class ConfigurationTests(unittest.TestCase):
     def test_no_url_is_named(self):
         self.assertIn("EXPLORER_URL", self._reason(url=""))
 
-    def test_a_read_only_backend_needs_the_address_configured_by_hand(self):
-        """It cannot ask a node for one, and inventing one would strand payments.
+    def test_a_read_only_backend_is_paid_at_the_cold_wallet(self):
+        """The cold wallet is the address, so it is the one the reason names.
 
-        An address minted after peers were told a different one is an address nobody
-        pays to.
+        Nothing here can mint an address, and there is nothing to mint *into*: with no
+        key there is no hot wallet holding a working balance, and no sweep to cold
+        later. So payers are sent to the cold wallet, and an unset one is what stops
+        the contract being offered.
         """
         reason = self._reason(address="")
-        self.assertIn("RECEIVING_ADDRESS", reason)
+        self.assertIn("COLD_WALLET", reason)
         self.assertIn("read-only", reason)
+
+    def test_a_non_segwit_cold_wallet_is_refused_with_the_reason(self):
+        # Its scriptPubKey is what peers are advertised, and this node builds P2WPKH.
+        reason = self._reason(address="1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2")
+        self.assertIn("segwit", reason)
+
+    def test_a_cold_wallet_for_another_network_is_refused(self):
+        # Being paid at an address this chain cannot pay to is the same mistake as
+        # sweeping savings to one, and it is caught in the same place.
+        self.assertIn("segwit", self._reason(network="testnet"))
+
+    def test_the_receiving_address_is_read_every_call(self):
+        # Nothing is stored, so a corrected cold wallet takes effect without a restart.
+        values = {"ledgers.bitcoin.payments.COLD_WALLET": ADDRESS}
+        with mock.patch.object(
+            explorer.ConfigManager(), "get",
+            side_effect=lambda key, default=None: values.get(key, default),
+        ):
+            self.assertEqual(explorer.receiving_address(), ADDRESS)
+            values["ledgers.bitcoin.payments.COLD_WALLET"] = ""
+            with self.assertRaises(BackendUnavailable) as raised:
+                explorer._receiving_address()
+        self.assertIn("COLD_WALLET", str(raised.exception))
 
 
 if __name__ == "__main__":

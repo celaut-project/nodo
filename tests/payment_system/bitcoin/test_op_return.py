@@ -132,48 +132,67 @@ class OpReturnValidationTests(unittest.TestCase):
 
     def test_a_read_only_backend_will_not_mint_an_address_even_from_init(self):
         # It cannot ask a node for one, and inventing one would strand payments aimed
-        # at whatever peers were already told.
-        with mock.patch.object(btc, "can_pay", return_value=False), \
+        # at whatever peers were already told. With no cold wallet either, there is no
+        # address at all, and that is what it says.
+        with mock.patch.object(btc, "_signs", return_value=False), \
                 mock.patch.object(btc.env_manager, "get", return_value=""):
             with self.assertRaisesRegex(ValueError, "read-only"):
                 btc.ensure_receiving_address()
+
+    def test_a_read_only_backend_is_paid_at_the_cold_wallet_and_asks_nobody(self):
+        """No key means no hot wallet to be paid into, and no sweep to cold later.
+
+        So the cold wallet is where payers are sent, which leaves the operator one
+        address to own rather than a second to configure by hand -- and nothing to ask
+        a node for, which is just as well, since this backend has none to ask.
+        """
+        chain = mock.Mock()
+        with mock.patch.object(btc, "_signs", return_value=False), \
+                mock.patch.object(btc, "backend", return_value=chain), \
+                mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \
+                mock.patch.object(
+                    btc.env_manager, "get",
+                    side_effect=lambda key, default=None: (
+                        ADDRESS if key == btc.COLD_WALLET_KEY else ""
+                    )):
+            self.assertEqual(btc.ensure_receiving_address(), ADDRESS)
+
+        self.assertFalse(chain.new_address.called)
+        self.assertFalse(chain.receive_address.called)
 
     def test_the_receiving_path_never_mints_an_address(self):
         """Minting here would check the payment against a script no payer was told.
 
         `payment_process_validator` runs on the receiving side. An address minted from
         it would be one nobody has been advertised, so a payment that is already
-        on-chain would be measured against the wrong script and rejected -- and it
-        would rewrite config.yaml from the payment path, which is not where that
-        belongs. `init()` is the one place that may mint.
+        on-chain would be measured against the wrong script and rejected. `init()` is
+        the one place that may mint.
         """
         chain = mock.Mock()
+        chain.receive_address.return_value = ""
         with mock.patch.object(btc, "backend", return_value=chain), \
-                mock.patch.object(btc.env_manager, "get", return_value=""), \
-                mock.patch.object(btc.env_manager, "set") as setter:
+                mock.patch.object(btc, "_read_cached_address", return_value=""):
             self.assertFalse(btc.payment_process_validator(
                 amount=1_000, token=TOKEN, ledger=LEDGER,
                 script=script_pubkey_from_address(ADDRESS),
             ))
-        self.assertFalse(setter.called, "the payment path rewrote the config")
         self.assertFalse(chain.new_address.called, "the payment path minted an address")
 
-    def test_init_is_what_mints_and_stores_the_address(self):
+    def test_init_is_what_mints_the_address(self):
         # A wallet-bearing backend only: a read-only one cannot be asked for an address,
-        # which is why it requires RECEIVING_ADDRESS to be configured by hand.
+        # which is why it is paid at the cold wallet instead.
         chain = mock.Mock()
+        chain.receive_address.return_value = ""
         chain.new_address.return_value = ADDRESS
-        stored = {}
         with mock.patch.object(btc, "backend", return_value=chain), \
-                mock.patch.object(btc, "can_pay", return_value=True), \
-                mock.patch.object(btc.env_manager, "get", return_value=""), \
-                mock.patch.object(btc.env_manager, "set",
-                                  side_effect=lambda key, value: stored.__setitem__(key, value)), \
+                mock.patch.object(btc, "_signs", return_value=True), \
+                mock.patch.object(btc, "_read_cached_address", return_value=""), \
+                mock.patch.object(btc, "_remember_address") as remembered, \
                 mock.patch.object(btc, "NETWORK", lambda: "mainnet"), \
                 mock.patch.object(btc.sql_connection, "SQLConnection") as sql:
             btc.init()
 
-        self.assertEqual(stored.get(btc.RECEIVING_ADDRESS_KEY), ADDRESS)
+        remembered.assert_called_once_with(ADDRESS)
         # Advertised as the raw scriptPubKey, never as a readable address.
         contract = sql.return_value.add_contract.call_args.kwargs["contract"]
         from src.utils.contract_xattrs import get_script, get_token_id

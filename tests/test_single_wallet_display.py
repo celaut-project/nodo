@@ -28,6 +28,20 @@ class PrintPaymentInfoTests(unittest.TestCase):
         self.assertNotIn("Receiver Wallet", out)
         self.assertNotIn("Total:", out)
 
+    def test_a_wallet_that_is_its_own_cold_wallet_is_printed_once(self):
+        """Bitcoin's read-only backend is paid at the cold wallet: one address, one line.
+
+        Printed twice it reads as two wallets, and an operator counting their money
+        would be looking for a second balance that does not exist.
+        """
+        with mock.patch.object(envs, "contracts", return_value={
+            "h": _contract(ledger="bitcoin", address="bc1qsame", cold="bc1qsame",
+                           unit="BTC")
+        }):
+            out = envs.print_payment_info()
+        self.assertIn("Wallet: bc1qsame", out)
+        self.assertNotIn("Cold Wallet:", out)
+
     def test_omits_cold_wallet_line_when_unset(self):
         with mock.patch.object(
             envs, "contracts", return_value={"h": _contract(balance=0.0, cold="")}

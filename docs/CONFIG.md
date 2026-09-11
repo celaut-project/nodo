@@ -615,7 +615,9 @@ no default on purpose: a satoshi is worth about a million nanoERG, so borrowing
 Unset, the node does not offer Bitcoin at all rather than offering it mispriced.
 
 `BACKEND` decides what this node can do and where the key is. With `explorer` (a public
-HTTP API) there is no key anywhere and the node can only be *paid*. With `core` the key
+HTTP API) there is no key anywhere and the node can only be *paid*, at
+`payments.COLD_WALLET`: with no key there is no hot wallet to be paid into and no sweep
+to cold later, so the cold wallet is where payers are sent. With `core` the key
 is in the wallet of a bitcoind you run and back up, and `WALLET_KEYS_EXTERNAL: true` is
 what tells the node not to generate a mnemonic for it.
 
