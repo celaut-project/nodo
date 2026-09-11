@@ -7,10 +7,12 @@ Core signs, so it has to be a node you would hand your wallet to -- and requirin
 of anyone who merely wants to *receive* BTC is a heavier ask than this project makes
 anywhere else.
 
-This backend closes that gap for the receiving side. It implements the read half of the
-`ChainBackend` surface against an Esplora-compatible API (blockstream.info,
-mempool.space, or a self-hosted one) and **refuses the rest**: it holds no key, so it
-cannot sign, and it says so rather than failing somewhere further in.
+This backend closes that gap for the receiving side. Selected as
+`ledgers.bitcoin.BACKEND: explorer`, it implements the read half of the `ChainBackend`
+surface against whatever `EXPLORER_URL` points at, which has to speak the Esplora HTTP
+API: blockstream.info, mempool.space, or a self-hosted instance. It **refuses the
+rest**: it holds no key, so it cannot sign, and it says so rather than failing
+somewhere further in.
 
 What that buys, and what it does not:
 
@@ -42,7 +44,7 @@ TIMEOUT_SECONDS = 30
 PAGE_SIZE = 25
 
 
-class EsploraBackend:
+class ExplorerBackend:
     """The read half of the chain, over HTTP. Holds no key and signs nothing."""
 
     #: No wallet, no signature: this backend cannot move money, and says so up front.
@@ -58,12 +60,12 @@ class EsploraBackend:
             response = requests.get(url, timeout=TIMEOUT_SECONDS)
         except requests.exceptions.RequestException as exc:
             raise BackendUnavailable(
-                f"esplora {path} failed: {type(exc).__name__}"
+                f"explorer {path} failed: {type(exc).__name__}"
             ) from None
         if response.status_code == 404:
             return None
         if response.status_code != 200:
-            raise BackendUnavailable(f"esplora {path}: HTTP {response.status_code}")
+            raise BackendUnavailable(f"explorer {path}: HTTP {response.status_code}")
         text = response.text.strip()
         if not text:
             return None
@@ -297,8 +299,8 @@ def configuration_reason() -> Optional[str]:
     Config only -- no socket -- because the registry asks on the payment path.
     """
     config = ConfigManager()
-    if not str(config.get("ledgers.bitcoin.ESPLORA_URL") or "").strip():
-        return "ledgers.bitcoin.ESPLORA_URL is not set"
+    if not str(config.get("ledgers.bitcoin.EXPLORER_URL") or "").strip():
+        return "ledgers.bitcoin.EXPLORER_URL is not set"
     if not str(config.get("ledgers.bitcoin.payments.RECEIVING_ADDRESS") or "").strip():
         return (
             "ledgers.bitcoin.payments.RECEIVING_ADDRESS is not set, and a read-only "
@@ -307,8 +309,8 @@ def configuration_reason() -> Optional[str]:
     return None
 
 
-def backend() -> EsploraBackend:
-    url = str(ConfigManager().get("ledgers.bitcoin.ESPLORA_URL") or "").strip()
+def backend() -> ExplorerBackend:
+    url = str(ConfigManager().get("ledgers.bitcoin.EXPLORER_URL") or "").strip()
     if not url:
-        raise BackendUnavailable("ledgers.bitcoin.ESPLORA_URL is not set")
-    return EsploraBackend(url=url)
+        raise BackendUnavailable("ledgers.bitcoin.EXPLORER_URL is not set")
+    return ExplorerBackend(url=url)

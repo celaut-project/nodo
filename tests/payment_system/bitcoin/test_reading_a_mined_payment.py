@@ -14,14 +14,14 @@ IMPORT_ERROR = None
 try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
-    from src.payment_system.contracts.bitcoin import esplora
+    from src.payment_system.contracts.bitcoin import explorer
     from src.payment_system.contracts.bitcoin.backend import (
         BackendUnavailable,
         ChainBackend,
     )
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
-    esplora = None  # type: ignore[assignment]
+    explorer = None  # type: ignore[assignment]
 
 ADDRESS = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 DECODED = {"vout": [{"value": 0.001, "n": 0, "scriptPubKey": {"hex": "0014" + "11" * 20}}]}
@@ -94,7 +94,7 @@ class MinedTransactionTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class EsploraPaginationTests(unittest.TestCase):
+class ExplorerPaginationTests(unittest.TestCase):
     """One page of address history is not the history.
 
     `/address/:addr/txs` returns the newest page only, so on a node paid by several
@@ -109,7 +109,7 @@ class EsploraPaginationTests(unittest.TestCase):
         }
         for last_seen, page in chain_pages.items():
             responses[f"/address/{ADDRESS}/txs/chain/{last_seen}"] = page
-        backend = esplora.EsploraBackend("https://example.invalid/api")
+        backend = explorer.ExplorerBackend("https://example.invalid/api")
         asked = []
 
         def _get(path):
@@ -124,12 +124,12 @@ class EsploraPaginationTests(unittest.TestCase):
         return {"txid": txid, "status": {"confirmed": True, "block_height": height}}
 
     def test_a_full_page_is_followed_to_the_next_one(self):
-        first = [self._confirmed(f"tx-{i}") for i in range(esplora.PAGE_SIZE)]
-        backend, asked = self._pages(first, {f"tx-{esplora.PAGE_SIZE - 1}": [self._confirmed("older")]})
+        first = [self._confirmed(f"tx-{i}") for i in range(explorer.PAGE_SIZE)]
+        backend, asked = self._pages(first, {f"tx-{explorer.PAGE_SIZE - 1}": [self._confirmed("older")]})
         found = backend.list_received(ADDRESS, 1)[0]["txids"]
         self.assertIn("older", found)
-        self.assertEqual(len(found), esplora.PAGE_SIZE + 1)
-        self.assertIn(f"/address/{ADDRESS}/txs/chain/tx-{esplora.PAGE_SIZE - 1}", asked)
+        self.assertEqual(len(found), explorer.PAGE_SIZE + 1)
+        self.assertIn(f"/address/{ADDRESS}/txs/chain/tx-{explorer.PAGE_SIZE - 1}", asked)
 
     def test_a_short_page_is_the_last_one(self):
         backend, asked = self._pages([self._confirmed("only")], {})
@@ -142,12 +142,12 @@ class EsploraPaginationTests(unittest.TestCase):
         # first -- so it can be longer than a page without there being another one.
         first = (
             [{"txid": "pending", "status": {"confirmed": False}}]
-            + [self._confirmed(f"tx-{i}") for i in range(esplora.PAGE_SIZE)]
+            + [self._confirmed(f"tx-{i}") for i in range(explorer.PAGE_SIZE)]
         )
-        backend, asked = self._pages(first, {f"tx-{esplora.PAGE_SIZE - 1}": []})
+        backend, asked = self._pages(first, {f"tx-{explorer.PAGE_SIZE - 1}": []})
         backend.list_received(ADDRESS, 1)
         followed = [path for path in asked if "/chain/" in path]
-        self.assertEqual(followed, [f"/address/{ADDRESS}/txs/chain/tx-{esplora.PAGE_SIZE - 1}"])
+        self.assertEqual(followed, [f"/address/{ADDRESS}/txs/chain/tx-{explorer.PAGE_SIZE - 1}"])
 
     def test_only_deep_enough_transactions_are_reported(self):
         first = [self._confirmed("deep", 900_000), self._confirmed("shallow", 1_000_000)]
