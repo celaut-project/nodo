@@ -253,6 +253,22 @@ class OptionParsingTests(unittest.TestCase):
         self.assertEqual(positionals, ["peer-1", "5", "ergo"])
         self.assertEqual(values, {})
 
+    def test_a_flag_left_waiting_at_the_end_of_the_input_is_an_error(self):
+        """`nodo pay <peer> 1 --ledger` did not name a ledger, and must say so.
+
+        Dropped in silence it behaves as though no ledger had been named at all, so a
+        node offering two payment systems answers "the amount is ambiguous" -- which
+        sends the operator looking at the amount rather than at the half-typed flag.
+        """
+        with self.assertRaisesRegex(ValueError, r"--ledger needs a value"):
+            self._take(["peer-1", "5", "--ledger"])
+
+    def test_the_last_flag_still_takes_the_value_that_follows_it(self):
+        # The check is about the end of the input, not about the last flag.
+        positionals, values = self._take(["peer-1", "5", "--asset", "sigusd"])
+        self.assertEqual(positionals, ["peer-1", "5"])
+        self.assertEqual(values["--asset"], "sigusd")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -33,6 +33,11 @@ def take_options(argv, *flags):
     Accepts both `--flag value` and `--flag=value`. An unknown `--option` is left out of
     the positionals rather than treated as one, so a typo cannot silently become an
     amount.
+
+    A flag still waiting for its value at the end of the input raises, for the same
+    reason. Dropped in silence, `nodo pay <peer> 1 --ledger` behaves as though no ledger
+    had been named, and the operator is told the amount is ambiguous rather than that
+    they did not finish naming the ledger.
     """
     wanted = set(flags)
     positionals, values, expecting = [], {}, None
@@ -48,6 +53,8 @@ def take_options(argv, *flags):
                 values[flag] = value
         elif not argument.startswith("--"):
             positionals.append(argument)
+    if expecting:
+        raise ValueError(f"{expecting} needs a value: `{expecting} <value>`.")
     return positionals, values
 
 
@@ -811,9 +818,13 @@ if __name__ == '__main__':
                 # token, at different rates. Naming one is only needed when this node
                 # offers more than one, and then it *is* needed -- guessing would move
                 # money nobody named.
-                pay_args, pay_options = take_options(
-                    sys.argv[2:], "--payment-method", "--ledger", "--asset"
-                )
+                try:
+                    pay_args, pay_options = take_options(
+                        sys.argv[2:], "--payment-method", "--ledger", "--asset"
+                    )
+                except ValueError as e:
+                    print(str(e), flush=True)
+                    os._exit(1)
                 if len(pay_args) < 2:
                     print(
                         "Usage: nodo pay <peer_id> <amount> "
