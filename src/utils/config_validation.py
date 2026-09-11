@@ -822,14 +822,14 @@ def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
         except ValueError as exc:
             raise ConfigValidationError(f"ledgers.bitcoin.payments.{key}: {exc}") from exc
 
-    for key in ("COLD_WALLET", "RECEIVING_ADDRESS"):
-        address = str(payments.get(key) or "").strip()
-        if address and not is_valid_bitcoin_address(address, network=network):
-            raise ConfigValidationError(
-                f"ledgers.bitcoin.payments.{key} is not a valid {network} Bitcoin "
-                f"address: {address!r}. An address valid on another network is refused "
-                "too -- sweeping to it would send funds nobody on this chain can spend."
-            )
+    cold = str(payments.get("COLD_WALLET") or "").strip()
+    if cold and not is_valid_bitcoin_address(cold, network=network):
+        raise ConfigValidationError(
+            f"ledgers.bitcoin.payments.COLD_WALLET is not a valid {network} Bitcoin "
+            f"address: {cold!r}. An address valid on another network is refused too -- "
+            "sweeping to it would send funds nobody on this chain can spend, and on the "
+            "read-only backend it is also the address this node is paid at."
+        )
 
     rate = payments.get("MU_PER_SATOSHI")
     # An unset rate means this node does not offer Bitcoin at all -- the shipped default

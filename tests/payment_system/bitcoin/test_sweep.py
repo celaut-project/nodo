@@ -69,7 +69,7 @@ class SweepArithmeticTests(unittest.TestCase):
 class SweepTests(unittest.TestCase):
 
     def _sweep(self, *, balance, cold=COLD, hot="0.05", minimum="0.01", simulate=False,
-               network="mainnet"):
+               network="mainnet", signs=True):
         chain = mock.Mock()
         chain.get_balance.return_value = balance
         chain.estimate_fee_rate.return_value = 5.0
@@ -80,6 +80,7 @@ class SweepTests(unittest.TestCase):
         }
         real_get = btc.env_manager.get
         with mock.patch.object(btc, "backend", return_value=chain), \
+                mock.patch.object(btc, "_signs", return_value=signs), \
                 mock.patch.object(btc, "COLD_WALLET", lambda: cold), \
                 mock.patch.object(btc, "NETWORK", lambda: network), \
                 mock.patch.object(btc, "MIN_CONFIRMATIONS", lambda: 1), \
@@ -113,6 +114,17 @@ class SweepTests(unittest.TestCase):
         options = chain.send_to.call_args.kwargs
         self.assertEqual(options["fee_rate_sat_vb"], 5.0)
         self.assertTrue(options["subtract_fee_from_amount"])
+
+    def test_a_read_only_backend_has_nothing_to_sweep(self):
+        """Payments already land in the cold wallet, and no key here could move them.
+
+        The hot/cold split is a signing wallet's arrangement: hold a working balance,
+        send the excess somewhere safer. A backend that cannot sign has no working
+        balance to hold, so there is nothing to move and nothing to look up either.
+        """
+        chain = self._sweep(balance=10_000_000, signs=False)
+        self.assertEqual(chain.send_to.call_count, 0)
+        self.assertEqual(chain.get_balance.call_count, 0)
 
     def test_no_cold_wallet_means_nothing_is_swept(self):
         self.assertEqual(self._sweep(balance=10_000_000, cold="").send_to.call_count, 0)

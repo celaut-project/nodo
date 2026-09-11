@@ -52,9 +52,14 @@ systems it shares with a peer and settles through the first one it can fund, so 
 with a read-only Bitcoin backend simply pays in something else. Nothing is broadcast
 and nothing fails halfway through a payment.
 
-You must set `payments.RECEIVING_ADDRESS` yourself — a read-only API cannot be asked
-for an address, and one invented later would strand payments aimed at the one peers were
-already told. The contract is not offered until it is set.
+Payers are sent to `payments.COLD_WALLET`, and it is the one address you have to set.
+A read-only API cannot be asked to mint one — and there is nothing to mint *into*:
+the hot/cold split exists so a signing wallet can hold a working balance and sweep the
+excess away, and a backend that holds no key has neither half. So the cold wallet is
+where payments land in the first place, which also means there is no second address to
+choose and no sweep that could ever fail. It must be **segwit**, because its
+`scriptPubKey` is what peers are advertised. The contract is not offered until it is
+set.
 
 This is the shipped default, because being paid is the side that matters to a node that
 is earning.
@@ -185,11 +190,14 @@ ledgers:
       TARGET_CONF: 6
       MAX_FEE_RATE_SAT_VB: 100
       HOT_WALLET_LIMITS: "0.05"
-      COLD_WALLET: ""
+      COLD_WALLET: ""                # also the receiving address on `explorer`
       COLD_WALLET_MIN_TRANSFER: "0.01"
       MAX_FEE_OVERHEAD: 0.25
-      RECEIVING_ADDRESS: ""          # filled in by the node
 ```
+
+There is no receiving-address setting. On a signing backend the address lives in Core's
+wallet under the label `nodo`, and that label is how it is found again; on `explorer` it
+is `COLD_WALLET`. Nothing about it is written into `config.yaml`.
 
 The cookie is preferred and is what Core writes on every start, so the ordinary setup
 keeps no credential in `config.yaml` at all. `RPC_USER` / `RPC_PASSWORD` are the
@@ -229,8 +237,16 @@ register, so `nodo` uses the literal translation: **one static receiving address
 
 - The advertised `script` xattr is one fixed `scriptPubKey` — the bytes, never a
   human-readable address, exactly as Ergo advertises propositionBytes.
-- The receiving address is asked of Core once and written back to
-  `payments.RECEIVING_ADDRESS`, so what peers are told stays the same across restarts.
+- On a signing backend the receiving address is **asked of Core**, every time, under the
+  label `nodo` — Core is the only thing that knows which addresses its wallet watches,
+  and an address it does not watch is one whose payments it will not report and whose
+  output it cannot spend. The answer is cached in `__cache__/bitcoind_receive_address`,
+  so a node whose bitcoind is down still knows what it advertised and can still check an
+  incoming payment against it. The cache is rewritten whenever Core's answer changes,
+  and once every 20 reads otherwise. On `explorer` the address is `payments.COLD_WALLET`.
+- Exactly one address is ever minted, by `init()`, and only for a wallet that has none
+  under the label. No other caller may mint: an address minted on the receiving path
+  would be one no payer was ever told about.
 - It costs ~43 extra vB and reuses one address. That is the same privacy posture Ergo
   already has here.
 
@@ -341,7 +357,9 @@ excess = balance - HOT_WALLET_LIMITS - fee
 ```
 
 swept only when it is at least `COLD_WALLET_MIN_TRANSFER` **and** above the dust
-threshold. `COLD_WALLET` must be a valid address **for the configured network** — an
+threshold. There is no sweep on `explorer`: payments already land in the cold wallet,
+and nothing there could sign one anyway. `COLD_WALLET` must be a valid address **for the
+configured network** — an
 address valid on another one is refused, because sweeping savings to it would send funds
 nobody on this chain can spend. The check is bech32/base58check arithmetic and needs no
 node, so a node that cannot reach `bitcoind` still refuses a typo.

@@ -1135,8 +1135,9 @@ ledgers:
     #            -- which is the side that matters if you are earning. It cannot pay
     #            out: the payer walks the systems it shares with a peer and settles
     #            through the first it can fund, so BTC is simply skipped when paying.
-    #            You must set payments.RECEIVING_ADDRESS yourself; a read-only API
-    #            cannot be asked for an address.
+    #            Payments land in payments.COLD_WALLET directly: a read-only API
+    #            cannot be asked for an address, and with no key there is no hot
+    #            wallet to sweep to cold later. Set it to a segwit address you own.
     #
     #   core     A bitcoind you trust with your wallet, since Core is what signs. It
     #            may be remote -- RPC_URL is a URL -- but "remote" here means your own
@@ -1216,6 +1217,8 @@ ledgers:
       # Maximum balance (BTC, decimal string) retained in the operational wallet.
       HOT_WALLET_LIMITS: "0.05"
       # Public Bitcoin address funds are swept to. Empty disables sweeping. Never a seed.
+      # On the read-only `explorer` backend this is also where payers are sent: there is
+      # no hot wallet to be paid into, so it must be set, and it must be segwit.
       COLD_WALLET: ""
       COLD_WALLET_MIN_TRANSFER: "0.01"
       # Per-system override of deposits.MAX_FEE_OVERHEAD. 2% is right for Ergo and
@@ -1228,6 +1231,3 @@ ledgers:
       DONATION_WALLETS: []
       DONATION_CREDIT_WALLETS: []
       DONATION_MIN_CONFIRMATIONS: 6
-      # Filled in by the node the first time it asks bitcoind for an address, so what it
-      # advertises to peers stays the same across restarts.
-      RECEIVING_ADDRESS: ""
