@@ -1130,7 +1130,7 @@ ledgers:
     NETWORK: mainnet                 # mainnet | testnet | signet | regtest
     # How this node reaches Bitcoin. Two very different asks:
     #
-    #   esplora  A public HTTP API (blockstream.info, mempool.space, or your own).
+    #   explorer A public HTTP API (blockstream.info, mempool.space, or your own).
     #            No key anywhere and nothing to run, and this node can be PAID in BTC
     #            -- which is the side that matters if you are earning. It cannot pay
     #            out: the payer walks the systems it shares with a peer and settles
@@ -1144,7 +1144,7 @@ ledgers:
     #
     #   service  The same bitcoind, run by THIS node as a core service, with its wallet
     #            derived from the mnemonic below. It signs like `core` and needs no
-    #            infrastructure like `esplora`: you back up one mnemonic, the way you
+    #            infrastructure like `explorer`: you back up one mnemonic, the way you
     #            already do for Ergo, and the node brings the rest up at boot. Needs
     #            core_services.bitcoin-node, RPC_USER/RPC_PASSWORD, and
     #            WALLET_KEYS_EXTERNAL false. Read the "Running your own node" section of
@@ -1153,8 +1153,8 @@ ledgers:
     #
     # Ergo's posture is the third one: a mnemonic in this file, and the chain's own
     # software doing the signing.
-    BACKEND: esplora
-    ESPLORA_URL: "https://blockstream.info/api"
+    BACKEND: explorer
+    EXPLORER_URL: "https://blockstream.info/api"
     RPC_URL: "http://127.0.0.1:8332"
     # Core writes this file on every start, so the ordinary setup keeps no credential
     # in this file at all. RPC_USER / RPC_PASSWORD are the fallback.
@@ -1162,7 +1162,7 @@ ledgers:
     RPC_USER: ""
     RPC_PASSWORD: ""
     WALLET_NAME: "nodo"
-    # With BACKEND core or esplora this chain's keys live in Core's own wallet or nowhere,
+    # With BACKEND core or explorer this chain's keys live in Core's own wallet or nowhere,
     # not here, so nodo neither generates nor holds a mnemonic for it: back up bitcoind's
     # wallet, not this file.
     #

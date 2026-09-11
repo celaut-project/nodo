@@ -14,18 +14,18 @@ from unittest import mock
 
 IMPORT_ERROR = None
 try:
-    from src.payment_system.contracts.bitcoin import esplora
+    from src.payment_system.contracts.bitcoin import explorer
     from src.payment_system.contracts.bitcoin.backend import BackendUnavailable
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
-    esplora = None  # type: ignore[assignment]
+    explorer = None  # type: ignore[assignment]
 
 ADDRESS = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
 
 
 def _backend(responses):
-    """An Esplora backend whose HTTP reads are answered from ``responses``."""
-    chain = esplora.EsploraBackend("https://example.invalid/api")
+    """An explorer backend whose HTTP reads are answered from ``responses``."""
+    chain = explorer.ExplorerBackend("https://example.invalid/api")
     chain._get = lambda path: responses.get(path)  # type: ignore[assignment]
     return chain
 
@@ -36,10 +36,10 @@ class ReadOnlyTests(unittest.TestCase):
     def test_it_declares_that_it_cannot_pay(self):
         # The payer reads this, not an exception: funding is the selection, so a system
         # that cannot sign has no funding and the walk moves on.
-        self.assertFalse(esplora.EsploraBackend("x").can_pay)
+        self.assertFalse(explorer.ExplorerBackend("x").can_pay)
 
     def test_every_write_refuses_with_the_reason_and_the_fix(self):
-        chain = esplora.EsploraBackend("x")
+        chain = explorer.ExplorerBackend("x")
         for call in (
             lambda: chain.new_address(),
             lambda: chain.send_to(ADDRESS, 1_000),
@@ -60,7 +60,7 @@ class ReadOnlyTests(unittest.TestCase):
                 "mempool_stats": {"funded_txo_sum": 999_999, "spent_txo_sum": 0},
             }
         })
-        with mock.patch.object(esplora, "_receiving_address", return_value=ADDRESS):
+        with mock.patch.object(explorer, "_receiving_address", return_value=ADDRESS):
             self.assertEqual(chain.get_balance(), 100_000)
 
 
@@ -144,11 +144,11 @@ class NormalisedOutputTests(unittest.TestCase):
     def test_a_pushdata_op_return_is_read_too(self):
         token = b"x" * 80
         script = "6a4c" + f"{len(token):02x}" + token.hex()
-        self.assertEqual(esplora._op_return_payload(script), token)
+        self.assertEqual(explorer._op_return_payload(script), token)
 
     def test_a_script_that_is_not_an_op_return_carries_no_payload(self):
-        self.assertIsNone(esplora._op_return_payload("0014" + "11" * 20))
-        self.assertIsNone(esplora._op_return_payload("not-hex"))
+        self.assertIsNone(explorer._op_return_payload("0014" + "11" * 20))
+        self.assertIsNone(explorer._op_return_payload("not-hex"))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -170,20 +170,20 @@ class ConfigurationTests(unittest.TestCase):
 
     def _reason(self, url="https://example.invalid/api", address=ADDRESS):
         values = {
-            "ledgers.bitcoin.ESPLORA_URL": url,
+            "ledgers.bitcoin.EXPLORER_URL": url,
             "ledgers.bitcoin.payments.RECEIVING_ADDRESS": address,
         }
         with mock.patch.object(
-            esplora.ConfigManager(), "get",
+            explorer.ConfigManager(), "get",
             side_effect=lambda key, default=None: values.get(key, default),
         ):
-            return esplora.configuration_reason()
+            return explorer.configuration_reason()
 
     def test_a_configured_backend_is_usable(self):
         self.assertIsNone(self._reason())
 
     def test_no_url_is_named(self):
-        self.assertIn("ESPLORA_URL", self._reason(url=""))
+        self.assertIn("EXPLORER_URL", self._reason(url=""))
 
     def test_a_read_only_backend_needs_the_address_configured_by_hand(self):
         """It cannot ask a node for one, and inventing one would strand payments.
