@@ -1,5 +1,6 @@
 import importlib
 import os
+import shutil
 import sys
 from typing import Optional
 
@@ -98,19 +99,69 @@ def raise_java_dependency_missing(feature: Optional[str] = None) -> None:
     raise JavaDependencyMissing(build_java_dependency_message(feature=feature))
 
 
+#: Stale paths already named. `ensure_java_runtime` is reached from every payment
+#: advertisement, and a path that is wrong stays wrong, so the line is worth saying once
+#: rather than on every read.
+_stale_java_homes: set = set()
+
+
+def forget_stale_java_homes() -> None:
+    """Let the warning be said again. For a test, and for a config reload."""
+    _stale_java_homes.clear()
+
+
+def _stale_java_home(where: str, path: str, logger_fn=None) -> None:
+    """Say that a configured `JAVA_HOME` names a directory with no `java` in it.
+
+    Worth a line of its own, with the path in it. The installer sets both the
+    environment variable and `dependencies.java.JAVA_HOME`, so a node reaching this has
+    had a runtime move or be removed underneath it -- and the only symptom otherwise is
+    Ergo quietly vanishing from what the node advertises, which reads as a node that was
+    never configured for it rather than one whose path has gone stale.
+    """
+    if (where, path) in _stale_java_homes:
+        return
+    _stale_java_homes.add((where, path))
+    if logger_fn is None:
+        from src.utils.logger import LOGGER as logger_fn
+    logger_fn(
+        f"[WARNING] {where} points at {path!r}, which holds no bin/java. Java-backed "
+        "features fall back to whatever `java` is on PATH; correct the path or "
+        f"reinstall the runtime with `{get_java_install_command()}`."
+    )
+
+
 def ensure_java_runtime(feature: Optional[str] = None) -> None:
+    """Return quietly when this node has a Java runtime, raise when it has none.
+
+    Three places are looked at, in the order of how deliberately they were chosen:
+    `JAVA_HOME` in the environment, `dependencies.java.JAVA_HOME` in the config, and
+    finally `java` on `PATH`.
+
+    `PATH` last rather than not at all. A configured path that has gone stale used to be
+    the end of the search, so a node with a perfectly good `java` in front of it stopped
+    advertising Ergo altogether -- and since `registry.contracts()` drops a contract that
+    cannot settle, the node then offered no payment method at all and could not pay
+    anybody. A runtime the operator did not name is a weaker answer than one they did,
+    which is why it is tried last; it is not no answer.
+    """
     java_home = os.environ.get("JAVA_HOME")
     if java_home:
         if os.path.exists(os.path.join(java_home, "bin", "java")):
             return
-        raise_java_dependency_missing(feature=feature)
+        _stale_java_home("JAVA_HOME", str(java_home))
 
     try:
         configured_java_home = ConfigManager().get("dependencies.java.JAVA_HOME")
     except Exception:
         configured_java_home = None
 
-    if configured_java_home and os.path.exists(os.path.join(str(configured_java_home), "bin", "java")):
+    if configured_java_home:
+        if os.path.exists(os.path.join(str(configured_java_home), "bin", "java")):
+            return
+        _stale_java_home("dependencies.java.JAVA_HOME", str(configured_java_home))
+
+    if shutil.which("java"):
         return
 
     raise_java_dependency_missing(feature=feature)

@@ -89,10 +89,46 @@ needs_unspent_proof = False
 # in. It lives on the contract because it describes how long this chain takes.
 DEPOSIT_TOKEN_TTL = 6 * 3600
 
-# The transaction this contract builds: one P2WPKH input, a P2WPKH output, an OP_RETURN
-# and a change output. Used to turn a fee *rate* into a fee, which is what makes this
-# ledger's floors a moving number rather than a constant.
-VSIZE_ESTIMATE = 184
+# What each piece of a transaction this contract builds costs, in vB. Kept apart rather
+# than folded into one constant because the transactions are not all the same shape: a
+# payment carries an `OP_RETURN` and one output, a donation carries one output per
+# wallet and no `OP_RETURN`, and a fee is a rate times the size of the transaction it is
+# actually paid on. One number for all of them is a fee reserved for a transaction
+# nobody built.
+TX_OVERHEAD_VSIZE = 11
+P2WPKH_INPUT_VSIZE = 68
+P2WPKH_OUTPUT_VSIZE = 31
+OP_RETURN_VSIZE = 43
+
+
+def vsize_estimate(outputs: int = 1, *, op_return: bool = False, inputs: int = 1) -> int:
+    """About how large a transaction of this shape is, in vB.
+
+    An estimate, and the direction it errs in matters: Core charges the rate it is
+    given against the vsize the transaction really has, so a vsize guessed too small
+    means a fee larger than the one that was reserved -- which comes out of the retained
+    hot-wallet balance, or fails funding outright where the balance was sized against
+    the reserve.
+
+    ``inputs`` is one because that is what a wallet holding a few consolidated UTXOs
+    spends, and it is the one term nothing here can know: Core picks the inputs when it
+    funds. A wallet of many small UTXOs therefore builds a larger transaction than this
+    describes; what happens then is a funding failure the caller reports and retries,
+    never a payment recorded as made.
+    """
+    return (
+        TX_OVERHEAD_VSIZE
+        + max(1, int(inputs)) * P2WPKH_INPUT_VSIZE
+        # The outputs asked for, plus the change Core adds.
+        + (max(1, int(outputs)) + 1) * P2WPKH_OUTPUT_VSIZE
+        + (OP_RETURN_VSIZE if op_return else 0)
+    )
+
+
+# The transaction this contract builds to *be paid*: one P2WPKH input, a P2WPKH output,
+# an OP_RETURN and a change output. Used to turn a fee *rate* into a fee, which is what
+# makes this ledger's floors a moving number rather than a constant.
+VSIZE_ESTIMATE = vsize_estimate(outputs=1, op_return=True)  # 184 vB
 
 # How long to wait for the payer's confirmation, and how often to look.
 WAIT_TX_TIME = 240  # attempts
@@ -673,19 +709,46 @@ def _pay_accrued_donations():
     from src.payment_system.donations.payout import pay_accrued
 
     try:
-        fee = _fee_sat()
+        fee_rate = _fee_rate_sat_vb()
+        # Sized for the transaction this payout can actually build -- one output per
+        # configured wallet -- rather than for the one-output payment `VSIZE_ESTIMATE`
+        # describes. Core charges a rate against the vsize of what it funds, so a
+        # reserve taken from a smaller transaction is a fee paid out of the retained hot
+        # balance instead of out of the debt, or a `fundrawtransaction` that fails
+        # outright where `can_cover` sized the balance against that reserve.
+        #
+        # Conservative on purpose: `plan_payout` routinely pays fewer wallets than are
+        # configured, and over-reserving only leaves a little more accrued for next
+        # time, while under-reserving is money the node did not agree to spend.
+        fee = int(round(fee_rate * vsize_estimate(
+            outputs=max(1, len(donation_config.pay_wallets(LEDGER)))
+        )))
     except Exception as e:
         LOGGER(f"Not paying BTC donations this tick: {e}")
         return
 
     def send(outputs, fee_sat: int) -> str:
         chain = backend()
+        # A rate, because a rate is what Core charges against the vsize of the
+        # transaction it really builds -- recovered from `fee_sat` against the shape
+        # being built here rather than against `VSIZE_ESTIMATE`, which describes a
+        # different transaction entirely.
+        #
+        # `fee_sat` and not the enclosing `fee`: `pay_accrued` passes `plan.fee_native`
+        # deliberately, and the two are the same number only for as long as
+        # `plan_payout` does not adjust a fee. Held at the market rate read above, so a
+        # reserve sized for more wallets than are being paid this tick cannot become a
+        # fee above what the network is asking for -- which is also what keeps this
+        # under the ceiling `_fee_rate_sat_vb` refuses to cross.
+        sat_vb = fee_rate
+        if fee_sat > 0:
+            sat_vb = min(fee_rate, fee_sat / vsize_estimate(outputs=len(outputs)))
         if len(outputs) == 1:
             address, amount = outputs[0]
-            return chain.send_to(address, amount, fee_rate_sat_vb=fee / VSIZE_ESTIMATE)
+            return chain.send_to(address, amount, fee_rate_sat_vb=sat_vb)
         # Several wallets: one transaction with one output each, so a split costs one
         # fee rather than one per recipient.
-        return chain.send_many(outputs, fee_rate_sat_vb=fee / VSIZE_ESTIMATE)
+        return chain.send_many(outputs, fee_rate_sat_vb=sat_vb)
 
     def can_cover(total_sat: int) -> bool:
         return backend().get_balance(MIN_CONFIRMATIONS()) >= total_sat
@@ -708,7 +771,16 @@ def _pay_accrued_donations():
 
 
 def _sweep_to_cold_wallet():
-    """Move the wallet's excess to cold storage when both thresholds are met."""
+    """Move the wallet's excess to cold storage when both thresholds are met.
+
+    The fee is left to Core to take out of the swept output rather than reserved here
+    against a guessed transaction size. A sweep is the one transaction whose size cannot
+    be guessed: it moves most of a balance, so Core spends however many UTXOs that
+    balance happens to be split across, and a fee reserved for one input is a fee the
+    retained hot balance ends up paying. Subtracted from the output, the difference
+    lands on the amount that leaves -- money already being parted with -- and the hot
+    limit is retained whatever the transaction turns out to weigh.
+    """
     LOGGER("Exec bitcoin interface manager (cold sweep).")
     try:
         cold_wallet = COLD_WALLET()
@@ -725,7 +797,11 @@ def _sweep_to_cold_wallet():
             return
 
         chain = backend()
-        fee = _fee_sat()
+        fee_rate = _fee_rate_sat_vb()
+        # Still reserved for the decision, even though Core takes the real one out of
+        # the output: an excess worth barely more than a fee is not worth a transaction,
+        # and this is the figure that says so.
+        fee = int(round(fee_rate * vsize_estimate(outputs=1)))
         sweep_sat = compute_sweep_amount(
             balance=chain.get_balance(MIN_CONFIRMATIONS()),
             hot_limit=btc_to_satoshi(
@@ -749,11 +825,12 @@ def _sweep_to_cold_wallet():
 
         with payment_lock:
             tx_id = chain.send_to(
-                cold_wallet, sweep_sat, fee_rate_sat_vb=fee / VSIZE_ESTIMATE
+                cold_wallet, sweep_sat, fee_rate_sat_vb=fee_rate,
+                subtract_fee_from_amount=True,
             )
         LOGGER(
             f"Cold sweep tx -> {tx_id}: {satoshi_to_btc_str(sweep_sat)} BTC to "
-            f"{cold_wallet} (fee {satoshi_to_btc_str(fee)} BTC)."
+            f"{cold_wallet}, less the fee at {fee_rate:.2f} sat/vB."
         )
     except Exception as e:
         LOGGER(f"Exception on bitcoin cold sweep -> {e}")

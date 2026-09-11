@@ -186,6 +186,52 @@ class ManagerIntervalTests(unittest.TestCase):
         )
         self.assertEqual(set(due), {FAST})
 
+    def test_a_contract_is_only_recorded_as_run_once_it_has_run(self):
+        last_run: dict = {}
+        payment_process._run_managers({FAST: lambda: None}, last_run)
+        self.assertIn(FAST, last_run)
+
+    def test_a_job_that_raised_still_counts_as_its_turn(self):
+        # What the interval bounds is how often this node spends money reading a
+        # chain; a contract whose backend is down must not be retried every quantum.
+        last_run: dict = {}
+        with mock.patch.object(payment_process._l, "LOGGER"):
+            payment_process._run_managers(
+                {FAST: lambda: (_ for _ in ()).throw(RuntimeError("no node"))}, last_run
+            )
+        self.assertIn(FAST, last_run)
+
+    def test_a_drain_that_times_out_does_not_defer_the_paused_contract(self):
+        """The stamp used to go on before the drain, so a timeout cost a whole interval.
+
+        86400 s by default, and with Bitcoin registered it stops being rare:
+        `deposit_token_ttl()` is the maximum across contracts, so one pending Bitcoin
+        deposit holds the pending set non-empty for hours -- and Ergo's donation payout
+        and cold sweep are skipped for a day each time it does.
+        """
+        managers = {FAST: lambda: None, SLOW: lambda: None}
+        envs = _envs({FAST: 3600, SLOW: 21600}, pausing=(FAST,), managers=managers,
+                     intervals={FAST: 3600, SLOW: 3600})
+        with mock.patch.object(payment_process, "_payment_envs", return_value=envs), \
+                mock.patch.object(payment_process, "_pause_and_drain_deposits",
+                                  return_value=False), \
+                mock.patch.object(payment_process, "sc", mock.MagicMock()), \
+                mock.patch.object(payment_process, "_run_managers") as run, \
+                mock.patch.object(payment_process, "sleep",
+                                  side_effect=[None, StopIteration]):
+            manage = getattr(payment_process, "__manage_interfaces")
+            try:
+                manage()
+            except StopIteration:
+                pass
+
+        # The unpaused contract was handed the map to stamp itself in; the paused one
+        # never reached `_run_managers` at all, so nothing recorded it as having run.
+        run.assert_called_once()
+        ran, last_run = run.call_args.args
+        self.assertEqual(set(ran), {SLOW})
+        self.assertEqual(last_run, {})
+
     def test_the_two_shipped_contracts_read_their_own_config_keys(self):
         import inspect
 
