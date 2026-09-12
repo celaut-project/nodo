@@ -42,7 +42,7 @@ interchangeable:
 | | earned by | purchasable | in the balancer |
 |---|---|---|---|
 | **Local reputation** (`peer.reputation_score`) | behaving well towards *this* node — taking our payments, answering `GetPeerInfo` | no — the only way to raise it is to behave well towards us | bonus *and* penalty, at `SOCIALIZATION_FACTOR` (`2`) |
-| **On-chain reputation** (opinions on Ergo's reputation contract) | other proofs staking part of themselves on you, backed by irrecoverably burned ERG | **yes, by burning — that is what the burn is** | bonus *and* penalty, at `ONCHAIN_REPUTATION_WEIGHT` (`0.1`), and **only after each publisher is re-weighed by its local standing with us and capped** |
+| **On-chain reputation** (opinions on Ergo's reputation contract) | other proofs staking part of themselves on you, backed by irrecoverably burned ERG | **yes, by burning — that is what the burn is** | bonus *and* penalty, at `ONCHAIN_REPUTATION_WEIGHT` (`0.1`), and **only after each proof's burn is discounted by how far that proof agrees with what we have seen ourselves, then capped** |
 | **Donation credit** | contributing money, verifiably on-chain | yes, that is the point | bonus only, at `DONATION_WEIGHT` (`0.3`) |
 
 ### What actually protects the routing decision
@@ -58,13 +58,19 @@ different things protect the three terms, and they are worth naming separately:
   every node here runs.
 - **The on-chain term is bought by design too** — an opinion is worth `share × burned
   ERG`, minting a proof is free, and the ERG put into one can never come back out, which
-  is the ecosystem's only Sybil resistance (see [`ERGO.md`](ERGO.md)). So it is **not
-  imported as it stands**. What is imported is each opinion's credibility *to us*: a
-  publisher's verdict is multiplied by that publisher's standing in our own local table,
-  capped per publisher, and then saturated. A proof belonging to no peer we have ever
-  transacted with weighs zero no matter how much was burned into it, which is what makes
-  the term a transitive extension of local observation rather than a second purchasable
-  channel. `burned_nanoerg` appears nowhere in the balancer.
+  is the ecosystem's only Sybil resistance (see [`ERGO.md`](ERGO.md)). The burn is
+  counted, at its own weight, **after being repriced by us**. A reputation proof is not a
+  peer: a peer is a node we have transacted with and keep an event log about, a proof is
+  a token that publishes opinions. We keep local reputation on peers only, and work out
+  what a *proof* is worth by comparing the opinions it publishes about peers against our
+  own scores for those same peers — the cosine over the peers both of us rate. Its burn
+  is scaled by that, capped per proof, then saturated.
+
+  So a proof that vouches loudly for a peer that failed us is discredited **by that
+  vouch** rather than by a rule about who owns it; a proof we share no ground with scores
+  zero however much was burned into it, which is the default and closes the
+  mint-a-second-proof trick; and a newcomer can still earn a voice by agreeing with us
+  about peers we both know, which an owner test could never allow.
 
 The traffic used to be one-way: `submit_to_ledger` publishes our local scores as staked
 opinions and nothing was read back. It is now a loop, but a lossy one on purpose — what
@@ -95,11 +101,23 @@ the separate weight is what closes it.
 Filtering out a node's opinion about itself does **not** close it, and is not claimed to:
 a second proof costs nothing to mint, nothing on-chain ties it to its owner, and R7 is a
 wallet — wallets are free too. `split_own` is hygiene for the report (issue #351). The
-defence is that an unattributable proof has no local standing, so it is inaudible.
+defence is that a proof nobody has ever heard speak has agreed with us about nothing, so
+its burn buys nothing.
 
-The price of that defence is real and paid by newcomers: **an unknown rater counts for
-nothing**, so a node whose only vouchers are peers we have never dealt with scores zero
-here. `LOCAL_BIAS` and the donation term are what newcomers have.
+**And agreement can be mirrored — this is the term's known weakness, not a detail.** This
+node publishes its own local scores to the chain (`submit_to_ledger`), so anyone can read
+them, mint a proof, restate them verbatim and reach near-perfect agreement for the price
+of the burn. Dating the boxes does not help: revising a box spends it and rewrites its
+date. What contains it is the bounding, which is why the weight and not the shape is the
+safety parameter — a perfect mirror is still capped at one proof's worth, still saturates,
+and still sits under `DONATION_WEIGHT`, so the most it can buy is the term's ceiling,
+priced below 3 ERG donated. A mirror also has to keep mirroring, publishing that the peers
+we distrust are untrustworthy, which is not free for a coalition to say.
+
+What this shape does **not** cost is bootstrapping. A rater unknown to us is not mute by
+decree: it is worth what it agrees with us about, so a newcomer with no history of
+transacting with us can still be heard. What stays true is that agreeing about nothing is
+worth nothing — `LOCAL_BIAS` and the donation term are what a node with no overlap has.
 
 ## The two wallet lists
 
