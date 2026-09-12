@@ -75,14 +75,17 @@ down when a node misbehaves and the question is what state the host is in.
    `New-NetFirewallHyperVRule`.
 6. Adds a Windows route for `192.168.200.0/24` — the microVM subnet — via the
    distro's IP, so the host can reach the guests a node launches.
-7. Creates a `Nodo Terminal` desktop shortcut (`wsl.exe -d Nodo --cd ~`).
+7. Creates a `Nodo Terminal` desktop shortcut that opens the **console** directly
+   (`wsl.exe -d Nodo --cd ~ -- nodo tui`), not a shell prompt.
 
 **Inside the distro:**
 
 8. Writes `/etc/wsl.conf` with `systemd=true` and `default=root`. **The node needs
    both**: `install.sh` installs a systemd unit, and Cloud Hypervisor networking
    needs root.
-9. Installs `git curl sudo iptables bc`, sets the hostname to `Nodo`.
+9. Installs `git curl sudo iptables bc`, sets the hostname to `Nodo`, and makes an
+   interactive login open the console (`exec nodo tui` from `/root/.bashrc`, guarded
+   so a non-interactive `wsl -d Nodo -- <cmd>` still gets a plain shell).
 10. Downloads the paired `vmlinuz` and `initramfs` to `/boot`. These belong to the
     WSL2 host kernel and are **not** the Cloud Hypervisor guest kernel, which
     `install.sh` fetches separately into `/nodo/cloud_hypervisor/`.
@@ -90,7 +93,12 @@ down when a node misbehaves and the question is what state the host is in.
     ```bash
     curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
     ```
-12. Points `network.EXTERNAL_INTERFACE` in `/nodo/config.yaml` at the distro's
+12. Builds the console (`cargo build --release`), fetching the Rust toolchain if it
+    is missing. Nothing else in the install needs Rust; it is built here because the
+    shortcut opens it, and `cargo run` on a cold cache would compile ~17k lines
+    behind a window showing nothing. Non-fatal — `nodo tui` falls back to building
+    on demand.
+13. Points `network.EXTERNAL_INTERFACE` in `/nodo/config.yaml` at the distro's
     default-route interface, and enables IP forwarding plus `FORWARD` accepts for
     the microVM subnets, persisted through an `iptables-restore` unit.
 
@@ -101,13 +109,21 @@ down when a node misbehaves and the question is what state the host is in.
 
 ## After it finishes
 
-Open the `Nodo Terminal` shortcut, then:
+Open the `Nodo Terminal` shortcut. **The first launch asks two questions** before it
+draws anything — the KyA, and the share of earnings this node donates (2 % by
+default, `0` to opt out). The install deliberately does not ask them: it is a pipe
+with no terminal on either end, so a prompt there would be skipped in silence. See
+[`DONATIONS.md`](DONATIONS.md).
+
+The console covers the rest, but the same checks from a shell are:
 
 ```bash
 sudo nodo doctor        # every check should be [OK]
 sudo nodo daemon start
 sudo nodo daemon status
 ```
+
+To get a plain shell instead of the console, `wsl -d Nodo -- bash`.
 
 ---
 
@@ -175,23 +191,19 @@ ever execute.
 sudo apt update && sudo apt install -y curl
 ```
 
-Then **clone and run** rather than piping:
+Then either clone and run, or pipe — both are fine, because **the installer asks
+nothing**:
 
 ```bash
-git clone https://github.com/celaut-project/nodo.git /tmp/nodo
-sudo bash /tmp/nodo/install.sh
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
 ```
 
-Piping the installer into `bash` works, but stdin is then the pipe rather than a
-terminal, and the installer skips every question it would otherwise ask — silently.
-Today that costs nothing. It will not stay that way; see
-[What is not in a Windows node yet](#what-is-not-in-a-windows-node-yet).
-
-To pipe anyway, answer the questions with the environment instead:
+The KyA and the donation share are asked on the **first run of `nodo`**, not during
+the install, precisely so that piping loses nothing. To set the share without ever
+being asked — a scripted or fleet install — name it in the environment:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh \
-  | sudo NODO_DONATION_PERCENTAGE=0.02 bash
+curl ... | sudo NODO_DONATION_PERCENTAGE=0 bash
 ```
 
 The install downloads a portable Python 3.11 and JRE 21, builds a venv, fetches
@@ -315,24 +327,21 @@ how to reach a service **without** opening anything.
 
 # What is not in a Windows node yet
 
-Both installation paths pull `install.sh` from **`stable`**. `dev` has since gained
-two things that change what an install does, and neither is live on Windows until
-the next release moves `stable`. Written down here because on the day it moves,
-they land on Windows without either path changing a line:
+Both installation paths pull `install.sh` from **`stable`**, so anything merged to
+`dev` reaches a Windows node only when a release moves `stable`. Two things are
+waiting there:
 
-- **A donation prompt.** `install.sh` on `dev` asks what share of earnings to
-  donate, defaulting to 2 %. It asks only on a terminal (`[ -t 0 ]`), and **both
-  Windows paths install through a pipe** — the installer's in-distro script pipes
-  `curl` into `bash`, and under `Nodo-Setup.exe` there is no console at all. The
-  question will be skipped and the default kept, silently. The commit that added it
-  argues "a default nobody is told about is not consent"; a Windows user is exactly
-  that nobody. Passing `NODO_DONATION_PERCENTAGE` names the share without a prompt
-  and is what the installer should do — until then, check
+- **The first-run questions.** The KyA and the donation share are asked by
+  `nodo` itself on first run (`src/commands/onboarding.py`), which is what the
+  desktop shortcut opens. On `stable` today, the KyA is still asked by
+  `nodo.py` through `accept_kya.sh` and the donation share is not asked at all on
+  Windows — it is left at the 2 % default. Until the release lands, check
   `ledgers.ergo.payments.DONATION_PERCENTAGE` in `config.yaml` after installing.
 - **Gateway port assignment.** `install.sh` on `dev` picks the port during the
   install and prints an operator notice as its final line, saying what still has to
-  be opened. Piped and GUI-wrapped, that notice has nowhere to go. It is the same
-  instruction as [Reaching the node](#reaching-the-node-from-outside).
+  be opened. Piped and GUI-wrapped, that notice has nowhere to go — it is the same
+  instruction as [Reaching the node](#reaching-the-node-from-outside), so nothing is
+  lost by reading it here instead.
 
 Also on `dev`: `builder.ARM_SUPPORT` and `builder.X86_SUPPORT` were removed and are
 now **refused** at startup. A `config.yaml` kept from an older node — or baked into
