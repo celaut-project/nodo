@@ -585,17 +585,20 @@ balancers:
   # on, a burn destroys the money. The node refuses a config where this exceeds
   # DONATION_WEIGHT, which would make burning the better buy.
   #
-  # It is not a bare import of what the chain says. Each opinion is weighed by the
-  # publisher's standing in THIS node's own peer table, so a proof belonging to no peer
-  # we have dealt with weighs zero however much was burned into it, and each publisher
-  # is capped. See docs/DONATIONS.md and issue #353.
+  # The burn counts, but only as far as the proof behind it agrees with what this node
+  # has seen for itself: each publishing proof's opinions about peers are compared with
+  # our own local scores for those same peers, and its burn is scaled by how closely the
+  # two match. A proof we share no ground with scores zero however much was burned into
+  # it, and a proof that vouches for peers that failed us discredits itself by doing so.
+  # We keep local reputation on peers, never on proofs. See docs/DONATIONS.md and #353.
   ONCHAIN_REPUTATION_WEIGHT: 0.1
-  # Summed trusted verdict at which half of that weight is earned. 1.0 is four
-  # fully-trusted publishers at the per-publisher cap.
-  ONCHAIN_REPUTATION_HALF_CREDIT: 1.0
-  # The most any single publisher may contribute to that sum. A quarter, so no one
-  # proof -- however trusted, however funded -- carries the term on its own.
-  ONCHAIN_PUBLISHER_CAP: 0.25
+  # Agreed, burn-weighted ERG at which half of that weight is earned. 20 is four
+  # publishing proofs at the per-publisher cap, each in full agreement with us.
+  ONCHAIN_REPUTATION_HALF_CREDIT: 20.0
+  # The most any single proof may contribute to that sum, in ERG. Equal to
+  # DONATION_HALF_CREDIT on purpose: one proof, however funded and however much it
+  # agrees with us, is worth at most what one median donation is.
+  ONCHAIN_PUBLISHER_CAP: 5.0
   COST_AVERAGE_VARIATION: 1
   # Weight of a peer's donation credit. Bonus only, never a penalty: penalising
   # non-donors is exactly what would make patching this out rational.

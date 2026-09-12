@@ -475,9 +475,10 @@ score(local) = −ln(cost_mu) + LOCAL_BIAS              + DONATION_WEIGHT · d̂
 r̂ = r / (|r| + REPUTATION_HALF_CREDIT)   ∈ (−1, 1)   sign-preserving: a peer that
                                                      failed us is still penalised
 ô = S / (|S| + ONCHAIN_REPUTATION_HALF_CREDIT)  ∈ (−1, 1)
-    S = Σ_p trust(p) · sign(v_p) · min(|v_p|, ONCHAIN_PUBLISHER_CAP)
-    trust(p) = max(0, r̂(p))   — the publisher's standing in OUR table
-    v_p      = the share of its own proof p stakes on this peer, netted
+    S = Σ_p cred(p) · sign(v_p) · min(|v_p| · burned_erg(p), ONCHAIN_PUBLISHER_CAP)
+    v_p     = the share of its own proof p stakes on this peer, netted
+    cred(p) = max(0, cos(v_p, r̂))  — how far p's opinions about peers agree
+                                      with ours, over the peers we both rate
 d̂ = C / (C + DONATION_HALF_CREDIT)       ∈ [ 0, 1)   bonus only, never a penalty
 ```
 
@@ -485,16 +486,30 @@ d̂ = C / (C + DONATION_HALF_CREDIT)       ∈ [ 0, 1)   bonus only, never a pen
 the chain says about it is what it published.
 
 `ô` is the *on-chain* reputation — a different quantity that shares the name and, unlike
-`r̂`, one that can be bought (an opinion is worth `share × burned ERG`). It is deliberately
-not a bare import: each publisher's verdict is multiplied by **that publisher's standing in
-this node's own peer table** and capped, so a proof belonging to no peer we have dealt with
-weighs zero however much was burned into it, and no single publisher carries the term.
-`trust` reuses `REPUTATION_HALF_CREDIT` rather than adding a knob: a peer lends us exactly
-the credibility our own ranking already gives it. It is clamped at zero rather than
-sign-preserving — a peer we distrust is silenced, not inverted, or paying a distrusted peer
-to badmouth a rival would promote that rival. The chain is read on an hourly tick into
-SQLite; a routing decision does no network I/O, and an index that has never filled scores
-**every** candidate zero, never some.
+`r̂`, one that can be bought (an opinion is worth `share × burned ERG`). The burn **is**
+counted, and `cred(p)` is what keeps counting it from being a way to buy a routing
+decision: a reputation proof is not a peer, so instead of asking who owns it, this node
+asks what it has said. Each proof's opinions about peers are compared with our own local
+scores for those same peers — the cosine over the peers both of us rate — and its burn is
+scaled by the result.
+
+That is worth reading twice, because it is the whole design. A proof that praises a peer
+that failed us is discredited **by that praise**, not by a rule about its owner. A proof
+we share no ground with scores `0` and its burn buys nothing, which is the default and
+the common case: a freshly minted proof that has only ever spoken about its own node
+overlaps with us nowhere. And a newcomer can still earn a voice by agreeing with us about
+peers we both know, which an owner test could never allow. Local reputation stays on
+**peers only** — nothing is stored about proofs, `cred` is computed at read time.
+
+`cred` is clamped at zero rather than sign-preserving: disagreement silences a proof, it
+does not invert it. Were it to invert, paying a proof to denounce a rival would promote
+that rival. It is also mirrorable — this node publishes its own scores
+(`submit_to_ledger`), so agreement can be bought by copying them — which is why the cap,
+the saturation and `ONCHAIN_REPUTATION_WEIGHT ≤ DONATION_WEIGHT` are what the safety
+actually rests on: the most a perfect mirror buys is the term's ceiling, priced below 3
+ERG donated. The chain is read on an hourly tick into SQLite; a routing decision does no
+network I/O, and an index that has never filled scores **every** candidate zero, never
+some.
 
 Because price enters as a logarithm, **each weight is the maximum equivalent price
 discount**: a weight of `W` lets the best possible candidate on that term beat a price up
@@ -506,10 +521,10 @@ ties.
 | Key | Default | Meaning |
 |---|---|---|
 | `balancers.SOCIALIZATION_FACTOR` | `2` | Weight of a peer's reputation, i.e. the largest price premium reliability can beat (`e²` ≈ 7.4×). |
-| `balancers.REPUTATION_HALF_CREDIT` | `50` | Reputation at which half that weight is earned. A peer's standing no longer depends on how many peers exist. Also the half-credit for `trust(p)` in the on-chain term. |
+| `balancers.REPUTATION_HALF_CREDIT` | `50` | Reputation at which half that weight is earned. A peer's standing no longer depends on how many peers exist. Also what bounds our own opinion vector when `cred(p)` is computed. |
 | `balancers.ONCHAIN_REPUTATION_WEIGHT` | `0.1` | Weight of what the **ledgers** say about a peer (`e^0.1` ≈ 11 % premium at most). **Read `ONCHAIN_REPUTATION_WEIGHT / DONATION_WEIGHT` as the exchange rate between destroying one ERG and donating one** — at `0.1 / 0.3` a donated ERG is worth three burned ones, on purpose. The node **refuses** a config where this exceeds `DONATION_WEIGHT`: on-chain reputation is bought by burning, and weighing the burn higher makes donating the worse buy, so the money that funds this software gets destroyed instead. See [`DONATIONS.md`](DONATIONS.md) and issue #353. |
-| `balancers.ONCHAIN_REPUTATION_HALF_CREDIT` | `1.0` | Summed, trusted, capped verdict `S` at which half that weight is earned. `1.0` is four fully-trusted publishers at the cap — a coalition, not a purchase. |
-| `balancers.ONCHAIN_PUBLISHER_CAP` | `0.25` | The most any one publisher may contribute to `S`, so no single proof — however trusted, however funded — carries the term alone. |
+| `balancers.ONCHAIN_REPUTATION_HALF_CREDIT` | `20.0` | Agreed, burn-weighted ERG (`S`) at which half that weight is earned. `20` is four proofs at the cap, each in full agreement with us — a coalition, not a purchase. |
+| `balancers.ONCHAIN_PUBLISHER_CAP` | `5.0` | The most any one proof may contribute to `S`, in ERG. Equal to `DONATION_HALF_CREDIT` on purpose: one proof, however funded and however agreeable, is worth at most what one median donation is. |
 | `balancers.COST_AVERAGE_VARIATION` | `1` | How much a quote's variance inflates its cost when candidates are compared. |
 | `balancers.DONATION_WEIGHT` | `0.3` | Weight of a peer's donation credit (`e^0.3` ≈ 35 % premium at most). **The safety parameter** — a high value closes the network to newcomers; see [`DONATIONS.md`](DONATIONS.md). |
 | `balancers.DONATION_HALF_CREDIT` | `"5000000000"` | Donation credit, in MU, at which half that weight is earned. |

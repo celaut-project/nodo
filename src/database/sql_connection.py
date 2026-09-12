@@ -2975,11 +2975,11 @@ class SQLConnection(metaclass=Singleton):
         return _as_int(row['tip']) if row else 0
 
     def replace_onchain_opinions(self, ledger: str, subject_id: str,
-                                 rows: List[Tuple[str, str, float]]) -> bool:
+                                 rows: List[Tuple[str, float, int]]) -> bool:
         """Set what ``ledger`` says about ``subject_id`` to exactly ``rows``. Atomic.
 
-        ``rows`` are ``(proof id, publisher peer id, verdict)``, already netted per proof
-        by the caller. Replace rather than upsert, because an opinion can be *withdrawn*:
+        ``rows`` are ``(proof id, verdict, burned nanoERG)``, already netted per proof by
+        the caller. Replace rather than upsert, because an opinion can be *withdrawn*:
         revising a reputation box spends it and writes a new one, so a proof that pulled
         its stake back leaves no row behind to update, and an upsert would keep crediting
         a peer for a vouch that no longer exists on the chain.
@@ -2997,12 +2997,12 @@ class SQLConnection(metaclass=Singleton):
             "DELETE FROM onchain_opinions WHERE ledger = ? AND subject_id = ?",
             (ledger, subject_id),
         )]
-        for proof_id, publisher_peer_id, verdict in rows:
+        for proof_id, verdict, burned_nanoerg in rows:
             statements.append((
                 "INSERT INTO onchain_opinions "
-                "(ledger, subject_id, proof_id, publisher_peer_id, verdict) "
+                "(ledger, subject_id, proof_id, verdict, burned_nanoerg) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (ledger, subject_id, str(proof_id), str(publisher_peer_id), float(verdict)),
+                (ledger, subject_id, str(proof_id), float(verdict), int(burned_nanoerg)),
             ))
         try:
             self._execute2(statements)
@@ -3014,16 +3014,19 @@ class SQLConnection(metaclass=Singleton):
             return False
 
     def get_onchain_opinions(self, subject_id: Optional[str] = None) -> List[dict]:
-        """Attributable on-chain opinions, as the balancer's on-chain term reads them.
+        """On-chain opinions, as the balancer's on-chain term reads them.
 
         With no ``subject_id``, every row, so one pass builds the whole candidate set for
         a routing decision -- the same shape and the same reason as ``get_donations``.
+        That whole-table read is also what lets the term score each publishing proof: the
+        rows grouped by proof are its opinion vector, and filtering to one subject first
+        would leave nothing to judge the proof saying it by.
 
         An empty list on a read failure, never an exception. The term this feeds must
         score every candidate zero rather than some of them, and a routing decision has
         to complete (issues #352, #353).
         """
-        query = ("SELECT ledger, subject_id, proof_id, publisher_peer_id, verdict "
+        query = ("SELECT ledger, subject_id, proof_id, verdict, burned_nanoerg "
                  "FROM onchain_opinions")
         params: tuple = ()
         if subject_id is not None:

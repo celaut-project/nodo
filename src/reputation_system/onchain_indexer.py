@@ -13,26 +13,26 @@ The same three properties the donation indexer keeps, for the same reasons
   verdict of "nobody vouches for this peer" -- the rows already stored stand, and the
   next refresh re-reads what this one could not.
 
-Two filters are applied before a row is written, and they are what the whole design rests
-on:
+What is stored is the chain as it stands: every proof's netted verdict on each known
+peer, and the sunk cost behind that proof. **No publisher is filtered out here**, and
+that is the design rather than an omission. A proof is not credible because of who owns
+it -- proofs and wallets are both free to mint, so any identity test is a test an
+attacker passes by paying nothing. It is credible because of *what it has said*, which
+:mod:`.onchain_credit` scores at read time against this node's own opinions. A proof
+nobody here has ever heard of is not excluded from the table; it simply agrees with us
+about nothing, and nothing is what its burn is then worth.
 
-**The subject's own proofs are set aside** (:func:`interface._own_proof_ids`, issue
-#351). Hygiene rather than the defence: the list is what the subject *chose to announce*,
-and minting a second proof it never mentions is free.
+One filter does apply: **the subject's own proofs are set aside**
+(:func:`interface._own_proof_ids`, issue #351). Hygiene rather than the defence, and it
+is worth being clear about which is which. The announced list is what the subject
+*chose* to disclose, and minting a second proof it never mentions is free -- so this
+keeps a self-vouch out of the figures a node reports about itself, and stops nothing.
+What stops the self-vouch is that an undisclosed proof has no track record with us
+either.
 
-**A publisher has to be a peer we know, and to have proved it owns the proof.** The proof
-id has to appear in some peer's stored advertisement *and* carry an owner attestation
-that verifies against that peer's id (:func:`proof_attestation.attested_proof_owner`) --
-the same link ``nodo verify_reputation`` prints and ``manager.add_peer_instance`` checks
-when a peer introduces itself. Both checks are local: one SQLite read and one Schnorr
-verification, no round trip. The canonical-contract question is already settled upstream,
-because ``opinions_about`` only returns boxes on the pinned ErgoTree.
-
-An opinion published by a proof we cannot attribute to a peer is **dropped rather than
-stored as unattributed**, which is where this parts from the donation indexer. A donation
-is a fact about money that happened and can be credited retroactively when its donor is
-introduced; an opinion is re-read in full on every refresh, so a publisher introduced
-later is picked up on the next pass without a row having waited for it.
+The rows are keyed by ``(ledger, subject, proof)``: the publishing proof is the unit of
+voice, netted across its boxes before it gets here (``opinions.by_proof``), so a proof
+that split its stake into ten boxes still speaks once.
 """
 from __future__ import annotations
 
@@ -43,110 +43,56 @@ from src.database.sql_connection import SQLConnection
 from src.utils.logger import LOGGER
 
 
-def publisher_peers() -> Dict[str, str]:
-    """``proof id -> peer id`` for every proof a known peer has proved it owns.
+def opinions_for(subject_id: str) -> List[Tuple[str, float, int]]:
+    """``(proof id, verdict, burned nanoERG)`` for one subject. Raises on a read failure.
 
-    Read from the advertisement each peer signed, which is where
-    ``commands.verify_reputation`` reads them from too: a proof announced there is one
-    the peer can be asked to prove it owns, so it is the list the peer is accountable
-    for. A node may announce several.
+    The verdict is the publishing proof's netted signed share of itself staked on the
+    subject (``opinions.by_proof``), in ``[-1, 1]``. The burn is a property of the proof
+    rather than of a box (``opinions.burned_by_proof``), so it is the same figure on
+    every row that proof produces and it is stored per row only so that the reader needs
+    one table and no join.
 
-    A proof announced by two peers is attributed to neither. Only one of them can control
-    it, and crediting the wrong one would hand a peer the voice another peer paid for --
-    the same rule ``peer_by_contract_instance`` applies to a payment address.
-    """
-    from protos import celaut_pb2
-    from src.reputation_system.proof_attestation import attested_proof_owner
-    from src.utils.contract_xattrs import get_token_id
-
-    sql = SQLConnection()
-    owners: Dict[str, str] = {}
-    contested: set = set()
-    for peer_id in sql.get_peers_id():
-        advertisement = None
-        try:
-            advertisement = sql.get_peer_advertisement(peer_id)
-        except Exception as e:
-            LOGGER(f"Could not read the advertisement of peer {peer_id}: {e}")
-        if not advertisement:
-            continue
-        announced = celaut_pb2.Peer()
-        try:
-            announced.ParseFromString(advertisement)
-        except Exception as e:
-            LOGGER(f"Unreadable advertisement for peer {peer_id}: {e}")
-            continue
-        for contract in announced.reputation_proofs:
-            token_id = get_token_id(contract)
-            if not token_id:
-                continue
-            # The attestation is what ties an on-chain proof to a node identity: R7
-            # holds an Ergo proposition and can never hold an identity key, so the
-            # wallet signs the peer id instead. A proof announcing an owner it cannot
-            # prove is worth exactly as much as one announcing none.
-            if not attested_proof_owner(contract, peer_id):
-                continue
-            if token_id in owners and owners[token_id] != peer_id:
-                contested.add(token_id)
-                continue
-            owners[token_id] = peer_id
-
-    for token_id in contested:
-        LOGGER(
-            f"Reputation proof {token_id} is announced by more than one peer; its "
-            "opinions are attributed to none of them."
-        )
-        owners.pop(token_id, None)
-    return owners
-
-
-def opinions_for(subject_id: str, owners: Dict[str, str]) -> List[Tuple[str, str, float]]:
-    """``(proof id, publisher peer id, verdict)`` for one subject. Raises on a read failure.
-
-    The verdict is the publisher's netted signed share of itself staked on the subject
-    (``opinions.by_proof``), so a publisher that split its stake into ten boxes still
-    speaks once. Raising rather than returning nothing is deliberate and matches
-    ``opinions_about``: an empty list means "the ledgers hold no opinion about this
-    peer", and a failed read must not be able to say that.
+    Raising rather than returning nothing is deliberate and matches ``opinions_about``:
+    an empty list means "the ledgers hold no opinion about this peer", and a failed read
+    must not be able to say that.
     """
     from src.reputation_system.interface import _own_proof_ids, _opinion_readers
-    from src.reputation_system.opinions import by_proof, split_own
+    from src.reputation_system.opinions import burned_by_proof, by_proof, split_own
 
     collected = []
     for ledger, reader in _opinion_readers().items():
         collected.extend(reader(subject_id))
 
     opinions, _own = split_own(collected, _own_proof_ids(subject_id))
+    burned = burned_by_proof(opinions)
     return [
-        (proof_id, owners[proof_id], verdict)
+        (proof_id, verdict, burned.get(proof_id, 0))
         for proof_id, verdict in by_proof(opinions).items()
-        if proof_id in owners
     ]
 
 
 def refresh() -> int:
     """Re-read every known peer's on-chain standing. Returns how many rows were written.
 
-    Our own proof is not in ``owners`` unless we happen to be our own peer row, and that
-    is the intended shape: what we publish is our *local* scores (``submit_to_ledger``),
-    which the balancer already weighs at ``SOCIALIZATION_FACTOR``. Reading them back in
-    would count one observation twice, once unpurchasably and once through a channel that
-    can be bought.
+    One pass over the peers we know, and the table it leaves behind serves both of the
+    reader's needs at once: the rows for one subject are the verdicts on that candidate,
+    and the rows grouped by proof are each publisher's opinion vector over the peers we
+    can check it against. The agreement score costs no extra request because the scan
+    that feeds it is the scan that was already happening.
+
+    Our own proof is read like any other. What it says about a peer is our own local
+    score republished (``submit_to_ledger``), so it agrees with us by construction and
+    would lend itself perfect credibility -- which is why :mod:`.onchain_credit` drops
+    it at read time rather than here: the row is still the truth about the chain, and it
+    is the scoring, not the index, that must not count one observation twice.
     """
     from src.reputation_system.envs import LEDGER
 
     sql = SQLConnection()
-    owners = publisher_peers()
-    if not owners:
-        # Nobody we know has proved it publishes anything, so no opinion out there is
-        # attributable and the term is zero for every candidate. Not an error: it is
-        # what a young node looks like.
-        return 0
-
     written = 0
     for peer_id in sql.get_peers_id():
         try:
-            rows = opinions_for(peer_id, owners)
+            rows = opinions_for(peer_id)
         except Exception as e:
             # Includes the explorer being unreachable. The rows already stored stand:
             # replacing them with nothing would read as "the network withdrew its
@@ -185,7 +131,7 @@ def tick() -> None:
         LOGGER(f"On-chain reputation refresh failed: {e}")
         return
     if written:
-        LOGGER(f"Read {written} attributable on-chain opinion(s).")
+        LOGGER(f"Read {written} on-chain opinion(s).")
     # Unconditionally, not only when something was written: a refresh that removed every
     # row changed the answer just as much as one that added some, and the standings are
     # cached off the routing path.

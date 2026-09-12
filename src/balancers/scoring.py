@@ -77,10 +77,11 @@ def score(
     this node is what this node published, so counting it here would let an operator
     raise their own rank against their peers by burning ERG into a proof.
 
-    ``onchain_reputation`` arrives already bounded in ``(-1, 1)`` and already weighed by
-    how much this node trusts each publisher -- see
-    :mod:`src.reputation_system.onchain_credit`. Nothing that can be bought is added to
-    it here; the saturation it went through is what makes the weight a ceiling.
+    ``onchain_reputation`` arrives already bounded in ``(-1, 1)``, with each publishing
+    proof's burn already discounted by how far that proof agrees with what this node has
+    observed itself -- see :mod:`src.reputation_system.onchain_credit`. Nothing that can
+    be bought is added to it here; the saturation it went through is what makes the
+    weight a ceiling.
 
     ``cost_mu == 0`` is ``+inf``: a peer giving its capacity away is the best offer
     there is, not a math domain error. ``log(0)`` used to raise here, and a price of

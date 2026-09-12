@@ -52,13 +52,13 @@ class OnChainStandingInTheSortTests(unittest.TestCase):
         """Sign-preserving, like the local term and unlike donations.
 
         An accusation is the one thing sunk cost is genuinely good at making expensive,
-        so the term carries it -- but only from publishers this node already trusts, and
-        only up to the cap.
+        so the term carries it -- but only from proofs whose other opinions match what
+        this node has seen for itself, and only up to the cap.
         """
         candidates = {"peer-a": _cost(1000), "peer-b": _cost(1000)}
         self.assertEqual(self._order({"peer-b": -0.9}, candidates)[0], "peer-a")
 
-    def test_a_peer_nobody_attributable_vouches_for_is_ranked_on_its_price(self):
+    def test_a_peer_only_strangers_vouch_for_is_ranked_on_its_price(self):
         candidates = {"cheap": _cost(100), "vouched": _cost(1000)}
         self.assertEqual(self._order({"vouched": 0.99}, candidates)[0], "cheap")
 
