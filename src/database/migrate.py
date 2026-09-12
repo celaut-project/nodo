@@ -420,6 +420,33 @@ TABLES = {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (ledger, address)
         )
+    ''',
+    # What the ledgers say about each peer we know, read off the chain on the periodic
+    # tick and never on the routing path (issue #353). One row per (ledger, subject,
+    # publishing proof): the proof's boxes about one subject are netted into a single
+    # `verdict` before they get here, which is what stops a proof that split its stake
+    # into ten boxes from counting ten times.
+    #
+    # No publisher is filtered out, because a proof earns its voice by what it says and
+    # not by who owns it -- minting a proof is free, so any owner test is one an attacker
+    # passes for nothing. The table is therefore read two ways by `onchain_credit`:
+    # grouped by subject it is the verdicts on a candidate, and grouped by proof it is
+    # that publisher's opinion vector, scored against this node's own local opinions of
+    # the same peers. A proof that agrees with us about nothing weighs nothing.
+    #
+    # `burned_nanoerg` is a property of the proof rather than of a box, so every row one
+    # proof produces repeats it. Stored rather than joined: the reader takes one pass
+    # over one table on every routing decision.
+    "onchain_opinions": '''
+        CREATE TABLE IF NOT EXISTS onchain_opinions (
+            ledger TEXT NOT NULL,
+            subject_id TEXT NOT NULL,
+            proof_id TEXT NOT NULL,
+            verdict REAL NOT NULL,
+            burned_nanoerg INTEGER NOT NULL DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (ledger, subject_id, proof_id)
+        )
     '''
 }
 
@@ -437,6 +464,10 @@ INDEXES = (
     # indexer looks a donation up by the address it paid.
     "CREATE INDEX IF NOT EXISTS idx_donations_peer ON donations (peer_id)",
     "CREATE INDEX IF NOT EXISTS idx_donations_from ON donations (ledger, from_address)",
+    # The balancer reads every attributable opinion in one pass per routing decision,
+    # and the indexer replaces one subject's rows at a time.
+    "CREATE INDEX IF NOT EXISTS idx_onchain_opinions_subject "
+    "ON onchain_opinions (ledger, subject_id)",
 )
 
 

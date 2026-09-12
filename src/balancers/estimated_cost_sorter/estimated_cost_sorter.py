@@ -4,6 +4,11 @@ from protos import celaut_pb2
 from src.balancers.scoring import DEFAULT_REPUTATION_HALF_CREDIT, reputation_factor, score
 from src.payment_system.donations.credit import bonus_by_peer
 from src.reputation_system.interface import compute_reputation
+from src.reputation_system.onchain_credit import (
+    DEFAULT_ONCHAIN_HALF_CREDIT,
+    DEFAULT_ONCHAIN_WEIGHT,
+    standing_by_peer,
+)
 from src.utils.cost_functions.variance_cost_normalization import variance_cost_normalization as vcnorm
 from src.utils.config import ConfigManager
 from src.utils.utils import from_amount
@@ -42,12 +47,25 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
     reputation_half: float = _parameter("REPUTATION_HALF_CREDIT", DEFAULT_REPUTATION_HALF_CREDIT)
     donation_weight: float = _parameter("DONATION_WEIGHT", 0.3)
     local_bias: float = _parameter("LOCAL_BIAS", 1.0)
+    onchain_weight: float = _parameter("ONCHAIN_REPUTATION_WEIGHT", DEFAULT_ONCHAIN_WEIGHT)
 
     # One read of the donation index for the whole sort, out of SQLite. Zero network
     # I/O in a routing decision: an unreachable explorer, or an index that has never
     # been filled, leaves this empty -- and then every candidate scores zero on the
     # donation term, never some of them.
     donation_bonuses: Dict[str, float] = bonus_by_peer()
+
+    # And one read of the on-chain standings, on the same terms and for the same reason
+    # (issue #353). This is what the chain says about each candidate, already weighed by
+    # how far each publishing proof agrees with what this node has seen itself, and
+    # capped per publisher -- see `reputation_system.onchain_credit`. A proof that has
+    # never said anything we can check agrees with us about nothing and is worth nothing,
+    # whatever it burned. It is scored at its **own** weight, never at
+    # SOCIALIZATION_FACTOR: the local term is an observation nobody can buy, and this one
+    # is published by proofs whose voice is for sale. The ratio
+    # ONCHAIN_REPUTATION_WEIGHT / DONATION_WEIGHT is the exchange rate between destroying
+    # an ERG and donating one, and it favours donating by construction.
+    onchain_standings: Dict[str, float] = standing_by_peer()
 
     def __compute_score(peer_id: str, estimated_cost: celaut_pb2.EstimatedCost) -> float:
 
@@ -99,6 +117,10 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
             LOCAL_PEER_ID if is_local else peer_id, 0.0
         )
         reputation: float = 0.0 if is_local else compute_reputation(peer_id=peer_id)
+        # Like the reputation term, and for the same reason: this node holds no evidence
+        # about itself, and what the chain says about us is what we published. Counting
+        # it here would let a node raise its own rank against its peers by burning.
+        onchain: float = 0.0 if is_local else onchain_standings.get(peer_id, 0.0)
 
         candidate_score = score(
             cost_mu=cost_mu,
@@ -107,6 +129,8 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
             reputation_half_credit=reputation_half,
             donation_bonus=donation_bonus,
             donation_weight=donation_weight,
+            onchain_reputation=onchain,
+            onchain_weight=onchain_weight,
             local_bias=local_bias if is_local else None,
         )
 
@@ -118,6 +142,7 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
         else:
             standing = (
                 f"reputation {reputation:+.2f} -> {reputation_weight * reputation_factor(reputation, reputation_half):+.4f}"
+                f", on-chain {onchain:+.4f} -> {onchain_weight * onchain:+.4f}"
             )
         logger(
             f"Estimated cost score for peer {peer_id}: cost {format_mu(cost_mu)}/h, "
