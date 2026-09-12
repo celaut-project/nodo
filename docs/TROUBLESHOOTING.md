@@ -78,7 +78,10 @@ virtualization (`/dev/kvm`). It is commonly unavailable when:
 - CPU virtualization (VT-x/`vmx`, AMD-V/`svm`) is disabled in BIOS/UEFI.
 - Running inside a VM without **nested virtualization** enabled.
 - Running inside an unprivileged container without `/dev/kvm` passed through.
-- On WSL2 — see [`WSL.md`](WSL.md) for the mirrored-networking / KVM setup.
+- On WSL2 — `nestedVirtualization=true` must be set in `.wslconfig`; see
+  [`WSL.md`](WSL.md#3-give-the-distro-kvm). If peers cannot reach the node either,
+  that is a separate problem with its own section:
+  [Reaching the node from outside](WSL.md#reaching-the-node-from-outside).
 - On Fedora/RHEL or aarch64 — see [`FEDORA_ARM.md`](FEDORA_ARM.md), which also covers
   why `doctor` only notes (rather than faults) a kernel newer than Cloud Hypervisor.
 
