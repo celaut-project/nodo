@@ -403,67 +403,44 @@ install_shell_completion() {
 
 install_shell_completion
 
-ask_donation_percentage() {
-  # Asked out loud, here, for the same reason the gateway port is: this is the last
-  # moment in an install that has an operator watching the terminal.
+set_donation_percentage_if_named() {
+  # The share is NOT asked for here. It is asked on the node's first run
+  # (src/commands/onboarding.py), beside the KyA, because an install is not reliably a
+  # place where a question can be asked: on Windows this script is piped into bash by
+  # install.ps1, and under Nodo-Setup.exe there is no console at all. A prompt there is
+  # a prompt into a pipe -- skipped in silence, default kept, which is the one outcome
+  # "a default nobody is told about is not consent" was meant to rule out.
   #
-  # The default is 2 %, and a default nobody is told about is not consent. Defaults are
-  # the cheapest lever there is -- almost nobody edits them -- so the honest version of
-  # shipping a non-zero one is showing the number and making "0" one keystroke away.
+  # What survives here is the scripted path: naming the share in the environment still
+  # sets it, so an unattended fleet install does not have to answer anything twice.
+  # Nothing is written when it is not named, and config.yaml keeps its default.
   local yq_bin="$TARGET_DIR/bin/yq"
   local config_file="$TARGET_DIR/config.yaml"
   local key='.ledgers.ergo.payments.DONATION_PERCENTAGE'
-  local suggested="0.02"
-  local current="" answer=""
+  local answer="${NODO_DONATION_PERCENTAGE:-}"
 
+  [ -n "$answer" ] || return 0
   [ -x "$yq_bin" ] && [ -f "$config_file" ] || return 0
-  current="$("$yq_bin" -r "$key // \"\"" "$config_file" 2>/dev/null || true)"
-  [ -n "$current" ] && [ "$current" != "null" ] && suggested="$current"
-
-  # An unattended install keeps whatever the config says and stays silent; a scripted
-  # one can name the share without a prompt.
-  if [ -n "${NODO_DONATION_PERCENTAGE:-}" ]; then
-    answer="$NODO_DONATION_PERCENTAGE"
-  elif [ -t 0 ]; then
-    printf "\n------------------------------------------------------------\n"
-    printf " Donations\n"
-    printf "------------------------------------------------------------\n"
-    printf " nodo can donate a share of what this node EARNS to the people who\n"
-    printf " write it. It applies to incoming payments, not to your savings, and\n"
-    printf " the transaction fee comes out of that share -- never on top of it.\n\n"
-    printf " It is not charity for its own sake: other nodes read donations off the\n"
-    printf " chain and weigh them when they choose whom to delegate work to, so it\n"
-    printf " buys a better position in their routing. Nothing here is enforced --\n"
-    printf " this is open source, and you can set it to 0 now or edit it later.\n\n"
-    printf " Who is funded, and whose contributions this node recognises, are the\n"
-    printf " two wallet lists under ledgers.ergo.payments in config.yaml.\n"
-    printf " See docs/DONATIONS.md.\n\n"
-    read -r -p " Share of earnings to donate [$suggested]: " answer
-  else
-    return 0
-  fi
 
   answer="$(printf '%s' "$answer" | tr -d '[:space:]')"
-  [ -z "$answer" ] && answer="$suggested"
   # A share, so a fraction of one. A malformed answer is refused rather than coerced:
   # "2" meant as a percentage would donate everything.
   if ! printf '%s' "$answer" | grep -Eq '^(0|1)(\.[0-9]+)?$|^\.[0-9]+$'; then
-    printf " '%s' is not a share between 0 and 1; keeping %s.\n" "$answer" "$suggested"
+    printf "NODO_DONATION_PERCENTAGE='%s' is not a share between 0 and 1; ignored.\n" "$answer"
     return 0
   fi
 
   if "$yq_bin" -i "$key = \"$answer\"" "$config_file" 2>/dev/null; then
-    if [ "$answer" = "0" ]; then
-      printf " Donations off. Change DONATION_PERCENTAGE in config.yaml to turn them on.\n"
-    else
-      printf " Donating %s of incoming payments. Edit config.yaml to change it.\n" "$answer"
-    fi
+    printf "Donation share set to %s from the environment.\n" "$answer"
+    # Answered, so the first run must not ask again.
+    mkdir -p "$TARGET_DIR/storage" 2>/dev/null || true
+    touch "$TARGET_DIR/storage/.askeddonation" 2>/dev/null || true
   else
-    printf " Could not write the donation share; config.yaml keeps %s.\n" "$suggested"
+    printf "Could not write the donation share; config.yaml keeps its current value.\n"
   fi
 }
 
-ask_donation_percentage
+set_donation_percentage_if_named
 
 assign_gateway_port() {
   # Explicitly, here: this is the last moment in an install that has root AND an
