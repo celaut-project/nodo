@@ -1,85 +1,206 @@
 # Nodo on WSL2 (Windows)
 
-This guide covers two workflows:
+Windows cannot run a node directly: services execute as Cloud Hypervisor microVMs,
+which need `/dev/kvm`. WSL2 is the supported way to get one, and it is the only
+Windows path there is.
 
-1. **Installation** — Set up Nodo inside WSL2 on any Windows machine.
-2. **Distribution** — Package the configured WSL distro as an `.appx` for one-click installation by end users.
+There are two ways in, and they are not equivalent:
+
+| | [The installer](#the-installer) | [By hand](#installing-by-hand) |
+|---|---|---|
+| What runs it | `bash/install.ps1`, or `Nodo-Setup.exe` (the same script compiled) | you, step by step |
+| Distro | a purpose-built Debian rootfs named `Nodo` | whatever you pick |
+| Host kernel | a custom `bzImage` pinned in `.wslconfig` | whatever WSL ships |
+| Networking | mirrored + a Hyper-V inbound rule, configured for you | **yours to set up** — see [Reaching the node](#reaching-the-node-from-outside) |
+| systemd | enabled for you | **yours to enable** |
+| Who it is for | anyone running a node on Windows | development, auditing, or a distro you already keep |
+
+**Use the installer unless you have a reason not to.** The manual path is written
+out below because the installer is a script someone has to be able to read, repair
+and disagree with — not because it is the recommended route.
+
+> **Both paths install from the `stable` branch, not from `dev`.** That is what
+> pins them: a change merged to `dev` does not reach a Windows node until a
+> release moves `stable`. See [What is not in a Windows node yet](#what-is-not-in-a-windows-node-yet)
+> for what is currently waiting there.
 
 ---
 
-# Installation
+# The installer
 
 ## Prerequisites
 
-- **Windows 10 (build 19041+)** or **Windows 11**
-- **WSL2** enabled. If not already installed:
+- **Windows 11** (build 22000+). The script warns and continues below that; the
+  Hyper-V firewall rule it writes needs 22H2 or newer, and mirrored networking
+  needs the same.
+- **Hardware virtualization (VT-x / AMD-V)** enabled in BIOS/UEFI. This is the one
+  check the script refuses to continue past.
+- **Administrator privileges** (`#Requires -RunAsAdministrator`).
+
+If WSL itself is missing, the script installs it with `wsl --install --no-distribution`
+and stops, asking you to restart Windows and run it again.
+
+## Running it
 
 ```powershell
-wsl --install
+powershell -ExecutionPolicy Bypass -File .\bash\install.ps1 -VerboseMode
 ```
 
-> Restart your machine if prompted. This installs WSL2 with the default Ubuntu distribution.
+`Nodo-Setup.exe` is the same script wrapped by PS2EXE with a GUI progress window.
+It may lag `install.ps1` — it is rebuilt by hand, so when the two disagree the
+script is the current one ([`RELEASING.md`](RELEASING.md)).
 
-- **Hardware virtualization (VT-x / AMD-V)** must be enabled in BIOS/UEFI.
+## What it actually does
+
+Worth reading before running something as Administrator, and worth having written
+down when a node misbehaves and the question is what state the host is in.
+
+**On Windows:**
+
+1. Downloads a custom WSL2 host kernel to `C:\wsl-kernel\bzImage`.
+2. Merges three keys into `%USERPROFILE%\.wslconfig` under `[wsl2]`, preserving
+   everything else in the file and backing it up to `.wslconfig.old` first:
+   ```ini
+   nestedVirtualization=true
+   kernel=C:\\wsl-kernel\\bzImage
+   networkingMode=mirrored
+   ```
+   `nestedVirtualization` is what gives the distro `/dev/kvm`. `networkingMode=mirrored`
+   is what makes a port opened inside the distro reachable on the host's own address.
+3. **Unregisters any existing distro named `Nodo`** — it is non-interactive, and
+   that is how it stays so. A distro of that name is destroyed without a prompt.
+4. Imports the `Nodo` distro from a published Debian rootfs into `C:\WSL\Nodo`.
+5. Adds a Hyper-V firewall rule `WSL-Allow-All` (inbound, allow) for the WSL VM
+   creator. Skipped with a warning on builds whose PowerShell has no
+   `New-NetFirewallHyperVRule`.
+6. Adds a Windows route for `192.168.200.0/24` — the microVM subnet — via the
+   distro's IP, so the host can reach the guests a node launches.
+7. Creates a `Nodo Terminal` desktop shortcut (`wsl.exe -d Nodo --cd ~`).
+
+**Inside the distro:**
+
+8. Writes `/etc/wsl.conf` with `systemd=true` and `default=root`. **The node needs
+   both**: `install.sh` installs a systemd unit, and Cloud Hypervisor networking
+   needs root.
+9. Installs `git curl sudo iptables bc`, sets the hostname to `Nodo`.
+10. Downloads the paired `vmlinuz` and `initramfs` to `/boot`. These belong to the
+    WSL2 host kernel and are **not** the Cloud Hypervisor guest kernel, which
+    `install.sh` fetches separately into `/nodo/cloud_hypervisor/`.
+11. Runs the standard installer, from `stable`:
+    ```bash
+    curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
+    ```
+12. Points `network.EXTERNAL_INTERFACE` in `/nodo/config.yaml` at the distro's
+    default-route interface, and enables IP forwarding plus `FORWARD` accepts for
+    the microVM subnets, persisted through an `iptables-restore` unit.
+
+> ⚠️ **It ends by making `/nodo` world-writable** (`chmod 777` over every file and
+> directory). `config.yaml` holds the wallet mnemonic. On a single-user Windows
+> laptop that is mostly theoretical; on a shared machine it is not, and it is worth
+> tightening by hand afterwards.
+
+## After it finishes
+
+Open the `Nodo Terminal` shortcut, then:
+
+```bash
+sudo nodo doctor        # every check should be [OK]
+sudo nodo daemon start
+sudo nodo daemon status
+```
 
 ---
 
-## 1️⃣ Install Ubuntu 22.04 on WSL2
+# Installing by hand
 
-If you already have Ubuntu 22.04 on WSL, skip this step.
+For development, for auditing what the installer does, or to use a distro you
+already keep. You are responsible for the two things the installer would have
+done for you: **systemd** and **networking**.
+
+## 1. A WSL2 distro
 
 ```powershell
 wsl --install -d Ubuntu-22.04
+wsl -l -v                              # VERSION must be 2
+wsl --set-version Ubuntu-22.04 2       # if it says 1
 ```
 
-After installation, WSL will open the distro and ask you to create a UNIX user. Pick any username and password.
+## 2. Enable systemd and root — before installing
 
-Verify it is running WSL2:
+`install.sh` writes and starts a systemd unit unconditionally: it calls
+`systemctl daemon-reload`, `enable` and `start` with no fallback and no `set -e`.
+Without systemd the install limps to the end and prints
+`Error: nodo.service does not exist or cannot be restarted`, leaving a node that
+never comes up on its own.
 
-```powershell
-wsl -l -v
+```bash
+sudo tee /etc/wsl.conf << 'EOF'
+[boot]
+systemd=true
+
+[user]
+default=root
+EOF
 ```
 
-If the VERSION column shows `1`, convert it:
+Then, from PowerShell:
 
 ```powershell
-wsl --set-version Ubuntu-22.04 2
-```
-
----
-
-## 2️⃣ Enter the distro and install dependencies
-
-```powershell
+wsl --shutdown
 wsl -d Ubuntu-22.04
 ```
 
-Inside the distro, install `curl` (needed by the installer):
+Confirm before going further — `systemctl is-system-running` must not answer
+`offline`:
+
+```bash
+systemctl is-system-running    # "running" or "degraded" are both fine
+```
+
+## 3. Give the distro KVM
+
+In `%USERPROFILE%\.wslconfig`:
+
+```ini
+[wsl2]
+nestedVirtualization=true
+```
+
+`wsl --shutdown` to apply. Without this there is no `/dev/kvm` and no service will
+ever execute.
+
+## 4. Install
 
 ```bash
 sudo apt update && sudo apt install -y curl
 ```
 
----
-
-## 3️⃣ Install Nodo
-
-Run the official installer:
+Then **clone and run** rather than piping:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
+git clone https://github.com/celaut-project/nodo.git /tmp/nodo
+sudo bash /tmp/nodo/install.sh
 ```
 
-This will:
-- Clone the Nodo repository to `/nodo`
-- Install a portable Python 3.11, Java JRE 21, and yq
-- Create a Python virtual environment with all dependencies
-- Download Cloud Hypervisor v51 with a custom kernel (`vmlinuz`) and initramfs
-- Set up the `nodo` systemd service
+Piping the installer into `bash` works, but stdin is then the pipe rather than a
+terminal, and the installer skips every question it would otherwise ask — silently.
+Today that costs nothing. It will not stay that way; see
+[What is not in a Windows node yet](#what-is-not-in-a-windows-node-yet).
 
-> ⏳ The installation takes several minutes. If it fails on the first run (e.g. network timeout), run it again — the script is idempotent.
+To pipe anyway, answer the questions with the environment instead:
 
-> ⚠️ **Known issue (Ubuntu 22.04):** The Python virtual environment creation may fail with an `ensurepip` error. If this happens:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh \
+  | sudo NODO_DONATION_PERCENTAGE=0.02 bash
+```
+
+The install downloads a portable Python 3.11 and JRE 21, builds a venv, fetches
+Cloud Hypervisor `v51.1` with its guest kernel and initramfs, and installs the
+`nodo` systemd unit. It takes several minutes and is idempotent — re-run it if it
+fails on a network timeout.
+
+> ⚠️ **Known issue (Ubuntu 22.04):** venv creation can fail with an `ensurepip`
+> error. If it does:
 > ```bash
 > sudo rm -rf /nodo/venv
 > /nodo/runtime/python/current/bin/python3 -m venv /nodo/venv
@@ -88,15 +209,13 @@ This will:
 > ```
 > Then re-run the install script.
 
----
-
-## 4️⃣ Verify the installation
+## 5. Verify
 
 ```bash
 sudo nodo doctor
 ```
 
-You should see all `[OK]` checks:
+Expect all `[OK]`, including:
 
 ```
 Virtualization checks (Cloud Hypervisor/KVM):
@@ -108,107 +227,137 @@ Cloud Hypervisor KVM smoke test:
 [OK] Cloud Hypervisor vCPU is running (process alive after 2s).
 ```
 
-If `/dev/kvm` is missing, make sure:
-1. Hardware virtualization is enabled in BIOS.
-2. You are running WSL2 (not WSL1).
-3. Windows Hyper-V and Virtual Machine Platform features are enabled.
+If `/dev/kvm` is missing: `nestedVirtualization=true` (step 3), virtualization
+enabled in BIOS, WSL2 rather than WSL1, and Hyper-V + Virtual Machine Platform
+enabled in Windows features.
 
----
-
-## 5️⃣ Start the Nodo daemon
+## 6. Start
 
 ```bash
 sudo nodo daemon start
-```
-
-Check status:
-
-```bash
 sudo nodo daemon status
 ```
 
 ---
 
-## 6️⃣ (Optional) Configure WSL to start as root
+# Reaching the node from outside
 
-Nodo requires root to manage Cloud Hypervisor (networking, microVMs). You can configure the distro to default to root:
+**This is the part WSL2 does not give you for free, and the part a manual install
+has to finish by hand.** A node that only talks to itself does not need it; a node
+that peers, or that publishes a service port, does.
 
-Create `/etc/wsl.conf` inside the distro:
+`install.sh` assigns a gateway port and writes a firewall rule for it *inside* the
+distro. Under WSL2's default NAT that rule is real and still unreachable: the
+distro sits behind a virtual switch with its own address, so nothing on the LAN
+can open that port. Two ways out.
 
-```bash
-sudo tee /etc/wsl.conf << 'EOF'
-[user]
-default=root
-EOF
+## Mirrored networking (what the installer uses)
+
+Windows 11 22H2 and newer. In `%USERPROFILE%\.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
 ```
 
-Then restart the distro from PowerShell:
+The distro then shares the host's network interfaces, and a port bound to
+`0.0.0.0` inside it is reachable at the host's own address — no forwarding to
+maintain and no address that changes on reboot.
+
+Mirrored mode puts WSL traffic behind the **Hyper-V firewall**, which is a
+separate stack from both the Windows Defender firewall and the distro's own
+nftables. Inbound is filtered there and has to be allowed explicitly:
 
 ```powershell
-wsl --shutdown
-wsl -d Ubuntu-22.04
+$vmCreator = (Get-NetFirewallHyperVVMCreator | Where-Object { $_.FriendlyName -eq 'WSL' }).VMCreatorId
+
+New-NetFirewallHyperVRule -Name "WSL-Allow-Nodo" -DisplayName "Nodo gateway (WSL)" `
+  -VMCreatorId $vmCreator -Direction Inbound -Action Allow -Protocol TCP -LocalPorts <GATEWAY_PORT>
 ```
 
----
+The installer writes the same rule without `-Protocol`/`-LocalPorts`, i.e. allow
+all inbound to the VM. Naming the port is the narrower version and is what to
+prefer on a machine that is not solely a node.
 
-# Distribution
+`wsl --shutdown` to apply.
 
-To distribute a pre-configured Nodo WSL distro as a `.appx` / `.msixbundle` package that users can install with a double click:
+## Port forwarding (NAT mode, or Windows 10)
 
----
-
-## 1️⃣ Prepare and export the distro
-
-After completing the installation above and verifying `nodo doctor` passes:
+Keep the default NAT and forward each port from Windows into the distro:
 
 ```powershell
-wsl --export Ubuntu-22.04 nodo-distro.tar
+$wslIp = (wsl -d <distro> -- hostname -I).Trim().Split(" ")[0]
+netsh interface portproxy add v4tov4 listenport=<GATEWAY_PORT> listenaddress=0.0.0.0 `
+  connectport=<GATEWAY_PORT> connectaddress=$wslIp
+netsh advfirewall firewall add rule name="Nodo gateway" dir=in action=allow `
+  protocol=TCP localport=<GATEWAY_PORT>
 ```
 
-This creates a portable tarball of the entire WSL filesystem.
+**The distro's IP changes on most restarts**, so this has to be re-run — a startup
+task, or mirrored mode instead. That impermanence is the reason the installer does
+not use this route.
 
----
+## Which port
 
-## 2️⃣ Build the Appx package
-
-Microsoft provides an open-source WSL distribution launcher template:
-
-👉 [WSL-DistroLauncher (GitHub)](https://github.com/microsoft/WSL-DistroLauncher)
-
-1. Clone the repository.
-2. Open `DistroLauncher.sln` in **Visual Studio 2019 or 2022**.
-3. Replace `install.tar.gz` in the project with your `nodo-distro.tar` (rename accordingly).
-4. Edit the project configuration:
-   - **Display name** → e.g. "Nodo WSL"
-   - **Package identity** → unique name for your distribution
-   - **Icons and metadata** as desired
-5. Set build to **Release > x64**.
-6. Build → **Project → Publish → Create App Packages**.
-7. Select **Sideloading** (not Microsoft Store).
-8. The output `.appx` or `.msixbundle` is ready for distribution.
-
----
-
-## 3️⃣ User installation
-
-End users only need to:
-
-1. Enable WSL2 (if not already): `wsl --install` in PowerShell (admin).
-2. Double-click the `.appx` / `.msixbundle` file.
-3. The distro appears in the Start menu and can be launched like any app.
-
-> **Note:** If the user has never enabled WSL, Windows will prompt them to enable it and may require a restart.
-
----
-
-## 4️⃣ Post-install (for the end user)
-
-After launching the distro for the first time:
+Whatever `network.GATEWAY_PORT` resolved to in `/nodo/config.yaml`. `install.sh`
+assigns it at install time and prints the result as its last line; afterwards:
 
 ```bash
-sudo nodo doctor     # Verify everything is OK
-sudo nodo daemon start  # Start the Nodo service
+/nodo/bin/yq '.network.GATEWAY_PORT' /nodo/config.yaml
 ```
+
+Published service ports come out of `network.FREE_PORTS_RANGE` and need the same
+treatment — narrow the range first, or the rule you have to write is enormous. See
+[`FIREWALL.md`](FIREWALL.md) and [`TUNNELING.md`](TUNNELING.md), the latter being
+how to reach a service **without** opening anything.
+
+---
+
+# What is not in a Windows node yet
+
+Both installation paths pull `install.sh` from **`stable`**. `dev` has since gained
+two things that change what an install does, and neither is live on Windows until
+the next release moves `stable`. Written down here because on the day it moves,
+they land on Windows without either path changing a line:
+
+- **A donation prompt.** `install.sh` on `dev` asks what share of earnings to
+  donate, defaulting to 2 %. It asks only on a terminal (`[ -t 0 ]`), and **both
+  Windows paths install through a pipe** — the installer's in-distro script pipes
+  `curl` into `bash`, and under `Nodo-Setup.exe` there is no console at all. The
+  question will be skipped and the default kept, silently. The commit that added it
+  argues "a default nobody is told about is not consent"; a Windows user is exactly
+  that nobody. Passing `NODO_DONATION_PERCENTAGE` names the share without a prompt
+  and is what the installer should do — until then, check
+  `ledgers.ergo.payments.DONATION_PERCENTAGE` in `config.yaml` after installing.
+- **Gateway port assignment.** `install.sh` on `dev` picks the port during the
+  install and prints an operator notice as its final line, saying what still has to
+  be opened. Piped and GUI-wrapped, that notice has nowhere to go. It is the same
+  instruction as [Reaching the node](#reaching-the-node-from-outside).
+
+Also on `dev`: `builder.ARM_SUPPORT` and `builder.X86_SUPPORT` were removed and are
+now **refused** at startup. A `config.yaml` kept from an older node — or baked into
+an exported distro image — stops that node from booting until those keys are
+deleted. Architecture support is derived from the host now, not declared.
+
+---
+
+# Distributing a configured distro
+
+`Nodo-Setup.exe` is built by compiling `bash/install.ps1` with PS2EXE, and the
+rootfs, kernel and initramfs it downloads are release assets. The whole process —
+building the rootfs, publishing the assets, rebuilding the `.exe` — is in
+[`RELEASING.md`](RELEASING.md).
+
+To hand someone a distro you configured yourself rather than the published one:
+
+```powershell
+wsl --export Nodo nodo-distro.tar
+```
+
+They import it with `wsl --import <name> <install-dir> nodo-distro.tar`. Two things
+travel with that tarball and are worth checking first: the `config.yaml` inside it
+(**including the wallet mnemonic** — regenerate it, do not ship yours), and whether
+it predates the removal of `ARM_SUPPORT`/`X86_SUPPORT` above.
 
 ---
 
@@ -216,8 +365,14 @@ sudo nodo daemon start  # Start the Nodo service
 
 | Problem | Solution |
 |---------|----------|
-| `ensurepip` fails during install | See the workaround in Step 3 above |
-| `/dev/kvm` not found | Enable VT-x/AMD-V in BIOS, ensure WSL2 + Hyper-V enabled |
-| `nodo doctor` shows kernel incompatible | Update WSL kernel: `wsl --update` from PowerShell |
-| Install script fails with network errors | Re-run the install command — it is idempotent |
-| WSL version is 1 instead of 2 | `wsl --set-version <distro-name> 2` |
+| `System has not been booted with systemd` | `[boot] systemd=true` in `/etc/wsl.conf`, then `wsl --shutdown` |
+| `nodo.service does not exist or cannot be restarted` | Same cause: systemd was off during the install. Enable it, then re-run `install.sh` |
+| `ensurepip` fails during install | See the workaround in step 4 above |
+| `/dev/kvm` not found | `nestedVirtualization=true` in `.wslconfig`; VT-x/AMD-V in BIOS; WSL2 not WSL1; Hyper-V enabled |
+| `nodo doctor` shows kernel incompatible | `wsl --update` from PowerShell |
+| Install fails with network errors | Re-run it — the script is idempotent |
+| WSL version is 1 instead of 2 | `wsl --set-version <distro> 2` |
+| Peers cannot reach the node | [Reaching the node](#reaching-the-node-from-outside) — under NAT the port is open inside the distro and unreachable from the LAN |
+| Reachable from Windows but not from the LAN | Mirrored mode is on but the Hyper-V firewall is still filtering inbound; add the rule above |
+| Port forwarding stopped working after a reboot | The distro's IP changed. Re-run the `netsh` commands, or switch to mirrored |
+| Node refuses to start naming `ARM_SUPPORT` / `X86_SUPPORT` | Delete both keys from `config.yaml`; support is derived from the host now |

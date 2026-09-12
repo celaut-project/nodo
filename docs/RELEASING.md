@@ -2,9 +2,20 @@
 
 ## Overview
 
-The Windows installer (`bash/install.ps1` / `Nodo-Setup.exe`) downloads assets from a
-**hardcoded GitHub release tag**. When a new release is cut, the tag references inside
-`bash/install.ps1` must be bumped to match.
+The Windows installer (`bash/install.ps1` / `Nodo-Setup.exe`) downloads its assets from
+a **single floating release tag, `wsl-exe`**. All four URLs in `install.ps1` point at it:
+
+```
+https://github.com/celaut-project/nodo/releases/download/wsl-exe/{bzImage,debian.tar,vmlinuz,initramfs}
+```
+
+So a release is shipped by **replacing the assets on the `wsl-exe` release**, not by
+cutting a new tag. Publishing under a fresh tag (`v2`, `v3`, …) leaves every installer
+in the wild downloading the old assets, because nothing points at the new tag.
+
+> The `wsl-exe` assets currently date from **2026-07-17**. Anything merged since then
+> reaches a Windows node only through the `stable` branch, which `install.sh` is pulled
+> from at install time — not through the rootfs.
 
 ## Release assets
 
@@ -23,8 +34,7 @@ The Windows installer (`bash/install.ps1` / `Nodo-Setup.exe`) downloads assets f
 - Any change to `bash/setup_linux_x86.sh` (setup flow, dependency versions)
 - Significant feature merges that should ship to Windows users
 
-After creating the release, bump the hardcoded version tag in `bash/install.ps1`
-and open a PR (see "Bump version references" below).
+Re-uploading the assets is the whole ship step; see "Publish the assets" below.
 
 ## Build prerequisites
 
@@ -91,41 +101,47 @@ docker rm -f nodo-v2-build
 > for Cloud Hypervisor guests but changes the WSL2 host kernel for installer users.
 > To keep the custom host kernel, download v1's `bzImage` and include it unchanged.
 
-### 4. Create the GitHub release
+### 4. Publish the assets
+
+Upload onto the existing `wsl-exe` release, replacing what is there. `--clobber` is the
+point: the tag does not move, the files behind it do.
 
 ```bash
-NEXT_TAG=v2   # increment as needed (v3, v4, …)
-
-gh release create "$NEXT_TAG" \
+gh release upload wsl-exe \
   --repo celaut-project/nodo \
-  --title "Nodo WSL ${NEXT_TAG} [Windows 11 - x86_64]" \
-  --notes "Rebuilt from dev HEAD." \
-  --latest \
-  /tmp/debian.tar#debian.tar \
-  /tmp/vmlinuz#vmlinuz \
-  /tmp/bzImage#bzImage \
-  /tmp/initramfs#initramfs
+  --clobber \
+  /tmp/debian.tar /tmp/vmlinuz /tmp/bzImage /tmp/initramfs
 ```
 
-### 5. Bump version references in install.ps1
-
-`bash/install.ps1` has four hardcoded references to the previous tag. Update all of them:
+Verify the assets took, and that nothing still points elsewhere:
 
 ```bash
-# In the nodo repo, on a new branch:
-sed -i "s|/releases/download/v[0-9]*/|/releases/download/${NEXT_TAG}/|g" bash/install.ps1
-```
+gh release view wsl-exe --repo celaut-project/nodo \
+  --json assets --jq '.assets[] | "\(.name)\t\(.updatedAt)"'
 
-Verify:
-```bash
+# Every URL must read .../releases/download/wsl-exe/...
 grep "releases/download" bash/install.ps1
 ```
 
-Commit and open a PR targeting `dev`.
+No edit to `install.ps1` is needed, and that is deliberate: a floating tag means the
+installer in someone's Downloads folder from six months ago fetches the current assets.
+The cost is that there is no way to install an older set, and no changelog in the tag —
+so say what changed in the release notes.
 
-> `Nodo-Setup.exe` is a compiled GUI wrapper around `install.ps1`. It also embeds the old
-> tag and must be rebuilt separately (requires a Windows build environment with PS2EXE or
-> the equivalent). Until it is rebuilt, users should run `install.ps1` directly.
+> **`stable` ships separately.** `install.ps1` runs
+> `curl .../celaut-project/nodo/stable/install.sh | sudo bash` inside the distro, so the
+> node's own code comes from the `stable` branch at install time, not from `debian.tar`.
+> Rebuilding the rootfs without moving `stable` ships nothing new; moving `stable`
+> without rebuilding the rootfs still ships the change. **Moving `stable` is what
+> releases a node to Windows users.**
+
+### 5. Rebuild `Nodo-Setup.exe` (optional)
+
+`Nodo-Setup.exe` is `install.ps1` compiled with PS2EXE, and it is uploaded to the same
+`wsl-exe` release. It no longer embeds a tag that can go stale, but it does embed the
+*script*, so it lags any change to `install.ps1` until rebuilt — which needs a Windows
+build environment. Until then, point users at running `install.ps1` directly
+([`WSL.md`](WSL.md#running-it)).
 
 ## Verify the release
 
