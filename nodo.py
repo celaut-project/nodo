@@ -158,8 +158,17 @@ def warn_if_not_serving() -> None:
 
 if __name__ == '__main__':
 
-    if not os.path.exists(os.path.join(MAIN_DIR, "storage", ".acceptedkya")):
-        os.system(f"/bin/bash {MAIN_DIR}/bash/accept_kya.sh {MAIN_DIR}")
+    # The first run asks what the install no longer does: the KyA, and the share of
+    # earnings this node donates. The installer cannot ask on Windows -- it pipes curl
+    # into bash, and Nodo-Setup.exe has no console at all -- so the questions live
+    # here, at the first moment there is reliably a terminal and a person.
+    #
+    # The exit status is honoured, unlike the os.system call this replaces: refusing
+    # the KyA returned 1 into nothing, so "no" started the node exactly like "yes".
+    from src.commands.onboarding import run as run_onboarding
+
+    if not run_onboarding(MAIN_DIR):
+        sys.exit(1)
 
     os.umask(0o002)
 
@@ -721,8 +730,18 @@ if __name__ == '__main__':
                 pack(directory=absolute_path)
 
             case "tui":
-                check_rust_installation()
-                os.system(f"cd {MAIN_DIR}/src/commands/tui && cargo run")
+                # A binary built at install time, when there was a terminal to watch it
+                # and a package manager to fix. `cargo run` re-checks the build graph on
+                # every launch, and on a cold cache that is a compile -- which is fine at
+                # a prompt and not fine behind a desktop shortcut, where it looks like
+                # the app failed to open. Falling back keeps a source checkout working.
+                tui_dir = f"{MAIN_DIR}/src/commands/tui"
+                prebuilt = f"{tui_dir}/target/release/tui"
+                if os.path.exists(prebuilt):
+                    os.system(prebuilt)
+                else:
+                    check_rust_installation()
+                    os.system(f"cd {tui_dir} && cargo run")
 
             case "ggconf":
                 from src.commands.ggconf import generate_gateway_config_dev
