@@ -126,3 +126,4 @@ document to ensure you are fully aware of your responsibilities and the limitati
 
 All payments, reputation submissions, and service remunerations are handled decentralized on the Ergo blockchain.
 Check how and why Nodo uses [Ergo](docs/ERGO.md).
+How a peer's score is computed when work is delegated: [Reputation](docs/REPUTATION.md).

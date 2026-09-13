@@ -7,7 +7,8 @@ have an implementation in this repository, the pointer says where to read it:
 [`USAGE.md`](USAGE.md) for the commands, [`PACKING.md`](PACKING.md) for the packer's
 input format, [`CONFIG.md`](CONFIG.md) for configuration,
 [`BACKENDS.md`](BACKENDS.md) for execution, [`PRICING.md`](PRICING.md) and
-[`ERGO.md`](ERGO.md) for prices and settlement. The paradigm itself is defined in
+[`ERGO.md`](ERGO.md) for prices and settlement, [`REPUTATION.md`](REPUTATION.md) for how
+a peer is scored. The paradigm itself is defined in
 [celaut-project/paradigm](https://github.com/celaut-project/paradigm); the wire
 contract quoted throughout is [`celaut.proto`](../protos/celaut.proto).
 
