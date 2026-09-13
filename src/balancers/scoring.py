@@ -14,11 +14,10 @@ higher, and never more. The ceiling is one number and can be explained in a sent
 There are two reputation terms because there are two reputations, and only one of them
 is this node's own observation. ``r`` is what we saw ourselves and nobody can buy; ``o``
 is what the ledgers say, which **is** bought -- an opinion is worth ``share x burned
-ERG``. They therefore cannot share a weight. ``W_o <= W_d`` by construction (config
-validation refuses the other order), because ``W_o / W_d`` is the exchange rate between
-destroying an ERG and donating one, and it has to favour donating: the money in a
-donation funds the development this node runs on, and the money in a burn is gone.
-Issue #353.
+ERG``. They therefore cannot share a weight. At the shipped defaults ``W_o = W_d`` and
+the two half-credits are the same 5 ERG, so a burned ERG buys exactly what a donated one
+does; an operator who wants one system to outweigh the other sets it, and the config
+validator warns rather than refuses. Issue #353.
 
 The shape this replaced could not do that. Reputation entered as
 ``(rep / total_network_reputation) * 2``, so with ten similar peers it was worth about

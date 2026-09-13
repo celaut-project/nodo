@@ -611,8 +611,12 @@ class ConfigManager(metaclass=Singleton):
 
             # The shape of the peer-selection formula. A negative weight or a
             # half-credit of zero would not make the node quote a wrong price -- it
-            # would make every routing decision meaningless, silently.
-            validate_balancers_config(self._config)
+            # would make every routing decision meaningless, silently. The exchange rate
+            # between burning an ERG and donating one is a policy, not a mistake, so it
+            # is warned about rather than refused.
+            validate_balancers_config(
+                self._config, warn=lambda message: self.log(f"[BALANCERS] {message}")
+            )
 
             # The Bitcoin ledger block, if there is one. Structural only -- addresses
             # are checked with arithmetic, never by asking a node -- so a node that

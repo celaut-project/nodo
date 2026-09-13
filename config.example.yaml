@@ -557,12 +557,14 @@ deposits:
 # Every parameter of the peer-selection formula, and nothing else. The score a
 # candidate is ranked by reads as an effective cost in log space:
 #
-#   score(peer)  = -ln(cost_mu) + SOCIALIZATION_FACTOR * r + DONATION_WEIGHT * d
-#   score(local) = -ln(cost_mu) + LOCAL_BIAS             + DONATION_WEIGHT * d
+#   score(peer)  = -ln(cost_mu) + SOCIALIZATION_FACTOR * r + ONCHAIN_REPUTATION_WEIGHT * o
+#                              + DONATION_WEIGHT * d
+#   score(local) = -ln(cost_mu) + LOCAL_BIAS              + DONATION_WEIGHT * d
 #
-# where r and d are bounded: r in (-1, 1) and d in [0, 1). Each weight is therefore the
-# maximum equivalent price discount, in log space -- a weight of 0.3 means the best
-# imaginable donor beats a price up to e^0.3 (about 35 %) higher, and never more.
+# where r, o and d are bounded: r and o in (-1, 1) and d in [0, 1). Each weight is
+# therefore the maximum equivalent price discount, in log space -- a weight of 0.3 means
+# the best imaginable donor beats a price up to e^0.3 (about 35 %) higher, and never
+# more. docs/REPUTATION.md works the whole thing through at these defaults.
 #
 # SOCIALIZATION_FACTOR and COST_AVERAGE_VARIATION moved here from `costs:`, unchanged.
 # They were always peer selection rather than pricing, and this section is where the
@@ -579,25 +581,29 @@ balancers:
   # name, and the one that can be bought: an opinion is worth share x burned ERG, and
   # minting a proof is free. It gets its own weight for exactly that reason.
   #
-  # Read ONCHAIN_REPUTATION_WEIGHT / DONATION_WEIGHT as the exchange rate between
-  # destroying one ERG and donating one. At 0.1 / 0.3 an ERG donated is worth three
-  # times an ERG burned, on purpose: a donation funds the development this node runs
-  # on, a burn destroys the money. The node refuses a config where this exceeds
-  # DONATION_WEIGHT, which would make burning the better buy.
+  # Set equal to DONATION_WEIGHT, with a matching half-credit below, so that a burned
+  # ERG is worth exactly a donated ERG under the shipped config. Neither system is the
+  # better buy by default; raise one above the other and this node prefers that way of
+  # paying. The node WARNS (it does not refuse) when the first ERG burned is worth more
+  # than the first ERG donated, because that makes destroying money the rational play
+  # instead of funding the software.
   #
   # The burn counts, but only as far as the proof behind it agrees with what this node
   # has seen for itself: each publishing proof's opinions about peers are compared with
   # our own local scores for those same peers, and its burn is scaled by how closely the
   # two match. A proof we share no ground with scores zero however much was burned into
   # it, and a proof that vouches for peers that failed us discredits itself by doing so.
-  # We keep local reputation on peers, never on proofs. See docs/DONATIONS.md and #353.
-  ONCHAIN_REPUTATION_WEIGHT: 0.1
-  # Agreed, burn-weighted ERG at which half of that weight is earned. 20 is four
-  # publishing proofs at the per-publisher cap, each in full agreement with us.
-  ONCHAIN_REPUTATION_HALF_CREDIT: 20.0
-  # The most any single proof may contribute to that sum, in ERG. Equal to
-  # DONATION_HALF_CREDIT on purpose: one proof, however funded and however much it
-  # agrees with us, is worth at most what one median donation is.
+  # We keep local reputation on peers, never on proofs. Computed on the hourly tick, not
+  # on the routing path. See docs/REPUTATION.md, docs/DONATIONS.md and #353.
+  ONCHAIN_REPUTATION_WEIGHT: 0.3
+  # Agreed, burn-weighted ERG at which half of that weight is earned. 5 ERG, which is
+  # DONATION_HALF_CREDIT (5000000000 nanoERG at MU_PER_NANOERG: 1) in the same units:
+  # the two curves have the same scale, not just the same ceiling.
+  ONCHAIN_REPUTATION_HALF_CREDIT: 5.0
+  # The most any single proof may contribute to that sum, in ERG. It binds one honest
+  # publisher and nothing else: minting a proof is free, so a burn split across several
+  # proofs never meets it. Above 5 ERG, a single proof earns less than the same ERG
+  # donated; at or below it the two are identical.
   ONCHAIN_PUBLISHER_CAP: 5.0
   COST_AVERAGE_VARIATION: 1
   # Weight of a peer's donation credit. Bonus only, never a penalty: penalising
