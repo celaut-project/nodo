@@ -577,6 +577,26 @@ message Peer {
 
 message Client {
     string client_id = 1;
+
+    // GenerateClient proof of work (issue #361). Both are absent on the first attempt
+    // and on every other RPC that carries a Client; they are only set on the retry that
+    // answers a PoWRequired. Optional so that a caller that never learned about PoW --
+    // and a node whose difficulty is still 0 -- keeps working unchanged.
+    optional string challenge = 2;
+    optional string pow_solution = 3;
+}
+
+// What GenerateClient answers with instead of a Client once this node has handed out
+// more clients than it gives away for free. `tags`, `prose` and `formal` are static and
+// describe the one proof of work on offer; `challenge` and `difficulty` are the work.
+// The difficulty the server actually enforces is the one authenticated inside the
+// challenge, not this field: this copy exists so the client knows what to solve for.
+message PoWRequired {
+    repeated string tags = 1;
+    string prose = 2;
+    bytes formal = 3;
+    string challenge = 4;
+    int32 difficulty = 5;
 }
 
 message RecursionGuard {
@@ -698,7 +718,7 @@ service Gateway {
 
     rpc GetPeerInfo(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Peer
     rpc IntroducePeer(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Peer -> 
-    rpc GenerateClient(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Client
+    rpc GenerateClient(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> Client | PoWRequired
     rpc GenerateDepositToken(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> TokenMessage
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Payment -> Empty
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> ModifyServiceSystemResourcesOutput
