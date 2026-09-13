@@ -5,9 +5,9 @@ The other reputation. :func:`src.reputation_system.interface.compute_reputation`
 is to take our payments and answer our calls. This module reads what the **ledgers** say,
 which is a different quantity that shares the name and **is** bought: an opinion is worth
 ``share x burned ERG``, minting a proof is free, and the ERG put into one can never come
-back out (``docs/ERGO.md``). Importing that figure as it stands would make burning ERG a
-strictly better buy than donating, which is the incentive ``docs/DONATIONS.md`` is built
-on. Issue #353.
+back out (``docs/ERGO.md``). The defaults price the two channels the same: a burned ERG
+and a donated ERG buy the same log-space bonus at every point on the curve, and which one
+an operator prefers is theirs to set. Issue #353.
 
 The burn is imported, and what is *not* imported is the assumption that a burn means
 anything by itself:
@@ -17,6 +17,9 @@ anything by itself:
     c(p, s)  = cred(p) * sign(v) * min(|v(p, s)| * burned_erg(p), ONCHAIN_PUBLISHER_CAP)
     S(s)     = sum over publishing proofs of c(p, s)
     o(s)     = S / (|S| + ONCHAIN_REPUTATION_HALF_CREDIT)          in (-1, 1)
+
+``cred`` is computed on the hourly tick (:mod:`.onchain_indexer`) and stored beside the
+row it scores, so a routing decision reads one table and computes no agreement at all.
 
 ``cred`` is the whole design, so it is worth saying plainly what it is. A reputation
 proof is not a peer. A peer is a node we have transacted with and hold an event log
@@ -44,14 +47,29 @@ That single number does the job identity cannot:
 **Known cost, and it is real: agreement can be mirrored.** This node publishes its own
 local scores to the chain (``submit_to_ledger``), so an attacker can read them, mint a
 proof, copy our opinions verbatim, and reach ``cred ~ 1`` for the price of the burn. That
-is not fixable by dating the boxes -- revising a box spends it and rewrites its date
-(see ``Opinion.published_at``) -- and it is why the *bounds* matter more than the
-agreement score does. A perfect mirror is still capped at ``ONCHAIN_PUBLISHER_CAP`` of
-one publisher's worth, the sum still saturates, and the whole term is still weighed below
-``DONATION_WEIGHT`` by a validator that refuses any other order. The most that buys is
-the term's ceiling, which is priced at less than 3 ERG donated. A mirror also has to keep
-mirroring: it is agreeing with our verdicts, so it is publishing that the peers we
-distrust are untrustworthy, which is not a free thing for a coalition to say.
+is not fixable by dating the boxes -- revising a box spends it and rewrites its date (see
+``Opinion.published_at``).
+
+What that costs the attacker is worth stating exactly, because ``ONCHAIN_PUBLISHER_CAP``
+is **not** the answer. Minting a proof is free, so a mirror splits its burn across as
+many proofs as it likes and the cap binds none of them; the cap only shapes the curve for
+an honest publisher putting everything behind one proof. Two things do bound the attack,
+and neither is an identity test:
+
+* **The burn is the Sybil cost.** The ERG has to be destroyed, per subject and in
+  proportion to the share staked, and no number of proofs makes it cheaper. Against a
+  mirror the term is therefore just ``total_burned / (total_burned + HALF_CREDIT)``, a
+  concave curve bought with real money, ceilinged at ``ONCHAIN_REPUTATION_WEIGHT``.
+* **A mirror only buys credibility with the nodes it mirrored.** ``cred`` is measured
+  against *our* opinions, so copying a peer group's published scores earns a voice with
+  that group and with nobody else. The same burn reaches fewer victims, which is a price
+  per victim rather than a flat one, and the mirror also has to keep publishing that the
+  peers we distrust are untrustworthy.
+
+One more limitation, documented rather than fixed: ``cred`` is *earned* on the subjects
+we and the proof both rate, and then *spent* on subjects we hold no opinion about --
+which is exactly where the term is doing work. Agreeing about the peers we can check is
+taken as evidence about the peers we cannot.
 
 Everything here is computed from rows already in SQLite -- a routing decision does no
 network I/O at all. The chain is read on the periodic tick (:mod:`.onchain_indexer`), and
@@ -64,19 +82,24 @@ from math import sqrt
 from time import monotonic
 from typing import Dict, Iterable, Mapping, Optional, Tuple
 
-from src.balancers.scoring import DEFAULT_REPUTATION_HALF_CREDIT, reputation_factor
+from src.balancers.scoring import reputation_factor
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER
 
-DEFAULT_ONCHAIN_WEIGHT = 0.1
+#: Equal to ``DONATION_WEIGHT``'s default, and that is the point: a burned ERG is worth a
+#: donated ERG under the shipped config, and an operator who wants one to outweigh the
+#: other says so themselves.
+DEFAULT_ONCHAIN_WEIGHT = 0.3
 
-#: Burn-weighted, agreed sum at which half the weight is earned, in ERG. Four publishers
-#: at the cap, the same shape the donation term's half credit has.
-DEFAULT_ONCHAIN_HALF_CREDIT = 20.0
+#: Burn-weighted, agreed ERG at which half the weight is earned. Equal to
+#: ``DONATION_HALF_CREDIT`` (5 000 000 000 nanoERG at ``MU_PER_NANOERG: 1``, i.e. 5 ERG),
+#: so the two curves have the same scale as well as the same ceiling.
+DEFAULT_ONCHAIN_HALF_CREDIT = 5.0
 
-#: The most one publishing proof may contribute to that sum, in ERG. Deliberately equal
-#: to ``DONATION_HALF_CREDIT``: one proof, however funded and however much it agrees with
-#: us, is worth at most what one median donation is.
+#: The most one publishing proof may contribute to that sum, in ERG. It binds a single
+#: honest publisher and nothing else -- minting a proof is free, so a burn split across
+#: several proofs never meets it. Above the cap, one proof burning X ERG earns less than
+#: donating X; below it the two are identical.
 DEFAULT_PUBLISHER_CAP = 5.0
 
 NANOERG_PER_ERG = 10 ** 9
@@ -131,6 +154,9 @@ def agreement(
     ``local_scores`` are the bounded factors ``r_hat``, not raw event sums, so one peer we
     have transacted with a thousand times cannot set the direction of our vector on its
     own.
+
+    Pure, and called from the hourly tick rather than from here: the routing path reads
+    the score this returned out of the row it was stored on.
 
     **Zero when the two overlap nowhere**, which is the common case and the intended one:
     a proof that has never spoken about a peer we know tells us nothing we can check, and
@@ -188,7 +214,6 @@ def contribution(
 def standing(
     opinions: Iterable[Mapping[str, object]],
     *,
-    local_scores: Mapping[str, float],
     excluded_proof_ids: Iterable[str] = (),
     cap: float = DEFAULT_PUBLISHER_CAP,
     half: float = DEFAULT_ONCHAIN_HALF_CREDIT,
@@ -196,21 +221,22 @@ def standing(
     """``o`` per subject peer. Pure: every input is passed in, nothing is read here.
 
     ``opinions`` are rows as :meth:`SQLConnection.get_onchain_opinions` returns them, one
-    per (subject, publishing proof). They are read twice, and that is the point of
-    keeping them in one table: grouped by proof they are each publisher's opinion vector,
-    which is what :func:`agreement` scores; grouped by subject they are the verdicts on
-    each candidate. The second pass costs one dictionary, not a second scan of the chain.
+    per (subject, publishing proof), each already carrying the ``credibility`` its
+    publisher earned on the last tick. One pass, one arithmetic sum per subject: the
+    agreement scoring happened in the indexer, against every peer we know rather than
+    against whoever happens to be up for selection.
 
     ``excluded_proof_ids`` are the proofs this node publishes through. What they say is
     our own local scores restated (``submit_to_ledger``), so they agree with us perfectly
     by construction and would hand themselves the highest credibility in the table for
     it. Counting them would weigh one observation twice -- once as the local term nobody
-    can buy, and once through the channel that is for sale.
+    can buy, and once through the channel that is for sale. Dropped here rather than in
+    the index because it is a *local* setting: an operator who changes their proof id
+    must not have to wait an hour for the change to take.
     """
     excluded = {proof_id for proof_id in excluded_proof_ids if proof_id}
 
-    rows = []
-    by_publisher: Dict[str, Dict[str, float]] = {}
+    sums: Dict[str, float] = {}
     for row in opinions:
         subject = str(row.get("subject_id") or "")
         proof_id = str(row.get("proof_id") or "")
@@ -219,19 +245,10 @@ def standing(
         try:
             verdict = float(row.get("verdict") or 0.0)
             burned = int(row.get("burned_nanoerg") or 0)
+            credibility = float(row.get("credibility") or 0.0)
         except (TypeError, ValueError):
             continue
-        rows.append((subject, proof_id, verdict, burned))
-        by_publisher.setdefault(proof_id, {})[subject] = verdict
-
-    credibility = {
-        proof_id: agreement(verdicts, local_scores)
-        for proof_id, verdicts in by_publisher.items()
-    }
-
-    sums: Dict[str, float] = {}
-    for subject, proof_id, verdict, burned in rows:
-        value = contribution(verdict, burned, credibility.get(proof_id, 0.0), cap)
+        value = contribution(verdict, burned, credibility, cap)
         if value:
             sums[subject] = sums.get(subject, 0.0) + value
     return {
@@ -248,9 +265,12 @@ def standing_by_peer() -> Dict[str, float]:
     decision. The donation term is built on the same promise
     (:func:`payment_system.donations.credit.bonus_by_peer`).
 
-    Our own opinions are read **here**, not frozen into the index, so a peer that failed
-    us an hour ago drags down its vouchers' credibility on the next routing decision
-    rather than at the next chain scan. It is a local table read either way.
+    Each publisher's credibility was computed on the hourly tick and stored on the row,
+    so this is one SQLite read and a sum -- no ``compute_reputation`` call, no second
+    pass. The tradeoff is stated rather than hidden: a peer that failed us ten minutes
+    ago drags its vouchers' credibility down at the **next** tick, not on the next
+    routing decision. An hour of staleness on a term that only ever breaks a tie, in
+    exchange for a routing path that does one table read.
 
     Cached for :data:`CACHE_SECONDS`. A failed computation is never cached: it must not
     blank every candidate's standing for a whole window.
@@ -261,26 +281,14 @@ def standing_by_peer() -> Dict[str, float]:
         return cached[1]
     try:
         from src.database.sql_connection import SQLConnection
-        from src.reputation_system.interface import compute_reputation
 
         sql = SQLConnection()
         rows = sql.get_onchain_opinions()
         if not rows:
             return {}
 
-        # Our opinion of every peer we know, not only of the ones the chain mentions: a
-        # proof is credible for agreeing with us about *any* peer we can check, and
-        # restricting the comparison to the candidates in the table would score the same
-        # proof differently depending on who else happened to be up for selection.
-        half_local = _parameter("REPUTATION_HALF_CREDIT", DEFAULT_REPUTATION_HALF_CREDIT)
-        local_scores = {
-            peer_id: reputation_factor(compute_reputation(peer_id=peer_id), half_local)
-            for peer_id in sql.get_peers_id()
-        }
-
         standings = standing(
             rows,
-            local_scores=local_scores,
             excluded_proof_ids=_own_proof_ids(),
             cap=publisher_cap(),
             half=half_credit(),

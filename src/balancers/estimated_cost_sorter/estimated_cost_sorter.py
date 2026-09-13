@@ -57,14 +57,15 @@ def estimated_cost_sorter(estimated_costs: Dict[str, celaut_pb2.EstimatedCost]) 
 
     # And one read of the on-chain standings, on the same terms and for the same reason
     # (issue #353). This is what the chain says about each candidate, already weighed by
-    # how far each publishing proof agrees with what this node has seen itself, and
-    # capped per publisher -- see `reputation_system.onchain_credit`. A proof that has
+    # how far each publishing proof agrees with what this node has seen itself -- scored
+    # on the hourly tick and stored beside the verdict, so nothing is computed here --
+    # and capped per publisher; see `reputation_system.onchain_credit`. A proof that has
     # never said anything we can check agrees with us about nothing and is worth nothing,
     # whatever it burned. It is scored at its **own** weight, never at
     # SOCIALIZATION_FACTOR: the local term is an observation nobody can buy, and this one
-    # is published by proofs whose voice is for sale. The ratio
-    # ONCHAIN_REPUTATION_WEIGHT / DONATION_WEIGHT is the exchange rate between destroying
-    # an ERG and donating one, and it favours donating by construction.
+    # is published by proofs whose voice is for sale. At the defaults that weight equals
+    # DONATION_WEIGHT and the half-credits match, so a burned ERG and a donated ERG are
+    # worth the same; the operator may tilt it either way.
     onchain_standings: Dict[str, float] = standing_by_peer()
 
     def __compute_score(peer_id: str, estimated_cost: celaut_pb2.EstimatedCost) -> float:
