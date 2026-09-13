@@ -134,6 +134,26 @@ registered with a node and pay it.
 
 A peer is named by its identity public key — see [Node identity](#node-identity).
 
+### Creating a client
+
+`GenerateClient` is how a caller gets its first identity on a node, so it cannot ask
+for one: it takes no authentication, and anybody who can reach the gateway can call it.
+What limits it is price rather than permission. The caller proposes its own `client_id`
+(a UUID4), and the node hands out `free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY`
+clients for nothing; past that it answers with a `PoWRequired` instead — a challenge to
+hash until `Blake2b(challenge + solution)` ends in as many zeros as the difficulty,
+which rises by one per block of that many clients.
+
+The node stores nothing while the caller works. The challenge carries the `client_id`,
+a nonce and the difficulty under an HMAC the node computes with a secret derived from
+its identity mnemonic, so it can re-derive on the retry what it issued without having
+kept it — and the caller cannot lower its own difficulty. On the retry the node checks
+the MAC, then that the `client_id` is still free, and only then hashes: a `client_id`
+that already exists is refused before any work is done, which is also what stops one
+solution creating the same client twice. The difficulty enforced is the one inside the
+challenge, never the node's current one, so work already under way is not invalidated
+by other callers arriving meanwhile.
+
 ## Transport security
 
 Every hop between nodes is TLS. A node's certificate is self-signed and carries the
