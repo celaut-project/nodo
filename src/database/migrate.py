@@ -429,14 +429,15 @@ TABLES = {
     #
     # No publisher is filtered out, because a proof earns its voice by what it says and
     # not by who owns it -- minting a proof is free, so any owner test is one an attacker
-    # passes for nothing. The table is therefore read two ways by `onchain_credit`:
-    # grouped by subject it is the verdicts on a candidate, and grouped by proof it is
-    # that publisher's opinion vector, scored against this node's own local opinions of
-    # the same peers. A proof that agrees with us about nothing weighs nothing.
+    # passes for nothing. What it says is scored on the tick that reads it: grouped by
+    # proof, the rows are that publisher's opinion vector, and `credibility` is how far
+    # it matches this node's own local opinions of the same peers. A proof that agrees
+    # with us about nothing weighs nothing.
     #
-    # `burned_nanoerg` is a property of the proof rather than of a box, so every row one
-    # proof produces repeats it. Stored rather than joined: the reader takes one pass
-    # over one table on every routing decision.
+    # `burned_nanoerg` and `credibility` are both properties of the proof rather than of
+    # a box, so every row one proof produces repeats them. Stored rather than joined or
+    # recomputed: the reader takes one pass over one table on every routing decision and
+    # does no agreement arithmetic at all.
     "onchain_opinions": '''
         CREATE TABLE IF NOT EXISTS onchain_opinions (
             ledger TEXT NOT NULL,
@@ -444,6 +445,7 @@ TABLES = {
             proof_id TEXT NOT NULL,
             verdict REAL NOT NULL,
             burned_nanoerg INTEGER NOT NULL DEFAULT 0,
+            credibility REAL NOT NULL DEFAULT 0,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (ledger, subject_id, proof_id)
         )

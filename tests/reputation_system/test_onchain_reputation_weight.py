@@ -21,8 +21,8 @@ cannot be:
   so are ours, which agree with us by construction;
 * a failed read scores **every** candidate zero, never some of them (issue #352's rule,
   applied to a second term);
-* and the shipped weight is at or below ``DONATION_WEIGHT``, so the same ERG spent on a
-  burn never beats what it buys as a donation.
+* and the shipped defaults price a burned ERG exactly like a donated one, at every point
+  on the curve rather than only at the ceiling.
 
 No network and no database: the pure functions take their inputs, and the two readers are
 stubbed. Issue #353.
@@ -66,14 +66,20 @@ HALF_LOCAL = 50.0
 CAP_ERG = 5.0
 NANOERG = 10 ** 9
 
+# What a donated ERG buys, so the burn can be priced against it in the same units.
+DONATION_HALF_CREDIT_ERG = 5.0
 
-def row(subject="peer-a", proof="proof-1", verdict=1.0, burned_erg=CAP_ERG):
+
+def row(subject="peer-a", proof="proof-1", verdict=1.0, burned_erg=CAP_ERG,
+        credibility=1.0):
+    """A stored row, credibility included -- the indexer scores it, the reader sums it."""
     return {
         "ledger": "ergo",
         "subject_id": subject,
         "proof_id": proof,
         "verdict": verdict,
         "burned_nanoerg": int(burned_erg * NANOERG),
+        "credibility": credibility,
     }
 
 
@@ -165,10 +171,7 @@ class BurnTests(unittest.TestCase):
             contribution(1.0, 10 ** 6 * NANOERG_PER_ERG, 0.0, DEFAULT_PUBLISHER_CAP),
             0.0,
         )
-        self.assertEqual(
-            standing([row(burned_erg=10 ** 6)], local_scores={"peer-b": 0.9}),
-            {},
-        )
+        self.assertEqual(standing([row(burned_erg=10 ** 6, credibility=0.0)]), {})
 
     def test_a_larger_burn_says_more_up_to_the_cap(self):
         small = contribution(1.0, 1 * NANOERG_PER_ERG, 1.0, DEFAULT_PUBLISHER_CAP)
@@ -208,20 +211,45 @@ class PublisherCapTests(unittest.TestCase):
             -DEFAULT_PUBLISHER_CAP,
         )
 
-    def test_reaching_the_half_credit_takes_several_agreeing_proofs(self):
-        """Four proofs at the cap, in full agreement with us. A coalition, not a buy."""
-        rows = [row(proof=f"proof-{i}") for i in range(4)]
-        rows += [row(subject="peer-good", proof=f"proof-{i}") for i in range(4)]
-        result = standing(rows, local_scores={"peer-good": 0.9})
-        self.assertAlmostEqual(result["peer-a"], 0.5)
+    def test_the_half_credit_is_reached_at_the_half_credit_in_agreed_erg(self):
+        """Arithmetic, not a security property, and the name used to claim otherwise.
 
-    def test_one_proof_alone_reaches_a_fifth_of_the_ceiling(self):
-        rows = [row(), row(subject="peer-good")]
-        result = standing(rows, local_scores={"peer-good": 0.9})
+        ``S`` is agreed, burn-weighted ERG and the curve is ``S / (S + half)``, so
+        ``S = ONCHAIN_REPUTATION_HALF_CREDIT`` is 0.5 whether it arrives as one proof at
+        the cap or as five proofs burning an ERG each. The cap does not make that a
+        coalition: minting proofs is free, so a mirror splits its burn and meets no cap.
+        What the burn costs is the burn.
+        """
+        one_proof = standing([row(burned_erg=DEFAULT_ONCHAIN_HALF_CREDIT)])
+        many = standing([
+            row(proof=f"proof-{i}", burned_erg=DEFAULT_ONCHAIN_HALF_CREDIT / 5)
+            for i in range(5)
+        ])
+        self.assertAlmostEqual(one_proof["peer-a"], 0.5)
+        self.assertAlmostEqual(many["peer-a"], 0.5)
+
+    def test_the_cap_only_binds_a_publisher_that_did_not_split_its_burn(self):
+        """What the cap is and is not. It shapes one honest proof's curve, nothing more.
+
+        Twenty ERG behind a single proof buys the cap's five. The same twenty split
+        across four proofs -- free to mint -- buys all twenty. So the cap is not a bound
+        on an attacker; it is a bound on the operator who used one proof.
+        """
+        one = standing([row(burned_erg=20.0)])["peer-a"]
+        split = standing(
+            [row(proof=f"proof-{i}", burned_erg=5.0) for i in range(4)]
+        )["peer-a"]
+        self.assertAlmostEqual(one, 5.0 / (5.0 + DEFAULT_ONCHAIN_HALF_CREDIT))
+        self.assertAlmostEqual(split, 20.0 / (20.0 + DEFAULT_ONCHAIN_HALF_CREDIT))
+        self.assertGreater(split, one)
+
+    def test_one_proof_at_the_cap_reaches_half_the_ceiling(self):
+        result = standing([row()])
         self.assertAlmostEqual(
             result["peer-a"],
             DEFAULT_PUBLISHER_CAP / (DEFAULT_PUBLISHER_CAP + DEFAULT_ONCHAIN_HALF_CREDIT),
         )
+        self.assertAlmostEqual(result["peer-a"], 0.5)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -235,15 +263,13 @@ class SaturationTests(unittest.TestCase):
 
     def test_it_saturates_without_reaching_one(self):
         rows = [row(proof=f"proof-{i}") for i in range(1000)]
-        rows += [row(subject="peer-good", proof=f"proof-{i}") for i in range(1000)]
-        value = standing(rows, local_scores={"peer-good": 0.9})["peer-a"]
+        value = standing(rows)["peer-a"]
         self.assertLess(value, 1.0)
         self.assertGreater(value, 0.99)
 
     def test_it_saturates_downwards_too(self):
         rows = [row(proof=f"proof-{i}", verdict=-1.0) for i in range(1000)]
-        rows += [row(subject="peer-good", proof=f"proof-{i}") for i in range(1000)]
-        value = standing(rows, local_scores={"peer-good": 0.9})["peer-a"]
+        value = standing(rows)["peer-a"]
         self.assertGreater(value, -1.0)
         self.assertLess(value, -0.99)
 
@@ -289,11 +315,8 @@ class OwnVoiceExclusionTests(unittest.TestCase):
         buy, and once through the channel that is for sale.
         """
         rows = [row(proof="ours"), row(subject="peer-good", proof="ours")]
-        local = {"peer-good": 0.9}
-        self.assertIn("peer-a", standing(rows, local_scores=local))
-        self.assertEqual(
-            standing(rows, local_scores=local, excluded_proof_ids=("ours",)), {}
-        )
+        self.assertIn("peer-a", standing(rows))
+        self.assertEqual(standing(rows, excluded_proof_ids=("ours",)), {})
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -313,18 +336,20 @@ class FailureZeroesEveryCandidateTests(unittest.TestCase):
         ):
             self.assertEqual(standing_by_peer(), {})
 
-    def test_an_unreadable_local_score_does_not_take_half_the_table_with_it(self):
+    def test_the_routing_path_computes_no_agreement_and_reads_no_event_log(self):
+        """The credibility is on the row, so ``compute_reputation`` is never called here.
+
+        That is the whole point of scoring on the tick: an unreadable event log cannot
+        blank the table, because the table does not depend on reading it.
+        """
         with mock.patch(
             "src.database.sql_connection.SQLConnection.get_onchain_opinions",
             return_value=[row(), row(subject="peer-b")],
         ), mock.patch(
-            "src.database.sql_connection.SQLConnection.get_peers_id",
-            return_value=["peer-a", "peer-b"],
-        ), mock.patch(
             "src.reputation_system.interface.compute_reputation",
-            side_effect=RuntimeError("no such column"),
+            side_effect=AssertionError("the routing path must not score agreement"),
         ):
-            self.assertEqual(standing_by_peer(), {})
+            self.assertIn("peer-a", standing_by_peer())
 
     def test_a_failure_is_never_cached(self):
         with mock.patch(
@@ -335,12 +360,6 @@ class FailureZeroesEveryCandidateTests(unittest.TestCase):
         with mock.patch(
             "src.database.sql_connection.SQLConnection.get_onchain_opinions",
             return_value=[row(), row(subject="peer-good")],
-        ), mock.patch(
-            "src.database.sql_connection.SQLConnection.get_peers_id",
-            return_value=["peer-a", "peer-good"],
-        ), mock.patch(
-            "src.reputation_system.interface.compute_reputation",
-            side_effect=lambda peer_id: 10 ** 6 if peer_id == "peer-good" else 0,
         ):
             self.assertIn("peer-a", standing_by_peer())
 
@@ -354,74 +373,133 @@ class FailureZeroesEveryCandidateTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ExchangeRateTests(unittest.TestCase):
-    """The economics issue #353 exists to protect: donating must stay the better buy."""
+    """Parity: under the shipped config an ERG buys the same either way it is spent."""
 
-    def test_the_shipped_onchain_weight_does_not_exceed_the_donation_weight(self):
-        self.assertLessEqual(DEFAULT_ONCHAIN_WEIGHT, W_D)
+    @staticmethod
+    def _donated(erg):
+        return W_D * (erg / (erg + DONATION_HALF_CREDIT_ERG))
 
-    def test_the_config_refuses_a_burn_worth_more_than_a_donation(self):
-        with self.assertRaises(ConfigValidationError) as raised:
-            validate_balancers_config({"balancers": {
-                "ONCHAIN_REPUTATION_WEIGHT": 2, "DONATION_WEIGHT": 0.3,
-            }})
-        self.assertIn("exchange rate", str(raised.exception))
+    @staticmethod
+    def _burned(erg):
+        return DEFAULT_ONCHAIN_WEIGHT * (erg / (erg + DEFAULT_ONCHAIN_HALF_CREDIT))
 
-    def test_equal_weights_are_the_most_that_is_allowed(self):
+    def test_the_two_ceilings_are_equal(self):
+        self.assertEqual(DEFAULT_ONCHAIN_WEIGHT, W_D)
+
+    def test_the_two_half_credits_are_the_same_number_of_erg(self):
+        # DONATION_HALF_CREDIT is 5_000_000_000 MU and MU_PER_NANOERG is 1.
+        self.assertEqual(DEFAULT_ONCHAIN_HALF_CREDIT, DONATION_HALF_CREDIT_ERG)
+
+    def test_a_burned_erg_is_worth_a_donated_erg_at_every_point_on_the_curve(self):
+        """Not only at the ceiling: the marginal rate matches too.
+
+        The shape is ``W * X / (X + H)`` on both sides with the same ``W`` and ``H``, so
+        the first ERG, the fifth and the thousandth are each worth the same whichever
+        channel they went through. That is what Josemi asked for in #358, and it is what
+        makes weighing one system above the other a *choice* rather than a default.
+        """
+        for erg in (0.5, 1.0, 2.0, 5.0, 10.0, 1000.0):
+            with self.subTest(erg=erg):
+                self.assertAlmostEqual(self._burned(erg), self._donated(erg))
+
+    def test_the_same_erg_through_the_sort_ranks_the_two_channels_level(self):
+        burned = score(
+            cost_mu=1000,
+            onchain_reputation=5.0 / (5.0 + DEFAULT_ONCHAIN_HALF_CREDIT),
+            onchain_weight=DEFAULT_ONCHAIN_WEIGHT,
+        )
+        donated = score(
+            cost_mu=1000,
+            donation_bonus=5.0 / (5.0 + DONATION_HALF_CREDIT_ERG),
+            donation_weight=W_D,
+        )
+        self.assertAlmostEqual(burned, donated)
+
+        plain = score(cost_mu=1000)
+        self.assertAlmostEqual(burned - plain, 0.15)
+
+    def test_the_cap_is_the_only_thing_that_breaks_parity_and_only_above_it(self):
+        """One honest proof burning more than the cap earns less than donating the same.
+
+        Stated rather than hidden: it is the one place the two curves part, it only
+        affects a publisher who put everything behind a single proof, and an attacker
+        never meets it because minting a second proof is free.
+        """
+        below = standing([row(burned_erg=3.0)])["peer-a"] * DEFAULT_ONCHAIN_WEIGHT
+        self.assertAlmostEqual(below, self._donated(3.0))
+
+        above = standing([row(burned_erg=20.0)])["peer-a"] * DEFAULT_ONCHAIN_WEIGHT
+        self.assertLess(above, self._donated(20.0))
+
+    def test_a_mirror_pays_the_burn_and_the_burn_is_the_sybil_cost(self):
+        """What the term is worth to an attacker with perfect agreement, priced.
+
+        Agreement can be copied off the chain, and splitting the burn across freely
+        minted proofs defeats the cap -- so what a mirror faces is the bare curve
+        ``burned / (burned + HALF_CREDIT)``, bought with ERG that is destroyed. Half the
+        ceiling costs 5 ERG, which is what 5 ERG donated also buys.
+        """
+        rows = [row(proof=f"proof-{i}", burned_erg=1.0) for i in range(5)]
+        mirrored = standing(rows)["peer-a"]
+        self.assertAlmostEqual(mirrored, 5.0 / (5.0 + DEFAULT_ONCHAIN_HALF_CREDIT))
+        self.assertAlmostEqual(
+            mirrored * DEFAULT_ONCHAIN_WEIGHT, self._donated(5.0)
+        )
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ExchangeRateWarningTests(unittest.TestCase):
+    """The validator says what a config prices. It no longer refuses either order.
+
+    Which system an operator weighs higher is a policy (issue #358): the node warns when
+    burning is the better buy at the margin and boots either way.
+    """
+
+    def _warnings(self, **balancers):
+        found = []
+        validate_balancers_config({"balancers": balancers}, warn=found.append)
+        return found
+
+    def test_the_shipped_defaults_warn_about_nothing(self):
+        self.assertEqual(self._warnings(
+            ONCHAIN_REPUTATION_WEIGHT=0.3, ONCHAIN_REPUTATION_HALF_CREDIT=5.0,
+            DONATION_WEIGHT=0.3, DONATION_HALF_CREDIT="5000000000",
+        ), [])
+
+    def test_weighing_the_burn_higher_is_allowed_and_warned_about(self):
+        warnings = self._warnings(
+            ONCHAIN_REPUTATION_WEIGHT=2.0, DONATION_WEIGHT=0.3,
+        )
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("better buy", warnings[0])
+
+    def test_a_burn_that_wins_at_the_margin_but_not_at_the_ceiling_still_warns(self):
+        """The case a ceiling-only check missed, which is what #358 asked about.
+
+        Both weights are ceilings, so comparing only ``W_o`` against ``W_d`` says nothing
+        about what the *first* ERG buys. Here the burn's ceiling is lower -- 0.2 against
+        0.3 -- and yet an ERG burned is worth more than an ERG donated, because the burn
+        saturates four times sooner.
+        """
+        warnings = self._warnings(
+            ONCHAIN_REPUTATION_WEIGHT=0.2, ONCHAIN_REPUTATION_HALF_CREDIT=1.0,
+            DONATION_WEIGHT=0.3, DONATION_HALF_CREDIT="5000000000",
+        )
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("better buy", warnings[0])
+
+    def test_weighing_the_donation_higher_is_the_operators_business_and_is_silent(self):
+        self.assertEqual(self._warnings(
+            ONCHAIN_REPUTATION_WEIGHT=0.1, DONATION_WEIGHT=0.3,
+        ), [])
+
+    def test_nothing_is_refused_for_the_exchange_rate_alone(self):
         validate_balancers_config({"balancers": {
-            "ONCHAIN_REPUTATION_WEIGHT": 0.3, "DONATION_WEIGHT": 0.3,
+            "ONCHAIN_REPUTATION_WEIGHT": 5.0, "DONATION_WEIGHT": 0.3,
         }})
 
-    def test_the_default_donation_weight_is_what_an_unset_one_is_compared_against(self):
-        # An operator who raises only the on-chain weight, leaving DONATION_WEIGHT to its
-        # default, must not slip past the check because the key is absent.
-        with self.assertRaises(ConfigValidationError):
-            validate_balancers_config({"balancers": {"ONCHAIN_REPUTATION_WEIGHT": 1.0}})
-
-    def test_the_same_erg_burned_never_beats_what_it_buys_as_a_donation(self):
-        """The substitution the issue is about, priced at the shipped defaults.
-
-        An operator with ERG to spend has two channels. Burning buys, at the absolute
-        ceiling -- every proof in the network burning without limit and in full agreement
-        with us -- `ONCHAIN_REPUTATION_WEIGHT` of log-space bonus. Donating buys, at its
-        own ceiling, `DONATION_WEIGHT`. The first must not exceed the second, or the
-        rational play is to destroy the money instead of funding the software.
-        """
-        burned_to_the_ceiling = score(
-            cost_mu=1000, onchain_reputation=1.0, onchain_weight=DEFAULT_ONCHAIN_WEIGHT
-        )
-        donated_to_the_ceiling = score(
-            cost_mu=1000, donation_bonus=1.0, donation_weight=W_D
-        )
-        self.assertLess(burned_to_the_ceiling, donated_to_the_ceiling)
-
-        # And in the units an operator reads: the premium each channel beats.
-        plain = score(cost_mu=1000)
-        self.assertAlmostEqual(burned_to_the_ceiling - plain, DEFAULT_ONCHAIN_WEIGHT)
-        self.assertAlmostEqual(donated_to_the_ceiling - plain, W_D)
-
-    def test_the_whole_onchain_ceiling_is_worth_under_three_donated_erg(self):
-        """The mirror attack's payoff, priced.
-
-        Agreement can be copied off the chain, so the honest way to read the term is:
-        what does an attacker who reaches perfect agreement and burns without limit get?
-        The answer is the ceiling, and the ceiling is what donating 2.5 ERG buys. The
-        bounding is the safety, not the agreement score.
-        """
-        donated_erg = 2.5
-        half_credit_erg = 5.0
-        donation_bonus = W_D * (donated_erg / (donated_erg + half_credit_erg))
-        self.assertAlmostEqual(DEFAULT_ONCHAIN_WEIGHT, donation_bonus)
-
-    def test_a_realistic_burn_is_far_below_even_one_donated_erg(self):
-        """Not just the ceilings: the achievable case.
-
-        One proof at the cap, in full agreement with us, is S = 5 -> o = 0.2, worth 0.02
-        in log space. A single ERG donated is d = 1/6, worth 0.05. So a burn routed
-        through one agreeable proof is worth less than 1 ERG donated.
-        """
-        rows = [row(), row(subject="peer-good")]
-        one_proof = standing(rows, local_scores={"peer-good": 0.9})["peer-a"]
-        self.assertLess(one_proof * DEFAULT_ONCHAIN_WEIGHT, (1 / 6) * W_D)
+    def test_a_caller_that_passes_no_warn_still_validates(self):
+        validate_balancers_config({"balancers": {"ONCHAIN_REPUTATION_WEIGHT": 5.0}})
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -432,8 +510,8 @@ class ConfigValidationTests(unittest.TestCase):
             "SOCIALIZATION_FACTOR": 2, "REPUTATION_HALF_CREDIT": 50,
             "COST_AVERAGE_VARIATION": 1, "DONATION_WEIGHT": 0.3,
             "DONATION_HALF_CREDIT": "5000000000", "DONATION_AGE_SCALE": 31536000,
-            "LOCAL_BIAS": 1.0, "ONCHAIN_REPUTATION_WEIGHT": 0.1,
-            "ONCHAIN_REPUTATION_HALF_CREDIT": 20.0, "ONCHAIN_PUBLISHER_CAP": 5.0,
+            "LOCAL_BIAS": 1.0, "ONCHAIN_REPUTATION_WEIGHT": 0.3,
+            "ONCHAIN_REPUTATION_HALF_CREDIT": 5.0, "ONCHAIN_PUBLISHER_CAP": 5.0,
         }})
 
     def test_the_example_config_ships_a_valid_block(self):
@@ -444,10 +522,13 @@ class ConfigValidationTests(unittest.TestCase):
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         with open(os.path.join(root, "config.example.yaml"), encoding="utf-8") as handle:
             shipped = yaml.safe_load(handle) or {}
-        validate_balancers_config(shipped)
-        self.assertLessEqual(
+        warnings = []
+        validate_balancers_config(shipped, warn=warnings.append)
+        self.assertEqual(warnings, [], "the shipped config must not warn about itself")
+        self.assertEqual(
             float(shipped["balancers"]["ONCHAIN_REPUTATION_WEIGHT"]),
             float(shipped["balancers"]["DONATION_WEIGHT"]),
+            "a burned ERG is worth a donated ERG by default",
         )
 
     def test_the_numbers_this_file_reasons_with_are_the_ones_that_ship(self):

@@ -5,9 +5,12 @@ is pinned here is the boundary rather than the arithmetic (that is
 ``test_onchain_reputation_weight``):
 
 * **every** publishing proof is stored, attributable to a known peer or not -- a proof
-  earns its voice by what it says, scored at read time, and filtering by who owns it
-  would only exclude the publishers an attacker does not need;
+  earns its voice by what it says, and filtering by who owns it would only exclude the
+  publishers an attacker does not need;
 * the burn behind each proof reaches the row, because the reader prices it;
+* each proof's **credibility is scored here**, once per tick, against this node's own
+  opinions of every peer it knows -- so that the routing path reads it instead of
+  computing it;
 * a publisher's boxes are netted per proof before they are written, so splitting a stake
   into ten boxes does not speak ten times;
 * the subject's own proofs are set aside first (issue #351);
@@ -141,6 +144,8 @@ class RefreshTests(unittest.TestCase):
 
         with mock.patch.object(
             onchain_indexer, "opinions_for", side_effect=opinions_for
+        ), mock.patch.object(
+            onchain_indexer, "local_scores", return_value={"peer-a": 0.5}
         ), mock.patch(
             "src.database.sql_connection.SQLConnection.get_peers_id",
             return_value=["peer-a", "peer-b"],
@@ -182,6 +187,78 @@ class RefreshTests(unittest.TestCase):
 
     def test_the_refresh_interval_keeps_the_explorer_clear_of_a_launch(self):
         self.assertGreaterEqual(onchain_indexer.REFRESH_INTERVAL_SECONDS, 3600)
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CredibilityIsScoredOnTheTickTests(unittest.TestCase):
+    """Where ``cred`` is computed, and what it is computed against.
+
+    It used to happen on every routing decision, which meant one ``compute_reputation``
+    call per known peer inside a launch. It happens here now (issue #358): a peer that
+    failed us is reflected in its vouchers' credibility at the next tick rather than at
+    the next launch, and the balancer reads one table.
+    """
+
+    def test_a_proof_is_scored_against_every_peer_it_spoke_about(self):
+        """Across the whole scan, not per subject: a proof is worth the same to all."""
+        credibility = onchain_indexer.credibility_by_proof(
+            {
+                "peer-a": [("agrees", 1.0, 0), ("disagrees", -1.0, 0)],
+                "peer-b": [("agrees", -1.0, 0), ("disagrees", 1.0, 0)],
+            },
+            {"peer-a": 0.8, "peer-b": -0.8},
+        )
+        self.assertAlmostEqual(credibility["agrees"], 1.0)
+        self.assertEqual(credibility["disagrees"], 0.0)
+
+    def test_a_proof_we_can_check_nothing_of_scores_zero(self):
+        credibility = onchain_indexer.credibility_by_proof(
+            {"stranger": [("proof-1", 1.0, 0)]}, {"peer-a": 0.9}
+        )
+        self.assertEqual(credibility["proof-1"], 0.0)
+
+    def test_the_score_reaches_the_stored_row(self):
+        """What the reader sums is what the tick worked out."""
+        stored = {}
+
+        with mock.patch.object(
+            onchain_indexer, "opinions_for",
+            side_effect=lambda peer_id: [("proof-1", 1.0, 10 ** 15)],
+        ), mock.patch.object(
+            onchain_indexer, "local_scores", return_value={"peer-a": 0.7}
+        ), mock.patch(
+            "src.database.sql_connection.SQLConnection.get_peers_id",
+            return_value=["peer-a"],
+        ), mock.patch(
+            "src.database.sql_connection.SQLConnection.replace_onchain_opinions",
+            side_effect=lambda ledger, subject, rows: stored.update({subject: rows}) or True,
+        ):
+            onchain_indexer.refresh()
+
+        self.assertEqual(len(stored["peer-a"]), 1)
+        proof_id, verdict, burned, credibility = stored["peer-a"][0]
+        self.assertEqual((proof_id, verdict, burned), ("proof-1", 1.0, 10 ** 15))
+        self.assertAlmostEqual(credibility, 1.0)
+
+    def test_an_unreadable_event_log_leaves_the_index_alone(self):
+        """Our own scores failing to read is not a verdict about anybody's credibility.
+
+        Writing zeroes would blank every publisher's voice until the next tick, which is
+        a routing decision made on the shape of a failure.
+        """
+        with mock.patch.object(
+            onchain_indexer, "opinions_for",
+            side_effect=lambda peer_id: [("proof-1", 1.0, 10 ** 15)],
+        ), mock.patch.object(
+            onchain_indexer, "local_scores", side_effect=RuntimeError("no such column")
+        ), mock.patch(
+            "src.database.sql_connection.SQLConnection.get_peers_id",
+            return_value=["peer-a"],
+        ), mock.patch(
+            "src.database.sql_connection.SQLConnection.replace_onchain_opinions",
+            side_effect=AssertionError("nothing may be written"),
+        ):
+            self.assertEqual(onchain_indexer.refresh(), 0)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

@@ -2975,11 +2975,17 @@ class SQLConnection(metaclass=Singleton):
         return _as_int(row['tip']) if row else 0
 
     def replace_onchain_opinions(self, ledger: str, subject_id: str,
-                                 rows: List[Tuple[str, float, int]]) -> bool:
+                                 rows: List[Tuple[str, float, int, float]]) -> bool:
         """Set what ``ledger`` says about ``subject_id`` to exactly ``rows``. Atomic.
 
-        ``rows`` are ``(proof id, verdict, burned nanoERG)``, already netted per proof by
-        the caller. Replace rather than upsert, because an opinion can be *withdrawn*:
+        ``rows`` are ``(proof id, verdict, burned nanoERG, credibility)``, already netted
+        per proof and already scored by the caller -- the indexer works the credibility
+        out once per tick so that the balancer never does
+        (:mod:`src.reputation_system.onchain_indexer`). Like the burn, it is a property of
+        the proof and therefore repeated on every row that proof produces; stored rather
+        than joined, so the reader takes one pass over one table.
+
+        Replace rather than upsert, because an opinion can be *withdrawn*:
         revising a reputation box spends it and writes a new one, so a proof that pulled
         its stake back leaves no row behind to update, and an upsert would keep crediting
         a peer for a vouch that no longer exists on the chain.
@@ -2997,12 +3003,13 @@ class SQLConnection(metaclass=Singleton):
             "DELETE FROM onchain_opinions WHERE ledger = ? AND subject_id = ?",
             (ledger, subject_id),
         )]
-        for proof_id, verdict, burned_nanoerg in rows:
+        for proof_id, verdict, burned_nanoerg, credibility in rows:
             statements.append((
                 "INSERT INTO onchain_opinions "
-                "(ledger, subject_id, proof_id, verdict, burned_nanoerg) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (ledger, subject_id, str(proof_id), float(verdict), int(burned_nanoerg)),
+                "(ledger, subject_id, proof_id, verdict, burned_nanoerg, credibility) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (ledger, subject_id, str(proof_id), float(verdict), int(burned_nanoerg),
+                 float(credibility)),
             ))
         try:
             self._execute2(statements)
@@ -3018,16 +3025,15 @@ class SQLConnection(metaclass=Singleton):
 
         With no ``subject_id``, every row, so one pass builds the whole candidate set for
         a routing decision -- the same shape and the same reason as ``get_donations``.
-        That whole-table read is also what lets the term score each publishing proof: the
-        rows grouped by proof are its opinion vector, and filtering to one subject first
-        would leave nothing to judge the proof saying it by.
+        Each row carries the ``credibility`` its publisher earned on the last tick, so
+        scoring a candidate is one sum over rows already read and nothing else.
 
         An empty list on a read failure, never an exception. The term this feeds must
         score every candidate zero rather than some of them, and a routing decision has
         to complete (issues #352, #353).
         """
-        query = ("SELECT ledger, subject_id, proof_id, verdict, burned_nanoerg "
-                 "FROM onchain_opinions")
+        query = ("SELECT ledger, subject_id, proof_id, verdict, burned_nanoerg, "
+                 "credibility FROM onchain_opinions")
         params: tuple = ()
         if subject_id is not None:
             query += " WHERE subject_id = ?"
