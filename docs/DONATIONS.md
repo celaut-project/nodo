@@ -42,7 +42,7 @@ interchangeable:
 | | earned by | purchasable | in the balancer |
 |---|---|---|---|
 | **Local reputation** (`peer.reputation_score`) | behaving well towards *this* node — taking our payments, answering `GetPeerInfo` | no — the only way to raise it is to behave well towards us | bonus *and* penalty, at `SOCIALIZATION_FACTOR` (`2`) |
-| **On-chain reputation** (opinions on Ergo's reputation contract) | other proofs staking part of themselves on you, backed by irrecoverably burned ERG | **yes, by burning — that is what the burn is** | bonus *and* penalty, at `ONCHAIN_REPUTATION_WEIGHT` (`0.1`), and **only after each proof's burn is discounted by how far that proof agrees with what we have seen ourselves, then capped** |
+| **On-chain reputation** (opinions on Ergo's reputation contract) | other proofs staking part of themselves on you, backed by irrecoverably burned ERG | **yes, by burning — that is what the burn is** | bonus *and* penalty, at `ONCHAIN_REPUTATION_WEIGHT` (`0.3`), and **only after each proof's burn is discounted by how far that proof agrees with what we have seen ourselves, then capped** |
 | **Donation credit** | contributing money, verifiably on-chain | yes, that is the point | bonus only, at `DONATION_WEIGHT` (`0.3`) |
 
 ### What actually protects the routing decision
@@ -76,15 +76,18 @@ The traffic used to be one-way: `submit_to_ledger` publishes our local scores as
 opinions and nothing was read back. It is now a loop, but a lossy one on purpose — what
 comes back is priced by us, not by whoever spent the most.
 
-### Why the weight, not the shape, is the safety parameter
+### Parity: one burned ERG is worth one donated ERG
 
-**Read `ONCHAIN_REPUTATION_WEIGHT / DONATION_WEIGHT` as the exchange rate between
-destroying one ERG and donating one.** At the shipped `0.1 / 0.3`, a donated ERG is worth
-three times a burned one, and the node **refuses a config where the burn weighs more**
-(`validate_balancers_config`).
+**Read `ONCHAIN_REPUTATION_WEIGHT / ONCHAIN_REPUTATION_HALF_CREDIT` against
+`DONATION_WEIGHT / DONATION_HALF_CREDIT` as the exchange rate between destroying one ERG
+and donating one.** The defaults set the two equal — `0.3` over 5 ERG on each side — so
+an ERG buys the same log-space bonus whichever way it is spent, at every point on the
+curve and not only at the ceiling. Neither system is the better buy until an operator
+decides it should be, and they may decide either way: the node **warns** when burning
+pays better at the margin, and refuses nothing (`validate_balancers_config`).
 
-That inequality has to be deliberate, because every other advantage already sits on the
-burn's side:
+Parity is the position and not an accident, because the burn has advantages the donation
+does not:
 
 - **Universal recognition.** One contract, one filter, every node reads the same boxes.
   Donation credit only counts for nodes whose `DONATION_CREDIT_WALLETS` lists the wallet
@@ -92,11 +95,14 @@ burn's side:
 - **Instant.** No `DONATION_AGE_SCALE` to wait out (1.00 now, 1.69 at a year).
 - **Sign-preserving**, not bonus-only.
 
-Reusing `SOCIALIZATION_FACTOR = 2` for the import would have handed the burn 6.7× the
-log-space bonus of a donation on top of all that, and a rational operator would have
-stopped donating and burned instead — destroying the money rather than funding the
-development donations exist to pay for. That is the substitution issue #353 records, and
-the separate weight is what closes it.
+Against those, the burn has to be *believed* before it counts at all: it is multiplied by
+`cred`, and a proof nobody here can check is worth nothing however much went into it. A
+donation needs no such discount.
+
+What is still refused is reusing `SOCIALIZATION_FACTOR = 2` for the import, which would
+have handed the burn 6.7× the log-space bonus of a donation — and would have priced
+something bought against something observed. That is the substitution issue #353 records,
+and the separate weight is what closes it.
 
 Filtering out a node's opinion about itself does **not** close it, and is not claimed to:
 a second proof costs nothing to mint, nothing on-chain ties it to its owner, and R7 is a
@@ -108,11 +114,28 @@ its burn buys nothing.
 node publishes its own local scores to the chain (`submit_to_ledger`), so anyone can read
 them, mint a proof, restate them verbatim and reach near-perfect agreement for the price
 of the burn. Dating the boxes does not help: revising a box spends it and rewrites its
-date. What contains it is the bounding, which is why the weight and not the shape is the
-safety parameter — a perfect mirror is still capped at one proof's worth, still saturates,
-and still sits under `DONATION_WEIGHT`, so the most it can buy is the term's ceiling,
-priced below 3 ERG donated. A mirror also has to keep mirroring, publishing that the peers
-we distrust are untrustworthy, which is not free for a coalition to say.
+date.
+
+What this costs the attacker is worth being exact about, because `ONCHAIN_PUBLISHER_CAP`
+is **not** the answer. Minting a proof is free, so a mirror splits its burn across as many
+proofs as it likes and the cap binds none of them — the cap only shapes the curve for an
+honest publisher putting everything behind one proof. Two things do bound the attack:
+
+- **The burn is the Sybil cost.** The ERG has to be destroyed, per subject, in proportion
+  to the share staked, and no number of proofs makes that cheaper. Against a mirror the
+  term is simply `burned / (burned + ONCHAIN_REPUTATION_HALF_CREDIT)` — a concave curve
+  bought with real money, ceilinged at `ONCHAIN_REPUTATION_WEIGHT`. Buying half the
+  term's ceiling costs 5 ERG burned, the same 5 ERG that buys half the donation term.
+- **A mirror only buys credibility with the nodes it mirrored.** `cred` is measured
+  against *our* opinions, so copying one peer group's published scores earns a voice with
+  that group and nobody else. The same burn reaches fewer victims, which makes the attack
+  priced per victim rather than flat. The mirror also has to keep mirroring — publishing
+  that the peers we distrust are untrustworthy, which is not free for a coalition to say.
+
+One limitation is accepted rather than solved: `cred` is *earned* on the subjects we and
+the proof both rate, and then *spent* on subjects we hold no opinion about — which is
+exactly where the term does its work. Agreement about the peers we can check is taken as
+evidence about the peers we cannot.
 
 What this shape does **not** cost is bootstrapping. A rater unknown to us is not mute by
 decree: it is worth what it agrees with us about, so a newcomer with no history of
@@ -377,6 +400,8 @@ every peer.
 
 ## See also
 
+- [`REPUTATION.md`](REPUTATION.md) — how a peer's score is computed, worked through at
+  the shipped defaults.
 - [`CONFIG.md`](CONFIG.md) — every key, including the `balancers:` block.
 - [`PRICING.md`](PRICING.md) — MU, what one is worth, and how a quote is built.
 - [`ERGO.md`](ERGO.md) — the single wallet, and the cold-wallet sweep donations no longer
