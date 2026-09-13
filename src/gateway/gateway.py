@@ -112,19 +112,6 @@ class Gateway(celaut_pb2_grpc.Gateway):
                 message_iterator=generate_client()
         )
 
-    def GenerateDepositToken(self, request_iterator, context, *kwargs):
-        yield from bee.serialize_to_buffer(
-                message_iterator=celaut_pb2.TokenMessage(
-                    token=generate_deposit_token(
-                        client_id=next(bee.parse_from_buffer(
-                            request_iterator=request_iterator,
-                            indices=celaut_pb2.Client,
-                            partitions_message_mode=True
-                        ), 0).client_id
-                    )
-                )
-        )
-
     def ModifyServiceSystemResources(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for modify service system resources.')
         caller_ip = get_only_the_ip_from_context(context_peer=context.peer())
@@ -166,6 +153,19 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def GetService(self, request_iterator, context, **kwargs):
         yield from GetServiceIterable(request_iterator, context)
+
+    def GenerateDepositToken(self, request_iterator, context, *kwargs):
+        yield from bee.serialize_to_buffer(
+                message_iterator=celaut_pb2.TokenMessage(
+                    token=generate_deposit_token(
+                        client_id=next(bee.parse_from_buffer(
+                            request_iterator=request_iterator,
+                            indices=celaut_pb2.Client,
+                            partitions_message_mode=True
+                        ), 0).client_id
+                    )
+                )
+        )
 
     def Payable(self, request_iterator, context, **kwargs):
         log.LOGGER('Request for payment.')
