@@ -761,8 +761,8 @@ def generate_client(client_id: Optional[str] = None) -> celaut_pb2.Client:
     without one the node mints its own, which is the difficulty-0 path and what every
     caller predating the proof of work does. Either way the id is new: a duplicate
     violates the ``clients`` primary key and raises here rather than overwriting a
-    balance, which is what makes the check-then-create of ``client_pow_response`` safe
-    against two requests racing for the same id.
+    balance, which is what makes the check-then-create of
+    ``generate_client_or_pow_required`` safe against two requests racing for the same id.
     """
     # No collisions expected.
     client_id = client_id or uuid4().hex

@@ -125,7 +125,10 @@ class Gateway(celaut_pb2_grpc.Gateway):
                     challenge=request.challenge if request else "",
                     solution=request.pow_solution if request else "",
                 ),
-                indices=GenerateClient_output_indices
+                # A copy: bee-rpc adds its own `0: bytes` entry to whatever it is
+                # handed, and this one is a module-level constant shared with the
+                # calling side.
+                indices=dict(GenerateClient_output_indices)
         )
 
     def GenerateDepositToken(self, request_iterator, context, *kwargs):
