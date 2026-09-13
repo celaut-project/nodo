@@ -3,8 +3,7 @@
 ``test_onchain_reputation_weight`` pins the arithmetic. This pins the decision -- the
 sorter reading the standings under the right key, at the right weight, and failing the
 right way. The one that matters most is the last class: at the shipped defaults, the same
-ERG spent on a burn must not beat what it buys as a donation, or a rational operator
-stops funding the software (issue #353).
+ERG buys the same rank whether it was burned or donated (issue #353, revised in #358).
 """
 import unittest
 from unittest import mock
@@ -63,7 +62,7 @@ class OnChainStandingInTheSortTests(unittest.TestCase):
         self.assertEqual(self._order({"vouched": 0.99}, candidates)[0], "cheap")
 
     def test_the_term_never_outweighs_the_home_field_preference(self):
-        # LOCAL_BIAS is 1.0 and the whole on-chain ceiling is 0.1: a peer the network
+        # LOCAL_BIAS is 1.0 and the whole on-chain ceiling is 0.3: a peer the network
         # loves does not pull work off this node at the same price.
         candidates = {"local": _cost(1000), "peer-a": _cost(1000)}
         self.assertEqual(self._order({"peer-a": 1.0}, candidates)[0], "local")
@@ -145,66 +144,84 @@ class FailureZeroesEveryCandidateTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class BurningMustNotBeatDonatingTests(unittest.TestCase):
-    """The economics of issue #353, reproduced as a routing decision.
+class BurningAndDonatingRankTheSameTests(unittest.TestCase):
+    """The economics of issue #353 as Josemi settled them in #358, as a routing decision.
 
-    Two peers, same price. One bought the best on-chain standing that exists; the other
-    donated. The donor has to win, at the shipped defaults, or the rational play is to
-    destroy money instead of funding the software every node here runs on.
+    Two peers, same price. One burned five ERG through proofs that agree with us; the
+    other donated five. Neither wins, because an ERG is an ERG under the shipped config
+    and which system to prefer is the operator's to set.
     """
 
-    def _order(self, standings, donations, candidates):
+    def _scores(self, standings, donations, candidates):
         with mock.patch.object(sorter, "bonus_by_peer", return_value=donations), \
                 mock.patch.object(sorter, "compute_reputation", return_value=0.0), \
                 mock.patch.object(sorter, "standing_by_peer", return_value=standings):
             return [peer_id for peer_id, _ in sorter.estimated_cost_sorter(candidates)]
 
-    def test_a_maximum_burn_loses_to_a_maximum_donation(self):
-        candidates = {"burner": _cost(1000), "donor": _cost(1000)}
-        order = self._order({"burner": 1.0}, {"donor": 1.0}, candidates)
-        self.assertEqual(order[0], "donor")
+    def _order(self, standings, donations, candidates):
+        return self._scores(standings, donations, candidates)
 
-    def test_a_maximum_burn_loses_even_to_a_partial_donation(self):
-        """Five ERG donated -- the half credit, d̂ = 0.5 -> 0.15 -- still beats the
-        entire on-chain ceiling of 0.1. There is no amount of ERG that buys past it."""
+    def test_five_erg_burned_and_five_erg_donated_rank_level(self):
+        """Both half-credits are 5 ERG and both weights are 0.3, so both terms are 0.15.
+
+        A tie in the score, which the sort breaks arbitrarily -- so it is asserted as a
+        tie rather than as an order: neither channel can beat the other.
+        """
         candidates = {"burner": _cost(1000), "donor": _cost(1000)}
-        order = self._order({"burner": 1.0}, {"donor": 0.5}, candidates)
-        self.assertEqual(order[0], "donor")
+        order = self._order({"burner": 0.5}, {"donor": 0.5}, candidates)
+        self.assertEqual(sorted(order), ["burner", "donor"])
+
+        # And neither beats a peer priced e^0.15 (about 16.2 %) cheaper.
+        for who, standings, donations in (
+            ("burner", {"burner": 0.5}, {}),
+            ("donor", {}, {"donor": 0.5}),
+        ):
+            with self.subTest(who=who):
+                self.assertEqual(
+                    self._order(standings, donations,
+                                {who: _cost(1170), "plain": _cost(1000)})[0],
+                    "plain",
+                )
+                self.assertEqual(
+                    self._order(standings, donations,
+                                {who: _cost(1150), "plain": _cost(1000)})[0],
+                    who,
+                )
 
     def test_the_ceiling_of_the_burn_is_the_weight_and_nothing_more(self):
         """A weight is the maximum equivalent price discount, since price is a log.
 
-        At 0.1, the best conceivable on-chain standing beats a price up to e**0.1 (about
-        10.5 %) higher, and loses to anything cheaper than that.
+        At 0.3, the best conceivable on-chain standing beats a price up to e**0.3 (about
+        35 %) higher, and loses to anything cheaper than that. Same ceiling the donation
+        term has.
         """
         from math import exp
 
-        self.assertAlmostEqual(exp(DEFAULT_ONCHAIN_WEIGHT), 1.1051709, places=6)
+        self.assertAlmostEqual(exp(DEFAULT_ONCHAIN_WEIGHT), 1.3498588, places=6)
 
-        # 10 % dearer: the standing still wins.
+        # 34 % dearer: the standing still wins.
         self.assertEqual(
-            self._order({"vouched": 1.0}, {}, {"vouched": _cost(1100), "plain": _cost(1000)})[0],
+            self._order({"vouched": 1.0}, {}, {"vouched": _cost(1340), "plain": _cost(1000)})[0],
             "vouched",
         )
-        # 11 % dearer, past the ceiling: price wins.
+        # 36 % dearer, past the ceiling: price wins.
         self.assertEqual(
-            self._order({"vouched": 1.0}, {}, {"vouched": _cost(1110), "plain": _cost(1000)})[0],
+            self._order({"vouched": 1.0}, {}, {"vouched": _cost(1360), "plain": _cost(1000)})[0],
             "plain",
         )
 
-    def test_an_operator_cannot_raise_the_weight_past_the_donation_weight(self):
-        # The check is in the validator rather than here, but the pairing is the point:
-        # the ceiling above is only a ceiling because the config refuses to lift it past
-        # what a donation buys.
-        from src.utils.config_validation import (
-            ConfigValidationError,
-            validate_balancers_config,
-        )
+    def test_an_operator_may_weight_either_system_higher_and_is_warned_not_refused(self):
+        # The exchange rate is a policy, not a mistake (issue #358): the node says what
+        # the config prices and boots either way.
+        from src.utils.config_validation import validate_balancers_config
 
-        with self.assertRaises(ConfigValidationError):
-            validate_balancers_config({"balancers": {
-                "ONCHAIN_REPUTATION_WEIGHT": 2.0, "DONATION_WEIGHT": 0.3,
-            }})
+        warnings = []
+        validate_balancers_config(
+            {"balancers": {"ONCHAIN_REPUTATION_WEIGHT": 2.0, "DONATION_WEIGHT": 0.3}},
+            warn=warnings.append,
+        )
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("better buy", warnings[0])
 
 
 if __name__ == "__main__":

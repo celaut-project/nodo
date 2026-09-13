@@ -59,7 +59,7 @@ class OnChainOpinionStorageTests(unittest.TestCase):
 
     def _rows(self, subject="peer-a"):
         return sorted(
-            (row["proof_id"], row["verdict"], row["burned_nanoerg"])
+            (row["proof_id"], row["verdict"], row["burned_nanoerg"], row["credibility"])
             for row in self.sql.get_onchain_opinions(subject)
         )
 
@@ -76,11 +76,21 @@ class OnChainOpinionStorageTests(unittest.TestCase):
 
     def test_rows_are_written_and_read_back(self):
         self.assertTrue(self.sql.replace_onchain_opinions(
-            "ergo", "peer-a", [("proof-1", 0.25, 10 ** 15), ("proof-2", -0.1, 10 ** 12)]
+            "ergo", "peer-a",
+            [("proof-1", 0.25, 10 ** 15, 0.8), ("proof-2", -0.1, 10 ** 12, 0.0)]
         ))
         self.assertEqual(
             self._rows(),
-            [("proof-1", 0.25, 10 ** 15), ("proof-2", -0.1, 10 ** 12)],
+            [("proof-1", 0.25, 10 ** 15, 0.8), ("proof-2", -0.1, 10 ** 12, 0.0)],
+        )
+
+    def test_the_credibility_the_tick_worked_out_is_what_comes_back(self):
+        """The reader sums it and computes none of it (issue #358), so it has to store."""
+        self.sql.replace_onchain_opinions(
+            "ergo", "peer-a", [("proof-1", 1.0, 10 ** 15, 0.625)]
+        )
+        self.assertEqual(
+            self.sql.get_onchain_opinions("peer-a")[0]["credibility"], 0.625
         )
 
     def test_a_withdrawn_opinion_disappears_rather_than_lingering(self):
@@ -91,42 +101,59 @@ class OnChainOpinionStorageTests(unittest.TestCase):
         the chain no longer holds.
         """
         self.sql.replace_onchain_opinions(
-            "ergo", "peer-a", [("proof-1", 0.25, 10 ** 15), ("proof-2", 0.25, 10 ** 12)]
+            "ergo", "peer-a",
+            [("proof-1", 0.25, 10 ** 15, 1.0), ("proof-2", 0.25, 10 ** 12, 1.0)]
         )
-        self.sql.replace_onchain_opinions("ergo", "peer-a", [("proof-1", 0.25, 10 ** 15)])
-        self.assertEqual(self._rows(), [("proof-1", 0.25, 10 ** 15)])
+        self.sql.replace_onchain_opinions(
+            "ergo", "peer-a", [("proof-1", 0.25, 10 ** 15, 1.0)]
+        )
+        self.assertEqual(self._rows(), [("proof-1", 0.25, 10 ** 15, 1.0)])
 
     def test_an_empty_refresh_clears_a_subject(self):
-        self.sql.replace_onchain_opinions("ergo", "peer-a", [("proof-1", 0.25, 10 ** 15)])
+        self.sql.replace_onchain_opinions(
+            "ergo", "peer-a", [("proof-1", 0.25, 10 ** 15, 1.0)]
+        )
         self.sql.replace_onchain_opinions("ergo", "peer-a", [])
         self.assertEqual(self._rows(), [])
 
     def test_one_subjects_refresh_does_not_touch_another(self):
-        self.sql.replace_onchain_opinions("ergo", "peer-a", [("proof-1", 0.25, 10 ** 15)])
-        self.sql.replace_onchain_opinions("ergo", "peer-b", [("proof-2", 0.5, 10 ** 12)])
+        self.sql.replace_onchain_opinions(
+            "ergo", "peer-a", [("proof-1", 0.25, 10 ** 15, 1.0)]
+        )
+        self.sql.replace_onchain_opinions(
+            "ergo", "peer-b", [("proof-2", 0.5, 10 ** 12, 0.5)]
+        )
         self.sql.replace_onchain_opinions("ergo", "peer-a", [])
         self.assertEqual(self._rows("peer-a"), [])
-        self.assertEqual(self._rows("peer-b"), [("proof-2", 0.5, 10 ** 12)])
+        self.assertEqual(self._rows("peer-b"), [("proof-2", 0.5, 10 ** 12, 0.5)])
 
     def test_one_proof_speaks_once_per_subject(self):
         """The primary key, not a convention. Writing the same proof twice is refused,
         and the caller nets a publisher's boxes before it gets here."""
         ok = self.sql.replace_onchain_opinions(
-            "ergo", "peer-a", [("proof-1", 0.25, 10 ** 15), ("proof-1", 0.25, 10 ** 15)]
+            "ergo", "peer-a",
+            [("proof-1", 0.25, 10 ** 15, 1.0), ("proof-1", 0.25, 10 ** 15, 1.0)]
         )
         self.assertFalse(ok, "a duplicated proof must not be stored twice")
 
     def test_a_failed_write_leaves_the_previous_rows_in_place(self):
         """A database error is not the network changing its mind."""
-        self.sql.replace_onchain_opinions("ergo", "peer-a", [("proof-1", 0.25, 10 ** 15)])
+        self.sql.replace_onchain_opinions(
+            "ergo", "peer-a", [("proof-1", 0.25, 10 ** 15, 1.0)]
+        )
         self.assertFalse(self.sql.replace_onchain_opinions(
-            "ergo", "peer-a", [("proof-2", 0.5, 10 ** 12), ("proof-2", 0.5, 10 ** 12)]
+            "ergo", "peer-a",
+            [("proof-2", 0.5, 10 ** 12, 0.5), ("proof-2", 0.5, 10 ** 12, 0.5)]
         ))
-        self.assertEqual(self._rows(), [("proof-1", 0.25, 10 ** 15)])
+        self.assertEqual(self._rows(), [("proof-1", 0.25, 10 ** 15, 1.0)])
 
     def test_every_subject_is_read_in_one_pass(self):
-        self.sql.replace_onchain_opinions("ergo", "peer-a", [("proof-1", 0.25, 10 ** 15)])
-        self.sql.replace_onchain_opinions("ergo", "peer-b", [("proof-2", 0.5, 10 ** 12)])
+        self.sql.replace_onchain_opinions(
+            "ergo", "peer-a", [("proof-1", 0.25, 10 ** 15, 1.0)]
+        )
+        self.sql.replace_onchain_opinions(
+            "ergo", "peer-b", [("proof-2", 0.5, 10 ** 12, 0.5)]
+        )
         self.assertEqual(
             sorted(row["subject_id"] for row in self.sql.get_onchain_opinions()),
             ["peer-a", "peer-b"],
@@ -139,8 +166,10 @@ class OnChainOpinionStorageTests(unittest.TestCase):
         different number than it went in as -- and the term multiplies by it.
         """
         burned = 4321 * 10 ** 9 + 7
-        self.sql.replace_onchain_opinions("ergo", "peer-a", [("proof-1", 1.0, burned)])
-        self.assertEqual(self._rows(), [("proof-1", 1.0, burned)])
+        self.sql.replace_onchain_opinions(
+            "ergo", "peer-a", [("proof-1", 1.0, burned, 1.0)]
+        )
+        self.assertEqual(self._rows(), [("proof-1", 1.0, burned, 1.0)])
 
     def test_an_unreadable_table_is_an_empty_list_not_an_exception(self):
         # The routing path calls this. It has to complete (issue #352).
