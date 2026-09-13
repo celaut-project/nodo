@@ -1060,7 +1060,24 @@ default=root
 EOF
 echo -e "${GREEN}[OK] Default user configured as '${WSL_USER}'${NC}"
 
-echo "nodo" >> /root/.bashrc
+# Opening the terminal opens the console, not a bare shell. `nodo tui` runs the
+# first-run questions (KyA, donation share) before drawing anything, so a Windows
+# user is asked them the same way a Linux one is -- which the install itself cannot
+# do, being a pipe with no terminal on either end.
+#
+# Guarded so it only fires on an interactive login, and only once: without the
+# $PS1 test every non-interactive `wsl -d Nodo -- <cmd>` would try to draw a TUI,
+# and NODO_TUI_STARTED stops a shell opened from inside the console from nesting
+# another one. `exec` so quitting the console closes the window instead of
+# dropping to a prompt the shortcut never promised.
+cat >> /root/.bashrc <<'BASHRC'
+
+# Added by the nodo installer.
+if [ -n "$PS1" ] && [ -z "$NODO_TUI_STARTED" ]; then
+    export NODO_TUI_STARTED=1
+    exec nodo tui
+fi
+BASHRC
 
 echo -e "\n${CYAN}[STEP 5.2] Configuring hostname...${NC}"
 echo "Nodo" > /etc/hostname
@@ -1080,6 +1097,29 @@ echo -e "${GREEN}[OK] vmlinuz and initramfs installed${NC}"
 echo -e "\n${CYAN}[STEP 5.4] Installing Nodo system...${NC}"
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
 echo -e "${GREEN}[OK] Nodo system installed${NC}"
+
+echo -e "\n${CYAN}[STEP 5.4b] Building the operations console...${NC}"
+# Built here, once, because the desktop shortcut opens it. `nodo tui` otherwise
+# falls back to `cargo run`, which on a cold cache compiles ~17k lines of Rust --
+# fine at a prompt, but behind a double-clicked shortcut it is a window that shows
+# nothing for several minutes and reads as a failure to launch. Nothing else in the
+# install needs Rust, so the toolchain is fetched here and only here.
+#
+# Non-fatal: a node without a console is still a node, and `nodo tui` will fall
+# back to building on demand.
+if ! command -v cargo >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1 || true
+fi
+. "$HOME/.cargo/env" 2>/dev/null || true
+if command -v cargo >/dev/null 2>&1; then
+    if (cd /nodo/src/commands/tui && cargo build --release >/dev/null 2>&1); then
+        echo -e "${GREEN}[OK] Console built${NC}"
+    else
+        echo -e "${YELLOW}Console build failed; 'nodo tui' will build it on first use${NC}"
+    fi
+else
+    echo -e "${YELLOW}Rust unavailable; 'nodo tui' will build the console on first use${NC}"
+fi
 
 if [ -f /etc/systemd/system/nodo.service ]; then
     sed -i 's/{{PYTHON_VENV_BIN}}/python/g' /etc/systemd/system/nodo.service
@@ -1208,10 +1248,13 @@ try {
     $WScriptShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WScriptShell.CreateShortcut($ShortcutPath)
 
+    # Straight into the console rather than a shell prompt. The first launch asks the
+    # KyA and the donation share (src/commands/onboarding.py) before drawing, which is
+    # where a Windows user gets asked at all -- the install is a pipe and cannot ask.
     $Shortcut.TargetPath      = "wsl.exe"
-    $Shortcut.Arguments       = "-d Nodo --cd ~"
+    $Shortcut.Arguments       = "-d Nodo --cd ~ -- nodo tui"
     $Shortcut.WorkingDirectory = "%USERPROFILE%"
-    $Shortcut.Description     = "Open Nodo Terminal (WSL2)"
+    $Shortcut.Description     = "Open the Nodo console (WSL2)"
     $Shortcut.IconLocation    = "C:\Windows\System32\wsl.exe,0"
     $Shortcut.Save()
 
