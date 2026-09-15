@@ -423,6 +423,34 @@ service_networks:
   #   - "dns:*"
   #   - "pow:bitcoin"
 
+# How a `pow:<chain>` network is resolved into peers (docs/NETWORKS.md use case 3,
+# docs/proposals/78-network-guarantees-and-pow.md). A service declaring `pow:ergo`
+# puts its actual ask in Service.Network.formal -- which block its peers must have
+# on their main chain, and how much cumulative work their chain must carry -- and
+# this node checks each candidate against it before opening anything.
+#
+# The chain endpoints are NOT configured here: Ergo candidates come from
+# `ledgers.ergo.NODE_URL`, from the peer crawl at `ledgers.ergo.HTTP_PEERS_PATH`,
+# and from EXTRA_PEERS below. Duplicating a node URL in two blocks is how the two
+# come to disagree.
+#
+# What is verified is what each candidate REPORTS ABOUT ITSELF over its REST API.
+# That is enough to exclude an out-of-sync, stalled, pruned or wrong-network node,
+# and it is not enough to exclude one that lies: a peer can claim any state it
+# likes for the cost of one `if`. A service needing more than that gets it from the
+# chain protocol it is about to speak.
+#
+# NOTE the name, for the same reason `service_networks` has the name it has: this is
+# not `networks:`, which would sit one letter from the `network:` block above.
+pow_networks:
+  TIMEOUT_SECONDS: 10  # Per HTTP request to a candidate peer.
+  MAX_PEERS: 8  # Stop verifying once this many peers qualify. Each one becomes a firewall rule.
+  # Extra chain endpoints to consider, ahead of the crawled ones. For an operator
+  # running their own node on a host this node is not otherwise pointed at.
+  EXTRA_PEERS: []
+  # EXTRA_PEERS:
+  #   - "http://192.168.1.50:9053"
+
 # Dynamic DNS: keep a hostname pointing at this node's public IP, so peers can
 # find it by name when the address changes. Tunneling means only the gateway port
 # needs to be reachable -- but it still needs forwarding on the router, which is

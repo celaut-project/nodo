@@ -9,6 +9,7 @@ from src.manager.network_env import (
     PeerEnvLookup,
     filter_peers_by_environment,
 )
+from src.manager.pow_networks import POW_TAG_PREFIX, resolve_pow_network
 
 env_manager = ConfigManager()
 sc = SQLConnection()
@@ -81,6 +82,24 @@ def resolve_network(
     # UnboundLocalError (it previously did for tag "*").
     uris: List[celaut.Instance.Uri] = []
     for tag in network.tags:
+        # A `pow:<chain>` tag names a PoW communication domain, whose actual ask
+        # lives in `Network.formal` (issue #78,
+        # docs/proposals/78-network-guarantees-and-pow.md). It is dispatched first
+        # and returns whole Instances rather than bare uris, because which peers
+        # qualify is decided by verifying each candidate's chain state -- not by a
+        # name lookup. The prefix carries no `.`, so such a tag could never have
+        # reached the DNS heuristic below anyway; the order is for clarity.
+        if tag.startswith(POW_TAG_PREFIX):
+            peers = resolve_pow_network(network, tag=tag)
+            if peers:
+                return filter_peers_by_environment(
+                    network=network,
+                    peers=peers,
+                    requester_env_values=requester_env_values,
+                    peer_env_lookup=peer_env_lookup,
+                )
+            continue
+
         if tag in LEDGERS_WITHOUT_URIS:
             continue
 
