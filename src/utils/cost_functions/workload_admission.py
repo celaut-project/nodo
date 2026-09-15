@@ -129,25 +129,21 @@ def check_resource_availability_on_peer(
 ) -> Optional[bool]:
     """Ask exactly one peer whether it could run an instance shaped like
     `resources` right now. None means the peer could not be asked (unreachable,
-    timed out, or running a version without the RPC) -- not a "no".
+    timed out, running a version without the RPC, or holding an address that
+    turns out not to prove its identity) -- not a "no".
     """
     # Imported lazily: this is the only place in the module that talks to a
     # peer, and keeping the rest importable without bee_rpc/grpc installed is
     # what lets evaluate_possible_environment_workloads' own logic be unit
     # tested on a host that has neither (see tests/test_workload_admission.py).
-    import grpc
     from bee_rpc import client as bee
     from protos import celaut_pb2_grpc
-    from src.utils.utils import generate_uris_by_peer_id
-
-    # TODO(#257): a plaintext channel, like every other peer call on this path. When
-    # `grpc_transport.peer_channel(peer_id)` exists it replaces this, and it resolves
-    # the address too, so `generate_uris_by_peer_id` goes with it.
+    from src.identity.grpc_transport import peer_channel
 
     try:
         response = next(bee.client_grpc(
             method=celaut_pb2_grpc.GatewayStub(
-                grpc.insecure_channel(next(generate_uris_by_peer_id(peer_id)))
+                peer_channel(peer_id=peer_id)
             ).GetResourceAvailability,
             timeout=_timeout(),
             partitions_message_mode_parser=True,
