@@ -57,7 +57,8 @@ class _Response:
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class TokenValidationTests(unittest.TestCase):
     def setUp(self):
-        self.ledger = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="Ergo", formal=b"")
+        # The payment path passes the ledger TAG, not the message (issue #82).
+        self.ledger = "ergo"
         # The JVM and the explorer session are not what is under test; the decision is.
         wallet = mock.patch.object(interface, "get_wallet_address", return_value=WALLET)
         wallet.start()

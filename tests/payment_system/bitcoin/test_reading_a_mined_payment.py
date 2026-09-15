@@ -172,8 +172,8 @@ class UnderpaidCandidateTests(unittest.TestCase):
         from protos import celaut_pb2
         from src.payment_system.contracts.bitcoin import interface
 
-        ledger = celaut_pb2.Contract.Ledger()
-        ledger.tags.append(interface.LEDGER)
+        # The payment path passes the ledger TAG, not the message (issue #82).
+        ledger = interface.LEDGER
 
         chain = mock.MagicMock()
         chain.list_received.return_value = [{"txids": list(transactions)}]
