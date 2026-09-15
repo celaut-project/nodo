@@ -134,7 +134,12 @@ def _donation_accrual():
 
 
 def _ledger_tag(ledger) -> Optional[str]:
-    """The ledger's tag ("ergo"), for a row a person reads. Demo payments carry none."""
+    """The tag ("ergo") of a `Contract.Ledger` as it arrives on the wire.
+
+    Only for the incoming side, where a peer sends the whole advertised message. The
+    payer's own side already works in tags: that is what a `contract_instance` row
+    holds and what `get_peer_contract_instances` yields.
+    """
     tags = getattr(ledger, "tags", None)
     return tags[0] if tags else None
 
@@ -255,7 +260,9 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
             # a script and an address, so paying in one asset against another's rows
             # would build the output at the right address for the wrong money.
             scripts = get_peer_contract_instances(contract_hash, peer_id, plan.asset)
-            ledgers = [("", "")] if plan.is_demo else ledger_balancer(ledger_generator=scripts)
+            # ``ledger`` below is the chain's TAG, which is what the stored instance
+            # carries and all a contract reads off it.
+            ledgers = [(b"", "", "")] if plan.is_demo else ledger_balancer(ledger_generator=scripts)
             
             for script, ledger, _asset in ledgers:
                 
@@ -340,7 +347,7 @@ def __peer_payment_process(peer_id: str, plans: List[SettlementPlan],
                         tx_id=submitted_tx[-1] if submitted_tx else None,
                         peer_id=peer_id,
                         deposit_token=deposit_token,
-                        ledger=_ledger_tag(ledger) or plan.ledger_tag,
+                        ledger=ledger or plan.ledger_tag,
                         contract_hash=contract_hash,
                         # Which asset paid it: `amount_mu` is ledger-neutral, and one
                         # contract settles in several assets at several rates.
@@ -670,6 +677,10 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
     """
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         raise Exception(f"Deposit token {token} doesn't exists.")
+    # The wire carries the whole `Contract.Ledger` a peer advertises; the tag is the
+    # only part of it anything reads, so it is taken here, once, and everything below
+    # this line works in tags. `prose` and `formal` are description and are dropped.
+    ledger_tag: str = _ledger_tag(ledger) or ""
     # Resolved once, up front, because the payment record needs it whichever way the
     # validation goes -- a deposit we refused is exactly the one a client will ask about.
     try:
@@ -679,7 +690,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
 
     try:
         _r = bool(client_id) and __check_payment_process(
-            amount=amount, ledger=ledger, token=token,
+            amount=amount, ledger=ledger_tag, token=token,
             contract=contract, script=script, asset=asset,
         ) and _manager_module().increase_local_balance_for_client(client_id=client_id, amount_mu=amount)  # TODO allow for containers too.
     except: _r = False
@@ -690,7 +701,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         # in. Accrued here rather than paid here: see `donations.accrual`.
         _donation_accrual().accrue(
             amount_mu=amount,
-            ledger=_ledger_tag(ledger),
+            ledger=ledger_tag,
             contract_hash=contract_hash,
             asset=asset,
         )
@@ -703,7 +714,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
         amount_mu=amount,
         client_id=client_id,
         deposit_token=token,
-        ledger=_ledger_tag(ledger),
+        ledger=ledger_tag,
         contract_hash=contract_hash,
         token_id=asset,
     )
@@ -711,7 +722,7 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
     return _r
 
 
-def __check_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, token: str,
+def __check_payment_process(amount: int, ledger: str, token: str,
                             contract: bytes, script: bytes, asset: str = "") -> bool:
     _l.LOGGER('Check payment process to ' + token + ' of ' + str(amount))
     if not sc.deposit_token_exists(token_id=token, status='pending'):
@@ -728,7 +739,7 @@ def __check_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, tok
     # Keyed by the method the payment names, not by the contract: on Ergo one contract
     # validates ERG and every token at the same address, and each has its own rate, so
     # the wrong validator would check the amount against the wrong money.
-    key = MethodKey(_ledger_tag(ledger) or "", sha3_256(contract).hexdigest(), asset)
+    key = MethodKey(ledger, sha3_256(contract).hexdigest(), asset)
     validators = _payment_envs().payment_process_validators()
     _validator = validators.get(key)
     if _validator is None:

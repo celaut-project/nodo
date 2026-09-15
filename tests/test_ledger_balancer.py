@@ -1,17 +1,19 @@
-"""ledger_balancer receives Ledger messages, not strings.
+"""ledger_balancer works in ledger tags.
 
-It tracked what it had checked in a ``Set[str]`` and put the ledger straight in,
-but ``get_peer_contract_instances`` yields the deserialized ``Contract.Ledger``
-message — which protobuf makes unhashable. Every payment attempt died with
-``unhashable type: 'Ledger'`` before reaching the ledger, right after the peer had
-already issued a deposit token.
+It once tracked what it had checked in a ``Set[str]`` while
+``get_peer_contract_instances`` yielded a deserialized ``Contract.Ledger`` message,
+which protobuf makes unhashable: every payment attempt died with
+``unhashable type: 'Ledger'`` right after the peer had issued a deposit token. That
+was patched by hashing the message to key the dict -- and the real answer, taken in
+issue #82, is that the message never had to be here at all. A stored instance now
+carries the chain's TAG, which is a string, is hashable, and is the only part of the
+ledger anything downstream reads.
 """
 import unittest
 from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
-    from protos import celaut_pb2
     from src.database.sql_connection import SQLConnection
     from src.payment_system.ledger_balancer import ledger_balancer
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -22,8 +24,8 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class LedgerBalancerTests(unittest.TestCase):
     def setUp(self):
-        self.ergo = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="Ergo chain", formal=b"")
-        self.other = celaut_pb2.Contract.Ledger(tags=["other"], prose="Another chain", formal=b"")
+        self.ergo = "ergo"
+        self.other = "bitcoin"
         self.script = bytes.fromhex("0008cd02" + "aa" * 32)
 
     def _balance(self, instances, available=True):
@@ -32,19 +34,18 @@ class LedgerBalancerTests(unittest.TestCase):
         ) as check:
             return list(ledger_balancer(iter(instances))), check
 
-    def test_a_ledger_message_does_not_raise(self):
-        # The regression: the message went into a Set[str].
-        result, _ = self._balance([(self.script, self.ergo)])
-        self.assertEqual(len(result), 1)
-
     def test_an_available_ledger_is_yielded_unchanged(self):
         [(script, ledger, asset)], _ = self._balance([(self.script, self.ergo, "ERG")])
         self.assertEqual(script, self.script)
-        self.assertEqual(ledger.prose, "Ergo chain")
+        self.assertEqual(ledger, "ergo")
         # The asset rides through untouched: whether a *ledger* is reachable says
         # nothing about which of its assets a payment is in, and dropping it would
         # leave the payer unable to tell two methods of one contract apart.
         self.assertEqual(asset, "ERG")
+
+    def test_the_tag_is_what_availability_is_asked_about(self):
+        _, check = self._balance([(self.script, self.ergo, "ERG")])
+        self.assertEqual(check.call_args.kwargs, {"ledger": "ergo"})
 
     def test_an_unavailable_ledger_is_filtered_out(self):
         result, _ = self._balance([(self.script, self.ergo, "ERG")], available=False)

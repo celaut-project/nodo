@@ -60,8 +60,11 @@ finally:
 # A real P2PK ErgoTree: 0008cd + 33-byte compressed pubkey. Not UTF-8 decodable,
 # which is exactly what used to crash local_payment_methods.
 PROPOSITION_BYTES = bytes.fromhex("0008cd03927647d5fab8e2e718601177a3528468fc97b9a495be1b7e" + "00" * 8)
-ERGO_LEDGER = celaut.Contract.Ledger(tags=["ergo"], prose="Ergo", formal=b"")
-BITCOIN_LEDGER = celaut.Contract.Ledger(tags=["bitcoin"], prose="Bitcoin", formal=b"")
+# A stored instance carries the chain's TAG (issue #82); the full `Contract.Ledger`
+# a peer receives is assembled by the contract module from its own constants, which is
+# what `local_payment_methods` now asks it for.
+ERGO_LEDGER = "ergo"
+BITCOIN_LEDGER = "bitcoin"
 
 # The stable, wallet-independent type string Ergo's contract is identified by. Stated
 # here rather than imported: the point of the type is that it is a fixed value both
@@ -83,6 +86,13 @@ def _contract(contract=ERGO_CONTRACT, ledger="ergo", asset="ERG", rate=1_000_000
     module.CONTRACT = contract
     module.CONTRACT_HASH = sha3_256(contract.encode("utf-8")).hexdigest()
     module.LEDGER = ledger
+    module.PROSE = f"{ledger} chain"
+    module.FORMAL = b""
+    # What peers receive. A real module builds this from LEDGER/PROSE/FORMAL; the point
+    # is that it comes from the contract rather than from the database.
+    module.ledger.return_value = celaut.Contract.Ledger(
+        tags=[ledger], prose=module.PROSE, formal=module.FORMAL
+    )
     module.NATIVE_ASSET = asset
     module.asset = asset
     module.is_demo = is_demo
@@ -97,8 +107,8 @@ def advertised(instances, offered=None):
     depends on which ledgers are configured and which runtimes are present, and this is
     a test about the shape of the advertisement.
 
-    ``instances`` rows are ``(script, ledger)``, optionally with a third element naming
-    which contract stored them -- so one call can give two methods a row each.
+    ``instances`` rows are ``(script, ledger_tag)``, optionally with a third element
+    naming which contract stored them -- so one call can give two methods a row each.
     """
     from src.payment_system.contracts.registry import MethodKey
 
