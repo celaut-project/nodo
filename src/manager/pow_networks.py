@@ -7,10 +7,13 @@ work". Tags alone cannot express that, which is why this is the first network ki
 in nodo that reads ``formal`` at all (see
 ``docs/proposals/78-network-guarantees-and-pow.md``, issue #78).
 
-``formal`` is canonical UTF-8 JSON, not a proto message inside ``bytes``: the field
-is authored by hand, packed from ``service.json``, and read by more than one
-language, so a schema nobody outside this repository can see would be the wrong
-trade. celaut-project/skills made the same choice for its Strict Definitions.
+``formal`` is the ``key=value`` body every other celaut component declares one in
+(``node_identity.component_formal``): sorted lines, UTF-8, compared byte for byte.
+Not a shape invented here -- a signature scheme's curve and an address's transport
+already state their determinate parameters this way, and a PoW requirement is the
+same kind of statement about the same kind of field. It costs a reader nothing to
+parse, it is diffable by eye in a service spec, and it makes the bytes canonical by
+construction, which a JSON object is not.
 
 **Unknown keys are rejected rather than ignored.** A node that silently drops a
 constraint it does not understand grants more than was asked for -- the same rule
@@ -37,6 +40,11 @@ from urllib.parse import urlparse
 import requests
 
 from protos import celaut_pb2 as celaut
+from src.identity.node_identity import (
+    ComponentFormalError,
+    component_formal,
+    parse_component_formal,
+)
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
 
@@ -97,33 +105,23 @@ class PowRequirement:
     version: int = SUPPORTED_VERSION
 
 
-def _as_int(value: Any, field: str) -> int:
-    """A non-negative integer, accepting the decimal *string* form.
+def _as_int(value: str, field: str) -> int:
+    """A non-negative base-10 integer from one ``formal`` value.
 
-    Cumulative work does not fit in a JSON number (an IEEE double loses precision
-    well below Ergo's current score), so it travels as a string and is compared as
-    an exact integer. A bool is refused explicitly: in Python it would otherwise
-    pass as an int and read ``true`` as 1.
+    Every value in a ``key=value`` body is text, which is exactly what cumulative
+    work needs: Ergo's score passed 2**64 long ago, and an encoding whose numbers
+    are IEEE doubles would have rounded it away before this function ever saw it.
+    So there is one accepted spelling and no numeric type to be lenient about.
     """
-    if isinstance(value, bool):
-        raise PowFormalError(f"Network.formal: '{field}' must be an integer, got a boolean.")
-    if isinstance(value, int):
-        parsed = value
-    elif isinstance(value, str):
-        text = value.strip()
-        if not text:
-            raise PowFormalError(f"Network.formal: '{field}' is empty.")
-        try:
-            parsed = int(text, 10)
-        except ValueError:
-            raise PowFormalError(
-                f"Network.formal: '{field}' must be a base-10 integer, got {value!r}."
-            ) from None
-    else:
+    text = value.strip()
+    if not text:
+        raise PowFormalError(f"Network.formal: '{field}' is empty.")
+    try:
+        parsed = int(text, 10)
+    except ValueError:
         raise PowFormalError(
-            f"Network.formal: '{field}' must be an integer or a decimal string, got "
-            f"{type(value).__name__}."
-        )
+            f"Network.formal: '{field}' must be a base-10 integer, got {value!r}."
+        ) from None
     if parsed < 0:
         raise PowFormalError(f"Network.formal: '{field}' must not be negative, got {parsed}.")
     return parsed
@@ -133,9 +131,9 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
     """Read ``Network.formal`` as a :class:`PowRequirement`.
 
     ``tag`` is checked against the declared chain when given: a ``pow:ergo`` tag
-    carrying ``"chain": "bitcoin"`` is a malformed specification, not a
-    cross-chain request, and reading it either way would mean resolving one chain
-    for a tag the operator's policy vetted as another.
+    carrying ``chain=bitcoin`` is a malformed specification, not a cross-chain
+    request, and reading it either way would mean resolving one chain for a tag the
+    operator's policy vetted as another.
     """
     if not formal:
         raise PowFormalError(
@@ -144,14 +142,9 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
         )
 
     try:
-        document = json.loads(bytes(formal).decode("utf-8"))
-    except (UnicodeDecodeError, ValueError) as e:
-        raise PowFormalError(f"Network.formal is not UTF-8 JSON: {e}") from None
-
-    if not isinstance(document, dict):
-        raise PowFormalError(
-            f"Network.formal must be a JSON object, got {type(document).__name__}."
-        )
+        document = parse_component_formal(formal)
+    except ComponentFormalError as e:
+        raise PowFormalError(f"Network.formal is not a key=value body: {e}") from None
 
     unknown = sorted(set(document) - _KNOWN_KEYS)
     if unknown:
@@ -173,9 +166,9 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
         )
 
     chain = document["chain"]
-    if not isinstance(chain, str) or not chain.strip() or chain.strip() != chain.strip().lower():
+    if not chain.strip() or chain.strip() != chain.strip().lower():
         raise PowFormalError(
-            f"Network.formal: 'chain' must be a lowercase non-empty string, got {chain!r}."
+            f"Network.formal: 'chain' must be a lowercase non-empty value, got {chain!r}."
         )
     chain = chain.strip()
     if chain not in KNOWN_CHAINS:
@@ -192,14 +185,11 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
                 "have to agree."
             )
 
-    block_id = document["block_id"]
-    if not isinstance(block_id, str):
-        raise PowFormalError(
-            f"Network.formal: 'block_id' must be a hex string, got {type(block_id).__name__}."
-        )
-    block_id = block_id.strip().lower()
+    block_id = document["block_id"].strip().lower()
     if not block_id or any(c not in "0123456789abcdef" for c in block_id):
-        raise PowFormalError(f"Network.formal: 'block_id' is not hexadecimal: {document['block_id']!r}.")
+        raise PowFormalError(
+            f"Network.formal: 'block_id' is not hexadecimal: {document['block_id']!r}."
+        )
 
     return PowRequirement(
         chain=chain,
@@ -220,25 +210,24 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
 
 
 def canonical_formal(requirement: PowRequirement) -> bytes:
-    """The requirement back as canonical JSON: sorted keys, no padding.
+    """The requirement back as ``formal`` bytes: :func:`component_formal`'s sorted lines.
 
-    Canonicalisation exists so a ``formal`` can be hashed or logged reproducibly,
-    never as a validity condition -- :func:`parse_pow_formal` accepts any equivalent
-    encoding.
+    Canonical by construction rather than by convention -- ``component_formal`` sorts
+    the keys, so the same requirement built in any order is the same bytes. That is
+    what makes a ``formal`` hashable, comparable and loggable reproducibly, and it is
+    what ``match_networks`` compares down the ancestor chain.
     """
-    document: Dict[str, Any] = {
-        "v": requirement.version,
+    pairs: Dict[str, str] = {
+        "v": str(requirement.version),
         "chain": requirement.chain,
         "block_id": requirement.block_id,
-        # A string, for the same reason it is read as one: the value outgrows a
-        # double, and a reader that treats JSON numbers as doubles would round it.
         "min_cumulative_difficulty": str(requirement.min_cumulative_difficulty),
     }
     if requirement.min_height is not None:
-        document["min_height"] = requirement.min_height
+        pairs["min_height"] = str(requirement.min_height)
     if requirement.max_tip_age_s is not None:
-        document["max_tip_age_s"] = requirement.max_tip_age_s
-    return json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        pairs["max_tip_age_s"] = str(requirement.max_tip_age_s)
+    return component_formal(pairs)
 
 
 # --------------------------------------------------------------------- candidates
@@ -247,6 +236,9 @@ def canonical_formal(requirement: PowRequirement) -> bytes:
 #: ``network:`` block, which is this node's own ports and addresses -- the same
 #: reason ``src/utils/network_policy.py`` calls its block ``service_networks``.
 CONFIG_BLOCK = "pow_networks"
+
+#: Where an operator names chain endpoints by hand, as ``tag -> [uri, ...]``.
+ENDPOINTS_KEY = "ENDPOINTS"
 
 
 def _timeout() -> int:
@@ -264,21 +256,112 @@ def _max_peers() -> int:
     return value if value > 0 else DEFAULT_MAX_PEERS
 
 
-def ergo_candidate_urls() -> List[str]:
-    """Candidate Ergo REST endpoints, most trusted first, de-duplicated.
+def _configured_endpoints(tag: str) -> List[str]:
+    """Endpoints the operator wrote down for this tag, in ``pow_networks.ENDPOINTS``.
 
-    Three sources, and the order is the trust order rather than a preference:
+    Keyed by the network tag rather than flat, because "an endpoint" means nothing on
+    its own: an Ergo REST node has no business being asked about a bitcoin network, and
+    a flat list would have this node discover that one request at a time. The key is the
+    tag exactly as the service declares it (``pow:ergo``), so what an operator wrote and
+    what a service asked for can be compared by eye.
 
-    1. ``ledgers.ergo.NODE_URL`` -- the node the operator configured, which this
-       node already trusts with reputation reads and payment proofs.
-    2. ``pow_networks.EXTRA_PEERS`` -- an explicit operator list, for somebody
-       running their own.
-    3. ``ledgers.ergo.HTTP_PEERS_PATH`` -- the crawl in ``src/manager/ergo.py``.
-       Strangers. The file is **read**, never refreshed from here: the crawl
-       recurses unboundedly and a service launch is not the place to start one.
+    Anything unreadable is logged and skipped rather than raised: a typo in one block of
+    config.yaml is not a reason to abort a launch that has other sources to draw on.
+    """
+    block = env_manager.get(f"{CONFIG_BLOCK}.{ENDPOINTS_KEY}", {}) or {}
+    if not isinstance(block, dict):
+        logger(
+            f"[POW] {CONFIG_BLOCK}.{ENDPOINTS_KEY} is not a mapping of tag -> uris "
+            f"(got {type(block).__name__}); ignored."
+        )
+        return []
 
-    Every one of them is verified the same way regardless of where it came from;
-    the ordering only decides who is asked first.
+    entries = block.get(tag, [])
+    if isinstance(entries, str):
+        entries = [entries]
+    if not isinstance(entries, (list, tuple)):
+        logger(
+            f"[POW] {CONFIG_BLOCK}.{ENDPOINTS_KEY}[{tag!r}] is not a list of uris "
+            f"(got {type(entries).__name__}); ignored."
+        )
+        return []
+
+    return [str(entry).strip() for entry in entries if str(entry).strip()]
+
+
+def _published_endpoints(network: celaut.Service.Network) -> List[str]:
+    """Endpoints the ledger holds for this exact domain, best-backed first.
+
+    Imported where it is used rather than at module import: it reaches the explorer and
+    pulls in the reputation reader, and a node resolving a DNS network should not be
+    paying for either. The whole source is optional in the same sense -- it answers ``[]``
+    for an unset type NFT and for an explorer that is down.
+    """
+    try:
+        from src.reputation_system.network_endpoints import endpoints_for
+    except Exception as e:  # pragma: no cover - environment-dependent
+        logger(f"[POW] reputation endpoint source unavailable: {type(e).__name__}: {e}")
+        return []
+    return endpoints_for(network)
+
+
+def _peer_suggested_endpoints(network: celaut.Service.Network) -> List[str]:
+    """What other celaut nodes answer for this domain, as URLs to try.
+
+    Imported where it is used: it pulls in the database and the gRPC transport, which a
+    node resolving a DNS network has no reason to be loading here.
+
+    ``Instance.Uri`` carries an address and a port and no scheme, so what comes back is
+    tried over ``http``. That is a real loss of fidelity -- a peer that found an
+    https-only endpoint has just handed us one we will fail to read -- and the honest
+    place to fix it is the peer's ``protocol_stack``, not a guess here. It costs one
+    failed request per such endpoint and nothing else: the candidate is dropped by the
+    same verification every other candidate goes through.
+    """
+    try:
+        from src.manager.network_discovery import ask_peers
+    except Exception as e:  # pragma: no cover - environment-dependent
+        logger(f"[POW] peer endpoint source unavailable: {type(e).__name__}: {e}")
+        return []
+    return [f"http://{ip}:{port}" for ip, port in ask_peers(network)]
+
+
+def candidate_urls(
+    network: celaut.Service.Network,
+    tag: str,
+    ask_peers: bool = True,
+) -> List[str]:
+    """Candidate chain endpoints for one ``pow:`` network, most trusted first.
+
+    Five sources. The order is a trust order and nothing else -- **every candidate is
+    verified identically whatever named it** (:func:`ergo_peer_satisfies`), so the order
+    decides only who is asked first and therefore who fills the ``MAX_PEERS`` budget:
+
+    1. ``ledgers.ergo.NODE_URL`` -- the node this operator already trusts with
+       reputation reads and payment proofs.
+    2. ``pow_networks.ENDPOINTS[<tag>]`` -- what the operator wrote down for this tag.
+    3. The ledger (:func:`_published_endpoints`) -- what the *network* published for this
+       exact domain, ordered by the ERG irrecoverably staked behind each claim. Strangers,
+       but strangers who paid to say it, and what they bought is a place in this queue.
+    4. Other celaut nodes (:func:`_peer_suggested_endpoints`), over
+       ``Gateway.ResolveNetwork``. Peers this node holds a relationship with, who have
+       already done this finding for themselves -- but who staked nothing on the answer,
+       which is why they come after the boxes that did.
+    5. ``ledgers.ergo.HTTP_PEERS_PATH`` -- the crawl in ``src/manager/ergo.py``.
+       Strangers who paid nothing and were asked nothing. The file is **read**, never
+       refreshed from here: the crawl recurses unboundedly and a service launch is not
+       the place to start one.
+
+    That a stranger can put an address in front of this node is why nothing here grants
+    anything. The cost of a lie at this layer is one wasted HTTP request; the firewall
+    rule is written later, and only for a peer that answered the requirement.
+
+    ``ask_peers=False`` drops source 4, and is not a tuning knob: it is what stops one
+    ``ResolveNetwork`` call turning into a flood. Answering a peer's question by asking
+    our peers -- who ask theirs -- is a cycle in a graph nobody has a view of, and two
+    nodes that know each other are a cycle of length two. A node therefore answers from
+    what it knows locally and never by relaying, so one question costs one node one
+    round of verification. See ``gateway.Gateway.ResolveNetwork``.
     """
     urls: List[str] = []
 
@@ -286,11 +369,10 @@ def ergo_candidate_urls() -> List[str]:
     if configured:
         urls.append(configured)
 
-    extra = env_manager.get(f"{CONFIG_BLOCK}.EXTRA_PEERS", []) or []
-    if isinstance(extra, str):
-        extra = [extra]
-    if isinstance(extra, (list, tuple)):
-        urls.extend(str(entry).strip() for entry in extra if str(entry).strip())
+    urls.extend(_configured_endpoints(tag))
+    urls.extend(_published_endpoints(network))
+    if ask_peers:
+        urls.extend(_peer_suggested_endpoints(network))
 
     peers_path = str(env_manager.get("ledgers.ergo.HTTP_PEERS_PATH", "") or "").strip()
     if peers_path and os.path.exists(peers_path):
@@ -457,20 +539,26 @@ def ergo_peer_satisfies(
 def resolve_pow_network(
     network: celaut.Service.Network,
     tag: Optional[str] = None,
+    ask_peers: bool = True,
 ) -> List[celaut.Instance]:
-    """Peers that satisfy a ``pow:<chain>`` network, as at most **one** Instance.
+    """Peers that satisfy a ``pow:<chain>`` network, **one Instance per endpoint**.
 
-    One Instance carrying N uris, and not N Instances, because of how the rules are
-    written: ``configure_guest_firewall_policy`` stops at the first peer instance a
-    rule could be applied for, while ``allow_connection_to_instance`` walks *every*
-    uri of the instance it is given. N instances would open the first peer and
-    silently drop the rest. ``resolve_domain`` already returns multiple A records
-    this way.
+    One per endpoint because that is what they are: separate operators, separately
+    verified, separately reachable, and separately worth dropping. Packing them into one
+    Instance's ``uri`` list would say the opposite -- that shape means "one peer at
+    several addresses", which is what ``resolve_domain`` legitimately builds out of the A
+    records of a single name -- and it would leave the guest unable to tell the peers
+    apart in its own ``__config__``.
 
-    No qualifying peer returns ``[]`` rather than raising: "nobody meets D right
-    now" is a statement about the world and a transient one, unlike a policy
-    rejection (intent) or an unreadable ancestor spec (this node's integrity), both
-    of which do abort. The reasoning is in the proposal document.
+    That this is safe took a fix at the other end: ``configure_guest_firewall_policy``
+    stopped at the first peer instance it could write a rule for, so N instances would
+    have opened the first peer and silently dropped the rest. It now writes a rule for
+    every one of them, which is what the guest is told it may reach.
+
+    No qualifying peer returns ``[]`` rather than raising: "nobody meets D right now" is
+    a statement about the world and a transient one, unlike a policy rejection (intent)
+    or an unreadable ancestor spec (this node's integrity), both of which do abort. The
+    reasoning is in the proposal document.
     """
     pow_tag = tag
     if pow_tag is None:
@@ -493,11 +581,12 @@ def resolve_pow_network(
 
     timeout = _timeout()
     limit = _max_peers()
-    uris: List[celaut.Instance.Uri] = []
+    i_slot = 1  # Internal port usage is irrelevant for an externally-reached peer.
+    peers: List[celaut.Instance] = []
     seen_addresses = set()
 
-    for url in ergo_candidate_urls():
-        if len(uris) >= limit:
+    for url in candidate_urls(network, pow_tag, ask_peers=ask_peers):
+        if len(peers) >= limit:
             break
         if not ergo_peer_satisfies(url, requirement, timeout=timeout):
             continue
@@ -507,9 +596,26 @@ def resolve_pow_network(
         if address in seen_addresses:
             continue
         seen_addresses.add(address)
-        uris.append(celaut.Instance.Uri(ip=address[0], port=address[1]))
+        peers.append(
+            celaut.Instance(
+                api=celaut.Service.Api(
+                    slot=[celaut.Service.Api.Slot(
+                        port=i_slot,
+                        transport=celaut.Service.Api.Protocol(tags=["tcp"]),
+                        # Echoed from the requester's declaration, exactly as the DNS
+                        # path does: nothing here observed the peer's protocol stack.
+                        protocol_stack=network.protocol_stack,
+                    )],
+                    payment_contracts=[],
+                ),
+                uri_slot=[celaut.Instance.Uri_Slot(
+                    internal_port=i_slot,
+                    uri=[celaut.Instance.Uri(ip=address[0], port=address[1])],
+                )],
+            )
+        )
 
-    if not uris:
+    if not peers:
         # Distinguishable in the log from the wildcard's empty answer and from an
         # AAAA-only DNS name, which are the other two ways `[]` is reached today.
         logger(
@@ -518,19 +624,4 @@ def resolve_pow_network(
         )
         return []
 
-    i_slot = 1  # Internal port usage is irrelevant for an externally-reached peer.
-    return [
-        celaut.Instance(
-            api=celaut.Service.Api(
-                slot=[celaut.Service.Api.Slot(
-                    port=i_slot,
-                    transport=celaut.Service.Api.Protocol(tags=["tcp"]),
-                    # Echoed from the requester's declaration, exactly as the DNS
-                    # path does: nothing here observed the peer's protocol stack.
-                    protocol_stack=network.protocol_stack,
-                )],
-                payment_contracts=[],
-            ),
-            uri_slot=[celaut.Instance.Uri_Slot(internal_port=i_slot, uri=uris)],
-        )
-    ]
+    return peers

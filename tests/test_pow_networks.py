@@ -16,6 +16,7 @@ import json
 import sys
 import types
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -72,8 +73,9 @@ SCORE = 2749889727692749668352
 
 
 def _formal(**overrides):
+    """A ``formal`` in the shape every celaut component declares one: key=value lines."""
     document = {
-        "v": 1,
+        "v": "1",
         "chain": "ergo",
         "block_id": BLOCK,
         "min_cumulative_difficulty": "1000",
@@ -82,7 +84,12 @@ def _formal(**overrides):
     for key, value in list(document.items()):
         if value is None:
             del document[key]
-    return json.dumps(document).encode("utf-8")
+    return _lines(document)
+
+
+def _lines(document):
+    """``key=value`` lines, unsorted, so the parser is never handed its own output."""
+    return "\n".join(f"{key}={value}" for key, value in document.items()).encode("utf-8")
 
 
 def _network(formal=None, tags=("pow:ergo",)):
@@ -123,15 +130,15 @@ class PowFormalParsingTests(unittest.TestCase):
 
     def test_an_unknown_key_is_refused_rather_than_ignored(self):
         """A constraint this node drops silently is a constraint nobody applied."""
-        formal = json.dumps(
+        formal = _lines(
             {
-                "v": 1,
+                "v": "1",
                 "chain": "ergo",
                 "block_id": BLOCK,
                 "min_cumulative_difficulty": "1",
-                "min_miners": 3,
+                "min_miners": "3",
             }
-        ).encode("utf-8")
+        )
 
         with self.assertRaises(pow_networks.PowFormalError) as raised:
             pow_networks.parse_pow_formal(formal, tag="pow:ergo")
@@ -150,7 +157,7 @@ class PowFormalParsingTests(unittest.TestCase):
         self.assertIn("pow:ergo", str(raised.exception))
 
     def test_a_missing_required_field_is_named(self):
-        formal = json.dumps({"v": 1, "chain": "ergo", "block_id": BLOCK}).encode("utf-8")
+        formal = _lines({"v": "1", "chain": "ergo", "block_id": BLOCK})
 
         with self.assertRaises(pow_networks.PowFormalError) as raised:
             pow_networks.parse_pow_formal(formal, tag="pow:ergo")
@@ -167,13 +174,35 @@ class PowFormalParsingTests(unittest.TestCase):
                 _formal(min_cumulative_difficulty="-1"), tag="pow:ergo"
             )
 
-    def test_a_boolean_is_not_an_integer(self):
+    def test_a_word_is_not_an_integer(self):
         with self.assertRaises(pow_networks.PowFormalError):
-            pow_networks.parse_pow_formal(_formal(min_height=True), tag="pow:ergo")
+            pow_networks.parse_pow_formal(_formal(min_height="true"), tag="pow:ergo")
 
-    def test_garbage_bytes_are_refused_as_json(self):
+    def test_garbage_bytes_are_refused_rather_than_read(self):
         with self.assertRaises(pow_networks.PowFormalError):
-            pow_networks.parse_pow_formal(b"\xff\xfe not json", tag="pow:ergo")
+            pow_networks.parse_pow_formal(b"\xff\xfe not a formal", tag="pow:ergo")
+
+    def test_a_line_that_is_not_a_pair_is_refused(self):
+        """The body is key=value lines, and a line that is not one is not ignorable."""
+        with self.assertRaises(pow_networks.PowFormalError) as raised:
+            pow_networks.parse_pow_formal(b"chain=ergo\nwhatever", tag="pow:ergo")
+
+        self.assertIn("key=value", str(raised.exception))
+
+    def test_a_key_declared_twice_is_refused_rather_than_resolved(self):
+        """Which of the two was meant is not something a parser gets to decide."""
+        formal = _formal() + b"\nchain=bitcoin"
+
+        with self.assertRaises(pow_networks.PowFormalError) as raised:
+            pow_networks.parse_pow_formal(formal, tag="pow:ergo")
+
+        self.assertIn("twice", str(raised.exception))
+
+    def test_a_hand_written_formal_may_end_in_a_newline(self):
+        """Whitespace around the document is ignored; nothing inside it is."""
+        requirement = pow_networks.parse_pow_formal(_formal() + b"\n", tag="pow:ergo")
+
+        self.assertEqual(requirement.chain, "ergo")
 
     def test_an_unknown_chain_is_refused(self):
         with self.assertRaises(pow_networks.PowFormalError):
@@ -181,17 +210,51 @@ class PowFormalParsingTests(unittest.TestCase):
 
     def test_the_canonical_form_round_trips_and_is_sorted(self):
         requirement = pow_networks.parse_pow_formal(
-            _formal(min_cumulative_difficulty=str(SCORE), max_tip_age_s=3600), tag="pow:ergo"
+            _formal(min_cumulative_difficulty=str(SCORE), max_tip_age_s="3600"), tag="pow:ergo"
         )
         canonical = pow_networks.canonical_formal(requirement)
 
         self.assertEqual(pow_networks.parse_pow_formal(canonical, tag="pow:ergo"), requirement)
         self.assertEqual(canonical, pow_networks.canonical_formal(requirement))
-        keys = list(json.loads(canonical.decode("utf-8")))
+        keys = [line.split("=", 1)[0] for line in canonical.decode("utf-8").split("\n")]
         self.assertEqual(keys, sorted(keys))
-        # The threshold stays a string on the way out: a reader that treats JSON
-        # numbers as doubles would round it.
-        self.assertIsInstance(json.loads(canonical.decode("utf-8"))["min_cumulative_difficulty"], str)
+
+    def test_the_canonical_form_does_not_depend_on_the_order_it_was_written_in(self):
+        """It is what `match_networks` compares byte for byte down the ancestor chain."""
+        forwards = pow_networks.parse_pow_formal(
+            _lines({
+                "v": "1",
+                "chain": "ergo",
+                "block_id": BLOCK,
+                "min_cumulative_difficulty": "1000",
+            }),
+            tag="pow:ergo",
+        )
+        backwards = pow_networks.parse_pow_formal(
+            _lines({
+                "min_cumulative_difficulty": "1000",
+                "block_id": BLOCK,
+                "chain": "ergo",
+                "v": "1",
+            }),
+            tag="pow:ergo",
+        )
+
+        self.assertEqual(
+            pow_networks.canonical_formal(forwards),
+            pow_networks.canonical_formal(backwards),
+        )
+
+    def test_the_threshold_survives_the_round_trip_as_an_exact_integer(self):
+        """Every value is text, so nothing on this path can round it to a double."""
+        requirement = pow_networks.parse_pow_formal(
+            _formal(min_cumulative_difficulty=str(2 ** 71 + 1)), tag="pow:ergo"
+        )
+
+        self.assertIn(
+            f"min_cumulative_difficulty={2 ** 71 + 1}",
+            pow_networks.canonical_formal(requirement).decode("utf-8"),
+        )
 
 
 def _answers(**overrides):
@@ -335,7 +398,7 @@ class ResolvePowNetworkTests(unittest.TestCase):
             "http://b.test:9053": ("203.0.113.11", 9053),
         }
         with patch.object(
-            pow_networks, "ergo_candidate_urls", return_value=list(candidates)
+            pow_networks, "candidate_urls", return_value=list(candidates)
         ), patch.object(
             pow_networks, "ergo_peer_satisfies", side_effect=lambda url, *a, **k: url in qualifying
         ), patch.object(
@@ -343,28 +406,30 @@ class ResolvePowNetworkTests(unittest.TestCase):
         ):
             return pow_networks.resolve_pow_network(network, tag="pow:ergo")
 
-    def test_every_qualifying_peer_lands_in_one_instance_not_one_each(self):
-        """The shape is load-bearing, not cosmetic.
+    def test_every_qualifying_peer_is_its_own_instance(self):
+        """They are separate operators, separately verified and separately reachable.
 
-        `configure_guest_firewall_policy` stops at the first peer instance it could
-        write a rule for, while `allow_connection_to_instance` walks every uri of
-        the instance it is handed. Returning one instance per peer would open the
-        first and silently drop the rest.
+        One Instance with N uris is the shape of "one peer at several addresses",
+        which is what `resolve_domain` builds out of the A records of one name. These
+        are not that, and the guest is handed the same list the firewall is.
         """
         peers = self._resolve()
 
-        self.assertEqual(len(peers), 1)
-        self.assertEqual(len(peers[0].uri_slot), 1)
+        self.assertEqual(len(peers), 2)
         self.assertEqual(
-            [(u.ip, u.port) for u in peers[0].uri_slot[0].uri],
+            [(u.ip, u.port) for peer in peers for u in peer.uri_slot[0].uri],
             [("203.0.113.10", 9053), ("203.0.113.11", 9053)],
         )
+        for peer in peers:
+            self.assertEqual(len(peer.uri_slot), 1)
+            self.assertEqual(len(peer.uri_slot[0].uri), 1)
 
     def test_a_peer_that_fails_verification_is_left_out(self):
         peers = self._resolve(qualifying=("http://b.test:9053",))
 
         self.assertEqual(
-            [(u.ip, u.port) for u in peers[0].uri_slot[0].uri], [("203.0.113.11", 9053)]
+            [(u.ip, u.port) for peer in peers for u in peer.uri_slot[0].uri],
+            [("203.0.113.11", 9053)],
         )
 
     def test_no_qualifying_peer_resolves_to_nothing_rather_than_aborting(self):
@@ -385,7 +450,7 @@ class ResolvePowNetworkTests(unittest.TestCase):
 
     def test_a_malformed_formal_stops_the_resolution_rather_than_returning_peers(self):
         with self.assertRaises(pow_networks.PowFormalError):
-            self._resolve(network=_network(formal=b"{}"))
+            self._resolve(network=_network(formal=b"chain=ergo"))
 
     def test_bitcoin_parses_and_says_it_does_not_resolve_yet(self):
         network = celaut.Service.Network(
@@ -416,13 +481,15 @@ class CandidateSourceTests(unittest.TestCase):
             settings = {
                 "ledgers.ergo.NODE_URL": "https://configured.test",
                 "ledgers.ergo.HTTP_PEERS_PATH": path,
-                f"{pow_networks.CONFIG_BLOCK}.EXTRA_PEERS": ["http://mine.test:9053"],
+                f"{pow_networks.CONFIG_BLOCK}.{pow_networks.ENDPOINTS_KEY}": {
+                    "pow:ergo": ["http://mine.test:9053"],
+                    "pow:bitcoin": ["http://not-for-this-tag.test:8332"],
+                },
             }
-            with patch.object(pow_networks, "env_manager") as env:
-                env.get.side_effect = lambda key, default=None: settings.get(key, default)
-                urls = pow_networks.ergo_candidate_urls()
+            urls = self._candidates(settings)
 
-        # Configured node first, then the operator's own, then strangers.
+        # Configured node first, then the operator's own for THIS tag, then strangers.
+        # The bitcoin entry is not an Ergo endpoint and is never asked.
         self.assertEqual(
             urls,
             [
@@ -438,10 +505,85 @@ class CandidateSourceTests(unittest.TestCase):
             "ledgers.ergo.NODE_URL": "https://configured.test",
             "ledgers.ergo.HTTP_PEERS_PATH": "/nonexistent/peers.json",
         }
-        with patch.object(pow_networks, "env_manager") as env:
-            env.get.side_effect = lambda key, default=None: settings.get(key, default)
 
-            self.assertEqual(pow_networks.ergo_candidate_urls(), ["https://configured.test"])
+        self.assertEqual(self._candidates(settings), ["https://configured.test"])
+
+    def test_endpoints_that_are_not_a_mapping_of_tag_to_uris_are_ignored(self):
+        """A typo in one config block does not abort a launch with other sources."""
+        settings = {
+            "ledgers.ergo.NODE_URL": "https://configured.test",
+            f"{pow_networks.CONFIG_BLOCK}.{pow_networks.ENDPOINTS_KEY}": [
+                "http://flat-list.test:9053"
+            ],
+        }
+
+        self.assertEqual(self._candidates(settings), ["https://configured.test"])
+
+    def test_a_lone_uri_is_accepted_where_a_list_was_meant(self):
+        settings = {
+            f"{pow_networks.CONFIG_BLOCK}.{pow_networks.ENDPOINTS_KEY}": {
+                "pow:ergo": "http://alone.test:9053"
+            },
+        }
+
+        self.assertEqual(self._candidates(settings), ["http://alone.test:9053"])
+
+    def test_the_ledger_is_asked_after_the_operator_and_before_the_strangers(self):
+        """What the network published, ranked by what was staked on saying it."""
+        settings = {
+            "ledgers.ergo.NODE_URL": "https://configured.test",
+            f"{pow_networks.CONFIG_BLOCK}.{pow_networks.ENDPOINTS_KEY}": {
+                "pow:ergo": ["http://mine.test:9053"]
+            },
+        }
+
+        urls = self._candidates(
+            settings,
+            published=["http://well-backed.test:9053", "http://less-backed.test:9053"],
+        )
+
+        self.assertEqual(
+            urls,
+            [
+                "https://configured.test",
+                "http://mine.test:9053",
+                "http://well-backed.test:9053",
+                "http://less-backed.test:9053",
+            ],
+        )
+
+    def test_what_peers_suggest_is_asked_last_and_only_when_relaying_is_allowed(self):
+        """A node answering ResolveNetwork passes ask_peers=False, so it cannot relay."""
+        with patch.object(pow_networks, "_peer_suggested_endpoints") as suggested:
+            suggested.return_value = ["http://from-a-peer.test:9053"]
+
+            asking = self._candidates({}, patch_peers=False)
+            answering = self._candidates({}, patch_peers=False, ask_peers=False)
+
+        self.assertEqual(asking, ["http://from-a-peer.test:9053"])
+        self.assertEqual(answering, [])
+        suggested.assert_called_once()
+
+    def test_the_same_endpoint_named_by_two_sources_is_asked_once(self):
+        settings = {"ledgers.ergo.NODE_URL": "http://shared.test:9053/"}
+
+        urls = self._candidates(settings, published=["http://shared.test:9053"])
+
+        self.assertEqual(urls, ["http://shared.test:9053"])
+
+    def _candidates(self, settings, published=(), patch_peers=True, ask_peers=True):
+        """`candidate_urls` with config stubbed and the two network sources controlled."""
+        with ExitStack() as stack:
+            env = stack.enter_context(patch.object(pow_networks, "env_manager"))
+            stack.enter_context(
+                patch.object(pow_networks, "_published_endpoints", return_value=list(published))
+            )
+            if patch_peers:
+                stack.enter_context(
+                    patch.object(pow_networks, "_peer_suggested_endpoints", return_value=[])
+                )
+            env.get.side_effect = lambda key, default=None: settings.get(key, default)
+            return pow_networks.candidate_urls(_network(), "pow:ergo", ask_peers=ask_peers)
 
     def test_a_url_is_pinned_to_an_address_and_a_port(self):
         with patch.object(
@@ -521,6 +663,146 @@ class ResolveNetworkDispatchTests(unittest.TestCase):
 
         self.assertEqual(
             [(u.ip, u.port) for u in result[0].uri_slot[0].uri], [("203.0.113.2", 443)]
+        )
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class MatchNetworksTests(unittest.TestCase):
+    """`match_networks` reads `formal`, which is what the ancestor chain authorizes on.
+
+    The rule is `node_identity.same_component`'s, the one every other tags/prose/formal
+    descriptor in celaut is compared by: formal decides when both sides declare one, a
+    shared tag otherwise.
+    """
+
+    def setUp(self):
+        networks = _load_networks_module()
+        if networks is None:  # pragma: no cover - environment-dependent
+            self.skipTest("src/manager/networks.py could not be loaded")
+        self.match = networks.match_networks
+
+    def test_two_pow_networks_asking_for_different_work_do_not_match(self):
+        """The case the tag intersection got wrong: same domain name, different ask."""
+        a = _network(formal=_formal(min_cumulative_difficulty="1000"))
+        b = _network(formal=_formal(min_cumulative_difficulty="9000"))
+
+        self.assertFalse(self.match(a, b))
+
+    def test_the_same_ask_written_in_a_different_order_still_matches(self):
+        """Only if both sides canonicalise -- which is why `canonical_formal` sorts."""
+        requirement = pow_networks.parse_pow_formal(_formal(), tag="pow:ergo")
+        canonical = pow_networks.canonical_formal(requirement)
+
+        self.assertTrue(
+            self.match(_network(formal=canonical), _network(formal=canonical))
+        )
+
+    def test_a_parent_declaring_no_formal_still_grants_the_whole_tag(self):
+        """How a parent says "any pow:ergo my children care to specify"."""
+        parent = celaut.Service.Network(tags=["pow:ergo"])
+        child = _network(formal=_formal(min_cumulative_difficulty="9000"))
+
+        self.assertTrue(self.match(parent, child))
+        self.assertTrue(self.match(child, parent))
+
+    def test_a_shared_tag_still_decides_when_neither_side_declares_a_formal(self):
+        """Every network that predates `formal` behaves exactly as it did."""
+        self.assertTrue(
+            self.match(
+                celaut.Service.Network(tags=["a.example", "b.example"]),
+                celaut.Service.Network(tags=["b.example"]),
+            )
+        )
+        self.assertFalse(
+            self.match(
+                celaut.Service.Network(tags=["a.example"]),
+                celaut.Service.Network(tags=["c.example"]),
+            )
+        )
+
+    def test_a_network_that_names_nothing_matches_nothing_not_even_itself(self):
+        """Prose alone states nothing a comparison can act on."""
+        empty = celaut.Service.Network(prose="a domain, described")
+
+        self.assertFalse(self.match(empty, empty))
+
+    def test_the_protocol_stack_is_not_what_decides(self):
+        """It says what the peers speak, not which domain this is."""
+        a = celaut.Service.Network(tags=["pow:ergo"])
+        b = celaut.Service.Network(tags=["pow:ergo"])
+        b.protocol_stack.append(celaut.Service.Api.Protocol(tags=["http"]))
+
+        self.assertTrue(self.match(a, b))
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ResolveForPeerTests(unittest.TestCase):
+    """What a node answers when another one asks it to resolve a domain (issue #78).
+
+    The decisions behind `Gateway.ResolveNetwork`, which is why they live in
+    `networks.resolve_network_for_peer` and not in the handler: a decision buried in
+    gRPC plumbing is a decision nobody can test.
+    """
+
+    def setUp(self):
+        networks = _load_networks_module()
+        if networks is None:  # pragma: no cover - environment-dependent
+            self.skipTest("src/manager/networks.py could not be loaded")
+        self.networks = networks
+
+    def test_the_question_is_never_relayed_to_our_own_peers(self):
+        """Two nodes that know each other are a cycle; relaying makes one ask a flood."""
+        with patch.object(self.networks, "enforce_network_policy"), \
+             patch.object(self.networks, "resolve_pow_network", return_value=[]) as resolver:
+            self.networks.resolve_network_for_peer(_network())
+
+        self.assertIs(resolver.call_args.kwargs["ask_peers"], False)
+
+    def test_the_answer_carries_the_tags_it_was_asked_about(self):
+        peer = celaut.Instance(uri_slot=[celaut.Instance.Uri_Slot(internal_port=1)])
+        with patch.object(self.networks, "enforce_network_policy"), \
+             patch.object(self.networks, "resolve_pow_network", return_value=[peer]):
+            resolution = self.networks.resolve_network_for_peer(_network())
+
+        self.assertEqual(list(resolution.tags), ["pow:ergo"])
+        self.assertEqual(len(resolution.peer_instances), 1)
+
+    def test_a_domain_the_operator_refuses_to_reach_is_refused_to_a_peer_too(self):
+        """Handing over the addresses this node would not use itself is reaching it
+        by proxy -- the argument that puts the check before the balancer in
+        `launch_service` rather than after it."""
+        from src.utils.network_policy import NetworkPolicy, NetworkPolicyRejection
+
+        rejection = NetworkPolicy(blacklist=("pow:*",)).check(
+            networks=[_network()], subject="peer ipv4:203.0.113.5:1234"
+        )
+
+        def _refuse(networks, subject=""):
+            raise NetworkPolicyRejection(rejection)
+
+        with patch.object(self.networks, "enforce_network_policy", side_effect=_refuse), \
+             patch.object(self.networks, "resolve_pow_network") as resolver:
+            with self.assertRaises(NetworkPolicyRejection):
+                self.networks.resolve_network_for_peer(_network())
+
+        # Refused before anything was resolved: a rejection is not an empty answer.
+        resolver.assert_not_called()
+
+    def test_an_ordinary_dns_domain_is_answerable_too(self):
+        """Nothing about this is proof of work; the RPC is generic on purpose."""
+        with patch.object(self.networks, "enforce_network_policy"), \
+             patch.object(
+                 self.networks, "resolve_domain",
+                 return_value=[celaut.Instance.Uri(ip="203.0.113.2", port=443)],
+             ):
+            resolution = self.networks.resolve_network_for_peer(
+                celaut.Service.Network(tags=["example.test"])
+            )
+
+        self.assertEqual(list(resolution.tags), ["example.test"])
+        self.assertEqual(
+            [(u.ip, u.port) for u in resolution.peer_instances[0].uri_slot[0].uri],
+            [("203.0.113.2", 443)],
         )
 
 

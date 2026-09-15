@@ -142,8 +142,10 @@ That is a useful statement. It is not an identity statement.
 * Otherwise, per `NetworkResolution`, it iterates `peer_instances` and **stops at
   the first instance for which a rule was applied** (`network.py:559-569`).
   `resolve_network` returns at most one `Instance` today, so this is not currently
-  lossy — but an implementation returning several peers (a PoW network will) would
-  have only its first honoured. This is a real constraint on §2.
+  lossy — but the *guest* is handed every instance in its `__config__`, so the two
+  would disagree the moment a resolution had more than one. A PoW network does. This
+  is the one finding in §1 that §2 fixes rather than designs around (§2.8): the loop
+  now writes a rule for every instance.
 * Inside one instance, *every* `uri` gets a rule
   (`microvm/firewall.py:177-190`), so all resolved IPs × {80, 443} are opened.
 * A tag nothing could be applied for is a **log line**, not an error
@@ -201,6 +203,10 @@ Tag-set intersection. Consequences, all verified by reading the callers:
   For DNS that is harmless. For any network whose tag is a class and whose `formal`
   is the actual ask, it is the entire control surface being ignored.
 
+This is the one finding in §1 that §2 does not merely design around: `match_networks`
+is changed (§2.8). Every network that declares no `formal` — which is every network
+that exists today — compares exactly as it did.
+
 ## 1.8 `resolve_ergo_network` is a stub, and the dead code behind it is wrong
 
 ```python
@@ -254,6 +260,11 @@ deliberate. The step that decides *what address that domain is* is a single
 unvalidated `getaddrinfo` frozen at boot. Any new network kind should inherit the
 first two and not imitate the third.
 
+The table reads `dev` as it was. §2 leaves every row of it alone except two, both of
+them rows where what the node *told* a guest and what it *did* had come apart:
+"`formal` constrains anything" (§2.8) and the firewall's first-instance `break`
+(§1.5). Nothing in the DNS lookup itself is touched.
+
 ---
 
 # 2. Proposal: Proof-of-Work networks
@@ -285,57 +296,62 @@ written today, because the policy globs the tag and nothing else
 It must **not** contain a `.`, so it can never fall into the DNS heuristic
 (`networks.py:92`); `pow:ergo` verified above as not matching it.
 
-## 2.3 `formal`: JSON, not a proto message
+## 2.3 `formal`: the `key=value` body every celaut component already uses
 
-`formal` is `bytes` (`celaut.proto:264`), so the encoding is ours to choose.
+`formal` is `bytes` (`celaut.proto:264`), so the encoding is ours to choose — and
+celaut has already chosen one. `node_identity.component_formal` writes it: `key=value`
+lines, sorted by key, UTF-8. That is what a signature scheme's curve declares its
+parameters in, and what an address's transport stack declares its own in
+(`identity/transport_stack.py`). A PoW requirement is the same kind of statement about
+the same kind of field, and it gets the same encoding.
 
-| | JSON (utf-8) | new proto message |
-|---|---|---|
-| Round-trips across packers | yes — `service.json` is already JSON (`docs/PACKING.md:422-427`) | needs a codegen step in every packer |
-| Canonical form for comparison | needs a rule (see below) | free |
-| Readable in an issue / a log | yes | no |
-| Cost to add a chain | a field | a proto change + regeneration |
-| Precedent in celaut | `strictDefinition.ts` puts JSON in R9 | `Architecture.formal`, `Protocol.formal` are also unstructured `bytes` today |
+| | `key=value` lines | JSON (utf-8) | new proto message |
+|---|---|---|---|
+| Already the convention for `formal` | **yes** — `component_formal`, two callers | no | no |
+| Round-trips across packers | yes — bytes are bytes | yes | needs a codegen step in every packer |
+| Canonical form for comparison | **free** (sorted by construction) | needs a rule | free |
+| Readable in an issue, a log, a diff | yes, one line per constraint | yes | no |
+| Cost to add a chain | a line | a field | a proto change + regeneration |
+| Big integers | native — every value is text | needs the string-not-number rule | native |
 
-**Recommendation: JSON.** The deciding argument is that `formal` is `bytes` in a
-message that is authored by hand, packed from `service.json`, published to a
-reputation-system box and read by three languages. A proto message inside `bytes`
-is a schema nobody can see from the outside; the skills repo already chose JSON for
-exactly this reason. The cost — needing a canonicalisation rule — is one paragraph:
+**The canonical form is not a rule anyone has to follow, it is what the writer
+produces.** `component_formal` sorts the keys, so the same requirement built in any
+order is the same bytes. That matters more here than it did for a signature scheme:
+§2.8 makes `formal` what `match_networks` compares down the ancestor chain, byte for
+byte.
 
-> **Canonical form.** UTF-8 JSON object, keys sorted, no insignificant whitespace
-> (`json.dumps(obj, sort_keys=True, separators=(",", ":"))`). Comparison is over the
-> *parsed* object, never the bytes, so a non-canonical `formal` is accepted on
-> input; canonicalisation exists so that a `formal` can be hashed or logged
-> reproducibly, not as a validity condition. Unknown keys are **rejected**, not
-> ignored: a node that silently drops a constraint it does not understand grants
-> more than was asked for. (Same reasoning as `network_policy.py`'s "a list the
-> node failed to read is not a list that allowed everything".)
-
-```json
-{
-  "v": 1,
-  "chain": "ergo",
-  "block_id": "f35a8aa47ab6e950ba1a8cd10dc92bade42928dd985575d7fe46e759379690e0",
-  "min_cumulative_difficulty": "2749889727692749668352",
-  "min_height": 1873000,
-  "max_tip_age_s": 3600
-}
+```
+block_id=f35a8aa47ab6e950ba1a8cd10dc92bade42928dd985575d7fe46e759379690e0
+chain=ergo
+max_tip_age_s=3600
+min_cumulative_difficulty=2749889727692749668352
+min_height=1873000
+v=1
 ```
 
-| Field | Type | Req. | Meaning |
-|---|---|---|---|
-| `v` | int | yes | Format version. A peer that does not know `v` refuses rather than guesses. |
-| `chain` | string | yes | `ergo`, `bitcoin`. Must equal the tag's suffix — a `pow:ergo` tag with `"chain":"bitcoin"` is a malformed spec, not a cross-chain ask. |
-| `block_id` | hex string | yes | The block that must be **on the peer's main chain**. |
-| `min_cumulative_difficulty` | decimal **string** | yes | See §2.4. String because the value exceeds 2⁶⁴ (Ergo's `fullBlocksScore` is ~2.7e21 today) and JSON numbers are doubles. |
-| `min_height` | int | no | Peer's main-chain height must be ≥ this. Cheap liveness floor. |
-| `max_tip_age_s` | int | no | Peer's tip timestamp must be within this many seconds of now. Catches a synced-but-stalled node. |
+| Field | Req. | Meaning |
+|---|---|---|
+| `v` | yes | Format version. A node that does not know `v` refuses rather than guesses. |
+| `chain` | yes | `ergo`, `bitcoin`. Must equal the tag's suffix — a `pow:ergo` tag saying `chain=bitcoin` is a malformed spec, not a cross-chain ask. |
+| `block_id` | yes | The block that must be **on the peer's main chain**. |
+| `min_cumulative_difficulty` | yes | See §2.4. Text, like everything here, and compared as an exact `int`: the value passed 2⁶⁴ long ago, and no encoding on this path can round it. |
+| `min_height` | no | Peer's main-chain height must be ≥ this. Cheap liveness floor. |
+| `max_tip_age_s` | no | Peer's tip timestamp must be within this many seconds of now. Catches a synced-but-stalled node. |
 
-`protocol_stack` stays in the proto field where it belongs
-(`celaut.proto:267`), not in `formal`. `pow:ergo` peers speak the Ergo node REST
-API (`:9053` by convention, `restApiUrl` in practice); `pow:bitcoin` peers speak
-JSON-RPC (`:8332`) or P2P (`:8333`). §2.8 is where that turns into a port.
+**Unknown keys are refused**, not ignored: a node that silently drops a constraint it
+does not understand grants more than was asked for. Same reasoning as
+`network_policy.py`'s "a list the node failed to read is not a list that allowed
+everything". The parser refuses a repeated key for the same reason — which of the two
+was meant is not something it gets to decide — and a line that is not a pair, rather
+than skipping it as prose.
+
+What it cannot carry: a value with a newline in it, since that is the separator. A
+component that needs one should be pointing `formal` at a document, not carrying it.
+
+`protocol_stack` stays in the proto field where it belongs (`celaut.proto:267`), not in
+`formal`. `pow:ergo` peers speak the Ergo node REST API (`:9053` by convention,
+`restApiUrl` in practice); `pow:bitcoin` peers speak JSON-RPC (`:8332`) or P2P
+(`:8333`). §2.8 is where that turns into a port.
 
 ## 2.4 "Minimum difficulty", precisely
 
@@ -374,14 +390,62 @@ this peer can serve blocks from.
 
 ## 2.5 Where candidate peers come from
 
+A DNS network resolves a name. A `pow:` network has no name — "peers whose main chain
+contains B and carries D work" is not something a lookup answers — so its addresses
+have to be **found**. Five sources, in trust order:
+
 | Source | How | Trust |
 |---|---|---|
-| **(a) celaut instances declaring the network** | The normal indexing path in `NETWORKS.md` "Network Instance Indexing": an instance that declares `pow:ergo` *and* exposes the `protocol_stack` in its `Service.Api`. | Same as any peer: unknown, must be verified. But it is a peer this node can also *pay* and *rate*, so a lying one is attributable — the only source where that is true. **Not implementable today**: there is no network-membership index in the database (`grep -rni network src/database/access_functions/` → nothing). Out of v1 scope. |
-| **(b) the node's own configured ledger node** | `ledgers.ergo.NODE_URL` (`config.example.yaml:1021`), `ledgers.bitcoin.*` (`:1166`). | The operator chose it and the node already trusts it with reputation reads and payment proofs (`src/manager/ergo.py:14`). Verifying it is still worth doing — its *state* is a fact about the world, not about the operator's intent — but its honesty is already assumed elsewhere. |
-| **(c) the Ergo peer crawl** | `ledgers.ergo.HTTP_PEERS_PATH`, populated by `get_refresh_peers()` (`src/manager/ergo.py:36-75`), which already filters on `genesisBlockId` matching `ledgers.ergo.GENESIS_BLOCK_ID` (`ergo.py:22-30`). | Untrusted strangers. Each must be verified independently, and the genesis check is a floor not a ceiling. Note the crawl is recursive and unbounded (`ergo.py:68` recurses inside the loop) — resolution must **read the file**, never trigger a crawl. |
+| **(a) the node's own configured ledger node** | `ledgers.ergo.NODE_URL` (`config.example.yaml:1021`), `ledgers.bitcoin.*` (`:1166`). | The operator chose it and the node already trusts it with reputation reads and payment proofs (`src/manager/ergo.py:14`). Verifying it is still worth doing — its *state* is a fact about the world, not about the operator's intent. |
+| **(b) endpoints named by hand** | `pow_networks.ENDPOINTS["pow:ergo"]`, a map of tag → uris. | The operator's own statement, for somebody running a node this one is not otherwise pointed at. Keyed by tag rather than flat because an endpoint means nothing on its own: an Ergo REST node has no business being asked about a bitcoin network. |
+| **(c) the reputation ledger** | An ordinary reputation box: R4 an endpoints type NFT, R5 `blake2b(sorted tags ‖ formal)`, R8 the polarity, R9 `{"uris": [...]}`. Read by `src/reputation_system/network_endpoints.py`, ordered by the box's share of what its proof assigned times what that proof burned. | Strangers **who paid to say it**. What the ERG buys is a place in the queue and nothing else. A box staking against the same endpoints takes them out again, so withdrawing one is something the network can do. |
+| **(d) other celaut nodes** | `Gateway.ResolveNetwork` (§2.5.1). | Peers this node holds a relationship with — it can pay them, rate them, and attribute a lie — but who staked nothing on *this* answer, which is why they come after (c). |
+| **(e) the Ergo peer crawl** | `ledgers.ergo.HTTP_PEERS_PATH`, populated by `get_refresh_peers()` (`src/manager/ergo.py:36-75`), which already filters on `genesisBlockId` matching `ledgers.ergo.GENESIS_BLOCK_ID`. | Untrusted strangers who paid nothing and were asked nothing. The crawl is recursive and unbounded (`ergo.py:68` recurses inside the loop), so resolution **reads the file** and never triggers a crawl. |
 
-v1 uses **(b) + (c)**, because both exist. (a) is the interesting one and is
-deferred to whenever network-membership indexing lands.
+**The order is a latency decision, not a security one.** Every candidate goes through
+the same verification (§2.6) whatever named it, so what the order decides is who is
+asked first and therefore who fills the `MAX_PEERS` budget. That is the whole reason
+it is safe to take addresses from strangers at all: the cost of a lie at this layer is
+one wasted HTTP request, and the firewall rule is written afterwards, only for a peer
+that answered the requirement.
+
+What is *not* here: source (a) of the earlier draft — celaut instances that declare the
+network, found through a network-membership index. There is still no such index
+(`grep -rni network src/database/access_functions/` → nothing), and it stays out of
+scope. Note that (d) reaches much of the same ground through a different door: a node
+that resolved this domain for its own guests answers with what it found.
+
+### 2.5.1 `Gateway.ResolveNetwork`
+
+A new RPC: `Service.Network` → `ConfigurationFile.NetworkResolution`.
+
+**Generic, not `pow:`-shaped.** A domain is declared the same way whatever resolves it
+— tags, prose, formal — and an RPC per mechanism would make every caller decide in
+advance which kind it was holding, which is the resolving it was trying to delegate. So
+the RPC exposes `resolve_network` itself, and a node may answer for a DNS tag as
+readily as for a `pow:` one.
+
+Three properties, each a decision:
+
+* **It is not a grant.** The reply is what the answering node believes. The caller
+  opens nothing on it and verifies every address exactly as it verifies one from its
+  own `config.yaml`. An `Instance` in the reply is a suggestion, which is why the
+  client (`src/manager/network_discovery.py`) flattens them to bare addresses rather
+  than carrying a claim nothing checked.
+* **The operator's policy applies** (`service_networks`). Resolving a domain this node
+  refuses to reach — handing over addresses it would not use itself — is reaching it by
+  proxy; the same argument puts the policy check before the balancer in
+  `launch_service` rather than after it. The rejection propagates as a rejection, so a
+  caller can tell "not from this node" from "nobody is there".
+* **The question is never relayed** (`resolve_network(..., ask_peers=False)`).
+  Answering by asking our peers, who ask theirs, is a walk over a graph nobody has a
+  view of — and two nodes that know each other are already a cycle of length two. Each
+  node answers from what it knows locally; a caller wanting more breadth asks more
+  nodes itself, which keeps the cost with whoever chose to spend it.
+
+Two peers naming the same address have confirmed nothing — they may well have read it
+off the same list — so answers are pooled, never voted on. Treating agreement as
+evidence would be the one reading of this that *is* a trust decision.
 
 ## 2.6 Verification, per candidate
 
@@ -472,46 +536,72 @@ express "PoW networks, but not with `min_height` below X". That is fine — the
 policy is about domains, not about their contents — but it should be stated so
 nobody assumes otherwise.
 
-**Ancestor chain** — this is where `formal` has to start being read. Proposed rule
-for `match_networks`, keeping today's behaviour for every existing network:
+**Ancestor chain** — this is where `formal` starts being read. `match_networks` was a
+tag intersection with a `# TODO Could be more powerfull` on it (`networks.py:130`),
+which was harmless while nothing put anything in `formal` and stopped being harmless
+the moment a `pow:ergo` network carried its whole ask there: two services both tagged
+`pow:ergo`, asking for different blocks and different amounts of work, were being
+authorized as the same domain.
 
-```
-match(child, father):
-  1. tags must intersect                          (unchanged, networks.py:130)
-  2. if neither side's matched tag is "pow:*"     -> match (unchanged)
-  3. if exactly one side carries a pow formal     -> NO match
-  4. both carry one: match iff the child's ask is NO WEAKER than the father's:
-       chain                       equal
-       block_id                    equal, OR the child's block is a descendant
-                                   of the father's — v1: require equal
-       min_cumulative_difficulty   child >= father
-       min_height                  child >= father   (absent on child = father's)
-       max_tip_age_s               child <= father   (absent on child = father's)
-  5. a formal that does not parse  -> NO match
-```
+The rule is **the one every other tags/prose/formal descriptor in celaut is compared
+by** — `node_identity.same_component`, which `Peer.SignatureScheme` in `celaut.proto`
+states and which a signature scheme and a transport stack already use:
 
-Rule 4 is "a child may ask for a *narrower* domain than its father, never a wider
-one", which is the same induction the chain already runs on tags, applied to the
-contents. A father asking `≥ D1` and a child asking `≥ D2 ≥ D1` is fine: every peer
-the child accepts, the father would have accepted too. Rule 3 is the conservative
-direction — a father that asked for `pow:ergo` with no constraints at all is asking
-for something this scheme cannot compare, so it grants nothing rather than
-everything. Rule 5 follows `network_policy.py`'s stated principle verbatim.
+> `formal` decides whenever **both** sides declare one, byte for byte. Otherwise one
+> shared tag is enough. `prose` is never compared.
+
+A `Service.Network` is such a descriptor, so it gets that rule and no second one.
+`same_component` became public for this; `same_component_stack` is not what is wanted,
+because that pairs up a *stack* of descriptors and a Network is one.
+
+An earlier draft of this document proposed a richer rule instead: compare the fields,
+and let a child ask for a *narrower* domain than its father (`min_cumulative_difficulty`
+≥ the father's, `max_tip_age_s` ≤ it, and so on). It is not obviously wrong, and it is
+rejected anyway:
+
+* It is a **second comparison semantics for one field**, known to exactly one module.
+  Every other `formal` in celaut is compared as opaque bytes; a reader of
+  `match_networks` would have to know that this one is not, and the next kind of
+  network to use `formal` would need its own ladder or would silently fall back to
+  bytes.
+* "Narrower" is only orderable because *these particular* fields happen to be
+  numeric thresholds. `block_id` already breaks it — the draft had to write "v1:
+  require equal" — and anything non-scalar breaks it completely.
+* It buys convenience, not safety. Both rules refuse the same dangerous case (a child
+  asking for something weaker than its father granted).
+
+What the simple rule costs, stated plainly: **a father that declares a `formal` grants
+that exact ask and no other.** A child asking for strictly more work than its father
+demanded is refused, even though it would have been safe. The way to grant a family of
+asks is the way it already reads — declare the tag and leave `formal` empty, which is a
+father saying "any `pow:ergo` my children care to specify". Nothing that declares no
+`formal` anywhere changes behaviour at all.
+
+This is why §2.3's canonical form matters: two nodes that mean the same requirement
+must produce the same bytes, and `component_formal` sorting the keys is what makes that
+true without anyone having to remember a rule.
 
 **`environment_variable`** — no change, and it stays inert for PoW peers for the
 same reason it is inert for DNS ones (§1.6): a chain node is not a celaut instance
-and has no environment to read. It becomes meaningful only for peer source (a).
+and has no environment to read.
 
-**Firewall** — each qualifying peer becomes one `Instance` with one
+**Firewall** — each qualifying peer becomes **its own `Instance`** with one
 `Uri(ip, port)`, where ip/port come from parsing the peer's `restApiUrl`
 (`https://host:9053` → resolve `host`, port 9053; default 443/80 by scheme when
-absent). Two consequences to respect:
+absent). They are separate operators, separately verified, separately reachable and
+separately worth dropping, and one `Instance` carrying N uris says the opposite — that
+shape means "one peer at several addresses", which is what `resolve_domain`
+legitimately builds out of the A records of a single name.
 
-* `network.py:559-569` **breaks after the first instance for which a rule applied**.
-  So a PoW resolution returning N peers must return them as **one `Instance` with
-  N `uri`s in one `Uri_Slot`** — which `allow_connection_to_instance` walks
-  completely (`firewall.py:177-190`) — and not as N `Instance`s. This mirrors what
-  `resolve_domain` already does with multiple A records.
+That required a fix at the other end, which this proposal makes:
+
+* `configure_guest_firewall_policy` (`network.py:559-569`) **stopped at the first peer
+  instance for which a rule applied**. Nothing had noticed, because a resolution had
+  never been more than one instance — but `ConfigurationFile.network_resolution` hands
+  the *guest* every instance, so the guest was being given a list of addresses its own
+  node's firewall would refuse. Which peers are reachable has to be the same question
+  inside the guest and at the nftables rule. It now writes a rule for every instance,
+  and one peer that cannot be opened no longer shuts the rest of the domain.
 * A peer whose `restApiUrl` is a hostname needs a DNS lookup, which re-imports every
   §1.4 caveat. Prefer the numeric form when the crawl recorded one.
 
@@ -546,36 +636,42 @@ once.
 
 | File | Change |
 |---|---|
-| `src/manager/pow_networks.py` (new) | `PowRequirement`; `parse_pow_formal(formal, tag)` (strict: unknown keys refused, `v` checked, tag/chain agreement enforced, decimal strings parsed as exact `int`); `canonical_formal`; `ergo_candidate_urls`; `ergo_peer_satisfies` (the §2.6 ladder); `resolve_pow_network`. Bitcoin parses and raises `NotImplementedError` with the §2.6 reason. |
-| `src/manager/networks.py` | One branch at the top of `resolve_network`'s tag loop: `if tag.startswith("pow:")`. No existing branch is touched, and a `pow:` tag could not have reached the DNS heuristic anyway (no `.`) — the ordering is for the reader. |
-| `config.example.yaml` | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.EXTRA_PEERS`. **Not `networks:`** — that would sit one letter from the `network:` block, the same trap `service_networks` is named around. Chain endpoints are read from `ledgers.ergo.*` rather than duplicated. |
-| `tests/test_pow_networks.py` (new) | 37 tests, no network and no clock: the parser's accept/reject table; per-reason peer rejection (wrong genesis, work below threshold, `headersScore` not accepted for `fullBlocksScore`, below `min_height`, block absent, block present but orphan at that height, stalled tip against *our* clock, unreachable); the one-Instance-N-uris shape; candidate ordering and that the crawl file is read as URLs; and that the dispatch leaves DNS resolution untouched. |
+| `src/manager/pow_networks.py` (new) | `PowRequirement`; `parse_pow_formal(formal, tag)` (strict: unknown keys refused, repeated keys refused, `v` checked, tag/chain agreement enforced, values parsed as exact `int`); `canonical_formal`; `candidate_urls` (the §2.5 sources); `ergo_peer_satisfies` (the §2.6 ladder); `resolve_pow_network`. Bitcoin parses and raises `NotImplementedError` with the §2.6 reason. |
+| `src/identity/node_identity.py` | `parse_component_formal`, the inverse of `component_formal`, beside it because the two have to agree — the field is authored by hand as often as it is built. `_same_component` → `same_component`, made public for `match_networks` (§2.8). |
+| `src/manager/networks.py` | One branch at the top of `resolve_network`'s tag loop (`if tag.startswith("pow:")`); `match_networks` now `same_component` (§2.8); `resolve_network_for_peer`, the decisions behind `Gateway.ResolveNetwork` kept out of its gRPC plumbing so they can be tested as decisions. |
+| `src/reputation_system/network_endpoints.py` (new) | Endpoint lists read off the reputation contract (§2.5 source (c)): `network_descriptor_digest`, `endpoints_for`. Read-only — publishing a list is a wallet operation and not something a service launch does. |
+| `src/manager/network_discovery.py` (new) | The client half of `Gateway.ResolveNetwork` (§2.5.1): `ask_peer`, `ask_peers`. Bare addresses out, never the sender's `Instance` grouping. |
+| `src/gateway/gateway.py`, `protos/celaut.proto`, `protos/celaut_pb2_grpc.py` | The `ResolveNetwork` RPC. **The gencode is hand-edited**, in the 1.56-era style the file is already in (it carries a hand-applied `from bee_rpc import buffer_pb2` fix): `bash/generate_protos.sh` needs `grpcio-tools==1.56.0` for the pinned protobuf 4.x, which has no wheel for current Pythons and does not build from source there. `celaut_pb2.py`'s embedded service descriptor is therefore one method out of date until someone regenerates it — nothing reads it (the grpc stub never imports `celaut_pb2`), and `tests/test_network_discovery.py` pins all four wiring points so a missed one fails in a test rather than in a handshake. |
+| `src/virtualizers/microvm/network.py` | `configure_guest_firewall_policy` writes a rule for **every** peer instance, not the first that works (§2.8). |
+| `config.example.yaml` | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ENDPOINTS` (tag → uris), `.ASK_PEERS`; `ledgers.ergo.reputation.NETWORK_ENDPOINTS_TYPE_NFT_ID`. **Not `networks:`** — that would sit one letter from the `network:` block, the same trap `service_networks` is named around. |
+| `tests/` | `test_pow_networks.py` (the parser's accept/reject table, per-reason peer rejection, the instance-per-endpoint shape, the §2.5 source ordering, `match_networks`, `resolve_network_for_peer`), `test_network_endpoints.py`, `test_network_discovery.py`, `identity/test_component_formal.py`, and two cases in `test_guest_policy_uses_the_right_hook.py`. No test touches the network or the clock. |
 | `docs/NETWORKS.md` | Use Case 3 spelled out, linking here. |
 
-**Explicitly not in v1:** `match_networks` formal comparison (§2.8 — a behaviour
-change to an authorization control, so it deserves its own PR and its own tests),
-peer source (a), Bitcoin verification, re-resolution, cross-checking.
+**Explicitly not in v1:** Bitcoin verification (the default backend is receive-only
+Esplora, which exposes neither `chainwork` nor a peer list), publishing an endpoint
+list to the ledger (a wallet operation), re-resolution, cross-checking.
 
-**Follow-ups, in order:** (1) `match_networks` formal comparison; (2) v2
-cross-checking *k* of *n*; (3) `NetworkResolution.status`, so `[]` stops meaning
-three different things (§2.9); (4) v3 header verification. Each is independently
-revertible, which is the point of the order.
+**Follow-ups, in order:** (1) publishing endpoint lists, so a node can contribute to
+source (c) and not only read it; (2) v2 cross-checking *k* of *n*;
+(3) `NetworkResolution.status`, so `[]` stops meaning three different things (§2.9);
+(4) v3 header verification. Each is independently revertible, which is the point of
+the order.
 
 ## 2.11 Open questions for Josemi
 
 1. **Difficulty semantics** — §2.4 recommends cumulative work since genesis
    (`fullBlocksScore` / `chainwork`). Is "since the given block" the reading you
    had in mind instead? It is a different, also defensible ask.
-2. **`formal` encoding** — JSON (§2.3), or a proto message? JSON is my
-   recommendation and matches celaut-project/skills, but `formal` is `bytes`
-   project-wide and you may want one answer for `Architecture.formal`,
-   `Protocol.formal` and `Network.formal` together rather than three.
-3. **No qualifying peer** — `[]` (§2.9) or abort? `[]` is consistent with today;
+2. **No qualifying peer** — `[]` (§2.9) or abort? `[]` is consistent with today;
    abort is arguably more honest to the service.
-4. **`match_networks`** — is tightening it to compare `formal` (§2.8) in scope for
-   #78, or does it belong with the strict-definition work in
-   celaut-project/skills? It is a behaviour change to an authorization control, so
-   it should not ride along on a resolver PR either way.
-5. **Peer source (a)** — is network-membership indexing (`NETWORKS.md` "Network
-   Instance Indexing") planned? It is the only source where a lying peer is
-   attributable, which changes the whole trust argument in §2.6.
+3. **What `match_networks` costs** — §2.8 takes the byte-comparison rule every other
+   `formal` in celaut gets, which means a father declaring a `formal` grants that
+   exact ask and nothing narrower. Is the family-grant idiom (declare the tag, leave
+   `formal` empty) enough, or do you want the field-by-field ladder after all?
+4. **The endpoints type NFT** — source (c) needs one minted, and
+   `NETWORK_ENDPOINTS_TYPE_NFT_ID` ships empty, so the source is off until it exists.
+   Who mints it, and does it belong in `config.example.yaml` pinned the way
+   `CELAUT_NODE_TYPE_NFT_ID` is?
+5. **Regenerating the protos** — the `ResolveNetwork` gencode is hand-written
+   (§2.10). Worth pinning a toolchain that still builds, or keeping the hand-edit and
+   the wiring tests?

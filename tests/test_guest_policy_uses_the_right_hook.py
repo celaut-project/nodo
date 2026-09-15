@@ -21,6 +21,13 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    # `microvm.network` builds a ConfigManager at import, so a config has to exist
+    # before it is loaded -- the same bootstrap `test_pow_networks.py` does. Without
+    # it every test here skipped on a FileNotFoundError that had nothing to do with a
+    # missing runtime dependency.
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from protos import celaut_pb2 as celaut
     from src.virtualizers.microvm import network
     from src.virtualizers.microvm.errors import MicroVMError
@@ -35,9 +42,32 @@ VM_IP = "192.168.200.148"
 GATEWAY_PORT = 58443
 
 
+def _resolution(tag="pow:ergo", ips=("203.0.113.10", "203.0.113.11", "203.0.113.12")):
+    """A resolution of one domain into several separately-reached peers."""
+    resolution = celaut.ConfigurationFile.NetworkResolution()
+    resolution.tags.append(tag)
+    for ip in ips:
+        resolution.peer_instances.append(_instance(ip))
+    return resolution
+
+
+def _instance(ip, port=9053):
+    """A peer instance reachable at one address, as a pow: resolution builds them."""
+    return celaut.Instance(
+        api=celaut.Service.Api(
+            slot=[celaut.Service.Api.Slot(
+                port=1, transport=celaut.Service.Api.Protocol(tags=["tcp"])
+            )]
+        ),
+        uri_slot=[celaut.Instance.Uri_Slot(
+            internal_port=1, uri=[celaut.Instance.Uri(ip=ip, port=port)]
+        )],
+    )
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class PolicyHookTests(unittest.TestCase):
-    def _configure(self, network_resolution=()):
+    def _configure(self, network_resolution=(), to_instance=None):
         calls = {"host": [], "block_all": [], "instance": [], "all_egress": []}
 
         def _host(vmachine_id, host_ip, port=None, protocol=None, source_ip=None):
@@ -50,6 +80,8 @@ class PolicyHookTests(unittest.TestCase):
 
         def _to_instance(vmachine_id, instance, source_ip=None):
             calls["instance"].append(source_ip)
+            if to_instance is not None:
+                return to_instance(instance)
             return True
 
         def _all_egress(vmachine_id, source_ip=None):
@@ -132,6 +164,39 @@ class PolicyHookTests(unittest.TestCase):
         calls = self._configure([resolution])
 
         self.assertEqual(calls["all_egress"], [VM_IP])
+
+    def test_every_peer_instance_in_a_resolution_gets_a_rule(self):
+        """Not the first one that works: the guest is told it may reach all of them.
+
+        `ConfigurationFile.network_resolution` hands the guest every peer instance, so
+        stopping at the first (which this did) left it a list of addresses its own
+        node's firewall would refuse. Nothing noticed while a resolution was at most
+        one instance; a `pow:` network resolves to one per endpoint.
+        """
+        written = []
+
+        def _record(instance):
+            written.append(instance.uri_slot[0].uri[0].ip)
+            return True
+
+        self._configure([_resolution()], to_instance=_record)
+
+        self.assertEqual(written, ["203.0.113.10", "203.0.113.11", "203.0.113.12"])
+
+    def test_a_peer_that_cannot_be_opened_does_not_stop_the_ones_after_it(self):
+        """One unroutable address is not a reason to leave the rest of the domain shut."""
+        written = []
+
+        def _record(instance):
+            ip = instance.uri_slot[0].uri[0].ip
+            if ip == "203.0.113.11":
+                return False
+            written.append(ip)
+            return True
+
+        self._configure([_resolution()], to_instance=_record)
+
+        self.assertEqual(written, ["203.0.113.10", "203.0.113.12"])
 
     def test_a_failure_on_the_host_hook_aborts_the_launch(self):
         with patch.object(network, "vm_block_all", return_value=True), \
