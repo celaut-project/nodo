@@ -679,16 +679,26 @@ def validate_donation_config(
 # sanity check: a negative donation weight would turn the count list into a punishment
 # mechanism, and punishing peers for not donating is exactly what would make patching
 # donations out of a node rational.
-BALANCER_NONNEG = ("SOCIALIZATION_FACTOR", "DONATION_WEIGHT", "LOCAL_BIAS", "COST_AVERAGE_VARIATION")
-BALANCER_POSITIVE = ("REPUTATION_HALF_CREDIT", "DONATION_HALF_CREDIT", "DONATION_AGE_SCALE")
+BALANCER_NONNEG = (
+    "SOCIALIZATION_FACTOR", "DONATION_WEIGHT", "LOCAL_BIAS", "COST_AVERAGE_VARIATION",
+    "ONCHAIN_REPUTATION_WEIGHT",
+)
+BALANCER_POSITIVE = (
+    "REPUTATION_HALF_CREDIT", "DONATION_HALF_CREDIT", "DONATION_AGE_SCALE",
+    "ONCHAIN_REPUTATION_HALF_CREDIT", "ONCHAIN_PUBLISHER_CAP",
+)
 
 
-def validate_balancers_config(config: Dict[str, Any]) -> None:
+def validate_balancers_config(config: Dict[str, Any], *, warn=None) -> None:
     """Validate the ``balancers:`` block: the shape of the peer-selection formula.
 
     Absent keys are fine -- each has a default in code, and a node that never edits
     this section gets today's behaviour. What is refused is a value that would make the
     formula meaningless: a negative weight, or a half-credit of zero (which divides).
+
+    ``warn`` receives non-fatal findings (a callable taking one string) -- notably the
+    exchange rate between burning an ERG and donating one, which is a policy rather than
+    a mistake.
     """
     balancers = config.get("balancers")
     if balancers in (None, ""):
@@ -713,6 +723,56 @@ def validate_balancers_config(config: Dict[str, Any]) -> None:
                 f"balancers.{key} must be positive, got {raw!r}: it is the point at "
                 "which half the weight is earned, and the formula divides by it."
             )
+
+    _warn_if_burning_is_the_better_buy(balancers, warn)
+
+
+# What one nanoERG is worth in MU at the shipped rate, which is what puts
+# ``DONATION_HALF_CREDIT`` (in MU) and ``ONCHAIN_REPUTATION_HALF_CREDIT`` (in ERG) on one
+# scale. A node that reprices its MU also reprices this comparison, and the warning below
+# says which numbers it used so that can be seen rather than guessed at.
+NANOERG_PER_ERG = Decimal(10) ** 9
+
+
+def _warn_if_burning_is_the_better_buy(balancers: Dict[str, Any], warn) -> None:
+    """The exchange rate between destroying one ERG and donating one. A warning.
+
+    Both terms are per ERG and both saturate, so the rate an operator actually faces is
+    the value of the **first** ERG on each curve: ``W / H``, the weight over the ERG at
+    which half of it is earned. Comparing only the ceilings ``W_o`` and ``W_d`` -- which
+    is what this used to refuse on -- misses a config where the burn pays better at the
+    margin and worse at the limit, and that margin is where an operator spends.
+
+    The shipped defaults make the two rates equal: a burned ERG is worth a donated ERG at
+    every point on the curve, which is the position issue #353 settled on. Weighing one
+    system above the other is then a **policy** an operator may set, so this says what the
+    config does and does not refuse it. Worth saying because the consequence is neither
+    local nor visible: burning destroys money that donating would have put into the
+    software every node here runs on (``docs/DONATIONS.md``).
+    """
+    if warn is None:
+        return
+    try:
+        onchain_weight = Decimal(str(balancers.get("ONCHAIN_REPUTATION_WEIGHT", "0.3")).strip())
+        onchain_half = Decimal(str(balancers.get("ONCHAIN_REPUTATION_HALF_CREDIT", "5.0")).strip())
+        donation_weight = Decimal(str(balancers.get("DONATION_WEIGHT", "0.3")).strip())
+        donation_half_mu = Decimal(str(balancers.get("DONATION_HALF_CREDIT", "5000000000")).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        # Shape is the other loops' job; they have already raised for anything unusable.
+        return
+    donation_half = donation_half_mu / NANOERG_PER_ERG
+    if onchain_half <= 0 or donation_half <= 0:
+        return
+    burn_rate = onchain_weight / onchain_half
+    donate_rate = donation_weight / donation_half
+    if burn_rate > donate_rate:
+        warn(
+            f"balancers: burning is the better buy at the margin -- the first ERG burned "
+            f"is worth {burn_rate} of log-space bonus against {donate_rate} for the first "
+            "ERG donated (weight over half-credit, each in ERG). That is allowed and may "
+            "be what you want; it does mean a rational peer destroys money this node's "
+            "donation list would have sent to the software's developers."
+        )
 
 
 BITCOIN_NETWORKS = ("mainnet", "testnet", "signet", "regtest")
