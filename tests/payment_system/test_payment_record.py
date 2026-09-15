@@ -43,9 +43,13 @@ class _Envs:
 
     def available_payment_process(self):
         def process_payment(amount, deposit_token, ledger, script):
+            # `ledger` is the TAG a stored contract instance carries; the message the
+            # peer receives is the contract's own (issue #82).
             if self._reporter and self._submitted_tx_id:
                 self._reporter(self._submitted_tx_id)
-            return celaut_pb2.Contract(ledger=ledger)
+            return celaut_pb2.Contract(
+                ledger=celaut_pb2.Contract.Ledger(tags=[ledger])
+            )
 
         return {METHOD: process_payment}
 
@@ -76,7 +80,7 @@ class OutgoingPaymentRecordTests(unittest.TestCase):
         credit are different numbers. They are kept distinct in this helper because the
         row records one and the communication carries the other.
         """
-        ledger = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="Ergo chain", formal=b"")
+        ledger = "ergo"
         connection = mock.MagicMock()
         peer_payment_process = getattr(payment_process, "__peer_payment_process")
         self.communicated_with = {}

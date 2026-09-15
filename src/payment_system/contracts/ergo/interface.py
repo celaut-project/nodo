@@ -1,4 +1,3 @@
-from src.reputation_system.envs import ergo_ledger
 from decimal import Decimal
 from typing import Optional, Tuple
 from protos import celaut_pb2
@@ -41,7 +40,24 @@ env_manager = ConfigManager()
 DEFAULT_FEE = 1_000_000  # Fee for the transaction in nanoErgs
 # Technical minimum box value the node must always retain / be able to build an output with.
 SAFE_MIN_BOX_VALUE = 1_000_000
+# This contract's ledger identity, declared here rather than imported from another
+# subsystem's constants. The TAG is the identity: it is what a `contract_instance` row
+# is keyed by, what `MethodKey` carries and what the check below compares. `PROSE` and
+# `FORMAL` are description -- they travel to peers in the advertised `Contract.Ledger`
+# and nothing on this side reads them back, which is precisely why they must not be
+# part of how a ledger is identified.
 LEDGER = "ergo"  # or "ergo-testnet" for Ergo testnet.
+PROSE = (
+    "Ergo system: PoW blockchain using Autolykos with verifiable eUTXO model, "
+    "non-Turing-complete Sigma scripts, finite emission with linear reduction, "
+    "on-chain miner-signaled governance, and cryptographic security via Merkle trees, "
+    "proof-of-work, and zero-knowledge proofs."
+)
+# No formal specification is published for the chain itself, so this is empty rather
+# than a placeholder that would claim one exists.
+FORMAL = b""
+
+ergo_ledger = celaut_pb2.Contract.Ledger(tags=[LEDGER], prose=PROSE, formal=FORMAL)
 # Stable, wallet-independent identity of the Ergo P2PK payment contract TYPE. Its sha3 is
 # the contract_hash used to match this kind of contract across nodes; the specific wallet
 # ErgoTree travels per-instance as the raw ``script`` xattr (propositionBytes).
@@ -722,13 +738,13 @@ def _ergo_token_class(jpype, org_appkit):
 
 
 # Function to process the payment, generating a transaction with the token in register R4
-def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> celaut_pb2.Contract:
+def process_payment(amount: int, deposit_token: str, ledger: str, script: bytes) -> celaut_pb2.Contract:
     """Pay ``amount`` MU in ERG, the native unit of this ledger."""
     return _settle(amount=amount, deposit_token=deposit_token, ledger=ledger,
                    script=script, asset=None)
 
 
-def _settle(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger,
+def _settle(amount: int, deposit_token: str, ledger: str,
             script: bytes, asset) -> celaut_pb2.Contract:
     """One payment, in ERG when ``asset`` is ``None`` and in that token otherwise.
 
@@ -865,7 +881,7 @@ def _settle(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger,
                 obj = response.json()
                 if obj["numConfirmations"] > 1:
                     LOGGER(f"Tx {tx_id} verified.")
-                    contract = celaut_pb2.Contract(ledger=ledger)
+                    contract = celaut_pb2.Contract(ledger=ergo_ledger)
                     # Which asset was paid, so the peer files the credit against the
                     # method it advertised rather than against this contract's default.
                     set_token_id(contract, NATIVE_ASSET if asset is None else asset.token_id)
@@ -880,7 +896,7 @@ def _settle(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger,
 
 
 # Validate the payment by checking for an unspent box with the token in register R4 at the wallet.
-def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes) -> bool:
+def payment_process_validator(amount: int, token: str, ledger: str, script: bytes) -> bool:
     """Prove an incoming ERG payment."""
     return _validate(amount=amount, token=token, ledger=ledger, script=script, asset=None)
 
@@ -909,7 +925,7 @@ def _box_token_amount(box_dict: dict, token_id: str) -> int:
     return total
 
 
-def _validate(amount: int, token: str, ledger: celaut_pb2.Contract.Ledger, script: bytes,
+def _validate(amount: int, token: str, ledger: str, script: bytes,
               asset) -> bool:
     """Prove one incoming payment: ERG when ``asset`` is ``None``, that token otherwise.
 
@@ -918,7 +934,7 @@ def _validate(amount: int, token: str, ledger: celaut_pb2.Contract.Ledger, scrip
     node's own balance.
     """
     try:
-        assert LEDGER in ledger.tags, "Ledger does not match"
+        assert ledger == LEDGER, "Ledger does not match"
 
         # ``script`` is the raw propositionBytes; derive the readable address only here.
         from src.payment_system.contracts.ergo.ergo_tree import address_from_proposition_bytes

@@ -71,10 +71,18 @@ CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 LEDGER = "bitcoin"
 NATIVE_ASSET = "BTC"
 
+# The TAG is this ledger's identity: it is what a `contract_instance` row is keyed by,
+# what `MethodKey` carries and what the check in `payment_process_validator` compares.
+# `PROSE` and `FORMAL` are description -- they travel to peers in the advertised
+# `Contract.Ledger` and nothing on this side reads them back, which is exactly why they
+# must not be part of how a ledger is identified.
 PROSE = (
     "Bitcoin: PoW blockchain with a UTXO model, script-based spending conditions, "
     "a fixed supply schedule, and settlement finality measured in confirmations."
 )
+# No formal specification is published for the chain itself, so this is empty rather
+# than a placeholder that would claim one exists.
+FORMAL = b""
 
 # The proof of an incoming payment is a *confirmed transaction*, not an unspent output,
 # so nothing here breaks if the receiving outputs are spent. That is what keeps this
@@ -298,11 +306,7 @@ def can_pay() -> bool:
         return False
 
 
-bitcoin_ledger = celaut_pb2.Contract.Ledger(
-    tags=[LEDGER],
-    prose=PROSE,
-    formal="".encode("utf-8"),
-)
+bitcoin_ledger = celaut_pb2.Contract.Ledger(tags=[LEDGER], prose=PROSE, formal=FORMAL)
 
 _transaction_url_reporter: ContextVar = ContextVar("bitcoin_transaction_url_reporter", default=None)
 _transaction_id_reporter: ContextVar = ContextVar("bitcoin_transaction_id_reporter", default=None)
@@ -606,7 +610,7 @@ def check_sender_balance(amount: int) -> bool:
         return False
 
 
-def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract.Ledger,
+def process_payment(amount: int, deposit_token: str, ledger: str,
                     script: bytes) -> celaut_pb2.Contract:
     """Pay ``amount`` MU to ``script``, carrying ``deposit_token`` in an `OP_RETURN`.
 
@@ -674,7 +678,7 @@ def process_payment(amount: int, deposit_token: str, ledger: celaut_pb2.Contract
                 )
             if confirmations >= wanted:
                 LOGGER(f"Tx {tx_id} verified with {confirmations} confirmation(s).")
-                contract = celaut_pb2.Contract(ledger=ledger)
+                contract = celaut_pb2.Contract(ledger=bitcoin_ledger)
                 set_token_id(contract, NATIVE_ASSET)
                 set_script(contract, script)
                 set_contract_type(contract, CONTRACT.encode("utf-8"))
@@ -723,7 +727,7 @@ def _paid_to_script(transaction: dict, script_hex: str) -> int:
     return total
 
 
-def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contract.Ledger,
+def payment_process_validator(amount: int, token: str, ledger: str,
                               script: bytes) -> bool:
     """Whether a confirmed transaction paid us ``amount`` MU carrying ``token``.
 
@@ -738,7 +742,7 @@ def payment_process_validator(amount: int, token: str, ledger: celaut_pb2.Contra
     was asked for, and the rest is simply kept.
     """
     try:
-        assert LEDGER in ledger.tags, "Ledger does not match"
+        assert ledger == LEDGER, "Ledger does not match"
 
         script_hex = bytes(script).hex().lower()
         assert script_hex == get_wallet_script().hex().lower(), \

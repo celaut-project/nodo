@@ -13,7 +13,6 @@ is the table's unique key and the `ON CONFLICT` target that has to match it.
 import sqlite3
 import unittest
 from hashlib import sha3_256
-from unittest import mock
 
 IMPORT_ERROR = None
 try:
@@ -35,7 +34,6 @@ CONTRACT_HASH = sha3_256(CONTRACT.encode("utf-8")).hexdigest()
 SCRIPT = bytes.fromhex("0008cd03" + "77" * 32)
 ADDRESS = "9walletADDR"
 TOKEN = "ab" * 32
-OTHER = "cd" * 32
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -45,7 +43,7 @@ class AssetKeyedMethodTests(unittest.TestCase):
         self.connection.row_factory = sqlite3.Row
         self.addCleanup(self.connection.close)
         cursor = self.connection.cursor()
-        migrate.ensure_tables(cursor, ("contract_instance", "contract", "ledger"))
+        migrate.ensure_tables(cursor, ("contract_instance", "ledger"))
 
         self.sql = SQLConnection()
         saved = SQLConnection._connection
@@ -163,81 +161,6 @@ class AssetKeyedMethodTests(unittest.TestCase):
         self._advertise(TOKEN, 1)
         self._advertise(TOKEN, 1, script=other_script)
         self.assertEqual(len(self._rows()), 2)
-
-
-@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class WideningAnOlderDatabaseTests(unittest.TestCase):
-    """An older database declares the four-column key, which SQLite cannot ALTER away.
-
-    Leaving it is not an option: `add_contract`'s `ON CONFLICT` names five columns, so
-    against the old constraint *every* peer registration raises -- not "tokens are
-    unavailable" but "this node can no longer learn how to pay anybody".
-    """
-
-    OLD_TABLE = '''
-        CREATE TABLE contract_instance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            address TEXT,
-            ledger_hash TEXT,
-            contract_hash TEXT,
-            peer_id TEXT NOT NULL,
-            mu_per_unit TEXT,
-            UNIQUE (address, ledger_hash, contract_hash, peer_id)
-        )
-    '''
-
-    def setUp(self):
-        self.connection = sqlite3.connect(":memory:")
-        self.connection.row_factory = sqlite3.Row
-        self.addCleanup(self.connection.close)
-        self.cursor = self.connection.cursor()
-        self.cursor.execute(self.OLD_TABLE)
-        self.cursor.execute(
-            "INSERT INTO contract_instance (address, ledger_hash, contract_hash, "
-            "peer_id, mu_per_unit) VALUES ('cafe', 'beef', ?, 'LOCAL', '7')",
-            (CONTRACT_HASH,),
-        )
-
-    def _declared(self):
-        return " ".join(self.connection.execute(
-            "SELECT sql FROM sqlite_master WHERE name='contract_instance'"
-        ).fetchone()[0].split())
-
-    def test_the_constraint_is_widened_and_the_rows_are_kept(self):
-        with mock.patch("builtins.print"):
-            migrate.widen_contract_instance_uniqueness(self.cursor)
-        self.assertIn("contract_hash, token_id, peer_id", self._declared())
-        [row] = [dict(r) for r in self.connection.execute(
-            "SELECT address, token_id, mu_per_unit FROM contract_instance"
-        ).fetchall()]
-        # The asset is left empty rather than guessed at a symbol: this file knows no
-        # ledgers, and the contract's own NATIVE_ASSET is what names it -- `init()`
-        # rewrites the row on the next boot.
-        self.assertEqual(row, {"address": "cafe", "token_id": "", "mu_per_unit": "7"})
-
-    def test_running_it_again_changes_nothing(self):
-        with mock.patch("builtins.print"):
-            migrate.widen_contract_instance_uniqueness(self.cursor)
-            declared = self._declared()
-            migrate.widen_contract_instance_uniqueness(self.cursor)
-        self.assertEqual(self._declared(), declared)
-        self.assertEqual(len(self.connection.execute(
-            "SELECT id FROM contract_instance").fetchall()), 1)
-
-    def test_a_second_asset_can_be_stored_afterwards(self):
-        # The whole point: before this the insert below raised.
-        with mock.patch("builtins.print"):
-            migrate.widen_contract_instance_uniqueness(self.cursor)
-        for asset in ("ERG", TOKEN, OTHER):
-            self.cursor.execute(
-                "INSERT INTO contract_instance (address, ledger_hash, contract_hash, "
-                "token_id, peer_id, mu_per_unit) VALUES ('cafe','beef',?,?, 'LOCAL','1') "
-                "ON CONFLICT (address, ledger_hash, contract_hash, token_id, peer_id) "
-                "DO UPDATE SET mu_per_unit = excluded.mu_per_unit",
-                (CONTRACT_HASH, asset),
-            )
-        self.assertEqual(len(self.connection.execute(
-            "SELECT id FROM contract_instance").fetchall()), 4)
 
 
 if __name__ == "__main__":

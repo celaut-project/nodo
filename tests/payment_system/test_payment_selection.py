@@ -49,8 +49,11 @@ class _Envs:
     def available_payment_process(self):
         def process(name):
             def process_payment(amount, deposit_token, ledger, script):
+                # `ledger` is the TAG a stored contract instance carries (issue #82).
                 self.settled.append((name, amount))
-                return celaut_pb2.Contract(ledger=ledger)
+                return celaut_pb2.Contract(
+                    ledger=celaut_pb2.Contract.Ledger(tags=[ledger])
+                )
             return process_payment
 
         return {key: process(name) for name, key in self.keys.items()}
@@ -67,7 +70,7 @@ class PaymentSelectionTests(unittest.TestCase):
 
     def _pay(self, funded, plans=None, keys=None):
         envs = _Envs(funded, keys)
-        ledger = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="", formal=b"")
+        ledger = "ergo"
         told = []
         plans = plans or [
             payment_process.SettlementPlan(contract_hash=FIRST, ledger_tag="ergo",
@@ -177,7 +180,7 @@ class PaymentSelectionTests(unittest.TestCase):
         """
         keys = {"erg": FIRST_KEY, "token": _key(FIRST, "ergo", TOKEN)}
         asked = []
-        ledger = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="", formal=b"")
+        ledger = "ergo"
 
         def rows(contract_hash, peer_id, asset=None):
             asked.append((contract_hash, asset))

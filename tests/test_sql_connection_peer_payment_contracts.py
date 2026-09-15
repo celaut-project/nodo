@@ -4,8 +4,10 @@ different contract or ledger looked exactly like a peer with no contract at
 all, and a peer with several instances only ever showed one.
 
 ``get_peer_payment_contracts`` replaces that with a per-peer enumeration of
-every ``contract_instance`` row, resolving each one's ledger hash to its tag
-(e.g. ``"ergo"``) the same way the payment path already does.
+every ``contract_instance`` row. The ledger comes off the row as its tag: it used
+to be stored as the sha3 of a serialized ``Contract.Ledger`` and recovered here
+with a second query and a protobuf parse *per row*, to arrive at a string the row
+could have held in the first place (issue #82).
 """
 import unittest
 from unittest.mock import patch
@@ -14,7 +16,6 @@ IMPORT_ERROR = None
 try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
-    from protos import celaut_pb2
     from src.database.sql_connection import SQLConnection
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -36,87 +37,63 @@ class _FakeCursor:
 class GetPeerPaymentContractsTests(unittest.TestCase):
     def setUp(self):
         self.conn = SQLConnection()
-        self.ergo = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="Ergo chain", formal=b"")
+
+    def _contracts(self, rows):
+        with patch.object(self.conn, "_execute", return_value=_FakeCursor(rows)) as execute:
+            result = self.conn.get_peer_payment_contracts("peer-1")
+        return result, execute
 
     def test_no_contracts_returns_empty_list(self):
-        with patch.object(self.conn, "_execute", return_value=_FakeCursor([])):
-            result = self.conn.get_peer_payment_contracts("peer-1")
+        result, _ = self._contracts([])
         self.assertEqual(result, [])
 
-    def test_resolves_ledger_tag_and_gas_price(self):
-        instance_row = {
+    def test_reads_the_ledger_tag_and_rate_off_the_row(self):
+        row = {
             "contract_hash": "abc123",
-            "ledger_hash": "deadbeef",
+            "ledger": "ergo",
             "address": "0008cd0392",
             "token_id": "ERG",
             "mu_per_unit": "9999999999999999438119489974413630815797154428513196965888",
         }
-        ledger_row = {"content": self.ergo.SerializeToString()}
-
-        with patch.object(
-            self.conn, "_execute",
-            side_effect=[_FakeCursor([instance_row]), _FakeCursor([ledger_row])],
-        ):
-            result = self.conn.get_peer_payment_contracts("peer-1")
+        result, execute = self._contracts([row])
 
         self.assertEqual(len(result), 1)
         contract = result[0]
         self.assertEqual(contract["contract_hash"], "abc123")
         self.assertEqual(contract["ledger_tag"], "ergo")
         self.assertEqual(contract["address"], "0008cd0392")
+        self.assertEqual(contract["token_id"], "ERG")
         self.assertEqual(
             contract["mu_per_unit"],
             9999999999999999438119489974413630815797154428513196965888,
         )
+        # One query for the whole listing: no per-row ledger resolution any more.
+        self.assertEqual(execute.call_count, 1)
 
-    def test_missing_ledger_row_falls_back_to_raw_hash(self):
-        # The ledger row can't always be resolved (e.g. mid-migration data);
-        # surfacing the raw hash beats hiding the contract entirely.
-        instance_row = {
+    def test_invalid_rate_becomes_none(self):
+        row = {
             "contract_hash": "abc123",
-            "ledger_hash": "deadbeef",
-            "address": "addr",
-            "token_id": "ERG",
-            "mu_per_unit": "5",
-        }
-        with patch.object(
-            self.conn, "_execute",
-            side_effect=[_FakeCursor([instance_row]), _FakeCursor([])],
-        ):
-            result = self.conn.get_peer_payment_contracts("peer-1")
-
-        self.assertEqual(result[0]["ledger_tag"], "deadbeef")
-
-    def test_invalid_gas_price_becomes_none(self):
-        instance_row = {
-            "contract_hash": "abc123",
-            "ledger_hash": "deadbeef",
+            "ledger": "ergo",
             "address": "addr",
             "token_id": "ERG",
             "mu_per_unit": None,
         }
-        with patch.object(
-            self.conn, "_execute",
-            side_effect=[_FakeCursor([instance_row]), _FakeCursor([])],
-        ):
-            result = self.conn.get_peer_payment_contracts("peer-1")
-
+        result, _ = self._contracts([row])
         self.assertIsNone(result[0]["mu_per_unit"])
 
     def test_multiple_instances_for_one_peer_are_all_returned(self):
         # The old code could only ever show one contract per peer; a peer with
         # several must not get truncated to the first.
         rows = [
-            {"contract_hash": "c1", "ledger_hash": "l1", "address": "a1", "token_id": "ERG", "mu_per_unit": "1"},
-            {"contract_hash": "c2", "ledger_hash": "l2", "address": "a2", "token_id": "ERG", "mu_per_unit": "2"},
+            {"contract_hash": "c1", "ledger": "ergo", "address": "a1",
+             "token_id": "ERG", "mu_per_unit": "1"},
+            {"contract_hash": "c2", "ledger": "bitcoin", "address": "a2",
+             "token_id": "BTC", "mu_per_unit": "2"},
         ]
-        with patch.object(
-            self.conn, "_execute",
-            side_effect=[_FakeCursor(rows), _FakeCursor([]), _FakeCursor([])],
-        ):
-            result = self.conn.get_peer_payment_contracts("peer-1")
+        result, _ = self._contracts(rows)
 
         self.assertEqual([c["contract_hash"] for c in result], ["c1", "c2"])
+        self.assertEqual([c["ledger_tag"] for c in result], ["ergo", "bitcoin"])
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -131,9 +108,9 @@ class ContractInstanceRateIsUpsertedTests(unittest.TestCase):
 
     STATEMENT = (
         "INSERT INTO contract_instance "
-        "(address, ledger_hash, contract_hash, token_id, peer_id, mu_per_unit) "
+        "(address, ledger, contract_hash, token_id, peer_id, mu_per_unit) "
         "VALUES (?,?,?,?,?,?) "
-        "ON CONFLICT (address, ledger_hash, contract_hash, token_id, peer_id) "
+        "ON CONFLICT (address, ledger, contract_hash, token_id, peer_id) "
         "DO UPDATE SET mu_per_unit = excluded.mu_per_unit"
     )
 
@@ -143,7 +120,7 @@ class ContractInstanceRateIsUpsertedTests(unittest.TestCase):
 
         db = sqlite3.connect(":memory:")
         db.execute(TABLES["contract_instance"])
-        row = ("addr", "ledger", "contract", "ERG", "peer-1")
+        row = ("addr", "ergo", "contract", "ERG", "peer-1")
         db.execute(self.STATEMENT, (*row, "1000000000"))
         db.execute(self.STATEMENT, (*row, "2000000000"))
 
@@ -164,8 +141,8 @@ class ContractInstanceRateIsUpsertedTests(unittest.TestCase):
         db = sqlite3.connect(":memory:")
         db.execute(TABLES["contract_instance"])
         token = "ab" * 32
-        db.execute(self.STATEMENT, ("addr", "ledger", "contract", "ERG", "LOCAL", "1"))
-        db.execute(self.STATEMENT, ("addr", "ledger", "contract", token, "LOCAL", "20000000"))
+        db.execute(self.STATEMENT, ("addr", "ergo", "contract", "ERG", "LOCAL", "1"))
+        db.execute(self.STATEMENT, ("addr", "ergo", "contract", token, "LOCAL", "20000000"))
 
         stored = dict(db.execute(
             "SELECT token_id, mu_per_unit FROM contract_instance"
