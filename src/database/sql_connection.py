@@ -313,6 +313,17 @@ class SQLConnection(metaclass=Singleton):
         result = self._execute('SELECT id FROM clients')
         return [row['id'] for row in result.fetchall()]
 
+    def count_clients(self) -> int:
+        """How many clients this node has.
+
+        A COUNT rather than ``len(get_clients_id())``: the GenerateClient proof of work
+        (issue #361) asks this on every unauthenticated creation request, and the
+        version that loads every id would hand an attacker a way to make the node
+        allocate a list per call -- inside the defence against exactly that.
+        """
+        result = self._execute('SELECT COUNT(*) FROM clients')
+        return int(result.fetchone()[0])
+
     def client_exists(self, client_id: str) -> bool:
         """
         Checks if a client exists in the database.

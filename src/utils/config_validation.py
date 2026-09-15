@@ -268,6 +268,24 @@ def validate_pricing_config(config: Dict[str, Any], *, warn=None) -> None:
         raise ConfigValidationError("Malformed 'free_tier' mapping.")
     _require_whole_mu(free, "free_tier", "CREDIT_MU_PER_NEW_CLIENT")
     _require_share(free, "free_tier", "FREE_WHILE_SCARCITY_BELOW")
+    if "MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY" in free:
+        raw_free_clients = free["MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY"]
+        try:
+            free_clients = int(raw_free_clients)
+        except (TypeError, ValueError) as exc:
+            raise ConfigValidationError(
+                "free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY must be an integer, got "
+                f"{raw_free_clients!r}"
+            ) from exc
+        # It is the size of a difficulty step, and the difficulty is a division by it,
+        # so 0 is not "unlimited" -- it has no meaning at all. An operator who wants
+        # every client to be free sets no proof of work by leaving the node's client
+        # count below one step, not by zeroing the step.
+        if free_clients <= 0:
+            raise ConfigValidationError(
+                "free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY must be positive, got "
+                f"{free_clients}. It is how many clients fit in one difficulty level."
+            )
 
     deposits = config.get("deposits") or {}
     if not isinstance(deposits, dict):
