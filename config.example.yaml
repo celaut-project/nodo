@@ -429,10 +429,12 @@ service_networks:
 # on their main chain, and how much cumulative work their chain must carry -- and
 # this node checks each candidate against it before opening anything.
 #
-# The chain endpoints are NOT configured here: Ergo candidates come from
-# `ledgers.ergo.NODE_URL`, from the peer crawl at `ledgers.ergo.HTTP_PEERS_PATH`,
-# and from EXTRA_PEERS below. Duplicating a node URL in two blocks is how the two
-# come to disagree.
+# A pow: network has no name to look up, so its endpoints are *found*, from four
+# sources in trust order: `ledgers.ergo.NODE_URL` (the node you already trust for
+# reputation and payments), ENDPOINTS below (what you wrote down yourself), the
+# reputation ledger (what the network published for this exact domain, best-backed
+# first) and the peer crawl at `ledgers.ergo.HTTP_PEERS_PATH` (strangers). The order
+# decides only who is asked first: every candidate is verified identically.
 #
 # What is verified is what each candidate REPORTS ABOUT ITSELF over its REST API.
 # That is enough to exclude an out-of-sync, stalled, pruned or wrong-network node,
@@ -445,11 +447,19 @@ service_networks:
 pow_networks:
   TIMEOUT_SECONDS: 10  # Per HTTP request to a candidate peer.
   MAX_PEERS: 8  # Stop verifying once this many peers qualify. Each one becomes a firewall rule.
-  # Extra chain endpoints to consider, ahead of the crawled ones. For an operator
-  # running their own node on a host this node is not otherwise pointed at.
-  EXTRA_PEERS: []
-  # EXTRA_PEERS:
-  #   - "http://192.168.1.50:9053"
+  # Chain endpoints named by hand, per network tag. Keyed by the tag exactly as a
+  # service declares it, because an endpoint means nothing on its own: an Ergo REST
+  # node has no business being asked about a bitcoin network, and a flat list would
+  # have this node find that out one request at a time.
+  ENDPOINTS: {}
+  # ENDPOINTS:
+  #   "pow:ergo":
+  #     - "http://192.168.1.50:9053"
+  # How many known peers to ask (Gateway.ResolveNetwork) for addresses in this domain.
+  # A latency budget, not a quality setting: the answers are pooled rather than compared,
+  # and each ask is a round trip on the launch path. 0 switches the source off. A node
+  # answering such a question never relays it, so asking cannot fan out beyond this.
+  ASK_PEERS: 4
 
 # Dynamic DNS: keep a hostname pointing at this node's public IP, so peers can
 # find it by name when the address changes. Tunneling means only the gateway port
@@ -1066,6 +1076,13 @@ ledgers:
       REPUTATION_PROOF_ID: ""
       PLAIN_TEXT_TYPE_NFT_ID: "8299d98e15ebee7fa39ad716de7c8bb191790a1bf4b7c3f91af35a0e36187706"
       CELAUT_NODE_TYPE_NFT_ID: "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
+      # Which type NFT marks a reputation box as a list of endpoints for a
+      # communication domain rather than an opinion about a node -- the source a
+      # `pow:` network reads its candidates from (src/reputation_system/network_endpoints.py).
+      # Both live on the same contract and differ only by R4, so an unset value means
+      # this node reads none of them: taking every opinion ever published for an
+      # address list is the one outcome worse than reading nothing.
+      NETWORK_ENDPOINTS_TYPE_NFT_ID: ""
     payments:
       # What one nanoERG buys, in MU. This is the ONE place the node's unit of account
       # meets real money; it is what peers are told as ContractRate.mu_per_unit, so they

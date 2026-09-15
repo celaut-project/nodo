@@ -9,6 +9,8 @@ from src.manager.network_env import (
     PeerEnvLookup,
     filter_peers_by_environment,
 )
+from src.identity.node_identity import same_component
+from src.utils.network_policy import enforce_network_policy
 from src.manager.pow_networks import POW_TAG_PREFIX, resolve_pow_network
 
 env_manager = ConfigManager()
@@ -76,7 +78,14 @@ def resolve_network(
     network: celaut.Service.Network,
     requester_env_values: Optional[Dict[str, bytes]] = None,
     peer_env_lookup: Optional[PeerEnvLookup] = None,
+    ask_peers: bool = True,
 ) -> List[celaut.Instance]:
+    """Peer instances for one declared communication domain.
+
+    ``ask_peers=False`` forbids the resolution from asking other celaut nodes, and is
+    passed by ``Gateway.ResolveNetwork`` when answering one. It is what keeps a question
+    from being relayed: see :func:`pow_networks.candidate_urls`.
+    """
     # Wildcard "*" (open-internet egress) and any unresolved tag resolve to no
     # concrete peer instances; initialise uris so an unmatched loop cannot raise
     # UnboundLocalError (it previously did for tag "*").
@@ -90,7 +99,7 @@ def resolve_network(
         # name lookup. The prefix carries no `.`, so such a tag could never have
         # reached the DNS heuristic below anyway; the order is for clarity.
         if tag.startswith(POW_TAG_PREFIX):
-            peers = resolve_pow_network(network, tag=tag)
+            peers = resolve_pow_network(network, tag=tag, ask_peers=ask_peers)
             if peers:
                 return filter_peers_by_environment(
                     network=network,
@@ -145,15 +154,76 @@ def resolve_network(
         peer_env_lookup=peer_env_lookup,
     )
 
+def resolve_network_for_peer(
+    network: celaut.Service.Network,
+    subject: str = "",
+) -> celaut.ConfigurationFile.NetworkResolution:
+    """Answer another node's ``Gateway.ResolveNetwork`` question about ``network``.
+
+    The decisions behind that RPC, kept out of its gRPC plumbing so they can be read
+    and tested as decisions. Two of them:
+
+    * **The operator's policy applies.** ``service_networks`` says which domains this
+      node will reach on anyone's behalf. Resolving one it refuses to reach -- handing
+      over the addresses it would not use itself -- is reaching it by proxy, the same
+      argument that puts the check before the balancer in ``launch_service`` rather
+      than after it. The rejection propagates as a rejection, so the caller can tell
+      "not from this node" from "nobody is there".
+    * **The question is never relayed** (``ask_peers=False``). Answering it by asking
+      our own peers, who ask theirs, is a walk over a graph nobody has a view of -- and
+      two nodes that know each other are already a cycle. Each node answers from what
+      it knows, and a caller wanting more breadth asks more nodes itself, which keeps
+      the cost with whoever chose to spend it.
+
+    No environment filter either: ``Network.environment_variable`` picks among *this*
+    node's own instances by the requesting instance's value, and a remote caller is not
+    one of them.
+    """
+    enforce_network_policy(networks=[network], subject=subject)
+    return celaut.ConfigurationFile.NetworkResolution(
+        tags=list(network.tags),
+        peer_instances=resolve_network(network, ask_peers=False),
+    )
+
+
 def match_networks(a: celaut.Service.Network, b: celaut.Service.Network) -> bool:
-    # TODO Could be more powerfull
-    return bool(set(a.tags) & set(b.tags))  # There is at least one common tag
+    """Whether two ``Service.Network`` declarations name the same communication domain.
+
+    A ``Network`` is a tags/prose/formal descriptor like every other replaceable
+    component in celaut, so it is compared by the rule every other one is compared by
+    (``node_identity.same_component``, and see ``Peer.SignatureScheme`` in
+    celaut.proto): **formal decides whenever both sides declare one**, and otherwise
+    one shared tag is enough.
+
+    Reading ``formal`` is the point. Until now this was a tag intersection with a
+    ``# TODO Could be more powerfull`` on it, which was harmless while nothing put
+    anything in ``formal`` -- and stopped being harmless the moment a ``pow:ergo``
+    network started carrying its actual ask there (issue #78). Two services both
+    tagged ``pow:ergo`` asking for different blocks and different amounts of work are
+    not in the same domain, and the ancestor chain was authorizing one as the other.
+
+    What that costs, stated plainly, because it is a real narrowing of
+    :func:`filter_networks_with_ancestors`: a parent that declares a ``formal`` grants
+    its descendants **that** ask and no other, byte for byte, since two formals either
+    are the same bytes or are not. A parent meaning to grant a family of asks -- any
+    ``pow:ergo`` network its children care to specify -- says so by declaring the tag
+    and leaving ``formal`` empty, which is the same thing it already meant. Nothing
+    that declares no ``formal`` anywhere changes behaviour at all.
+
+    Not ``same_component_stack``: that pairs up a *stack* of descriptors, and a
+    Network is one descriptor. ``protocol_stack`` is not compared here either -- it
+    says what the peers are expected to speak, not which domain this is, and a parent
+    and child that name the same domain in different protocol terms are still naming
+    the same domain.
+    """
+    return same_component(a, b)
 
 def filter_networks_with_ancestors(networks: List[celaut.Service.Network], father_id: str) -> List[celaut.Service.Network]:
     """Keep only the networks that every ancestor of ``father_id`` also declares.
 
     This is the authorization control for ``Service.Network``: a network is usable
-    only if it tag-matches the whole ancestor chain. The AND over the chain is
+    only if every ancestor declares one that :func:`match_networks` accepts -- which
+    reads ``formal`` when both sides carry one, and falls back to a shared tag. The AND over the chain is
     "only the direct father authorizes" applied by induction -- a father can only
     grant the domain its own father granted it, recursively -- so the walk
     re-derives the effective grant from each ancestor's spec. (It re-derives it
