@@ -2,6 +2,7 @@ from bee_rpc import client as bee
 import grpc
 
 from protos import celaut_pb2_grpc, celaut_pb2
+from protos.gateway_bee import GenerateClient_output_indices
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
@@ -10,7 +11,7 @@ from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_full_node_peer_info
-from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client, get_internal_service_id_by_uri, spend_mu, \
+from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources
 from src.manager.metrics import get_metrics
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
@@ -107,9 +108,27 @@ class Gateway(celaut_pb2_grpc.Gateway):
         yield from bee.serialize_to_buffer(celaut_pb2.RecursionGuard(token=peer_id or "REFUSED"))  # Recursion guard shouldn't be used here, another message should be used. TODO
 
     def GenerateClient(self, request_iterator, context, **kwargs):
-        # TODO DDOS protection.   ¿?
+        # The DoS protection this used to only have a TODO for (issue #361): the first
+        # clients are free, after which the caller proposes its own UUID4 and pays for
+        # it in Blake2b. The request is optional -- absent, or a bare Client with no
+        # challenge, is the first attempt, and on a node still below the free limit that
+        # is the whole exchange, exactly as before.
+        request = next(bee.parse_from_buffer(
+            request_iterator=request_iterator,
+            indices=celaut_pb2.Client,
+            partitions_message_mode=True
+        ), None)
+
         yield from bee.serialize_to_buffer(
-                message_iterator=generate_client()
+                message_iterator=generate_client_or_pow_required(
+                    client_id=request.client_id if request else "",
+                    challenge=request.challenge if request else "",
+                    solution=request.pow_solution if request else "",
+                ),
+                # A copy: bee-rpc adds its own `0: bytes` entry to whatever it is
+                # handed, and this one is a module-level constant shared with the
+                # calling side.
+                indices=dict(GenerateClient_output_indices)
         )
 
     def GenerateDepositToken(self, request_iterator, context, *kwargs):

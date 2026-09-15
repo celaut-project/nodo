@@ -514,6 +514,14 @@ free_tier:
   # 1.0). 0.0 disables it (always charge); 0.5 means "free while the node is under half
   # load". This is how you run a node that is free until it is actually busy.
   FREE_WHILE_SCARCITY_BELOW: 0.0
+  # How many clients GenerateClient hands out per proof-of-work difficulty level
+  # (issue #361). GenerateClient takes no authentication -- it is how a caller gets its
+  # first identity here -- so this is what stops one from being farmed: the first 500
+  # clients cost nothing, the next 500 cost one Blake2b zero each, and so on without a
+  # ceiling. Each step multiplies the work by 16, so the difference between a real
+  # client and a flood shows up quickly. Lower it on a node that expects few clients;
+  # raising it makes the node more welcoming and more farmable.
+  MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY: 500
 
 # What the operator reads and types. Purely presentational: changing it never changes
 # what anybody is charged.

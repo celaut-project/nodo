@@ -7,6 +7,7 @@ from bee_rpc import client as bee
 
 from src.manager.resources import IOBigData
 from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc
+from protos.gateway_bee import GenerateClient_output_indices
 
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.tunneling import delegated_endpoints
@@ -16,6 +17,20 @@ from src.utils import utils
 from src.utils.config import ConfigManager
 from src.utils.instance_names import normalize_instance_name, random_instance_name
 from src.identity.grpc_transport import node_channel, peer_channel
+from src.gateway.client_pow import (
+    DEFAULT_MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY,
+    POW_FORMAL,
+    POW_PROSE,
+    POW_TAGS,
+    PoWError,
+    current_difficulty,
+    is_uuid4_hex,
+    make_challenge,
+    parse_and_verify_challenge,
+    server_secret,
+    solve_pow,
+    verify_solution,
+)
 from src.utils.utils import (
     from_amount,
     to_amount,
@@ -739,13 +754,105 @@ def spend_mu(
         return False
 
 
-def generate_client() -> celaut_pb2.Client:
+def generate_client(client_id: Optional[str] = None) -> celaut_pb2.Client:
+    """Create a client, under an id this node or the caller chose.
+
+    ``client_id`` is the UUID4 the caller proposed and proved work for (issue #361);
+    without one the node mints its own, which is the difficulty-0 path and what every
+    caller predating the proof of work does. Either way the id is new: a duplicate
+    violates the ``clients`` primary key and raises here rather than overwriting a
+    balance, which is what makes the check-then-create of
+    ``generate_client_or_pow_required`` safe against two requests racing for the same id.
+    """
     # No collisions expected.
-    client_id = uuid4().hex
+    client_id = client_id or uuid4().hex
     sc.add_client(client_id=client_id, balance_mu=free_tier().credit_mu_per_new_client, last_usage=None)
     log.LOGGER('New client created ' + client_id)
     return celaut_pb2.Client(
         client_id=client_id,
+    )
+
+
+def max_work_free_clients_per_difficulty() -> int:
+    """How many clients this node gives away before the next difficulty step."""
+    raw = env_manager.get(
+        "free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY",
+        DEFAULT_MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY,
+    )
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = DEFAULT_MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY
+    return value if value > 0 else DEFAULT_MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY
+
+
+def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
+                                    solution: str = ""):
+    """Answer a ``GenerateClient`` with either the new client or the work it costs.
+
+    The order of the checks is the point (issue #361 §8), and it is deliberately the
+    cheap-first one: the MAC says the node wrote this challenge, the existence lookup
+    says the id is still free, and only then is a hash computed. Validating the proof of
+    work first would mean an attacker could make this node hash for a ``client_id`` that
+    was never going to be created.
+
+    Returns a ``celaut_pb2.Client`` when a client was created, or a
+    ``celaut_pb2.PoWRequired`` carrying the challenge to solve. Raises on a request that
+    is not merely unsolved but wrong -- a forged challenge, a bad id, an id already
+    taken -- because there is no answer to give those that is not an oracle.
+    """
+    secret = server_secret()
+
+    if challenge:
+        # A retry. Everything trusted from here comes out of the authenticated challenge:
+        # the client_id the caller re-sent alongside it is not consulted at all, so
+        # changing it changes nothing.
+        authenticated_id, _, authenticated_difficulty = parse_and_verify_challenge(
+            challenge=challenge, secret=secret
+        )
+        if sc.client_exists(client_id=authenticated_id):
+            raise PoWError("Client already exists.")
+        if not verify_solution(
+            challenge=challenge, solution=solution, difficulty=authenticated_difficulty
+        ):
+            raise PoWError("Invalid proof of work solution.")
+        return generate_client(client_id=authenticated_id)
+
+    difficulty = current_difficulty(
+        existing_clients=sc.count_clients(),
+        per_difficulty=max_work_free_clients_per_difficulty(),
+    )
+
+    if difficulty == 0:
+        # Free, and a caller that sent no id at all still gets one -- which is every
+        # caller written before this existed.
+        if not client_id:
+            return generate_client()
+        if not is_uuid4_hex(client_id):
+            raise PoWError("client_id must be the 32 hex characters of a UUID4.")
+        if sc.client_exists(client_id=client_id):
+            raise PoWError("Client already exists.")
+        return generate_client(client_id=client_id)
+
+    # Not free. The id has to be the caller's, because it is what the challenge binds to
+    # and what stops a solution being spent twice.
+    if not is_uuid4_hex(client_id):
+        raise PoWError(
+            "This node requires a proof of work to create a client, so the request must "
+            "propose a client_id: a UUID4 in hex."
+        )
+    if sc.client_exists(client_id=client_id):
+        raise PoWError("Client already exists.")
+
+    log.LOGGER(f'Proof of work required for a new client, difficulty {difficulty}.')
+    return celaut_pb2.PoWRequired(
+        tags=POW_TAGS,
+        prose=POW_PROSE,
+        formal=POW_FORMAL,
+        challenge=make_challenge(
+            client_id=client_id, difficulty=difficulty, secret=secret
+        ),
+        difficulty=difficulty,
     )
 
 
@@ -769,11 +876,12 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
         2. If a client ID is found, return it.
         3. If no client ID is found, check if the peer is available using `is_peer_available`.
         4. If the peer is not available, log the unavailability and raise an exception.
-        5. If the peer is available, generate a new client ID using `bee.client_grpc`.
-        6. Log the generation of the new client ID.
-        7. Attempt to associate the new client ID with the peer using `sc.add_external_client`.
-        8. If the association is successful, return the new client ID.
-        9. If the association fails, return None.
+        5. If the peer is available, propose a UUID4 and ask the peer to create it.
+        6. If the peer answers with a PoWRequired, solve it and ask again (issue #361).
+        7. Log the generation of the new client ID.
+        8. Attempt to associate the new client ID with the peer using `sc.add_external_client`.
+        9. If the association is successful, return the new client ID.
+        10. If the association fails, return None.
     """
     client_id = sc.get_peer_client(peer_id=peer_id)
     if client_id: return client_id
@@ -781,14 +889,42 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
         raise Exception('Peer not available.')
 
     log.LOGGER('Generate new client for peer ' + peer_id)
-    client_msg = next(bee.client_grpc(
-        method=celaut_pb2_grpc.GatewayStub(
-            peer_channel(peer_id=peer_id)
-        ).GenerateClient,
-        indices_parser=celaut_pb2.Client,
-        partitions_message_mode_parser=True
-    ), "")
-    if not client_msg:
+
+    # The id is ours to choose now, and it is what the peer's challenge binds to, so it
+    # is minted once here and reused across the retry -- a second UUID4 on the retry
+    # would not match the challenge and the work would be wasted.
+    proposed_id = uuid4().hex
+
+    def _ask(message) -> Optional[object]:
+        return next(bee.client_grpc(
+            method=celaut_pb2_grpc.GatewayStub(
+                peer_channel(peer_id=peer_id)
+            ).GenerateClient,
+            input=message,
+            indices_parser=dict(GenerateClient_output_indices),
+            indices_serializer=celaut_pb2.Client,
+            partitions_message_mode_parser=True
+        ), None)
+
+    client_msg = _ask(celaut_pb2.Client(client_id=proposed_id))
+
+    if isinstance(client_msg, celaut_pb2.PoWRequired):
+        # The peer has given away its free clients. Its `difficulty` field only says what
+        # to solve for; what it will actually check is sealed inside the challenge, so
+        # there is nothing to gain by disbelieving it.
+        log.LOGGER(
+            f'Peer {peer_id} requires a proof of work of difficulty '
+            f'{client_msg.difficulty} for a new client.'
+        )
+        client_msg = _ask(celaut_pb2.Client(
+            client_id=proposed_id,
+            challenge=client_msg.challenge,
+            pow_solution=solve_pow(
+                challenge=client_msg.challenge, difficulty=client_msg.difficulty
+            ),
+        ))
+
+    if not client_msg or not isinstance(client_msg, celaut_pb2.Client):
         raise Exception("No client msg returned.")
     new_client_id = str(client_msg.client_id)
     if not sc.add_external_client(peer_id=peer_id, client_id=new_client_id):

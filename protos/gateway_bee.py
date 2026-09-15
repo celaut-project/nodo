@@ -10,6 +10,15 @@ StartService_input_indices = {
 }
 StartService_input_message_mode = {1: True, 2: True, 3: True, 4: True, 5: True, 6: False}  # False yield a Dir.
 
+# GenerateClient answers with one of two messages (issue #361), so both ends need the
+# same index for each: bee-rpc numbers a lone message 1 by itself, which would put a
+# Client and a PoWRequired on the same index and leave the caller unable to tell which
+# it received.
+GenerateClient_output_indices = {
+    1: celaut_pb2.Client,
+    2: celaut_pb2.PoWRequired,
+}
+
 PackOutput_indices = {
     1: pack_pb2.PackOutputServiceId,
     2: celaut_pb2.Metadata,
