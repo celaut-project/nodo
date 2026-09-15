@@ -465,17 +465,64 @@ ui:
 Every parameter of the peer-selection formula, and nothing else. `SOCIALIZATION_FACTOR`
 and `COST_AVERAGE_VARIATION` moved here from `costs:`, unchanged — they were always peer
 selection rather than pricing — and the rest of the formula now lives beside them.
+[`REPUTATION.md`](REPUTATION.md) walks the whole formula through at these defaults, with
+worked numbers.
 
 A candidate is ranked by an effective cost in log space:
 
 ```
-score(peer)  = −ln(cost_mu) + SOCIALIZATION_FACTOR · r̂ + DONATION_WEIGHT · d̂
+score(peer)  = −ln(cost_mu) + SOCIALIZATION_FACTOR · r̂ + ONCHAIN_REPUTATION_WEIGHT · ô
+                            + DONATION_WEIGHT · d̂
 score(local) = −ln(cost_mu) + LOCAL_BIAS              + DONATION_WEIGHT · d̂
 
 r̂ = r / (|r| + REPUTATION_HALF_CREDIT)   ∈ (−1, 1)   sign-preserving: a peer that
                                                      failed us is still penalised
+ô = S / (|S| + ONCHAIN_REPUTATION_HALF_CREDIT)  ∈ (−1, 1)
+    S = Σ_p cred(p) · sign(v_p) · min(|v_p| · burned_erg(p), ONCHAIN_PUBLISHER_CAP)
+    v_p     = the share of its own proof p stakes on this peer, netted
+    cred(p) = max(0, cos(v_p, r̂))  — how far p's opinions about peers agree
+                                      with ours, over the peers we both rate
 d̂ = C / (C + DONATION_HALF_CREDIT)       ∈ [ 0, 1)   bonus only, never a penalty
 ```
+
+`local` gets neither reputation term: this node holds no evidence about itself, and what
+the chain says about it is what it published.
+
+`ô` is the *on-chain* reputation — a different quantity that shares the name and, unlike
+`r̂`, one that can be bought (an opinion is worth `share × burned ERG`). The burn **is**
+counted, and `cred(p)` is what keeps counting it from being a way to buy a routing
+decision: a reputation proof is not a peer, so instead of asking who owns it, this node
+asks what it has said. Each proof's opinions about peers are compared with our own local
+scores for those same peers — the cosine over the peers both of us rate — and its burn is
+scaled by the result.
+
+That is worth reading twice, because it is the whole design. A proof that praises a peer
+that failed us is discredited **by that praise**, not by a rule about its owner. A proof
+we share no ground with scores `0` and its burn buys nothing, which is the default and
+the common case: a freshly minted proof that has only ever spoken about its own node
+overlaps with us nowhere. And a newcomer can still earn a voice by agreeing with us about
+peers we both know, which an owner test could never allow. Local reputation stays on
+**peers only** — nothing is stored about proofs. `cred` is computed on the hourly tick,
+against every peer we know, and stored beside the row it scores.
+
+`cred` is clamped at zero rather than sign-preserving: disagreement silences a proof, it
+does not invert it. Were it to invert, paying a proof to denounce a rival would promote
+that rival. It is also mirrorable — this node publishes its own scores
+(`submit_to_ledger`), so agreement can be bought by copying them. What that costs the
+attacker is the **burn**: real ERG, per subject, and `ONCHAIN_PUBLISHER_CAP` does not
+change it, because minting proofs is free and a burn split across several proofs never
+meets the cap. Against a mirror the term is just `burned / (burned + 5)` bought with real
+money and ceilinged at `ONCHAIN_REPUTATION_WEIGHT` — and a mirror only earns credibility
+with the peers whose published opinions it copied, so the same burn reaches fewer victims.
+The cap shapes the curve for a single honest publisher, and nothing more. One limitation
+is accepted rather than solved: `cred` is earned on the subjects we and the proof both
+rate, then spent on subjects we hold no opinion about.
+
+The chain is read on an hourly tick into SQLite; a routing decision does no network I/O
+and computes no agreement, and an index that has never filled scores **every** candidate
+zero, never some. The cost of moving `cred` off the routing path is stated plainly: a peer
+that failed us ten minutes ago drags its vouchers down at the next tick, not at the next
+launch.
 
 Because price enters as a logarithm, **each weight is the maximum equivalent price
 discount**: a weight of `W` lets the best possible candidate on that term beat a price up
@@ -487,7 +534,10 @@ ties.
 | Key | Default | Meaning |
 |---|---|---|
 | `balancers.SOCIALIZATION_FACTOR` | `2` | Weight of a peer's reputation, i.e. the largest price premium reliability can beat (`e²` ≈ 7.4×). |
-| `balancers.REPUTATION_HALF_CREDIT` | `50` | Reputation at which half that weight is earned. A peer's standing no longer depends on how many peers exist. |
+| `balancers.REPUTATION_HALF_CREDIT` | `50` | Reputation at which half that weight is earned. A peer's standing no longer depends on how many peers exist. Also what bounds our own opinion vector when `cred(p)` is computed. |
+| `balancers.ONCHAIN_REPUTATION_WEIGHT` | `0.3` | Weight of what the **ledgers** say about a peer (`e^0.3` ≈ 35 % premium at most). Equal to `DONATION_WEIGHT`, with a matching half-credit, so **a burned ERG is worth a donated ERG** at every point on the curve. An operator may weight either system higher; the node **warns** (it does not refuse) when the first ERG burned is worth more than the first ERG donated, comparing `W_o / H_o` against `W_d / H_d`. See [`REPUTATION.md`](REPUTATION.md), [`DONATIONS.md`](DONATIONS.md) and issue #353. |
+| `balancers.ONCHAIN_REPUTATION_HALF_CREDIT` | `5.0` | Agreed, burn-weighted ERG (`S`) at which half that weight is earned. `5` ERG is `DONATION_HALF_CREDIT` in the same units (`5000000000` nanoERG at `MU_PER_NANOERG: 1`): the two curves share a scale, not only a ceiling. |
+| `balancers.ONCHAIN_PUBLISHER_CAP` | `5.0` | The most any one proof may contribute to `S`, in ERG. It binds a single honest publisher and nothing else — minting a proof is free, so a burn split across several never meets it. Above 5 ERG behind one proof, burning earns less than donating the same; at or below, the two are identical. |
 | `balancers.COST_AVERAGE_VARIATION` | `1` | How much a quote's variance inflates its cost when candidates are compared. |
 | `balancers.DONATION_WEIGHT` | `0.3` | Weight of a peer's donation credit (`e^0.3` ≈ 35 % premium at most). **The safety parameter** — a high value closes the network to newcomers; see [`DONATIONS.md`](DONATIONS.md). |
 | `balancers.DONATION_HALF_CREDIT` | `"5000000000"` | Donation credit, in MU, at which half that weight is earned. |
@@ -496,7 +546,10 @@ ties.
 
 Weights must not be negative, and the half-credits must be positive — the node refuses
 the config otherwise. A negative donation weight would turn the count list into a
-punishment mechanism, which is what would make patching donations out rational.
+punishment mechanism, which is what would make patching donations out rational. The
+burn-versus-donate exchange rate is the one thing here that decides an incentive rather
+than a ranking, and it is a **warning** rather than a refusal: which system an operator
+weighs higher is theirs to choose, and the log line says what the config actually prices.
 
 ## `costs`, `timing`, `client`
 

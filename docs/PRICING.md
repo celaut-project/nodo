@@ -428,7 +428,8 @@ to pricing.
 Peer selection is now three terms rather than two: price, reputation, and donation
 credit, plus an explicit `LOCAL_BIAS` for how much this node prefers running work itself.
 Each weight is the maximum equivalent price discount, because price enters the score as a
-logarithm. See [`CONFIG.md`](CONFIG.md#balancers) for the formula and
+logarithm. See [`REPUTATION.md`](REPUTATION.md) for the formula worked through at the
+shipped defaults, [`CONFIG.md`](CONFIG.md#balancers) for every key, and
 [`DONATIONS.md`](DONATIONS.md) for what the donation term is and why it is bounded.
 
 ## Files changed
