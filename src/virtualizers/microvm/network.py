@@ -553,22 +553,36 @@ def configure_guest_firewall_policy(
             )
         log.LOGGER(f"{log_prefix} firewall allow-all egress (network tag '*')")
 
+    # Every peer instance, not the first one that works. A resolution is the set of
+    # peers the service was told it may reach, and `ConfigurationFile.network_resolution`
+    # hands the guest all of them -- so stopping at the first (which this did) opened one
+    # peer and silently dropped the rest, leaving the guest a list of addresses its own
+    # firewall would refuse. Which peers are reachable has to be the same question inside
+    # the guest and at the nftables rule, or the config file is a promise the node does
+    # not keep.
+    #
+    # Nothing noticed while a resolution was at most one instance: `resolve_domain` packs
+    # every A record into one Instance's uris, and `allow_connection_to_instance` does walk
+    # every uri of the instance it is handed. A `pow:` network resolves to one instance per
+    # endpoint (they are separate peers, reached separately, and worth separate rules), which
+    # is what made the difference visible.
     for net_res in network_resolution:
         tag = net_res.tags[0] if net_res.tags else "<untagged>"
-        rule_applied = False
+        applied = 0
         for instance in net_res.peer_instances:
             if vm_allow_connection_to_instance(
                 vmachine_id=vmachine_id,
                 instance=instance,
                 source_ip=vm_ip,
             ):
-                log.LOGGER(
-                    f"{log_prefix} firewall allow network tag '{tag}' resolved via peer instance"
-                )
-                rule_applied = True
-                break
+                applied += 1
 
-        if not rule_applied:
+        if applied:
+            log.LOGGER(
+                f"{log_prefix} firewall allow network tag '{tag}': "
+                f"{applied} of {len(net_res.peer_instances)} peer instance(s)"
+            )
+        else:
             log.LOGGER(
                 f"{log_prefix} firewall warning: no egress rule could be applied for network tag '{tag}'"
             )

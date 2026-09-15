@@ -14,10 +14,12 @@ from src.gateway.utils import generate_full_node_peer_info
 from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources
 from src.manager.metrics import get_metrics
+from src.manager.networks import resolve_network_for_peer
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 from src.utils.config import ConfigManager
+from src.utils.network_policy import NetworkPolicyRejection
 from src.utils.monetary import prices
 
 env_manager = ConfigManager()
@@ -87,6 +89,48 @@ class Gateway(celaut_pb2_grpc.Gateway):
         log.LOGGER(f'Request for instance by {context.peer()}')
         gateway_instance = generate_full_node_peer_info()
         yield from bee.serialize_to_buffer(gateway_instance)
+
+    def ResolveNetwork(self, request_iterator, context, **kwargs):
+        """Answer with the peers this node knows in the communication domain asked for.
+
+        Generic on purpose. A caller holds a ``Service.Network`` and wants it turned
+        into addresses; which mechanism does the turning -- a DNS lookup, a chain
+        crawl, a published endpoint list -- is this node's business, not the caller's,
+        and an RPC per mechanism would have every caller decide in advance which one it
+        was holding. ``resolve_network`` already dispatches on the tag, so this exposes
+        exactly the function the node runs for its own guests (issue #78).
+
+        **Not a grant.** The reply is what this node believes; the caller opens nothing
+        on the strength of it and verifies each address the way it verifies one from its
+        own config. A lying answer therefore costs the caller a wasted request, which is
+        what makes it safe to ask a stranger at all.
+
+        The operator's policy and the no-relaying rule live in
+        ``networks.resolve_network_for_peer``, with the reasoning for each -- this is the
+        gRPC plumbing around them, and a decision buried in a handler is a decision
+        nobody can test.
+        """
+        network = next(bee.parse_from_buffer(
+            request_iterator=request_iterator,
+            indices=celaut_pb2.Service.Network,
+            partitions_message_mode=True
+        ), None)
+
+        if network is None:
+            raise Exception("ResolveNetwork needs a Service.Network to resolve.")
+
+        log.LOGGER(
+            f"Resolve network request by {context.peer()} for tags {list(network.tags)}"
+        )
+
+        try:
+            resolution = resolve_network_for_peer(
+                network, subject=f"peer {context.peer()}"
+            )
+        except NetworkPolicyRejection as e:
+            raise Exception(f"This node does not reach that network. {e}")
+
+        yield from bee.serialize_to_buffer(resolution)
 
     def IntroducePeer(self, request_iterator, context, **kwargs):
         # TODO DDOS protection.   ¿?

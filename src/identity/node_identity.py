@@ -76,11 +76,66 @@ def component_formal(pairs: Dict[str, str]) -> bytes:
     return "\n".join(f"{key}={pairs[key]}" for key in sorted(pairs)).encode("utf-8")
 
 
+class ComponentFormalError(ValueError):
+    """A ``formal`` field could not be read as :func:`component_formal` bytes.
+
+    Raised rather than returning what could be salvaged: a declaration this node
+    cannot read whole is not a declaration that asked for less.
+    """
+
+
+def parse_component_formal(formal: bytes) -> Dict[str, str]:
+    """The inverse of :func:`component_formal`: ``key=value`` lines back into pairs.
+
+    Written beside it because the two have to agree, and because the field is
+    authored by hand as often as it is built here -- a service spec carries its
+    ``formal`` as literal bytes, and whoever typed them gets an error naming the line
+    rather than a requirement silently missing a key.
+
+    ``=`` splits on its **first** occurrence, so a value may contain one; a key may
+    not, which costs nothing (keys here are identifiers) and is what keeps the
+    encoding unambiguous in the direction that matters. A newline cannot appear in
+    either, since it is the separator -- a component needing one is a component whose
+    ``formal`` should point at a document instead of carrying it.
+
+    Leading and trailing whitespace around the *document* is ignored, because a
+    hand-written field arrives with a trailing newline more often than not. Nothing
+    inside it is: a blank line, a line without ``=``, an empty key or a repeated key
+    are each refused, the last one because two values for one key is a question this
+    cannot answer by picking one.
+    """
+    try:
+        text = bytes(formal).decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise ComponentFormalError(f"formal is not UTF-8: {e}") from None
+
+    text = text.strip()
+    if not text:
+        return {}
+
+    pairs: Dict[str, str] = {}
+    for number, line in enumerate(text.split("\n"), start=1):
+        if "=" not in line:
+            raise ComponentFormalError(
+                f"formal line {number} is not a 'key=value' pair: {line!r}."
+            )
+        key, value = line.split("=", 1)
+        if not key:
+            raise ComponentFormalError(f"formal line {number} has an empty key: {line!r}.")
+        if key in pairs:
+            raise ComponentFormalError(
+                f"formal declares {key!r} twice (line {number}). Which value was meant "
+                "is not something this can decide, so neither is taken."
+            )
+        pairs[key] = value
+    return pairs
+
+
 class SignatureSchemeComponent(NamedTuple):
     """One building block of a signature scheme, in celaut's tags/prose/formal shape.
 
     ``formal`` belongs to the component it describes, not to the scheme around it: it
-    is what :func:`_same_component` compares whenever both sides carry one, so a single
+    is what :func:`same_component` compares whenever both sides carry one, so a single
     value shared across every component would make them all interchangeable -- and a
     peer repeating that one value on however many components would match whatever its
     tags said.
@@ -236,8 +291,15 @@ def _component_is_declared(component) -> bool:
     return bool(component.tags) or bool(bytes(component.formal))
 
 
-def _same_component(a, b) -> bool:
-    """Whether two ``SignatureScheme.Protocol`` entries name the same building block.
+def same_component(a, b) -> bool:
+    """Whether two tags/prose/formal descriptors name the same thing.
+
+    Public because it is not only a step inside :func:`same_component_stack`: a
+    ``Service.Network`` is one such descriptor rather than a stack of them, so
+    ``networks.match_networks`` compares a single pair directly. Anything carrying
+    ``tags`` and ``formal`` can be passed -- a ``SignatureScheme.Protocol``, a
+    ``Uri.Protocol``, a ``Contract.Ledger``, a ``Service.Network`` -- which is what
+    declaring every replaceable component in the same shape is for.
 
     ``formal`` decides whenever **both** sides declare one, as the strictest and most
     machine-readable identity: two components pointing at different specifications name
@@ -284,7 +346,7 @@ def same_signature_scheme(a, b) -> bool:
     A scheme is an unordered stack of components (see ``Peer.SignatureScheme`` in
     celaut.proto), so this asks for a one-to-one pairing between the two schemes'
     components, not a positional comparison. Within a pair, matching is
-    :func:`_same_component`'s (``formal`` when both sides carry one, a shared tag
+    :func:`same_component`'s (``formal`` when both sides carry one, a shared tag
     otherwise); across the whole scheme, the pairing must be total. A peer declaring an
     extra component, or missing one, is a different scheme even if every paired
     component matches: a shared tag is enough to identify one *building block*, never
@@ -327,7 +389,7 @@ def same_component_stack(a_components, b_components) -> bool:
         return False
 
     return any(
-        all(_same_component(x, y) for x, y in zip(a_components, permutation))
+        all(same_component(x, y) for x, y in zip(a_components, permutation))
         for permutation in itertools.permutations(b_components)
     )
 

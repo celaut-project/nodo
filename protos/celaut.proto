@@ -717,6 +717,21 @@ service Gateway {
     rpc ModifyDeposit(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyDepositInput -> ModifyDepositOutput
 
     rpc GetPeerInfo(stream buffer.Buffer) returns (stream buffer.Buffer) {} //  -> Peer
+
+    // Ask this node to turn a communication domain into the peers it knows in it.
+    //
+    // Any Service.Network, not one kind of it: a domain is declared the same way
+    // whatever resolves it (tags/prose/formal), and a caller that had to know in
+    // advance which kind it was holding would be doing the resolving itself. A `pow:`
+    // network is the case that needs asking -- it has no name to look up, so its
+    // addresses have to be found rather than resolved (issue #78) -- but nothing here
+    // is about proof of work, and a node may answer for a DNS tag just as well.
+    //
+    // The answer is what this node BELIEVES, not a grant and not a proof. The caller
+    // verifies every address it is given, exactly as it would verify one an operator
+    // typed into its own config, because a peer that names an address has staked
+    // nothing on it. Nothing is opened on the strength of this reply.
+    rpc ResolveNetwork(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Service.Network -> ConfigurationFile.NetworkResolution
     rpc IntroducePeer(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Peer -> 
     rpc GenerateClient(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> Client | PoWRequired
     rpc GenerateDepositToken(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> TokenMessage
