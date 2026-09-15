@@ -108,7 +108,8 @@ class _Confirmed:
 class TokenOutBoxTests(unittest.TestCase):
     def setUp(self):
         self.record = {}
-        self.ledger = celaut_pb2.Contract.Ledger(tags=["ergo"], prose="Ergo", formal=b"")
+        # The payment path passes the ledger TAG, not the message (issue #82).
+        self.ledger = "ergo"
         self.sender = mock.Mock(name="sender-address")
 
         jpype = mock.Mock()

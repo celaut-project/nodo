@@ -8,7 +8,7 @@ from collections import deque
 from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
-from typing import Any, Callable, Dict, Generator, Iterable, List, Sequence, Tuple, Optional
+from typing import Callable, Dict, Generator, Iterable, List, Sequence, Tuple, Optional
 from google.protobuf.json_format import MessageToJson
 
 from protos import celaut_pb2
@@ -1304,94 +1304,61 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error submitting to ledger: {e}')
             return False
 
-    @staticmethod
-    def ledger_key(ledger: Any) -> str:
-        """The ``hash`` value the ledger table is keyed by, from a Ledger or a hash.
-
-        Callers on the payment path hold the deserialized ``Contract.Ledger``
-        message (that is what ``get_peer_contract_instances`` yields), so derive
-        the digest the same way ``add_contract`` does when it stores the row.
-        """
-        if isinstance(ledger, str):
-            return ledger
-        return sha3_256(ledger.SerializeToString()).hexdigest()
-
-    def ledger_hashes(self, ledger: Any) -> List[str]:
-        """Stored ``ledger.hash`` values a ledger identifier resolves to.
-
-        The ``ledger`` table is keyed by the sha3 of the serialized
-        ``Contract.Ledger`` message, but payment-path callers only hold the ledger
-        *tag* (``"ergo"``) — that is all a peer's advertisement carries as a stable
-        name. Accept either: an exact stored hash, or a tag to resolve against the
-        deserialized rows.
-        """
-        key = self.ledger_key(ledger)
-        rows = self._execute("SELECT hash, content FROM ledger").fetchall()
-
-        exact = [row['hash'] for row in rows if row['hash'] == key]
-        if exact:
-            return exact
-
-        by_tag: List[str] = []
-        for row in rows:
-            parsed = celaut_pb2.Contract.Ledger()
-            try:
-                parsed.ParseFromString(row['content'])
-            except Exception as e:
-                logger.LOGGER(f'Could not parse stored ledger {row["hash"]}: {e}')
-                continue
-            if key in parsed.tags:
-                by_tag.append(row['hash'])
-        return by_tag
-
-    def update_double_attempt_retry_time_on_ledger(self, ledger: Any):
-        """
-        Updates the double_spending_retry_time field in the ledger table
-        by setting it to the current time plus 10 minutes for the specified ledger.
+    def update_double_attempt_retry_time_on_ledger(self, ledger: str):
+        """Put ``ledger`` on cooldown for 10 minutes after a double-spending attempt.
 
         Args:
-            ledger: The ledger whose retry_time needs updating, as a
-                ``Contract.Ledger`` message or as its ``hash``.
-        """
-        query = """
-        UPDATE ledger
-        SET double_spending_retry_time = DATETIME('now', '+10 minutes')
-        WHERE hash = ?
-        """
+            ledger: The ledger TAG (``"ergo"``), which is what
+                :class:`~src.payment_system.exceptions.DoubleSpendingAttempt` is raised
+                with and what every caller on the payment path holds.
 
-        self._execute(query, (self.ledger_key(ledger),))
-
-    def check_if_ledger_is_available(self, ledger: Any) -> bool:
+        An upsert rather than an UPDATE, because the row exists only to record a
+        cooldown: a chain that has never had one has no row at all. The previous
+        version keyed the table by the sha3 of a serialized ``Contract.Ledger`` and
+        was handed the tag, so its ``WHERE hash = 'ergo'`` matched nothing -- the
+        cooldown was written to zero rows and no ledger was ever actually paused.
         """
-        Checks if the specified ledger is available for use.
-        A ledger is considered available if its double_spending_retry_time is NULL
-        or is in the past.
+        self._execute(
+            """
+            INSERT INTO ledger (tag, double_spending_retry_time)
+            VALUES (?, DATETIME('now', '+10 minutes'))
+            ON CONFLICT (tag)
+            DO UPDATE SET double_spending_retry_time = DATETIME('now', '+10 minutes')
+            """,
+            (ledger,),
+        )
+
+    def check_if_ledger_is_available(self, ledger: str) -> bool:
+        """Whether ``ledger`` may be used right now.
 
         Args:
-            ledger: The ledger to check, as a ``Contract.Ledger`` message or as
-                its ``hash``.
+            ledger: The ledger TAG (``"ergo"``).
 
         Returns:
-            bool: True if the ledger is available, False otherwise.
+            bool: True unless a double-spending cooldown is still running.
+
+        **No row means available.** The table records cooldowns, not ledgers, so
+        absence is the normal state of a chain nothing has gone wrong on -- answering
+        False there would refuse every payment on every ledger that had never failed.
+
+        The deadline is compared **in SQL**, against the same clock that wrote it. Doing
+        it in Python got the answer wrong twice over: ``datetime.utcnow()`` is an
+        ``AttributeError`` here (this module imports the *module*, not the class), and
+        had it resolved, it would have compared SQLite's ``'YYYY-MM-DD HH:MM:SS'`` with
+        ``isoformat()``'s ``'YYYY-MM-DDTHH:MM:SS.ffffff'`` as strings -- and a space
+        sorts before a ``T``, so a live cooldown reads as expired.
         """
-        query = """
-        SELECT double_spending_retry_time
-        FROM ledger
-        WHERE hash = ?
-        """
+        row = self._execute(
+            """
+            SELECT 1 FROM ledger
+            WHERE tag = ?
+              AND double_spending_retry_time IS NOT NULL
+              AND double_spending_retry_time > DATETIME('now')
+            """,
+            (ledger,),
+        ).fetchone()
 
-        # Execute the query to get the retry time for the specified ledger.
-        result = self._execute(query, (self.ledger_key(ledger),)).fetchone()
-
-        # Check if a result was returned and evaluate its availability.
-        if result:
-            retry_time = result[0]
-
-            # A ledger is available if the retry_time is NULL or in the past.
-            if retry_time is None or retry_time < datetime.utcnow().isoformat():
-                return True
-
-        return False
+        return row is None
 
     def get_peers(self) -> List[dict]:
         """
@@ -1441,88 +1408,79 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error fetching peer details for ID {peer_id}: {e}')
             return {}
         
-    def get_peer_contract_rate(self, peer_id: str, contract_hash: str, ledger_hash: str) -> Optional[int]:
+    def get_peer_contract_rate(self, peer_id: str, contract_hash: str, ledger: str) -> Optional[int]:
         """
-        Fetches the balance_mu price for a specific contract instance, identified by
-        peer, contract hash, and ledger ID.
+        Fetches the mu_per_unit rate for a specific contract instance, identified by
+        peer, contract hash, and ledger tag.
 
         Parameters:
         - peer_id (str): The unique identifier of the peer.
         - contract_hash (str): The hash of the contract.
-        - ledger_hash (str): The ledger, either as its stored ``ledger.hash`` or as
-          a ledger tag such as ``"ergo"`` (see ``ledger_hashes``). Callers on the
-          payment path only hold the tag, so matching the column verbatim would
-          never find the row the peer's advertisement created.
+        - ledger (str): The ledger TAG (``"ergo"``), matched verbatim. It used to be a
+          hash of a serialized ledger description, which callers never held, so the
+          lookup had to scan and parse every stored ledger to translate a tag back.
 
         Returns:
-        - int: The balance_mu price as an integer if the specific contract instance is found.
-        - None: If the specific contract instance is not found or an error occurs.
+        - int: The mu_per_unit rate as an integer if the contract instance is found.
+        - None: If the contract instance is not found or an error occurs.
         """
         try:
-            for stored_hash in self.ledger_hashes(ledger_hash):
-                result = self._execute('''
-                    SELECT mu_per_unit
-                    FROM contract_instance
-                    WHERE peer_id = ? AND contract_hash = ? AND ledger_hash = ?
-                ''', (peer_id, contract_hash, stored_hash))
+            row = self._execute(
+                """
+                SELECT mu_per_unit
+                FROM contract_instance
+                WHERE peer_id = ? AND contract_hash = ? AND ledger = ?
+                """,
+                (peer_id, contract_hash, ledger),
+            ).fetchone()
 
-                # Fetch one row (we expect at most one for this combination)
-                row = result.fetchone()
-                if not row:
-                    continue
+            if not row:
+                return None
 
-                gas_price_str = row['mu_per_unit']
-                try:
-                    # Convert the string mu_per_unit to an integer
-                    return int(gas_price_str)
-                except (ValueError, TypeError) as ve:
-                    logger.LOGGER(f'Error converting stored mu_per_unit "{gas_price_str}" to int for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {ve}')
-                    return None # Return None if conversion fails
-
-            # No row found for the given criteria
-            return None # Indicate that the specific instance was not found
+            rate_str = row['mu_per_unit']
+            try:
+                return int(rate_str)
+            except (ValueError, TypeError) as ve:
+                logger.LOGGER(
+                    f'Error converting stored mu_per_unit "{rate_str}" to int for '
+                    f'instance: peer={peer_id}, contract={contract_hash}, '
+                    f'ledger={ledger}. Error: {ve}'
+                )
+                return None
 
         except Exception as e:
             # Catch potential database errors during execution
-            logger.LOGGER(f'Database error fetching balance_mu price for instance: peer={peer_id}, contract={contract_hash}, ledger={ledger_hash}. Error: {e}')
-            return None # Return None on database error
+            logger.LOGGER(
+                f'Database error fetching the mu_per_unit rate for instance: '
+                f'peer={peer_id}, contract={contract_hash}, ledger={ledger}. Error: {e}'
+            )
+            return None
 
     def get_peer_payment_contracts(self, peer_id: str) -> List[dict]:
         """
-        Lists every payment contract instance registered for a peer, resolving
-        each row's ledger to its tag (e.g. ``"ergo"``) instead of the opaque
-        stored hash.
+        Lists every payment contract instance registered for a peer.
 
         Args:
             peer_id (str): The peer id (``"LOCAL"`` for our own contracts).
 
         Returns:
             List[dict]: One entry per ``contract_instance`` row, each with
-            ``contract_hash``, ``ledger_tag`` (falling back to the raw
-            ``ledger_hash`` if the ledger content can't be resolved to a tag),
-            ``address``, and ``mu_per_unit`` (int, or None if unset/invalid).
+            ``contract_hash``, ``ledger_tag``, ``address``, ``token_id`` and
+            ``mu_per_unit`` (int, or None if unset/invalid).
+
+        The tag is read straight off the row. It used to be recovered by selecting the
+        stored ledger blob per row and parsing it back into a ``Contract.Ledger`` just
+        to reach ``tags[0]`` -- one extra query and one protobuf parse per instance, to
+        arrive at a string the row could simply have held.
         """
         rows = self._execute(
-            "SELECT contract_hash, ledger_hash, address, token_id, mu_per_unit "
+            "SELECT contract_hash, ledger, address, token_id, mu_per_unit "
             "FROM contract_instance WHERE peer_id = ?",
             (peer_id,)
         ).fetchall()
 
         contracts = []
         for row in rows:
-            ledger_tag = row['ledger_hash']
-            ledger_row = self._execute(
-                "SELECT content FROM ledger WHERE hash = ?", (row['ledger_hash'],)
-            ).fetchone()
-            if ledger_row:
-                ledger = celaut_pb2.Contract.Ledger()
-                try:
-                    ledger.ParseFromString(ledger_row['content'])
-                    if ledger.tags:
-                        ledger_tag = ledger.tags[0]
-                except Exception as e:
-                    logger.LOGGER(f'Could not parse stored ledger {row["ledger_hash"]}: {e}')
-
             try:
                 mu_per_unit = int(row['mu_per_unit'])
             except (TypeError, ValueError):
@@ -1530,7 +1488,7 @@ class SQLConnection(metaclass=Singleton):
 
             contracts.append({
                 'contract_hash': row['contract_hash'],
-                'ledger_tag': ledger_tag,
+                'ledger_tag': row['ledger'],
                 'address': row['address'],
                 # A payment method is ledger + contract + asset. Without the asset, two
                 # rows of one contract look like one row duplicated with two different
@@ -1716,78 +1674,22 @@ class SQLConnection(metaclass=Singleton):
             ),
         )
 
-    def check_if_ledger_exists(self, ledger_to_check: celaut_pb2.Contract.Ledger) -> celaut_pb2.Contract.Ledger:
-        """
-        Checks if a logically equivalent ledger already exists in the database.
-
-        This method defines an inner comparison function to determine ledger equivalence
-        by prioritizing the 'formal' and 'prose' fields over 'tags'. It then iterates
-        through all ledgers in the 'ledger' table, deserializes them, and uses this
-        comparison logic.
-
-        Args:
-            ledger_to_check: The Ledger object to check for.
-
-        Returns:
-            The complete Ledger object from the database if a match is found.  The same if not exists.
-        """
-        
-        def _compare_ledgers(ledger_a: celaut_pb2.Contract.Ledger, ledger_b: celaut_pb2.Contract.Ledger) -> bool:
-            """
-            Inner function to compare two Ledger objects for logical equivalence.
-            """
-            if not ledger_a or not ledger_b:
-                return False
-
-            # 1. Highest priority: the 'formal' field. It's the strictest identifier.
-            if ledger_a.formal and ledger_b.formal and ledger_a.formal == ledger_b.formal:
-                return True
-
-            # 2. Second priority: the 'prose' field.
-            if ledger_a.prose and ledger_b.prose and ledger_a.prose == ledger_b.prose:
-                return True
-
-            # 3. If neither formal nor prose are present, check for common tags.
-            #    If there's at least one common tag, they match.
-            if not ledger_a.prose and not ledger_b.prose and not ledger_a.formal and not ledger_b.formal:
-                # Convert tag lists to sets for efficient intersection checking
-                tags_a_set = set(ledger_a.tags)
-                tags_b_set = set(ledger_b.tags)
-                
-                # Check if the intersection of the two sets is not empty
-                if tags_a_set.intersection(tags_b_set):
-                    return True
-                
-            return False
-
-        # Fetch all stored ledgers. 'content' holds the serialized ledger; 'hash' is
-        # only its sha3 digest, and there is no 'id' column at all (see migrate.py).
-        cursor = self._execute("SELECT content FROM ledger")
-
-        for row in cursor.fetchall():
-            # The ledger from the DB is in a serialized byte format.
-            db_ledger_bytes = row['content']
-            
-            # Deserialize the bytes to reconstruct the Ledger object.
-            db_ledger = celaut_pb2.Contract.Ledger()
-            db_ledger.ParseFromString(db_ledger_bytes)
-            
-            # Use the inner comparison logic.
-            if _compare_ledgers(ledger_to_check, db_ledger):
-                # If they match, return the full object from the database.
-                return db_ledger
-        
-        # If the loop finishes without finding a match, return the same.
-        return ledger_to_check
-
     def add_contract(self, contract: celaut_pb2.Contract, peer_id: str = LOCAL_PEER_ID, mu_per_unit: int = 0):
         """
-        Adds a contract to the database.
+        Registers one payment method advertised by a peer (or by this node).
 
         Args:
             contract (celaut_pb2.Contract): The contract to add.
             peer_id (Optional[str]): The ID of the peer or None for a self contract (to be send to clients.)
             mu_per_unit (Int): MU that one unit of this contract is worth.
+
+        Neither the ledger nor the contract is stored as an object any more. Which
+        ledgers and contracts exist is settled by the build -- `contracts/registry.py`
+        lists them and each interface module declares its own identity -- and an
+        advertisement for one this node does not implement can never be settled
+        through, because the payer resolves `process_payment` out of that same
+        registry. So the only parts worth keeping are the ones a lookup is keyed by:
+        the ledger tag and the contract-type hash.
         """
         # The per-instance value is the raw ErgoTree/propositionBytes (script xattr). It is
         # stored as hex so it round-trips as binary, never as a textual address. The
@@ -1807,19 +1709,21 @@ class SQLConnection(metaclass=Singleton):
         # rates and neither would be found by the method keyed on the other.
         asset: str = _normalized_asset(get_token_id(contract))
 
-        ledger = self.check_if_ledger_exists(ledger_to_check=contract.ledger)
-        ledger_str: bytes = ledger.SerializeToString()
+        # The tag, and nothing else, is the ledger's identity. `prose` and `formal`
+        # travel on the wire and are never read by anything on this side, yet hashing
+        # the serialized message meant two peers describing the same chain in different
+        # words advertised two different ledgers -- which no amount of matching after
+        # the fact reliably put back together.
+        ledger_tag: str = contract.ledger.tags[0] if contract.ledger.tags else ""
+        if not ledger_tag:
+            logger.LOGGER(
+                f"Not registering a contract from {peer_id}: its ledger carries no tag, "
+                "so there is nothing to match it by."
+            )
+            return
 
         contract_hash: str = sha3_256(type_bytes).hexdigest()
-        ledger_hash: str = sha3_256(ledger_str).hexdigest()
-
         gas_str = str(mu_per_unit)
-
-        self._execute("INSERT OR IGNORE INTO contract (hash, content) VALUES (?,?)",
-                    (contract_hash, type_bytes))
-
-        self._execute("INSERT OR IGNORE INTO ledger (hash, content) VALUES (?,?)",
-                    (ledger_hash, ledger_str))
 
         # Upsert, not INSERT OR IGNORE: a peer re-advertises its rate on every
         # refresh (`manager.update_peer_instance`), and ignoring the row froze
@@ -1827,15 +1731,15 @@ class SQLConnection(metaclass=Singleton):
         # Converting MU with a stale rate misprices delegation and, on the
         # payment path, gets a deposit rejected with the money already on-chain.
         self._execute("INSERT INTO contract_instance "
-                    "(address, ledger_hash, contract_hash, token_id, peer_id, mu_per_unit) "
+                    "(address, ledger, contract_hash, token_id, peer_id, mu_per_unit) "
                     "VALUES (?,?,?,?,?,?) "
-                    "ON CONFLICT (address, ledger_hash, contract_hash, token_id, peer_id) "
+                    "ON CONFLICT (address, ledger, contract_hash, token_id, peer_id) "
                     "DO UPDATE SET mu_per_unit = excluded.mu_per_unit",
-                    (instance_value, ledger_hash, contract_hash, asset, peer_id, gas_str))
+                    (instance_value, ledger_tag, contract_hash, asset, peer_id, gas_str))
 
     def get_peer_contract_instances(self, contract_hash: str, peer_id: str = LOCAL_PEER_ID,
                                     asset: Optional[str] = None
-                                    ) -> Generator[Tuple[bytes, celaut_pb2.Contract.Ledger, str], None, None]:
+                                    ) -> Generator[Tuple[bytes, str, str], None, None]:
         """
         Retrieves all contract instances for a given contract hash and peer ID.
 
@@ -1848,9 +1752,15 @@ class SQLConnection(metaclass=Singleton):
                 contract, a script and an address, and differ only here.
 
         Yields:
-            Tuple[bytes, Ledger, str]: the raw script, the ledger, and the asset.
+            Tuple[bytes, str, str]: the raw script, the ledger TAG, and the asset.
+
+        The ledger comes back as its tag rather than as a deserialized
+        ``Contract.Ledger``: the tag is the whole of what every consumer reads off it
+        (the interfaces check ``ledger == LEDGER``; nothing resolves a node URL or a
+        rate from the message, those come from this node's own config), and it is what
+        the row now holds.
         """
-        query = ("SELECT address, ledger_hash, token_id FROM contract_instance "
+        query = ("SELECT address, ledger, token_id FROM contract_instance "
                  "WHERE contract_hash = ? AND peer_id = ?")
         params: tuple = (contract_hash, peer_id)
         if asset is not None:
@@ -1858,12 +1768,6 @@ class SQLConnection(metaclass=Singleton):
             params = params + (asset,)
         cursor = self._execute(query, params)
         for row in cursor.fetchall():
-            cursor = self._execute("SELECT content FROM ledger WHERE hash = ?", (row['ledger_hash'],))
-            ledger_str = cursor.fetchone()['content']
-
-            ledger = celaut_pb2.Contract.Ledger()
-            ledger.ParseFromString(ledger_str)
-
             stored = row['address'] or ""
             try:
                 # Ergo instances store the raw ErgoTree/propositionBytes as hex.
@@ -1872,7 +1776,7 @@ class SQLConnection(metaclass=Singleton):
                 # Legacy/simulator instances stored a textual value.
                 script = stored.encode('utf-8')
 
-            yield script, ledger, (row['token_id'] or "")
+            yield script, row['ledger'], (row['token_id'] or "")
 
     def peer_exists(self, peer_id: str) -> bool:
         """

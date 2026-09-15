@@ -57,6 +57,11 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
     xattr, untouched. See the contract in src/payment_system/contracts/ergo/ergo_tree.py: the exchanged
     value is never an ErgoScript source string and never a base58 address.
 
+    The full ``Contract.Ledger`` a peer receives -- tag, prose and formal identity --
+    comes from the contract module itself (``contract.ledger()``), which is where those
+    constants are declared. It used to be read back out of the database, which only
+    ever held a copy of them.
+
     ``contract_type`` carries the stable, wallet-independent identity instead, so
     the receiving peer's ``add_contract`` derives the same ``contract_hash`` this
     node looks the instance up by.
@@ -85,12 +90,12 @@ def local_payment_methods() -> Generator[celaut.ContractRate, None, None]:
             LOGGER(f"Not advertising {contract.LEDGER}: its MU rate is not positive.")
             continue
 
-        for script, ledger, _asset in get_peer_contract_instances(
+        for script, _ledger_tag, _asset in get_peer_contract_instances(
             contract.CONTRACT_HASH, asset=contract.asset
         ):
 
             contract_ledger = celaut.Contract()
-            contract_ledger.ledger.CopyFrom(ledger)
+            contract_ledger.ledger.CopyFrom(contract.ledger())
             set_script(contract_ledger, script)
             set_contract_type(contract_ledger, contract.CONTRACT.encode("utf-8"))
             # The asset this method settles in, which is the whole reason a peer can

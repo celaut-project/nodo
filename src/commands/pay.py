@@ -164,7 +164,7 @@ def _read_peer_balance(
         return None
     balance_mu = int(peer.get("balance_mu") or 0)
     mu_per_unit = sq.get_peer_contract_rate(
-        peer_id=peer_id, contract_hash=contract_hash, ledger_hash=ledger
+        peer_id=peer_id, contract_hash=contract_hash, ledger=ledger
     )
     return balance_mu, mu_per_unit, peer.get("balance_last_update")
 
@@ -236,7 +236,7 @@ def pay(peer_id: str, amount: str, ledger: Optional[str] = None,
     # This method's instances, not the contract's: on Ergo every asset of a contract
     # shares an address, so the contract's rows would say "yes, payable" for an asset
     # the peer never advertised.
-    scripts: List[Tuple[bytes, object, str]] = list(
+    scripts: List[Tuple[bytes, str, str]] = list(
         get_peer_contract_instances(contract_hash, peer_id, contract.asset)
     )
     if not scripts:
