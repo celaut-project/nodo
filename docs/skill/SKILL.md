@@ -1,6 +1,6 @@
 ---
 name: celaut-bridge-skill
-version: 1.2.0
+version: 1.3.0
 description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), package projects into content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
 author: Community Contribution
 license: MIT
@@ -81,6 +81,16 @@ Understand these before running anything. Full glossary:
   `pack_config.json`; with `dependencies_env` the packer injects each resolved
   dependency's content hash into the build as an env var. See
   [`../PACKING.md`](../PACKING.md).
+* **Composition constrains networks downward.** `Service.Network` is a *request*,
+  not a grant: a child may only use the networks that **every** generation above
+  it also declares. `filter_networks_with_ancestors` intersects the child's tags
+  with the direct father's spec, then its father's, to the topmost local ancestor,
+  and the match is a plain tag-set intersection — `*` is matched **literally**, so
+  a parent declaring `["ipv4", "public"]` authorizes a child asking for `["*"]`
+  exactly as little as a parent declaring nothing. **A parent must therefore
+  declare every network its children need, for itself.** See
+  [`../NETWORKS.md`](../NETWORKS.md), and rule 8 in §6 for why this one is worth a
+  rule of its own.
 
 ## 1. Celaut Node Installation & Management
 
@@ -203,6 +213,14 @@ entrypoint executable in the image (e.g. `RUN chmod +x /usr/local/bin/worker`).
 The full `service.json` / `pack_config.json` / Dockerfile spec — including
 `resources`, `api`, `envs`, `config_declaration`, `network`, and dependencies — is
 in [`../PACKING.md`](../PACKING.md).
+
+> **If this service launches others, `network` is not a per-service field.**
+> `../PACKING.md` documents `network` as `tags` + `prose`, which is the whole of
+> the *syntax* and none of the *authorization*: a child's networks are intersected
+> with its parent's, and its grandparent's, up the chain. Read
+> [`../NETWORKS.md`](../NETWORKS.md) before writing the `network` field of any
+> service that has dependencies, and see §6 rule 8 for the failure mode — which is
+> silent.
 
 ### Importing, Exporting & Distribution
 
@@ -427,7 +445,20 @@ sudo nodo update
 5. **MicroVM Execution Awareness:** Understand that services execute inside isolated microVMs (`ch`). Do not attempt to use Docker commands to inspect running service instances; Docker is used only for the `nodo pack` build phase (and only locally in the opt-in `packer.local` mode) — never for execution.
 6. **Pre-flight Estimation:** Always run `nodo estimate <service>` before deploying unknown workloads to verify memory guard limits (`resources.at_most.mem_limit`) and ensure a sufficient balance.
 7. **Problem-First Discovery:** When seeking AI capabilities, query Unstoppable Skills **through the read-only MCP server** (start with `load_skills`, then `load_skill_tree`) to evaluate comparative `Results` and verifiable `Coverage` before selecting a service id. There is no `nodo` CLI for Skills; publishing (if ever needed) uses the `reputation-system` library, not this agent path.
-8. **Disclose Irreversibility Before Funds:** Before any operation that configures a wallet, spends ERG, pays a peer, or submits reputation, disclose to the user that Nodo is **alpha** and that Ergo payments are **final and irreversible** with self-custodied keys and no recourse (see [`../KyA.md`](../KyA.md)). Do not initiate on-chain spending without explicit user consent.
+8. **Networks Are Inherited, and Under-declaring Fails Silently:** When writing
+   or reviewing the manifests of a service **and its dependencies**, check the
+   parent's `network` against every child's before packing. A child can only reach
+   what its whole ancestor chain also declared. What makes this a rule rather than
+   a footnote is that getting it wrong produces **no error at all**:
+   `filter_networks_with_ancestors` returns an empty list,
+   `build_network_resolution` raises nothing, and the guest boots with the default
+   `block_all` and not one allow rule. The instance starts, `nodo instances` shows
+   it healthy, and it reaches nothing — so every symptom points at the child, and
+   the file that has to change is the parent's. The pressure that puts on an agent
+   debugging it is to widen the *child's* declaration, which can never help.
+   Cross-check with `nodo observe <instance id>`, whose per-flow view shows the
+   traffic that is not happening.
+9. **Disclose Irreversibility Before Funds:** Before any operation that configures a wallet, spends ERG, pays a peer, or submits reputation, disclose to the user that Nodo is **alpha** and that Ergo payments are **final and irreversible** with self-custodied keys and no recourse (see [`../KyA.md`](../KyA.md)). Do not initiate on-chain spending without explicit user consent.
 
 ---
 
@@ -439,6 +470,11 @@ In-repo siblings (offline-safe; pulled by imperatives above at the point of need
 * Manual install / uninstall → [`../INSTALL.md`](../INSTALL.md) · [`../UNINSTALL.md`](../UNINSTALL.md)
 * Command reference → [`../USAGE.md`](../USAGE.md)
 * Packing input format → [`../PACKING.md`](../PACKING.md)
+* `Service.Network`: inheritance, resolution, operator policy → [`../NETWORKS.md`](../NETWORKS.md)
+* Parent → child shared directories (and the colocation they force) → [`../SHARED_FILESYSTEMS.md`](../SHARED_FILESYSTEMS.md)
+* Reaching a service without publishing a port (`ServiceTunnel`, `nodo tunnel`) → [`../TUNNELING.md`](../TUNNELING.md)
+* What the node writes into the host's ruleset per guest → [`../FIREWALL.md`](../FIREWALL.md)
+* Execution backends (`ch`, `qemu`) and how one is chosen → [`../BACKENDS.md`](../BACKENDS.md)
 * Configuration reference → [`../CONFIG.md`](../CONFIG.md)
 * End-to-end walkthrough → [`../WALKTHROUGH.md`](../WALKTHROUGH.md)
 * Troubleshooting → [`../TROUBLESHOOTING.md`](../TROUBLESHOOTING.md)

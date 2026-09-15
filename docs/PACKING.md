@@ -859,6 +859,25 @@ The older `entrypoint` top-level field is still supported and will be automatica
 | `tags` | array of strings | Yes | Network type identifiers. Required when a `network` entry is present — omitting it raises `KeyError` |
 | `prose` | string | Yes | Human-readable description of the network requirement. Required when a `network` entry is present — omitting it raises `KeyError` |
 
+> ⚠️ **This is the syntax, not the authorization.** What a service *declares*
+> here is a request. What it is *granted* is that request intersected with what
+> every generation above it declared — the direct father's spec, then its
+> father's, up to the topmost local ancestor
+> (`filter_networks_with_ancestors`). The match is a plain tag-set intersection
+> and `*` is matched **literally**, so a father declaring `["ipv4", "public"]`
+> grants a child asking for `["*"]` nothing, and a father declaring no network
+> grants its children nothing at all, whatever they asked for.
+>
+> **So a service that launches dependencies must declare, for itself, every
+> network those dependencies need.** There is no way to pass a domain down
+> without also holding it.
+>
+> Getting this wrong does not fail: the filter returns an empty list,
+> `build_network_resolution` raises nothing, and the guest boots with the default
+> `block_all` and no allow rules. The instance starts and is reported healthy, and
+> reaches nothing — with every symptom in the child and the fix in the parent's
+> `service.json`. Full model: [`NETWORKS.md`](NETWORKS.md).
+
 ```json
 {
     "network": [
