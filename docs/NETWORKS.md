@@ -196,7 +196,34 @@ Scenario: a service needs to access third-party resources (e.g. OpenAI) but does
 
 > "Give me peers in the PoW network with architecture X, latest block ≥ B, and difficulty ≥ D."
 
-The formal description (`formal`) encodes the consensus requirements used to select peers.
+The formal description (`formal`) encodes the consensus requirements used to select
+peers. This is the first network kind where `formal` carries the ask: the tag
+(`pow:ergo`, `pow:bitcoin`) names the *chain*, and two services on the same chain
+asking for different blocks or different work are not in the same domain.
+
+| | |
+|---|---|
+| Tag | `pow:<chain>` — `pow:ergo`, `pow:bitcoin` |
+| `formal` | canonical UTF-8 JSON: `{"v":1,"chain":"ergo","block_id":"…","min_cumulative_difficulty":"…","min_height":…,"max_tip_age_s":…}`. Unknown keys are **refused**, not ignored. |
+| Difficulty | **cumulative work since genesis** (Ergo `fullBlocksScore`, Bitcoin `chainwork`), not the tip block's difficulty: it is what the chain's own fork choice maximises, it is monotone, and it gives a total order peers can be compared on. Carried as a decimal string — the value outgrew a double long ago. |
+| Containment | the block must be on the peer's **main** chain (`/blocks/{id}/header` then `/blocks/at/{height}`), not merely stored: an orphan a peer kept is not a block its chain contains. |
+| Peers | `ledgers.ergo.NODE_URL`, `pow_networks.EXTRA_PEERS`, then the crawl at `ledgers.ergo.HTTP_PEERS_PATH`. All verified the same way; the order only decides who is asked first. |
+| No peer qualifies | resolves to `[]`, like any other unresolved tag — "nobody meets D right now" is transient and about the world, not about the request. |
+| Config | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.EXTRA_PEERS` |
+| Implementation | `src/manager/pow_networks.py`, dispatched from `resolve_network()` |
+
+> ⚠️ **What is verified is what the candidate says about itself.** Its REST answers
+> are claims, and a peer can fabricate all of them cheaply. That excludes the common
+> failure — an out-of-sync, stalled, pruned or wrong-network node — and not a
+> deliberate liar. Cross-checking *k* of *n* candidates, and verifying the Autolykos
+> solutions in the headers themselves, are the next two steps.
+
+Bitcoin parses and does not resolve: nodo's default Bitcoin posture is a
+receive-only Esplora backend, which exposes neither `chainwork` nor a peer list.
+
+Full design, and an audit of what the DNS path guarantees today:
+[`proposals/78-network-guarantees-and-pow.md`](proposals/78-network-guarantees-and-pow.md)
+(issue [#78](https://github.com/celaut-project/nodo/issues/78)).
 
 ---
 
