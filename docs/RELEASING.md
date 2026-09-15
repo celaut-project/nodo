@@ -22,15 +22,15 @@ in the wild downloading the old assets, because nothing points at the new tag.
 | File | Purpose | Notes |
 |---|---|---|
 | `debian.tar` | WSL2 rootfs imported by the installer | Ubuntu 22.04 base with nodo code + venv pre-installed |
-| `vmlinuz` | Cloud Hypervisor **guest** kernel | Downloaded by `setup_linux_x86.sh` from the `guest-kernel-vN` release |
+| `vmlinuz` | Cloud Hypervisor **guest** kernel | Downloaded by `setup_linux_x86.sh` from the `guest-kernel` release |
 | `bzImage` | WSL2 **host** kernel | Written to `C:\wsl-kernel\bzImage` and referenced in `.wslconfig`; currently Josemi's custom `microhobby` build — requires a separate kernel build environment to update |
-| `initramfs` | WSL2 distro-side initramfs, paired with `bzImage` | `install.ps1` (STEP 5.3, "Downloading internal kernel") downloads it from the `wsl-exe` release to `/boot/initramfs` inside the distro, before `install.sh` runs. **Unrelated to the Cloud Hypervisor guest initramfs**, which `setup_linux_x86.sh` downloads from the `guest-kernel-vN` release into `$TARGET_DIR/cloud_hypervisor/initramfs/<arch>/initramfs` — nothing writes to `/boot` at install time |
+| `initramfs` | WSL2 distro-side initramfs, paired with `bzImage` | `install.ps1` (STEP 5.3, "Downloading internal kernel") downloads it from the `wsl-exe` release to `/boot/initramfs` inside the distro, before `install.sh` runs. **Unrelated to the Cloud Hypervisor guest initramfs**, which `setup_linux_x86.sh` downloads from the `guest-kernel` release into `$TARGET_DIR/cloud_hypervisor/initramfs/<arch>/initramfs` — nothing writes to `/boot` at install time |
 
 ## When to cut a release
 
 - Any change to `bash/build_ch_initramfs.sh` (the guest userspace it assembles, or
   the `/init` ↔ `execute.py` contract version it stamps) — note the image itself is
-  built by CI and shipped in the `guest-kernel-vN` release, so that pin moves first
+  built by CI and shipped in the `guest-kernel` release, so that pin moves first
 - Any change to `bash/setup_linux_x86.sh` (setup flow, dependency versions)
 - Significant feature merges that should ship to Windows users
 
@@ -62,7 +62,7 @@ docker cp /tmp/nodo-release-build/. nodo-v2-build:/nodo/
 
 ### 2. Run setup
 
-`setup_linux_x86.sh` downloads the guest kernel, initramfs and busybox from the `guest-kernel-vN`
+`setup_linux_x86.sh` downloads the guest kernel, initramfs and busybox from the `guest-kernel`
 release, so the build container needs no kernel package of its own and builds no part of the guest
 (`/boot` is never read, and there are no guest modules — `CONFIG_MODULES` is off in the guest
 kernel).
@@ -84,7 +84,7 @@ docker exec nodo-v2-build bash /nodo/bash/setup_linux_x86.sh /nodo
 docker export nodo-v2-build > /tmp/debian.tar
 
 # Copy out the guest kernel + initramfs provisioned by setup_linux_x86.sh.
-# vmlinuz here is the Nodo guest kernel asset (guest-kernel-vN release), which the
+# vmlinuz here is the Nodo guest kernel asset (guest-kernel release), which the
 # setup script downloads — not the build container's distro kernel.
 docker cp nodo-v2-build:/nodo/cloud_hypervisor/kernels/linux/amd64/vmlinuz /tmp/vmlinuz
 docker cp nodo-v2-build:/nodo/cloud_hypervisor/initramfs/linux/amd64/initramfs /tmp/initramfs

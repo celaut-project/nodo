@@ -257,6 +257,33 @@ class PinnedGuestAssetTests(unittest.TestCase):
         pinned = re.search(r"^TAG (\S+)$", self._pin(), re.MULTILINE).group(1)
         self.assertEqual(pinned, wanted)
 
+    def test_setup_default_tag_matches_the_installer_and_the_pin(self):
+        # The setup scripts can be run by hand without the third argument. Their
+        # fallback used to be `guest-kernel-v1`, a release that does not exist,
+        # while install.sh and the pin both said `guest-kernel` -- so a direct run
+        # refused every guest asset on a tag mismatch (issue #360).
+        installer = Path("install.sh").read_text(encoding="utf-8")
+        wanted = re.search(r'GUEST_KERNEL_VERSION="([^"]+)"', installer).group(1)
+        pinned = re.search(r"^TAG (\S+)$", self._pin(), re.MULTILINE).group(1)
+        for script in (ARM_SETUP, X86_SETUP):
+            with self.subTest(script=str(script)):
+                content = script.read_text(encoding="utf-8")
+                default = re.search(
+                    r'GUEST_KERNEL_VERSION="\$\{3:-([^}]+)\}"', content
+                ).group(1)
+                self.assertEqual(default, wanted)
+                self.assertEqual(default, pinned)
+
+    def test_fail_writes_to_stderr_so_a_subshell_reason_is_not_swallowed(self):
+        # `pinned_guest_digest` runs inside `$(...)`. With `fail` on stdout its
+        # reason was captured into the variable and the caller printed "see above"
+        # with nothing above it (issue #360).
+        for script in (ARM_SETUP, X86_SETUP):
+            with self.subTest(script=str(script)):
+                content = script.read_text(encoding="utf-8")
+                body = content.split("fail() {")[1].split("\n}")[0]
+                self.assertIn('echo "Error: $1" >&2', body)
+
     def test_setup_verifies_against_the_pin_and_not_the_release(self):
         # SHA256SUMS published next to the artifact proves only that the download was
         # not truncated: whoever can edit the release swaps both at once.

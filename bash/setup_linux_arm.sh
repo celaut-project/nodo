@@ -13,7 +13,11 @@ if [ -z "$TARGET_DIR" ]; then
 fi
 
 CH_VERSION="${2:-v51.1}"
-GUEST_KERNEL_VERSION="${3:-guest-kernel-v1}"
+# Default matches install.sh and bash/guest-kernel/SHA256SUMS.pinned (TAG). The
+# pinned digests are checked against this tag, so the three must agree; running
+# this script by hand without the third argument must not pick a release that
+# does not exist.
+GUEST_KERNEL_VERSION="${3:-guest-kernel}"
 CONFIG_FILE="$TARGET_DIR/config.yaml"
 
 # Package names differ per distro; everything distro-specific lives here.
@@ -44,7 +48,10 @@ PYTHON_RUNTIME_ROOT="$PYTHON_RUNTIME_ROOT_DEFAULT"
 JAVA_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/java"
 
 fail() {
-    echo "Error: $1"
+    # To stderr, so the reason survives a command substitution: `fail` inside
+    # `$(...)` used to write into the captured variable and the caller then
+    # reported "see above" with nothing above it (issue #360).
+    echo "Error: $1" >&2
     exit 1
 }
 
