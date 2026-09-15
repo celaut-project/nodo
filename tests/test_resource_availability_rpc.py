@@ -7,9 +7,13 @@ byte through it -- and the serialization pairing (the iterable's `serialize_to_b
 against the client's `indices_parser` + `partitions_message_mode_parser`) is exactly the
 kind of thing that is silently wrong until a real peer is asked.
 
-So this serves the real `GetResourceAvailabilityIterable` over a real grpc server and
-calls it with the real `check_resource_availability_on_peer`, with only the *address
-lookup* patched. Requires bee_rpc and grpc; skipped where they are not installed.
+So this serves the real `GetResourceAvailabilityIterable` over a real grpc server -- with
+TLS and this node's own certificate, as `serve.py` does -- and calls it with the real
+`check_resource_availability_on_peer`, with only the *address lookup* patched. The peer
+being asked is therefore this node itself: `peer_channel` verifies the certificate
+against the `peer_id` it was handed (issue #257), so the id and the server have to
+belong to the same node for the channel to come up at all. Requires bee_rpc, grpc and
+cryptography; skipped where they are not installed.
 """
 import unittest
 from concurrent import futures
@@ -18,12 +22,15 @@ from unittest.mock import patch
 try:
     import grpc
     from bee_rpc import client as bee  # noqa: F401
-    # Imported, not just checked: `check_resource_availability_on_peer` resolves
-    # `generate_uris_by_peer_id` out of this module at call time, so patching it
-    # requires the module object to exist.
-    import src.utils.utils  # noqa: F401
+
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+    # Imported, not just checked: `peer_channel` resolves `generate_uris_by_peer_id`
+    # out of this module at call time, so patching it requires the module object.
+    from src.identity import grpc_transport
+    from src.identity.node_identity import get_node_public_key_hex
     _MISSING = None
-except ImportError as exc:  # pragma: no cover - environment-dependent
+except Exception as exc:  # pragma: no cover - environment-dependent
     _MISSING = str(exc)
 
 from protos import celaut_pb2 as celaut
@@ -72,22 +79,29 @@ class ResourceAvailabilityRoundTripTests(unittest.TestCase):
 
         cls.server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
         celaut_pb2_grpc.add_GatewayServicer_to_server(_Servicer(), cls.server)
-        cls.port = cls.server.add_insecure_port("127.0.0.1:0")
+        # The peer-facing port, so the client dials what a peer would dial.
+        cls.port = cls.server.add_secure_port(
+            "127.0.0.1:0", grpc_transport.server_credentials()
+        )
         cls.server.start()
 
     @classmethod
     def tearDownClass(cls):
         cls.server.stop(None)
 
-    def _ask(self, resources):
+    def _ask(self, resources, peer_id=None, target=None):
         from src.utils.cost_functions.workload_admission import (
             check_resource_availability_on_peer,
         )
-        with patch(
-            "src.utils.utils.generate_uris_by_peer_id",
-            side_effect=lambda peer_id: iter([f"127.0.0.1:{self.port}"]),
+        uri = target or f"127.0.0.1:{self.port}"
+        with patch.object(
+            grpc_transport,
+            "generate_uris_by_peer_id",
+            side_effect=lambda peer_id: iter([uri]),
         ):
-            return check_resource_availability_on_peer("a-peer", resources)
+            return check_resource_availability_on_peer(
+                peer_id or get_node_public_key_hex(), resources
+            )
 
     def setUp(self):
         self.RECEIVED.clear()
@@ -120,16 +134,16 @@ class ResourceAvailabilityRoundTripTests(unittest.TestCase):
     def test_an_unreachable_peer_is_not_a_no(self):
         # None means "could not ask", which _workload_group_is_satisfiable must not read
         # as a refusal. A closed port is the cheapest way to produce it.
-        from src.utils.cost_functions.workload_admission import (
-            check_resource_availability_on_peer,
-        )
-        with patch(
-            "src.utils.utils.generate_uris_by_peer_id",
-            side_effect=lambda peer_id: iter(["127.0.0.1:1"]),
-        ):
-            answer = check_resource_availability_on_peer(
-                "a-peer", celaut.Service.Container.Resources()
-            )
+        answer = self._ask(celaut.Service.Container.Resources(), target="127.0.0.1:1")
+        self.assertIsNone(answer)
+
+    def test_an_address_held_by_another_identity_is_not_a_no(self):
+        # The address answers, and answers with a certificate that proves an identity --
+        # just not the one we meant to ask. `peer_channel` refuses it, and being unable
+        # to ask is None here too, never a "no" the admission gate would act on.
+        self.ANSWERS.clear()
+        self.ANSWERS.update({"can_execute": True, "reason": ""})
+        answer = self._ask(celaut.Service.Container.Resources(), peer_id="ab" * 32)
         self.assertIsNone(answer)
 
 
