@@ -7,17 +7,10 @@ work". Tags alone cannot express that, which is why this is the first network ki
 in nodo that reads ``formal`` at all (see
 ``docs/proposals/78-network-guarantees-and-pow.md``, issue #78).
 
-``formal`` is the ``key=value`` body every other celaut component declares one in
-(``node_identity.component_formal``): sorted lines, UTF-8, compared byte for byte.
-Not a shape invented here -- a signature scheme's curve and an address's transport
-already state their determinate parameters this way, and a PoW requirement is the
-same kind of statement about the same kind of field. It costs a reader nothing to
-parse, it is diffable by eye in a service spec, and it makes the bytes canonical by
-construction, which a JSON object is not.
-
-**Unknown keys are rejected rather than ignored.** A node that silently drops a
-constraint it does not understand grants more than was asked for -- the same rule
-``src/utils/network_policy.py`` states for a policy list it failed to read.
+``formal`` contains a serialized ``celaut.NetworkFormal`` protobuf map. Known
+values are UTF-8 strings with strict domain-specific validation; unknown entries
+are preserved as opaque bytes, not interpreted as enforced constraints. New
+mandatory semantics require a new supported version.
 
 What v1 verifies is **self-reported**: a candidate's own REST answers about its own
 state. That catches the overwhelmingly common failure -- an out-of-sync, stalled,
@@ -33,18 +26,16 @@ import json
 import os
 import socket
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
 
 from protos import celaut_pb2 as celaut
-from src.identity.node_identity import (
-    ComponentFormalError,
-    component_formal,
-    parse_component_formal,
-)
+from google.protobuf.message import DecodeError
+from protos.network_formal_pb2 import NetworkFormal
+from src.manager.network_defaults import configured_endpoints
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
 
@@ -103,12 +94,13 @@ class PowRequirement:
     min_height: Optional[int] = None
     max_tip_age_s: Optional[int] = None
     version: int = SUPPORTED_VERSION
+    extensions: Dict[str, bytes] = field(default_factory=dict)
 
 
 def _as_int(value: str, field: str) -> int:
     """A non-negative base-10 integer from one ``formal`` value.
 
-    Every value in a ``key=value`` body is text, which is exactly what cumulative
+    Every known value in the protobuf map is UTF-8 text, which is exactly what cumulative
     work needs: Ergo's score passed 2**64 long ago, and an encoding whose numbers
     are IEEE doubles would have rounded it away before this function ever saw it.
     So there is one accepted spelling and no numeric type to be lenient about.
@@ -141,18 +133,15 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
             "much work it means; the tag alone names only the chain."
         )
 
+    message = NetworkFormal()
     try:
-        document = parse_component_formal(formal)
-    except ComponentFormalError as e:
-        raise PowFormalError(f"Network.formal is not a key=value body: {e}") from None
-
-    unknown = sorted(set(document) - _KNOWN_KEYS)
-    if unknown:
-        raise PowFormalError(
-            f"Network.formal has unknown key(s): {', '.join(unknown)}. They are refused "
-            "rather than ignored, because a constraint this node drops silently is a "
-            f"constraint nobody applied. Known keys: {', '.join(sorted(_KNOWN_KEYS))}."
-        )
+        message.ParseFromString(formal)
+        document = {key: value.decode("utf-8") for key, value in message.entries.items()
+                    if key in _KNOWN_KEYS}
+    except (DecodeError, UnicodeDecodeError) as e:
+        raise PowFormalError(f"Network.formal is not a valid protobuf map: {e}") from None
+    extensions = {key: bytes(value) for key, value in message.entries.items()
+                  if key not in _KNOWN_KEYS}
 
     missing = [key for key in _REQUIRED_KEYS if key not in document]
     if missing:
@@ -206,17 +195,12 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
             else None
         ),
         version=version,
+        extensions=extensions,
     )
 
 
 def canonical_formal(requirement: PowRequirement) -> bytes:
-    """The requirement back as ``formal`` bytes: :func:`component_formal`'s sorted lines.
-
-    Canonical by construction rather than by convention -- ``component_formal`` sorts
-    the keys, so the same requirement built in any order is the same bytes. That is
-    what makes a ``formal`` hashable, comparable and loggable reproducibly, and it is
-    what ``match_networks`` compares down the ancestor chain.
-    """
+    """Deterministic protobuf map, including all opaque extensions."""
     pairs: Dict[str, str] = {
         "v": str(requirement.version),
         "chain": requirement.chain,
@@ -227,7 +211,11 @@ def canonical_formal(requirement: PowRequirement) -> bytes:
         pairs["min_height"] = str(requirement.min_height)
     if requirement.max_tip_age_s is not None:
         pairs["max_tip_age_s"] = str(requirement.max_tip_age_s)
-    return component_formal(pairs)
+    if set(requirement.extensions) & _KNOWN_KEYS:
+        raise PowFormalError("Extensions must not override known PoW fields.")
+    entries = dict(requirement.extensions)
+    entries.update({key: value.encode("utf-8") for key, value in pairs.items()})
+    return NetworkFormal(entries=entries).SerializeToString(deterministic=True)
 
 
 # --------------------------------------------------------------------- candidates
@@ -236,9 +224,6 @@ def canonical_formal(requirement: PowRequirement) -> bytes:
 #: ``network:`` block, which is this node's own ports and addresses -- the same
 #: reason ``src/utils/network_policy.py`` calls its block ``service_networks``.
 CONFIG_BLOCK = "pow_networks"
-
-#: Where an operator names chain endpoints by hand, as ``tag -> [uri, ...]``.
-ENDPOINTS_KEY = "ENDPOINTS"
 
 
 def _timeout() -> int:
@@ -257,36 +242,8 @@ def _max_peers() -> int:
 
 
 def _configured_endpoints(tag: str) -> List[str]:
-    """Endpoints the operator wrote down for this tag, in ``pow_networks.ENDPOINTS``.
-
-    Keyed by the network tag rather than flat, because "an endpoint" means nothing on
-    its own: an Ergo REST node has no business being asked about a bitcoin network, and
-    a flat list would have this node discover that one request at a time. The key is the
-    tag exactly as the service declares it (``pow:ergo``), so what an operator wrote and
-    what a service asked for can be compared by eye.
-
-    Anything unreadable is logged and skipped rather than raised: a typo in one block of
-    config.yaml is not a reason to abort a launch that has other sources to draw on.
-    """
-    block = env_manager.get(f"{CONFIG_BLOCK}.{ENDPOINTS_KEY}", {}) or {}
-    if not isinstance(block, dict):
-        logger(
-            f"[POW] {CONFIG_BLOCK}.{ENDPOINTS_KEY} is not a mapping of tag -> uris "
-            f"(got {type(block).__name__}); ignored."
-        )
-        return []
-
-    entries = block.get(tag, [])
-    if isinstance(entries, str):
-        entries = [entries]
-    if not isinstance(entries, (list, tuple)):
-        logger(
-            f"[POW] {CONFIG_BLOCK}.{ENDPOINTS_KEY}[{tag!r}] is not a list of uris "
-            f"(got {type(entries).__name__}); ignored."
-        )
-        return []
-
-    return [str(entry).strip() for entry in entries if str(entry).strip()]
+    """Use the same operator defaults as every other communication domain."""
+    return configured_endpoints(tag, config=env_manager)
 
 
 def _published_endpoints(network: celaut.Service.Network) -> List[str]:
@@ -339,7 +296,7 @@ def candidate_urls(
 
     1. ``ledgers.ergo.NODE_URL`` -- the node this operator already trusts with
        reputation reads and payment proofs.
-    2. ``pow_networks.ENDPOINTS[<tag>]`` -- what the operator wrote down for this tag.
+    2. ``service_networks.default_instances[<tag>]`` -- what the operator wrote down for this tag.
     3. The ledger (:func:`_published_endpoints`) -- what the *network* published for this
        exact domain, ordered by the ERG irrecoverably staked behind each claim. Strangers,
        but strangers who paid to say it, and what they bought is a place in this queue.

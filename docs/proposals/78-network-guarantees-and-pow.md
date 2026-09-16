@@ -296,62 +296,33 @@ written today, because the policy globs the tag and nothing else
 It must **not** contain a `.`, so it can never fall into the DNS heuristic
 (`networks.py:92`); `pow:ergo` verified above as not matching it.
 
-## 2.3 `formal`: the `key=value` body every celaut component already uses
+## 2.3 `formal`: protobuf key-value map
 
-`formal` is `bytes` (`celaut.proto:264`), so the encoding is ours to choose — and
-celaut has already chosen one. `node_identity.component_formal` writes it: `key=value`
-lines, sorted by key, UTF-8. That is what a signature scheme's curve declares its
-parameters in, and what an address's transport stack declares its own in
-(`identity/transport_stack.py`). A PoW requirement is the same kind of statement about
-the same kind of field, and it gets the same encoding.
+`Service.Network.formal` remains bytes and contains serialized `NetworkFormal`
+from `protos/network_formal.proto`: `map<string, bytes> entries = 1`.
+Known PoW values are UTF-8: `v`, `chain`, `block_id`,
+`min_cumulative_difficulty`, optional `min_height` and `max_tip_age_s`.
+Integers are nonnegative decimal text (no floating-point conversion).
+Version, required fields, chain/tag agreement, hexadecimal block ID and typed
+values are still validated. Extra keys may contain arbitrary bytes and are retained
+through parse/serialize. They are extensions, **not constraints v1 enforces**;
+new mandatory semantics need a supported version. Unknown versions fail closed.
+Map duplicate keys follow standard protobuf last-value-wins semantics.
 
-| | `key=value` lines | JSON (utf-8) | new proto message |
-|---|---|---|---|
-| Already the convention for `formal` | **yes** — `component_formal`, two callers | no | no |
-| Round-trips across packers | yes — bytes are bytes | yes | needs a codegen step in every packer |
-| Canonical form for comparison | **free** (sorted by construction) | needs a rule | free |
-| Readable in an issue, a log, a diff | yes, one line per constraint | yes | no |
-| Cost to add a chain | a line | a field | a proto change + regeneration |
-| Big integers | native — every value is text | needs the string-not-number rule | native |
-
-**The canonical form is not a rule anyone has to follow, it is what the writer
-produces.** `component_formal` sorts the keys, so the same requirement built in any
-order is the same bytes. That matters more here than it did for a signature scheme:
-§2.8 makes `formal` what `match_networks` compares down the ancestor chain, byte for
-byte.
-
-```
-block_id=f35a8aa47ab6e950ba1a8cd10dc92bade42928dd985575d7fe46e759379690e0
-chain=ergo
-max_tip_age_s=3600
-min_cumulative_difficulty=2749889727692749668352
-min_height=1873000
-v=1
+```python
+from protos.network_formal_pb2 import NetworkFormal
+formal = NetworkFormal(entries={
+    "v": b"1", "chain": b"ergo", "block_id": b"f35a8aa47ab6e950ba1a8cd10dc92bade42928dd985575d7fe46e759379690e0",
+    "min_cumulative_difficulty": b"2749889727692749668352",
+    "publisher-note": b"extra metadata",
+}).SerializeToString(deterministic=True)
 ```
 
-| Field | Req. | Meaning |
-|---|---|---|
-| `v` | yes | Format version. A node that does not know `v` refuses rather than guesses. |
-| `chain` | yes | `ergo`, `bitcoin`. Must equal the tag's suffix — a `pow:ergo` tag saying `chain=bitcoin` is a malformed spec, not a cross-chain ask. |
-| `block_id` | yes | The block that must be **on the peer's main chain**. |
-| `min_cumulative_difficulty` | yes | See §2.4. Text, like everything here, and compared as an exact `int`: the value passed 2⁶⁴ long ago, and no encoding on this path can round it. |
-| `min_height` | no | Peer's main-chain height must be ≥ this. Cheap liveness floor. |
-| `max_tip_age_s` | no | Peer's tip timestamp must be within this many seconds of now. Catches a synced-but-stalled node. |
-
-**Unknown keys are refused**, not ignored: a node that silently drops a constraint it
-does not understand grants more than was asked for. Same reasoning as
-`network_policy.py`'s "a list the node failed to read is not a list that allowed
-everything". The parser refuses a repeated key for the same reason — which of the two
-was meant is not something it gets to decide — and a line that is not a pair, rather
-than skipping it as prose.
-
-What it cannot carry: a value with a newline in it, since that is the separator. A
-component that needs one should be pointing `formal` at a document, not carrying it.
-
-`protocol_stack` stays in the proto field where it belongs (`celaut.proto:267`), not in
-`formal`. `pow:ergo` peers speak the Ergo node REST API (`:9053` by convention,
-`restApiUrl` in practice); `pow:bitcoin` peers speak JSON-RPC (`:8332`) or P2P
-(`:8333`). §2.8 is where that turns into a port.
+Use deterministic serialization for descriptors compared/hashed as bytes.
+`canonical_formal` normalizes known values and retains opaque extensions.
+This changes the unpublished PoW wire format: old JSON/key=value specs must be
+repacked, not silently reinterpreted. Identity/signature component encodings are
+unchanged. A new map key needs no proto edit or regeneration.
 
 ## 2.4 "Minimum difficulty", precisely
 
@@ -397,7 +368,7 @@ have to be **found**. Five sources, in trust order:
 | Source | How | Trust |
 |---|---|---|
 | **(a) the node's own configured ledger node** | `ledgers.ergo.NODE_URL` (`config.example.yaml:1021`), `ledgers.bitcoin.*` (`:1166`). | The operator chose it and the node already trusts it with reputation reads and payment proofs (`src/manager/ergo.py:14`). Verifying it is still worth doing — its *state* is a fact about the world, not about the operator's intent. |
-| **(b) endpoints named by hand** | `pow_networks.ENDPOINTS["pow:ergo"]`, a map of tag → uris. | The operator's own statement, for somebody running a node this one is not otherwise pointed at. Keyed by tag rather than flat because an endpoint means nothing on its own: an Ergo REST node has no business being asked about a bitcoin network. |
+| **(b) endpoints named by hand** | `service_networks.default_instances["pow:ergo"]`, a map of tag → uris. | The operator's own statement, for somebody running a node this one is not otherwise pointed at. Keyed by tag rather than flat because an endpoint means nothing on its own: an Ergo REST node has no business being asked about a bitcoin network. |
 | **(c) the reputation ledger** | An ordinary reputation box: R4 an endpoints type NFT, R5 `blake2b(sorted tags ‖ formal)`, R8 the polarity, R9 `{"uris": [...]}`. Read by `src/reputation_system/network_endpoints.py`, ordered by the box's share of what its proof assigned times what that proof burned. | Strangers **who paid to say it**. What the ERG buys is a place in the queue and nothing else. A box staking against the same endpoints takes them out again, so withdrawing one is something the network can do. |
 | **(d) other celaut nodes** | `Gateway.ResolveNetwork` (§2.5.1). | Peers this node holds a relationship with — it can pay them, rate them, and attribute a lie — but who staked nothing on *this* answer, which is why they come after (c). |
 | **(e) the Ergo peer crawl** | `ledgers.ergo.HTTP_PEERS_PATH`, populated by `get_refresh_peers()` (`src/manager/ergo.py:36-75`), which already filters on `genesisBlockId` matching `ledgers.ergo.GENESIS_BLOCK_ID`. | Untrusted strangers who paid nothing and were asked nothing. The crawl is recursive and unbounded (`ergo.py:68` recurses inside the loop), so resolution **reads the file** and never triggers a crawl. |
@@ -578,7 +549,7 @@ father saying "any `pow:ergo` my children care to specify". Nothing that declare
 `formal` anywhere changes behaviour at all.
 
 This is why §2.3's canonical form matters: two nodes that mean the same requirement
-must produce the same bytes, and `component_formal` sorting the keys is what makes that
+must produce the same bytes, and `canonical_formal` using deterministic protobuf serialization is what makes that
 true without anyone having to remember a rule.
 
 **`environment_variable`** — no change, and it stays inert for PoW peers for the
@@ -636,14 +607,14 @@ once.
 
 | File | Change |
 |---|---|
-| `src/manager/pow_networks.py` (new) | `PowRequirement`; `parse_pow_formal(formal, tag)` (strict: unknown keys refused, repeated keys refused, `v` checked, tag/chain agreement enforced, values parsed as exact `int`); `canonical_formal`; `candidate_urls` (the §2.5 sources); `ergo_peer_satisfies` (the §2.6 ladder); `resolve_pow_network`. Bitcoin parses and raises `NotImplementedError` with the §2.6 reason. |
+| `src/manager/pow_networks.py` (new) | `PowRequirement`; `parse_pow_formal(formal, tag)` (strict known fields; opaque extensions retained; `v` checked, tag/chain agreement enforced, values parsed as exact `int`); `canonical_formal`; `candidate_urls` (the §2.5 sources); `ergo_peer_satisfies` (the §2.6 ladder); `resolve_pow_network`. Bitcoin parses and raises `NotImplementedError` with the §2.6 reason. |
 | `src/identity/node_identity.py` | `parse_component_formal`, the inverse of `component_formal`, beside it because the two have to agree — the field is authored by hand as often as it is built. `_same_component` → `same_component`, made public for `match_networks` (§2.8). |
 | `src/manager/networks.py` | One branch at the top of `resolve_network`'s tag loop (`if tag.startswith("pow:")`); `match_networks` now `same_component` (§2.8); `resolve_network_for_peer`, the decisions behind `Gateway.ResolveNetwork` kept out of its gRPC plumbing so they can be tested as decisions. |
 | `src/reputation_system/network_endpoints.py` (new) | Endpoint lists read off the reputation contract (§2.5 source (c)): `network_descriptor_digest`, `endpoints_for`. Read-only — publishing a list is a wallet operation and not something a service launch does. |
 | `src/manager/network_discovery.py` (new) | The client half of `Gateway.ResolveNetwork` (§2.5.1): `ask_peer`, `ask_peers`. Bare addresses out, never the sender's `Instance` grouping. |
 | `src/gateway/gateway.py`, `protos/celaut.proto`, `protos/celaut_pb2_grpc.py` | The `ResolveNetwork` RPC. **The gencode is hand-edited**, in the 1.56-era style the file is already in (it carries a hand-applied `from bee_rpc import buffer_pb2` fix): `bash/generate_protos.sh` needs `grpcio-tools==1.56.0` for the pinned protobuf 4.x, which has no wheel for current Pythons and does not build from source there. `celaut_pb2.py`'s embedded service descriptor is therefore one method out of date until someone regenerates it — nothing reads it (the grpc stub never imports `celaut_pb2`), and `tests/test_network_discovery.py` pins all four wiring points so a missed one fails in a test rather than in a handshake. |
 | `src/virtualizers/microvm/network.py` | `configure_guest_firewall_policy` writes a rule for **every** peer instance, not the first that works (§2.8). |
-| `config.example.yaml` | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ENDPOINTS` (tag → uris), `.ASK_PEERS`; `ledgers.ergo.reputation.NETWORK_ENDPOINTS_TYPE_NFT_ID`. **Not `networks:`** — that would sit one letter from the `network:` block, the same trap `service_networks` is named around. |
+| `config.example.yaml` | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ASK_PEERS`; `service_networks.default_instances` (any tag → uris); `ledgers.ergo.reputation.NETWORK_ENDPOINTS_TYPE_NFT_ID`. **Not `networks:`** — that would sit one letter from the `network:` block, the same trap `service_networks` is named around. |
 | `tests/` | `test_pow_networks.py` (the parser's accept/reject table, per-reason peer rejection, the instance-per-endpoint shape, the §2.5 source ordering, `match_networks`, `resolve_network_for_peer`), `test_network_endpoints.py`, `test_network_discovery.py`, `identity/test_component_formal.py`, and two cases in `test_guest_policy_uses_the_right_hook.py`. No test touches the network or the clock. |
 | `docs/NETWORKS.md` | Use Case 3 spelled out, linking here. |
 

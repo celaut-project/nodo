@@ -3,8 +3,7 @@
 No test touches the network or the clock. `requests.get` is replaced with a table
 of canned answers keyed by path, so what is asserted is which requests would go
 out, how each answer is read, and -- the part that matters -- which *shape* of peer
-comes back, since the firewall's behaviour depends on it (one Instance with N uris,
-never N Instances).
+comes back, since the firewall's behaviour depends on it (one Instance per endpoint).
 
 Two halves, matching the module: the parser, whose whole job is to refuse things;
 and the resolver, whose whole job is to refuse peers.
@@ -16,6 +15,7 @@ import json
 import sys
 import types
 import unittest
+from protos.network_formal_pb2 import NetworkFormal
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -73,7 +73,7 @@ SCORE = 2749889727692749668352
 
 
 def _formal(**overrides):
-    """A ``formal`` in the shape every celaut component declares one: key=value lines."""
+    """A PoW formal encoded as a protobuf map."""
     document = {
         "v": "1",
         "chain": "ergo",
@@ -88,8 +88,8 @@ def _formal(**overrides):
 
 
 def _lines(document):
-    """``key=value`` lines, unsorted, so the parser is never handed its own output."""
-    return "\n".join(f"{key}={value}" for key, value in document.items()).encode("utf-8")
+    """Build a protobuf map independently of the production writer."""
+    return NetworkFormal(entries={k: v if isinstance(v, bytes) else str(v).encode() for k, v in document.items()}).SerializeToString()
 
 
 def _network(formal=None, tags=("pow:ergo",)):
@@ -128,22 +128,15 @@ class PowFormalParsingTests(unittest.TestCase):
         with self.assertRaises(pow_networks.PowFormalError):
             pow_networks.parse_pow_formal(b"", tag="pow:ergo")
 
-    def test_an_unknown_key_is_refused_rather_than_ignored(self):
-        """A constraint this node drops silently is a constraint nobody applied."""
-        formal = _lines(
-            {
-                "v": "1",
-                "chain": "ergo",
-                "block_id": BLOCK,
-                "min_cumulative_difficulty": "1",
-                "min_miners": "3",
-            }
-        )
+    def test_unknown_binary_entries_are_preserved_but_not_enforced(self):
+        requirement = pow_networks.parse_pow_formal(_formal(custom=b"\xff\x00"))
+        self.assertEqual(requirement.extensions, {"custom": b"\xff\x00"})
+        self.assertEqual(pow_networks.parse_pow_formal(
+            pow_networks.canonical_formal(requirement)), requirement)
 
-        with self.assertRaises(pow_networks.PowFormalError) as raised:
-            pow_networks.parse_pow_formal(formal, tag="pow:ergo")
-
-        self.assertIn("min_miners", str(raised.exception))
+    def test_known_fields_still_reject_invalid_utf8(self):
+        with self.assertRaises(pow_networks.PowFormalError):
+            pow_networks.parse_pow_formal(_formal(min_height=b"\xff"))
 
     def test_a_future_version_is_refused_rather_than_guessed(self):
         with self.assertRaises(pow_networks.PowFormalError):
@@ -183,26 +176,16 @@ class PowFormalParsingTests(unittest.TestCase):
             pow_networks.parse_pow_formal(b"\xff\xfe not a formal", tag="pow:ergo")
 
     def test_a_line_that_is_not_a_pair_is_refused(self):
-        """The body is key=value lines, and a line that is not one is not ignorable."""
+        """Old text encodings must be repacked, not silently interpreted."""
         with self.assertRaises(pow_networks.PowFormalError) as raised:
             pow_networks.parse_pow_formal(b"chain=ergo\nwhatever", tag="pow:ergo")
 
-        self.assertIn("key=value", str(raised.exception))
+        self.assertIn("protobuf map", str(raised.exception))
 
-    def test_a_key_declared_twice_is_refused_rather_than_resolved(self):
-        """Which of the two was meant is not something a parser gets to decide."""
-        formal = _formal() + b"\nchain=bitcoin"
-
-        with self.assertRaises(pow_networks.PowFormalError) as raised:
+    def test_map_duplicate_keys_follow_protobuf_last_value_semantics(self):
+        formal = _formal() + NetworkFormal(entries={"chain": b"bitcoin"}).SerializeToString()
+        with self.assertRaises(pow_networks.PowFormalError):
             pow_networks.parse_pow_formal(formal, tag="pow:ergo")
-
-        self.assertIn("twice", str(raised.exception))
-
-    def test_a_hand_written_formal_may_end_in_a_newline(self):
-        """Whitespace around the document is ignored; nothing inside it is."""
-        requirement = pow_networks.parse_pow_formal(_formal() + b"\n", tag="pow:ergo")
-
-        self.assertEqual(requirement.chain, "ergo")
 
     def test_an_unknown_chain_is_refused(self):
         with self.assertRaises(pow_networks.PowFormalError):
@@ -216,8 +199,6 @@ class PowFormalParsingTests(unittest.TestCase):
 
         self.assertEqual(pow_networks.parse_pow_formal(canonical, tag="pow:ergo"), requirement)
         self.assertEqual(canonical, pow_networks.canonical_formal(requirement))
-        keys = [line.split("=", 1)[0] for line in canonical.decode("utf-8").split("\n")]
-        self.assertEqual(keys, sorted(keys))
 
     def test_the_canonical_form_does_not_depend_on_the_order_it_was_written_in(self):
         """It is what `match_networks` compares byte for byte down the ancestor chain."""
@@ -252,8 +233,8 @@ class PowFormalParsingTests(unittest.TestCase):
         )
 
         self.assertIn(
-            f"min_cumulative_difficulty={2 ** 71 + 1}",
-            pow_networks.canonical_formal(requirement).decode("utf-8"),
+            str(2 ** 71 + 1).encode(),
+            pow_networks.canonical_formal(requirement),
         )
 
 
@@ -481,7 +462,7 @@ class CandidateSourceTests(unittest.TestCase):
             settings = {
                 "ledgers.ergo.NODE_URL": "https://configured.test",
                 "ledgers.ergo.HTTP_PEERS_PATH": path,
-                f"{pow_networks.CONFIG_BLOCK}.{pow_networks.ENDPOINTS_KEY}": {
+                "service_networks.default_instances": {
                     "pow:ergo": ["http://mine.test:9053"],
                     "pow:bitcoin": ["http://not-for-this-tag.test:8332"],
                 },
@@ -512,7 +493,7 @@ class CandidateSourceTests(unittest.TestCase):
         """A typo in one config block does not abort a launch with other sources."""
         settings = {
             "ledgers.ergo.NODE_URL": "https://configured.test",
-            f"{pow_networks.CONFIG_BLOCK}.{pow_networks.ENDPOINTS_KEY}": [
+            "service_networks.default_instances": [
                 "http://flat-list.test:9053"
             ],
         }
@@ -521,7 +502,7 @@ class CandidateSourceTests(unittest.TestCase):
 
     def test_a_lone_uri_is_accepted_where_a_list_was_meant(self):
         settings = {
-            f"{pow_networks.CONFIG_BLOCK}.{pow_networks.ENDPOINTS_KEY}": {
+            "service_networks.default_instances": {
                 "pow:ergo": "http://alone.test:9053"
             },
         }
@@ -532,7 +513,7 @@ class CandidateSourceTests(unittest.TestCase):
         """What the network published, ranked by what was staked on saying it."""
         settings = {
             "ledgers.ergo.NODE_URL": "https://configured.test",
-            f"{pow_networks.CONFIG_BLOCK}.{pow_networks.ENDPOINTS_KEY}": {
+            "service_networks.default_instances": {
                 "pow:ergo": ["http://mine.test:9053"]
             },
         }

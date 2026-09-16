@@ -261,6 +261,8 @@ message Service {
     message Network {
         repeated string tags = 1;
         string prose = 2;
+        // PoW domains encode NetworkFormal (network_formal.proto) here.
+        // Other component formal encodings are unchanged.
         bytes formal = 3;
 
         // Protocol stack expected from the peers in this communication domain.

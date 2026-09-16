@@ -18,6 +18,7 @@ if python3 -c "import grpc_tools.protoc" >/dev/null 2>&1; then
     -I"${PROTO_DIR}" \
     --python_out="${PROTO_DIR}" \
     "${PROTO_DIR}/pack.proto" \
+    "${PROTO_DIR}/network_formal.proto" \
     --experimental_allow_proto3_optional
 else
   protoc \
@@ -31,6 +32,7 @@ else
     -I"${PROTO_DIR}" \
     --python_out="${PROTO_DIR}" \
     "${PROTO_DIR}/pack.proto" \
+    "${PROTO_DIR}/network_formal.proto" \
     --experimental_allow_proto3_optional
 fi
 

@@ -204,14 +204,14 @@ asking for different blocks or different work are not in the same domain.
 | | |
 |---|---|
 | Tag | `pow:<chain>` — `pow:ergo`, `pow:bitcoin` |
-| `formal` | `key=value` lines, sorted, UTF-8 — the body every celaut component declares one in (`node_identity.component_formal`): `v=1`, `chain=ergo`, `block_id=…`, `min_cumulative_difficulty=…`, and optionally `min_height=…`, `max_tip_age_s=…`. Unknown keys are **refused**, not ignored. |
+| `formal` | Serialized `NetworkFormal` protobuf map (`protos/network_formal.proto`). Known values are strictly parsed UTF-8; unknown entries are retained opaque bytes, not enforced constraints. Unsupported versions are refused. |
 | Difficulty | **cumulative work since genesis** (Ergo `fullBlocksScore`, Bitcoin `chainwork`), not the tip block's difficulty: it is what the chain's own fork choice maximises, it is monotone, and it gives a total order peers can be compared on. Carried as a decimal string — the value outgrew a double long ago. |
 | Containment | the block must be on the peer's **main** chain (`/blocks/{id}/header` then `/blocks/at/{height}`), not merely stored: an orphan a peer kept is not a block its chain contains. |
 | Ancestors | `match_networks` compares `formal` when both sides declare one (`node_identity.same_component`, the rule every tags/prose/formal descriptor is compared by), and falls back to a shared tag. So a parent granting a specific ask grants **that** ask; a parent meaning "any `pow:ergo`" leaves its own `formal` empty. |
-| Endpoints | A `pow:` domain has no name to look up, so its addresses are *found*, from four sources in trust order: `ledgers.ergo.NODE_URL`; `pow_networks.ENDPOINTS["pow:ergo"]` (named by hand); the reputation ledger (published for this exact domain, ranked by the ERG burned behind each claim — `src/reputation_system/network_endpoints.py`); other nodes over `Gateway.ResolveNetwork`; and the crawl at `ledgers.ergo.HTTP_PEERS_PATH`. Every one is verified identically, so the order decides only who is asked first. |
+| Endpoints | A `pow:` domain has no name to look up, so its addresses are *found*, from four sources in trust order: `ledgers.ergo.NODE_URL`; `service_networks.default_instances["pow:ergo"]` (named by hand); the reputation ledger (published for this exact domain, ranked by the ERG burned behind each claim — `src/reputation_system/network_endpoints.py`); other nodes over `Gateway.ResolveNetwork`; and the crawl at `ledgers.ergo.HTTP_PEERS_PATH`. Every one is verified identically, so the order decides only who is asked first. |
 | Shape | **one `Instance` per endpoint**, not one with N uris: they are separate operators, separately verified and separately reachable. One Instance with several uris means "one peer at several addresses", which is what a DNS name's A records are. |
 | No peer qualifies | resolves to `[]`, like any other unresolved tag — "nobody meets D right now" is transient and about the world, not about the request. |
-| Config | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ENDPOINTS`, `.ASK_PEERS`; `ledgers.ergo.reputation.NETWORK_ENDPOINTS_TYPE_NFT_ID` |
+| Config | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ASK_PEERS`; `service_networks.default_instances`; `ledgers.ergo.reputation.NETWORK_ENDPOINTS_TYPE_NFT_ID` |
 | Implementation | `src/manager/pow_networks.py`, dispatched from `resolve_network()` |
 
 > ⚠️ **What is verified is what the candidate says about itself.** Its REST answers
@@ -258,3 +258,15 @@ Applicable to any kind of network:
 * **PoS:** Proof-of-Stake networks
 * **P2P:** Arbitrary peer-to-peer networks
 
+
+### Operator default instances (all network tags)
+
+`service_networks.default_instances` maps any exact network tag to URI seeds.
+For example `"my-domain": ["tcp://192.168.1.60:1234"]`. Valid seeds take
+precedence over DNS for ordinary domains; invalid/unresolvable seeds fall back to
+the existing resolver. Each resolved address is a separate Instance. PoW domains
+consume the same map through their candidate pipeline and still verify every peer.
+Move existing `pow_networks.ENDPOINTS` entries here; the old setting is retired.
+Generic peer discovery and reputation readers remain reusable helpers, but their
+untrusted suggestions are only wired to the PoW verifier, not blindly granted as
+members of arbitrary domains. Operator defaults are explicit operator assertions.
