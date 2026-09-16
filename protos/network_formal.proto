@@ -1,0 +1,10 @@
+syntax = "proto3";
+package celaut;
+
+// Serialized inside Service.Network.formal (the outer field remains bytes).
+// Known keys have domain-specific typed validation. Other entries are opaque
+// extensions, NOT requirements this node claims to enforce. New mandatory
+// semantics require a supported domain version. Serialize deterministically.
+message NetworkFormal {
+    map<string, bytes> entries = 1;
+}

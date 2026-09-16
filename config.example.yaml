@@ -415,6 +415,12 @@ network:
 # this node's own ports and addresses; the two would be one letter apart, and a
 # typo between them would leave the node with no policy while looking configured.
 service_networks:
+  # Operator seeds for ANY network tag, before discovery/DNS fallback.
+  # PoW seeds still undergo the same chain verification as all other candidates.
+  default_instances: {}
+  # default_instances:
+  #   "pow:ergo": ["http://192.168.1.50:9053"]
+  #   "my-domain": ["tcp://192.168.1.60:1234"]
   blacklist: []
   whitelist: []
   # blacklist:
@@ -431,7 +437,7 @@ service_networks:
 #
 # A pow: network has no name to look up, so its endpoints are *found*, from four
 # sources in trust order: `ledgers.ergo.NODE_URL` (the node you already trust for
-# reputation and payments), ENDPOINTS below (what you wrote down yourself), the
+# reputation and payments), service_networks.default_instances (what you wrote down yourself), the
 # reputation ledger (what the network published for this exact domain, best-backed
 # first) and the peer crawl at `ledgers.ergo.HTTP_PEERS_PATH` (strangers). The order
 # decides only who is asked first: every candidate is verified identically.
@@ -447,14 +453,6 @@ service_networks:
 pow_networks:
   TIMEOUT_SECONDS: 10  # Per HTTP request to a candidate peer.
   MAX_PEERS: 8  # Stop verifying once this many peers qualify. Each one becomes a firewall rule.
-  # Chain endpoints named by hand, per network tag. Keyed by the tag exactly as a
-  # service declares it, because an endpoint means nothing on its own: an Ergo REST
-  # node has no business being asked about a bitcoin network, and a flat list would
-  # have this node find that out one request at a time.
-  ENDPOINTS: {}
-  # ENDPOINTS:
-  #   "pow:ergo":
-  #     - "http://192.168.1.50:9053"
   # How many known peers to ask (Gateway.ResolveNetwork) for addresses in this domain.
   # A latency budget, not a quality setting: the answers are pooled rather than compared,
   # and each ask is a round trip on the launch path. 0 switches the source off. A node

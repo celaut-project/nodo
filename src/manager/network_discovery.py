@@ -71,6 +71,7 @@ def ask_peer(peer_id: str, network: celaut_pb2.Service.Network) -> List[Tuple[st
                 peer_channel(peer_id=peer_id)
             ).ResolveNetwork,
             input=network,
+            timeout=10,  # A non-answering peer must not hang service launch.
             indices_parser=celaut_pb2.ConfigurationFile.NetworkResolution,
             partitions_message_mode_parser=True
         ), None)

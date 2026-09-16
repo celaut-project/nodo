@@ -230,7 +230,7 @@ def endpoints_for(network) -> List[str]:
             continue
 
         signed = _backing(api_url, box) * (1 if positive else -1)
-        for uri in uris:
+        for uri in dict.fromkeys(uris):
             if uri not in scores:
                 scores[uri] = 0.0
                 offered_by[uri] = 0

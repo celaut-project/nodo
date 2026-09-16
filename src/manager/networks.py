@@ -11,6 +11,7 @@ from src.manager.network_env import (
 )
 from src.identity.node_identity import same_component
 from src.utils.network_policy import enforce_network_policy
+from src.manager.network_defaults import configured_endpoints, endpoint_addresses
 from src.manager.pow_networks import POW_TAG_PREFIX, resolve_pow_network
 
 env_manager = ConfigManager()
@@ -108,6 +109,21 @@ def resolve_network(
                     peer_env_lookup=peer_env_lookup,
                 )
             continue
+
+        # Operator seeds apply to any tag; PoW above still verifies its candidates.
+        addresses = endpoint_addresses(configured_endpoints(tag, config=env_manager))
+        if addresses:
+            peers = [celaut.Instance(
+                api=celaut.Service.Api(slot=[celaut.Service.Api.Slot(
+                    port=1, transport=celaut.Service.Api.Protocol(tags=["tcp"]),
+                    protocol_stack=network.protocol_stack)]),
+                uri_slot=[celaut.Instance.Uri_Slot(internal_port=1,
+                    uri=[celaut.Instance.Uri(ip=ip, port=port)])],
+            ) for ip, port in addresses]
+            return filter_peers_by_environment(
+                network=network, peers=peers,
+                requester_env_values=requester_env_values, peer_env_lookup=peer_env_lookup,
+            )
 
         if tag in LEDGERS_WITHOUT_URIS:
             continue

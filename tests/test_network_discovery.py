@@ -159,6 +159,13 @@ class AskPeerTests(unittest.TestCase):
     def test_a_peer_that_answers_nothing_is_not_an_error(self):
         self.assertEqual(self._ask(None), [])
 
+    def test_peer_requests_have_a_finite_deadline(self):
+        with patch.object(self.nd.bee, "client_grpc", return_value=iter(())) as rpc, \
+             patch.object(self.nd, "celaut_pb2_grpc", MagicMock()), \
+             patch.object(self.nd, "peer_channel", return_value=None):
+            self.assertEqual(self.nd.ask_peer("peer-1", self.network), [])
+        self.assertEqual(rpc.call_args.kwargs["timeout"], 10)
+
     def test_a_peer_that_fails_is_one_fewer_source_not_a_failed_launch(self):
         def _raise(**kwargs):
             raise RuntimeError("unreachable")

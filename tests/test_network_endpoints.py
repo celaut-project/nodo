@@ -160,6 +160,15 @@ class EndpointsForTests(unittest.TestCase):
 
         self.assertEqual(endpoints, ["http://dear.test:9053", "http://cheap.test:9053"])
 
+    def test_duplicate_urls_do_not_multiply_one_attestation(self):
+        uri = "http://repeat.test:9053"
+        self.assertEqual(self._endpoints(
+            [_box([uri] * 10, proof="c" * 64),
+             _box([uri], positive=False, proof="d" * 64)],
+            standings={"c" * 64: _standing(burned=1000),
+                       "d" * 64: _standing(burned=2000)},
+        ), [])
+
     def test_a_claim_against_an_endpoint_takes_it_out(self):
         """Withdrawing an endpoint is something the network can do."""
         endpoints = self._endpoints(
