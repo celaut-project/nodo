@@ -261,8 +261,14 @@ message Service {
     message Network {
         repeated string tags = 1;
         string prose = 2;
-        // PoW domains encode NetworkFormal (network_formal.proto) here.
-        // Other component formal encodings are unchanged.
+        // The same `key=value` lines node_identity.component_formal builds as
+        // every other formal in this file, sorted and UTF-8. A PoW domain states
+        // its ask with `pow.`-prefixed keys (pow.chain, pow.block_id,
+        // pow.min_cumulative_difficulty, and optionally pow.min_height,
+        // pow.max_tip_age_s); a reader preserves keys outside the vocabulary it
+        // knows rather than refusing them, and enforces none of them.
+        // Which protocols the peers speak is NOT stated here -- that is
+        // protocol_stack below, where each entry is a descriptor of its own.
         bytes formal = 3;
 
         // Protocol stack expected from the peers in this communication domain.

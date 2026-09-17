@@ -7,10 +7,31 @@ work". Tags alone cannot express that, which is why this is the first network ki
 in nodo that reads ``formal`` at all (see
 ``docs/proposals/78-network-guarantees-and-pow.md``, issue #78).
 
-``formal`` contains a serialized ``celaut.NetworkFormal`` protobuf map. Known
-values are UTF-8 strings with strict domain-specific validation; unknown entries
-are preserved as opaque bytes, not interpreted as enforced constraints. New
-mandatory semantics require a new supported version.
+``formal`` is the ``key=value`` body every other celaut component declares one in
+(``node_identity.component_formal``): sorted lines, UTF-8, compared byte for byte.
+Not a shape invented here -- a signature scheme's curve and an address's transport
+already state their determinate parameters this way, and a PoW requirement is the
+same kind of statement about the same kind of field. It costs a reader nothing to
+parse (``celaut-project/skills`` is JS with no protobuf dependency), it is diffable
+by eye in a service spec, and it makes the bytes canonical by construction, which
+neither a JSON object nor a protobuf map is -- map serialization is explicitly not
+canonical, which is why this repo's own ``canonical_peer_content_digest`` refuses
+``SerializeToString()``.
+
+The domain's own keys are prefixed ``pow.``, so the vocabulary this module reads is
+namespaced from anything else the same descriptor carries. **Unrecognized keys are
+preserved, not refused**: a key outside this vocabulary rides alongside the known
+ones and is round-tripped by :func:`canonical_formal`, and it is emphatically *not*
+treated as a constraint this node enforces. What is still refused is a missing
+required key or a malformed value -- validation of what is understood, which is a
+different thing from rejecting what is not.
+
+There is no version key. A version belongs to the vocabulary being spoken, and that
+is named in the network's sibling ``protocol_stack`` descriptor, not duplicated in
+here where the two could disagree. For the same reason ``protocol`` and
+``peerDiscovery`` are not keys of this body: each is a tags/prose/formal descriptor
+in its own right, which is exactly what ``Service.Network.protocol_stack``
+(``repeated Api.Protocol``) already models.
 
 What v1 verifies is **self-reported**: a candidate's own REST answers about its own
 state. That catches the overwhelmingly common failure -- an out-of-sync, stalled,
@@ -33,8 +54,11 @@ from urllib.parse import urlparse
 import requests
 
 from protos import celaut_pb2 as celaut
-from google.protobuf.message import DecodeError
-from protos.network_formal_pb2 import NetworkFormal
+from src.identity.node_identity import (
+    ComponentFormalError,
+    component_formal,
+    parse_component_formal,
+)
 from src.manager.network_defaults import configured_endpoints
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
@@ -46,13 +70,20 @@ env_manager = ConfigManager()
 #: (``not tag.islower() or '.' not in tag``).
 POW_TAG_PREFIX = "pow:"
 
-#: The only ``formal`` version this node knows how to read. A newer one is refused
-#: rather than best-effort parsed, for the reason in the module docstring.
-SUPPORTED_VERSION = 1
+#: Prefix of every key this module claims. Namespaced so a ``formal`` can carry a
+#: neighbouring vocabulary's keys without either side having to know about the
+#: other, which is the whole point of not refusing what is not recognized.
+KEY_PREFIX = "pow."
 
-_REQUIRED_KEYS = ("v", "chain", "block_id", "min_cumulative_difficulty")
-_OPTIONAL_KEYS = ("min_height", "max_tip_age_s")
-_KNOWN_KEYS = frozenset(_REQUIRED_KEYS + _OPTIONAL_KEYS)
+_REQUIRED_KEYS = tuple(
+    KEY_PREFIX + name for name in ("chain", "block_id", "min_cumulative_difficulty")
+)
+_OPTIONAL_KEYS = tuple(KEY_PREFIX + name for name in ("min_height", "max_tip_age_s"))
+
+#: Not a whitelist. It separates the keys this module *interprets* from the ones it
+#: merely carries (:attr:`PowRequirement.extensions`); nothing is refused for being
+#: outside it.
+_DOMAIN_KEYS = frozenset(_REQUIRED_KEYS + _OPTIONAL_KEYS)
 
 #: Chains this module can parse. Parsing and resolving are separate capabilities:
 #: ``bitcoin`` parses (so an ancestor-chain comparison can be written against it)
@@ -86,6 +117,11 @@ class PowRequirement:
     monotone -- so a requirement written today does not flip validity at the next
     retarget -- and it is a total order, so two peers are comparable. It is carried
     as ``int`` and never as a float: Ergo's score passed 2**64 long ago.
+
+    ``extensions`` are the keys that were in the body and are not this module's:
+    carried so :func:`canonical_formal` gives back what it was handed, and read by
+    nothing here. They are ``str`` because the body is text -- there is no opaque
+    half of a ``key=value`` line.
     """
 
     chain: str
@@ -93,14 +129,13 @@ class PowRequirement:
     min_cumulative_difficulty: int
     min_height: Optional[int] = None
     max_tip_age_s: Optional[int] = None
-    version: int = SUPPORTED_VERSION
-    extensions: Dict[str, bytes] = field(default_factory=dict)
+    extensions: Dict[str, str] = field(default_factory=dict)
 
 
 def _as_int(value: str, field: str) -> int:
     """A non-negative base-10 integer from one ``formal`` value.
 
-    Every known value in the protobuf map is UTF-8 text, which is exactly what cumulative
+    Every value in a ``key=value`` body is text, which is exactly what cumulative
     work needs: Ergo's score passed 2**64 long ago, and an encoding whose numbers
     are IEEE doubles would have rounded it away before this function ever saw it.
     So there is one accepted spelling and no numeric type to be lenient about.
@@ -123,9 +158,16 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
     """Read ``Network.formal`` as a :class:`PowRequirement`.
 
     ``tag`` is checked against the declared chain when given: a ``pow:ergo`` tag
-    carrying ``chain=bitcoin`` is a malformed specification, not a cross-chain
+    carrying ``pow.chain=bitcoin`` is a malformed specification, not a cross-chain
     request, and reading it either way would mean resolving one chain for a tag the
     operator's policy vetted as another.
+
+    Keys outside the ``pow.`` vocabulary are kept in ``extensions`` and otherwise
+    ignored. They are not refused: refusing them would make every reader the ceiling
+    on what a descriptor may say, and this one enforces none of them, so there is
+    nothing it would be granting by not understanding them. What it does refuse is a
+    body it cannot read at all, a missing ``pow.`` key it needs, or a value of one
+    that is not what that key is defined to hold.
     """
     if not formal:
         raise PowFormalError(
@@ -133,31 +175,22 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
             "much work it means; the tag alone names only the chain."
         )
 
-    message = NetworkFormal()
     try:
-        message.ParseFromString(formal)
-        document = {key: value.decode("utf-8") for key, value in message.entries.items()
-                    if key in _KNOWN_KEYS}
-    except (DecodeError, UnicodeDecodeError) as e:
-        raise PowFormalError(f"Network.formal is not a valid protobuf map: {e}") from None
-    extensions = {key: bytes(value) for key, value in message.entries.items()
-                  if key not in _KNOWN_KEYS}
+        body = parse_component_formal(formal)
+    except ComponentFormalError as e:
+        raise PowFormalError(f"Network.formal is not a key=value body: {e}") from None
+
+    document = {key: value for key, value in body.items() if key in _DOMAIN_KEYS}
+    extensions = {key: value for key, value in body.items() if key not in _DOMAIN_KEYS}
 
     missing = [key for key in _REQUIRED_KEYS if key not in document]
     if missing:
         raise PowFormalError(f"Network.formal is missing: {', '.join(missing)}.")
 
-    version = _as_int(document["v"], "v")
-    if version != SUPPORTED_VERSION:
-        raise PowFormalError(
-            f"Network.formal version {version} is not supported by this node "
-            f"(it reads v{SUPPORTED_VERSION}). Refused rather than guessed."
-        )
-
-    chain = document["chain"]
+    chain = document["pow.chain"]
     if not chain.strip() or chain.strip() != chain.strip().lower():
         raise PowFormalError(
-            f"Network.formal: 'chain' must be a lowercase non-empty value, got {chain!r}."
+            f"Network.formal: 'pow.chain' must be a lowercase non-empty value, got {chain!r}."
         )
     chain = chain.strip()
     if chain not in KNOWN_CHAINS:
@@ -174,48 +207,64 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
                 "have to agree."
             )
 
-    block_id = document["block_id"].strip().lower()
+    block_id = document["pow.block_id"].strip().lower()
     if not block_id or any(c not in "0123456789abcdef" for c in block_id):
         raise PowFormalError(
-            f"Network.formal: 'block_id' is not hexadecimal: {document['block_id']!r}."
+            f"Network.formal: 'pow.block_id' is not hexadecimal: {document['pow.block_id']!r}."
         )
 
     return PowRequirement(
         chain=chain,
         block_id=block_id,
         min_cumulative_difficulty=_as_int(
-            document["min_cumulative_difficulty"], "min_cumulative_difficulty"
+            document["pow.min_cumulative_difficulty"], "pow.min_cumulative_difficulty"
         ),
         min_height=(
-            _as_int(document["min_height"], "min_height") if "min_height" in document else None
-        ),
-        max_tip_age_s=(
-            _as_int(document["max_tip_age_s"], "max_tip_age_s")
-            if "max_tip_age_s" in document
+            _as_int(document["pow.min_height"], "pow.min_height")
+            if "pow.min_height" in document
             else None
         ),
-        version=version,
+        max_tip_age_s=(
+            _as_int(document["pow.max_tip_age_s"], "pow.max_tip_age_s")
+            if "pow.max_tip_age_s" in document
+            else None
+        ),
         extensions=extensions,
     )
 
 
 def canonical_formal(requirement: PowRequirement) -> bytes:
-    """Deterministic protobuf map, including all opaque extensions."""
+    """The requirement back as ``formal`` bytes: :func:`component_formal`'s sorted lines.
+
+    Canonical by construction rather than by convention -- ``component_formal`` sorts
+    the keys, so the same requirement built in any order is the same bytes. That is
+    what makes a ``formal`` hashable, comparable and loggable reproducibly, and it is
+    what ``match_networks`` compares down the ancestor chain.
+
+    Extensions go back out with everything else, so a body that travelled through this
+    node comes out saying what it came in saying. A key it does not interpret is still
+    part of what the author declared, and dropping it here would quietly turn a
+    round-trip into an edit.
+    """
     pairs: Dict[str, str] = {
-        "v": str(requirement.version),
-        "chain": requirement.chain,
-        "block_id": requirement.block_id,
-        "min_cumulative_difficulty": str(requirement.min_cumulative_difficulty),
+        "pow.chain": requirement.chain,
+        "pow.block_id": requirement.block_id,
+        "pow.min_cumulative_difficulty": str(requirement.min_cumulative_difficulty),
     }
     if requirement.min_height is not None:
-        pairs["min_height"] = str(requirement.min_height)
+        pairs["pow.min_height"] = str(requirement.min_height)
     if requirement.max_tip_age_s is not None:
-        pairs["max_tip_age_s"] = str(requirement.max_tip_age_s)
-    if set(requirement.extensions) & _KNOWN_KEYS:
-        raise PowFormalError("Extensions must not override known PoW fields.")
-    entries = dict(requirement.extensions)
-    entries.update({key: value.encode("utf-8") for key, value in pairs.items()})
-    return NetworkFormal(entries=entries).SerializeToString(deterministic=True)
+        pairs["pow.max_tip_age_s"] = str(requirement.max_tip_age_s)
+    overridden = sorted(set(requirement.extensions) & _DOMAIN_KEYS)
+    if overridden:
+        # Not reachable from `parse_pow_formal`, which partitions by the same set.
+        # Reachable from a hand-built PowRequirement, where it would mean the
+        # serializer silently dropping one of the two values for a key.
+        raise PowFormalError(
+            f"Extensions must not override this module's own keys: {', '.join(overridden)}."
+        )
+    pairs.update(requirement.extensions)
+    return component_formal(pairs)
 
 
 # --------------------------------------------------------------------- candidates
