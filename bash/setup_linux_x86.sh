@@ -30,6 +30,9 @@ CONFIG_FILE="$TARGET_DIR/config.yaml"
 # Package names differ per distro; everything distro-specific lives here.
 # shellcheck source=bash/lib_pkg.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_pkg.sh"
+# Rust + the prebuilt tui, shared with setup_linux_arm.sh (issue #375).
+# shellcheck source=bash/lib_rust.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_rust.sh"
 CH_ARCH_TAG="linux/amd64"
 # The arch this host cannot run under KVM, and therefore the one QEMU emulates.
 # Its guest assets are installed too (see provision_guest_assets_for_arch).
@@ -53,6 +56,20 @@ RUNTIME_DIR="$TARGET_DIR/runtime"
 PYTHON_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/python"
 PYTHON_RUNTIME_ROOT="$PYTHON_RUNTIME_ROOT_DEFAULT"
 JAVA_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/java"
+# Rust lives under the installation root like every other runtime here, rather
+# than in $HOME/.cargo where rustup's defaults put it. src/utils/rust_toolchain.py
+# derives the same paths from the same config key, so what this script installs
+# is exactly what `nodo tui` later looks for -- no $PATH, no $HOME (issue #375).
+#
+# This script never installed Rust at all, which is the same bug seen from the
+# other side: a node set up here had no toolchain and no binary, so the first
+# `nodo tui` compiled one at a moment nobody was watching.
+RUST_RUNTIME_ROOT_DEFAULT="$RUNTIME_DIR/rust"
+RUST_RUNTIME_ROOT="$RUST_RUNTIME_ROOT_DEFAULT"
+# The release asset and the `rustc -vV` host triple for this architecture. The
+# marker is checked against the triple before the binary is ever executed.
+RUST_TUI_ASSET_TAG="linux-amd64"
+RUST_TUI_HOST_TRIPLE="x86_64-unknown-linux-gnu"
 
 fail() {
     # To stderr, so the reason survives a command substitution: `fail` inside
@@ -94,6 +111,7 @@ apply_configured_dependency_paths() {
     fi
 
     PYTHON_RUNTIME_ROOT="$(read_config_path_or_default '.dependencies.python.RUNTIME_ROOT' "$PYTHON_RUNTIME_ROOT_DEFAULT")"
+    RUST_RUNTIME_ROOT="$(read_config_path_or_default '.dependencies.rust.RUNTIME_ROOT' "$RUST_RUNTIME_ROOT_DEFAULT")"
 }
 
 download_file() {
@@ -405,6 +423,9 @@ fi
 
 # No Docker install: nodo runs services under Cloud Hypervisor and delegates
 # packing to the external packer-service. Docker is never installed on this host.
+
+# The tui binary, and a Rust toolchain only if this host has to build one.
+provision_rust_and_tui
 
 echo "Running migrations with local Python runtime..."
 "$TARGET_DIR/venv/bin/python" "$TARGET_DIR/nodo.py" migrate > /dev/null
