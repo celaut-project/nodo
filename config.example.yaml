@@ -415,6 +415,12 @@ network:
 # this node's own ports and addresses; the two would be one letter apart, and a
 # typo between them would leave the node with no policy while looking configured.
 service_networks:
+  # Operator seeds for ANY network tag, before discovery/DNS fallback.
+  # PoW seeds still undergo the same chain verification as all other candidates.
+  default_instances: {}
+  # default_instances:
+  #   "pow:ergo": ["http://192.168.1.50:9053"]
+  #   "my-domain": ["tcp://192.168.1.60:1234"]
   blacklist: []
   whitelist: []
   # blacklist:
@@ -422,6 +428,49 @@ service_networks:
   # whitelist:
   #   - "dns:*"
   #   - "pow:bitcoin"
+
+# How a `pow:<chain>` network is resolved into peers (docs/NETWORKS.md use case 3,
+# docs/proposals/78-network-guarantees-and-pow.md). A service declaring `pow:ergo`
+# puts its actual ask in Service.Network.formal -- which block its peers must have
+# on their main chain, and how much cumulative work their chain must carry -- and
+# this node checks each candidate against it before opening anything.
+#
+# That ask is the same sorted `key=value` body every other celaut formal carries,
+# with this domain's keys namespaced `pow.`:
+#
+#   pow.block_id=f35a8aa47ab6e950ba1a8cd10dc92bade42928dd985575d7fe46e759379690e0
+#   pow.chain=ergo
+#   pow.max_tip_age_s=3600            # optional
+#   pow.min_cumulative_difficulty=2749889727692749668352
+#   pow.min_height=1873000            # optional
+#
+# A key outside that vocabulary is carried along and enforced by nothing, so a
+# service may say more than this node reads without being refused. Which protocols
+# the peers speak is NOT in there: that is Service.Network.protocol_stack.
+#
+# A pow: network has no name to look up, so its endpoints are *found*, from four
+# sources in trust order: `ledgers.ergo.NODE_URL` (the node you already trust for
+# reputation and payments), service_networks.default_instances (what you wrote down
+# yourself), other nodes over Gateway.ResolveNetwork, and the peer crawl at
+# `ledgers.ergo.HTTP_PEERS_PATH` (strangers). The order decides only who is asked
+# first: every candidate is verified identically.
+#
+# What is verified is what each candidate REPORTS ABOUT ITSELF over its REST API.
+# That is enough to exclude an out-of-sync, stalled, pruned or wrong-network node,
+# and it is not enough to exclude one that lies: a peer can claim any state it
+# likes for the cost of one `if`. A service needing more than that gets it from the
+# chain protocol it is about to speak.
+#
+# NOTE the name, for the same reason `service_networks` has the name it has: this is
+# not `networks:`, which would sit one letter from the `network:` block above.
+pow_networks:
+  TIMEOUT_SECONDS: 10  # Per HTTP request to a candidate peer.
+  MAX_PEERS: 8  # Stop verifying once this many peers qualify. Each one becomes a firewall rule.
+  # How many known peers to ask (Gateway.ResolveNetwork) for addresses in this domain.
+  # A latency budget, not a quality setting: the answers are pooled rather than compared,
+  # and each ask is a round trip on the launch path. 0 switches the source off. A node
+  # answering such a question never relays it, so asking cannot fan out beyond this.
+  ASK_PEERS: 4
 
 # Dynamic DNS: keep a hostname pointing at this node's public IP, so peers can
 # find it by name when the address changes. Tunneling means only the gateway port

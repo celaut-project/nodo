@@ -196,7 +196,62 @@ Scenario: a service needs to access third-party resources (e.g. OpenAI) but does
 
 > "Give me peers in the PoW network with architecture X, latest block ≥ B, and difficulty ≥ D."
 
-The formal description (`formal`) encodes the consensus requirements used to select peers.
+The formal description (`formal`) encodes the consensus requirements used to select
+peers. This is the first network kind where `formal` carries the ask: the tag
+(`pow:ergo`, `pow:bitcoin`) names the *chain*, and two services on the same chain
+asking for different blocks or different work are not in the same domain.
+
+| | |
+|---|---|
+| Tag | `pow:<chain>` — `pow:ergo`, `pow:bitcoin` |
+| `formal` | The `key=value` body every celaut descriptor uses (`node_identity.component_formal`): sorted lines, UTF-8. This domain's keys are namespaced `pow.` — `pow.chain`, `pow.block_id`, `pow.min_cumulative_difficulty`, optional `pow.min_height` and `pow.max_tip_age_s`. A key outside that vocabulary is **preserved and round-tripped, not refused** and not enforced; a missing required key or a malformed value still is refused. No version key: a version belongs to the vocabulary, which `protocol_stack` names. |
+| Not in `formal` | Which protocols the peers speak. `protocol` and `peerDiscovery` are tags/prose/formal descriptors in their own right, which is what `Service.Network.protocol_stack` (`repeated Api.Protocol`) already models — flattening them into a key here would be a second place for the same thing to be stated, and to disagree. |
+| Difficulty | **cumulative work since genesis** (Ergo `fullBlocksScore`, Bitcoin `chainwork`), not the tip block's difficulty: it is what the chain's own fork choice maximises, it is monotone, and it gives a total order peers can be compared on. Carried as a decimal string — the value outgrew a double long ago. |
+| Containment | the block must be on the peer's **main** chain (`/blocks/{id}/header` then `/blocks/at/{height}`), not merely stored: an orphan a peer kept is not a block its chain contains. |
+| Ancestors | `match_networks` compares `formal` when both sides declare one (`node_identity.same_component`, the rule every tags/prose/formal descriptor is compared by), and falls back to a shared tag. So a parent granting a specific ask grants **that** ask; a parent meaning "any `pow:ergo`" leaves its own `formal` empty. |
+| Endpoints | A `pow:` domain has no name to look up, so its addresses are *found*, from four sources in trust order: `ledgers.ergo.NODE_URL`; `service_networks.default_instances["pow:ergo"]` (named by hand); other nodes over `Gateway.ResolveNetwork`; and the crawl at `ledgers.ergo.HTTP_PEERS_PATH`. Every one is verified identically, so the order decides only who is asked first. |
+| Shape | **one `Instance` per endpoint**, not one with N uris: they are separate operators, separately verified and separately reachable. One Instance with several uris means "one peer at several addresses", which is what a DNS name's A records are. |
+| No peer qualifies | resolves to `[]`, like any other unresolved tag — "nobody meets D right now" is transient and about the world, not about the request. |
+| Config | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ASK_PEERS`; `service_networks.default_instances` |
+| Implementation | `src/manager/pow_networks.py`, dispatched from `resolve_network()` |
+
+> ⚠️ **What is verified is what the candidate says about itself.** Its REST answers
+> are claims, and a peer can fabricate all of them cheaply. That excludes the common
+> failure — an out-of-sync, stalled, pruned or wrong-network node — and not a
+> deliberate liar. Cross-checking *k* of *n* candidates, and verifying the Autolykos
+> solutions in the headers themselves, are the next two steps.
+
+> ⚠️ **What a suggested endpoint buys, and what it does not.** Another node naming an
+> address grants nothing: what it buys is a place in the queue. Every address is
+> verified the same way as one the operator typed into `config.yaml`, so the cost of a
+> lie at that layer is a wasted HTTP request, not a firewall rule.
+
+> **Reading endpoint lists off the reputation ledger is deliberately out of scope
+> here.** How a communication domain is formalized on-chain is still being settled
+> with [`celaut-project/skills`](https://github.com/celaut-project/skills/issues/72),
+> and wiring a reader against a schema that is about to change would bake in the
+> version we are least sure of.
+
+Bitcoin parses and does not resolve: nodo's default Bitcoin posture is a
+receive-only Esplora backend, which exposes neither `chainwork` nor a peer list.
+
+### Asking another node
+
+`Gateway.ResolveNetwork` takes **any** `Service.Network` and answers with the peers
+this node knows in that domain. Generic, not `pow:`-shaped: a domain is declared the
+same way whatever resolves it, and a caller that had to know in advance which kind it
+held would be doing the resolving itself.
+
+The operator's `service_networks` policy applies to it — resolving a domain this node
+refuses to reach is reaching it by proxy — and a node **never relays** the question
+(`resolve_network(..., ask_peers=False)`). Two nodes that know each other are a cycle
+of length two, so relaying would turn one request into a flood over a graph nobody has
+a view of. Each node answers from what it knows locally; a caller that wants more
+breadth asks more nodes itself.
+
+Full design, and an audit of what the DNS path guarantees today:
+[`proposals/78-network-guarantees-and-pow.md`](proposals/78-network-guarantees-and-pow.md)
+(issue [#78](https://github.com/celaut-project/nodo/issues/78)).
 
 ---
 
@@ -209,3 +264,15 @@ Applicable to any kind of network:
 * **PoS:** Proof-of-Stake networks
 * **P2P:** Arbitrary peer-to-peer networks
 
+
+### Operator default instances (all network tags)
+
+`service_networks.default_instances` maps any exact network tag to URI seeds.
+For example `"my-domain": ["tcp://192.168.1.60:1234"]`. Valid seeds take
+precedence over DNS for ordinary domains; invalid/unresolvable seeds fall back to
+the existing resolver. Each resolved address is a separate Instance. PoW domains
+consume the same map through their candidate pipeline and still verify every peer.
+Move existing `pow_networks.ENDPOINTS` entries here; the old setting is retired.
+Generic peer discovery and reputation readers remain reusable helpers, but their
+untrusted suggestions are only wired to the PoW verifier, not blindly granted as
+members of arbitrary domains. Operator defaults are explicit operator assertions.
