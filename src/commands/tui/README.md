@@ -17,7 +17,7 @@ particular installation directory.
 | **Earnings** | What this node earned by being up, in both currencies it earns in, each drawn as the kind of quantity it is: money per payment network over the last day/week/month/year, because money is a flow; and what the network stakes on this node as a standing, with the ERG sunk behind it, because a chain that re-dates an opinion whenever its proof republishes cannot say when reputation was earned. Underneath, every proof that has staked something on this node. |
 | **Cell** | The node's policies as a set of named decisions, laid out as a cell: what it lets in, what work it takes, what it says to the network, what it distrusts, how it charges, and what it keeps. One row is one decision, and moving it writes every key that decision spans. Postures ("just me", "cautious renter", …) apply a whole set at once, and the page says which one this node is closest to. |
 | **Pricing** | What this node charges, per resource, as vertical bars you can nudge. Recurring and one-off prices are charted apart because their magnitudes are unrelated. Beside them: the display unit, what one MU is worth on the ledger, the scarcity ceiling, and a worked hourly example. |
-| **Schedule** | The hours this node takes work in (`activity_window`), drawn as the day it is: the open stretch as one run of blocks, a marker at the current hour, and what closing time does to work already running. Underneath, on the same axis, a month of demand folded onto the 24 hours of a clock — peak instances held, and the work refused because the window was shut. Edited by moving an edge rather than by typing a time, so an unusable hour cannot be expressed. |
+| **Schedule** | The hours this node takes work in (`activity_window`), drawn as the day it is: every configured window's open stretch as its own run of blocks, a marker at the current hour, and what closing time does to work already running. Underneath, on the same axis, a month of demand folded onto the 24 hours of a clock — peak instances held, and the work refused because the schedule was shut. A night shift and a weekday lunch break are two windows, added and removed with `a`/`d` (or a click), each edited by moving an edge rather than by typing a time, so an unusable hour cannot be expressed. Every element answers the mouse as well as the keyboard: click an edge to select it, `[x]` to remove a window, `+ add window`, or the on/off and closing-time lines to toggle them. |
 | **Config** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited, and list elements can be added and removed. |
 | **Logs** | Tail of `storage/app.log` beside commands/actions launched from the TUI. |
 
@@ -168,11 +168,11 @@ transaction:
 1. `config.yaml` is snapshotted to `config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` beside it (the ten
    most recent are kept, matching what the Python `ConfigManager` prunes to).
 2. The change is written with nodo's configured `yq`, in place, comments preserved.
-   A change that spans several keys — a lever, a profile, the four keys a working day
-   is — is **one** `yq` invocation, so the file never holds half of it. That is also
-   why Schedule collects an edit and applies it on `Enter` rather than writing per
-   keypress: `START` and `END` are one decision, and a node restarted between them
-   would be running a window nobody chose.
+   A change that spans several keys — a lever, a profile, the whole schedule a
+   working day is — is **one** `yq` invocation, so the file never holds half of it.
+   That is also why Schedule collects an edit and applies it on `Enter` rather than
+   writing per keypress: `ENABLED`, every window in `WINDOWS`, and `ON_CLOSE` are one
+   decision, and a node restarted mid-edit would be running a schedule nobody chose.
 3. If something is serving on the gateway port, `nodo daemon restart` runs and the
    port is waited on until it answers again.
 4. **If the node does not come back, the snapshot is put straight back** and the node
@@ -303,6 +303,42 @@ example, list values appear as `core_services[1].id` and nested values as
 - A saved value is immediately visible in the TUI; a running nodo process observes it
   only after the restart above, because it reads `config.yaml` once at start.
 
+## How `nodo tui` finds a binary to run
+
+This is a separate Rust binary, and a node is not required to own a compiler to
+run it. Resolution goes (`src/utils/rust_toolchain.py`):
+
+1. **A prebuilt whose marker names this host.** The binary lives at
+   `src/commands/tui/target/release/tui` — where `cargo build --release` would put
+   it, so a shipped binary and a locally built one are the same file and neither
+   can shadow the other. Beside it, `tui.host-triple` holds the `rustc -vV` host
+   line it was built for (`aarch64-unknown-linux-gnu`, …). nodo computes the
+   expected triple from the host's architecture, OS and libc and **refuses to
+   execute a binary whose marker disagrees**: running an aarch64 ELF on x86_64
+   fails with `Exec format error`, which an operator experiences as `nodo tui`
+   doing nothing at all. A missing marker counts as a mismatch. The last check is
+   `tui --version`, which prints one line and exits — the only entry point that
+   does not take over the terminal, which is why the flag exists.
+2. **This node's own cargo**, at
+   `<main.MAIN_DIR>/runtime/rust/cargo/bin/cargo`, to build it once. Then the
+   marker is written from that compiler's own `rustc -vV`, so the next launch
+   takes step 1 and starts immediately.
+3. **Install that toolchain** into the installation root, then build.
+
+There is deliberately no step onto a `cargo` from `$PATH`. That was the bug
+(issue #375): the installer piped `sh.rustup.rs` into `$HOME/.cargo` and sourced
+`~/.cargo/env` in its own subshell, so `nodo tui` found nothing, printed
+"Installing Rust (Cargo)..." and reinstalled the toolchain on every launch —
+into a different `$HOME` under `sudo` than without it. An existing `~/.cargo` is
+never read, moved or removed; it is the operator's, not the node's.
+
+The binaries come from `.github/workflows/tui-release.yml`, which builds
+`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` on native runners and
+publishes each with its marker and a checksum to the `tui` release. Relocate the
+toolchain with `dependencies.rust.RUNTIME_ROOT`; force it onto a machine that
+would otherwise skip it with `dependencies.rust.INSTALL_TOOLCHAIN: true`
+([`docs/CONFIG.md`](../../../docs/CONFIG.md)).
+
 ## Development
 
 The protobuf compiler is vendored through `protoc-bin-vendored`; no system `protoc` is needed.
@@ -311,8 +347,17 @@ The protobuf compiler is vendored through `protoc-bin-vendored`; no system `prot
 cd src/commands/tui
 cargo test
 cargo clippy --all-targets -- -D warnings
-cargo run
+cargo build --release && ./target/release/tui
 ```
+
+`cargo build --release` then running the binary, rather than `cargo run`: `cargo
+run` re-checks the build graph on every launch, and on a cold cache that is a
+compile. Fine at a prompt; not fine behind a desktop shortcut, where it reads as
+an app that failed to open. Building into `target/release` also puts the binary
+exactly where `nodo tui` looks, so a local build is picked up with no extra step
+— write the marker beside it (`rustc -vV | awk '/^host:/ {print $2}' >
+target/release/tui.host-triple`) or let `nodo tui` build it once and write it for
+you.
 
 Render tests cover every page at 80×24 and 140×40, and a dedicated regression test verifies
 that plaintext secrets never appear in the terminal buffer.

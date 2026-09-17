@@ -2361,17 +2361,22 @@ fn draw_profile_popup(frame: &mut Frame, app: &App) {
 /// also makes an unusable hour inexpressible, where the two scalar editors it replaces
 /// took `25:00` happily and let the node refuse to start on it.
 fn draw_schedule(frame: &mut Frame, app: &mut App, area: Rect) {
-    let window = app.schedule_window();
+    let schedule = app.schedule();
     let now = app.now_minute;
+    // Fixed lines regardless of window count: the enabled toggle, `+ add window`, the
+    // duration, one of (flip countdown | off note), `at closing:`, and the dev-client
+    // exemption note -- six -- plus one row per window (or one placeholder line when
+    // there are none), plus the block's own two border rows.
+    let summary_height = 8 + schedule.windows.len().max(1) as u16;
     let rows = Layout::vertical([
         Constraint::Length(11),
-        Constraint::Length(7),
+        Constraint::Length(summary_height),
         Constraint::Min(3),
     ])
     .split(area);
 
-    draw_day_bar(frame, rows[0], app, window, now);
-    draw_schedule_summary(frame, rows[1], app, window, now);
+    draw_day_bar(frame, rows[0], app, &schedule, now);
+    draw_schedule_summary(frame, rows[1], app, &schedule, now);
     draw_schedule_help(frame, rows[2], app);
 }
 
@@ -2379,7 +2384,7 @@ fn draw_day_bar(
     frame: &mut Frame,
     area: Rect,
     app: &App,
-    window: schedule::Window,
+    schedule: &schedule::Schedule,
     now: u16,
 ) {
     let dirty = app.schedule_is_dirty();
@@ -2428,7 +2433,7 @@ fn draw_day_bar(
     let mut bar: Vec<Span> = Vec::new();
     for slot in 0..width {
         let minute = slot * per_slot;
-        let open = window.contains(minute);
+        let open = schedule.contains(minute);
         let is_now = now >= minute && now < minute + per_slot;
         let (glyph, colour) = match (open, is_now) {
             (true, true) => ('█', GOOD),
@@ -2449,7 +2454,7 @@ fn draw_day_bar(
     }
     marker.push('▲');
 
-    let open_now = window.contains(now);
+    let open_now = schedule.contains(now);
     let state = if open_now { "OPEN" } else { "CLOSED" };
     let state_colour = if open_now { GOOD } else { BAD };
 
@@ -2557,73 +2562,163 @@ fn demand_lines(
     lines
 }
 
+/// One line per window (`opens`/`closes` spans, a remove marker), a toggle line each
+/// for whether the schedule is enforced and what closing time does, and an `+ add
+/// window` line -- every one of them a mouse target, whose position is recorded as it
+/// is laid out (`app.schedule_*_area(s)`), the same "record while drawing, hit-test on
+/// click" pattern the CELL page uses for its levers.
 fn draw_schedule_summary(
     frame: &mut Frame,
     area: Rect,
-    app: &App,
-    window: schedule::Window,
+    app: &mut App,
+    schedule: &schedule::Schedule,
     now: u16,
 ) {
-    let selected = app.schedule_edge;
-    let edge_span = |edge: schedule::Edge, minute: u16| {
-        let text = format!(" {} {} ", edge.label(), schedule::format_clock(minute));
-        let style = if edge == selected {
-            Style::default().fg(Color::Black).bg(ACCENT)
-        } else {
-            Style::default().fg(ACCENT)
-        };
-        Span::styled(text, style)
-    };
+    app.schedule_edge_areas.clear();
+    app.schedule_remove_areas.clear();
 
-    // The span those two hours describe, whether or not it is being enforced: a line
-    // reading "opens 09:00 · closes 18:00 · 24 h a day" contradicts itself, and the
-    // note below is where "not enforced" belongs.
-    let span_of_hours = schedule::Window {
-        enabled: true,
-        ..window
-    };
-    let mut lines = vec![Line::from(vec![
-        edge_span(schedule::Edge::Start, window.start),
-        Span::raw("  "),
-        edge_span(schedule::Edge::End, window.end),
-        Span::styled(
-            format!("   {} a day", span_of_hours.open_duration()),
-            Style::default().fg(MUTED),
-        ),
-    ])];
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(MUTED))
+        .title(" THE HOURS ");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    if window.always_open() {
-        // Two ways to be always open, and an operator who set the hours and saw no
-        // change is looking at one of them.
+    let selected_window = app
+        .schedule_selected
+        .min(schedule.windows.len().saturating_sub(1));
+    let selected_edge = app.schedule_edge;
+    let mut lines: Vec<Line> = Vec::new();
+
+    // schedule: ON/OFF -- toggled by `w` or a click.
+    let enabled_text = if schedule.enabled {
+        " schedule: ON "
+    } else {
+        " schedule: OFF "
+    };
+    app.schedule_enabled_area = Rect::new(
+        inner.x,
+        inner.y + lines.len() as u16,
+        enabled_text.chars().count() as u16,
+        1,
+    );
+    lines.push(Line::from(Span::styled(
+        enabled_text,
+        Style::default()
+            .fg(if schedule.enabled { GOOD } else { MUTED })
+            .add_modifier(Modifier::BOLD),
+    )));
+
+    if schedule.windows.is_empty() {
         lines.push(Line::from(Span::styled(
-            if window.enabled {
-                "Always open: the two hours are equal, so nothing is refused."
-            } else {
-                "Always open: the window is off. Press `w` to enforce these hours."
-            },
+            "No windows yet.",
+            Style::default().fg(MUTED),
+        )));
+    } else {
+        for (index, window) in schedule.windows.iter().enumerate() {
+            let row = inner.y + lines.len() as u16;
+            let is_selected_window = index == selected_window;
+            let mut spans: Vec<Span> = Vec::new();
+            let mut x = inner.x;
+
+            let marker = if is_selected_window { "› " } else { "  " };
+            x += marker.chars().count() as u16;
+            spans.push(Span::styled(marker, Style::default().fg(ACCENT)));
+
+            let label = format!("W{} ", index + 1);
+            x += label.chars().count() as u16;
+            spans.push(Span::styled(label, Style::default().fg(MUTED)));
+
+            for edge in [schedule::Edge::Start, schedule::Edge::End] {
+                let minute = match edge {
+                    schedule::Edge::Start => window.start,
+                    schedule::Edge::End => window.end,
+                };
+                let text = format!(" {} {} ", edge.label(), schedule::format_clock(minute));
+                let width = text.chars().count() as u16;
+                let highlighted = is_selected_window && edge == selected_edge;
+                let style = if highlighted {
+                    Style::default().fg(Color::Black).bg(ACCENT)
+                } else {
+                    Style::default().fg(ACCENT)
+                };
+                app.schedule_edge_areas
+                    .push((index, edge, Rect::new(x, row, width, 1)));
+                spans.push(Span::styled(text, style));
+                x += width;
+                spans.push(Span::raw(" "));
+                x += 1;
+            }
+
+            let remove_text = "[x]";
+            app.schedule_remove_areas.push((
+                index,
+                Rect::new(x, row, remove_text.chars().count() as u16, 1),
+            ));
+            spans.push(Span::styled(remove_text, Style::default().fg(BAD)));
+
+            if window.is_empty() {
+                spans.push(Span::styled(
+                    "  empty — move an edge",
+                    Style::default().fg(MUTED),
+                ));
+            } else if window.wraps() {
+                spans.push(Span::styled(
+                    "  one window through midnight",
+                    Style::default().fg(MUTED),
+                ));
+            }
+
+            lines.push(Line::from(spans));
+        }
+    }
+
+    let add_text = " + add window ";
+    app.schedule_add_area = Rect::new(
+        inner.x,
+        inner.y + lines.len() as u16,
+        add_text.chars().count() as u16,
+        1,
+    );
+    lines.push(Line::from(Span::styled(
+        add_text,
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+    )));
+
+    // The span the windows describe, whether or not it is being enforced: a line
+    // reading "opens 09:00 · closes 18:00 · 24 h a day" while switched off contradicts
+    // itself, so what is and is not enforced is said on its own line below.
+    let hours_preview = schedule::Schedule {
+        enabled: true,
+        ..schedule.clone()
+    };
+    if hours_preview.always_open() {
+        // No non-empty window at all: always open regardless of the switch.
+        lines.push(Line::from(Span::styled(
+            "Always open: every window is empty, so nothing is refused.",
             Style::default().fg(WARN),
         )));
     } else {
-        if window.wraps() {
+        lines.push(Line::from(Span::styled(
+            format!("{} a day", hours_preview.open_duration()),
+            Style::default().fg(MUTED),
+        )));
+        if !schedule.enabled {
             lines.push(Line::from(Span::styled(
-                "The night shift: one window through midnight, not two.",
-                Style::default().fg(MUTED),
+                "Always open: the schedule is off. Press `w` (or click above) to enforce these hours.",
+                Style::default().fg(WARN),
             )));
-        }
-        if let Some(minutes) = window.minutes_until_flip(now) {
-            let verb = if window.contains(now) { "closes" } else { "opens" };
+        } else if let Some(minutes) = schedule.minutes_until_flip(now) {
+            let verb = if schedule.contains(now) { "closes" } else { "opens" };
             lines.push(Line::from(Span::styled(
-                format!(
-                    "{verb} in {}h {:02}m",
-                    minutes / 60,
-                    minutes % 60
-                ),
+                format!("{verb} in {}h {:02}m", minutes / 60, minutes % 60),
                 Style::default().fg(MUTED),
             )));
         }
     }
 
-    lines.push(Line::from(match window.on_close {
+    app.schedule_on_close_area = Rect::new(inner.x, inner.y + lines.len() as u16, inner.width, 1);
+    lines.push(Line::from(match schedule.on_close {
         schedule::OnClose::Refuse => vec![
             Span::styled("at closing: ", Style::default().fg(MUTED)),
             Span::styled("refuse", Style::default().fg(GOOD)),
@@ -2646,23 +2741,19 @@ fn draw_schedule_summary(
         Style::default().fg(MUTED),
     )));
 
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(MUTED))
-                .title(" THE HOURS "),
-        ),
-        area,
-    );
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_schedule_help(frame: &mut Frame, area: Rect, app: &App) {
     let dirty = app.schedule_is_dirty();
     let mut lines = vec![Line::from(Span::styled(
-        "←/→ move the selected edge by 30 min   ↑/↓ switch edge   w window on/off   c what closing does",
+        "←/→ move the selected edge   ↑/↓ switch edge   [/] switch window   a add   d remove   w on/off   c what closing does",
         Style::default().fg(MUTED),
     ))];
+    lines.push(Line::from(Span::styled(
+        "Click an edge to select it, [x] to remove a window, + add window, or the on/off and closing lines — the mouse reaches everything here.",
+        Style::default().fg(MUTED),
+    )));
     lines.push(Line::from(if dirty {
         vec![
             Span::styled("Enter", Style::default().fg(WARN).add_modifier(Modifier::BOLD)),
@@ -3451,7 +3542,7 @@ mod tests {
                 .join("\n")
         }
 
-        const NIGHT: &str = "activity_window:\n  ENABLED: true\n  START: '22:00'\n  END: '06:00'\n  ON_CLOSE: refuse\n";
+        const NIGHT: &str = "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '22:00'\n      END: '06:00'\n  ON_CLOSE: refuse\n";
 
         /// A month of demand: busy through the evening, refused work at 20:00 and
         /// 21:00 -- the hours this node is closed through.
@@ -3564,7 +3655,7 @@ mod tests {
             assert!(screen.contains("nothing refused for being closed"), "{screen}");
             assert_eq!(demand_rows(&screen).len(), 1, "an empty row was drawn:\n{screen}");
         }
-        const DAY: &str = "activity_window:\n  ENABLED: true\n  START: '09:00'\n  END: '18:00'\n  ON_CLOSE: stop\n";
+        const DAY: &str = "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '09:00'\n      END: '18:00'\n  ON_CLOSE: stop\n";
 
         /// The bar of open/closed blocks, whatever row it landed on.
         fn bar(screen: &str) -> &str {
@@ -3647,12 +3738,12 @@ mod tests {
             let screen = screen(
                 100,
                 24,
-                "activity_window:\n  ENABLED: false\n  START: '09:00'\n  END: '18:00'\n",
+                "activity_window:\n  ENABLED: false\n  WINDOWS:\n    - START: '09:00'\n      END: '18:00'\n",
                 11 * 60,
             );
-            assert!(screen.contains("the window is off"), "{screen}");
-            // The three figures on the hours line describe the same span: "opens 09:00,
-            // closes 18:00, 24 h a day" contradicted itself.
+            assert!(screen.contains("the schedule is off"), "{screen}");
+            // The duration line still names the hours a switched-off window would
+            // enforce.
             assert!(screen.contains("9 h a day"), "{screen}");
             assert!(!screen.contains("24 h a day"), "{screen}");
         }
@@ -5657,6 +5748,86 @@ mod tests {
 
             app.click_at(x, y);
             assert_eq!(app.page(), Page::Clients);
+        }
+
+        /// A schedule with two windows, on the SCHEDULE page, ready to be clicked on.
+        /// Every one of the SCHEDULE page's elements has to answer the mouse, not only
+        /// the ones a table's `list_area` already covered — `click_at` had no arm for
+        /// this page at all before, so a click here used to do nothing.
+        fn app_on_schedule_with_two_windows() -> App {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Schedule).unwrap();
+            app.config_document = serde_yaml::from_str(
+                "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '22:00'\n      END: '06:00'\n    - START: '12:00'\n      END: '13:00'\n  ON_CLOSE: refuse\n",
+            )
+            .ok();
+            app
+        }
+
+        fn find(screen: &[String], text: &str) -> (u16, u16) {
+            screen
+                .iter()
+                .enumerate()
+                .find_map(|(y, row)| row.find(text).map(|byte| (row[..byte].chars().count() as u16, y as u16)))
+                .unwrap_or_else(|| panic!("{text:?} not found on screen:\n{}", screen.join("\n")))
+        }
+
+        #[test]
+        fn clicking_an_edge_selects_its_window_and_edge() {
+            let mut app = app_on_schedule_with_two_windows();
+            let screen = draw(&mut app);
+            let (x, y) = find(&screen, "closes 13:00");
+
+            app.click_at(x + 1, y);
+            assert_eq!(app.schedule_selected, 1, "the second window's row was clicked");
+            assert_eq!(app.schedule_edge, crate::schedule::Edge::End);
+        }
+
+        #[test]
+        fn clicking_remove_deletes_that_window() {
+            let mut app = app_on_schedule_with_two_windows();
+            let screen = draw(&mut app);
+            // `[x]` sits on the same row as the window it removes, past its end edge.
+            let (_, y) = find(&screen, "closes 13:00");
+            let row = &screen[y as usize];
+            let remove_x = row.find("[x]").map(|byte| row[..byte].chars().count() as u16).unwrap();
+
+            app.click_at(remove_x, y);
+            assert_eq!(app.schedule().windows.len(), 1);
+            assert_eq!(
+                app.schedule().windows[0].start,
+                crate::schedule::parse_clock("22:00").unwrap()
+            );
+        }
+
+        #[test]
+        fn clicking_add_window_appends_one() {
+            let mut app = app_on_schedule_with_two_windows();
+            let screen = draw(&mut app);
+            let (x, y) = find(&screen, "+ add window");
+
+            app.click_at(x + 1, y);
+            assert_eq!(app.schedule().windows.len(), 3);
+        }
+
+        #[test]
+        fn clicking_the_schedule_line_toggles_it_on_and_off() {
+            let mut app = app_on_schedule_with_two_windows();
+            let screen = draw(&mut app);
+            let (x, y) = find(&screen, "schedule: ON");
+
+            app.click_at(x + 1, y);
+            assert!(!app.schedule().enabled);
+        }
+
+        #[test]
+        fn clicking_the_closing_line_swaps_what_it_does() {
+            let mut app = app_on_schedule_with_two_windows();
+            let screen = draw(&mut app);
+            let (x, y) = find(&screen, "at closing:");
+
+            app.click_at(x + 1, y);
+            assert_eq!(app.schedule().on_close, crate::schedule::OnClose::Stop);
         }
     }
 }

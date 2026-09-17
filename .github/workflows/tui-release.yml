@@ -1,0 +1,177 @@
+name: tui-release
+
+# Builds `nodo tui` (src/commands/tui) for every Linux target the installer
+# supports and publishes the binaries to the single `tui` release, each with the
+# `rustc -vV` host triple recorded beside it.
+#
+# It exists so that a node does not need a Rust toolchain. Until now nothing
+# built this binary, so every install had to: bash/setup_linux_arm.sh piped
+# sh.rustup.rs into $HOME, sourced ~/.cargo/env in its own subshell, and the
+# PATH that created died with the script -- so `nodo tui` found no cargo, said
+# "Installing Rust (Cargo)..." and did the whole thing again (issue #375). A
+# published binary removes the compiler from the picture entirely for the hosts
+# it covers, and the self-contained toolchain under MAIN_DIR covers the rest.
+#
+# One mutable tag, like guest-kernel: there is nothing to version independently
+# of the repository the crate lives in, and a versioned tag per commit would
+# leave the installer choosing between releases it cannot compare. What makes
+# that safe here is different from guest-kernel, and weaker on purpose:
+# guest-kernel pins digests in-tree (bash/guest-kernel/SHA256SUMS.pinned) because
+# it is built from sources this repository does not move. This binary is built
+# FROM this repository, so an in-tree digest could only be written after CI had
+# produced it -- i.e. never by the commit that changes the crate. The published
+# SHA256SUMS therefore proves transport integrity and not content provenance, and
+# the installer treats a failed or mismatched fetch as "build it from the source
+# that is already in the checkout" rather than as a fatal error.
+#
+# Native runners, no `cross`: the crate builds rusqlite with `bundled` (which
+# compiles SQLite's C sources) and runs a build.rs that shells out to a vendored
+# protoc. A cross-compiled build of that needs a working foreign C toolchain and
+# a protoc for the *host*, and GitHub offers ubuntu-24.04-arm, so the plain
+# answer is available.
+#
+# Only gnu targets. The setup scripts pin a `-unknown-linux-gnu` portable Python
+# and install distro packages with apt/dnf, so no Alpine-like host is supported
+# today; a musl target here would publish a binary for a host nodo cannot
+# otherwise be installed on.
+#
+# Run it with:
+#   gh workflow run tui-release -f tag=tui
+# or by pushing the `tui` tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish the tui binaries under (normally tui)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "tui"
+  # On a PR, build only -- nothing is published. This is the check that keeps the
+  # crate compiling for both architectures, which is otherwise only discovered by
+  # an operator whose install tried to build it.
+  pull_request:
+    paths:
+      - 'src/commands/tui/**'
+      - 'protos/**'
+      - '.github/workflows/tui-release.yml'
+
+# Least privilege per job: `build` compiles third-party crates, so it must not
+# hold a token that can write to this repo. Only the release job publishes.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            triple: x86_64-unknown-linux-gnu
+            tag: linux-amd64
+          - runner: ubuntu-24.04-arm
+            triple: aarch64-unknown-linux-gnu
+            tag: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: src/commands/tui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build release binary
+        run: cargo build --release --locked || cargo build --release
+
+      # The check the binary is published on the strength of. `--version` is the
+      # only entry point that does not take over the terminal, which is also why
+      # nodo uses it to validate a downloaded binary before executing it.
+      - name: The binary runs
+        run: ./target/release/tui --version
+
+      # What the runner's own compiler says it targets, not what the matrix says.
+      # The two disagreeing is exactly the mislabelled-release case the marker
+      # exists to catch, so the marker must come from the compiler.
+      - name: Record host triple and checksum
+        run: |
+          set -euo pipefail
+          HOST="$(rustc -vV | awk '/^host:/ { print $2 }')"
+          test -n "$HOST"
+          if [ "$HOST" != "${{ matrix.triple }}" ]; then
+            echo "::error::runner built ${HOST}, matrix expected ${{ matrix.triple }}"
+            exit 1
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          install -m 0755 target/release/tui "$GITHUB_WORKSPACE/out/tui-${{ matrix.tag }}"
+          printf '%s\n' "$HOST" > "$GITHUB_WORKSPACE/out/tui-${{ matrix.tag }}.host-triple"
+          cd "$GITHUB_WORKSPACE/out"
+          sha256sum "tui-${{ matrix.tag }}" "tui-${{ matrix.tag }}.host-triple" \
+            > "tui-${{ matrix.tag }}.sha256"
+          cat "tui-${{ matrix.tag }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tui-${{ matrix.tag }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    # A pull request builds and stops there: it has nothing to publish onto, and
+    # a workflow that publishes from a PR would let a fork replace the binary
+    # every node downloads.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Assemble SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd artifacts
+          cat ./*.sha256 | sort -k2 > SHA256SUMS
+          rm -f ./*.sha256
+          cat SHA256SUMS
+          # Two binaries and two markers, or something silently did not build.
+          test "$(wc -l < SHA256SUMS)" -eq 4
+
+      # Updates the release in place when it already exists, because with a
+      # single unversioned tag there is nowhere else to publish. `create` alone
+      # would fail on every run after the first.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          NOTES: "The `nodo tui` operations console, built from src/commands/tui for each supported Linux target. Each binary ships with a `.host-triple` marker holding the `rustc -vV` host line it was built for; the installer and `nodo tui` refuse to execute a binary whose marker does not name the running host. SHA256SUMS proves the download was not altered in transit -- it is published in this same mutable release, so it is not a content pin. A node that cannot fetch or verify a binary builds one from the source in its own checkout, with the self-contained toolchain under MAIN_DIR/runtime/rust."
+        run: |
+          set -euo pipefail
+          ASSETS=(
+            artifacts/tui-linux-amd64
+            artifacts/tui-linux-amd64.host-triple
+            artifacts/tui-linux-arm64
+            artifacts/tui-linux-arm64.host-triple
+            artifacts/SHA256SUMS
+          )
+
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG exists; replacing its assets."
+            gh release upload "$TAG" --repo "${{ github.repository }}" --clobber "${ASSETS[@]}"
+            gh release edit "$TAG" --repo "${{ github.repository }}" \
+              --title "nodo tui" --notes "$NOTES"
+          else
+            gh release create "$TAG" --repo "${{ github.repository }}" \
+              --title "nodo tui" --notes "$NOTES" "${ASSETS[@]}"
+          fi

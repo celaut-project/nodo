@@ -1,6 +1,6 @@
 """`activity_window`: the hours this node accepts work in.
 
-Two things are worth pinning here, because both fail silently.
+Three things are worth pinning here, because all three fail silently.
 
 The first is the wrap around midnight. A node rented out overnight has a window whose
 end is *before* its start, and read as a plain `start <= t < end` that window is the
@@ -8,10 +8,15 @@ empty set -- the node would refuse everything, all night, which is exactly when 
 supposed to be working. It is the case an operator renting out a personal PC actually
 wants, so it is the case with the most assertions.
 
-The second is what an absent or unusable window means. Every one of the three ways of
-saying "no window" -- switched off, start equal to end, and a time that does not parse --
-has to leave the node open. A malformed window that closed the node instead would take
-it off the network over a typo, and say nothing that pointed at the typo.
+The second is what an absent or unusable schedule means. Every one of the ways of
+saying "no window" -- switched off, an empty list, an entry whose start equals its end,
+and a time that does not parse -- has to leave the node open. A malformed schedule that
+closed the node instead would take it off the network over a typo, and say nothing that
+pointed at the typo.
+
+The third is that the schedule is a *list*: a night shift and a weekday lunch break are
+two separate open stretches, and the node must be open in either one, not only the
+first one configured.
 """
 import unittest
 from datetime import datetime
@@ -36,12 +41,22 @@ def _at(hour, minute=0):
     return datetime(2026, 9, 4, hour, minute)
 
 
+def _window(start, end):
+    return {"START": start, "END": end}
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ActivityWindowTests(unittest.TestCase):
 
-    def _configured(self, **settings):
-        """The module reading a config made of `settings`, keyed as it reads them."""
-        values = {f"activity_window.{key}": value for key, value in settings.items()}
+    def _configured(self, *, enabled=None, windows=None, on_close=None):
+        """The module reading a config made of these settings, keyed as it reads them."""
+        values = {}
+        if enabled is not None:
+            values["activity_window.ENABLED"] = enabled
+        if windows is not None:
+            values["activity_window.WINDOWS"] = windows
+        if on_close is not None:
+            values["activity_window.ON_CLOSE"] = on_close
         return mock.patch.object(
             activity_window.env_manager,
             "get",
@@ -55,16 +70,16 @@ class ActivityWindowTests(unittest.TestCase):
 
     def test_a_node_with_no_window_configured_is_open(self):
         with self._configured():
-            self.assertIsNone(activity_window.window())
+            self.assertEqual(activity_window.windows(), [])
             self.assertTrue(activity_window.is_open(_at(3)))
 
     def test_the_hours_are_ignored_while_the_section_is_switched_off(self):
-        with self._configured(ENABLED=False, START="09:00", END="17:00"):
-            self.assertIsNone(activity_window.window())
+        with self._configured(enabled=False, windows=[_window("09:00", "17:00")]):
+            self.assertEqual(activity_window.windows(), [])
             self.assertTrue(activity_window.is_open(_at(3)))
 
     def test_a_window_inside_one_day_is_open_from_its_start_to_its_end(self):
-        with self._configured(ENABLED=True, START="09:00", END="17:00"):
+        with self._configured(enabled=True, windows=[_window("09:00", "17:00")]):
             self.assertFalse(activity_window.is_open(_at(8, 59)))
             # START is inclusive, END exclusive.
             self.assertTrue(activity_window.is_open(_at(9)))
@@ -73,7 +88,7 @@ class ActivityWindowTests(unittest.TestCase):
             self.assertFalse(activity_window.is_open(_at(23)))
 
     def test_a_window_whose_end_is_before_its_start_runs_through_midnight(self):
-        with self._configured(ENABLED=True, START="22:00", END="06:00"):
+        with self._configured(enabled=True, windows=[_window("22:00", "06:00")]):
             self.assertFalse(activity_window.is_open(_at(21, 59)))
             self.assertTrue(activity_window.is_open(_at(22)))
             self.assertTrue(activity_window.is_open(_at(23, 59)))
@@ -83,50 +98,85 @@ class ActivityWindowTests(unittest.TestCase):
             self.assertFalse(activity_window.is_open(_at(6)))
             self.assertFalse(activity_window.is_open(_at(12)))
 
-    def test_a_start_equal_to_its_end_is_always_open_rather_than_never(self):
-        """Enabling the section before choosing the hours must refuse nothing.
+    def test_an_empty_list_is_always_open(self):
+        with self._configured(enabled=True, windows=[]):
+            self.assertEqual(activity_window.windows(), [])
+            self.assertTrue(activity_window.is_open(_at(3)))
 
-        The zero-length reading is the other available one, and it would take a node
-        off the network the moment its operator switched the feature on to look at it.
+    def test_a_start_equal_to_its_end_is_dropped_rather_than_read_as_never_open(self):
+        """A degenerate entry contributes nothing rather than opening the whole day.
+
+        With one window that was the only other reading available, and the safe one:
+        equal edges meant "always open" so enabling the section before choosing the
+        hours refused nothing. With a list, a second entry can carry the real hours, so
+        a degenerate one is simply empty -- it no longer needs to swallow the others.
         """
-        with self._configured(ENABLED=True, START="00:00", END="00:00"):
-            self.assertIsNone(activity_window.window())
+        with self._configured(enabled=True, windows=[_window("00:00", "00:00")]):
+            self.assertEqual(activity_window.windows(), [])
             self.assertTrue(activity_window.is_open(_at(3)))
-        with self._configured(ENABLED=True, START="09:00", END="09:00"):
-            self.assertTrue(activity_window.is_open(_at(3)))
+        with self._configured(
+            enabled=True,
+            windows=[_window("09:00", "09:00"), _window("18:00", "20:00")],
+        ):
+            self.assertFalse(activity_window.is_open(_at(3)))
+            self.assertTrue(activity_window.is_open(_at(19)))
 
-    def test_a_window_that_does_not_parse_leaves_the_node_open_and_says_so(self):
+    def test_the_node_is_open_in_any_of_several_windows(self):
+        # A night shift and a weekday lunch break: two unrelated open stretches.
+        with self._configured(
+            enabled=True,
+            windows=[_window("22:00", "06:00"), _window("12:00", "13:00")],
+        ):
+            self.assertTrue(activity_window.is_open(_at(23)))
+            self.assertTrue(activity_window.is_open(_at(12, 30)))
+            self.assertFalse(activity_window.is_open(_at(9)))
+            self.assertFalse(activity_window.is_open(_at(18)))
+
+    def test_a_window_that_does_not_parse_leaves_the_whole_schedule_open_and_says_so(self):
         logged = []
-        with self._configured(ENABLED=True, START="9am", END="17:00"), \
-                mock.patch.object(activity_window, "_log", logged.append):
-            self.assertIsNone(activity_window.window())
+        with self._configured(
+            enabled=True,
+            windows=[_window("9am", "17:00"), _window("22:00", "06:00")],
+        ), mock.patch.object(activity_window, "_log", logged.append):
+            self.assertEqual(activity_window.windows(), [])
             self.assertTrue(activity_window.is_open(_at(3)))
             # Once, not once per admission decision: this is read on every launch.
-            activity_window.window()
-            activity_window.window()
+            activity_window.windows()
+            activity_window.windows()
         self.assertEqual(len(logged), 1, logged)
         self.assertIn("always open", logged[0])
 
     def test_only_stop_reaps_running_instances(self):
-        with self._configured(ENABLED=True, START="09:00", END="17:00", ON_CLOSE="stop"):
+        with self._configured(
+            enabled=True, windows=[_window("09:00", "17:00")], on_close="stop"
+        ):
             self.assertTrue(activity_window.stops_running_instances())
         for value in ("refuse", "REFUSE", "", "something-else"):
-            with self._configured(ENABLED=True, START="09:00", END="17:00", ON_CLOSE=value):
+            with self._configured(
+                enabled=True, windows=[_window("09:00", "17:00")], on_close=value
+            ):
                 self.assertFalse(
                     activity_window.stops_running_instances(),
                     f"ON_CLOSE={value!r} must not destroy anything",
                 )
 
     def test_stop_is_recognised_whatever_the_case(self):
-        with self._configured(ENABLED=True, START="09:00", END="17:00", ON_CLOSE="STOP"):
+        with self._configured(
+            enabled=True, windows=[_window("09:00", "17:00")], on_close="STOP"
+        ):
             self.assertTrue(activity_window.stops_running_instances())
 
-    def test_the_refusal_names_the_hours_it_is_refusing_outside_of(self):
+    def test_the_refusal_names_every_window_it_is_refusing_outside_of(self):
         """The reason travels to whoever asked, so a closed node must not read broken."""
-        with self._configured(ENABLED=True, START="22:00", END="06:00"):
+        with self._configured(
+            enabled=True,
+            windows=[_window("22:00", "06:00"), _window("12:00", "13:00")],
+        ):
             reason = activity_window.closed_reason()
         self.assertIn("22:00", reason)
         self.assertIn("06:00", reason)
+        self.assertIn("12:00", reason)
+        self.assertIn("13:00", reason)
         self.assertIn("activity_window", reason)
 
     def test_the_clock_parser_takes_what_an_operator_types_and_nothing_else(self):
