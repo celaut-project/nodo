@@ -4,6 +4,7 @@
 ```json
 {
   "architecture": "linux/amd64",
+  "read_only_filesystem": true,
   "init": {
     "entry_path": ["service", "start"],
     "xattrs": {
@@ -82,6 +83,31 @@
 - Legacy `entrypoint` is still accepted in `service.json` and is mapped to `container.init.entry_path`.
 - If `service.json` provides slash-based input (for example `"/service/start"`), packer normalizes it to segmented form (`["service","start"]`).
 - `init.xattrs` is serialized to `container.init.xattrs` (UTF-8 for text values).
+- `read_only_filesystem` (boolean, optional, default `false`) is serialized to
+  `container.filesystem.xattrs["read_mode"] = "ro"` — the xattr map on the **filesystem
+  itself**, not on one of its entries, and only on the root tree that
+  `container.filesystem` points at. A nested `Filesystem` (a subdirectory, reached via
+  `ItemBranch.item.filesystem`) is not separately mounted, so nothing is written there.
+  It declares that the service needs nothing writable beyond `/tmp` and `/run`, which
+  are tmpfs; the node then builds it as an immutable erofs/squashfs image instead of a
+  pre-sized ext4, and `at_init.disk_space` becomes a ceiling rather than a floor. Which
+  of the two formats is used is the node's own choice and is deliberately not
+  expressible here. See `docs/PACKING.md` for the full contract.
+  - **Absent and `false` are identical**: no `read_mode` key is written, rather than
+    `"rw"`. Absent already means `rw` to every reader, and the tree is hashed into the
+    service id, so writing the default would change the id of every existing service on
+    its next repack.
+  - The value must be a JSON boolean. `"true"` as a string is a packer error naming the
+    field, raised when `service.json` is read and before the image is built — coercing
+    it would mean treating `"false"` as truthy too.
+  - **Refused with `read_only_filesystem: true`:** exporting a shared filesystem (a
+    directory whose `branch.xattrs` carry `shared=true`). A share is seeded from the
+    exporter's own image with `debugfs`, an ext4 reader that cannot open an
+    erofs/squashfs image. Importing one (`guest=true`) is fine. The packer refuses this
+    at pack time, the same condition the node checks at launch.
+  - **Per-entry metadata** (the contract below) is mandatory for `ro`. This packer
+    already emits every key on every branch for every service, so there is nothing
+    extra to declare; it is asserted before the xattr is set.
 - `config_declaration.path` is serialized to `container.config_declaration.path`.
 - If `service.json` provides slash-based input (for example `"/config/runtime/node.pb"`), packer normalizes it to segmented form.
 - `api[].transport` is required and serialized to `api.slot[].transport.tags` (host transport, e.g. `tcp`, `udp`).
@@ -145,3 +171,7 @@ Compatibility behavior:
 - Legacy services without these keys are still accepted by Cloud Hypervisor
   builder, using the previous executable fallback heuristic.
 - Partial or malformed metadata is treated as an integrity error.
+- The fallback heuristic is **not** available to a `read_only_filesystem` service:
+  it cannot restore a uid or gid and cannot produce a device node, and a read-only
+  image offers no way to correct either from inside the guest. For those services
+  every key above is required on every entry, which this packer always emits.

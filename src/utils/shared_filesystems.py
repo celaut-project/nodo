@@ -299,6 +299,27 @@ def _reject_duplicate_names(declarations: List[SharedDir]) -> None:
             seen[d.share_name] = d.path
 
 
+def declarations_for_filesystem(
+    filesystem: celaut.Service.Container.Filesystem,
+) -> List[SharedDir]:
+    """All shared/guest declarations in a container filesystem tree.
+
+    Takes the tree itself rather than the service holding it, for the one caller
+    that has the tree and not yet the service: the packer builds
+    ``Container.Filesystem`` in memory and has to judge it *before* storing it as
+    a block, which is what ``load_container_filesystem`` would have to read back.
+    Same walk and same rules either way, so a declaration the packer refuses is
+    exactly one a node would have refused later.
+
+    Raises ``ValueError`` on anything a spec alone can be judged on: a malformed
+    xattr, a non-directory, a nested declaration, or two of them resolving to one
+    share.
+    """
+    declarations = _walk(filesystem, "/", None)
+    _reject_duplicate_names(declarations)
+    return declarations
+
+
 def declarations_for_service(service: celaut.Service) -> List[SharedDir]:
     """All shared/guest directory declarations in a service's container fs.
 
@@ -306,9 +327,7 @@ def declarations_for_service(service: celaut.Service) -> List[SharedDir]:
     xattr, a non-directory, a nested declaration, or two of them resolving to one
     share.
     """
-    declarations = _walk(load_container_filesystem(service), "/", None)
-    _reject_duplicate_names(declarations)
-    return declarations
+    return declarations_for_filesystem(load_container_filesystem(service))
 
 
 def exported_dirs(service: celaut.Service) -> List[SharedDir]:

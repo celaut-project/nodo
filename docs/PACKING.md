@@ -545,7 +545,26 @@ runtime, a config edited in place, state that outlives a boot — is a property 
 service does not have. The one thing that genuinely needs to be writable is `/tmp`,
 which is a tmpfs.
 
-A service that needs no more than that can say so, and stop paying for the rest:
+A service that needs no more than that can say so, and stop paying for the rest, with
+a top-level boolean in `service.json`:
+
+```json
+{
+    "architecture": "linux/amd64",
+    "read_only_filesystem": true,
+    "init": {
+        "entry_path": ["service", "start"]
+    }
+}
+```
+
+| | |
+|---|---|
+| **Type** | `boolean` |
+| **Required** | No |
+| **Default** | `false` |
+
+The packer translates that into
 
 ```
 Service.Container.Filesystem.xattrs["read_mode"] = "ro"
@@ -554,9 +573,21 @@ Service.Container.Filesystem.xattrs["read_mode"] = "ro"
 That is an xattr on the **filesystem itself** — a sibling of `branch`, distinct from
 the per-entry `ItemBranch.xattrs` — and only on the one `Container.filesystem` points
 at. A nested `Filesystem` (a subdirectory) is not separately mounted, so a `read_mode`
-set on one is ignored. Absent means `"rw"`, so every service packed before this key
-existed is unaffected; any value other than `"rw"` or `"ro"` is refused at build time
-rather than resolved to a default.
+set on one is ignored, and the packer does not write one there. Absent means `"rw"`,
+so every service packed before this key existed is unaffected; any value other than
+`"rw"` or `"ro"` is refused at build time rather than resolved to a default.
+
+`read_only_filesystem: false`, and the property being absent, are the same thing: the
+packer writes **no** `read_mode` key at all rather than `"rw"`. Absent already means
+`rw` to every reader, and the filesystem tree is hashed into the service id — so
+writing the default would give every existing service a new id on its next repack for
+no change in meaning.
+
+The value must be a JSON boolean. A string `"true"` is a packer error naming the
+field, not a yes: accepting it would mean accepting `"false"` as truthy too, and
+building a service the opposite way round from the one its author declared — the same
+reason `read_mode` itself refuses a value it does not recognise. The error is raised
+when `service.json` is read, before the image is built.
 
 **What changes for a `ro` service**
 
@@ -598,6 +629,22 @@ reject a service it is perfectly able to run.
 seeded with what the exporter packaged at that path, read out of its own image with
 `debugfs` — an ext4 reader, which cannot open a squashfs or erofs image. A service
 declaring both is refused rather than given an empty share.
+
+The packer refuses that combination **at pack time**, naming the exported paths, so
+the operator finds out before publishing a service that no node could start. It is
+the same condition the node checks at launch, read from the same declarations.
+Importing a directory (`guest: true`) is unaffected: it is mounted from the parent's
+share, with nothing read out of this service's own image, so it has no quarrel with
+an immutable rootfs.
+
+**Per-entry metadata is already handled.** The mandatory
+`mode`/`uid`/`gid`/`mtime_ns`/`device.*` keys above are not something a
+`read_only_filesystem` service has to arrange: this packer writes all of them on
+every branch it builds, root and nested alike, for every service. The completeness
+gate exists for trees produced by other packers and for services packed before the
+metadata contract existed. The packer asserts it anyway before setting the xattr, so
+that if that ever stops being true it says so rather than shipping a service every
+node would refuse.
 
 ---
 
