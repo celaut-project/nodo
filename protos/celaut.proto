@@ -206,6 +206,21 @@ message Service {
                 map<string, bytes> xattrs = 5;
             }
             repeated ItemBranch branch = 1;
+
+            // Metadata for the tree as a whole, distinct from ItemBranch.xattrs
+            // (which describes one file/dir/symlink entry). Only meaningful on
+            // the Filesystem referenced directly by Container.filesystem, i.e.
+            // the root of the tree; a nested Filesystem reached through
+            // ItemBranch.item.filesystem (a subdirectory) is not separately
+            // mounted, so any xattrs set there are ignored.
+            //
+            // Reserved keys:
+            //   read_mode: "rw" (default when absent) or "ro". "ro" is a
+            //     declaration that the built image needs no writable rootfs
+            //     capacity beyond /tmp; the node may build it with a
+            //     compressed, unpadded format (e.g. squashfs/erofs) instead of
+            //     a pre-sized ext4, and mount it read-only.
+            map<string, bytes> xattrs = 2;
         }
         
         message Init {
