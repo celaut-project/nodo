@@ -1651,38 +1651,81 @@ pub fn local_minute_of_day() -> u16 {
 /// Pure, and separate from `App::commit_schedule`, for the reason `chained_write` is:
 /// starting the write spawns a task, so a test that went through the method would need
 /// a runtime to ask the only question worth asking -- what would reach config.yaml.
-pub fn schedule_writes(window: schedule::Window) -> (String, Vec<(String, String)>) {
+///
+/// `WINDOWS` is written whole, as one flow-style YAML sequence, the same way a list
+/// lever writes its list (see `cell::path_segments`): the count of windows changes
+/// from one edit to the next, so there is no fixed set of per-window keys to assign
+/// into, only the list itself.
+pub fn schedule_writes(schedule: &schedule::Schedule) -> (String, Vec<(String, String)>) {
+    let windows_yaml = format!(
+        "[{}]",
+        schedule
+            .windows
+            .iter()
+            .map(|window| format!(
+                "{{START: \"{}\", END: \"{}\"}}",
+                schedule::format_clock(window.start),
+                schedule::format_clock(window.end),
+            ))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     let writes = vec![
         (
             "activity_window.ENABLED".to_string(),
-            window.enabled.to_string(),
+            schedule.enabled.to_string(),
         ),
-        (
-            "activity_window.START".to_string(),
-            schedule::format_clock(window.start),
-        ),
-        (
-            "activity_window.END".to_string(),
-            schedule::format_clock(window.end),
-        ),
+        ("activity_window.WINDOWS".to_string(), windows_yaml),
         (
             "activity_window.ON_CLOSE".to_string(),
-            window.on_close.as_str().to_string(),
+            schedule.on_close.as_str().to_string(),
         ),
     ];
-    // All four every time, including the ones that did not move: `yq` sets what it is
-    // given, and a window written as a partial set would leave the node running some of
-    // the old decision and some of the new.
-    let label = if window.always_open() {
+    // All three every time, including the ones that did not move: `yq` sets what it is
+    // given, and a schedule written as a partial set would leave the node running some
+    // of the old decision and some of the new.
+    let label = if schedule.always_open() {
         "Set schedule: always open".to_string()
-    } else {
+    } else if schedule.windows.len() == 1 {
+        let window = schedule.windows[0];
         format!(
             "Set schedule {} -> {}",
             schedule::format_clock(window.start),
             schedule::format_clock(window.end)
         )
+    } else {
+        format!("Set schedule: {} windows", schedule.windows.len())
     };
     (label, writes)
+}
+
+/// `activity_window.WINDOWS` as the page edits it: one [`schedule::Window`] per list
+/// entry, or none of them read at all if any entry cannot be parsed -- mirroring
+/// `activity_window.windows()`, which voids the whole schedule rather than only the
+/// entry that is wrong, so a typo cannot silently narrow the hours to whatever else
+/// happened to parse.
+fn schedule_windows_from_document(document: Option<&Value>) -> Vec<schedule::Window> {
+    let Some(sequence) =
+        yaml_at(document, &["activity_window", "WINDOWS"]).and_then(Value::as_sequence)
+    else {
+        return Vec::new();
+    };
+    let mut parsed = Vec::with_capacity(sequence.len());
+    for entry in sequence {
+        let start = entry
+            .get("START")
+            .and_then(Value::as_str)
+            .and_then(schedule::parse_clock);
+        let end = entry
+            .get("END")
+            .and_then(Value::as_str)
+            .and_then(schedule::parse_clock);
+        match (start, end) {
+            (Some(start), Some(end)) => parsed.push(schedule::Window { start, end }),
+            _ => return Vec::new(),
+        }
+    }
+    parsed
 }
 
 fn read_yaml(path: &Path) -> Result<Value, String> {
@@ -1698,6 +1741,17 @@ fn yaml_string(document: Option<&Value>, keys: &[&str]) -> Option<String> {
         value = value.get(*key)?;
     }
     value.as_str().map(ToString::to_string)
+}
+
+/// The value at a dotted path, whatever shape it is -- a mapping, a sequence, or a
+/// scalar. `yaml_string`/`yaml_scalar` stop at a leaf scalar; this is for a list like
+/// `activity_window.WINDOWS`, read whole rather than key by key.
+fn yaml_at<'a>(document: Option<&'a Value>, keys: &[&str]) -> Option<&'a Value> {
+    let mut value = document?;
+    for key in keys {
+        value = value.get(*key)?;
+    }
+    Some(value)
 }
 
 /// Read a scalar as text, whatever YAML type it happens to be.
@@ -1907,17 +1961,27 @@ pub struct App {
     pub prices: StatefulList<PriceEntry>,
     pub scarcity: Scarcity,
     pub money: Money,
-    /// Which edge of the working day the SCHEDULE page is moving, and the window as
-    /// edited but not yet applied.
+    /// Which window the SCHEDULE page is editing, which of its edges the arrows move,
+    /// and the schedule as edited but not yet applied.
     ///
-    /// A draft rather than a write per keypress: `activity_window.START` and `.END` are
-    /// one decision, and applying them one at a time would restart the node onto a
-    /// combination nobody chose -- 22:00→06:00 arrived at through 22:00→18:00, which is
-    /// a day shift the operator never asked for and which `ON_CLOSE: stop` would act
-    /// on. `write_config_values` exists for exactly this, so the page collects the
-    /// change and commits it once.
+    /// A draft rather than a write per keypress: `activity_window.ENABLED`, `.WINDOWS`
+    /// and `.ON_CLOSE` are one decision, and applying them one at a time would restart
+    /// the node onto a combination nobody chose -- 22:00→06:00 arrived at through
+    /// 22:00→18:00, which is a day shift the operator never asked for and which
+    /// `ON_CLOSE: stop` would act on. `write_config_values` exists for exactly this, so
+    /// the page collects the change and commits it once.
     pub schedule_edge: schedule::Edge,
-    pub schedule_draft: Option<schedule::Window>,
+    /// Index into `schedule().windows` of the window the arrows and `d` act on.
+    /// Clamped to the list's length every time it changes size.
+    pub schedule_selected: usize,
+    pub schedule_draft: Option<schedule::Schedule>,
+    /// Where the SCHEDULE page last drew each clickable element, so a click can be
+    /// mapped back to it. Written by `draw_schedule` each frame.
+    pub schedule_edge_areas: Vec<(usize, schedule::Edge, Rect)>,
+    pub schedule_remove_areas: Vec<(usize, Rect)>,
+    pub schedule_add_area: Rect,
+    pub schedule_enabled_area: Rect,
+    pub schedule_on_close_area: Rect,
     /// A month of demand folded onto the hours of a clock, drawn under the window on
     /// the SCHEDULE page so the hours can be chosen against what was actually asked
     /// for (issue #337).
@@ -2031,7 +2095,13 @@ impl Default for App {
             prices: StatefulList::with_items(prices),
             scarcity,
             schedule_edge: schedule::Edge::Start,
+            schedule_selected: 0,
             schedule_draft: None,
+            schedule_edge_areas: Vec::new(),
+            schedule_remove_areas: Vec::new(),
+            schedule_add_area: Rect::ZERO,
+            schedule_enabled_area: Rect::ZERO,
+            schedule_on_close_area: Rect::ZERO,
             now_minute: local_minute_of_day(),
             demand: DemandByHour::default(),
             demand_days: DEMAND_HISTORY_DAYS,
@@ -2229,8 +2299,51 @@ impl App {
             self.click_cell(position);
             return;
         }
+        if self.page() == Page::Schedule {
+            self.click_schedule(position);
+            return;
+        }
         if let Some(visible) = visible_row_at(row, self.list_area) {
             self.select_visible_row(visible);
+        }
+    }
+
+    /// Route a click on the SCHEDULE page: an edge label selects that window and
+    /// edge, an `x` removes its window, `+ add window` appends one, and the enabled /
+    /// on-close lines toggle exactly as their keys do. Geometry comes from the areas
+    /// `draw_schedule` recorded last frame.
+    fn click_schedule(&mut self, position: Position) {
+        if let Some((index, edge, _)) = self
+            .schedule_edge_areas
+            .iter()
+            .find(|(_, _, area)| area.contains(position))
+            .copied()
+        {
+            self.schedule_selected = index;
+            self.schedule_edge = edge;
+            self.status = format!("Moving when window {} {}", index + 1, edge.label());
+            return;
+        }
+        if let Some((index, _)) = self
+            .schedule_remove_areas
+            .iter()
+            .find(|(_, area)| area.contains(position))
+            .copied()
+        {
+            self.schedule_selected = index;
+            self.remove_schedule_window();
+            return;
+        }
+        if self.schedule_add_area.contains(position) {
+            self.add_schedule_window();
+            return;
+        }
+        if self.schedule_enabled_area.contains(position) {
+            self.toggle_schedule_enabled();
+            return;
+        }
+        if self.schedule_on_close_area.contains(position) {
+            self.toggle_schedule_on_close();
         }
     }
 
@@ -3361,50 +3474,58 @@ impl App {
     /// Read from `config_document` rather than mirrored into a field of its own: that
     /// document is already reloaded after every write, and a second copy would be one
     /// more thing that can disagree with the file the node actually booted with.
-    pub fn schedule_window(&self) -> schedule::Window {
-        if let Some(draft) = self.schedule_draft {
+    pub fn schedule(&self) -> schedule::Schedule {
+        if let Some(draft) = self.schedule_draft.clone() {
             return draft;
         }
         self.schedule_saved()
     }
 
-    /// The window on disk, ignoring any unapplied edit.
-    pub fn schedule_saved(&self) -> schedule::Window {
+    /// The schedule on disk, ignoring any unapplied edit.
+    pub fn schedule_saved(&self) -> schedule::Schedule {
         let document = self.config_document.as_ref();
-        let clock = |key: &str| {
-            yaml_scalar(document, &["activity_window", key])
-                .as_deref()
-                .and_then(schedule::parse_clock)
-        };
-        schedule::Window {
+        schedule::Schedule {
             enabled: yaml_scalar(document, &["activity_window", "ENABLED"])
                 .map(|value| value.trim().eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
-            // An unparseable hour cannot be drawn, and it cannot reach a running node
-            // either: `config_validation` stops the node on it. Falling back to
-            // midnight shows the day as always open, which is what a node with no
-            // usable window does.
-            start: clock("START").unwrap_or(0),
-            end: clock("END").unwrap_or(0),
             on_close: schedule::OnClose::parse(
                 &yaml_scalar(document, &["activity_window", "ON_CLOSE"]).unwrap_or_default(),
             ),
+            windows: schedule_windows_from_document(document),
+        }
+    }
+
+    /// The window `schedule_selected` points at, clamped to what the schedule
+    /// actually holds -- the list can shrink out from under a stale index between one
+    /// frame and the next.
+    fn selected_schedule_window(&self, schedule: &schedule::Schedule) -> Option<usize> {
+        if schedule.windows.is_empty() {
+            None
+        } else {
+            Some(self.schedule_selected.min(schedule.windows.len() - 1))
         }
     }
 
     /// Whether the page holds an edit that the node is not running yet.
     pub fn schedule_is_dirty(&self) -> bool {
         self.schedule_draft
-            .map(|draft| draft != self.schedule_saved())
+            .as_ref()
+            .map(|draft| draft != &self.schedule_saved())
             .unwrap_or(false)
     }
 
-    /// Move the selected edge by `steps` half-hours, in the draft.
+    /// Move the selected edge of the selected window by `steps` half-hours, in the
+    /// draft. A no-op with no window to move: `a` adds one first.
     pub fn nudge_schedule(&mut self, steps: i32) {
         if self.page() != Page::Schedule {
             return;
         }
-        let mut window = self.schedule_window();
+        let mut schedule = self.schedule();
+        let Some(index) = self.selected_schedule_window(&schedule) else {
+            self.status = "No window yet — press `a` to add one".to_string();
+            return;
+        };
+        let window = &mut schedule.windows[index];
         // Snapped on the first nudge so an hour typed into the file by hand -- 22:17 --
         // lands on the grid the cursor moves along, instead of carrying its odd minutes
         // through every later edit.
@@ -3413,7 +3534,7 @@ impl App {
             schedule::Edge::End => &mut window.end,
         };
         *edge = schedule::nudge(schedule::snap(*edge), steps);
-        self.schedule_draft = Some(window);
+        self.schedule_draft = Some(schedule);
         self.status = self.schedule_draft_status();
     }
 
@@ -3423,17 +3544,63 @@ impl App {
             return;
         }
         self.schedule_edge = self.schedule_edge.other();
-        self.status = format!("Moving when the node {}", self.schedule_edge.label());
+        self.status = format!("Moving when the selected window {}", self.schedule_edge.label());
     }
 
-    /// Turn the window on or off, in the draft.
+    /// Select the next (`steps > 0`) or previous window, wrapping. A no-op with fewer
+    /// than two windows.
+    pub fn select_schedule_window(&mut self, steps: i32) {
+        if self.page() != Page::Schedule {
+            return;
+        }
+        let schedule = self.schedule();
+        let count = schedule.windows.len();
+        if count < 2 {
+            return;
+        }
+        let current = self.selected_schedule_window(&schedule).unwrap_or(0) as i32;
+        self.schedule_selected = (current + steps).rem_euclid(count as i32) as usize;
+        self.status = format!("Window {} of {count} selected", self.schedule_selected + 1);
+    }
+
+    /// Append a new, empty window (both edges at 00:00, contributing no hours) and
+    /// select it, in the draft.
+    pub fn add_schedule_window(&mut self) {
+        if self.page() != Page::Schedule {
+            return;
+        }
+        let mut schedule = self.schedule();
+        schedule.windows.push(schedule::Window::default());
+        self.schedule_selected = schedule.windows.len() - 1;
+        self.schedule_edge = schedule::Edge::Start;
+        self.schedule_draft = Some(schedule);
+        self.status = self.schedule_draft_status();
+    }
+
+    /// Remove the selected window, in the draft.
+    pub fn remove_schedule_window(&mut self) {
+        if self.page() != Page::Schedule {
+            return;
+        }
+        let mut schedule = self.schedule();
+        let Some(index) = self.selected_schedule_window(&schedule) else {
+            self.status = "No window to remove".to_string();
+            return;
+        };
+        schedule.windows.remove(index);
+        self.schedule_selected = index.saturating_sub(if index >= schedule.windows.len() { 1 } else { 0 });
+        self.schedule_draft = Some(schedule);
+        self.status = self.schedule_draft_status();
+    }
+
+    /// Turn the schedule on or off, in the draft.
     pub fn toggle_schedule_enabled(&mut self) {
         if self.page() != Page::Schedule {
             return;
         }
-        let mut window = self.schedule_window();
-        window.enabled = !window.enabled;
-        self.schedule_draft = Some(window);
+        let mut schedule = self.schedule();
+        schedule.enabled = !schedule.enabled;
+        self.schedule_draft = Some(schedule);
         self.status = self.schedule_draft_status();
     }
 
@@ -3442,12 +3609,12 @@ impl App {
         if self.page() != Page::Schedule {
             return;
         }
-        let mut window = self.schedule_window();
-        window.on_close = match window.on_close {
+        let mut schedule = self.schedule();
+        schedule.on_close = match schedule.on_close {
             schedule::OnClose::Refuse => schedule::OnClose::Stop,
             schedule::OnClose::Stop => schedule::OnClose::Refuse,
         };
-        self.schedule_draft = Some(window);
+        self.schedule_draft = Some(schedule);
         self.status = self.schedule_draft_status();
     }
 
@@ -3459,20 +3626,19 @@ impl App {
     }
 
     fn schedule_draft_status(&self) -> String {
-        let window = self.schedule_window();
+        let schedule = self.schedule();
         if self.schedule_is_dirty() {
             format!(
-                "{} -> {} ({}) - Enter applies, Esc discards",
-                schedule::format_clock(window.start),
-                schedule::format_clock(window.end),
-                window.open_duration(),
+                "{} window(s), {} a day - Enter applies, Esc discards",
+                schedule.windows.len(),
+                schedule.open_duration(),
             )
         } else {
             "Schedule matches the running node".to_string()
         }
     }
 
-    /// Apply the edited window: one backup, one write, one restart.
+    /// Apply the edited schedule: one backup, one write, one restart.
     pub fn commit_schedule(&mut self) {
         if self.page() != Page::Schedule {
             return;
@@ -3481,7 +3647,7 @@ impl App {
             self.status = "Busy: a configuration change is being applied".to_string();
             return;
         }
-        let Some(draft) = self.schedule_draft else {
+        let Some(draft) = self.schedule_draft.clone() else {
             self.status = "Nothing to apply".to_string();
             return;
         };
@@ -3491,7 +3657,7 @@ impl App {
             return;
         }
 
-        let (label, writes) = schedule_writes(draft);
+        let (label, writes) = schedule_writes(&draft);
         self.schedule_draft = None;
         self.write_config_values(label, &writes, ConfigFollowUp::None);
     }
@@ -7549,17 +7715,28 @@ ergo: Cold Wallet: 9cold\n";
             app
         }
 
-        const NIGHT: &str = "activity_window:\n  ENABLED: true\n  START: '22:00'\n  END: '06:00'\n  ON_CLOSE: refuse\n";
+        const NIGHT: &str = "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '22:00'\n      END: '06:00'\n  ON_CLOSE: refuse\n";
+        const SPLIT: &str = "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '22:00'\n      END: '06:00'\n    - START: '12:00'\n      END: '13:00'\n  ON_CLOSE: refuse\n";
 
         #[test]
-        fn the_window_is_read_from_the_config_document() {
+        fn the_schedule_is_read_from_the_config_document() {
             let app = on_schedule_page(NIGHT);
-            let window = app.schedule_window();
-            assert!(window.enabled);
-            assert_eq!(window.start, parse_clock("22:00").unwrap());
-            assert_eq!(window.end, parse_clock("06:00").unwrap());
-            assert_eq!(window.on_close, OnClose::Refuse);
+            let schedule = app.schedule();
+            assert!(schedule.enabled);
+            assert_eq!(schedule.windows.len(), 1);
+            assert_eq!(schedule.windows[0].start, parse_clock("22:00").unwrap());
+            assert_eq!(schedule.windows[0].end, parse_clock("06:00").unwrap());
+            assert_eq!(schedule.on_close, OnClose::Refuse);
             assert!(!app.schedule_is_dirty());
+        }
+
+        #[test]
+        fn every_window_is_read_from_the_list() {
+            let app = on_schedule_page(SPLIT);
+            let schedule = app.schedule();
+            assert_eq!(schedule.windows.len(), 2);
+            assert_eq!(schedule.windows[1].start, parse_clock("12:00").unwrap());
+            assert_eq!(schedule.windows[1].end, parse_clock("13:00").unwrap());
         }
 
         #[test]
@@ -7568,31 +7745,35 @@ ergo: Cold Wallet: 9cold\n";
             // unparseable hour looks like too, since it cannot reach a running node:
             // `config_validation` stops the node on one.
             let app = on_schedule_page("network:\n  GATEWAY_PORT: 4040\n");
-            assert!(app.schedule_window().always_open());
+            assert!(app.schedule().always_open());
             assert!(!app.schedule_is_dirty());
         }
 
         #[test]
-        fn the_arrows_move_the_selected_edge_only() {
+        fn the_arrows_move_the_selected_edge_of_the_selected_window_only() {
             let mut app = on_schedule_page(NIGHT);
             assert_eq!(app.schedule_edge, Edge::Start);
 
             app.on_right();
-            let window = app.schedule_window();
-            assert_eq!(window.start, parse_clock("22:30").unwrap());
-            assert_eq!(window.end, parse_clock("06:00").unwrap(), "the far edge stayed");
+            let schedule = app.schedule();
+            assert_eq!(schedule.windows[0].start, parse_clock("22:30").unwrap());
+            assert_eq!(
+                schedule.windows[0].end,
+                parse_clock("06:00").unwrap(),
+                "the far edge stayed"
+            );
 
             app.on_up();
             assert_eq!(app.schedule_edge, Edge::End);
             app.on_left();
-            let window = app.schedule_window();
-            assert_eq!(window.start, parse_clock("22:30").unwrap());
-            assert_eq!(window.end, parse_clock("05:30").unwrap());
+            let schedule = app.schedule();
+            assert_eq!(schedule.windows[0].start, parse_clock("22:30").unwrap());
+            assert_eq!(schedule.windows[0].end, parse_clock("05:30").unwrap());
         }
 
         #[test]
         fn an_edit_is_held_rather_than_applied_per_keypress() {
-            // Applying each nudge would restart the node onto a window nobody chose:
+            // Applying each nudge would restart the node onto a schedule nobody chose:
             // 22:00→06:00 reached from 22:00→18:00 is a day shift, and `ON_CLOSE: stop`
             // would act on it.
             let mut app = on_schedule_page(NIGHT);
@@ -7605,88 +7786,135 @@ ergo: Cold Wallet: 9cold\n";
                 "moving an edge started a configuration write"
             );
             assert_eq!(
-                app.schedule_saved().start,
+                app.schedule_saved().windows[0].start,
                 parse_clock("22:00").unwrap(),
                 "the file was changed before Enter"
             );
         }
 
         #[test]
-        fn esc_gives_the_edit_up_and_leaves_the_saved_window() {
+        fn esc_gives_the_edit_up_and_leaves_the_saved_schedule() {
             let mut app = on_schedule_page(NIGHT);
             app.on_right();
             app.discard_schedule_draft();
 
             assert!(!app.schedule_is_dirty());
-            assert_eq!(app.schedule_window().start, parse_clock("22:00").unwrap());
+            assert_eq!(app.schedule().windows[0].start, parse_clock("22:00").unwrap());
         }
 
         #[test]
         fn an_hour_typed_by_hand_snaps_onto_the_grid_when_first_moved() {
             let mut app = on_schedule_page(
-                "activity_window:\n  ENABLED: true\n  START: '22:17'\n  END: '06:00'\n",
+                "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '22:17'\n      END: '06:00'\n",
             );
             assert_eq!(
-                app.schedule_window().start,
+                app.schedule().windows[0].start,
                 parse_clock("22:17").unwrap(),
                 "shown as the file spells it"
             );
 
             app.on_right();
             assert_eq!(
-                app.schedule_window().start,
+                app.schedule().windows[0].start,
                 parse_clock("23:00").unwrap(),
                 "22:17 snaps to 22:30, then moves half an hour"
             );
         }
 
         #[test]
-        fn w_turns_the_window_on_without_touching_its_hours() {
+        fn w_turns_the_schedule_on_without_touching_its_hours() {
             let mut app = on_schedule_page(
-                "activity_window:\n  ENABLED: false\n  START: '09:00'\n  END: '18:00'\n",
+                "activity_window:\n  ENABLED: false\n  WINDOWS:\n    - START: '09:00'\n      END: '18:00'\n",
             );
-            assert!(app.schedule_window().always_open(), "off means open");
+            assert!(app.schedule().always_open(), "off means open");
 
             app.toggle_schedule_enabled();
-            let window = app.schedule_window();
-            assert!(window.enabled);
-            assert!(!window.always_open());
-            assert_eq!(window.start, parse_clock("09:00").unwrap());
-            assert_eq!(window.end, parse_clock("18:00").unwrap());
+            let schedule = app.schedule();
+            assert!(schedule.enabled);
+            assert!(!schedule.always_open());
+            assert_eq!(schedule.windows[0].start, parse_clock("09:00").unwrap());
+            assert_eq!(schedule.windows[0].end, parse_clock("18:00").unwrap());
         }
 
         #[test]
         fn c_swaps_what_closing_time_does() {
             let mut app = on_schedule_page(NIGHT);
             app.toggle_schedule_on_close();
-            assert_eq!(app.schedule_window().on_close, OnClose::Stop);
+            assert_eq!(app.schedule().on_close, OnClose::Stop);
             app.toggle_schedule_on_close();
-            assert_eq!(app.schedule_window().on_close, OnClose::Refuse);
+            assert_eq!(app.schedule().on_close, OnClose::Refuse);
         }
 
         #[test]
-        fn applying_writes_all_four_keys_as_one_change() {
-            // One backup, one yq run, one restart: the four keys are one decision, and
-            // a node restarted between them would be running a combination nobody
+        fn a_adds_an_empty_window_that_refuses_nothing_until_moved() {
+            let mut app = on_schedule_page(NIGHT);
+            app.add_schedule_window();
+            let schedule = app.schedule();
+            assert_eq!(schedule.windows.len(), 2);
+            assert!(schedule.windows[1].is_empty());
+            // The new window is selected, and its Start edge, so the arrows reach it
+            // immediately rather than the operator having to find it first.
+            assert_eq!(app.schedule_selected, 1);
+            assert_eq!(app.schedule_edge, Edge::Start);
+        }
+
+        #[test]
+        fn d_removes_the_selected_window() {
+            let mut app = on_schedule_page(SPLIT);
+            app.select_schedule_window(1);
+            assert_eq!(app.schedule_selected, 1);
+            app.remove_schedule_window();
+            let schedule = app.schedule();
+            assert_eq!(schedule.windows.len(), 1);
+            assert_eq!(schedule.windows[0].start, parse_clock("22:00").unwrap());
+        }
+
+        #[test]
+        fn brackets_cycle_the_selected_window_and_wrap() {
+            let mut app = on_schedule_page(SPLIT);
+            assert_eq!(app.schedule_selected, 0);
+            app.select_schedule_window(1);
+            assert_eq!(app.schedule_selected, 1);
+            app.select_schedule_window(1);
+            assert_eq!(app.schedule_selected, 0, "wraps back to the first window");
+            app.select_schedule_window(-1);
+            assert_eq!(app.schedule_selected, 1, "wraps the other way too");
+        }
+
+        #[test]
+        fn the_node_is_open_in_either_window_of_a_split_schedule() {
+            let app = on_schedule_page(SPLIT);
+            let schedule = app.schedule();
+            assert!(schedule.contains(parse_clock("23:00").unwrap()));
+            assert!(schedule.contains(parse_clock("12:30").unwrap()));
+            assert!(!schedule.contains(parse_clock("09:00").unwrap()));
+        }
+
+        #[test]
+        fn applying_writes_the_windows_list_as_one_change() {
+            // One backup, one yq run, one restart: the whole schedule is one decision,
+            // and a node restarted mid-edit would be running a combination nobody
             // picked -- 22:00→06:00 arrived at through 22:00→18:00 is a day shift, and
             // `ON_CLOSE: stop` would act on it.
             let mut app = on_schedule_page(NIGHT);
             app.on_right();
             app.toggle_schedule_on_close();
 
-            let (_, writes) = schedule_writes(app.schedule_window());
+            let (_, writes) = schedule_writes(&app.schedule());
             let keys: Vec<&str> = writes.iter().map(|(key, _)| key.as_str()).collect();
             assert_eq!(
                 keys,
                 vec![
                     "activity_window.ENABLED",
-                    "activity_window.START",
-                    "activity_window.END",
+                    "activity_window.WINDOWS",
                     "activity_window.ON_CLOSE",
                 ]
             );
             let written: Vec<&str> = writes.iter().map(|(_, value)| value.as_str()).collect();
-            assert_eq!(written, vec!["true", "22:30", "06:00", "stop"]);
+            assert_eq!(written[0], "true");
+            assert!(written[1].contains("22:30"), "{}", written[1]);
+            assert!(written[1].contains("06:00"), "{}", written[1]);
+            assert_eq!(written[2], "stop");
         }
 
         #[test]
@@ -7710,19 +7938,28 @@ ergo: Cold Wallet: 9cold\n";
         fn the_label_says_what_is_being_applied() {
             let mut app = on_schedule_page(NIGHT);
             app.on_right();
-            let (label, _) = schedule_writes(app.schedule_window());
+            let (label, _) = schedule_writes(&app.schedule());
             assert!(
                 label.contains(&format_clock(parse_clock("22:30").unwrap())),
                 "label: {label}"
             );
 
-            let always = schedule::Window {
-                enabled: false,
-                ..app.schedule_window()
-            };
+            let mut always = app.schedule();
+            always.enabled = false;
             assert!(
-                schedule_writes(always).0.contains("always open"),
-                "a window that refuses nothing should say so"
+                schedule_writes(&always).0.contains("always open"),
+                "a schedule that refuses nothing should say so"
+            );
+
+            let mut several = app.schedule();
+            several.windows.push(schedule::Window {
+                start: parse_clock("12:00").unwrap(),
+                end: parse_clock("13:00").unwrap(),
+            });
+            assert!(
+                schedule_writes(&several).0.contains("2 windows"),
+                "label: {}",
+                schedule_writes(&several).0
             );
         }
     }
