@@ -12,6 +12,12 @@ if [ -z "$TARGET_DIR" ]; then
     exit 1
 fi
 
+# install.sh always calls this script from inside TARGET_DIR, but nothing stops
+# an operator from re-running it by hand after a failed install -- and several
+# steps below (notably the migration) rely on config.yaml being found via its
+# default, cwd-relative path. Enforce it here instead of trusting the caller.
+cd "$TARGET_DIR" || { echo "Error: Failed to change directory to $TARGET_DIR." >&2; exit 1; }
+
 CH_VERSION="${2:-v51.1}"
 # Default matches install.sh and bash/guest-kernel/SHA256SUMS.pinned (TAG). The
 # pinned digests are checked against this tag, so the three must agree; running
