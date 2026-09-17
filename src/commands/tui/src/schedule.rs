@@ -1,20 +1,22 @@
 //! The hours this node takes work in, as something you can see.
 //!
-//! `activity_window` is two times of day and a closing policy, and typed into two
-//! separate fields it reads as two unrelated numbers: that `START 22:00` with
+//! `activity_window` is a list of windows and a closing policy, and typed into flat
+//! fields it reads as two unrelated numbers per window: that `START 22:00` with
 //! `END 06:00` means "open all night" is a fact about the code, not about anything on
 //! screen. The same is true of the two answers an operator actually wants — is it open
 //! *now*, and how many hours a day is this machine being rented out — neither of which
-//! is a value in the file.
+//! is a value in the file. And a night shift plus a weekday lunch break is two windows,
+//! not one, so the page has to draw more than a single stretch of the day.
 //!
 //! So the page draws the day and this module is the arithmetic behind it. Kept apart
 //! from the drawing because the wrap-around is the part worth testing, and a test that
 //! has to build a `Frame` to ask "is 03:00 inside 22:00→06:00" tests the wrong thing.
 //!
 //! Mirrors `src/utils/activity_window.py`, which is what the node actually enforces:
-//! `parse_clock` accepts the same spellings, START is inclusive, END exclusive, and a
-//! window whose end precedes its start is one night rather than an empty set. Where the
-//! two must agree, they agree by both being tested against the same cases.
+//! `parse_clock` accepts the same spellings, START is inclusive, END exclusive, a window
+//! whose end precedes its start is one night rather than an empty set, and the node is
+//! open whenever the clock falls inside *any* configured window. Where the two must
+//! agree, they agree by both being tested against the same cases.
 
 pub const MINUTES_PER_DAY: u16 = 24 * 60;
 
@@ -80,45 +82,34 @@ pub fn format_clock(minutes: u16) -> String {
     format!("{:02}:{:02}", wrapped / 60, wrapped % 60)
 }
 
-/// The hours this node works, as the config file states them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// One open stretch of the day, as the config file states it.
+///
+/// Bare `START`/`END`: whether it is enforced at all and what happens at closing time
+/// are properties of the whole [`Schedule`], not of one entry in its list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Window {
-    pub enabled: bool,
     pub start: u16,
     pub end: u16,
-    pub on_close: OnClose,
-}
-
-impl Default for Window {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            start: 0,
-            end: 0,
-            on_close: OnClose::Refuse,
-        }
-    }
 }
 
 impl Window {
-    /// True while nothing is being refused: the window is off, or it is the whole day.
-    ///
-    /// `START == END` reads as always open rather than as never open, which is what
-    /// lets an operator enable this before choosing the hours without locking the node
-    /// out of its own network.
-    pub fn always_open(&self) -> bool {
-        !self.enabled || self.start == self.end
+    /// A freshly added window, or one whose two edges were never moved apart: it
+    /// contributes no hours rather than reading as a whole day. That is the safe
+    /// default -- appending a window must not silently open the node 24/7 before its
+    /// hours are chosen, the way a lone window's equal edges used to.
+    pub fn is_empty(&self) -> bool {
+        self.start == self.end
     }
 
-    /// Whether the window runs through midnight, which is one window and not two.
+    /// Whether this window runs through midnight, which is one window and not two.
     pub fn wraps(&self) -> bool {
-        !self.always_open() && self.end < self.start
+        !self.is_empty() && self.end < self.start
     }
 
-    /// Whether `minute` of the day falls inside the window.
+    /// Whether `minute` of the day falls inside this window.
     pub fn contains(&self, minute: u16) -> bool {
-        if self.always_open() {
-            return true;
+        if self.is_empty() {
+            return false;
         }
         let minute = minute % MINUTES_PER_DAY;
         if self.start < self.end {
@@ -128,16 +119,62 @@ impl Window {
         }
     }
 
-    /// How much of the day the node is open for, in minutes.
+    /// How many minutes of the day this window alone covers.
     pub fn open_minutes(&self) -> u16 {
-        if self.always_open() {
-            return MINUTES_PER_DAY;
+        if self.is_empty() {
+            return 0;
         }
         if self.start < self.end {
             self.end - self.start
         } else {
             MINUTES_PER_DAY - self.start + self.end
         }
+    }
+}
+
+/// The whole `activity_window` section: the switch, what closing time does, and every
+/// window it is enforced through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Schedule {
+    pub enabled: bool,
+    pub on_close: OnClose,
+    pub windows: Vec<Window>,
+}
+
+impl Default for Schedule {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            on_close: OnClose::Refuse,
+            windows: Vec::new(),
+        }
+    }
+}
+
+impl Schedule {
+    /// True while nothing is being refused: the section is off, there are no windows,
+    /// or every one of them is empty (see [`Window::is_empty`]).
+    pub fn always_open(&self) -> bool {
+        !self.enabled || self.windows.iter().all(Window::is_empty)
+    }
+
+    /// Whether `minute` of the day is inside any configured window.
+    pub fn contains(&self, minute: u16) -> bool {
+        if self.always_open() {
+            return true;
+        }
+        self.windows.iter().any(|window| window.contains(minute))
+    }
+
+    /// How much of the day the node is open for, in minutes -- the union of every
+    /// window, so two overlapping ones do not count the same minute twice.
+    pub fn open_minutes(&self) -> u16 {
+        if self.always_open() {
+            return MINUTES_PER_DAY;
+        }
+        (0..MINUTES_PER_DAY)
+            .filter(|&minute| self.contains(minute))
+            .count() as u16
     }
 
     /// `open_minutes` as `Hh MMm`, for a line an operator reads rather than computes.
@@ -151,23 +188,26 @@ impl Window {
         }
     }
 
-    /// Minutes until the state flips, from `minute`: how long until it closes when
-    /// open, until it opens when closed. None while nothing ever changes.
+    /// Minutes until the open/closed state flips, from `minute`. None while nothing
+    /// ever changes -- switched off, no usable windows, or windows that between them
+    /// cover the whole day.
     pub fn minutes_until_flip(&self, minute: u16) -> Option<u16> {
         if self.always_open() {
             return None;
         }
         let minute = minute % MINUTES_PER_DAY;
-        let edge = if self.contains(minute) {
-            self.end
-        } else {
-            self.start
-        };
-        Some((edge + MINUTES_PER_DAY - minute) % MINUTES_PER_DAY)
+        let now_open = self.contains(minute);
+        for offset in 1..=MINUTES_PER_DAY {
+            let candidate = (minute + offset) % MINUTES_PER_DAY;
+            if self.contains(candidate) != now_open {
+                return Some(offset);
+            }
+        }
+        None
     }
 }
 
-/// Which edge of the window an edit moves.
+/// Which edge of a window an edit moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
     Start,
@@ -200,8 +240,8 @@ impl Edge {
 /// Move a time of day by `steps` of `STEP_MINUTES`, wrapping at midnight.
 ///
 /// Wrapping rather than clamping, because the edges of this value are the same instant:
-/// nudging 00:00 back an hour means 23:00, and clamping it at 00:00 would make the
-/// night shift unreachable from one direction.
+/// nudging 00:00 back an hour means 23:00, and clamping it at 00:00 would put the night
+/// shift out of reach from one direction.
 pub fn nudge(minute: u16, steps: i32) -> u16 {
     let day = i32::from(MINUTES_PER_DAY);
     let moved = i32::from(minute % MINUTES_PER_DAY) + steps * i32::from(STEP_MINUTES);
@@ -220,12 +260,17 @@ pub fn snap(minute: u16) -> u16 {
 mod tests {
     use super::*;
 
-    fn window(start: &str, end: &str) -> Window {
-        Window {
+    fn schedule(windows: &[(&str, &str)]) -> Schedule {
+        Schedule {
             enabled: true,
-            start: parse_clock(start).unwrap(),
-            end: parse_clock(end).unwrap(),
             on_close: OnClose::Refuse,
+            windows: windows
+                .iter()
+                .map(|(start, end)| Window {
+                    start: parse_clock(start).unwrap(),
+                    end: parse_clock(end).unwrap(),
+                })
+                .collect(),
         }
     }
 
@@ -255,12 +300,12 @@ mod tests {
 
     #[test]
     fn a_daytime_window_holds_its_own_hours() {
-        let day = window("09:00", "18:00");
+        let day = schedule(&[("09:00", "18:00")]);
         assert!(day.contains(parse_clock("09:00").unwrap()), "START is inclusive");
         assert!(day.contains(parse_clock("17:59").unwrap()));
         assert!(!day.contains(parse_clock("18:00").unwrap()), "END is exclusive");
         assert!(!day.contains(parse_clock("08:59").unwrap()));
-        assert!(!day.wraps());
+        assert!(!day.windows[0].wraps());
         assert_eq!(day.open_minutes(), 9 * 60);
     }
 
@@ -268,8 +313,8 @@ mod tests {
     fn a_night_shift_is_one_window_and_not_an_empty_set() {
         // The case the whole page exists for: two fields showing 22:00 and 06:00 say
         // nothing about this being a single stretch through midnight.
-        let night = window("22:00", "06:00");
-        assert!(night.wraps());
+        let night = schedule(&[("22:00", "06:00")]);
+        assert!(night.windows[0].wraps());
         for open in ["22:00", "23:59", "00:00", "03:00", "05:59"] {
             assert!(night.contains(parse_clock(open).unwrap()), "{open} should be open");
         }
@@ -281,22 +326,56 @@ mod tests {
     }
 
     #[test]
-    fn equal_edges_are_always_open() {
-        // Not never open: enabling the window before choosing the hours must refuse
-        // nothing, or an operator locks the node out of its own network by accident.
-        let same = window("13:00", "13:00");
-        assert!(same.always_open());
-        assert!(same.contains(0));
-        assert!(same.contains(parse_clock("13:00").unwrap()));
-        assert_eq!(same.open_minutes(), MINUTES_PER_DAY);
-        assert!(!same.wraps());
+    fn the_node_is_open_in_any_of_several_windows() {
+        // A night shift and a weekday lunch break: two unrelated open stretches.
+        let split = schedule(&[("22:00", "06:00"), ("12:00", "13:00")]);
+        assert!(split.contains(parse_clock("23:00").unwrap()));
+        assert!(split.contains(parse_clock("12:30").unwrap()));
+        assert!(!split.contains(parse_clock("09:00").unwrap()));
+        assert!(!split.contains(parse_clock("18:00").unwrap()));
+        assert_eq!(split.open_minutes(), 9 * 60);
     }
 
     #[test]
-    fn a_disabled_window_is_open_whatever_its_hours_say() {
-        let off = Window {
+    fn overlapping_windows_do_not_double_count_their_shared_minutes() {
+        let overlap = schedule(&[("09:00", "13:00"), ("11:00", "15:00")]);
+        assert_eq!(overlap.open_minutes(), 6 * 60);
+    }
+
+    #[test]
+    fn equal_edges_are_dropped_rather_than_read_as_a_whole_day() {
+        // Not "always open": a degenerate entry contributes nothing, so a second entry
+        // can still say what the real hours are.
+        let empty = schedule(&[("13:00", "13:00")]);
+        assert!(empty.windows[0].is_empty());
+        assert!(empty.always_open());
+        assert!(empty.contains(0));
+        assert_eq!(empty.open_minutes(), MINUTES_PER_DAY);
+
+        let mixed = schedule(&[("13:00", "13:00"), ("09:00", "10:00")]);
+        assert!(!mixed.always_open());
+        assert!(mixed.contains(parse_clock("09:30").unwrap()));
+        assert!(!mixed.contains(parse_clock("13:00").unwrap()));
+        assert_eq!(mixed.open_minutes(), 60);
+    }
+
+    #[test]
+    fn no_windows_at_all_is_always_open() {
+        let none = Schedule {
+            enabled: true,
+            on_close: OnClose::Refuse,
+            windows: Vec::new(),
+        };
+        assert!(none.always_open());
+        assert!(none.contains(parse_clock("03:00").unwrap()));
+        assert_eq!(none.minutes_until_flip(0), None);
+    }
+
+    #[test]
+    fn a_disabled_schedule_is_open_whatever_its_windows_say() {
+        let off = Schedule {
             enabled: false,
-            ..window("09:00", "10:00")
+            ..schedule(&[("09:00", "10:00")])
         };
         assert!(off.always_open());
         assert!(off.contains(parse_clock("03:00").unwrap()));
@@ -305,7 +384,7 @@ mod tests {
 
     #[test]
     fn the_next_flip_counts_forward_across_midnight() {
-        let night = window("22:00", "06:00");
+        let night = schedule(&[("22:00", "06:00")]);
         // Open at 23:00, closing at 06:00: seven hours.
         assert_eq!(night.minutes_until_flip(parse_clock("23:00").unwrap()), Some(7 * 60));
         // Closed at 21:00, opening at 22:00.
@@ -313,6 +392,13 @@ mod tests {
         // On the closing edge itself the node is already closed, so the wait is until
         // it opens again.
         assert_eq!(night.minutes_until_flip(parse_clock("06:00").unwrap()), Some(16 * 60));
+    }
+
+    #[test]
+    fn the_next_flip_looks_past_the_nearer_window_to_the_next_one() {
+        let split = schedule(&[("22:00", "06:00"), ("12:00", "13:00")]);
+        // At 07:00 the night shift is long closed; the lunch window opens next.
+        assert_eq!(split.minutes_until_flip(parse_clock("07:00").unwrap()), Some(5 * 60));
     }
 
     #[test]

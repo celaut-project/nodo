@@ -614,15 +614,29 @@ about renting this machine out after hours, not about locking its owner out of i
 | Key | Default | Meaning |
 |---|---|---|
 | `activity_window.ENABLED` | `false` | Master switch. |
-| `activity_window.START` | `"00:00"` | Local time, `HH:MM`, inclusive. |
-| `activity_window.END` | `"00:00"` | Local time, `HH:MM`, exclusive. Earlier than `START` wraps around midnight: `22:00`–`06:00` is one window, open all night. Equal to `START` means always open, so enabling the section before choosing the hours refuses nothing. |
-| `activity_window.ON_CLOSE` | `refuse` | `refuse` stops taking new work and leaves running instances alone — they keep being charged, and an empty balance still reaps them. `stop` **also stops every instance not descended from a dev client** the moment the window closes, refunding what its balance still holds; its work is destroyed mid-flight, so only ask for it on a machine whose hours are genuinely not negotiable. |
+| `activity_window.WINDOWS` | `[]` | A list of `{START, END}` entries, one per open stretch of the day — a night shift and a lunch break are two entries, not one. Each `START`/`END` is local time, `HH:MM`; `START` is inclusive, `END` exclusive. An entry earlier `END` than `START` wraps around midnight: `22:00`–`06:00` is one window, open all night. An empty list, or an entry with `END` equal to `START`, means always open, so enabling the section before choosing the hours refuses nothing. The node is open whenever the clock falls inside *any* entry. |
+| `activity_window.ON_CLOSE` | `refuse` | `refuse` stops taking new work and leaves running instances alone — they keep being charged, and an empty balance still reaps them. `stop` **also stops every instance not descended from a dev client** the moment the window closes, refunding what its balance still holds; its work is destroyed mid-flight, so only ask for it on a machine whose hours are genuinely not negotiable. One policy, shared by every window: what happens to running work at closing time does not depend on which window it was in. |
 
-A malformed `START` or `END` is rejected at load. A window that somehow reaches the
-runtime unparseable leaves the node open and logs once: taking the node off the network
-over a typo would be a silent outage where a log line is enough.
+```yaml
+activity_window:
+  ENABLED: true
+  WINDOWS:
+    - START: "22:00"
+      END: "06:00"
+    - START: "12:00"
+      END: "13:00"
+  ON_CLOSE: refuse
+```
 
-Edited from the TUI's Cell page, under `WALL · footprint & hours`.
+A malformed entry is rejected at load, and so is the old single `START`/`END` pair —
+there is no migration; replace it with a one-entry `WINDOWS` list. A schedule that
+somehow reaches the runtime with an entry it cannot parse leaves the node open and logs
+once: taking the node off the network over a typo would be a silent outage where a log
+line is enough.
+
+Edited from the TUI's Schedule page (linked from the Cell page, under
+`WALL · footprint & hours`), which draws every window on the day and supports the
+mouse as well as the keyboard.
 
 ## `identity` — the node's name
 

@@ -192,19 +192,42 @@ def validate_host_policy_config(config: Dict[str, Any]) -> None:
     if not isinstance(window, dict):
         raise ConfigValidationError("Malformed 'activity_window' mapping.")
 
+    if "START" in window or "END" in window:
+        raise ConfigValidationError(
+            "activity_window.START / activity_window.END are gone: the schedule is now "
+            "a list, activity_window.WINDOWS, so a node can be rented out over more than "
+            "one stretch of the day (a night shift and a lunch break, say). Replace them "
+            "with:\n"
+            "  activity_window:\n"
+            "    WINDOWS:\n"
+            f"      - START: {window.get('START', '22:00')!r}\n"
+            f"        END: {window.get('END', '06:00')!r}\n"
+            "No migration is provided; update the config manually."
+        )
+
     # Imported here rather than at module scope: this module is loaded from inside
     # ConfigManager.load_config, and activity_window builds a ConfigManager of its own.
     from src.utils.activity_window import parse_clock
 
-    for key in ("START", "END"):
-        if key not in window:
-            continue
-        raw = window[key]
-        if parse_clock(str(raw).strip() if raw is not None else "") is None:
-            raise ConfigValidationError(
-                f"activity_window.{key} must be a time of day as HH:MM, got {raw!r}. "
-                "Midnight is 00:00; a window that ends before it starts wraps around it."
-            )
+    entries = window.get("WINDOWS") or []
+    if not isinstance(entries, list):
+        raise ConfigValidationError(
+            f"activity_window.WINDOWS must be a list of {{START, END}} entries, got "
+            f"{entries!r}"
+        )
+    for index, entry in enumerate(entries):
+        where = f"activity_window.WINDOWS[{index}]"
+        if not isinstance(entry, dict):
+            raise ConfigValidationError(f"{where} must be a {{START, END}} mapping, got {entry!r}")
+        for key in ("START", "END"):
+            if key not in entry:
+                raise ConfigValidationError(f"{where} is missing {key}")
+            raw = entry[key]
+            if parse_clock(str(raw).strip() if raw is not None else "") is None:
+                raise ConfigValidationError(
+                    f"{where}.{key} must be a time of day as HH:MM, got {raw!r}. "
+                    "Midnight is 00:00; a window that ends before it starts wraps around it."
+                )
 
     if "ON_CLOSE" in window:
         on_close = str(window["ON_CLOSE"] or "").strip().lower()
