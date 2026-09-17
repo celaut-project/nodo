@@ -2,6 +2,7 @@ import base64
 import fcntl
 import posixpath
 import stat
+import zipfile
 from typing import Generator, List, Tuple
 
 from src.utils import logger as log
@@ -698,24 +699,183 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
         )
         log.LOGGER(message)
         iobd.log_snapshot(context=f"pack-worker:timeout aux_id={aux_id} requested={_memory}")
-        os.system('rm -rf ' + CACHE + aux_id + '/')
+        shutil.rmtree(os.path.join(CACHE, aux_id), ignore_errors=True)
         return "", None, message
 
     iobd.log_snapshot(context=f"pack-worker:after-unlock aux_id={aux_id} service_id={identifier}")
-    os.system('rm -rf ' + CACHE + aux_id + '/')
+    shutil.rmtree(os.path.join(CACHE, aux_id), ignore_errors=True)
     return identifier, metadata, service
 
 
+class ZipExtractionError(Exception):
+    """A service zip could not be unpacked. Names the zip and the cause."""
+
+
+def _zip_member_destination(member_name: str, dest_root: str, zip_path: str) -> str:
+    """Resolve a zip member name to an absolute path proven to be inside ``dest_root``.
+
+    Nothing in ``zipfile`` guarantees this for the member-by-member API used below:
+    a member named ``../../etc/cron.d/x`` or ``/etc/passwd`` lands wherever it
+    points. Member names are '/'-separated by the spec regardless of the host, so
+    they are split on '/' and re-joined with the host separator, then resolved with
+    ``realpath`` and checked for containment.
+
+    Both halves are deliberate. The textual ``..``/absolute check refuses the
+    obvious payloads with an error that names the offending member; the ``realpath``
+    containment check is the one that actually holds, because it also resolves any
+    symlink along the path.
+    """
+    if not member_name or member_name.startswith(('/', '\\')):
+        raise ZipExtractionError(
+            f"Refusing to unpack '{zip_path}': member '{member_name}' has an absolute path."
+        )
+
+    parts = [p for p in member_name.split('/') if p not in ('', '.')]
+    if not parts or '..' in parts:
+        raise ZipExtractionError(
+            f"Refusing to unpack '{zip_path}': member '{member_name}' escapes the "
+            f"destination directory."
+        )
+
+    target = os.path.realpath(os.path.join(dest_root, *parts))
+    if target != dest_root and not target.startswith(dest_root + os.sep):
+        raise ZipExtractionError(
+            f"Refusing to unpack '{zip_path}': member '{member_name}' resolves outside "
+            f"the destination directory."
+        )
+    return target
+
+
+def _extract_zip(zip_path: str, dest: str) -> None:
+    """Unpack ``zip_path`` into ``dest`` with the stdlib ``zipfile``.
+
+    This was ``os.system('unzip ' + zip + ' -d ' + dest)``, which had three faults
+    at once. ``unzip`` is a separate Debian/Ubuntu package that nodo never declared
+    (the ``zip`` package does not provide it, and INSTALL.md installs only ``zip``).
+    ``os.system`` discards the exit status, so a host without ``unzip`` -- or a
+    corrupt archive -- produced an *empty* directory that the packer then tried to
+    pack, surfacing one layer away as a missing ``service.json``, with the zip
+    already deleted. And the unquoted interpolation broke on any cache path
+    containing a space. The stdlib requires nothing on PATH and raises. Same
+    reasoning as ``src/virtualizers/microvm/initramfs.py``, which reads the
+    initramfs with a declared ``cpio`` instead of whichever inspector the distro
+    happens to brand.
+
+    ``ZipFile.extractall`` is not used, because it silently drops two things a
+    service tree depends on:
+
+    * **Unix permission bits**, which live in the high 16 bits of ``external_attr``.
+      A service whose entrypoint was committed executable would reach BuildKit
+      non-executable and the build would fail at ``RUN ./entrypoint.sh``. They are
+      restored here, for directories too -- in a second pass, so that a directory
+      mode denying write to its owner cannot block the files still to be written
+      into it.
+    * **Symlinks**, which it materialises as regular files holding the link *text*.
+
+    Symlink members are refused rather than recreated. Nothing nodo ships can
+    produce one: ``generate_service_zip`` builds the archive with ``zip -r``
+    *without* ``-y``, which dereferences, over a tree assembled by
+    ``shutil.copytree``/``copy2``, which dereference too (verified -- a symlink in a
+    packed project arrives as a regular file entry, mode ``0o100xxx``). So a symlink
+    here means an archive built by something other than nodo's client, feeding a
+    directory that is about to become a BuildKit build context. Refusing is the
+    honest answer: recreating them would mean carrying a link-escape check that is
+    only sound as long as no later member is written *through* an earlier link, to
+    support an input shape that is unreachable and untested.
+    """
+    dest_root = os.path.realpath(dest)
+    # (directory, mode) fixups, applied once every file has been written.
+    directory_modes: List[Tuple[str, int]] = []
+
+    try:
+        archive = zipfile.ZipFile(zip_path)
+    except (zipfile.BadZipFile, OSError) as e:
+        raise ZipExtractionError(f"Could not open service zip '{zip_path}': {e}") from e
+
+    with archive:
+        for info in archive.infolist():
+            target = _zip_member_destination(info.filename, dest_root, zip_path)
+            mode = (info.external_attr >> 16) & 0xFFFF
+            permissions = mode & 0o7777
+
+            if stat.S_ISLNK(mode):
+                raise ZipExtractionError(
+                    f"Refusing to unpack '{zip_path}': member '{info.filename}' is a "
+                    f"symbolic link. Service archives are built with their contents "
+                    f"dereferenced, so a link here means the archive was not produced "
+                    f"by nodo's packer client."
+                )
+
+            # is_dir() only looks at the trailing '/'. Some writers record a
+            # directory by mode alone, so both are honoured.
+            if info.is_dir() or stat.S_ISDIR(mode):
+                os.makedirs(target, exist_ok=True)
+                if permissions:
+                    directory_modes.append((target, permissions))
+                continue
+
+            if mode and not stat.S_ISREG(mode):
+                raise ZipExtractionError(
+                    f"Refusing to unpack '{zip_path}': member '{info.filename}' is "
+                    f"neither a regular file nor a directory "
+                    f"(mode {stat.filemode(mode)})."
+                )
+
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+
+            try:
+                # Streamed, and read to EOF -- which is what makes ZipExtFile verify
+                # the member's CRC, so a corrupt archive raises here instead of
+                # leaving a truncated file for BuildKit to build.
+                with archive.open(info) as source, open(target, 'wb') as out:
+                    shutil.copyfileobj(source, out)
+            except (zipfile.BadZipFile, OSError, EOFError) as e:
+                raise ZipExtractionError(
+                    f"Could not extract '{info.filename}' from '{zip_path}': {e}"
+                ) from e
+
+            if permissions:
+                os.chmod(target, permissions)
+
+    # Deepest first, so restoring a restrictive mode on a parent cannot stop us
+    # reaching its children.
+    for directory, permissions in reversed(directory_modes):
+        try:
+            os.chmod(directory, permissions)
+        except OSError as e:
+            raise ZipExtractionError(
+                f"Could not restore permissions on '{directory}' from '{zip_path}': {e}"
+            ) from e
+
+
 def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, str]:
-    import random
-    aux_id = str(random.random())
-    os.system('mkdir ' + CACHE + aux_id)
-    os.system('mkdir ' + CACHE + aux_id + '/for_build')
-    os.system('unzip ' + zip + ' -d ' + CACHE + aux_id + '/for_build')
-    os.system('rm ' + zip)
-    
+    # uuid4().hex, not str(random.random()): this names a directory under a cache
+    # shared by every concurrent pack, and `random` is a Mersenne twister seeded per
+    # process. Nothing parses aux_id -- it is only ever joined into paths and
+    # interpolated into log lines (ZipContainerPacker, ok()) -- so the change of
+    # shape from '0.123...' to hex costs nothing.
+    aux_id = uuid.uuid4().hex
+    aux_dir = os.path.join(CACHE, aux_id)
+    build_dir = os.path.join(aux_dir, 'for_build')
+    # exist_ok=False: a collision would mean two packs sharing a build directory,
+    # which deserves an exception rather than a silent merge.
+    os.makedirs(build_dir, exist_ok=False)
+
+    try:
+        _extract_zip(zip, build_dir)
+    except Exception:
+        # The zip stays where it is. It is the only copy of what the operator asked
+        # us to pack, and the old code deleted it unconditionally one line after
+        # ignoring unzip's exit status -- destroying the evidence needed to work out
+        # why the unpack failed. Only the half-written destination is cleaned up.
+        shutil.rmtree(aux_dir, ignore_errors=True)
+        raise
+
+    # Deleted only now that its contents are safely on disk.
+    os.remove(zip)
+
     return ok(
-        path=CACHE + aux_id + '/for_build/',
+        path=build_dir + os.sep,
         aux_id=aux_id
     )  # Specification file
 
