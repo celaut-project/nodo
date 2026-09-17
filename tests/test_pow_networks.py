@@ -509,27 +509,21 @@ class CandidateSourceTests(unittest.TestCase):
 
         self.assertEqual(self._candidates(settings), ["http://alone.test:9053"])
 
-    def test_the_ledger_is_asked_after_the_operator_and_before_the_strangers(self):
-        """What the network published, ranked by what was staked on saying it."""
+    def test_the_operator_is_asked_before_the_strangers(self):
+        """Trust order: the node the operator configured, then what they wrote down."""
         settings = {
             "ledgers.ergo.NODE_URL": "https://configured.test",
             "service_networks.default_instances": {
-                "pow:ergo": ["http://mine.test:9053"]
+                "pow:ergo": ["http://mine.test:9053", "http://also-mine.test:9053"]
             },
         }
 
-        urls = self._candidates(
-            settings,
-            published=["http://well-backed.test:9053", "http://less-backed.test:9053"],
-        )
-
         self.assertEqual(
-            urls,
+            self._candidates(settings),
             [
                 "https://configured.test",
                 "http://mine.test:9053",
-                "http://well-backed.test:9053",
-                "http://less-backed.test:9053",
+                "http://also-mine.test:9053",
             ],
         )
 
@@ -546,19 +540,19 @@ class CandidateSourceTests(unittest.TestCase):
         suggested.assert_called_once()
 
     def test_the_same_endpoint_named_by_two_sources_is_asked_once(self):
-        settings = {"ledgers.ergo.NODE_URL": "http://shared.test:9053/"}
+        settings = {
+            "ledgers.ergo.NODE_URL": "http://shared.test:9053/",
+            "service_networks.default_instances": {
+                "pow:ergo": ["http://shared.test:9053"]
+            },
+        }
 
-        urls = self._candidates(settings, published=["http://shared.test:9053"])
+        self.assertEqual(self._candidates(settings), ["http://shared.test:9053"])
 
-        self.assertEqual(urls, ["http://shared.test:9053"])
-
-    def _candidates(self, settings, published=(), patch_peers=True, ask_peers=True):
-        """`candidate_urls` with config stubbed and the two network sources controlled."""
+    def _candidates(self, settings, patch_peers=True, ask_peers=True):
+        """`candidate_urls` with config stubbed and the peer-ask source controlled."""
         with ExitStack() as stack:
             env = stack.enter_context(patch.object(pow_networks, "env_manager"))
-            stack.enter_context(
-                patch.object(pow_networks, "_published_endpoints", return_value=list(published))
-            )
             if patch_peers:
                 stack.enter_context(
                     patch.object(pow_networks, "_peer_suggested_endpoints", return_value=[])

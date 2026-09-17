@@ -363,15 +363,14 @@ this peer can serve blocks from.
 
 A DNS network resolves a name. A `pow:` network has no name — "peers whose main chain
 contains B and carries D work" is not something a lookup answers — so its addresses
-have to be **found**. Five sources, in trust order:
+have to be **found**. Four sources, in trust order:
 
 | Source | How | Trust |
 |---|---|---|
 | **(a) the node's own configured ledger node** | `ledgers.ergo.NODE_URL` (`config.example.yaml:1021`), `ledgers.bitcoin.*` (`:1166`). | The operator chose it and the node already trusts it with reputation reads and payment proofs (`src/manager/ergo.py:14`). Verifying it is still worth doing — its *state* is a fact about the world, not about the operator's intent. |
 | **(b) endpoints named by hand** | `service_networks.default_instances["pow:ergo"]`, a map of tag → uris. | The operator's own statement, for somebody running a node this one is not otherwise pointed at. Keyed by tag rather than flat because an endpoint means nothing on its own: an Ergo REST node has no business being asked about a bitcoin network. |
-| **(c) the reputation ledger** | An ordinary reputation box: R4 an endpoints type NFT, R5 `blake2b(sorted tags ‖ formal)`, R8 the polarity, R9 `{"uris": [...]}`. Read by `src/reputation_system/network_endpoints.py`, ordered by the box's share of what its proof assigned times what that proof burned. | Strangers **who paid to say it**. What the ERG buys is a place in the queue and nothing else. A box staking against the same endpoints takes them out again, so withdrawing one is something the network can do. |
-| **(d) other celaut nodes** | `Gateway.ResolveNetwork` (§2.5.1). | Peers this node holds a relationship with — it can pay them, rate them, and attribute a lie — but who staked nothing on *this* answer, which is why they come after (c). |
-| **(e) the Ergo peer crawl** | `ledgers.ergo.HTTP_PEERS_PATH`, populated by `get_refresh_peers()` (`src/manager/ergo.py:36-75`), which already filters on `genesisBlockId` matching `ledgers.ergo.GENESIS_BLOCK_ID`. | Untrusted strangers who paid nothing and were asked nothing. The crawl is recursive and unbounded (`ergo.py:68` recurses inside the loop), so resolution **reads the file** and never triggers a crawl. |
+| **(c) other celaut nodes** | `Gateway.ResolveNetwork` (§2.5.1). | Peers this node holds a relationship with — it can pay them, rate them, and attribute a lie — but who staked nothing on *this* answer. |
+| **(d) the Ergo peer crawl** | `ledgers.ergo.HTTP_PEERS_PATH`, populated by `get_refresh_peers()` (`src/manager/ergo.py:36-75`), which already filters on `genesisBlockId` matching `ledgers.ergo.GENESIS_BLOCK_ID`. | Untrusted strangers who paid nothing and were asked nothing. The crawl is recursive and unbounded (`ergo.py:68` recurses inside the loop), so resolution **reads the file** and never triggers a crawl. |
 
 **The order is a latency decision, not a security one.** Every candidate goes through
 the same verification (§2.6) whatever named it, so what the order decides is who is
@@ -610,23 +609,23 @@ once.
 | `src/manager/pow_networks.py` (new) | `PowRequirement`; `parse_pow_formal(formal, tag)` (strict known fields; opaque extensions retained; `v` checked, tag/chain agreement enforced, values parsed as exact `int`); `canonical_formal`; `candidate_urls` (the §2.5 sources); `ergo_peer_satisfies` (the §2.6 ladder); `resolve_pow_network`. Bitcoin parses and raises `NotImplementedError` with the §2.6 reason. |
 | `src/identity/node_identity.py` | `parse_component_formal`, the inverse of `component_formal`, beside it because the two have to agree — the field is authored by hand as often as it is built. `_same_component` → `same_component`, made public for `match_networks` (§2.8). |
 | `src/manager/networks.py` | One branch at the top of `resolve_network`'s tag loop (`if tag.startswith("pow:")`); `match_networks` now `same_component` (§2.8); `resolve_network_for_peer`, the decisions behind `Gateway.ResolveNetwork` kept out of its gRPC plumbing so they can be tested as decisions. |
-| `src/reputation_system/network_endpoints.py` (new) | Endpoint lists read off the reputation contract (§2.5 source (c)): `network_descriptor_digest`, `endpoints_for`. Read-only — publishing a list is a wallet operation and not something a service launch does. |
 | `src/manager/network_discovery.py` (new) | The client half of `Gateway.ResolveNetwork` (§2.5.1): `ask_peer`, `ask_peers`. Bare addresses out, never the sender's `Instance` grouping. |
 | `src/gateway/gateway.py`, `protos/celaut.proto`, `protos/celaut_pb2_grpc.py` | The `ResolveNetwork` RPC. **The gencode is hand-edited**, in the 1.56-era style the file is already in (it carries a hand-applied `from bee_rpc import buffer_pb2` fix): `bash/generate_protos.sh` needs `grpcio-tools==1.56.0` for the pinned protobuf 4.x, which has no wheel for current Pythons and does not build from source there. `celaut_pb2.py`'s embedded service descriptor is therefore one method out of date until someone regenerates it — nothing reads it (the grpc stub never imports `celaut_pb2`), and `tests/test_network_discovery.py` pins all four wiring points so a missed one fails in a test rather than in a handshake. |
 | `src/virtualizers/microvm/network.py` | `configure_guest_firewall_policy` writes a rule for **every** peer instance, not the first that works (§2.8). |
-| `config.example.yaml` | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ASK_PEERS`; `service_networks.default_instances` (any tag → uris); `ledgers.ergo.reputation.NETWORK_ENDPOINTS_TYPE_NFT_ID`. **Not `networks:`** — that would sit one letter from the `network:` block, the same trap `service_networks` is named around. |
-| `tests/` | `test_pow_networks.py` (the parser's accept/reject table, per-reason peer rejection, the instance-per-endpoint shape, the §2.5 source ordering, `match_networks`, `resolve_network_for_peer`), `test_network_endpoints.py`, `test_network_discovery.py`, `identity/test_component_formal.py`, and two cases in `test_guest_policy_uses_the_right_hook.py`. No test touches the network or the clock. |
+| `config.example.yaml` | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ASK_PEERS`; `service_networks.default_instances` (any tag → uris). **Not `networks:`** — that would sit one letter from the `network:` block, the same trap `service_networks` is named around. |
+| `tests/` | `test_pow_networks.py` (the parser's accept/reject table, per-reason peer rejection, the instance-per-endpoint shape, the §2.5 source ordering, `match_networks`, `resolve_network_for_peer`), `test_network_discovery.py`, `identity/test_component_formal.py`, and two cases in `test_guest_policy_uses_the_right_hook.py`. No test touches the network or the clock. |
 | `docs/NETWORKS.md` | Use Case 3 spelled out, linking here. |
 
 **Explicitly not in v1:** Bitcoin verification (the default backend is receive-only
-Esplora, which exposes neither `chainwork` nor a peer list), publishing an endpoint
-list to the ledger (a wallet operation), re-resolution, cross-checking.
+Esplora, which exposes neither `chainwork` nor a peer list), reading *or* publishing
+endpoint lists on the reputation ledger (open question 4), re-resolution,
+cross-checking.
 
-**Follow-ups, in order:** (1) publishing endpoint lists, so a node can contribute to
-source (c) and not only read it; (2) v2 cross-checking *k* of *n*;
-(3) `NetworkResolution.status`, so `[]` stops meaning three different things (§2.9);
-(4) v3 header verification. Each is independently revertible, which is the point of
-the order.
+**Follow-ups, in order:** (1) endpoint lists on the reputation ledger, once the
+on-chain formalization of a communication domain is settled with `skills`; (2) v2
+cross-checking *k* of *n*; (3) `NetworkResolution.status`, so `[]` stops meaning three
+different things (§2.9); (4) v3 header verification. Each is independently
+revertible, which is the point of the order.
 
 ## 2.11 Open questions for Josemi
 
@@ -639,10 +638,13 @@ the order.
    `formal` in celaut gets, which means a father declaring a `formal` grants that
    exact ask and nothing narrower. Is the family-grant idiom (declare the tag, leave
    `formal` empty) enough, or do you want the field-by-field ladder after all?
-4. **The endpoints type NFT** — source (c) needs one minted, and
-   `NETWORK_ENDPOINTS_TYPE_NFT_ID` ships empty, so the source is off until it exists.
-   Who mints it, and does it belong in `config.example.yaml` pinned the way
-   `CELAUT_NODE_TYPE_NFT_ID` is?
+4. **Reading endpoints off the reputation ledger** — deliberately **out of scope for
+   v1**. How a communication domain is formalized on-chain is still being settled with
+   [`celaut-project/skills`](https://github.com/celaut-project/skills/issues/72): what
+   identifies a network in R5, and whether `formal` carries celaut's sorted
+   `key=value` body rather than a shape of its own. Wiring a reader against a schema
+   that is about to change would bake in the version we are least sure of, so the
+   source is left out entirely rather than shipped behind an unset type NFT.
 5. **Regenerating the protos** — the `ResolveNetwork` gencode is hand-written
    (§2.10). Worth pinning a toolchain that still builds, or keeping the hand-edit and
    the wiring tests?

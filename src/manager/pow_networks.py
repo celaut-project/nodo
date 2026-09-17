@@ -246,22 +246,6 @@ def _configured_endpoints(tag: str) -> List[str]:
     return configured_endpoints(tag, config=env_manager)
 
 
-def _published_endpoints(network: celaut.Service.Network) -> List[str]:
-    """Endpoints the ledger holds for this exact domain, best-backed first.
-
-    Imported where it is used rather than at module import: it reaches the explorer and
-    pulls in the reputation reader, and a node resolving a DNS network should not be
-    paying for either. The whole source is optional in the same sense -- it answers ``[]``
-    for an unset type NFT and for an explorer that is down.
-    """
-    try:
-        from src.reputation_system.network_endpoints import endpoints_for
-    except Exception as e:  # pragma: no cover - environment-dependent
-        logger(f"[POW] reputation endpoint source unavailable: {type(e).__name__}: {e}")
-        return []
-    return endpoints_for(network)
-
-
 def _peer_suggested_endpoints(network: celaut.Service.Network) -> List[str]:
     """What other celaut nodes answer for this domain, as URLs to try.
 
@@ -290,21 +274,17 @@ def candidate_urls(
 ) -> List[str]:
     """Candidate chain endpoints for one ``pow:`` network, most trusted first.
 
-    Five sources. The order is a trust order and nothing else -- **every candidate is
+    Four sources. The order is a trust order and nothing else -- **every candidate is
     verified identically whatever named it** (:func:`ergo_peer_satisfies`), so the order
     decides only who is asked first and therefore who fills the ``MAX_PEERS`` budget:
 
     1. ``ledgers.ergo.NODE_URL`` -- the node this operator already trusts with
        reputation reads and payment proofs.
     2. ``service_networks.default_instances[<tag>]`` -- what the operator wrote down for this tag.
-    3. The ledger (:func:`_published_endpoints`) -- what the *network* published for this
-       exact domain, ordered by the ERG irrecoverably staked behind each claim. Strangers,
-       but strangers who paid to say it, and what they bought is a place in this queue.
-    4. Other celaut nodes (:func:`_peer_suggested_endpoints`), over
+    3. Other celaut nodes (:func:`_peer_suggested_endpoints`), over
        ``Gateway.ResolveNetwork``. Peers this node holds a relationship with, who have
-       already done this finding for themselves -- but who staked nothing on the answer,
-       which is why they come after the boxes that did.
-    5. ``ledgers.ergo.HTTP_PEERS_PATH`` -- the crawl in ``src/manager/ergo.py``.
+       already done this finding for themselves, but who staked nothing on the answer.
+    4. ``ledgers.ergo.HTTP_PEERS_PATH`` -- the crawl in ``src/manager/ergo.py``.
        Strangers who paid nothing and were asked nothing. The file is **read**, never
        refreshed from here: the crawl recurses unboundedly and a service launch is not
        the place to start one.
@@ -313,7 +293,7 @@ def candidate_urls(
     anything. The cost of a lie at this layer is one wasted HTTP request; the firewall
     rule is written later, and only for a peer that answered the requirement.
 
-    ``ask_peers=False`` drops source 4, and is not a tuning knob: it is what stops one
+    ``ask_peers=False`` drops source 3, and is not a tuning knob: it is what stops one
     ``ResolveNetwork`` call turning into a flood. Answering a peer's question by asking
     our peers -- who ask theirs -- is a cycle in a graph nobody has a view of, and two
     nodes that know each other are a cycle of length two. A node therefore answers from
@@ -327,7 +307,6 @@ def candidate_urls(
         urls.append(configured)
 
     urls.extend(_configured_endpoints(tag))
-    urls.extend(_published_endpoints(network))
     if ask_peers:
         urls.extend(_peer_suggested_endpoints(network))
 

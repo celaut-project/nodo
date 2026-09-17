@@ -437,10 +437,10 @@ service_networks:
 #
 # A pow: network has no name to look up, so its endpoints are *found*, from four
 # sources in trust order: `ledgers.ergo.NODE_URL` (the node you already trust for
-# reputation and payments), service_networks.default_instances (what you wrote down yourself), the
-# reputation ledger (what the network published for this exact domain, best-backed
-# first) and the peer crawl at `ledgers.ergo.HTTP_PEERS_PATH` (strangers). The order
-# decides only who is asked first: every candidate is verified identically.
+# reputation and payments), service_networks.default_instances (what you wrote down
+# yourself), other nodes over Gateway.ResolveNetwork, and the peer crawl at
+# `ledgers.ergo.HTTP_PEERS_PATH` (strangers). The order decides only who is asked
+# first: every candidate is verified identically.
 #
 # What is verified is what each candidate REPORTS ABOUT ITSELF over its REST API.
 # That is enough to exclude an out-of-sync, stalled, pruned or wrong-network node,
@@ -1074,13 +1074,6 @@ ledgers:
       REPUTATION_PROOF_ID: ""
       PLAIN_TEXT_TYPE_NFT_ID: "8299d98e15ebee7fa39ad716de7c8bb191790a1bf4b7c3f91af35a0e36187706"
       CELAUT_NODE_TYPE_NFT_ID: "64060577c3393e0e3cf8938ec8e6a2002ded27ece17750aa5add7d5c3e1227ba"
-      # Which type NFT marks a reputation box as a list of endpoints for a
-      # communication domain rather than an opinion about a node -- the source a
-      # `pow:` network reads its candidates from (src/reputation_system/network_endpoints.py).
-      # Both live on the same contract and differ only by R4, so an unset value means
-      # this node reads none of them: taking every opinion ever published for an
-      # address list is the one outcome worse than reading nothing.
-      NETWORK_ENDPOINTS_TYPE_NFT_ID: ""
     payments:
       # What one nanoERG buys, in MU. This is the ONE place the node's unit of account
       # meets real money; it is what peers are told as ContractRate.mu_per_unit, so they
