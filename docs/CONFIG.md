@@ -100,7 +100,29 @@ it (see
 ## `dependencies` — local runtimes
 
 Portable runtimes installed under `MAIN_DIR` (not system-wide): `python`, `java`,
-`yq`, and `buildkit`. Override only to relocate the toolchain.
+`rust`, `yq`, and `buildkit`. Override only to relocate the toolchain.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `dependencies.rust.RUNTIME_ROOT` | `${main.MAIN_DIR}/runtime/rust` | This node's Rust toolchain. `RUSTUP_HOME` and `CARGO_HOME` are placed inside it, and `cargo`/`rustc` are resolved at fixed paths under it. |
+| `dependencies.rust.INSTALL_TOOLCHAIN` | `false` | Install Rust even when this host needs no compiler. |
+
+`rust` is self-contained for the same reason `python` is, and it was not always.
+rustup's stock defaults install into `$HOME/.cargo` and announce themselves by
+editing a shell profile, so the toolchain the installer put in was invisible to
+every process that ran afterwards — `nodo tui` reported Rust missing and
+reinstalled it on **every** launch, into whichever `$HOME` the invocation
+happened to have (issue #375). The node now resolves its own `cargo` at a path it
+computes from `RUNTIME_ROOT`, and asks no `$PATH` and no `$HOME` about it. An
+existing `~/.cargo` is never read, moved or removed: it is the operator's.
+
+`INSTALL_TOOLCHAIN: false` does **not** mean the TUI is unavailable. Rust is
+needed for exactly one thing here — building `nodo tui` — and CI publishes that
+binary per target with its `rustc -vV` host triple beside it
+(`.github/workflows/tui-release.yml`). The installer fetches the one matching
+this host, verifies the marker names this host, and skips the toolchain
+entirely; only a host with no usable prebuilt installs a compiler. Set it `true`
+on a machine you develop on, where you want the toolchain regardless.
 
 `dependencies.buildkit.*` (`BIN`, `DAEMON_BIN`, `BUILDKIT_SOCKET`) is an
 **optional, node-local** toolchain used **only** by the local packer

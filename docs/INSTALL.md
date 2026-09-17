@@ -120,6 +120,7 @@ Optional: override runtime/binary locations in `dependencies.*` before continuin
    .dependencies.python.VENV_BIN = "${main.MAIN_DIR}/venv/bin/python" |
    .dependencies.java.RUNTIME_ROOT = "${main.MAIN_DIR}/runtime/java" |
    .dependencies.java.JAVA_HOME = "${main.MAIN_DIR}/runtime/java/current" |
+   .dependencies.rust.RUNTIME_ROOT = "${main.MAIN_DIR}/runtime/rust" |
    .dependencies.yq.BIN = "${main.MAIN_DIR}/bin/yq"' \
   "$TARGET_DIR/config.yaml"
 ```
@@ -158,6 +159,8 @@ PY_VENV_DIR="$(dirname "$(dirname "$PY_VENV_BIN")")"
 
 JAVA_RUNTIME_ROOT="$(read_cfg_path_or_default '.dependencies.java.RUNTIME_ROOT' '${main.MAIN_DIR}/runtime/java')"
 JAVA_HOME_PATH="$(read_cfg_path_or_default '.dependencies.java.JAVA_HOME' '${main.MAIN_DIR}/runtime/java/current')"
+
+RUST_RUNTIME_ROOT="$(read_cfg_path_or_default '.dependencies.rust.RUNTIME_ROOT' '${main.MAIN_DIR}/runtime/rust')"
 
 CH_BINARY_PATH="$(read_cfg_path_or_default '.virtualizers.ch.BINARY_PATH' '${main.MAIN_DIR}/bin/cloud-hypervisor')"
 ```
@@ -380,6 +383,71 @@ done
 #   Debian/Ubuntu:  apt-get install -y qemu-system-arm   # or qemu-system-x86
 #   Fedora/RHEL:    dnf install -y qemu-system-aarch64   # or qemu-system-x86
 ```
+
+## 10b) The `nodo tui` binary (and Rust, only if this host has to build it)
+
+Rust is needed for exactly one thing: the `nodo tui` operations console. Most
+nodes never compile it — CI builds it per target and publishes it to the `tui`
+release, each binary with a `.host-triple` marker holding the `rustc -vV` host
+line it was built for. Fetch the one for this host:
+
+```bash
+case "$(uname -m)" in
+  x86_64|amd64)  TUI_ASSET="tui-linux-amd64"; TUI_TRIPLE="x86_64-unknown-linux-gnu" ;;
+  aarch64|arm64) TUI_ASSET="tui-linux-arm64"; TUI_TRIPLE="aarch64-unknown-linux-gnu" ;;
+  *) TUI_ASSET="" ;;
+esac
+
+TUI_DIR="$TARGET_DIR/src/commands/tui/target/release"
+mkdir -p "$TUI_DIR"
+
+if [ -n "$TUI_ASSET" ]; then
+  BASE="https://github.com/celaut-project/nodo/releases/download/tui"
+  curl -fsSL "$BASE/$TUI_ASSET"              -o /tmp/tui
+  curl -fsSL "$BASE/$TUI_ASSET.host-triple"  -o /tmp/tui.host-triple
+  curl -fsSL "$BASE/SHA256SUMS"              -o /tmp/tui.sums
+
+  # Transport integrity, not a content pin: SHA256SUMS lives in the same mutable
+  # release. That is acceptable here precisely because the fallback below exists
+  # — a node that cannot verify a binary builds one from the source it has.
+  EXPECTED="$(awk -v n="$TUI_ASSET" '$2 == n { print $1; exit }' /tmp/tui.sums)"
+  ACTUAL="$(sha256sum /tmp/tui | awk '{print $1}')"
+  RECORDED="$(head -n1 /tmp/tui.host-triple | tr -d '[:space:]')"
+
+  if [ -n "$EXPECTED" ] && [ "$EXPECTED" = "$ACTUAL" ] && [ "$RECORDED" = "$TUI_TRIPLE" ]; then
+    install -m 0755 /tmp/tui "$TUI_DIR/tui"
+    install -m 0644 /tmp/tui.host-triple "$TUI_DIR/tui.host-triple"
+    "$TUI_DIR/tui" --version
+  fi
+fi
+```
+
+The marker is not decoration. `nodo tui` refuses to execute a binary whose marker
+does not name the running host, because the failure mode of getting that wrong is
+`Exec format error` — which the operator experiences as the command doing
+nothing at all.
+
+Only if no usable binary landed above does this host need a toolchain, and it
+gets its own rather than the stock one:
+
+```bash
+mkdir -p "$RUST_RUNTIME_ROOT/rustup" "$RUST_RUNTIME_ROOT/cargo"
+RUSTUP_HOME="$RUST_RUNTIME_ROOT/rustup" CARGO_HOME="$RUST_RUNTIME_ROOT/cargo" \
+  sh -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path"
+```
+
+`RUSTUP_HOME`/`CARGO_HOME` and `--no-modify-path` are the whole point, and each
+replaces half of a real bug (issue #375). Without the two homes, rustup installs
+into `$HOME/.cargo` — a different directory under `sudo` than without it. Without
+`--no-modify-path`, the toolchain announces itself by editing a shell profile
+that the process running `nodo tui` never reads, so the node concluded Rust was
+missing and installed it again on every launch. nodo resolves `cargo` and `rustc`
+at fixed paths under `RUST_RUNTIME_ROOT` and consults neither `$PATH` nor `$HOME`.
+
+An existing `~/.cargo` is left exactly where it is and never used. If you want
+the toolchain on a machine that would otherwise skip it (you intend to rebuild
+the crate), set `dependencies.rust.INSTALL_TOOLCHAIN: true` or export
+`NODO_INSTALL_RUST=1` before running the setup script.
 
 ## 11) Rootless local builder directories
 

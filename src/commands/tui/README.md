@@ -303,6 +303,42 @@ example, list values appear as `core_services[1].id` and nested values as
 - A saved value is immediately visible in the TUI; a running nodo process observes it
   only after the restart above, because it reads `config.yaml` once at start.
 
+## How `nodo tui` finds a binary to run
+
+This is a separate Rust binary, and a node is not required to own a compiler to
+run it. Resolution goes (`src/utils/rust_toolchain.py`):
+
+1. **A prebuilt whose marker names this host.** The binary lives at
+   `src/commands/tui/target/release/tui` — where `cargo build --release` would put
+   it, so a shipped binary and a locally built one are the same file and neither
+   can shadow the other. Beside it, `tui.host-triple` holds the `rustc -vV` host
+   line it was built for (`aarch64-unknown-linux-gnu`, …). nodo computes the
+   expected triple from the host's architecture, OS and libc and **refuses to
+   execute a binary whose marker disagrees**: running an aarch64 ELF on x86_64
+   fails with `Exec format error`, which an operator experiences as `nodo tui`
+   doing nothing at all. A missing marker counts as a mismatch. The last check is
+   `tui --version`, which prints one line and exits — the only entry point that
+   does not take over the terminal, which is why the flag exists.
+2. **This node's own cargo**, at
+   `<main.MAIN_DIR>/runtime/rust/cargo/bin/cargo`, to build it once. Then the
+   marker is written from that compiler's own `rustc -vV`, so the next launch
+   takes step 1 and starts immediately.
+3. **Install that toolchain** into the installation root, then build.
+
+There is deliberately no step onto a `cargo` from `$PATH`. That was the bug
+(issue #375): the installer piped `sh.rustup.rs` into `$HOME/.cargo` and sourced
+`~/.cargo/env` in its own subshell, so `nodo tui` found nothing, printed
+"Installing Rust (Cargo)..." and reinstalled the toolchain on every launch —
+into a different `$HOME` under `sudo` than without it. An existing `~/.cargo` is
+never read, moved or removed; it is the operator's, not the node's.
+
+The binaries come from `.github/workflows/tui-release.yml`, which builds
+`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` on native runners and
+publishes each with its marker and a checksum to the `tui` release. Relocate the
+toolchain with `dependencies.rust.RUNTIME_ROOT`; force it onto a machine that
+would otherwise skip it with `dependencies.rust.INSTALL_TOOLCHAIN: true`
+([`docs/CONFIG.md`](../../../docs/CONFIG.md)).
+
 ## Development
 
 The protobuf compiler is vendored through `protoc-bin-vendored`; no system `protoc` is needed.
@@ -311,8 +347,17 @@ The protobuf compiler is vendored through `protoc-bin-vendored`; no system `prot
 cd src/commands/tui
 cargo test
 cargo clippy --all-targets -- -D warnings
-cargo run
+cargo build --release && ./target/release/tui
 ```
+
+`cargo build --release` then running the binary, rather than `cargo run`: `cargo
+run` re-checks the build graph on every launch, and on a cold cache that is a
+compile. Fine at a prompt; not fine behind a desktop shortcut, where it reads as
+an app that failed to open. Building into `target/release` also puts the binary
+exactly where `nodo tui` looks, so a local build is picked up with no extra step
+— write the marker beside it (`rustc -vV | awk '/^host:/ {print $2}' >
+target/release/tui.host-triple`) or let `nodo tui` build it once and write it for
+you.
 
 Render tests cover every page at 80×24 and 140×40, and a dedicated regression test verifies
 that plaintext secrets never appear in the terminal buffer.

@@ -86,38 +86,18 @@ def get_git_commit():
         return f"Error getting git commit: {e}"
 
 def check_rust_installation():
-    try:
-        # Try to run 'rustc --version' to check if Rust is installed
-        subprocess.run(['rustc', '--version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        print("Rust is already installed.", flush=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Installing Rust (Cargo)...", flush=True)
-        try:
-            # Run the command to install Rust
-            subprocess.run(
-                'curl --proto \'=https\' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y',
-                check=True,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            print("Rust installation completed.", flush=True)
+    """This node's own cargo, under MAIN_DIR -- never one found on `$PATH`.
 
-            # Load Rust environment variables directly in the current process
-            cargo_bin_path = os.path.expanduser("~/.cargo/bin")
-            
-            # Check if $HOME/.cargo/bin exists and add it to PATH
-            if os.path.exists(cargo_bin_path):
-                os.environ["PATH"] += os.pathsep + cargo_bin_path
-                print(f"Updated PATH with Rust binaries: {cargo_bin_path}", flush=True)
-            else:
-                print(f"Rust binaries directory not found: {cargo_bin_path}", flush=True)
+    Kept as a name because it is what the rest of the CLI calls; everything it
+    used to do is now in `src.utils.rust_toolchain`, which resolves fixed paths
+    under the installation root instead of searching `$PATH` and `$HOME`. The
+    search was the bug (issue #375): the setup script installed rustup into
+    `$HOME/.cargo` and sourced its env in its own subshell, so every later
+    `nodo tui` decided Rust was missing and installed it again.
+    """
+    from src.utils.rust_toolchain import ensure_toolchain
 
-            # Verify installation by checking rustc version again
-            subprocess.run(['rustc', '--version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            print("Rust has been successfully installed and configured.", flush=True)
-        except subprocess.CalledProcessError as e:
-            print("Error installing Rust:", e, flush=True)
+    return ensure_toolchain(MAIN_DIR)
 
 def resolve_user_path(user_path: str) -> str:
     """
@@ -730,18 +710,25 @@ if __name__ == '__main__':
                 pack(directory=absolute_path)
 
             case "tui":
-                # A binary built at install time, when there was a terminal to watch it
-                # and a package manager to fix. `cargo run` re-checks the build graph on
-                # every launch, and on a cold cache that is a compile -- which is fine at
-                # a prompt and not fine behind a desktop shortcut, where it looks like
-                # the app failed to open. Falling back keeps a source checkout working.
-                tui_dir = f"{MAIN_DIR}/src/commands/tui"
-                prebuilt = f"{tui_dir}/target/release/tui"
-                if os.path.exists(prebuilt):
-                    os.system(prebuilt)
-                else:
-                    check_rust_installation()
-                    os.system(f"cd {tui_dir} && cargo run")
+                # A binary built by CI for this host's target, when there was a
+                # release pipeline to watch it, is the normal case; a source
+                # checkout compiles once and is a prebuilt from then on. What the
+                # binary is NOT allowed to depend on is the invoking shell:
+                # resolution goes prebuilt (marker must name this host) ->
+                # nodo's own cargo under MAIN_DIR -> install that cargo, and
+                # never onto a `cargo` from `$PATH`. See
+                # src/utils/rust_toolchain.py and issue #375.
+                from src.utils.rust_toolchain import resolve_tui
+
+                tui_binary = resolve_tui(MAIN_DIR)
+                if not tui_binary:
+                    print(
+                        "Could not obtain a TUI binary for this host. See the messages "
+                        "above; `nodo doctor` reports the toolchain paths.",
+                        flush=True,
+                    )
+                    sys.exit(1)
+                sys.exit(subprocess.call([tui_binary]))
 
             case "ggconf":
                 from src.commands.ggconf import generate_gateway_config_dev
