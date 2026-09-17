@@ -435,6 +435,19 @@ service_networks:
 # on their main chain, and how much cumulative work their chain must carry -- and
 # this node checks each candidate against it before opening anything.
 #
+# That ask is the same sorted `key=value` body every other celaut formal carries,
+# with this domain's keys namespaced `pow.`:
+#
+#   pow.block_id=f35a8aa47ab6e950ba1a8cd10dc92bade42928dd985575d7fe46e759379690e0
+#   pow.chain=ergo
+#   pow.max_tip_age_s=3600            # optional
+#   pow.min_cumulative_difficulty=2749889727692749668352
+#   pow.min_height=1873000            # optional
+#
+# A key outside that vocabulary is carried along and enforced by nothing, so a
+# service may say more than this node reads without being refused. Which protocols
+# the peers speak is NOT in there: that is Service.Network.protocol_stack.
+#
 # A pow: network has no name to look up, so its endpoints are *found*, from four
 # sources in trust order: `ledgers.ergo.NODE_URL` (the node you already trust for
 # reputation and payments), service_networks.default_instances (what you wrote down

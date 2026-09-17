@@ -296,33 +296,79 @@ written today, because the policy globs the tag and nothing else
 It must **not** contain a `.`, so it can never fall into the DNS heuristic
 (`networks.py:92`); `pow:ergo` verified above as not matching it.
 
-## 2.3 `formal`: protobuf key-value map
+## 2.3 `formal`: sorted `key=value` lines, `pow.`-prefixed
 
-`Service.Network.formal` remains bytes and contains serialized `NetworkFormal`
-from `protos/network_formal.proto`: `map<string, bytes> entries = 1`.
-Known PoW values are UTF-8: `v`, `chain`, `block_id`,
-`min_cumulative_difficulty`, optional `min_height` and `max_tip_age_s`.
-Integers are nonnegative decimal text (no floating-point conversion).
-Version, required fields, chain/tag agreement, hexadecimal block ID and typed
-values are still validated. Extra keys may contain arbitrary bytes and are retained
-through parse/serialize. They are extensions, **not constraints v1 enforces**;
-new mandatory semantics need a supported version. Unknown versions fail closed.
-Map duplicate keys follow standard protobuf last-value-wins semantics.
+`Service.Network.formal` is bytes and carries the body every other `formal` in
+`celaut.proto` carries: sorted `key=value` lines, UTF-8, built by
+`node_identity.component_formal` and parsed by `parse_component_formal`. It is the
+encoding `SignatureScheme.Protocol`, `Uri.Protocol` and `Contract.Ledger` already
+use, and a PoW requirement is the same kind of statement about the same kind of
+field.
 
-```python
-from protos.network_formal_pb2 import NetworkFormal
-formal = NetworkFormal(entries={
-    "v": b"1", "chain": b"ergo", "block_id": b"f35a8aa47ab6e950ba1a8cd10dc92bade42928dd985575d7fe46e759379690e0",
-    "min_cumulative_difficulty": b"2749889727692749668352",
-    "publisher-note": b"extra metadata",
-}).SerializeToString(deterministic=True)
+```
+pow.block_id=f35a8aa47ab6e950ba1a8cd10dc92bade42928dd985575d7fe46e759379690e0
+pow.chain=ergo
+pow.max_tip_age_s=3600
+pow.min_cumulative_difficulty=2749889727692749668352
+pow.min_height=1873000
+publisher.note=extra metadata
 ```
 
-Use deterministic serialization for descriptors compared/hashed as bytes.
-`canonical_formal` normalizes known values and retains opaque extensions.
-This changes the unpublished PoW wire format: old JSON/key=value specs must be
-repacked, not silently reinterpreted. Identity/signature component encodings are
-unchanged. A new map key needs no proto edit or regeneration.
+Three properties, in order of weight:
+
+1. **Canonical by construction.** Sorting the keys means two authors who declare the
+   same parameters produce identical bytes whatever order they built them in. This
+   field is compared byte for byte down the ancestor chain, so that is not a nicety.
+   A protobuf map is explicitly *not* canonical across implementations — this repo's
+   own `canonical_peer_content_digest` refuses `SerializeToString()` for exactly that
+   reason — and neither is a JSON object.
+2. **One convention for one field.** A second encoding for `formal` would make this
+   the only place in the protocol with one, and every reader would have to know which
+   descriptor it was holding before it could read the field.
+3. **Readable with no dependency.** `celaut-project/skills` is TypeScript with no
+   protobuf in it; a `split('\n')`/`indexOf('=')` reads this. It is also diffable by
+   eye in a service spec, which the bytes of a map are not.
+
+**The domain's keys are prefixed `pow.`** so the vocabulary this module reads is
+namespaced from anything else the same body carries, and an old unprefixed `chain=`
+is a *missing* key rather than one silently reinterpreted. Integers are nonnegative
+decimal text (no floating-point conversion anywhere on the path). Required keys,
+chain/tag agreement, hexadecimal block ID and typed values are validated as before.
+
+**Unrecognized keys are preserved, not refused.** They are kept in
+`PowRequirement.extensions` and re-emitted by `canonical_formal`, so a body that
+travelled through this node says what it came in saying — and they are not treated as
+constraints this node enforces. Refusing them would make each reader the ceiling on
+what a descriptor may say, for no gain: a key nobody interprets grants nothing.
+Validation of what *is* understood is a different thing and stays: a missing required
+key, a malformed value, a line that is not a pair, or a key declared twice are each
+refused.
+
+**There is no version key.** A version belongs to the vocabulary being spoken, and
+that is named by the network's `protocol_stack` descriptor (`pow/ergo-v1`), not
+duplicated here where the two could disagree. Same reason `protocol` and
+`peerDiscovery` are not keys of this body — see §2.3.1.
+
+> **Historical note.** `7bd12f76` briefly made this a `NetworkFormal` protobuf
+> `map<string, bytes>` (`protos/network_formal.proto`), on the reading that the map was
+> what bought extensibility. It was not: what an unknown key needs is a *consumer* that
+> does not refuse it, which is a policy in `pow_networks.py` and not a wire format. The
+> map was reverted for the three reasons above, and the proto deleted; the decision is
+> recorded here rather than erased, since the question will come up again.
+
+### 2.3.1 What is not in `formal`
+
+`protocol` and `peerDiscovery` are not flat parameters of the PoW ask. Each is a
+tags/prose/formal descriptor in its own right — with its own version, its own prose
+and its own determinate parameters — and `Service.Network.protocol_stack`
+(`repeated Api.Protocol`) already models exactly that. Flattening either into one
+value here would give the same fact two places to be stated and one way to disagree.
+
+What nodo does with `protocol_stack` today is unchanged by this: `resolve_pow_network`
+echoes the requester's stack onto the Instances it returns, exactly as the DNS path
+does, because nothing here observed the peer's. Matching a published definition's
+protocol stack against a service's ask is subsumption, not byte equality, and it is
+out of scope for v1 along with the reputation-ledger source (open question 4).
 
 ## 2.4 "Minimum difficulty", precisely
 
@@ -606,7 +652,7 @@ once.
 
 | File | Change |
 |---|---|
-| `src/manager/pow_networks.py` (new) | `PowRequirement`; `parse_pow_formal(formal, tag)` (strict known fields; opaque extensions retained; `v` checked, tag/chain agreement enforced, values parsed as exact `int`); `canonical_formal`; `candidate_urls` (the §2.5 sources); `ergo_peer_satisfies` (the §2.6 ladder); `resolve_pow_network`. Bitcoin parses and raises `NotImplementedError` with the §2.6 reason. |
+| `src/manager/pow_networks.py` (new) | `PowRequirement`; `parse_pow_formal(formal, tag)` (`pow.`-prefixed keys validated, other keys carried as extensions and enforced by nothing, tag/chain agreement enforced, values parsed as exact `int`); `canonical_formal`; `candidate_urls` (the §2.5 sources); `ergo_peer_satisfies` (the §2.6 ladder); `resolve_pow_network`. Bitcoin parses and raises `NotImplementedError` with the §2.6 reason. |
 | `src/identity/node_identity.py` | `parse_component_formal`, the inverse of `component_formal`, beside it because the two have to agree — the field is authored by hand as often as it is built. `_same_component` → `same_component`, made public for `match_networks` (§2.8). |
 | `src/manager/networks.py` | One branch at the top of `resolve_network`'s tag loop (`if tag.startswith("pow:")`); `match_networks` now `same_component` (§2.8); `resolve_network_for_peer`, the decisions behind `Gateway.ResolveNetwork` kept out of its gRPC plumbing so they can be tested as decisions. |
 | `src/manager/network_discovery.py` (new) | The client half of `Gateway.ResolveNetwork` (§2.5.1): `ask_peer`, `ask_peers`. Bare addresses out, never the sender's `Instance` grouping. |
@@ -644,7 +690,10 @@ revertible, which is the point of the order.
    identifies a network in R5, and whether `formal` carries celaut's sorted
    `key=value` body rather than a shape of its own. Wiring a reader against a schema
    that is about to change would bake in the version we are least sure of, so the
-   source is left out entirely rather than shipped behind an unset type NFT.
+   source is left out entirely rather than shipped behind an unset type NFT. The
+   `formal` half of that question is now settled in the same direction on both sides
+   (§2.3); what identifies a network in R5, and matching a published definition to a
+   concrete ask by subsumption rather than byte equality, are not.
 5. **Regenerating the protos** — the `ResolveNetwork` gencode is hand-written
    (§2.10). Worth pinning a toolchain that still builds, or keeping the hand-edit and
    the wiring tests?

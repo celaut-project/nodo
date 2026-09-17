@@ -15,7 +15,6 @@ import json
 import sys
 import types
 import unittest
-from protos.network_formal_pb2 import NetworkFormal
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -73,14 +72,22 @@ SCORE = 2749889727692749668352
 
 
 def _formal(**overrides):
-    """A PoW formal encoded as a protobuf map."""
+    """A ``formal`` in the shape every celaut component declares one: key=value lines.
+
+    The four keys this module reads are written unprefixed for legibility and get the
+    ``pow.`` here; every other keyword is passed through verbatim, which is how a test
+    states a key from somebody else's vocabulary.
+    """
+    shorthand = ("chain", "block_id", "min_cumulative_difficulty", "min_height", "max_tip_age_s")
     document = {
-        "v": "1",
-        "chain": "ergo",
-        "block_id": BLOCK,
-        "min_cumulative_difficulty": "1000",
+        "pow.chain": "ergo",
+        "pow.block_id": BLOCK,
+        "pow.min_cumulative_difficulty": "1000",
     }
-    document.update(overrides)
+    document.update(
+        {(f"pow.{key}" if key in shorthand else key): value
+         for key, value in overrides.items()}
+    )
     for key, value in list(document.items()):
         if value is None:
             del document[key]
@@ -88,8 +95,8 @@ def _formal(**overrides):
 
 
 def _lines(document):
-    """Build a protobuf map independently of the production writer."""
-    return NetworkFormal(entries={k: v if isinstance(v, bytes) else str(v).encode() for k, v in document.items()}).SerializeToString()
+    """``key=value`` lines, unsorted, so the parser is never handed its own output."""
+    return "\n".join(f"{key}={value}" for key, value in document.items()).encode("utf-8")
 
 
 def _network(formal=None, tags=("pow:ergo",)):
@@ -128,19 +135,84 @@ class PowFormalParsingTests(unittest.TestCase):
         with self.assertRaises(pow_networks.PowFormalError):
             pow_networks.parse_pow_formal(b"", tag="pow:ergo")
 
-    def test_unknown_binary_entries_are_preserved_but_not_enforced(self):
-        requirement = pow_networks.parse_pow_formal(_formal(custom=b"\xff\x00"))
-        self.assertEqual(requirement.extensions, {"custom": b"\xff\x00"})
-        self.assertEqual(pow_networks.parse_pow_formal(
-            pow_networks.canonical_formal(requirement)), requirement)
+    def test_an_unknown_key_is_preserved_rather_than_refused(self):
+        """This node enforces none of them, so there is nothing it grants by carrying one.
 
-    def test_known_fields_still_reject_invalid_utf8(self):
-        with self.assertRaises(pow_networks.PowFormalError):
-            pow_networks.parse_pow_formal(_formal(min_height=b"\xff"))
+        The reverse rule -- refuse what you do not understand -- belongs where a
+        misread means granting more than was asked (`network_policy.py`). Here a key
+        outside the `pow.` vocabulary constrains nothing, and refusing it would make
+        this reader the ceiling on what a descriptor is allowed to say.
+        """
+        requirement = pow_networks.parse_pow_formal(
+            _formal(**{"publisher.note": "extra metadata", "pow.min_miners": "3"}),
+            tag="pow:ergo",
+        )
 
-    def test_a_future_version_is_refused_rather_than_guessed(self):
-        with self.assertRaises(pow_networks.PowFormalError):
-            pow_networks.parse_pow_formal(_formal(v=2), tag="pow:ergo")
+        # `pow.min_miners` is inside this module's namespace and still not one of its
+        # keys: unknown all the same, so carried and not enforced.
+        self.assertEqual(
+            requirement.extensions,
+            {"publisher.note": "extra metadata", "pow.min_miners": "3"},
+        )
+        self.assertEqual(requirement.chain, "ergo")
+
+    def test_an_unknown_key_survives_the_round_trip(self):
+        """A body that travelled through this node says what it came in saying."""
+        requirement = pow_networks.parse_pow_formal(
+            _formal(**{"publisher.note": "extra metadata"}), tag="pow:ergo"
+        )
+        canonical = pow_networks.canonical_formal(requirement)
+
+        self.assertIn(b"publisher.note=extra metadata", canonical)
+        self.assertEqual(
+            pow_networks.parse_pow_formal(canonical, tag="pow:ergo"), requirement
+        )
+
+    def test_there_is_no_version_key_to_get_wrong(self):
+        """A version belongs to the vocabulary, which `protocol_stack` names.
+
+        So `v` is neither required nor meaningful: a formal without one parses, and
+        one carrying it is carrying somebody else's key, not a claim this node reads.
+        """
+        without = pow_networks.parse_pow_formal(_formal(), tag="pow:ergo")
+        self.assertEqual(without.chain, "ergo")
+        self.assertEqual(without.extensions, {})
+
+        withV = pow_networks.parse_pow_formal(_formal(**{"v": "2"}), tag="pow:ergo")
+        self.assertEqual(withV.extensions, {"v": "2"})
+        self.assertEqual(withV.chain, "ergo")
+
+    def test_the_unprefixed_keys_of_the_old_shape_are_not_this_vocabulary(self):
+        """`chain=ergo` is somebody else's `chain`, not this module's.
+
+        The prefix is what makes that decidable, so an old unprefixed body is a body
+        missing every required key rather than one silently reinterpreted.
+        """
+        formal = _lines(
+            {"chain": "ergo", "block_id": BLOCK, "min_cumulative_difficulty": "1000"}
+        )
+
+        with self.assertRaises(pow_networks.PowFormalError) as raised:
+            pow_networks.parse_pow_formal(formal, tag="pow:ergo")
+
+        self.assertIn("pow.chain", str(raised.exception))
+
+    def test_protocol_and_peer_discovery_are_not_keys_of_this_body(self):
+        """They are descriptors of their own, in `Service.Network.protocol_stack`.
+
+        Carried like any other foreign key rather than read: a protocol is a
+        tags/prose/formal thing with its own version, and flattening it to one value
+        here would be a second place for it to be stated and disagree.
+        """
+        requirement = pow_networks.parse_pow_formal(
+            _formal(**{"protocol": "pow/ergo-v1", "peerDiscovery": "environment_variable"}),
+            tag="pow:ergo",
+        )
+
+        self.assertEqual(
+            requirement.extensions,
+            {"protocol": "pow/ergo-v1", "peerDiscovery": "environment_variable"},
+        )
 
     def test_a_tag_and_a_chain_that_disagree_are_a_malformed_spec(self):
         """The tag is what the operator's policy vetted, so the two have to agree."""
@@ -150,12 +222,12 @@ class PowFormalParsingTests(unittest.TestCase):
         self.assertIn("pow:ergo", str(raised.exception))
 
     def test_a_missing_required_field_is_named(self):
-        formal = _lines({"v": "1", "chain": "ergo", "block_id": BLOCK})
+        formal = _lines({"pow.chain": "ergo", "pow.block_id": BLOCK})
 
         with self.assertRaises(pow_networks.PowFormalError) as raised:
             pow_networks.parse_pow_formal(formal, tag="pow:ergo")
 
-        self.assertIn("min_cumulative_difficulty", str(raised.exception))
+        self.assertIn("pow.min_cumulative_difficulty", str(raised.exception))
 
     def test_a_non_hex_block_id_is_refused(self):
         with self.assertRaises(pow_networks.PowFormalError):
@@ -176,16 +248,49 @@ class PowFormalParsingTests(unittest.TestCase):
             pow_networks.parse_pow_formal(b"\xff\xfe not a formal", tag="pow:ergo")
 
     def test_a_line_that_is_not_a_pair_is_refused(self):
-        """Old text encodings must be repacked, not silently interpreted."""
+        """The body is key=value lines, and a line that is not one is not ignorable.
+
+        Malformed text is where `ComponentFormalError` is raised, and it surfaces here
+        as `PowFormalError`: a caller of this module handles one exception type, not
+        the parser's as well.
+        """
         with self.assertRaises(pow_networks.PowFormalError) as raised:
-            pow_networks.parse_pow_formal(b"chain=ergo\nwhatever", tag="pow:ergo")
+            pow_networks.parse_pow_formal(b"pow.chain=ergo\nwhatever", tag="pow:ergo")
 
-        self.assertIn("protobuf map", str(raised.exception))
+        self.assertIn("key=value", str(raised.exception))
 
-    def test_map_duplicate_keys_follow_protobuf_last_value_semantics(self):
-        formal = _formal() + NetworkFormal(entries={"chain": b"bitcoin"}).SerializeToString()
-        with self.assertRaises(pow_networks.PowFormalError):
+    def test_a_key_declared_twice_is_refused_rather_than_resolved(self):
+        """Which of the two was meant is not something a parser gets to decide."""
+        formal = _formal() + b"\npow.chain=bitcoin"
+
+        with self.assertRaises(pow_networks.PowFormalError) as raised:
             pow_networks.parse_pow_formal(formal, tag="pow:ergo")
+
+        self.assertIn("twice", str(raised.exception))
+
+    def test_a_hand_written_formal_may_end_in_a_newline(self):
+        """Whitespace around the document is ignored; nothing inside it is."""
+        requirement = pow_networks.parse_pow_formal(_formal() + b"\n", tag="pow:ergo")
+
+        self.assertEqual(requirement.chain, "ergo")
+
+    def test_an_extension_may_not_shadow_one_of_this_modules_own_keys(self):
+        """Unreachable through the parser, which partitions by the same set.
+
+        Reachable from a hand-built requirement, where taking it would mean the
+        serializer picking one of two values for a key on the author's behalf.
+        """
+        requirement = pow_networks.PowRequirement(
+            chain="ergo",
+            block_id=BLOCK,
+            min_cumulative_difficulty=1000,
+            extensions={"pow.chain": "bitcoin"},
+        )
+
+        with self.assertRaises(pow_networks.PowFormalError) as raised:
+            pow_networks.canonical_formal(requirement)
+
+        self.assertIn("pow.chain", str(raised.exception))
 
     def test_an_unknown_chain_is_refused(self):
         with self.assertRaises(pow_networks.PowFormalError):
@@ -199,24 +304,26 @@ class PowFormalParsingTests(unittest.TestCase):
 
         self.assertEqual(pow_networks.parse_pow_formal(canonical, tag="pow:ergo"), requirement)
         self.assertEqual(canonical, pow_networks.canonical_formal(requirement))
+        keys = [line.split("=", 1)[0] for line in canonical.decode("utf-8").split("\n")]
+        self.assertEqual(keys, sorted(keys))
 
     def test_the_canonical_form_does_not_depend_on_the_order_it_was_written_in(self):
         """It is what `match_networks` compares byte for byte down the ancestor chain."""
         forwards = pow_networks.parse_pow_formal(
             _lines({
-                "v": "1",
-                "chain": "ergo",
-                "block_id": BLOCK,
-                "min_cumulative_difficulty": "1000",
+                "pow.chain": "ergo",
+                "pow.block_id": BLOCK,
+                "pow.min_cumulative_difficulty": "1000",
+                "publisher.note": "extra metadata",
             }),
             tag="pow:ergo",
         )
         backwards = pow_networks.parse_pow_formal(
             _lines({
-                "min_cumulative_difficulty": "1000",
-                "block_id": BLOCK,
-                "chain": "ergo",
-                "v": "1",
+                "publisher.note": "extra metadata",
+                "pow.min_cumulative_difficulty": "1000",
+                "pow.block_id": BLOCK,
+                "pow.chain": "ergo",
             }),
             tag="pow:ergo",
         )
@@ -233,8 +340,8 @@ class PowFormalParsingTests(unittest.TestCase):
         )
 
         self.assertIn(
-            str(2 ** 71 + 1).encode(),
-            pow_networks.canonical_formal(requirement),
+            f"pow.min_cumulative_difficulty={2 ** 71 + 1}",
+            pow_networks.canonical_formal(requirement).decode("utf-8"),
         )
 
 
