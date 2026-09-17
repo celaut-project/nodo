@@ -969,7 +969,7 @@ static LEVERS: &[Lever] = &[
         organelle: Organelle::Wall,
         label: "working hours",
         question: "What hours of the day does this node take work in?",
-        consequence: "Edited on the SCHEDULE page, which draws the day: the open stretch is one run of blocks whether or not it crosses midnight, and a marker says where now is. Two scalar fields could say neither, and took \"25:00\" without complaint.",
+        consequence: "Edited on the SCHEDULE page, which draws the day: each window's open stretch is one run of blocks whether or not it crosses midnight, and a marker says where now is. A night shift and a lunch break are two windows, not one. Flat scalar fields could say neither, and took \"25:00\" without complaint.",
         kind: LeverKind::Link(Page::Schedule),
         warning: None,
         secret: false,

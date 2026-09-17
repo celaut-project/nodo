@@ -773,12 +773,17 @@ host_limits:
 # window is about renting this machine out, not about locking its owner out of it.
 activity_window:
   ENABLED: false
-  # Local time, HH:MM. START is inclusive, END exclusive. A window that wraps midnight
-  # is the night shift and is read as one: START 22:00 / END 06:00 is open all night.
-  # START equal to END means always open, so enabling this before choosing the hours
-  # refuses nothing.
-  START: "00:00"
-  END: "00:00"
+  # Local time, HH:MM, one entry per open stretch of the day -- a night shift and a
+  # lunch break are two entries, not one. START is inclusive, END exclusive. An entry
+  # that wraps midnight is the night shift and is read as one window: START 22:00 /
+  # END 06:00 is open all night. An empty list, or an entry with START equal to END,
+  # means always open, so enabling this before choosing the hours refuses nothing.
+  WINDOWS: []
+  # WINDOWS:
+  #   - START: "22:00"
+  #     END: "06:00"
+  #   - START: "12:00"
+  #     END: "13:00"
   # What closing time does to work already running.
   #   refuse  Only stop taking new work. Instances already running keep running, keep
   #           being charged, and stop when their balance runs out or their client says so.
