@@ -26,6 +26,7 @@ from protos import celaut_pb2 as celaut
 from src.manager.shares import authorize_shares, rundev_host_dirs
 from src.utils import logger as log
 from src.utils.config import ConfigManager
+from src.virtualizers.microvm.errors import MicroVMError
 from src.utils.shared_filesystems import exported_refs
 from src.virtualizers.microvm import paths, rootfs
 from src.virtualizers.microvm.runtime_state import load_runtime_state
@@ -67,6 +68,7 @@ def materialize_shares(
     rootfs_path: Path,
     runtime_dir: Path,
     log_prefix: str,
+    metadata: Optional[rootfs.GuestMetadata] = None,
 ) -> ShareSetup:
     """Bring up every shared filesystem this instance takes part in.
 
@@ -80,6 +82,10 @@ def materialize_shares(
 
     Ordinary services declare neither and get :data:`NO_SHARES` -- a complete
     no-op, with nothing spawned and nothing injected into the image.
+
+    ``metadata`` is where the guest's mount plan is delivered; it is the image
+    itself for a writable rootfs and the metadata disk for a read-only one. See
+    :class:`rootfs.GuestMetadata`.
     """
     base_dir = str(shared_fs_base_dir(paths.cache_root()))
     env_values = dict(config.environment_variables) if config else {}
@@ -88,6 +94,26 @@ def materialize_shares(
     inherited = authorize_shares(service=service, father_id=father_id, config=config)
     if not exports and not inherited:
         return NO_SHARES
+
+    # Exporting a share means seeding its host directory with what the exporter
+    # packaged at that path, read out of its own image with `debugfs rdump` -- an
+    # ext4 reader, and the only one the node has. A squashfs or erofs image cannot
+    # be read by it, and seeding the export from nothing would silently hide the
+    # content the service shipped behind an empty directory, which is precisely
+    # what the seeding exists to prevent.
+    #
+    # So it is refused rather than degraded, and refused here rather than at build
+    # time: `read_mode=ro` and `shared=true` are each legitimate on their own, and
+    # a node that later grows an unpacker for these formats lifts this without the
+    # service being repacked.
+    if exports and metadata is not None and metadata.read_only:
+        raise MicroVMError(
+            f"{log_prefix} this service declares read_mode=ro and exports "
+            f"{len(exports)} shared filesystem(s). A share is seeded from the "
+            "exporter's own image, which the node reads with debugfs -- an ext4 "
+            "reader that cannot open a squashfs/erofs image. Pack it read_mode=rw "
+            "(the default) or drop the shared declaration."
+        )
 
     # A rundev sandbox exports directories of the developer's own rather than
     # anything this node materialized; they are mounted where they are.
@@ -122,11 +148,14 @@ def materialize_shares(
     plan_host_path = runtime_dir / GUEST_MOUNT_PLAN_PATH.lstrip("/")
     with open(plan_host_path, "w", encoding="utf-8") as f:
         f.write(build_guest_mount_plan(mounts))
-    rootfs.debugfs_write(
-        image_path=rootfs_path,
-        host_file=plan_host_path,
-        guest_target=GUEST_MOUNT_PLAN_PATH,
-    )
+    if metadata is not None:
+        metadata.put(host_file=plan_host_path, guest_target=GUEST_MOUNT_PLAN_PATH)
+    else:
+        rootfs.debugfs_write(
+            image_path=rootfs_path,
+            host_file=plan_host_path,
+            guest_target=GUEST_MOUNT_PLAN_PATH,
+        )
     log.LOGGER(
         f"{log_prefix} virtiofs devices attached: {len(mounts)}; "
         f"guest mount plan injected: {GUEST_MOUNT_PLAN_PATH}"

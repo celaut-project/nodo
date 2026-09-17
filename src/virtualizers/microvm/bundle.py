@@ -1,6 +1,6 @@
 """Reading back what ``build`` produced, and refusing to boot what will not boot.
 
-A bundle is the family's boot contract: one ext4 rootfs, one kernel, one
+A bundle is the family's boot contract: one rootfs image, one kernel, one
 initramfs, and a manifest naming them, under
 ``CACHE/microvm/<service_id>/<arch>/``. There is exactly one of them per service
 and architecture, and both hypervisors boot the same one -- QEMU under TCG boots
@@ -20,6 +20,10 @@ from src.virtualizers.architecture import UnsupportedArchitectureException, get_
 from src.virtualizers.entry_path import resolve_entrypoint_path
 from src.virtualizers.microvm import initramfs as microvm_initramfs
 from src.virtualizers.microvm import paths
+from src.virtualizers.microvm.bundle_formats import (
+    SUPPORTED_ROOTFS_FORMATS,
+    rootfs_format_of,
+)
 from src.virtualizers.microvm.errors import MicroVMError
 
 
@@ -66,8 +70,21 @@ def load_bundle(service_id: str, arch: str) -> Dict[str, str]:
     if not initramfs_path.is_file():
         raise MicroVMError(f"Missing microVM initramfs image: {initramfs_path}")
 
+    # Which filesystem the image holds, and therefore how the guest has to mount
+    # it. Recorded by the build as a fact about what it produced, not re-derived
+    # from the manifest here: the manifest declares intent (`read_mode`), and two
+    # nodes may honour the same intent with different tools.
+    rootfs_format = rootfs_format_of(bundle)
+    if rootfs_format not in SUPPORTED_ROOTFS_FORMATS:
+        raise MicroVMError(
+            f"Unsupported rootfs_format '{rootfs_format}' in {bundle_path}. "
+            "Supported: " + ", ".join(sorted(SUPPORTED_ROOTFS_FORMATS)) + ". "
+            "Rebuild the service with this checkout."
+        )
+
     return {
         "rootfs_path": str(rootfs_path),
+        "rootfs_format": rootfs_format,
         "kernel_path": str(kernel_path),
         "initramfs_path": str(initramfs_path),
         "arch": bundle.get("arch", arch),

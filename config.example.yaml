@@ -82,6 +82,29 @@ virtualizers:
     # /init dies on its first redirection, and every launch ends in
     # "Kernel panic - not syncing: Attempted to kill init!".
     KERNEL_CMDLINE_EXTRA: ""
+    # Which tool builds the rootfs image of a service that declares
+    # `read_mode: ro` on its filesystem (see docs/PACKING.md).
+    #
+    # Such a service needs no writable rootfs beyond /tmp, so the node builds it
+    # as a compressed, unpadded image sized to its own contents instead of a
+    # pre-sized ext4 -- which is what removes the flat 64 MiB OVERHEAD_BYTES and
+    # the 128 MiB MIN_ROOTFS_BYTES floor from it, and what the instance is then
+    # priced by.
+    #
+    # This is a NODE-LOCAL choice, deliberately, and not something the manifest
+    # pins. The service hash covers the declared tree, not the image bytes built
+    # from it, so which format a node picks is unobservable from inside the guest
+    # -- while a manifest naming one would let a node lacking that one package
+    # reject a service it is perfectly able to run.
+    #
+    #   auto      (default) erofs if mkfs.erofs is in PATH, else squashfs if
+    #             mksquashfs is; an error naming both if neither is
+    #   erofs     always mkfs.erofs      (erofs-utils)
+    #   squashfs  always mksquashfs      (squashfs-tools)
+    #
+    # Neither package is required unless a service actually declares read_mode:
+    # ro; nothing else on the node uses them.
+    ROOTFS_READ_ONLY_FORMAT: "auto"
     # Fail fast if the guest does not become reachable on the bridge network.
     GUEST_NETWORK_READY_TIMEOUT_S: 20
     # Memory policy for VM boot:

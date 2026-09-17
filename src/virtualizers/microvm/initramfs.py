@@ -26,7 +26,16 @@ from typing import FrozenSet, Set, Tuple
 # in the service rootfs (`__config__`, `.__nodo_entrypoint`, `.__nodo_virtiofs`)
 # and how it reads them. The image is pinned by digest while that contract lives in
 # the code, so this is what keeps a pinned asset from silently outliving it.
-CONTRACT_VERSION = "v1"
+#
+# v2 (#369): /init reads `rootfstype=` and `ro`/`rw` off the kernel cmdline instead
+# of assuming ext4+rw, and on `ro` it overlays the image and takes the three
+# metadata files from a second block device rather than from inside the image.
+# Both halves are the same change, which is why they share a version: a v1
+# initramfs handed a `ro` cmdline mounts the image ext4+rw and fails, and a v2 one
+# on a ro bundle needs the /dev/vdb this checkout's execute.py attaches. Refusing
+# the skew here is what turns either into one error at launch instead of a guest
+# that hangs in the initramfs with nothing on its console.
+CONTRACT_VERSION = "v2"
 
 MARKER_PATH = "etc/nodo-ch-initramfs.marker"
 MARKER_KEY = "nodo-ch-initramfs"

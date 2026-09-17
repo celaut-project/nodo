@@ -4,7 +4,7 @@ import os
 import stat
 import tarfile
 from dataclasses import dataclass
-from typing import Mapping, MutableMapping, Optional
+from typing import Any, List, Mapping, MutableMapping, Optional
 
 MODE_KEY = "mode"
 UID_KEY = "uid"
@@ -23,6 +23,15 @@ FILESYSTEM_METADATA_KEYS = (
     DEVICE_MINOR_KEY,
     DEVICE_IS_BLOCK_KEY,
 )
+
+# `Filesystem.xattrs` -- the map on the tree itself, not on one of its entries.
+# Only the Filesystem referenced directly by `Container.filesystem` is read: a
+# nested one (a subdirectory, reached through `ItemBranch.item.filesystem`) is
+# not separately mounted, so nothing there could be honoured.
+READ_MODE_KEY = "read_mode"
+READ_MODE_RW = "rw"
+READ_MODE_RO = "ro"
+READ_MODES = (READ_MODE_RW, READ_MODE_RO)
 
 
 @dataclass(frozen=True)
@@ -236,6 +245,95 @@ def parse_filesystem_metadata_xattrs(
         device_minor=device_minor,
         device_is_block=device_is_block,
     )
+
+
+def read_mode(filesystem: Any) -> str:
+    """Whether this service asked for a writable rootfs: ``"rw"`` or ``"ro"``.
+
+    Absent is ``"rw"``, which is what every service packed before this key existed
+    declares by saying nothing -- so reading it can never change how an existing
+    service is built.
+
+    Anything else is an integrity error rather than a value to fall back on. The
+    key is what decides whether the node builds a pre-sized ext4 the guest can
+    write to or an immutable image it cannot, and a typo resolved to a default is
+    a service silently built the other way round from the one its author meant.
+
+    Read only from the tree's own ``xattrs``; pass the Filesystem that
+    ``Container.filesystem`` points at, not one of its subdirectories.
+    """
+    xattrs = getattr(filesystem, "xattrs", None) or {}
+    if READ_MODE_KEY not in xattrs:
+        return READ_MODE_RW
+
+    raw = xattrs[READ_MODE_KEY]
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+    try:
+        value = bytes(raw).decode("utf-8").strip()
+    except Exception as e:
+        raise ValueError(f"{READ_MODE_KEY} is not valid UTF-8 bytes") from e
+
+    if value not in READ_MODES:
+        raise ValueError(
+            f"unsupported {READ_MODE_KEY} '{value}': expected one of "
+            + ", ".join(READ_MODES)
+        )
+    return value
+
+
+def missing_metadata_keys(xattrs: Mapping[str, bytes]) -> List[str]:
+    """Which of :data:`FILESYSTEM_METADATA_KEYS` this entry does not carry."""
+    return [key for key in FILESYSTEM_METADATA_KEYS if key not in xattrs]
+
+
+def assert_complete_filesystem_metadata(
+    filesystem: Any,
+    parent_rel_path: str = "/",
+) -> None:
+    """Refuse a tree that does not declare mode/uid/gid/mtime/device for every entry.
+
+    The metadata keys are optional everywhere else: an entry that carries none of
+    them falls back to a legacy heuristic that sniffs shebangs and ELF magic to
+    guess an executable bit. That heuristic is enough for a writable image, where
+    whatever it got wrong can still be fixed from inside the guest, and it is the
+    only thing services packed before the metadata contract existed have.
+
+    It is not enough for an image with no writable escape hatch. It cannot restore
+    a uid or a gid -- it does not read them -- and it cannot produce a device node
+    at all, so a tree relying on it would be mounted read-only with ownership and
+    device nodes it never declared and now cannot repair. So for ``read_mode=ro``
+    the keys stop being optional, and a tree missing any of them is refused at
+    build time with the path that is missing them, rather than booted wrong.
+
+    Recursive: the gate is about what ends up in the image, and a subdirectory's
+    entries end up in it just as much as the root's.
+    """
+    for branch in getattr(filesystem, "branch", []) or []:
+        name = getattr(branch, "name", "") or ""
+        rel_path = (
+            f"{parent_rel_path.rstrip('/')}/{name}" if name else parent_rel_path
+        )
+
+        missing = missing_metadata_keys(getattr(branch, "xattrs", None) or {})
+        if missing:
+            raise ValueError(
+                f"incomplete filesystem metadata at '{rel_path}': missing "
+                + ", ".join(sorted(missing))
+                + f". A {READ_MODE_KEY}={READ_MODE_RO} service must declare "
+                + ", ".join(FILESYSTEM_METADATA_KEYS)
+                + " on every entry: the image it is built into cannot be corrected "
+                "from inside the guest."
+            )
+
+        nested = None
+        try:
+            if branch.HasField("filesystem"):
+                nested = branch.filesystem
+        except (AttributeError, ValueError):
+            nested = None
+        if nested is not None:
+            assert_complete_filesystem_metadata(nested, parent_rel_path=rel_path)
 
 
 def _parse_utf8_int(key: str, value: bytes) -> int:

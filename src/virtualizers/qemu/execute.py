@@ -42,6 +42,11 @@ from src.utils.config import ConfigManager
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.virtualizers.microvm import bundle as microvm_bundle
 from src.virtualizers.microvm import limits, network, paths, rootfs, serial
+from src.virtualizers.microvm.bundle_formats import (
+    ROOTFS_FORMAT_EXT4,
+    ROOTFS_IMAGE_NAMES,
+    is_read_only_format,
+)
 from src.virtualizers.microvm.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
 from src.virtualizers.microvm.errors import MicroVMError
 from src.virtualizers.microvm.members import QEMU as QEMU_HYPERVISOR
@@ -83,7 +88,12 @@ def _qmp_socket_path(vmachine_id: str) -> Path:
 # Pure builders — unit-tested directly, no side effects.
 # --------------------------------------------------------------------------- #
 
-def build_kernel_cmdline(arch: str, vm_ip: str, netmask: str) -> str:
+def build_kernel_cmdline(
+    arch: str,
+    vm_ip: str,
+    netmask: str,
+    rootfs_format: str = ROOTFS_FORMAT_EXT4,
+) -> str:
     """Guest kernel cmdline for an emulated boot.
 
     Takes the family's ``ip=`` autoconfig token (same bridge, same gateway,
@@ -91,10 +101,23 @@ def build_kernel_cmdline(arch: str, vm_ip: str, netmask: str) -> str:
     pins ``console=`` to the arch's serial device so init output reaches the
     captured serial log -- ``ttyAMA0`` for the arm64 ``virt`` PL011, ``ttyS0`` for
     the x86 16550.
+
+    ``rootfstype=`` and ``ro``/``rw`` come from the bundle the same way CH's do,
+    and have to: QEMU boots the bundles the microVM builder wrote, including a
+    read-only one, and the /init reading these tokens is the same /init.
     """
     ip_param = network.guest_ip_cmdline_token(vm_ip=vm_ip, netmask=netmask)
     console = QEMU_CONSOLE_BY_ARCH.get(arch, "ttyS0")
-    return " ".join(["root=/dev/vda", "rw", ip_param, f"console={console}"])
+    access = "ro" if is_read_only_format(rootfs_format) else "rw"
+    return " ".join(
+        [
+            "root=/dev/vda",
+            access,
+            f"rootfstype={rootfs_format}",
+            ip_param,
+            f"console={console}",
+        ]
+    )
 
 
 def build_virtiofs_args(
@@ -241,6 +264,8 @@ def build_qemu_command(
     virtiofs_args: Optional[List[str]] = None,
     has_shared_mem: bool = False,
     qmp_socket_path: Optional[str] = None,
+    rootfs_read_only: bool = False,
+    metadata_disk_path: Optional[Path] = None,
 ) -> List[str]:
     """Full ``qemu-system-<arch>`` argv for one emulated guest.
 
@@ -280,7 +305,12 @@ def build_qemu_command(
             "-append",
             cmdline,
             "-drive",
-            f"if=virtio,file={rootfs_path},format=raw",
+            # readonly=on for a squashfs/erofs image, for the same reason CH is
+            # told: the guest mounts it read-only either way, and this keeps the
+            # service's content-addressed bytes from being writable through the
+            # emulator.
+            f"if=virtio,file={rootfs_path},format=raw"
+            + (",readonly=on" if rootfs_read_only else ""),
             "-netdev",
             f"tap,id=net0,ifname={tap_name},script=no,downscript=no",
             "-device",
@@ -294,6 +324,15 @@ def build_qemu_command(
             "-no-reboot",
         ]
     )
+
+    # The metadata disk, when the rootfs is read-only: this instance's __config__,
+    # entrypoint and (if any) virtiofs plan, which cannot be written into a
+    # squashfs/erofs image. Declared after the rootfs so it lands as /dev/vdb,
+    # which is where /init looks for it.
+    if metadata_disk_path is not None:
+        command.extend(
+            ["-drive", f"if=virtio,file={metadata_disk_path},format=raw,readonly=on"]
+        )
 
     # virtio-balloon + QMP control socket: the live memory-resize path. Memory
     # hotplug drives the balloon over this socket (src/virtualizers/qemu/hotplug.py)
@@ -365,7 +404,9 @@ def execute(
     cleanup_rules: List[List[str]] = []
     tap_name: Optional[str] = None
     process: Optional[subprocess.Popen] = None
-    rootfs_path = runtime_dir / "rootfs.ext4"
+    # Renamed for the format once the bundle is loaded; this is only so the
+    # failure paths have a path to name before that.
+    rootfs_path = runtime_dir / ROOTFS_IMAGE_NAMES[ROOTFS_FORMAT_EXT4]
     config_host_path = runtime_dir / "__config__"
     entrypoint_host_path = runtime_dir / ".__nodo_entrypoint"
     stdout_path = runtime_dir / "qemu.stdout.log"
@@ -395,6 +436,9 @@ def execute(
         bundle = microvm_bundle.load_bundle(service_id=service_id, arch=arch)
         kernel_path = qemu_kernel_path(arch) or bundle["kernel_path"]
         initramfs_path = qemu_initramfs_path(arch) or bundle["initramfs_path"]
+        rootfs_format = bundle["rootfs_format"]
+        rootfs_read_only = is_read_only_format(rootfs_format)
+        rootfs_path = runtime_dir / ROOTFS_IMAGE_NAMES[rootfs_format]
         if not os.path.isfile(kernel_path):
             raise MicroVMError(f"QEMU guest kernel not found for {arch}: {kernel_path}")
         if not os.path.isfile(initramfs_path):
@@ -428,17 +472,20 @@ def execute(
         with open(config_host_path, "wb") as f:
             f.write(cfg.SerializeToString())
 
+        # Same carrier choice as CH: the image when it is writable, a metadata
+        # disk when it is not. See rootfs.GuestMetadata.
+        guest_metadata = rootfs.GuestMetadata(
+            image_path=rootfs_path,
+            runtime_dir=runtime_dir,
+            read_only=rootfs_read_only,
+        )
+
         for target_path in rootfs.guest_config_targets(service=service):
-            rootfs.debugfs_write(
-                image_path=rootfs_path,
-                host_file=config_host_path,
-                guest_target=target_path,
-            )
+            guest_metadata.put(host_file=config_host_path, guest_target=target_path)
 
         with open(entrypoint_host_path, "w", encoding="utf-8") as f:
             f.write(f"{resolved_entrypoint}\n")
-        rootfs.debugfs_write(
-            image_path=rootfs_path,
+        guest_metadata.put(
             host_file=entrypoint_host_path,
             guest_target=rootfs.GUEST_ENTRYPOINT_PATH,
         )
@@ -459,7 +506,15 @@ def execute(
             rootfs_path=rootfs_path,
             runtime_dir=runtime_dir,
             log_prefix=log_prefix,
+            metadata=guest_metadata,
         )
+
+        metadata_disk_path = guest_metadata.finalize()
+        if metadata_disk_path is not None:
+            log.LOGGER(
+                f"[QEMU][{vmachine_id}] metadata disk built for read-only rootfs: "
+                f"{metadata_disk_path}"
+            )
 
         tap_name = network.create_tap(vmachine_id)
         log.LOGGER(f"[QEMU][{vmachine_id}] TAP created and attached: {tap_name}")
@@ -526,7 +581,9 @@ def execute(
         )
         mem_mib = math.ceil(boot_mem_b / (1024 * 1024))
         netmask = str(guest_network.netmask)
-        cmdline = build_kernel_cmdline(arch=arch, vm_ip=vm_ip, netmask=netmask)
+        cmdline = build_kernel_cmdline(
+            arch=arch, vm_ip=vm_ip, netmask=netmask, rootfs_format=rootfs_format
+        )
 
         has_shared_mem = shares.any
         virtiofs_args = build_virtiofs_args(shares.mounts_state, mem_mib) if has_shared_mem else []
@@ -546,6 +603,8 @@ def execute(
             virtiofs_args=virtiofs_args,
             has_shared_mem=has_shared_mem,
             qmp_socket_path=str(qmp_socket_path),
+            rootfs_read_only=rootfs_read_only,
+            metadata_disk_path=metadata_disk_path,
         )
         log.LOGGER(
             f"[QEMU][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib} "

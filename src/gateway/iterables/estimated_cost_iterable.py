@@ -75,6 +75,12 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 service_arch = get_arch_tag(service=service, metadata=self.metadata)
 
                 resources = service.container.resources
+                # Kept for the same reason `service_arch` is read here: disk is
+                # priced differently for a `read_mode=ro` service (it holds its
+                # image and no writable capacity), and the quote and the charge
+                # have to agree. The spec is dropped after the quote instead of
+                # before it.
+                priced_service = service
                 del service
 
                 # Needs the requested resources to price, so it happens here rather than
@@ -94,6 +100,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                         config=self.configuration,
                         resources=resources,
                         arch=service_arch,
+                        service=priced_service,
                     ),
                     indices=celaut_pb2.EstimatedCost
                 )

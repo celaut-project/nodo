@@ -531,6 +531,76 @@ The `service.json` file defines **runtime metadata** for the service: its archit
 
 ---
 
+#### `read_mode` — a read-only rootfs
+
+By default the node builds a service's filesystem as a **writable, pre-sized ext4
+image**, and that image carries a floor: `max(128 MiB, tree + 64 MiB, disk_space)`.
+All three terms make the image larger than the manifest asked for; none of them can
+make it smaller. They exist to leave room for writes.
+
+A Celaut service is content-addressed and immutable: its filesystem is fixed by a
+hash at pack time and cannot differ between two instances of the same id. Every
+property that would make a writable filesystem necessary — a package installed at
+runtime, a config edited in place, state that outlives a boot — is a property such a
+service does not have. The one thing that genuinely needs to be writable is `/tmp`,
+which is a tmpfs.
+
+A service that needs no more than that can say so, and stop paying for the rest:
+
+```
+Service.Container.Filesystem.xattrs["read_mode"] = "ro"
+```
+
+That is an xattr on the **filesystem itself** — a sibling of `branch`, distinct from
+the per-entry `ItemBranch.xattrs` — and only on the one `Container.filesystem` points
+at. A nested `Filesystem` (a subdirectory) is not separately mounted, so a `read_mode`
+set on one is ignored. Absent means `"rw"`, so every service packed before this key
+existed is unaffected; any value other than `"rw"` or `"ro"` is refused at build time
+rather than resolved to a default.
+
+**What changes for a `ro` service**
+
+| | `rw` (default) | `ro` |
+|---|---|---|
+| image | `mkfs.ext4`, pre-sized | `mkfs.erofs` or `mksquashfs`, sized to its contents |
+| `MIN_ROOTFS_BYTES` / `OVERHEAD_BYTES` | applied | skipped |
+| `at_init.disk_space` | a **floor** — the image is grown to it | a **ceiling** — the build is refused above it |
+| billed disk | the floor, or the built image if larger | the built image |
+| guest mount | `rw` | `ro`, plus tmpfs on `/tmp` and `/run` |
+| filesystem metadata | optional per entry | **required on every entry** |
+
+That last row is the cost of the rest. The metadata keys (`mode`, `uid`, `gid`,
+`mtime_ns`, `device.*`) are normally optional per entry: an entry carrying none of
+them falls back to a legacy heuristic that guesses an executable bit from a shebang
+or ELF magic. That heuristic cannot restore a uid or a gid, and cannot produce a
+device node at all. On a writable image whatever it gets wrong can still be fixed
+from inside the guest; on an image with no writable escape hatch it cannot. So for
+`read_mode: ro` the keys stop being optional, and a tree missing any of them is
+refused at build time, naming the path and the missing keys.
+
+**What it saves.** `OVERHEAD_BYTES` is a flat 64 MiB whether the tree is 2 GiB or
+2 MiB — a rounding error on a large service and the dominant term on a small one,
+which is the opposite of what content-addressing is supposed to make cheap. On the
+capsules measured in issue #369 it was 44% of a 145 MiB image. For a 12 MB service
+the arithmetic was `max(128 MiB, 12 MB + 64 MiB)` = 128 MiB, a 10x multiplier.
+Compression is on top of that.
+
+**What it requires of the node.** Either `erofs-utils` (`mkfs.erofs`) or
+`squashfs-tools` (`mksquashfs`) in `PATH`, and a guest kernel with `CONFIG_EROFS_FS`
+/ `CONFIG_SQUASHFS` — both of which the kernels built by `bash/guest-kernel/` carry.
+Which of the two tools is used is the node's own choice, not the manifest's (see
+`virtualizers.ch.ROOTFS_READ_ONLY_FORMAT`): the service hash covers the declared tree,
+not the image bytes built from it, so the format is unobservable from inside the
+guest — while pinning one in the manifest would let a node lacking that package
+reject a service it is perfectly able to run.
+
+**What it rules out.** Exporting a shared filesystem (`shared: true`). A share is
+seeded with what the exporter packaged at that path, read out of its own image with
+`debugfs` — an ext4 reader, which cannot open a squashfs or erofs image. A service
+declaring both is refused rather than given an empty share.
+
+---
+
 #### `possible_environment_workload`
 - **Type:** `array` of objects
 - **Required:** No

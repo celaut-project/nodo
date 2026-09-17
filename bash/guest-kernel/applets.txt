@@ -15,3 +15,7 @@ ln
 test
 chmod
 ip
+# Read-only rootfs (#369): the per-instance metadata files arrive on a second
+# block device and are copied onto the overlay before switch_root.
+cp
+umount
