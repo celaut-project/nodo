@@ -1752,7 +1752,7 @@ Once the Docker build produces the filesystem tar, the packer recursively parses
 | Device node (block/char) | Stored as a file placeholder; recovered via xattrs during build |
 | Whiteout file (`.wh..wh..opq`) | Skipped (OCI layer opaque whiteout marker) |
 
-> **Block storage:** Large files are stored as blocks identified by their content hash. This deduplicates identical large files across services and avoids embedding huge blobs directly in the protobuf.
+> **Block storage:** Large files are stored as blocks identified by their content hash. This deduplicates identical large files across services and avoids embedding huge blobs directly in the protobuf. `GetService` also skips re-sending a block the requesting peer already holds: the peer tells the sender mid-transfer, over the same call, so the saving reaches the wire and not only the disk (issue #371).
 
 ---
 
