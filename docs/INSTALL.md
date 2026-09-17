@@ -63,9 +63,12 @@ Why these:
   is its only binary, so neither a busybox package nor `initramfs-tools`/`dracut`
   is needed here.
 - `iproute2`/`iproute` and `zip` are load-bearing at runtime: `ip` is a hard
-  preflight requirement for `execute` (CH networking), and `zip` is invoked when
-  packing — without them the first `execute`/`pack` fails. `iptables` and
-  `e2fsprogs` provide the `iptables`/`debugfs` tools also checked by that preflight.
+  preflight requirement for `execute` (CH networking), and `zip` builds the
+  `.service.zip` a pack uploads (`generate_service_zip`) — without them the first
+  `execute`/`pack` fails. `iptables` and `e2fsprogs` provide the
+  `iptables`/`debugfs` tools also checked by that preflight. Note that only the
+  *compressing* half needs a binary: the packer reads the archive back with
+  Python's `zipfile`, so there is deliberately no `unzip` in this list.
 - `protobuf-compiler` is not installed by the setup script and is only needed for
   development (regenerating protobufs), so it is omitted here.
 
