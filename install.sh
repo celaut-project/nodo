@@ -85,6 +85,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Make TARGET_DIR absolute unconditionally, before the directory necessarily
+# exists (so this can't rely on `cd`+`pwd`). setup_linux_arm.sh/setup_linux_x86.sh
+# cd into TARGET_DIR themselves now, and a relative one would resolve against
+# their own cwd (already TARGET_DIR, see below) instead of the caller's --
+# doubling the path.
+case "$TARGET_DIR" in
+  /*) ;;
+  *) TARGET_DIR="$(pwd)/$TARGET_DIR" ;;
+esac
+
 # Normalize local source path to absolute
 if [ "$USE_LOCAL_SOURCE" = true ]; then
   if [ ! -d "$TARGET_DIR" ]; then
