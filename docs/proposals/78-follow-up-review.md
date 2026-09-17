@@ -30,13 +30,14 @@ Reviewed against PR #366 head `181b7f2f` and Josemi's
    10-second RPC deadline so an unresponsive peer cannot hang launch indefinitely.
    The peer response loses HTTP-vs-HTTPS scheme information when reduced to
    IP/port candidates; HTTPS-only suggestions remain a documented limitation.
-3. **Reputation endpoint type:** the reader selects the configured type NFT in R4
-   and exact descriptor digest in R5, checks the contract tree, reads polarity
-   from R8 and URL lists from R9, and ranks by signed backing. Fixed duplicate URLs
-   within a single box multiplying its influence. This is a reader, not a minted
-   or deployed type NFT/publisher: the feature remains off until the operator
-   supplies `NETWORK_ENDPOINTS_TYPE_NFT_ID`. Rankings are candidate ordering,
-   never proof of chain state.
+3. **Reputation endpoint type: dropped from this PR.** The reader keyed R5 on a
+   `blake2b(sorted tags ‖ formal)` digest of the domain, which does not match how
+   `celaut-project/skills` identifies a network: there R5 is either empty (a
+   self-contained Strict Definition) or an existing box id, and the descriptor lives
+   in R9. An exact content digest is also not enumerable — it finds only boxes
+   published for one byte-identical ask. Rather than ship a reader against a schema
+   under revision, the source is removed and the alignment tracked in
+   [`skills#72`](https://github.com/celaut-project/skills/issues/72).
 
 Generic untrusted peer/reputation suggestions are deliberately not granted as
 members of arbitrary domains without a domain verifier. Operator default seeds

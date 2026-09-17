@@ -208,10 +208,10 @@ asking for different blocks or different work are not in the same domain.
 | Difficulty | **cumulative work since genesis** (Ergo `fullBlocksScore`, Bitcoin `chainwork`), not the tip block's difficulty: it is what the chain's own fork choice maximises, it is monotone, and it gives a total order peers can be compared on. Carried as a decimal string — the value outgrew a double long ago. |
 | Containment | the block must be on the peer's **main** chain (`/blocks/{id}/header` then `/blocks/at/{height}`), not merely stored: an orphan a peer kept is not a block its chain contains. |
 | Ancestors | `match_networks` compares `formal` when both sides declare one (`node_identity.same_component`, the rule every tags/prose/formal descriptor is compared by), and falls back to a shared tag. So a parent granting a specific ask grants **that** ask; a parent meaning "any `pow:ergo`" leaves its own `formal` empty. |
-| Endpoints | A `pow:` domain has no name to look up, so its addresses are *found*, from four sources in trust order: `ledgers.ergo.NODE_URL`; `service_networks.default_instances["pow:ergo"]` (named by hand); the reputation ledger (published for this exact domain, ranked by the ERG burned behind each claim — `src/reputation_system/network_endpoints.py`); other nodes over `Gateway.ResolveNetwork`; and the crawl at `ledgers.ergo.HTTP_PEERS_PATH`. Every one is verified identically, so the order decides only who is asked first. |
+| Endpoints | A `pow:` domain has no name to look up, so its addresses are *found*, from four sources in trust order: `ledgers.ergo.NODE_URL`; `service_networks.default_instances["pow:ergo"]` (named by hand); other nodes over `Gateway.ResolveNetwork`; and the crawl at `ledgers.ergo.HTTP_PEERS_PATH`. Every one is verified identically, so the order decides only who is asked first. |
 | Shape | **one `Instance` per endpoint**, not one with N uris: they are separate operators, separately verified and separately reachable. One Instance with several uris means "one peer at several addresses", which is what a DNS name's A records are. |
 | No peer qualifies | resolves to `[]`, like any other unresolved tag — "nobody meets D right now" is transient and about the world, not about the request. |
-| Config | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ASK_PEERS`; `service_networks.default_instances`; `ledgers.ergo.reputation.NETWORK_ENDPOINTS_TYPE_NFT_ID` |
+| Config | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ASK_PEERS`; `service_networks.default_instances` |
 | Implementation | `src/manager/pow_networks.py`, dispatched from `resolve_network()` |
 
 > ⚠️ **What is verified is what the candidate says about itself.** Its REST answers
@@ -220,11 +220,16 @@ asking for different blocks or different work are not in the same domain.
 > deliberate liar. Cross-checking *k* of *n* candidates, and verifying the Autolykos
 > solutions in the headers themselves, are the next two steps.
 
-> ⚠️ **What a published endpoint list buys, and what it does not.** The ledger and
-> other nodes both name addresses, and neither grants anything: what they buy is a
-> place in the queue. Every address is verified the same way as one the operator typed
-> into `config.yaml`, so the cost of a lie at that layer is a wasted HTTP request, not
-> a firewall rule.
+> ⚠️ **What a suggested endpoint buys, and what it does not.** Another node naming an
+> address grants nothing: what it buys is a place in the queue. Every address is
+> verified the same way as one the operator typed into `config.yaml`, so the cost of a
+> lie at that layer is a wasted HTTP request, not a firewall rule.
+
+> **Reading endpoint lists off the reputation ledger is deliberately out of scope
+> here.** How a communication domain is formalized on-chain is still being settled
+> with [`celaut-project/skills`](https://github.com/celaut-project/skills/issues/72),
+> and wiring a reader against a schema that is about to change would bake in the
+> version we are least sure of.
 
 Bitcoin parses and does not resolve: nodo's default Bitcoin posture is a
 receive-only Esplora backend, which exposes neither `chainwork` nor a peer list.
