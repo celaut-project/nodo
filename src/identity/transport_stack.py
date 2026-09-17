@@ -16,7 +16,7 @@ Each component is declared the way every replaceable component in celaut is:
 
 ``formal``
     The parameters, as canonical ``key=value`` lines sorted by key. This is what decides
-    a comparison (:func:`node_identity._same_component` reads ``formal`` first), so any
+    a comparison (:func:`node_identity.same_component` reads ``formal`` first), so any
     difference that would stop two nodes from talking -- a different OID, a different
     signed payload, an added or removed RPC -- shows up as different bytes here. Machine
     -readable and small enough to travel in an Ergo register.

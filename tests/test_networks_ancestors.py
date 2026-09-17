@@ -19,6 +19,13 @@ import unittest
 from pathlib import Path
 
 try:
+    # `networks.py` builds a ConfigManager at import, so a config has to exist before
+    # it is loaded -- the same bootstrap `test_pow_networks.py` does. Without it every
+    # test here skipped on a permission error reaching for the default config path,
+    # which is not a missing runtime dependency.
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from protos import celaut_pb2 as celaut
     from src.utils.registry_errors import ServiceNotInRegistry, ServiceSpecUnavailable
 

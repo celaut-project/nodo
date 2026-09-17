@@ -282,7 +282,7 @@ class ShippedDefaultTests(unittest.TestCase):
         self.assertIsNotNone(block, f"config.example.yaml has no '{np.CONFIG_BLOCK}:' block")
         self.assertEqual(block.get("blacklist"), [])
         self.assertEqual(block.get("whitelist"), [])
-        self.assertFalse(np.NetworkPolicy(**block).restricts)
+        self.assertFalse(np.NetworkPolicy.from_config(FakeManager(config)).restricts)
 
 
 if __name__ == "__main__":
