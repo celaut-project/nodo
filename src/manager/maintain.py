@@ -117,7 +117,13 @@ def check_wanted_service(wanted: str):
                     indices_serializer=celaut_pb2.Metadata.HashTag.Hash,
                     input=_hash,
                     indices_parser=StartService_input_indices,  #  Not used all the indices, but still are the same.
-                    partitions_message_mode_parser=StartService_input_message_mode
+                    partitions_message_mode_parser=StartService_input_message_mode,
+                    # Tell the peer which blocks of what it sends we already hold,
+                    # so it stops mid-block instead of us draining and discarding
+                    # bytes it did not need to send (issue #371). Ignored by a peer
+                    # that does not honour it, in which case the response arrives
+                    # in full exactly as before.
+                    block_skip=True,
             ):
                 if  type(b) == beerpc.Dir:
                     log.LOGGER(f"    type of dir {b.type}")
