@@ -21,7 +21,10 @@ from src.utils.config import ConfigManager
 from src.utils.container_filesystem import load_container_filesystem, filesystem_hash_types
 from src.utils.filesystem_xattrs import (
     FilesystemNodeMetadata,
+    READ_MODE_RO,
+    assert_complete_filesystem_metadata,
     parse_filesystem_metadata_xattrs,
+    read_mode,
 )
 from src.utils.logger import LOGGER as logger
 from src.utils.verify import get_service_hex_main_hash
@@ -29,6 +32,15 @@ from src.virtualizers.architecture import get_arch_tag, UnsupportedArchitectureE
 # Image floors and the sizing they feed. Shared with the pricing side, so a quote is
 # computed from the same numbers the image is formatted at (see `limits`).
 from src.virtualizers.microvm import limits, paths
+# What a built bundle can hold, declared where it is read back rather than where
+# it is written: both launch paths need it and neither should import this module.
+from src.virtualizers.microvm.bundle_formats import (
+    ROOTFS_FORMAT_EROFS,
+    ROOTFS_FORMAT_EXT4,
+    ROOTFS_FORMAT_SQUASHFS,
+    ROOTFS_IMAGE_NAMES,
+    rootfs_format_of,
+)
 
 env_manager = ConfigManager()
 
@@ -39,6 +51,15 @@ SECURITY_CONFIG = env_manager.get("virtualizers.ch.SECURITY", {}) or {}
 
 BLOCK_SIZE = 4096
 MKFS_MAX_ATTEMPTS = 3
+
+# Preference order when the service asked for a read-only image and said nothing
+# about how to build one -- which is deliberate: the format is a node-local build
+# detail (see #369), not something the manifest pins. erofs first because it is
+# the kernel's own current read-only format, mounts without a decompression
+# thread per read, and produces a smaller image than squashfs on a Debian-derived
+# tree; squashfs second because erofs-utils is the newer package and a host may
+# only have squashfs-tools.
+READ_ONLY_FORMAT_PREFERENCE = (ROOTFS_FORMAT_EROFS, ROOTFS_FORMAT_SQUASHFS)
 _EXEC_BITS = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 _DANGEROUS_MODE_BITS = stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX
 
@@ -70,6 +91,13 @@ TRUSTED_SERVICE_IDS = {
 }
 ROOTFS_BUILD_SANDBOX = str(
     SECURITY_CONFIG.get("ROOTFS_BUILD_SANDBOX", "none")
+).strip().lower()
+# Which tool builds the image of a `read_mode=ro` service. "auto" takes the first
+# of READ_ONLY_FORMAT_PREFERENCE the host actually has, which is what an operator
+# who has not thought about it wants; naming one pins it, and a node whose pinned
+# tool is missing says so instead of quietly building the other.
+ROOTFS_READ_ONLY_FORMAT = str(
+    env_manager.get("virtualizers.ch.ROOTFS_READ_ONLY_FORMAT", "auto") or "auto"
 ).strip().lower()
 
 
@@ -951,10 +979,184 @@ def _mkfs_ext4(rootfs_dir: Path, image_path: Path, size_bytes: int) -> int:
     raise RuntimeError("mkfs.ext4 failed after exhausting retries.")
 
 
+# Ownership in a read-only image, and why neither tool is asked to fake it.
+#
+# `mkfs.ext4 -d` writes the uid/gid it finds on each staged file straight into the
+# image's inodes, whoever runs it -- it is not creating files through the kernel,
+# it is writing a filesystem's bytes. `mksquashfs` and `mkfs.erofs` do the same
+# thing for the same reason, so a tree staged by `_write_fs` (which has already
+# applied every declared uid/gid/mode/mtime and created every declared device node,
+# through `_apply_regular_metadata` and `_create_device_node`) comes out of all
+# three tools with its declared ownership intact. That is the whole of what keeps
+# these interchangeable, and it is why point 2 of the plan refuses `ro` for a tree
+# whose metadata is not fully declared: the staged tree IS the contract.
+#
+# So: no `-all-root`. It would rewrite every uid/gid to 0 and throw away exactly
+# the thing the metadata gate was added to guarantee. And no fakeroot: the node
+# builds rootless on purpose (docs/ROOTLESS.md -- `mkfs.ext4 -d` plus `debugfs`,
+# never a loop mount), and these two tools need no more privilege than that one.
+
+
+def _mksquashfs(rootfs_dir: Path, image_path: Path) -> int:
+    """Build an immutable squashfs image of ``rootfs_dir``; return its size.
+
+    No size argument, which is the point of the read-only path: the image is
+    exactly as large as what went into it, compressed, with no slack to reserve
+    and nothing to retry when a fixed size turns out too small.
+    """
+    try:
+        subprocess.run(
+            [
+                "mksquashfs",
+                str(rootfs_dir),
+                str(image_path),
+                # A fresh image every time. Without it mksquashfs APPENDS to an
+                # existing file, so a rebuild over a stale path produces an image
+                # holding both trees.
+                "-noappend",
+                # The recovery file is a crash-safety artifact for the append case
+                # this build never takes, written next to the image and left behind
+                # in the bundle directory.
+                "-no-recovery",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "mksquashfs not found in PATH. A read_mode=ro service needs "
+            "squashfs-tools (or erofs-utils for mkfs.erofs)."
+        ) from e
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.strip() if e.stderr else ""
+        stdout = e.stdout.strip() if e.stdout else ""
+        raise RuntimeError(
+            f"mksquashfs failed: {stderr or stdout or 'unknown error'}"
+        ) from e
+
+    return int(image_path.stat().st_size)
+
+
+def _mkfs_erofs(rootfs_dir: Path, image_path: Path) -> int:
+    """Build an immutable erofs image of ``rootfs_dir``; return its size.
+
+    Sized to its contents for the same reason :func:`_mksquashfs` is, and preferred
+    over it by default: erofs is the kernel's current read-only format and reads
+    without squashfs's per-read decompression thread.
+    """
+    try:
+        subprocess.run(
+            [
+                "mkfs.erofs",
+                # lz4hc, not zstd: lz4 is erofs-utils' own default compressor and
+                # is in every build of it, while zstd is a configure-time option
+                # that naming here would break on hosts whose package was built
+                # without it. Not passing -z at all would leave the image
+                # uncompressed, which forfeits most of what issue #369 measured.
+                "-zlz4hc",
+                str(image_path),
+                str(rootfs_dir),
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "mkfs.erofs not found in PATH. A read_mode=ro service needs "
+            "erofs-utils (or squashfs-tools for mksquashfs)."
+        ) from e
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.strip() if e.stderr else ""
+        stdout = e.stdout.strip() if e.stdout else ""
+        raise RuntimeError(
+            f"mkfs.erofs failed: {stderr or stdout or 'unknown error'}"
+        ) from e
+
+    return int(image_path.stat().st_size)
+
+
+_READ_ONLY_BUILDERS = {
+    ROOTFS_FORMAT_EROFS: ("mkfs.erofs", _mkfs_erofs),
+    ROOTFS_FORMAT_SQUASHFS: ("mksquashfs", _mksquashfs),
+}
+
+
+def _select_read_only_format() -> str:
+    """Which read-only format this host can actually build, as a node-local choice.
+
+    Not a manifest field, deliberately. The service hash covers the declared tree,
+    not the image bytes built from it, so which of the two formats a node picks is
+    unobservable from inside the guest -- while pinning one in the manifest would
+    make a node that lacks that one package reject a service it is perfectly able
+    to run.
+    """
+    if ROOTFS_READ_ONLY_FORMAT not in ("auto", ""):
+        if ROOTFS_READ_ONLY_FORMAT not in _READ_ONLY_BUILDERS:
+            raise RuntimeError(
+                f"Unsupported virtualizers.ch.ROOTFS_READ_ONLY_FORMAT "
+                f"'{ROOTFS_READ_ONLY_FORMAT}'. Supported values are 'auto', "
+                + ", ".join(f"'{name}'" for name in READ_ONLY_FORMAT_PREFERENCE)
+                + "."
+            )
+        return ROOTFS_READ_ONLY_FORMAT
+
+    for fmt in READ_ONLY_FORMAT_PREFERENCE:
+        binary, _ = _READ_ONLY_BUILDERS[fmt]
+        if shutil.which(binary):
+            return fmt
+
+    raise RuntimeError(
+        "This service declares read_mode=ro, and neither tool that can build a "
+        "read-only rootfs is in PATH: mkfs.erofs (erofs-utils) or mksquashfs "
+        "(squashfs-tools). Install one of them, or pin the other with "
+        "virtualizers.ch.ROOTFS_READ_ONLY_FORMAT."
+    )
+
+
+def _build_read_only_rootfs(
+    rootfs_dir: Path,
+    bundle_dir: Path,
+    rootfs_format: str,
+) -> Tuple[Path, int]:
+    """Write the read-only image for ``rootfs_format``; return its path and size."""
+    _, builder = _READ_ONLY_BUILDERS[rootfs_format]
+    image_path = bundle_dir / ROOTFS_IMAGE_NAMES[rootfs_format]
+    if image_path.exists():
+        image_path.unlink()
+    return image_path, builder(rootfs_dir, image_path)
+
+
+def _bundle_rootfs_image(bundle_dir: Path) -> Optional[Path]:
+    """The image file in this bundle, whatever format it was built in.
+
+    Read from bundle.json rather than guessed from the directory listing: the
+    manifest is what records what was built, and a directory holding a stale image
+    from a previous format would otherwise answer for it.
+    """
+    bundle_path = bundle_dir / "bundle.json"
+    if not bundle_path.is_file():
+        return None
+    try:
+        with open(bundle_path, "r", encoding="utf-8") as f:
+            bundle = json.load(f)
+    except Exception:
+        return None
+
+    image_name = ROOTFS_IMAGE_NAMES.get(rootfs_format_of(bundle))
+    if not image_name:
+        return None
+    image_path = bundle_dir / image_name
+    return image_path if image_path.is_file() else None
+
+
 def _read_built_rootfs_size_bytes(bundle_dir: Path) -> Optional[int]:
     bundle_path = bundle_dir / "bundle.json"
-    rootfs_path = bundle_dir / "rootfs.ext4"
-    if not bundle_path.is_file() or not rootfs_path.is_file():
+    rootfs_path = _bundle_rootfs_image(bundle_dir)
+    if not bundle_path.is_file() or rootfs_path is None:
         return None
 
     try:
@@ -980,7 +1182,7 @@ def _is_service_built_for_arch(
     if not CACHE:
         return False
     bundle_dir = paths.bundle_dir(service_hash, arch)
-    if not (bundle_dir / "rootfs.ext4").is_file() or not (bundle_dir / "bundle.json").is_file():
+    if _bundle_rootfs_image(bundle_dir) is None or not (bundle_dir / "bundle.json").is_file():
         return False
 
     if service is None:
@@ -988,6 +1190,15 @@ def _is_service_built_for_arch(
 
     requested_disk_space_bytes = limits.requested_disk_space_bytes(service)
     if not requested_disk_space_bytes:
+        return True
+
+    # The declared figure is a ceiling for a read-only service, not a floor, so
+    # "the image is smaller than requested" is the expected outcome rather than a
+    # reason to rebuild. Applying the rw rule here would reject every ro bundle --
+    # a compressed image is by construction below the request -- and rebuild it on
+    # every launch, forever, to produce the same too-small image again. The ceiling
+    # itself was enforced when the image was built, against the tree.
+    if limits.is_read_only_service(service):
         return True
 
     built_rootfs_size_bytes = _read_built_rootfs_size_bytes(bundle_dir)
@@ -1004,8 +1215,8 @@ def is_service_built(service_hash: str) -> bool:
     if not base_dir.exists() or not base_dir.is_dir():
         return False
 
-    for rootfs_path in base_dir.rglob("rootfs.ext4"):
-        if rootfs_path.is_file() and (rootfs_path.parent / "bundle.json").is_file():
+    for bundle_path in base_dir.rglob("bundle.json"):
+        if bundle_path.is_file() and _bundle_rootfs_image(bundle_path.parent) is not None:
             return True
     return False
 
@@ -1029,10 +1240,10 @@ def built_rootfs_size_bytes(service_hash: str) -> Optional[int]:
         return None
 
     sizes = []
-    for rootfs_path in base_dir.rglob("rootfs.ext4"):
-        if not rootfs_path.is_file():
+    for bundle_path in base_dir.rglob("bundle.json"):
+        if not bundle_path.is_file():
             continue
-        size = _read_built_rootfs_size_bytes(rootfs_path.parent)
+        size = _read_built_rootfs_size_bytes(bundle_path.parent)
         if size:
             sizes.append(size)
 
@@ -1078,6 +1289,33 @@ def build(
     # the spec, the filesystem pointer's own types when it is a block of its own.
     fs_hash_types = filesystem_hash_types(service)
 
+    # Read once, from the ROOT Filesystem -- the one `container.filesystem` points
+    # at. A nested Filesystem is a subdirectory and is not separately mounted, so
+    # a read_mode set on one describes nothing and is ignored.
+    #
+    # Read here rather than at the mkfs call because it decides two things before
+    # that: whether the metadata contract is mandatory for this tree, and whether
+    # the declared disk_space is a ceiling or a floor.
+    try:
+        service_read_mode = read_mode(fs)
+    except ValueError as e:
+        raise RuntimeError(f"Invalid filesystem read_mode: {e}") from e
+    read_only = service_read_mode == READ_MODE_RO
+
+    if read_only:
+        # The legacy executable-sniffing fallback (`_apply_executable_permissions`
+        # over `legacy_regular_files`) stays available to rw services packed before
+        # the metadata contract existed. It is refused here: it guesses an exec bit
+        # from a shebang or ELF magic and knows nothing about uid, gid or device
+        # nodes, and an image with no writable escape hatch cannot have any of that
+        # corrected afterwards from inside the guest.
+        try:
+            assert_complete_filesystem_metadata(fs)
+        except ValueError as e:
+            raise RuntimeError(
+                f"Refusing to build read_mode=ro service {service_id}: {e}"
+            ) from e
+
     symlinks: List[_PendingSymlink] = []
     legacy_regular_files: Set[Path] = set()
     _write_fs(
@@ -1109,17 +1347,40 @@ def build(
 
     total_bytes = _dir_size_bytes(rootfs_dir)
     requested_disk_space_bytes = limits.requested_disk_space_bytes(service)
-    initial_size_bytes = limits.initial_rootfs_size_bytes(
-        service=service,
-        total_bytes=total_bytes,
-    )
-
-    rootfs_path = bundle_dir / "rootfs.ext4"
-    if rootfs_path.exists():
-        rootfs_path.unlink()
 
     try:
-        size_bytes = _mkfs_ext4(rootfs_dir, rootfs_path, initial_size_bytes)
+        if read_only:
+            # disk_space as a ceiling: the image holds exactly this tree and is
+            # never grown, so a tree above the declared figure is refused instead
+            # of built and billed at its real size.
+            try:
+                limits.assert_within_disk_space_ceiling(
+                    service=service, total_bytes=total_bytes
+                )
+            except ValueError as e:
+                raise RuntimeError(f"[build][{service_id}] {e}") from e
+
+            rootfs_format = _select_read_only_format()
+            rootfs_path, size_bytes = _build_read_only_rootfs(
+                rootfs_dir=rootfs_dir,
+                bundle_dir=bundle_dir,
+                rootfs_format=rootfs_format,
+            )
+            logger(
+                f"[build][{service_id}] read_mode=ro: built {rootfs_format} image of "
+                f"{size_bytes} bytes from a {total_bytes} byte tree "
+                f"(no MIN_ROOTFS_BYTES/OVERHEAD_BYTES floor applied)."
+            )
+        else:
+            rootfs_format = ROOTFS_FORMAT_EXT4
+            rootfs_path = bundle_dir / ROOTFS_IMAGE_NAMES[ROOTFS_FORMAT_EXT4]
+            if rootfs_path.exists():
+                rootfs_path.unlink()
+            initial_size_bytes = limits.initial_rootfs_size_bytes(
+                service=service,
+                total_bytes=total_bytes,
+            )
+            size_bytes = _mkfs_ext4(rootfs_dir, rootfs_path, initial_size_bytes)
     finally:
         shutil.rmtree(rootfs_dir, ignore_errors=True)
 
@@ -1127,6 +1388,7 @@ def build(
         "service_id": service_id,
         "arch": arch,
         "rootfs_path": str(rootfs_path),
+        "rootfs_format": rootfs_format,
         "kernel_path": kernel_path,
         "initramfs_path": initramfs_path,
         "created_at": datetime.now(timezone.utc).isoformat(),

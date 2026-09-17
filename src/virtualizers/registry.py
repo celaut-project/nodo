@@ -92,6 +92,11 @@ class Family:
     remove_built: Callable[..., Any]
     built_rootfs_size_bytes: Callable[..., Any]
     billable_resources: Callable[..., Any]
+    # Whether a manifest declares a read-only rootfs, which changes what the
+    # family's floors mean. Here rather than on the caller because the answer is
+    # the family's: it is the builder that honours `read_mode`, and a family that
+    # cannot build one would answer False for every service.
+    is_read_only: Callable[..., Any]
     sweep_orphans: Callable[..., Any]
 
 
@@ -102,6 +107,7 @@ MICROVM_FAMILY = Family(
     remove_built=_call("src.virtualizers.microvm.build", "remove_built_service"),
     built_rootfs_size_bytes=_call("src.virtualizers.microvm.build", "built_rootfs_size_bytes"),
     billable_resources=_call("src.virtualizers.microvm.limits", "billable_resources"),
+    is_read_only=_call("src.virtualizers.microvm.limits", "is_read_only_service"),
     sweep_orphans=_call("src.virtualizers.microvm.maintain", "sweep_orphans"),
 )
 

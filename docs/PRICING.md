@@ -270,6 +270,32 @@ the size of the image its instances receive — and a **lower bound** otherwise:
 populated-tree floor and the `mkfs.ext4` growth retries are knowable only once the image
 exists. A service not yet built here can cost more than its quote, never less.
 
+### A read-only service is priced at its image, with no floor
+
+The rootfs floors above exist to leave room for writes. A service that declares
+`read_mode: ro` (see docs/PACKING.md) has none to leave room for: its image is squashfs
+or erofs, the guest mounts it read-only, and the only writable thing it is given is a
+tmpfs on `/tmp` and `/run`. So `MIN_ROOTFS_BYTES`, `OVERHEAD_BYTES` and the
+`MKFS_GROWTH_FACTOR` retries are all skipped for it, and it is priced at the size of the
+image actually built.
+
+This is where the saving is. `OVERHEAD_BYTES` is not proportional — 64 MiB whether the
+tree is 2 GiB or 2 MiB — so it is a rounding error on a large service and the dominant
+term on a small one. On the capsules measured in issue #369 it was 44% of a 145 MiB
+image; on a 12 MB service the floor arithmetic came to `max(128 MiB, 12 MB + 64 MiB)`,
+a 10x multiplier. Compression is on top of that.
+
+`at_init.disk_space` also changes meaning, in the direction the field reads like it
+already means. On the writable path it is a **floor**: the image is grown to it, and the
+instance is billed for the declaration rather than for its bytes — which is how the pdf
+capsule in #369 came to hold 1 GiB of ext4 for a 221 MiB tree. On the read-only path it
+is a **ceiling**: nothing is grown to meet it, the instance is billed for the image, and
+a build whose populated tree exceeds it is refused outright rather than built oversized.
+
+Both halves need the manifest, not just the hash, so `resolve_billable_resources` takes
+an optional `service`. Without it the floors stay — which over-quotes rather than
+under-quotes, and only over-quoting is recoverable.
+
 The floors live in one module, `virtualizers/microvm/limits.py`, imported both by the code
 that creates a guest (`execute`, `build`) and by the code that prices one. A floor
 defined anywhere else would be a price the node charges without quoting.

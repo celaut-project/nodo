@@ -13,7 +13,7 @@ import posixpath
 import shutil
 import tempfile
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
@@ -34,10 +34,128 @@ GUEST_CONFIG_TARGETS = ["/__config__"]
 
 GUEST_ENTRYPOINT_PATH = "/.__nodo_entrypoint"
 
+# The metadata disk: a second virtio-blk device carrying exactly the per-instance
+# files the node would otherwise write into the rootfs image itself.
+#
+# It exists because those writes are offline ext4 writes (``debugfs_write``), and
+# a ``read_mode=ro`` service's image is squashfs or erofs -- formats with no
+# writer at all, in debugfs or anywhere else. The content is unchanged and so are
+# the paths the guest reads them at; only the carrier differs, and only for ro.
+#
+# ext4 rather than a second squashfs/erofs: this image is written per launch, by
+# ``mkfs.ext4 -d``, which is the one image tool the node already requires of every
+# host for the ordinary path (and which ``nodo doctor`` already checks for). A ro
+# service must not additionally require the host to have a read-only mkfs tool for
+# something the node generates itself.
+METADATA_DISK_NAME = "metadata.ext4"
+GUEST_METADATA_MOUNT = "/.__nodo_meta"
+
+# Sized for a handful of small files: a serialized ConfigurationFile, one line of
+# entrypoint, and a virtiofs mount plan. 4 MiB is far above any of them and still
+# below the noise floor of a guest's memory, and the image is sparse besides.
+METADATA_DISK_BYTES = 4 * 1024 * 1024
+
 
 def guest_config_targets(service: celaut.Service) -> List[str]:
     _ = service
     return list(GUEST_CONFIG_TARGETS)
+
+
+class GuestMetadata:
+    """Where this launch's per-instance files go, for either kind of rootfs.
+
+    The node delivers three things to every guest -- the serialized
+    ``ConfigurationFile``, the resolved entrypoint, and (when there are shares) the
+    virtiofs mount plan -- and the guest reads all three at fixed absolute paths.
+    Those paths do not change here. Only the carrier does:
+
+    * a **writable** rootfs takes them the way it always has, written into the
+      offline ext4 image with ``debugfs``;
+    * a **read-only** one cannot be written at all, by debugfs or anything else,
+      so they are packed into a small ext4 metadata disk attached as a second
+      virtio-blk device and copied onto the guest's overlay by ``/init``.
+
+    One object so the launch path states each file once and neither backend grows
+    an ``if read_only`` around every injection.
+    """
+
+    def __init__(self, image_path: Path, runtime_dir: Path, read_only: bool):
+        self._image_path = image_path
+        self._runtime_dir = runtime_dir
+        self._read_only = read_only
+        self._staged: Dict[str, Path] = {}
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
+
+    def put(self, host_file: Path, guest_target: str) -> None:
+        """Deliver ``host_file`` to the guest at ``guest_target``."""
+        if self._read_only:
+            self._staged[guest_target] = host_file
+            return
+        debugfs_write(
+            image_path=self._image_path,
+            host_file=host_file,
+            guest_target=guest_target,
+        )
+
+    def finalize(self) -> Optional[Path]:
+        """Build the metadata disk, or ``None`` when the image took the files.
+
+        Called once, after every ``put``, because the disk is written whole: it is
+        an ext4 image populated by ``mkfs.ext4 -d`` from a staging directory, not a
+        filesystem appended to.
+        """
+        if not self._read_only:
+            return None
+        return build_metadata_disk(self._runtime_dir, self._staged)
+
+
+def build_metadata_disk(runtime_dir: Path, entries: Dict[str, Path]) -> Path:
+    """Pack ``entries`` (guest path -> host file) into this VM's metadata disk.
+
+    Replaces the ``debugfs_write`` calls for a read-only rootfs, and nothing else:
+    the guest still finds ``/__config__`` at ``/__config__``, because /init copies
+    what lands here onto the overlay before ``switch_root`` (see
+    ``bash/build_ch_initramfs.sh``).
+
+    Rebuilt from scratch on every call rather than updated, since it is a launch
+    artifact in the VM's own runtime directory and there is never a previous one
+    worth keeping.
+    """
+    image_path = runtime_dir / METADATA_DISK_NAME
+    if image_path.exists():
+        image_path.unlink()
+
+    with tempfile.TemporaryDirectory(dir=str(runtime_dir)) as staging:
+        staging_dir = Path(staging)
+        for guest_path, host_file in entries.items():
+            # Flat by construction: every guest path this carries is a file at the
+            # root of the guest filesystem, and keeping it flat means no path
+            # arithmetic on a string that came from a service specification.
+            name = posixpath.basename(guest_path)
+            if not name or name != guest_path.lstrip("/"):
+                raise MicroVMError(
+                    f"metadata disk entries must be files at the guest root, got '{guest_path}'"
+                )
+            shutil.copyfile(host_file, staging_dir / name)
+
+        run(
+            [
+                "mkfs.ext4",
+                "-b",
+                "4096",
+                "-m",
+                "0",
+                "-d",
+                str(staging_dir),
+                str(image_path),
+                str(METADATA_DISK_BYTES // 4096),
+            ]
+        )
+
+    return image_path
 
 
 def debugfs_write(image_path: Path, host_file: Path, guest_target: str) -> None:
