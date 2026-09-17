@@ -84,22 +84,38 @@ class KyaTests(unittest.TestCase):
     def test_declining_the_kya_stops_the_node(self):
         """The bug this replaces: `os.system` dropped the exit code on the floor, so
         answering "no" started the node exactly like answering "yes"."""
-        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):
+        with mock.patch.object(onboarding, "_interactive", return_value=True), \
+             mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):
             self.assertFalse(onboarding.accept_kya(self.main))
 
     def test_accepting_the_kya_continues(self):
-        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)):
+        with mock.patch.object(onboarding, "_interactive", return_value=True), \
+             mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)):
             self.assertTrue(onboarding.accept_kya(self.main))
 
     def test_a_declined_kya_is_never_recorded_as_accepted(self):
-        with mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):
+        with mock.patch.object(onboarding, "_interactive", return_value=True), \
+             mock.patch("subprocess.run", return_value=mock.Mock(returncode=1)):
             self.assertFalse(onboarding.run(self.main))
         self.assertFalse(os.path.exists(os.path.join(self.main, "storage", onboarding.KYA_MARKER)))
 
     def test_a_missing_kya_script_does_not_lock_the_operator_out(self):
         """A broken install saying so is more use than a node exiting in silence."""
         os.remove(os.path.join(self.main, "bash", "accept_kya.sh"))
-        self.assertTrue(onboarding.accept_kya(self.main))
+        with mock.patch.object(onboarding, "_interactive", return_value=True):
+            self.assertTrue(onboarding.accept_kya(self.main))
+
+    def test_no_terminal_means_no_answer_and_no_refusal(self):
+        """The bug fixed alongside the beerpc protobuf collision: `nodo.py migrate`,
+        run by the installer with stdin already consumed by `curl | sudo bash`, must
+        not have that silence read as a declined KyA. Deferred, not refused -- the
+        marker is left unwritten so the first run with a real terminal still asks.
+        """
+        with mock.patch.object(onboarding, "_interactive", return_value=False), \
+             mock.patch("subprocess.run") as run:
+            self.assertTrue(onboarding.accept_kya(self.main))
+        run.assert_not_called()
+        self.assertFalse(os.path.exists(os.path.join(self.main, "storage", onboarding.KYA_MARKER)))
 
     def test_the_donation_question_comes_after_the_kya(self):
         """Order, not decoration: asking someone to fund the project before they have

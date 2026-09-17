@@ -186,6 +186,22 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Schedule => {
             app.toggle_schedule_on_close()
         }
+        // A schedule is a list of windows: `a` appends one (empty, so it refuses
+        // nothing until its hours are moved), `d` removes the selected one, and
+        // `[`/`]` switch which window ←/→/↑/↓ act on. Mirrors Config's `a`/`d` on its
+        // own lists.
+        (KeyModifiers::NONE, KeyCode::Char('a')) if app.page() == Page::Schedule => {
+            app.add_schedule_window()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Schedule => {
+            app.remove_schedule_window()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('[')) if app.page() == Page::Schedule => {
+            app.select_schedule_window(-1)
+        }
+        (KeyModifiers::NONE, KeyCode::Char(']')) if app.page() == Page::Schedule => {
+            app.select_schedule_window(1)
+        }
         (_, KeyCode::Enter | KeyCode::Char(' ')) if app.page() == Page::Cell => {
             app.toggle_selected_lever()
         }

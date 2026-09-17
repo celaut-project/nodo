@@ -93,6 +93,16 @@ def accept_kya(main_dir: str) -> bool:
     if _has(main_dir, KYA_MARKER):
         return True
 
+    if not _interactive():
+        # No terminal to ask into: install.sh piping curl into bash, the
+        # install-time `nodo.py migrate` call (bash/setup_linux_arm.sh and
+        # friends), a systemd-started daemon, Nodo-Setup.exe's console-less
+        # run, ... accept_kya.sh's `read` would see stdin already at EOF and
+        # read that silence as a refusal, permanently blocking a node that
+        # was never actually asked. Defer to the first run that has one,
+        # same as ask_donation() below.
+        return True
+
     script = os.path.join(main_dir, "bash", "accept_kya.sh")
     if not os.path.exists(script):
         # Nothing to show. Not a reason to refuse to run: a missing doc is a broken

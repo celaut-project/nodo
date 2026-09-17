@@ -15,6 +15,24 @@ dependencies:
     RUNTIME_BIN: "${main.MAIN_DIR}/runtime/python/current/bin/python3"
     VENV_BIN: "${main.MAIN_DIR}/venv/bin/python"
     RUNTIME_ROOT: "${main.MAIN_DIR}/runtime/python"
+  # Rust, for the one thing this node compiles: the `nodo tui` binary.
+  #
+  # RUNTIME_ROOT is the node's own toolchain, and it is self-contained for the
+  # same reason Python's is: rustup's stock defaults install into $HOME/.cargo
+  # and announce themselves by editing a shell profile, so the toolchain a setup
+  # script installed was invisible to every process that ran afterwards -- and
+  # `nodo tui` reinstalled Rust on every launch (issue #375). RUSTUP_HOME and
+  # CARGO_HOME are placed inside this directory, and nodo resolves cargo/rustc at
+  # fixed paths under it. An existing ~/.cargo is never read, moved or removed.
+  #
+  # INSTALL_TOOLCHAIN false (the default) means "install Rust only if this host
+  # actually has to build the TUI". Normally it does not: CI publishes a `tui`
+  # binary per target with the host triple beside it, the installer fetches the
+  # one matching this host, and no compiler is ever installed. Set it true on a
+  # machine you develop on, where the toolchain is wanted regardless.
+  rust:
+    RUNTIME_ROOT: "${main.MAIN_DIR}/runtime/rust"
+    INSTALL_TOOLCHAIN: false
   yq:
     BIN: "${main.MAIN_DIR}/bin/yq"
   # BuildKit is an OPTIONAL, node-local dependency used only by the local packer
@@ -796,12 +814,17 @@ host_limits:
 # window is about renting this machine out, not about locking its owner out of it.
 activity_window:
   ENABLED: false
-  # Local time, HH:MM. START is inclusive, END exclusive. A window that wraps midnight
-  # is the night shift and is read as one: START 22:00 / END 06:00 is open all night.
-  # START equal to END means always open, so enabling this before choosing the hours
-  # refuses nothing.
-  START: "00:00"
-  END: "00:00"
+  # Local time, HH:MM, one entry per open stretch of the day -- a night shift and a
+  # lunch break are two entries, not one. START is inclusive, END exclusive. An entry
+  # that wraps midnight is the night shift and is read as one window: START 22:00 /
+  # END 06:00 is open all night. An empty list, or an entry with START equal to END,
+  # means always open, so enabling this before choosing the hours refuses nothing.
+  WINDOWS: []
+  # WINDOWS:
+  #   - START: "22:00"
+  #     END: "06:00"
+  #   - START: "12:00"
+  #     END: "13:00"
   # What closing time does to work already running.
   #   refuse  Only stop taking new work. Instances already running keep running, keep
   #           being charged, and stop when their balance runs out or their client says so.

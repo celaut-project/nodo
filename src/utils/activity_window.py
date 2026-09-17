@@ -21,9 +21,16 @@ apply -- this module only answers what time it is -- and `descends_from_dev_clie
 Times are the host's local time, read at every call rather than cached: the answer
 depends on the clock, not only on the config. The window itself is the one the node
 booted with, and an edit reaches it through the restart `nodo tui` performs.
+
+The schedule is a *list* of windows (`activity_window.WINDOWS`), not one: a node rented
+out overnight and again over a weekday lunch break has two separate open stretches that
+share no arithmetic, and forcing them into a single START/END pair meant the second
+stretch could not be expressed at all. The node is open whenever the clock falls inside
+*any* configured window; `ON_CLOSE` is one policy shared by all of them, because what
+happens to running work when the node closes does not depend on which window it was in.
 """
 from datetime import datetime, time as clock
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from src.utils.config import ConfigManager
 
@@ -31,9 +38,6 @@ env_manager = ConfigManager()
 
 
 SECTION = "activity_window"
-
-DEFAULT_START = "00:00"
-DEFAULT_END = "00:00"
 
 # What closing time does to work already running.
 ON_CLOSE_REFUSE = "refuse"
@@ -99,57 +103,72 @@ def is_enabled() -> bool:
         return False
 
 
-def window() -> Optional[Tuple[clock, clock]]:
-    """The configured window, or None when there is no window to be outside of.
+def windows() -> List[Tuple[clock, clock]]:
+    """The configured windows, or ``[]`` when there is none to be outside of.
 
-    None covers all three ways of saying "always open": the section switched off, a
-    start equal to its end, and -- defensively -- a time neither of them parses as. A
-    malformed window opens the node rather than closing it: the config validator
-    rejects one at load (`validate_host_policy_config`), so reaching here at all means
-    something wrote the file behind the node's back, and taking the node off the network
-    over it would be a silent outage where a log line is enough.
+    An empty list covers every way of saying "always open": the section switched off,
+    no entries at all, an entry whose start equals its end, and -- defensively -- an
+    entry that does not parse. A malformed schedule opens the node rather than closing
+    it: the config validator rejects one at load (`validate_host_policy_config`), so
+    reaching here at all means something wrote the file behind the node's back, and
+    taking the node off the network over it would be a silent outage where a log line
+    is enough. One bad entry voids the whole schedule rather than just itself, so a
+    typo cannot silently narrow the hours to whatever else happened to parse.
     """
     global _malformed_announced
 
     if not is_enabled():
-        return None
+        return []
 
-    start_text = _text("START", DEFAULT_START)
-    end_text = _text("END", DEFAULT_END)
-    start = parse_clock(start_text)
-    end = parse_clock(end_text)
-    if start is None or end is None:
-        if not _malformed_announced:
-            _malformed_announced = True
-            _log(
-                f"[WINDOW] {SECTION}.START={start_text!r} / {SECTION}.END={end_text!r} "
-                "is not a pair of HH:MM times; this node is treating itself as always "
-                "open. Fix the window or switch the section off."
-            )
-        return None
+    raw = env_manager.get(f"{SECTION}.WINDOWS", []) or []
+    if not isinstance(raw, list) or not raw:
+        return []
+
+    parsed: List[Tuple[clock, clock]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            entry = {}
+        start_text = str(entry.get("START") or "").strip()
+        end_text = str(entry.get("END") or "").strip()
+        start = parse_clock(start_text)
+        end = parse_clock(end_text)
+        if start is None or end is None:
+            if not _malformed_announced:
+                _malformed_announced = True
+                _log(
+                    f"[WINDOW] {SECTION}.WINDOWS has an entry START={start_text!r} / "
+                    f"END={end_text!r} that is not a pair of HH:MM times; this node is "
+                    "treating its whole schedule as always open. Fix the window or "
+                    "switch the section off."
+                )
+            return []
+        if start != end:
+            parsed.append((start, end))
 
     _malformed_announced = False
-    if start == end:
-        return None
-    return start, end
+    return parsed
 
 
 def is_open(now: Optional[datetime] = None) -> bool:
     """Whether this node takes new work at ``now`` (default: local time now).
 
+    Open whenever ``now`` falls inside *any* configured window. Within one window,
     START is inclusive and END exclusive, and a window whose end is before its start
     wraps around midnight: 22:00 to 06:00 is one night, not an empty set. Wrapping is
-    the whole reason this is not a plain ``start <= t < end`` -- overnight is the case
-    an operator renting out a personal PC actually wants.
+    the whole reason a window is not a plain ``start <= t < end`` -- overnight is the
+    case an operator renting out a personal PC actually wants.
     """
-    bounds = window()
-    if bounds is None:
+    bounds = windows()
+    if not bounds:
         return True
-    start, end = bounds
     moment = (now or datetime.now()).time()
-    if start < end:
-        return start <= moment < end
-    return moment >= start or moment < end
+    for start, end in bounds:
+        if start < end:
+            if start <= moment < end:
+                return True
+        elif moment >= start or moment < end:
+            return True
+    return False
 
 
 def stops_running_instances() -> bool:
@@ -168,12 +187,13 @@ def closed_reason() -> str:
     Carried back to whoever asked -- a client, or a peer's balancer -- so a refused
     launch reads as a closed node rather than as a broken one.
     """
-    bounds = window()
-    if bounds is None:
+    bounds = windows()
+    if not bounds:
         return "This node is not accepting new work."
-    start, end = bounds
+    spans = " or ".join(
+        f"{start.strftime('%H:%M')} and {end.strftime('%H:%M')}" for start, end in bounds
+    )
     return (
         f"This node is outside its activity window: it accepts new work between "
-        f"{start.strftime('%H:%M')} and {end.strftime('%H:%M')} local time "
-        f"({SECTION} in config.yaml)."
+        f"{spans} local time ({SECTION} in config.yaml)."
     )
