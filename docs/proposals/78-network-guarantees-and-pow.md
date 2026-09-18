@@ -416,7 +416,7 @@ have to be **found**. Four sources, in trust order:
 | **(a) the node's own configured ledger node** | `ledgers.ergo.NODE_URL` (`config.example.yaml:1021`), `ledgers.bitcoin.*` (`:1166`). | The operator chose it and the node already trusts it with reputation reads and payment proofs (`src/manager/ergo.py:14`). Verifying it is still worth doing — its *state* is a fact about the world, not about the operator's intent. |
 | **(b) endpoints named by hand** | `service_networks.default_instances["pow:ergo"]`, a map of tag → uris. | The operator's own statement, for somebody running a node this one is not otherwise pointed at. Keyed by tag rather than flat because an endpoint means nothing on its own: an Ergo REST node has no business being asked about a bitcoin network. |
 | **(c) other celaut nodes** | `Gateway.ResolveNetwork` (§2.5.1). | Peers this node holds a relationship with — it can pay them, rate them, and attribute a lie — but who staked nothing on *this* answer. |
-| **(d) the Ergo peer crawl** | `ledgers.ergo.HTTP_PEERS_PATH`, populated by `get_refresh_peers()` (`src/manager/ergo.py:36-75`), which already filters on `genesisBlockId` matching `ledgers.ergo.GENESIS_BLOCK_ID`. | Untrusted strangers who paid nothing and were asked nothing. The crawl is recursive and unbounded (`ergo.py:68` recurses inside the loop), so resolution **reads the file** and never triggers a crawl. |
+| **(d) the Ergo peer crawl** | `ledgers.ergo.HTTP_PEERS_PATH`, populated by `get_refresh_peers()` (`src/manager/ergo.py:36-75`), which already filters on `genesisBlockId` matching `ledgers.ergo.GENESIS_BLOCK_ID`. It is also the **only** source that observes a peer's P2P address, which `/peers/connected` carries as `address` next to `restApiUrl`. | Untrusted strangers who paid nothing and were asked nothing. The crawl is recursive and unbounded (`ergo.py:68` recurses inside the loop), so resolution **reads the file** and never triggers a crawl. |
 
 **The order is a latency decision, not a security one.** Every candidate goes through
 the same verification (§2.6) whatever named it, so what the order decides is who is
@@ -602,12 +602,47 @@ same reason it is inert for DNS ones (§1.6): a chain node is not a celaut insta
 and has no environment to read.
 
 **Firewall** — each qualifying peer becomes **its own `Instance`** with one
-`Uri(ip, port)`, where ip/port come from parsing the peer's `restApiUrl`
-(`https://host:9053` → resolve `host`, port 9053; default 443/80 by scheme when
-absent). They are separate operators, separately verified, separately reachable and
-separately worth dropping, and one `Instance` carrying N uris says the opposite — that
-shape means "one peer at several addresses", which is what `resolve_domain`
-legitimately builds out of the A records of a single name.
+`Uri(ip, port)` naming that peer's **P2P endpoint**. They are separate operators,
+separately verified, separately reachable and separately worth dropping, and one
+`Instance` carrying N uris says the opposite — that shape means "one peer at several
+addresses", which is what `resolve_domain` legitimately builds out of the A records of
+a single name.
+
+*The uri is the P2P endpoint, not the REST one.* Verification goes to `restApiUrl`
+(§2.6) because only the REST API can answer "does your main chain contain B". But a
+service that declared `pow:ergo` is asking for **chain peers** — something to sync
+against — and the chain protocol is not spoken on the REST port. Emitting the REST
+address granted egress that could not be used for what it was granted for, which is the
+worst shape a firewall rule can take: useless *and* open. The REST uri is therefore not
+also emitted alongside it. An `Instance.Uri` carries an ip and a port and nothing that
+says which is which, so a second uri would be indistinguishable to the guest while the
+firewall opened both; a guest that wants a REST API asks for one, and that ask is a
+different network descriptor, not a second uri smuggled into this one.
+
+*Where the port comes from, without assuming one.* **This node does not assume a port
+for a network wherever it can observe one.** Ergo's `/peers/connected` entries carry
+`address` (`/1.2.3.4:9030`, Java's `InetSocketAddress.toString()`) alongside
+`restApiUrl`, so `get_refresh_peers()` keeps it as `p2pAddress` — an addition to the
+entry, never a change of its shape, so a file written by an older nodo still reads. A
+peer found that way is emitted at exactly the port it was seen on. That matters
+concretely: of 58 peers on one live mainnet node's `/peers/connected`, 53 were on 9030
+and five were not (9020, 9029, 9031, 1540).
+
+A candidate whose P2P endpoint nobody observed — `ledgers.ergo.NODE_URL`,
+`service_networks.default_instances`, a peer's `ResolveNetwork` answer, or a crawl entry
+from before this field existed — reuses the REST **host** with
+`pow_networks.ERGO_P2P_PORT` (default 9030), and the assumption is logged with the
+address it was made for. Reusing the host is not an assumption of the same kind: that is
+where the node which answered `/info` lives. Only the port is a guess, which is why it
+is the part the operator can override.
+
+*Checked: Ergo has no way to ask a node for its own P2P address.* `/info` reports
+`restApiUrl` and nothing else addressable — verified live against a mainnet node, whose
+28 `/info` keys include no P2P address, port or bind field. `/peers/all` carries the
+same `address`/`restApiUrl` pairs as `/peers/connected` and is likewise about the
+node's *peers*, not itself. So a peer's P2P port is learnable only from some **other**
+node that connected to it, which is exactly the crawl, and is unavailable for a
+candidate reached any other way. Hence the default.
 
 That required a fix at the other end, which this proposal makes:
 
@@ -619,7 +654,8 @@ That required a fix at the other end, which this proposal makes:
   inside the guest and at the nftables rule. It now writes a rule for every instance,
   and one peer that cannot be opened no longer shuts the rest of the domain.
 * A peer whose `restApiUrl` is a hostname needs a DNS lookup, which re-imports every
-  §1.4 caveat. Prefer the numeric form when the crawl recorded one.
+  §1.4 caveat. Prefer the numeric form when the crawl recorded one — which the crawl's
+  `p2pAddress` almost always is, since it is the address a connection was made to.
 
 ## 2.9 No peer qualifies
 

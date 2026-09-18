@@ -481,16 +481,20 @@ class ResolvePowNetworkTests(unittest.TestCase):
     def _resolve(self, network=None, qualifying=("http://a.test:9053", "http://b.test:9053"),
                  candidates=("http://a.test:9053", "http://b.test:9053")):
         network = network or _network()
+        # The port is the P2P one now, not the REST one the url names: these peers
+        # have no observed P2P address, so they are defaulted (9030).
         addresses = {
-            "http://a.test:9053": ("203.0.113.10", 9053),
-            "http://b.test:9053": ("203.0.113.11", 9053),
+            "http://a.test:9053": ("203.0.113.10", 9030),
+            "http://b.test:9053": ("203.0.113.11", 9030),
         }
         with patch.object(
             pow_networks, "candidate_urls", return_value=list(candidates)
         ), patch.object(
             pow_networks, "ergo_peer_satisfies", side_effect=lambda url, *a, **k: url in qualifying
         ), patch.object(
-            pow_networks, "_uri_for", side_effect=lambda url: addresses.get(url)
+            pow_networks, "crawled_p2p_addresses", return_value={}
+        ), patch.object(
+            pow_networks, "_p2p_uri_for", side_effect=lambda url, hint=None: addresses.get(url)
         ):
             return pow_networks.resolve_pow_network(network, tag="pow:ergo")
 
@@ -506,10 +510,13 @@ class ResolvePowNetworkTests(unittest.TestCase):
         self.assertEqual(len(peers), 2)
         self.assertEqual(
             [(u.ip, u.port) for peer in peers for u in peer.uri_slot[0].uri],
-            [("203.0.113.10", 9053), ("203.0.113.11", 9053)],
+            [("203.0.113.10", 9030), ("203.0.113.11", 9030)],
         )
         for peer in peers:
             self.assertEqual(len(peer.uri_slot), 1)
+            # Still exactly one uri: the REST endpoint is NOT also emitted. A guest
+            # asking for chain peers is not asking for a REST API, and an
+            # `Instance.Uri` carries no role it could tell the two apart by.
             self.assertEqual(len(peer.uri_slot[0].uri), 1)
 
     def test_a_peer_that_fails_verification_is_left_out(self):
@@ -517,7 +524,7 @@ class ResolvePowNetworkTests(unittest.TestCase):
 
         self.assertEqual(
             [(u.ip, u.port) for peer in peers for u in peer.uri_slot[0].uri],
-            [("203.0.113.11", 9053)],
+            [("203.0.113.11", 9030)],
         )
 
     def test_no_qualifying_peer_resolves_to_nothing_rather_than_aborting(self):
@@ -667,24 +674,247 @@ class CandidateSourceTests(unittest.TestCase):
             env.get.side_effect = lambda key, default=None: settings.get(key, default)
             return pow_networks.candidate_urls(_network(), "pow:ergo", ask_peers=ask_peers)
 
-    def test_a_url_is_pinned_to_an_address_and_a_port(self):
+    def test_a_hostname_is_pinned_to_an_address(self):
+        """The firewall writes rules against addresses, so a name has to be resolved.
+
+        Which re-imports every caveat of DNS resolution -- no DNSSEC, IPv4 only, frozen
+        at launch -- and is why the crawl's already-numeric addresses are preferred.
+        """
         with patch.object(
             pow_networks.socket,
             "getaddrinfo",
-            return_value=[(2, 1, 6, "", ("203.0.113.9", 9053))],
+            return_value=[(2, 1, 6, "", ("203.0.113.9", 9030))],
         ):
-            self.assertEqual(
-                pow_networks._uri_for("http://node.test:9053"), ("203.0.113.9", 9053)
-            )
-            self.assertEqual(pow_networks._uri_for("https://node.test"), ("203.0.113.9", 443))
-            # No scheme, no port: the conventional Ergo REST port.
-            self.assertEqual(pow_networks._uri_for("node.test"), ("203.0.113.9", 9053))
+            self.assertEqual(pow_networks._resolve_host("node.test", 9030), ("203.0.113.9", 9030))
 
     def test_a_name_that_does_not_resolve_is_dropped_rather_than_raising(self):
         with patch.object(
             pow_networks.socket, "getaddrinfo", side_effect=pow_networks.socket.gaierror("nx")
         ):
-            self.assertIsNone(pow_networks._uri_for("http://nowhere.test:9053"))
+            self.assertIsNone(pow_networks._resolve_host("nowhere.test", 9030))
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class P2PEndpointTests(unittest.TestCase):
+    """A `pow:ergo` peer is emitted at its **P2P** address, not its REST one.
+
+    A service declaring `pow:ergo` wants something to sync a chain against. The REST
+    API is what this node used to *verify* the peer; it is not where the chain
+    protocol is spoken. Emitting the REST address opened a port the guest could not
+    use for what it was opened for.
+
+    The port is observed wherever anything observed it -- the crawl keeps
+    `/peers/connected.address` -- and only defaulted when nothing did.
+    """
+
+    def _numeric(self):
+        """getaddrinfo standing in for the kernel's parse of a numeric literal."""
+        return patch.object(
+            pow_networks.socket,
+            "getaddrinfo",
+            side_effect=lambda host, port, *a, **k: [(2, 1, 6, "", (host, port))],
+        )
+
+    def test_an_observed_p2p_address_is_used_verbatim(self):
+        """Host and port both come from the crawl entry. Nothing is assumed."""
+        with self._numeric():
+            self.assertEqual(
+                pow_networks._p2p_uri_for("https://node.test", "203.0.113.7:9030"),
+                ("203.0.113.7", 9030),
+            )
+
+    def test_a_peer_on_an_unconventional_port_is_reached_on_that_port(self):
+        """Why the observation is preferred over the default at all.
+
+        Five of 58 peers on one live mainnet node were not on 9030. Assuming the
+        conventional port would have opened the wrong one for each of them.
+        """
+        with self._numeric():
+            self.assertEqual(
+                pow_networks._p2p_uri_for("https://node.test", "203.0.113.7:9031"),
+                ("203.0.113.7", 9031),
+            )
+
+    def test_a_rest_only_candidate_keeps_its_host_and_defaults_its_port(self):
+        """The host is where the node that answered /info lives; only the port is a guess."""
+        with self._numeric():
+            self.assertEqual(
+                pow_networks._p2p_uri_for("https://203.0.113.8:9053"),
+                ("203.0.113.8", 9030),
+            )
+            # No port and no scheme on the REST url changes nothing: the REST port was
+            # never what the P2P port was derived from.
+            self.assertEqual(
+                pow_networks._p2p_uri_for("203.0.113.8"), ("203.0.113.8", 9030)
+            )
+
+    def test_the_defaulted_port_is_configurable(self):
+        with self._numeric(), patch.object(pow_networks, "env_manager") as env:
+            env.get.side_effect = lambda key, default=None: (
+                9099 if key == "pow_networks.ERGO_P2P_PORT" else default
+            )
+            self.assertEqual(
+                pow_networks._p2p_uri_for("https://203.0.113.8:9053"),
+                ("203.0.113.8", 9099),
+            )
+
+    def test_an_out_of_range_or_unreadable_override_falls_back(self):
+        """A typo in one config key is not worth failing a launch over."""
+        for value in ("not-a-port", 0, 70000, None):
+            with self.subTest(value=value), patch.object(pow_networks, "env_manager") as env:
+                env.get.side_effect = lambda key, default=None: (
+                    value if key == "pow_networks.ERGO_P2P_PORT" else default
+                )
+                self.assertEqual(pow_networks._default_p2p_port(), 9030)
+
+    def test_an_unusable_observed_address_falls_back_rather_than_dropping_the_peer(self):
+        with self._numeric():
+            self.assertEqual(
+                pow_networks._p2p_uri_for("https://203.0.113.8:9053", "garbage"),
+                ("203.0.113.8", 9030),
+            )
+
+    def test_a_name_that_does_not_resolve_drops_the_peer(self):
+        with patch.object(
+            pow_networks.socket, "getaddrinfo", side_effect=pow_networks.socket.gaierror("nx")
+        ):
+            self.assertIsNone(pow_networks._p2p_uri_for("http://nowhere.test:9053"))
+
+    def test_the_crawl_file_yields_the_addresses_it_recorded(self):
+        import tempfile, os
+
+        entries = {
+            "https://has-address.test": {"appVersion": "6.0.4", "p2pAddress": "203.0.113.7:9030"},
+            # Written by a nodo from before this field existed.
+            "https://older-entry.test": {"appVersion": "5.0.0"},
+            "https://not-a-dict.test": "whatever",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "peers.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(entries, handle)
+
+            with patch.object(pow_networks, "env_manager") as env:
+                env.get.side_effect = lambda key, default=None: (
+                    path if key == "ledgers.ergo.HTTP_PEERS_PATH" else default
+                )
+                self.assertEqual(
+                    pow_networks.crawled_p2p_addresses(),
+                    {"https://has-address.test": "203.0.113.7:9030"},
+                )
+
+    def test_a_missing_crawl_file_yields_nothing_rather_than_raising(self):
+        with patch.object(pow_networks, "env_manager") as env:
+            env.get.side_effect = lambda key, default=None: (
+                "/nonexistent/peers.json" if key == "ledgers.ergo.HTTP_PEERS_PATH" else default
+            )
+            self.assertEqual(pow_networks.crawled_p2p_addresses(), {})
+
+    def test_resolution_emits_the_observed_port_for_a_crawled_peer(self):
+        """End to end: crawl entry with an address -> that port in the Instance.Uri.
+
+        Verification still runs against the REST url; only what is *emitted* changed.
+        """
+        asked = []
+
+        def satisfies(url, *a, **k):
+            asked.append(url)
+            return True
+
+        with patch.object(
+            pow_networks, "candidate_urls",
+            return_value=["https://crawled.test", "https://configured.test:9053"],
+        ), patch.object(
+            pow_networks, "ergo_peer_satisfies", side_effect=satisfies
+        ), patch.object(
+            pow_networks, "crawled_p2p_addresses",
+            return_value={"https://crawled.test": "203.0.113.7:9031"},
+        ), self._numeric():
+            peers = pow_networks.resolve_pow_network(_network(), tag="pow:ergo")
+
+        # The crawled peer carries its observed port; the configured one is defaulted.
+        self.assertEqual(
+            [(u.ip, u.port) for peer in peers for u in peer.uri_slot[0].uri],
+            [("203.0.113.7", 9031), ("configured.test", 9030)],
+        )
+        # Verification went to the REST urls, unchanged.
+        self.assertEqual(asked, ["https://crawled.test", "https://configured.test:9053"])
+
+    def test_the_rest_uri_is_not_also_emitted(self):
+        """One uri per peer, and it is the P2P one.
+
+        An `Instance.Uri` carries an ip and a port and no role, so a second uri would
+        be indistinguishable from the first to the guest, while the firewall would
+        open both. The guest asked for chain peers; a REST API is a different ask and
+        would be a different network descriptor.
+        """
+        with patch.object(
+            pow_networks, "candidate_urls", return_value=["https://only.test:9053"]
+        ), patch.object(
+            pow_networks, "ergo_peer_satisfies", return_value=True
+        ), patch.object(
+            pow_networks, "crawled_p2p_addresses", return_value={}
+        ), self._numeric():
+            peers = pow_networks.resolve_pow_network(_network(), tag="pow:ergo")
+
+        self.assertEqual(len(peers), 1)
+        self.assertEqual(len(peers[0].uri_slot), 1)
+        self.assertEqual(len(peers[0].uri_slot[0].uri), 1)
+        self.assertEqual(peers[0].uri_slot[0].uri[0].port, 9030)
+        self.assertNotIn(9053, [u.port for u in peers[0].uri_slot[0].uri])
+
+    def test_the_instance_is_otherwise_byte_identical(self):
+        """Only the port moved. Slot numbering, transport and protocol_stack did not."""
+        network = _network()
+        network.protocol_stack.append(celaut.Service.Api.Protocol(tags=["ergo-p2p"]))
+
+        with patch.object(
+            pow_networks, "candidate_urls", return_value=["https://only.test:9053"]
+        ), patch.object(
+            pow_networks, "ergo_peer_satisfies", return_value=True
+        ), patch.object(
+            pow_networks, "crawled_p2p_addresses", return_value={}
+        ), self._numeric():
+            peer = pow_networks.resolve_pow_network(network, tag="pow:ergo")[0]
+
+        self.assertEqual(peer.api.slot[0].port, 1)
+        self.assertEqual(list(peer.api.slot[0].transport.tags), ["tcp"])
+        self.assertEqual(list(peer.api.slot[0].protocol_stack[0].tags), ["ergo-p2p"])
+        self.assertEqual(peer.uri_slot[0].internal_port, 1)
+        self.assertEqual(list(peer.api.payment_contracts), [])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class CrawlP2PAddressTests(unittest.TestCase):
+    """`src/manager/ergo.py` keeping what `/peers/connected` says about the P2P port.
+
+    The field is Java's `InetSocketAddress.toString()`, which is why it arrives with a
+    leading `/` and sometimes a resolved name in front of it. Shapes below are copied
+    from a live mainnet node's answer.
+    """
+
+    def _module(self):
+        from src.manager import ergo
+        return ergo
+
+    def test_the_shapes_a_live_node_actually_returns(self):
+        ergo = self._module()
+        for raw, expected in (
+            ("/59.152.124.180:9030", "59.152.124.180:9030"),
+            ("/172.245.236.70:9031", "172.245.236.70:9031"),
+            # A name was resolved before connecting: the part after the last `/` is
+            # what was actually dialled.
+            ("ergo-node.eutxo.de/203.0.113.4:9030", "203.0.113.4:9030"),
+        ):
+            with self.subTest(raw=raw):
+                self.assertEqual(ergo._p2p_address({"address": raw}), expected)
+
+    def test_an_entry_without_a_usable_address_contributes_nothing(self):
+        ergo = self._module()
+        for peer in ({}, {"address": None}, {"address": "/no-port"}, {"address": "/1.2.3.4:x"},
+                     {"address": "/1.2.3.4:0"}, {"address": ""}):
+            with self.subTest(peer=peer):
+                self.assertIsNone(ergo._p2p_address(peer))
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

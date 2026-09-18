@@ -507,6 +507,21 @@ service_networks:
 pow_networks:
   TIMEOUT_SECONDS: 10  # Per HTTP request to a candidate peer.
   MAX_PEERS: 8  # Stop verifying once this many peers qualify. Each one becomes a firewall rule.
+  # P2P port to assume for a qualifying peer whose P2P endpoint was never observed.
+  #
+  # A peer is CHECKED over its REST API and then handed to the guest as its **P2P**
+  # address, because a service declaring pow:ergo wants something to sync a chain
+  # against -- and no chain protocol is spoken on the REST port. Only the P2P uri is
+  # emitted; the REST one is not also opened, since it would be a hole the guest
+  # cannot use for what it asked for.
+  #
+  # This node does not assume a port for a network wherever it can observe one: the
+  # peer crawl keeps each peer's `/peers/connected` address, so a peer on a
+  # non-conventional port is reached on that port. This key covers only the rest --
+  # `ledgers.ergo.NODE_URL`, `service_networks.default_instances`, and what other
+  # nodes answer over Gateway.ResolveNetwork -- where nothing ever saw a P2P port.
+  # Every such assumption is logged with the address it was made for.
+  ERGO_P2P_PORT: 9030
   # How many known peers to ask (Gateway.ResolveNetwork) for addresses in this domain.
   # A latency budget, not a quality setting: the answers are pooled rather than compared,
   # and each ask is a round trip on the launch path. 0 switches the source off. A node
