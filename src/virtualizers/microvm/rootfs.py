@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
+from src.manager.network_templates import Missing, substitute
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
 from src.utils import logger as log
 from src.utils.network_policy import enforce_network_policy
@@ -228,6 +229,31 @@ def build_network_resolution(
     father_id: str,
     config: Optional[celaut.Configuration] = None,
 ) -> List[celaut.ConfigurationFile.NetworkResolution]:
+    """The peers this instance may reach, per declared communication domain.
+
+    Three filters, in this order, and the order is the argument:
+
+    1. **the ancestor chain** narrows what was declared to what every generation
+       above authorized (``filter_networks_with_ancestors``);
+    2. **the operator's policy** judges what survived that, and is the only thing
+       here that can abort the launch (``enforce_network_policy``);
+    3. **template completion** (#385) decides, per network, whether this node has
+       enough information to resolve it *now*.
+
+    Step 3 is a decision about timing and never about permission. A network whose
+    ``formal`` carries a ``${VAR}`` the launcher did not answer is not refused --
+    it is left unresolved and omitted from the returned list, so the guest boots
+    with a ``__config__`` that is short that entry and can ask for it later over
+    ``Gateway.ResolveNetwork``. That is the point of declaring a template: an
+    author who writes ``pow.block_id=${ERGO_BLOCK_ID}`` is saying the instantiator
+    picks the chain, and a node that guessed one on its behalf -- resolving
+    ``pow:ergo`` against whatever Ergo-shaped peers it could find -- would be
+    answering a question nobody asked it.
+
+    Policy is deliberately judged *before* this, on the declared network, so that
+    whether a launch is refused does not depend on which variables happened to be
+    set. An operator who blacklists ``pow:*`` refuses it templated or filled.
+    """
     networks = service.network
     if father_id and sc.internal_instance_exists(id=father_id):
         networks = filter_networks_with_ancestors(networks=networks, father_id=father_id)
@@ -244,15 +270,64 @@ def build_network_resolution(
     # The requesting instance's own environment values drive Network peer
     # filtering (Service.Network.environment_variable).
     requester_env_values = dict(config.environment_variables) if config else None
+    env = requester_env_values or {}
 
-    return [
-        celaut.ConfigurationFile.NetworkResolution(
-            tags=network.tags,
-            peer_instances=resolve_network(network, requester_env_values=requester_env_values),
+    resolutions: List[celaut.ConfigurationFile.NetworkResolution] = []
+    for network in networks:
+        if len(network.tags) == 0:
+            continue
+
+        # `${VAR}` selection keys (#385). A network whose formal carries none is
+        # untouched -- `substitute` hands back the same bytes -- so every service
+        # that existed before templating resolves exactly as it did.
+        resolved_formal = substitute(network.formal, env)
+        if isinstance(resolved_formal, Missing):
+            # Deferred, not failed. The instantiator did not say which instance of
+            # this protocol it meant, so the node does not pick one for it: the
+            # network is omitted from __config__ and the guest may ask for it later
+            # over `Gateway.ResolveNetwork`, by which time it may know.
+            #
+            # Omitting an entry is a shape the rest of the launch already handles:
+            # `configure_guest_firewall_policy` walks the resolutions it is given,
+            # so a network that is not in the list simply has no rule written for
+            # it -- the guest gets default-deny toward those peers, which is the
+            # correct posture for a domain nobody has decided on yet. It is the same
+            # position a declared network in which no peer qualifies is already in.
+            #
+            # Logged once per network, naming the variables, because this is the
+            # one outcome that looks like a bug from inside the guest: it starts
+            # fine and finds `__config__` short an entry it declared.
+            log.LOGGER(
+                f"[NETWORKS] deferring {list(network.tags)}: {resolved_formal}. "
+                "It is omitted from __config__; resolve it later over "
+                "Gateway.ResolveNetwork."
+            )
+            continue
+
+        if resolved_formal != network.formal:
+            # Resolve against the completed ask, never the templated one: the whole
+            # point is that `${MIN_DIFF}` is not a block id. A copy, because `network`
+            # is a view on the service spec this node stores and holds unchanged --
+            # `filter_networks_with_ancestors` compares ancestor specs against what
+            # was *declared*, and an in-place edit here would mutate the declaration
+            # under a later reader.
+            filled = celaut.Service.Network()
+            filled.CopyFrom(network)
+            filled.formal = resolved_formal
+            network_to_resolve = filled
+        else:
+            network_to_resolve = network
+
+        resolutions.append(
+            celaut.ConfigurationFile.NetworkResolution(
+                tags=network.tags,
+                peer_instances=resolve_network(
+                    network_to_resolve, requester_env_values=requester_env_values
+                ),
+            )
         )
-        for network in networks
-        if len(network.tags) > 0
-    ]
+
+    return resolutions
 
 
 def build_configuration_file(

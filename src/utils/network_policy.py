@@ -47,9 +47,13 @@ Enforced at three points, each on its own grounds:
    it has not applied a policy, it has outsourced one.
 2. ``GetServiceEstimatedCostIterable`` -- this node does not quote a service it
    would refuse to run, so a peer's balancer never selects it and then fails.
-3. ``_build_network_resolution`` in the virtualizer -- defence in depth. Reaching
-   it means 1 and 2 were bypassed, so it aborts the launch instead of quietly
-   dropping the network.
+3. ``rootfs.build_network_resolution`` in the virtualizer -- defence in depth.
+   Reaching it means 1 and 2 were bypassed, so it aborts the launch instead of
+   quietly dropping the network. It judges the network as **declared**, before any
+   ``${VAR}`` substitution (#385), so whether a launch is refused never depends on
+   which variables the launcher happened to set: a service cannot evade a blacklist
+   by leaving one unanswered and having the network deferred out from under the
+   check.
 
 The policy applies to every service, including the core services the node starts
 for itself (packer, source-application, low-demand-fallback). Their egress is still

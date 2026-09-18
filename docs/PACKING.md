@@ -975,7 +975,7 @@ The older `entrypoint` top-level field is still supported and will be automatica
 |-------|------|----------|-------------|
 | `tags` | array of strings | Yes | Network type identifiers. Required when a `network` entry is present — omitting it raises `KeyError` |
 | `prose` | string | Yes | Human-readable description of the network requirement. Required when a `network` entry is present — omitting it raises `KeyError` |
-| `formal` | object of string → string | No | The machine-readable ask. Encoded to `Service.Network.formal` as the sorted `key=value` body every celaut descriptor uses (`node_identity.component_formal`). Values must be **JSON strings** — a number is refused, not stringified |
+| `formal` | object of string → string | No | The machine-readable ask. Encoded to `Service.Network.formal` as the sorted `key=value` body every celaut descriptor uses (`node_identity.component_formal`). Values must be **JSON strings** — a number is refused, not stringified. A value may be the template `"${VAR_NAME}"`, filled in at launch by the instantiator |
 | `protocol_stack` | array of protocol descriptors | No | Protocols the peers in this domain must speak. Each entry is either a bare list of tags (`["http"]`) or an object with `tags` / `prose` / `formal`, read by the same parser as an api slot's `protocol` |
 
 ##### `formal` — what a network *is*, not just what it is called
@@ -1011,6 +1011,44 @@ that is not a base-10 integer, or a `pow:ergo` tag whose body says
 Nothing contacts a peer: this is validation of the text, not resolution. A `pow:` tag
 with no `formal` is left alone — that is the legitimate "any peer on this chain" an
 ancestor declares when granting a whole chain (see [`NETWORKS.md`](NETWORKS.md)).
+
+##### `${VAR}` — a key whose value the instantiator writes
+
+A `formal` key that says *which concrete instance of a protocol to join* — mainnet or
+testnet, which block, how much work — is a **selection key**, and the decision
+belongs to whoever instantiates the service, not to its author. Writing `"${VAR}"` in
+place of the value says so:
+
+```json
+"formal": {
+    "pow.chain": "ergo",
+    "pow.consensus": "autolykos-v2",
+    "pow.block_id": "${ERGO_BLOCK_ID}",
+    "pow.min_cumulative_difficulty": "${ERGO_MIN_CUMULATIVE_DIFFICULTY}"
+}
+```
+
+At launch the node fills these from the launcher's
+`Configuration.environment_variables`. If every one is answered it resolves the
+network normally; if any is not, **that network alone is skipped** and omitted from
+`__config__`, to be resolved later over `Gateway.ResolveNetwork`. A missing variable
+is never an error and never aborts a launch. Full model, including the
+`ResolveNetwork` subset rule that bounds what a guest may later ask for:
+[`NETWORKS.md` → `${VAR}` templates](NETWORKS.md).
+
+The grammar, enforced here at pack time:
+
+| Rule | |
+|---|---|
+| `${NAME}` | NAME is `[A-Za-z_][A-Za-z0-9_]*` |
+| Whole values only | A value is **entirely** a placeholder or contains none. `"abc${X}"` fails the pack — a `formal` value is compared byte for byte, and half a value can be said neither to be fixed by the author nor left to the instantiator. It applies to every network's `formal`, not only a `pow:` one: the grammar belongs to the field. |
+| `pow.chain` | Never templatable. It is an identity key that must agree with the `pow:<chain>` tag the operator's policy vetted. |
+| Everything else is still checked | `parse_pow_formal` runs with templates allowed, not with validation off: a templated ask missing `pow.chain`, or with a non-integer literal in another key, still fails the pack. |
+| Bytes stay canonical | `component_formal` sorts the keys whether they hold values or placeholders, so authoring order never changes the packed bytes. Pinned by `tests/test_pow_formal_templates.py`. |
+
+**A `formal` with no template packs byte-identically to before this existed** — the
+same guarantee an absent `formal` already had, and for the same reason: the spec is
+hashed into the service id.
 
 ```json
 {
