@@ -41,6 +41,7 @@ def _fake_family(name=None):
         remove_built=MagicMock(return_value=42),
         built_rootfs_size_bytes=MagicMock(return_value=1024),
         billable_resources=MagicMock(),
+        is_read_only=MagicMock(return_value=False),
         sweep_orphans=MagicMock(),
     )
 

@@ -26,6 +26,9 @@ from src.utils.arch_guard import ensure_native_arch
 from src.utils.architectures import PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.buildkit_env import BUILDCTL_COMMAND, BUILDKIT_ENV
 from src.utils.filesystem_xattrs import (
+    READ_MODE_KEY,
+    READ_MODE_RO,
+    assert_complete_filesystem_metadata,
     describe_mode_type,
     encode_filesystem_metadata_xattrs,
     implicit_directory_metadata,
@@ -33,6 +36,7 @@ from src.utils.filesystem_xattrs import (
     metadata_from_lstat,
     metadata_from_tarinfo,
 )
+from src.utils.shared_filesystems import declarations_for_filesystem
 from src.utils.verify import calculate_hashes_by_stream
 from src.utils.config import ConfigManager
 from src.manager.resources import IOBigData
@@ -62,6 +66,12 @@ MIN_BUFFER_BLOCK_SIZE = env_manager.get("packer.MIN_BUFFER_BLOCK_SIZE")
 # Name of the Dockerfile inside the project directory. BuildKit's dockerfile
 # frontend defaults to "Dockerfile" too; this only exists to make it overridable.
 DOCKERFILE_NAME = env_manager.get("packer.buildkit.DOCKERFILE_NAME", "Dockerfile") or "Dockerfile"
+
+# `service.json` property that asks for a read-only rootfs. Named for what the
+# author declares (this service needs nothing writable beyond /tmp), not for the
+# xattr it becomes: which image format the node builds is a node-local choice,
+# and the manifest deliberately does not reach it. See docs/PACKING.md.
+READ_ONLY_FILESYSTEM_KEY = "read_only_filesystem"
 
 # Ensure bee_rpc uses the configured cache and block directories.
 if CACHE:
@@ -277,6 +287,99 @@ class ZipContainerPacker:
 
     def _validate_service_json_shape(self) -> None:
         resources = self.json.get("resources", {})
+        # Read for its side effect: a malformed declaration must be refused here,
+        # in __init__, rather than after BuildKit has built the whole image.
+        self._read_only_filesystem_requested()
+
+    # ------------------------------------------------------------------ #
+    # read_only_filesystem
+    # ------------------------------------------------------------------ #
+    def _read_only_filesystem_requested(self) -> bool:
+        """Whether ``service.json`` asked for a read-only rootfs.
+
+        The declaration is a plain boolean, and only a boolean. A string
+        ``"true"`` is the shape most likely to be written by hand or emitted by a
+        templating layer, and JSON can express the real thing, so accepting it
+        would mean quietly accepting ``"false"`` as truthy too -- building a
+        service the opposite way round from the one its author declared, which is
+        the exact failure ``read_mode``'s own strictness exists to prevent (see
+        ``src/utils/filesystem_xattrs.read_mode``).
+        """
+        if READ_ONLY_FILESYSTEM_KEY not in self.json:
+            return False
+
+        value = self.json[READ_ONLY_FILESYSTEM_KEY]
+        if not isinstance(value, bool):
+            raise ValueError(
+                f"service.json: '{READ_ONLY_FILESYSTEM_KEY}' must be a JSON boolean "
+                f"(true or false), got {type(value).__name__} {value!r}. It decides "
+                f"whether the node builds a writable ext4 or an immutable image, so "
+                f"it is not inferred from a truthy value."
+            )
+        return value
+
+    def _apply_read_only_filesystem(
+        self,
+        root_filesystem: celaut.Service.Container.Filesystem,
+    ) -> None:
+        """Translate ``read_only_filesystem: true`` into the tree's ``read_mode`` xattr.
+
+        Set on the **root** ``Filesystem`` only -- the one ``Container.filesystem``
+        points at. A nested ``Filesystem`` (a subdirectory, reached through
+        ``ItemBranch.item.filesystem``) is not separately mounted, and the proto
+        comment added in 84e9974c says a ``read_mode`` on one describes nothing;
+        ``src/virtualizers/microvm/build.py`` reads the root's and ignores the rest.
+        Writing it deeper would be inert at best and misleading at worst.
+
+        Absent or false writes **nothing**, rather than ``read_mode="rw"``. Absent
+        already means ``rw`` everywhere that reads it, and the tree is hashed into
+        the service id -- so writing the default would give every existing service a
+        new id on its next repack, for no change in meaning.
+        """
+        if not self._read_only_filesystem_requested():
+            return
+
+        # A ro service cannot export a shared filesystem. The node refuses this at
+        # launch (src/virtualizers/microvm/shares.py): a share is seeded from the
+        # exporter's own image with `debugfs rdump`, an ext4 reader that cannot open
+        # a squashfs/erofs image, and seeding from nothing would hide the content
+        # the service shipped behind an empty directory. The same condition is
+        # checked here, on the same declarations, so the operator finds out while
+        # packing rather than after publishing a service that cannot start.
+        try:
+            exported = [d for d in declarations_for_filesystem(root_filesystem) if d.shared]
+        except ValueError as e:
+            raise ValueError(f"service.json: invalid shared-filesystem declaration: {e}") from e
+
+        if exported:
+            paths = ", ".join(sorted(d.path for d in exported))
+            raise ValueError(
+                f"service.json: '{READ_ONLY_FILESYSTEM_KEY}' is true and this service "
+                f"exports {len(exported)} shared filesystem(s) ({paths}). A share is "
+                f"seeded from the exporter's own image, which the node reads with "
+                f"debugfs -- an ext4 reader that cannot open the squashfs/erofs image "
+                f"a read-only service is built into. Drop "
+                f"'{READ_ONLY_FILESYSTEM_KEY}' or drop the shared declaration."
+            )
+
+        # Per-entry metadata is mandatory for ro (assert_complete_filesystem_metadata
+        # in src/utils/filesystem_xattrs.py refuses the build otherwise). Nothing to
+        # emit here: recursive_parsing already calls
+        # encode_filesystem_metadata_xattrs on every branch it creates, root and
+        # nested alike, and that writes all of FILESYSTEM_METADATA_KEYS at once. The
+        # gate exists for trees from other packers, and for services packed before
+        # the metadata contract. Asserted here anyway, so that if that ever stops
+        # being true the packer says so instead of shipping a service every node
+        # will refuse.
+        try:
+            assert_complete_filesystem_metadata(root_filesystem)
+        except ValueError as e:
+            raise ValueError(
+                f"service.json: '{READ_ONLY_FILESYSTEM_KEY}' is true but the packed "
+                f"tree is missing required per-entry filesystem metadata: {e}"
+            ) from e
+
+        root_filesystem.xattrs[READ_MODE_KEY] = READ_MODE_RO.encode("utf-8")
 
     def parseContainer(self):
         def _normalize_path_segments(raw_path):
@@ -400,9 +503,12 @@ class ZipContainerPacker:
             # -- a pointer is replaced by its block's content either way -- so the
             # filesystem block's id, and the service id above it, are the same as
             # they would be with every type spelled out.
+            root_filesystem = recursive_parsing(directory="/")
+            self._apply_read_only_filesystem(root_filesystem)
+
             self.filesystem_block = _install_as_block(
                 *block_builder.build_multiblock(
-                    pf_object_with_block_pointers=recursive_parsing(directory="/"),
+                    pf_object_with_block_pointers=root_filesystem,
                     blocks=self.blocks,
                     inherited=hash_types_for_packing()
                 )

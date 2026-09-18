@@ -32,6 +32,7 @@ def generate_estimated_cost(
         config: celaut.Configuration,
         resources: celaut.Service.Container.Resources,
         arch: Optional[str] = None,
+        service: Optional[celaut.Service] = None,
 ) -> Optional[celaut_pb2.EstimatedCost]:
     """What running this service here would cost, at the current prices and load.
 
@@ -40,6 +41,13 @@ def generate_estimated_cost(
     tick then levies come from the same rate -- quoting the scalar and charging a
     per-arch rate would have the node bill above what it offered. Omitted, both sides
     use the scalar price, which is what a node with no per-arch pricing does.
+
+    ``service`` is the manifest, where the caller holds it. Only disk reads it, and
+    only to notice a ``read_mode=ro`` declaration: such an instance holds its image
+    and no writable capacity at all, so the rootfs floors describe nothing it will
+    be given and pricing it at them would quote a small immutable capsule at the
+    128 MiB MIN_ROOTFS_BYTES. Omitted, the floors stay -- which over-quotes rather
+    than under-quotes, and only over-quoting is recoverable.
     """
 
     initial_mu = from_amount(config.initial_mu) \
@@ -72,14 +80,18 @@ def generate_estimated_cost(
 
         # Maintenance cost per manager iteration, at the resources it starts with.
         init_maintenance_cost=to_amount(compute_maintenance_cost(
-            system_resources=resolve_billable_resources(resources.at_init, service_hash),
+            system_resources=resolve_billable_resources(
+                resources.at_init, service_hash, service=service
+            ),
             seconds=MANAGER_ITERATION_TIME,
             arch=arch,
         )) if resources.HasField('at_init') else to_amount(0),
 
         # Maintenance cost per manager iteration, at the most it may grow to.
         max_maintenance_cost=to_amount(compute_maintenance_cost(
-            system_resources=resolve_billable_resources(resources.at_most, service_hash),
+            system_resources=resolve_billable_resources(
+                resources.at_most, service_hash, service=service
+            ),
             seconds=MANAGER_ITERATION_TIME,
             arch=arch,
         )) if resources.HasField('at_most') else to_amount(0),

@@ -20,6 +20,7 @@ from src.utils.arch_guard import (
     normalize_arch_tag,
 )
 from src.utils.config import ConfigManager
+from src.utils.filesystem_xattrs import READ_MODE_RO, read_mode
 
 env_manager = ConfigManager()
 
@@ -51,6 +52,12 @@ if DEFAULT_MEM_MIB < MIN_MEM_MIB:
 # tree plus OVERHEAD_BYTES for filesystem metadata, then grows it by
 # MKFS_GROWTH_FACTOR on every mkfs.ext4 out-of-space retry. All three make the image
 # larger than the manifest asked for; none of them can make it smaller.
+#
+# All three exist to leave room for writes, so all three are skipped when the
+# service declared `read_mode=ro` (see `is_read_only_service`): an immutable image
+# has no writes to leave room for, and the floors are the whole of the 64 MiB flat
+# tax issue #369 measured -- 44% of a 145 MiB capsule, 10x on a 12 MB one. A ro
+# image is sized at its own bytes, and priced at them.
 OVERHEAD_BYTES = 64 * 1024 * 1024
 MIN_ROOTFS_BYTES = 128 * 1024 * 1024
 MKFS_GROWTH_FACTOR = 2
@@ -365,8 +372,68 @@ def requested_disk_space_bytes(service: celaut_pb2.Service) -> Optional[int]:
     return requested_bytes if requested_bytes > 0 else None
 
 
-def initial_rootfs_size_bytes(service: celaut_pb2.Service, total_bytes: int) -> int:
-    """Size to format the rootfs image at, given the tree it has to hold."""
+def is_read_only_service(service: celaut_pb2.Service, filesystem=None) -> bool:
+    """Whether this service declared ``read_mode=ro`` on its filesystem root.
+
+    ``filesystem`` is the already-loaded tree, for the one caller that has it in
+    hand (the build). Without it the field is read off the spec, which is only
+    possible when the filesystem is inline: a service whose tree is stored as a
+    block says nothing here rather than fetching the whole image to ask, and gets
+    the writable floors. That is the safe direction -- it prices above what the
+    image will cost, never below -- and the build, which does load the tree,
+    resolves it exactly.
+    """
+    if filesystem is None:
+        filesystem = _inline_filesystem(service)
+        if filesystem is None:
+            return False
+    try:
+        return read_mode(filesystem) == READ_MODE_RO
+    except ValueError:
+        # An unreadable read_mode is the build's error to raise, with the path and
+        # the accepted values in it. Pricing does not get to refuse a manifest.
+        return False
+
+
+def _inline_filesystem(service: celaut_pb2.Service):
+    """The Filesystem in ``container.filesystem``, when the bytes hold one inline.
+
+    Stays inside this module's dependency budget: no block registry, no reads off
+    disk. A pointer parses into a Filesystem with no branches and no xattrs, which
+    answers "rw" -- the floor -- rather than a wrong "ro".
+    """
+    raw = getattr(getattr(service, "container", None), "filesystem", b"") or b""
+    if not raw:
+        return None
+    filesystem = celaut_pb2.Service.Container.Filesystem()
+    try:
+        filesystem.ParseFromString(raw)
+    except Exception:
+        return None
+    return filesystem
+
+
+def initial_rootfs_size_bytes(
+    service: celaut_pb2.Service,
+    total_bytes: int,
+    read_only: bool = False,
+) -> int:
+    """Size to format the rootfs image at, given the tree it has to hold.
+
+    ``read_only`` inverts what the manifest's ``disk_space`` means, because the two
+    modes want opposite things from it. A writable image has to hold writes that
+    have not happened yet, so the declared figure is a floor and the image is grown
+    to it. An immutable one holds exactly the tree it was built from and nothing
+    will ever be added, so there is nothing to reserve and the declared figure is a
+    CEILING instead -- checked by the caller against the populated tree (see
+    ``assert_within_disk_space_ceiling``) and not used to size anything.
+
+    So in ``ro`` this returns the tree's own size: the mkfs tool decides the image,
+    and it will be smaller still once it compresses.
+    """
+    if read_only:
+        return int(total_bytes)
+
     return max(
         MIN_ROOTFS_BYTES,
         int(total_bytes) + OVERHEAD_BYTES,
@@ -374,9 +441,31 @@ def initial_rootfs_size_bytes(service: celaut_pb2.Service, total_bytes: int) -> 
     )
 
 
+def assert_within_disk_space_ceiling(service: celaut_pb2.Service, total_bytes: int) -> None:
+    """Refuse a read-only build whose populated tree exceeds what it declared.
+
+    The ``ro`` half of the ceiling semantics above. A service declaring 1 GiB and
+    occupying 221 MiB is charged for 221 MiB; one declaring 1 GiB and occupying
+    2 GiB is refused here, rather than silently built at 2 GiB and billed for it.
+
+    A manifest that names no disk at all declares no ceiling, and passes.
+    """
+    ceiling = requested_disk_space_bytes(service)
+    if not ceiling:
+        return
+    if int(total_bytes) > int(ceiling):
+        raise ValueError(
+            f"read-only rootfs tree is {int(total_bytes)} bytes, above the "
+            f"{int(ceiling)} bytes this service declared as at_init.disk_space. "
+            "For a read_mode=ro service that figure is a ceiling, not a floor: the "
+            "image holds exactly the packed tree and is never grown to fit it."
+        )
+
+
 def billable_resources(
     declared: Optional[celaut_pb2.Sysresources],
     built_rootfs_size_bytes: Optional[int] = None,
+    read_only: bool = False,
 ) -> celaut_pb2.Sysresources:
     """What an instance holding `declared` will actually be billed for.
 
@@ -392,6 +481,15 @@ def billable_resources(
     growth retries are known only once the image exists, so a service not yet built
     here can cost more than this says. It can never cost less, which is the direction
     that matters -- a client is never billed above its quote.
+
+    ``read_only`` drops the floors for the one case where they describe nothing the
+    instance holds. MIN_ROOTFS_BYTES and a declared ``disk_space`` are both promises
+    of writable capacity, and a ``read_mode=ro`` instance has none: what it holds is
+    its image, the whole of it, and never a byte more. So the built size IS the
+    price, and pricing it at the floor would be charging a 12 MB capsule for
+    128 MiB it was never given. Only meaningful together with
+    ``built_rootfs_size_bytes`` -- the image has to exist for its size to be the
+    answer -- so without one the floors stay.
     """
     _, mem_b, cpu_quota, cpu_period = resolve_initial_resources(declared)
 
@@ -402,9 +500,16 @@ def billable_resources(
     except Exception:
         declared_disk = 0
 
+    if read_only and built_rootfs_size_bytes:
+        disk_space = int(built_rootfs_size_bytes)
+    else:
+        disk_space = max(
+            MIN_ROOTFS_BYTES, declared_disk, int(built_rootfs_size_bytes or 0)
+        )
+
     return celaut_pb2.Sysresources(
         mem_limit=mem_b,
         cpu_period=cpu_period,
         cpu_quota=cpu_quota,
-        disk_space=max(MIN_ROOTFS_BYTES, declared_disk, int(built_rootfs_size_bytes or 0)),
+        disk_space=disk_space,
     )

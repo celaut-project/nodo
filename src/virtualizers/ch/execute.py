@@ -31,6 +31,11 @@ from src.virtualizers.firewall import resolve_slot_transport_protocols, remove_v
 from src.virtualizers.microvm import bundle as microvm_bundle
 from src.virtualizers.microvm import guest as microvm_guest
 from src.virtualizers.microvm import limits, network, paths, rootfs, serial
+from src.virtualizers.microvm.bundle_formats import (
+    ROOTFS_FORMAT_EXT4,
+    ROOTFS_IMAGE_NAMES,
+    is_read_only_format,
+)
 from src.virtualizers.microvm.cgroups import apply_cpu_limit, apply_memory_limit, ensure_vm_cgroup
 from src.virtualizers.microvm.errors import MicroVMError
 from src.virtualizers.microvm.members import CH
@@ -97,8 +102,21 @@ def _resolve_ch_stream_args(runtime_dir: Path) -> Tuple[List[str], Optional[Path
     return ["--serial", f"file={serial_log_path}", "--console", "off"], serial_log_path
 
 
-def _kernel_cmdline(vm_ip: str, netmask: str) -> str:
-    """The guest's cmdline: family addressing, architecture-determined console."""
+def _kernel_cmdline(vm_ip: str, netmask: str, rootfs_format: str = ROOTFS_FORMAT_EXT4) -> str:
+    """The guest's cmdline: family addressing, architecture-determined console.
+
+    ``rootfs_format`` is the format the build actually produced, read off
+    bundle.json. Two tokens come from it, and both have to, because the guest
+    cannot work either out for itself: ``ro``/``rw``, and ``rootfstype=``, which
+    is what tells /init whether to say ``-t ext4``, ``-t squashfs`` or ``-t
+    erofs``. /init reads it from /proc/cmdline the same way it already reads
+    ``ip=``.
+
+    ``rootfstype=`` rather than a nodo-specific key: it is the name the kernel
+    itself uses for exactly this, so a guest kernel that ever mounts its own root
+    reads the same token, and an operator who knows Linux already knows what it
+    means.
+    """
     ip_param = network.guest_ip_cmdline_token(vm_ip=vm_ip, netmask=netmask)
 
     # The console is derived, never configured. It is determined by the
@@ -112,7 +130,18 @@ def _kernel_cmdline(vm_ip: str, netmask: str) -> str:
     # operators to keep it, so it is in the config of every node installed before
     # this, and those nodes cannot launch anything until it stops taking effect.
     console = microvm_guest.serial_device()
-    cmdline_parts = ["root=/dev/vda", "rw", ip_param, f"console={console}"]
+    # A squashfs/erofs image has no writable implementation in the kernel at all,
+    # so `rw` on the cmdline is not a preference the kernel would quietly ignore:
+    # it is a mount that fails, inside the initramfs, before anything reaches the
+    # console that would explain it.
+    access = "ro" if is_read_only_format(rootfs_format) else "rw"
+    cmdline_parts = [
+        "root=/dev/vda",
+        access,
+        f"rootfstype={rootfs_format}",
+        ip_param,
+        f"console={console}",
+    ]
 
     extra = str(KERNEL_CMDLINE_EXTRA).strip() if KERNEL_CMDLINE_EXTRA is not None else ""
     if extra:
@@ -177,7 +206,10 @@ def execute(
     cleanup_rules: List[List[str]] = []
     tap_name: Optional[str] = None
     process: Optional[subprocess.Popen] = None
-    rootfs_path = runtime_dir / "rootfs.ext4"
+    # Named for the format the bundle turns out to hold; resolved once the bundle
+    # is loaded, below. `rootfs.ext4` until then only so the failure paths have a
+    # path to name.
+    rootfs_path = runtime_dir / ROOTFS_IMAGE_NAMES[ROOTFS_FORMAT_EXT4]
     api_socket_path = _api_socket_path(vmachine_id)
     config_host_path = runtime_dir / "__config__"
     entrypoint_host_path = runtime_dir / ".__nodo_entrypoint"
@@ -208,6 +240,13 @@ def execute(
             f"[CH][{vmachine_id}] bundle loaded: arch={bundle['arch']}, "
             f"rootfs={bundle['rootfs_path']}, kernel={bundle['kernel_path']}, "
             f"initramfs={bundle['initramfs_path']}"
+        )
+        rootfs_format = bundle["rootfs_format"]
+        rootfs_read_only = is_read_only_format(rootfs_format)
+        rootfs_path = runtime_dir / ROOTFS_IMAGE_NAMES[rootfs_format]
+        log.LOGGER(
+            f"[CH][{vmachine_id}] rootfs format: {rootfs_format} "
+            f"({'read-only' if rootfs_read_only else 'writable'})"
         )
         microvm_bundle.validate_custom_initramfs(bundle["initramfs_path"])
         log.LOGGER(f"[CH][{vmachine_id}] initramfs validation passed for {bundle['initramfs_path']}")
@@ -248,6 +287,15 @@ def execute(
             f"({config_host_path.stat().st_size} bytes)"
         )
 
+        # Where this instance's own files go. The image for a writable rootfs, a
+        # separate metadata disk for a read-only one -- same guest paths either
+        # way, so nothing below has to know which it is.
+        guest_metadata = rootfs.GuestMetadata(
+            image_path=rootfs_path,
+            runtime_dir=runtime_dir,
+            read_only=rootfs_read_only,
+        )
+
         config_targets = rootfs.guest_config_targets(service=service)
         log.LOGGER(
             f"[CH][{vmachine_id}] guest config targets={config_targets} "
@@ -255,18 +303,13 @@ def execute(
         )
         for target_path in config_targets:
             log.LOGGER(f"[CH][{vmachine_id}] injecting config into guest target: {target_path}")
-            rootfs.debugfs_write(
-                image_path=rootfs_path,
-                host_file=config_host_path,
-                guest_target=target_path,
-            )
+            guest_metadata.put(host_file=config_host_path, guest_target=target_path)
         log.LOGGER(f"[CH][{vmachine_id}] guest config injection completed for {len(config_targets)} target(s)")
 
         with open(entrypoint_host_path, "w", encoding="utf-8") as f:
             f.write(f"{resolved_entrypoint}\n")
         log.LOGGER(f"[CH][{vmachine_id}] entrypoint metadata serialized: {entrypoint_host_path}")
-        rootfs.debugfs_write(
-            image_path=rootfs_path,
+        guest_metadata.put(
             host_file=entrypoint_host_path,
             guest_target=rootfs.GUEST_ENTRYPOINT_PATH,
         )
@@ -288,7 +331,18 @@ def execute(
             rootfs_path=rootfs_path,
             runtime_dir=runtime_dir,
             log_prefix=log_prefix,
+            metadata=guest_metadata,
         )
+
+        # Written once, after every put: the metadata disk is populated whole by
+        # `mkfs.ext4 -d`, not appended to. None on the writable path, where the
+        # files went into the image itself.
+        metadata_disk_path = guest_metadata.finalize()
+        if metadata_disk_path is not None:
+            log.LOGGER(
+                f"[CH][{vmachine_id}] metadata disk built for read-only rootfs: "
+                f"{metadata_disk_path}"
+            )
 
         tap_name = network.create_tap(vmachine_id)
         log.LOGGER(f"[CH][{vmachine_id}] TAP created and attached: {tap_name}")
@@ -361,7 +415,9 @@ def execute(
         guest_kernel_reserve_b = boot_mem_b - mem_b
         mem_mib = math.ceil(boot_mem_b / (1024 * 1024))
         netmask = str(guest_network.netmask)
-        kernel_cmdline = _kernel_cmdline(vm_ip=vm_ip, netmask=netmask)
+        kernel_cmdline = _kernel_cmdline(
+            vm_ip=vm_ip, netmask=netmask, rootfs_format=rootfs_format
+        )
         log.LOGGER(
             f"[CH][{vmachine_id}] VM resources: vcpus={vcpus}, mem_mib={mem_mib} "
             f"(usable target {math.ceil(mem_b / (1024 * 1024))} MiB + "
@@ -378,6 +434,12 @@ def execute(
         # Explicitly declare raw image type to avoid CH autodetection safeguards
         # that can mark sector-0 writes as read-only and break ext4 rw mounts.
         disk_arg = f"path={rootfs_path},image_type=raw"
+        if rootfs_read_only:
+            # Told to CH as well as to the guest. The guest mounts it read-only
+            # either way, but a hypervisor that believes the disk is writable will
+            # happily let anything else on this host write through it, and the
+            # image is the service's content-addressed bytes.
+            disk_arg += ",readonly=on"
         start_command = [
             ch_binary,
             "--api-socket",
@@ -397,6 +459,14 @@ def execute(
             "--cmdline",
             kernel_cmdline,
         ]
+        if metadata_disk_path is not None:
+            # Second --disk, so it lands as /dev/vdb: the rootfs is declared first
+            # and CH assigns the devices in argument order. /init mounts it there,
+            # copies the three files onto the overlay, and unmounts it before
+            # switch_root, so the service never sees this device.
+            start_command.extend(
+                ["--disk", f"path={metadata_disk_path},image_type=raw,readonly=on"]
+            )
         start_command.extend(shares.fs_device_args)
         start_command.extend(stream_args)
         log.LOGGER(f"[CH][{vmachine_id}] launching cloud-hypervisor: {' '.join(start_command)}")
