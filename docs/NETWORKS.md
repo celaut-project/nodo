@@ -235,6 +235,49 @@ asking for different blocks or different work are not in the same domain.
 Bitcoin parses and does not resolve: nodo's default Bitcoin posture is a
 receive-only Esplora backend, which exposes neither `chainwork` nor a peer list.
 
+#### Declaring it in `service.json`
+
+The packer writes `formal` and `protocol_stack` from the network entry. `formal` is a
+flat object of **string** key/value pairs, encoded to the sorted `key=value` body by
+`node_identity.component_formal` — so authoring order never changes the packed bytes,
+which matters because this field is compared byte for byte.
+
+```json
+{
+    "network": [
+        {
+            "tags": ["pow:ergo"],
+            "prose": "An Ergo node whose main chain contains this block",
+            "formal": {
+                "pow.chain": "ergo",
+                "pow.block_id": "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b",
+                "pow.min_cumulative_difficulty": "1152921504606846976",
+                "pow.max_tip_age_s": "3600"
+            },
+            "protocol_stack": [
+                {"tags": ["ergo-node-api"], "formal": {"api.version": "4"}}
+            ]
+        }
+    ]
+}
+```
+
+Values are quoted because a `formal` body is text: `pow.min_cumulative_difficulty`
+passed 2\*\*64 long ago, and an unquoted JSON number would be an IEEE double that
+rounds the requirement away before it is ever packed. The packer refuses one rather
+than converting it.
+
+The ask is run through `parse_pow_formal` **at pack time**, so a missing
+`pow.block_id`, a non-integer difficulty, or a `pow:ergo` tag whose body says
+`pow.chain=bitcoin` fails the pack instead of the launch of an already-published
+service. Nothing contacts a peer while packing. Keys outside the `pow.` vocabulary
+are preserved and packed, not refused — the packer is no more the ceiling on what a
+domain may say than a resolver is. A `pow:` tag with **no** `formal` is left alone:
+that is the "any peer on this chain" an ancestor declares when it grants the whole
+chain rather than one instance of it.
+
+Syntax reference: [`PACKING.md` → `network`](PACKING.md#network).
+
 ### Asking another node
 
 `Gateway.ResolveNetwork` takes **any** `Service.Network` and answers with the peers
