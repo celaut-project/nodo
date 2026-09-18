@@ -2059,7 +2059,14 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 #### Stage Details
 
 **Extraction**
-The zip is unpacked into an isolated temporary directory unique to this packing job, preventing collisions between concurrent packing processes.
+The zip is unpacked into an isolated temporary directory unique to this packing job (named with a `uuid4`), preventing collisions between concurrent packing processes.
+
+The unpacking uses Python's standard-library `zipfile`, not an external `unzip` — that binary is a separate package on Debian and Ubuntu (the `zip` package does not provide it) and is deliberately not among nodo's host dependencies. Four properties are guaranteed:
+
+- **Failures are loud.** A corrupt archive, an unreadable member or a CRC mismatch raises an error naming both the archive and the member. It is not possible for a pack to proceed against an empty or partial directory and fail later with a confusing "missing `service.json`".
+- **The input survives a failure.** The `.service.zip` is deleted only after every member has been written successfully. If the unpack fails, the archive is left on disk and only the half-written destination is cleaned up, so the failure can be diagnosed.
+- **Permission bits are preserved.** The Unix mode in each member's `external_attr` is restored, so a `chmod +x` entrypoint is still executable when BuildKit receives the build context.
+- **Members cannot escape the destination.** Any member resolving outside the unpack directory (`../…`, an absolute path) is refused, as is any symlink member — `generate_service_zip` dereferences, so a link means the archive was not produced by nodo's packer client.
 
 **Validation**
 The `architecture` field from `service.json` is matched against the list of supported platforms. If no match is found, or if the host machine's architecture does not match the target, the process is aborted immediately before any build is attempted.
