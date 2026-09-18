@@ -2795,7 +2795,7 @@ fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
         frame,
         left[0],
         PriceChart {
-            title: " RECURRING • charged while held ",
+            title: " RECURRING • charged while held (log scale) ",
             recurring: true,
             color: ACCENT,
         },
@@ -2807,7 +2807,7 @@ fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
         frame,
         left[1],
         PriceChart {
-            title: " ONE-OFF • charged per event ",
+            title: " ONE-OFF • charged per event (log scale) ",
             recurring: false,
             color: Color::Magenta,
         },
@@ -2867,7 +2867,7 @@ fn draw_price_bars(
         .map(|entry| {
             let highlighted = selected == Some(entry.key);
             Bar::default()
-                .value(entry.mu)
+                .value(log_bar_value(entry.mu))
                 .text_value(money.format_raw(&entry.mu.to_string()))
                 .label(Line::from(if entry.mu == 0 {
                     format!("{} free", entry.short)
@@ -2891,6 +2891,17 @@ fn draw_price_bars(
         .bar_gap(1)
         .label_style(Style::default().fg(MUTED));
     frame.render_widget(chart, area);
+}
+
+/// A linear bar height flattens a price 1000x below its neighbour to nothing (#381),
+/// which defeats the one thing the chart is for: judging proportion at a glance.
+/// `ln(1 + mu)` compresses that range into something a fixed number of terminal
+/// rows can actually show, at the cost of the chart itself no longer being linear --
+/// which is exactly why the block title says "log scale". The table beside the
+/// chart, and `text_value` on each bar, still carry the real number; only the
+/// height is log-scaled.
+fn log_bar_value(mu: u64) -> u64 {
+    ((1.0 + mu as f64).ln() * 1_000_000.0).round() as u64
 }
 
 /// What the numbers on the bars actually mean: the display unit, the ledger rate, the
@@ -3957,10 +3968,10 @@ mod tests {
     }
 
     /// The bars are an editor, so what matters is that every price is actually on
-    /// screen -- including a free one and one small enough to round to no bar at all,
-    /// which is exactly when a chart quietly stops telling the truth.
+    /// screen -- including a free one, and one three orders of magnitude below its
+    /// neighbour, which on a linear scale would round to no bar at all.
     mod pricing {
-        use super::super::{draw_price_bars, PriceChart, ACCENT};
+        use super::super::{draw_price_bars, log_bar_value, PriceChart, ACCENT};
         use crate::app::{Money, PriceEntry};
         use ratatui::{backend::TestBackend, Terminal};
 
@@ -4049,10 +4060,10 @@ mod tests {
 
         #[test]
         fn a_price_dwarfed_by_its_neighbour_still_shows_its_amount() {
-            // At 1/1000 of the tallest bar there is no bar left to draw, and that is
-            // the honest picture. BarChart still prints the amount for any non-zero
-            // value, so the price does not vanish -- which is precisely why a price of
-            // exactly zero needs the `free` label instead.
+            // BarChart still prints the amount for any non-zero value regardless of
+            // height, so the price does not vanish even in the degenerate case --
+            // which is precisely why a price of exactly zero needs the `free` label
+            // instead, rather than relying on this.
             let prices = vec![
                 entry("BUILD_MU", "BUILD", 10_000_000, true),
                 entry("TUNNEL_OPEN_MU", "TUNNEL", 10_000, true),
@@ -4060,6 +4071,28 @@ mod tests {
             let text = render(&prices, None);
             assert!(text.contains("TUNNEL"), "missing label in:\n{text}");
             assert!(text.contains("0.00001"), "missing amount in:\n{text}");
+        }
+
+        #[test]
+        fn a_price_dwarfed_by_its_neighbour_still_gets_a_meaningful_bar() {
+            // On a linear scale TUNNEL is 1/1000th of BUILD's height -- rounded away
+            // to nothing on any terminal. The whole point of the log scale is that it
+            // no longer is: it should read as comparable in magnitude, not vanishing.
+            let build = log_bar_value(10_000_000);
+            let tunnel = log_bar_value(10_000);
+            assert!(tunnel > 0, "a non-zero price must not log-scale to a zero bar");
+            let ratio = tunnel as f64 / build as f64;
+            assert!(
+                ratio > 0.5,
+                "TUNNEL should render at more than half of BUILD's height, was {ratio}"
+            );
+        }
+
+        #[test]
+        fn log_bar_value_is_monotonic_and_maps_zero_to_zero() {
+            assert_eq!(log_bar_value(0), 0, "a free price must still draw no bar");
+            assert!(log_bar_value(1) < log_bar_value(1_000));
+            assert!(log_bar_value(1_000) < log_bar_value(1_000_000));
         }
 
         #[test]
