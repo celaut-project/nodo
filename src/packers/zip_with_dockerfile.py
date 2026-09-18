@@ -823,6 +823,7 @@ class ZipContainerPacker:
                 network.formal = self._parse_formal(
                     json_network['formal'], f"network[{index}]: 'formal'"
                 )
+                self._validate_formal_templates(network.formal, index)
 
             for stack_index, protocol in enumerate(
                 json_network.get('protocol_stack', []) or []
@@ -853,6 +854,13 @@ class ZipContainerPacker:
         Every one of those is a property of the text in front of the author, and
         every one of them would otherwise first be reported by a node launching the
         published service.
+
+        ``${VAR}`` selection keys pass (``allow_templates=True``, #385). A key the
+        author deliberately left for the instantiator to fill is not a malformed
+        value, and refusing it here is what made a service either pin one chain state
+        at pack time or say nothing about which chain it meant. Everything else about
+        the body is still checked, so a templated ask that is *also* missing
+        ``pow.chain``, or that templates ``pow.chain`` itself, still fails the pack.
         """
         if not network.formal:
             return
@@ -868,11 +876,46 @@ class ZipContainerPacker:
             return
 
         try:
-            parse_pow_formal(network.formal, tag=tag)
+            parse_pow_formal(network.formal, tag=tag, allow_templates=True)
         except PowFormalError as e:
             raise ValueError(
                 f"service.json network[{index}] (tag {tag!r}): {e}"
             ) from None
+
+    def _validate_formal_templates(self, formal: bytes, index: int) -> None:
+        """Refuse a value that is *partly* a ``${VAR}``, e.g. ``abc${X}`` (#385).
+
+        The grammar is "a value is either entirely a placeholder or contains none",
+        and this is where it is enforced, because the author is the only person who
+        can fix it and this is the only moment they are looking at the file. A node
+        that meets one later cannot report it to anybody -- it defers the network and
+        says so in its own log, which the author will never read.
+
+        Why the grammar forbids concatenation at all: a ``formal`` value is compared
+        byte for byte by ``match_networks``, and the ``ResolveNetwork`` subset check
+        (``networks.check_network_request``) has to classify each key as "fixed by
+        the author" or "left to the caller". A half-fixed value is neither, and there
+        is no defensible answer to "may the caller change the ``abc``?". Gluing a
+        caller-supplied string into a structured document is also the classic shape
+        of an injection, and this field's structure -- newline-separated pairs -- is
+        exactly the kind that can be forged by concatenation.
+
+        Applies to every network's ``formal``, not only a ``pow:`` one: the grammar
+        belongs to the field, and a domain this packer has never heard of gets the
+        same guarantee about what its own values mean.
+        """
+        from src.manager.network_templates import find_partial_placeholders
+
+        partial = find_partial_placeholders(formal)
+        if partial:
+            raise ValueError(
+                f"service.json network[{index}]: 'formal' value(s) "
+                f"{', '.join(repr(k) for k in partial)} mix a ${{VAR}} placeholder "
+                "with literal text. A formal value is either entirely a placeholder "
+                "('${MIN_DIFF}') or contains none -- it is compared byte for byte, "
+                "and half of a value cannot be said to be fixed by the author or "
+                "left to the instantiator."
+            )
 
     def parseNetwork(self):
         for network in self._parsed_networks():

@@ -130,11 +130,42 @@ class PowRequirement:
     """
 
     chain: str
-    block_id: str
-    min_cumulative_difficulty: int
+    block_id: Optional[str]
+    min_cumulative_difficulty: Optional[int]
     min_height: Optional[int] = None
     max_tip_age_s: Optional[int] = None
     extensions: Dict[str, str] = field(default_factory=dict)
+    templated: Tuple[str, ...] = ()
+
+    @property
+    def is_complete(self) -> bool:
+        """Whether this requirement can be put to a peer at all.
+
+        A templated requirement (``pow.block_id=${ERGO_BLOCK_ID}``, #385) states an
+        intention and not an ask: there is no block to look for until the
+        instantiator names one. ``block_id`` and ``min_cumulative_difficulty`` are
+        therefore ``Optional`` -- they are ``None`` exactly when the key that carries
+        them was left open -- and this is the one question a caller has to ask before
+        reading them.
+
+        Only :func:`parse_pow_formal` with ``allow_templates=True`` can build an
+        incomplete one, which is the pack-time and subset-check path. The resolver
+        never asks for that, so by the time a requirement reaches
+        :func:`ergo_peer_satisfies` it is complete by construction.
+        """
+        return not self.templated
+
+
+def _is_placeholder(value: str) -> bool:
+    """Whether one ``formal`` value is an unfilled ``${VAR}`` selection key (#385).
+
+    Imported from :mod:`src.manager.network_templates` so the grammar is stated once:
+    this module, the packer and the gateway's subset check all have to agree on what
+    counts as "left open", and three regexes would be three chances not to.
+    """
+    from src.manager.network_templates import PLACEHOLDER
+
+    return bool(PLACEHOLDER.fullmatch(value.strip()))
 
 
 def _as_int(value: str, field: str) -> int:
@@ -159,13 +190,34 @@ def _as_int(value: str, field: str) -> int:
     return parsed
 
 
-def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement:
+def parse_pow_formal(
+    formal: bytes,
+    tag: Optional[str] = None,
+    allow_templates: bool = False,
+) -> PowRequirement:
     """Read ``Network.formal`` as a :class:`PowRequirement`.
 
     ``tag`` is checked against the declared chain when given: a ``pow:ergo`` tag
     carrying ``pow.chain=bitcoin`` is a malformed specification, not a cross-chain
     request, and reading it either way would mean resolving one chain for a tag the
     operator's policy vetted as another.
+
+    ``allow_templates`` (#385) accepts ``${VAR}`` as the value of any key that would
+    otherwise need a concrete hash or integer, recording it in
+    :attr:`PowRequirement.templated` and leaving the typed field ``None``. It
+    defaults to **False**, so the two callers that intend to *resolve* something --
+    :func:`resolve_pow_network` and, through it, ``resolve_network`` -- cannot
+    silently get an incomplete requirement and go looking for a peer that contains
+    block ``${ERGO_BLOCK_ID}``. It is passed ``True`` by the packer, which is
+    validating what the author wrote and not asking anyone anything, and by the
+    ``ResolveNetwork`` subset check, which is comparing two declarations.
+
+    ``pow.chain`` is **never** templatable, whatever ``allow_templates`` says. It is
+    an identity key, not a selection key: it is the half of the declaration the
+    operator's ``service_networks`` policy vets (through the tag it must agree with),
+    and a chain chosen at instantiation time is a policy decision made after the
+    policy ran. Everything this module can select on -- which block, how much work,
+    how high, how fresh -- is selection and may be left open.
 
     Keys outside the ``pow.`` vocabulary are kept in ``extensions`` and otherwise
     ignored. They are not refused: refusing them would make every reader the ceiling
@@ -192,7 +244,31 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
     if missing:
         raise PowFormalError(f"Network.formal is missing: {', '.join(missing)}.")
 
+    templated = tuple(
+        sorted(
+            key
+            for key, value in document.items()
+            if key != "pow.chain" and _is_placeholder(value)
+        )
+    )
+    if templated and not allow_templates:
+        raise PowFormalError(
+            f"Network.formal still carries unfilled selection templates: "
+            f"{', '.join(templated)}. A `${{VAR}}` is answered from the launching "
+            "instance's environment_variables before the network is resolved "
+            "(see src/manager/network_templates.py); reaching a resolver with one "
+            "still in place means it was never answered, and there is no peer that "
+            "holds a block named after a variable."
+        )
+
     chain = document["pow.chain"]
+    if _is_placeholder(chain):
+        raise PowFormalError(
+            "Network.formal: 'pow.chain' must not be templated. It is an identity "
+            "key -- it says which protocol this is, it has to agree with the "
+            "`pow:<chain>` tag the operator's policy vetted, and a chain chosen "
+            "after that policy ran is a chain nobody vetted."
+        )
     if not chain.strip() or chain.strip() != chain.strip().lower():
         raise PowFormalError(
             f"Network.formal: 'pow.chain' must be a lowercase non-empty value, got {chain!r}."
@@ -212,29 +288,32 @@ def parse_pow_formal(formal: bytes, tag: Optional[str] = None) -> PowRequirement
                 "have to agree."
             )
 
-    block_id = document["pow.block_id"].strip().lower()
-    if not block_id or any(c not in "0123456789abcdef" for c in block_id):
-        raise PowFormalError(
-            f"Network.formal: 'pow.block_id' is not hexadecimal: {document['pow.block_id']!r}."
-        )
+    open_keys = frozenset(templated)
+
+    def typed_int(key: str) -> Optional[int]:
+        """The integer at ``key``, or None when the author left that key open."""
+        if key in open_keys or key not in document:
+            return None
+        return _as_int(document[key], key)
+
+    if "pow.block_id" in open_keys:
+        block_id = None
+    else:
+        block_id = document["pow.block_id"].strip().lower()
+        if not block_id or any(c not in "0123456789abcdef" for c in block_id):
+            raise PowFormalError(
+                f"Network.formal: 'pow.block_id' is not hexadecimal: "
+                f"{document['pow.block_id']!r}."
+            )
 
     return PowRequirement(
         chain=chain,
         block_id=block_id,
-        min_cumulative_difficulty=_as_int(
-            document["pow.min_cumulative_difficulty"], "pow.min_cumulative_difficulty"
-        ),
-        min_height=(
-            _as_int(document["pow.min_height"], "pow.min_height")
-            if "pow.min_height" in document
-            else None
-        ),
-        max_tip_age_s=(
-            _as_int(document["pow.max_tip_age_s"], "pow.max_tip_age_s")
-            if "pow.max_tip_age_s" in document
-            else None
-        ),
+        min_cumulative_difficulty=typed_int("pow.min_cumulative_difficulty"),
+        min_height=typed_int("pow.min_height"),
+        max_tip_age_s=typed_int("pow.max_tip_age_s"),
         extensions=extensions,
+        templated=templated,
     )
 
 
@@ -250,7 +329,23 @@ def canonical_formal(requirement: PowRequirement) -> bytes:
     node comes out saying what it came in saying. A key it does not interpret is still
     part of what the author declared, and dropping it here would quietly turn a
     round-trip into an edit.
+
+    A key the author left templated (#385) cannot be written back, because
+    :class:`PowRequirement` deliberately does not keep the variable *name* -- it keeps
+    which keys were open, which is all any reader here needs. Re-serializing one would
+    therefore either invent a name or drop the key, and dropping it is the dangerous
+    half: ``pow.block_id`` silently vanishing turns "contains block B" into "any
+    peer". So it refuses, and the caller that wants the templated bytes uses the ones
+    it already has -- the declaration -- which is what both such callers (the packer
+    and the subset check) are holding anyway.
     """
+    if requirement.templated:
+        raise PowFormalError(
+            "A templated requirement cannot be re-serialized: "
+            f"{', '.join(requirement.templated)} were left open and this object does "
+            "not carry the variable names. Serialize the declared formal bytes, or "
+            "substitute first (src/manager/network_templates.py)."
+        )
     pairs: Dict[str, str] = {
         "pow.chain": requirement.chain,
         "pow.block_id": requirement.block_id,

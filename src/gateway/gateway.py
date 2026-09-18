@@ -14,7 +14,7 @@ from src.gateway.utils import generate_full_node_peer_info
 from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources
 from src.manager.metrics import get_metrics
-from src.manager.networks import resolve_network_for_peer
+from src.manager.networks import NetworkRequestRejected, resolve_network_for_peer
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
 from src.utils import logger as log
 from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
@@ -105,6 +105,18 @@ class Gateway(celaut_pb2_grpc.Gateway):
         own config. A lying answer therefore costs the caller a wasted request, which is
         what makes it safe to ask a stranger at all.
 
+        **Bounded by what the caller declared, when the caller is one of this node's
+        own guests** (issue #385). A local instance is identified by its address the
+        same way ``ModifyServiceSystemResources`` identifies one, its service spec is
+        read, and the requested network has to fit inside a network that spec declares:
+        same tags, every key the declaration fixed present and unchanged, keys it left
+        as ``${VAR}`` free to fill, new keys free to add. Without that, deferred
+        resolution would be a way around the declaration it exists to complete -- a
+        guest that declared ``pow:ergo`` pinned to block B could ask here for
+        ``pow:ergo`` pinned to nothing. A caller this node cannot identify as a local
+        instance -- another node asking as a peer, which is the RPC's other and older
+        use -- has no spec here to be measured against and is answered as before.
+
         The operator's policy and the no-relaying rule live in
         ``networks.resolve_network_for_peer``, with the reasoning for each -- this is the
         gRPC plumbing around them, and a decision buried in a handler is a decision
@@ -125,10 +137,21 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
         try:
             resolution = resolve_network_for_peer(
-                network, subject=f"peer {context.peer()}"
+                network,
+                subject=f"peer {context.peer()}",
+                caller_ip=get_only_the_ip_from_context(context_peer=context.peer()),
             )
         except NetworkPolicyRejection as e:
             raise Exception(f"This node does not reach that network. {e}")
+        except NetworkRequestRejected as e:
+            # Raised as an Exception like every other refusal in this file, so the
+            # caller reads it off the gRPC status the same way it reads a policy
+            # rejection. The two are separate sentences because they are separate
+            # facts: the operator refuses the domain to anyone, versus this request
+            # asks for more than the asking instance declared.
+            raise Exception(
+                f"That request does not fit what the asking instance declared. {e}"
+            )
 
         yield from bee.serialize_to_buffer(resolution)
 

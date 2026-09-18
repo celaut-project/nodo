@@ -28,6 +28,120 @@ message Network {
 
 ---
 
+## What a `formal` says: identity keys and selection keys
+
+A `formal` carries two kinds of key. The distinction is a **convention, not a schema
+change** — nothing in `celaut.proto` marks a key as one or the other, and no reader
+enforces the split. It is a way of deciding, per key, *who gets to write the value*.
+
+| | **Identity keys** | **Selection keys** |
+|---|---|---|
+| Answer | *What is this protocol?* | *Which concrete instance of it?* |
+| Written by | The service author, once, in `service.json` | Whoever instantiates the service |
+| Example | `pow.chain=ergo`, `pow.consensus=autolykos-v2`, `ledger.model=extended-utxo` | `pow.block_id`, `pow.min_cumulative_difficulty`, `pow.min_height` |
+| Changes between instantiations | Never | Routinely — mainnet vs. testnet vs. a local chain |
+
+The motivating mistake (issue
+[#385](https://github.com/celaut-project/nodo/issues/385)) was writing selection keys
+as if they were identity keys. `celaut-basics/ergo-node` hardcoded a concrete
+`pow.block_id` and `pow.min_cumulative_difficulty` in its own spec — values that say
+nothing about what Ergo *is*, and everything about which Ergo chain state the author
+happened to be looking at. Two things follow from getting this wrong, and they pull
+in opposite directions: pin the values and the service is frozen to one chain state
+forever; leave them out and the node resolves `pow:ergo` against any peer that calls
+itself Ergo, including a low-difficulty parallel chain that is not the mainnet the
+instantiator obviously meant.
+
+`${VAR}` is the third option: say *that* a key is a selection key, without saying
+what its value is.
+
+---
+
+## `${VAR}` templates in `formal`
+
+A selection key may carry the placeholder `${VAR_NAME}` in place of a value:
+
+```json
+"formal": {
+    "pow.chain": "ergo",
+    "pow.consensus": "autolykos-v2",
+    "pow.block_id": "${ERGO_BLOCK_ID}",
+    "pow.min_cumulative_difficulty": "${ERGO_MIN_CUMULATIVE_DIFFICULTY}"
+}
+```
+
+The value is filled in at **launch** from the launcher-provided
+`Configuration.environment_variables` — the same map a service's own environment
+comes from, so an instantiator sets one variable and both the guest and the node's
+resolver see it.
+
+* **Implementation:** `src/manager/network_templates.py` — one regex, one module,
+  shared by the launch path, the packer and the gateway. Three copies of a grammar
+  are three chances for them to disagree.
+
+### Grammar
+
+| Rule | |
+|---|---|
+| Syntax | `${NAME}` where NAME is `[A-Za-z_][A-Za-z0-9_]*` — the C identifier shape every environment variable already has. |
+| Whole values only | **A value is either entirely a placeholder or contains none.** `"${MIN_DIFF}"` is a template; `"abc${X}"` is **refused at pack time**. |
+| Surrounding whitespace | Ignored: `" ${X} "` is a placeholder. |
+| Repetition | One variable may answer several keys. |
+| `pow.chain` | **Never templatable.** It is the identity key the operator's `service_networks` policy vetted through the tag it must agree with, and a chain chosen after that policy ran is a chain nobody vetted. |
+
+**Why partial substitution is refused.** Not aesthetics. A `formal` value is compared
+byte for byte by `match_networks`, and the `ResolveNetwork` subset check has to
+classify each key as *fixed by the author* or *left to the instantiator*. A
+half-fixed value is neither, and "may the caller change the `abc` part?" has no
+defensible answer. Concatenation is also the classic shape of an injection, and this
+field's structure — newline-separated pairs — is exactly the kind forgeable by
+gluing. A value whose answer contains a newline is rejected for the same reason: an
+instantiator answering `MIN_DIFF` with `0\npow.block_id=deadbeef` would otherwise be
+*adding a key* to somebody else's declaration, and the firewall would open whatever
+that key resolved to.
+
+### Per-network resolution policy: eager or deferred
+
+Decided **per network**, by whether its `formal` carries a template at all. There is
+deliberately no global on/off switch and no config knob: most declared networks have
+enough information to resolve eagerly, and there is no reason to make those pay the
+cost of deferral.
+
+| Case | What the node does |
+|---|---|
+| No `${VAR}` anywhere in the `formal` | **Eager.** Resolved at launch exactly as before this existed — the bytes are not even re-encoded. |
+| Every `${VAR}` answered by `config.environment_variables` | **Eager.** Substituted, then resolved normally, and the result is written into `__config__`. The common case, and it needs no gateway client in the guest. |
+| Any `${VAR}` unanswered | **Deferred.** That network alone is skipped: `resolve_network()` is not called for it and it is **omitted** from the `NetworkResolution` list. Other declared networks are unaffected. Not an error, and logged once naming the missing variables. |
+
+**A missing variable never aborts a launch.** The only condition under which a
+declared network can refuse a launch is an operator `service_networks` policy
+violation — and that is judged on the **declared**, pre-substitution network, before
+any of this runs. Judging it after would let a service evade a blacklist by leaving a
+variable unset: the network would have been dropped before the policy ever saw it.
+
+**What a deferred network means for the guest.** It boots with a `__config__` short
+the entry it declared, and with no firewall rule toward those peers — default-deny,
+which is the correct posture toward a domain nobody has decided on yet. It is the
+same position a declared network in which no peer qualified is already in;
+`configure_guest_firewall_policy` walks the resolutions it is given, so fewer entries
+is a shape the launch path already handles. The guest resolves it later over
+`Gateway.ResolveNetwork`, by which time it may know what it wants.
+
+**Deferred resolution is opt-in by construction.** A service author who wants to
+guarantee the instantiator gets to pin the chain must declare **at least one
+templated key**. A `formal` with no template at all is resolved eagerly against
+whatever superset of matching peers the node can find — which may be broader than
+any given instantiator wanted. That is the pre-existing behaviour, kept, because
+changing it would force every service declaring any network to embed a gateway client
+just to start.
+
+* **Implementation:** `build_network_resolution()` in
+  `src/virtualizers/microvm/rootfs.py`
+* **Tests:** `tests/test_network_templates.py`,
+  `tests/test_network_resolution_templates.py`
+
+---
+
 ## Peer Filtering by Environment Variable
 
 A network may contain multiple instances of the same service, but a client typically needs only those that share a particular property.
@@ -91,7 +205,7 @@ service_networks:
 
 * **Implementation:** `src/utils/network_policy.py`
 * **Consumers:** `launch_service()`, `GetServiceEstimatedCostIterable`,
-  `_build_network_resolution()`
+  `rootfs.build_network_resolution()`
 
 Both lists empty — the shipped default — restricts nothing.
 
@@ -117,7 +231,7 @@ ignored.
 |---|---|---|
 | `launch_service()`, before the balancer | What the service **declares** | Before the balancer, so it covers delegation: a node that refuses to reach a domain itself and then pays a peer to reach it has outsourced a policy, not applied one. Before the `force_execution` bypass too, which overrides peer *selection* and not what this node will have reached on its behalf. |
 | `GetServiceEstimatedCostIterable` | What the service **declares** | A price is an offer. Quoting a service this node would refuse only gets the asking peer's balancer to select it and fail at launch. |
-| `_build_network_resolution()` | What **survived** the ancestor chain | Defence in depth, on the narrower set that is actually about to be opened. It aborts the launch rather than dropping the network: reaching it means an earlier check did not run, and a guest silently started without the egress it asked for is exactly the unexplained rejection this policy replaces. |
+| `rootfs.build_network_resolution()` | What **survived** the ancestor chain, as **declared** | Defence in depth, on the narrower set that is actually about to be opened. It aborts the launch rather than dropping the network: reaching it means an earlier check did not run, and a guest silently started without the egress it asked for is exactly the unexplained rejection this policy replaces. Judged *before* `${VAR}` substitution, so whether a launch is refused never depends on which variables happened to be set. |
 
 The declaration is what the first two judge, and it is what the client can see and
 change; the launch is refused even when the ancestor chain would have dropped the
@@ -205,6 +319,7 @@ asking for different blocks or different work are not in the same domain.
 |---|---|
 | Tag | `pow:<chain>` — `pow:ergo`, `pow:bitcoin` |
 | `formal` | The `key=value` body every celaut descriptor uses (`node_identity.component_formal`): sorted lines, UTF-8. This domain's keys are namespaced `pow.` — `pow.chain`, `pow.block_id`, `pow.min_cumulative_difficulty`, optional `pow.min_height` and `pow.max_tip_age_s`. A key outside that vocabulary is **preserved and round-tripped, not refused** and not enforced; a missing required key or a malformed value still is refused. No version key: a version belongs to the vocabulary, which `protocol_stack` names. |
+| Identity vs. selection | `pow.chain` is the only **identity** key this vocabulary defines; everything else it reads (`pow.block_id`, `pow.min_cumulative_difficulty`, `pow.min_height`, `pow.max_tip_age_s`) is **selection** and may be written `${VAR}`. A service describing the protocol itself carries its identity keys as extensions — `pow.consensus`, `ledger.model` and such — which this module preserves and does not interpret. `pow.chain` is never templatable: the tag it must agree with is what the operator's policy vetted. |
 | Not in `formal` | Which protocols the peers speak. `protocol` and `peerDiscovery` are tags/prose/formal descriptors in their own right, which is what `Service.Network.protocol_stack` (`repeated Api.Protocol`) already models — flattening them into a key here would be a second place for the same thing to be stated, and to disagree. |
 | Difficulty | **cumulative work since genesis** (Ergo `fullBlocksScore`, Bitcoin `chainwork`), not the tip block's difficulty: it is what the chain's own fork choice maximises, it is monotone, and it gives a total order peers can be compared on. Carried as a decimal string — the value outgrew a double long ago. |
 | Containment | the block must be on the peer's **main** chain (`/blocks/{id}/header` then `/blocks/at/{height}`), not merely stored: an orphan a peer kept is not a block its chain contains. |
@@ -273,7 +388,12 @@ than converting it.
 The ask is run through `parse_pow_formal` **at pack time**, so a missing
 `pow.block_id`, a non-integer difficulty, or a `pow:ergo` tag whose body says
 `pow.chain=bitcoin` fails the pack instead of the launch of an already-published
-service. Nothing contacts a peer while packing. Keys outside the `pow.` vocabulary
+service. Nothing contacts a peer while packing. A `${VAR}` passes
+(`parse_pow_formal(..., allow_templates=True)`) wherever a concrete hash or integer
+would be required — the packer is validating what the author wrote, not asking anyone
+anything. The resolver gets the **strict** default, so it can never be handed an
+unfilled `${ERGO_BLOCK_ID}` and go looking for a peer that holds a block named after
+a variable. Keys outside the `pow.` vocabulary
 are preserved and packed, not refused — the packer is no more the ceiling on what a
 domain may say than a resolver is. A `pow:` tag with **no** `formal` is left alone:
 that is the "any peer on this chain" an ancestor declares when it grants the whole
@@ -281,7 +401,7 @@ chain rather than one instance of it.
 
 Syntax reference: [`PACKING.md` → `network`](PACKING.md#network).
 
-### Asking another node
+### Asking another node — `Gateway.ResolveNetwork`
 
 `Gateway.ResolveNetwork` takes **any** `Service.Network` and answers with the peers
 this node knows in that domain. Generic, not `pow:`-shaped: a domain is declared the
@@ -294,6 +414,68 @@ refuses to reach is reaching it by proxy — and a node **never relays** the que
 of length two, so relaying would turn one request into a flood over a graph nobody has
 a view of. Each node answers from what it knows locally; a caller that wants more
 breadth asks more nodes itself.
+
+#### The subset rule
+
+This RPC is the other half of deferred resolution: a network skipped at launch
+because a `${VAR}` was unanswered is completed here. That makes it a way to ask for a
+network the service never fully declared, so **when the caller is one of this node's
+own guests, the request must fit inside what its service declared.**
+
+Without the check, a guest that declared `pow:ergo` pinned to block B could ask here
+for `pow:ergo` pinned to nothing and be handed peers on any Ergo-shaped chain — the
+same over-broad resolution templating exists to prevent, reached from the other
+direction.
+
+| The request | Verdict | Why |
+|---|---|---|
+| Same tags (as a **set**, order irrelevant) | Required | A tag is what the operator's policy vetted and what dispatches the resolution. A request naming a different tag is asking about a different domain, not narrowing this one. Set equality, not intersection: `match_networks` may accept one shared tag between two *declarations*, but this is a caller proposing a completion of its own. |
+| Every key the declaration **fixed**, present and identical | Required | These are the identity keys plus whatever selection the author already made. |
+| **Fills** a key the declaration left `${VAR}` | Allowed | That is what the template said it was for. It may also be left templated — a caller narrowing in two steps. |
+| **Adds** a key the declaration never mentioned | Allowed | Adding always narrows: every reader of a `formal` either enforces a key or carries it, so a key the author did not write can only cost the caller peers, never gain it any. |
+| **Drops** a fixed key | Refused | Broadening. `pow.block_id` removed turns "contains block B" into "any peer" — refused as firmly as an edit precisely because it is the one that *looks* harmless. |
+| **Changes** a fixed key | Refused | A caller may complete what the author left open; it may not rewrite what the author decided. |
+| Still carries an unfilled `${VAR}` | Refused | There is no peer holding a block named after a variable. The node deliberately does **not** fill one in from its own environment: which instance of the protocol is meant is the caller's decision, which is the entire reason the key was left open. |
+
+The asymmetry is the whole rule: **templates and additions narrow; removals and edits
+broaden; only narrowing is granted.**
+
+A request is accepted if it fits **any one** of the caller's declared networks — a
+service declares several and is asking about one. A rejection reports every
+declaration it was measured against and why each refused it, for the same reason the
+policy's rejection report names every declared network: a verdict on one of a set
+says nothing useful alone.
+
+#### When the caller cannot be identified
+
+The caller is identified by its address against `local_instances.ip` — the same
+identification `ModifyServiceSystemResources` already uses, reused so there is one
+answer on this node to "which instance is this".
+
+**"Cannot tell who is asking" is not "declared nothing".** A `ResolveNetwork` caller
+is very often not a local instance at all: it is another celaut node asking as a
+peer, which is the RPC's older use (`pow_networks._peer_suggested_endpoints` makes
+exactly that call). Such a caller has no spec here to be measured against, the subset
+check does not apply, and it is answered exactly as before. A caller that *is* a
+local instance but whose spec cannot be read right now is treated the same way, and
+logged — a deliberate difference from `filter_networks_with_ancestors`, which aborts
+on that condition. It aborts because it decides what to **open** for a guest about to
+run, where "cannot tell" must not read as "allowed". Here nothing is opened: the
+answer is a list of addresses the caller verifies itself, so failing closed on a
+transient memory-lock timeout would break resolution for an instance behaving
+perfectly, and would buy nothing.
+
+A caller that *is* identified and whose service declares **no network at all** is
+refused outright: an empty declaration is "I asked for no domain", and resolving one
+for it would make the check optional for anybody willing to declare nothing.
+
+The operator's policy runs **first**, before the caller is identified, so a caller
+learns "not from this node" before it learns anything about its own declaration.
+
+* **Implementation:** `request_fits_declaration()`, `check_network_request()`,
+  `declared_networks_of_caller()` in `src/manager/networks.py`; the handler in
+  `src/gateway/gateway.py`
+* **Tests:** `tests/test_resolve_network_subset.py`
 
 Full design, and an audit of what the DNS path guarantees today:
 [`proposals/78-network-guarantees-and-pow.md`](proposals/78-network-guarantees-and-pow.md)
