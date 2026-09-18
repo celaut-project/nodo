@@ -89,6 +89,16 @@ Three things are hardcoded there and one is inferred:
 
 ## 1.3 When resolution happens
 
+> **Superseded in part by [#385](https://github.com/celaut-project/nodo/issues/385).**
+> This section says resolution happens once, at launch, for *every* declared
+> network. That is still true of every network whose `formal` carries no `${VAR}`
+> template. A network that does carry one and whose variables the launcher did not
+> answer is **not** resolved at launch at all: it is omitted from `__config__` and
+> resolved later, on demand, over `Gateway.ResolveNetwork` (§2.5.1) — which is also
+> the answer to the staleness this section goes on to describe, for that class of
+> network. See [`NETWORKS.md`](../NETWORKS.md). Everything below still holds for the
+> eager path.
+
 Once, at launch, inside `build_network_resolution` (`rootfs.py:108`), called from
 `ch/execute.py:236` and `qemu/execute.py:420`. The result is serialized into the
 guest's `__config__` and written into the offline rootfs image with `debugfs`
@@ -462,6 +472,20 @@ Three properties, each a decision:
 Two peers naming the same address have confirmed nothing — they may well have read it
 off the same list — so answers are pooled, never voted on. Treating agreement as
 evidence would be the one reading of this that *is* a trust decision.
+
+> **A fourth property, added by
+> [#385](https://github.com/celaut-project/nodo/issues/385).** As written above the
+> RPC resolves *any* `Service.Network` handed to it, and nothing relates the request
+> to what the caller declared. Once deferred resolution exists that is a hole: a
+> guest whose spec pins `pow:ergo` to block B could ask here for `pow:ergo` pinned to
+> nothing and be answered with peers on any Ergo-shaped chain. **When the caller is
+> one of this node's own local instances, the request must now fit inside a network
+> its service declares** — same tags, every key the declaration fixed present and
+> unchanged, keys it left `${VAR}` free to fill, new keys free to add. Narrowing is
+> granted; broadening is refused. A caller this node cannot identify as a local
+> instance — *including another node asking as a peer, which is this section's own
+> use of the RPC* — has no spec here to be measured against and is answered exactly
+> as described above. The rule is tabulated in [`NETWORKS.md`](../NETWORKS.md).
 
 ## 2.6 Verification, per candidate
 
