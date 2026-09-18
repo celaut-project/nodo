@@ -290,6 +290,10 @@ class ZipContainerPacker:
         # Read for its side effect: a malformed declaration must be refused here,
         # in __init__, rather than after BuildKit has built the whole image.
         self._read_only_filesystem_requested()
+        # Same reason, and one more: a `pow:` network's `formal` is parsed by the
+        # very code that will read it at launch, so an ask that cannot resolve is
+        # a pack failure rather than an instance that boots and reaches nothing.
+        self._parsed_networks()
 
     # ------------------------------------------------------------------ #
     # read_only_filesystem
@@ -650,8 +654,9 @@ class ZipContainerPacker:
                     f"service.json api slot port={slot.port}: 'transport' contains no valid tags."
                 )
             slot.protocol_stack.append(
-                celaut.Service.Api.Protocol(
-                    tags=item.get('protocol')
+                self._parse_protocol_descriptor(
+                    item.get('protocol'),
+                    f"api slot port={slot.port}: 'protocol'",
                 )
             )
             # `gas_amount_per_call` was renamed to `mu_per_call` with the pricing
@@ -668,13 +673,210 @@ class ZipContainerPacker:
                 slot.mu_per_call[method].n = str(amount_mu)
             self.service.api.slot.append(slot)
             
+    # ------------------------------------------------------------------ #
+    # network
+    # ------------------------------------------------------------------ #
+    def _parse_protocol_descriptor(self, declaration, where: str):
+        """One tags/prose/formal descriptor -> ``celaut.Service.Api.Protocol``.
+
+        The same message is a network's ``protocol_stack`` entry and an api slot's,
+        so it is read in one place rather than twice: a descriptor that means one
+        thing under ``api`` and another under ``network`` is a descriptor whose
+        meaning depends on where it was written, which is exactly what a shared
+        message type exists to prevent.
+
+        A bare list (or the ``None`` of an absent key) is the ``api[].protocol``
+        shape and is handed to ``tags=`` exactly as it always was, protobuf's own
+        error for anything else included -- untouched on purpose, since these bytes
+        are hashed into the service id and every service packed to date took that
+        path. The object form (``{"tags": [...], "prose": ..., "formal": {...}}``)
+        is the new one, and is the only one this validates.
+        """
+        if not isinstance(declaration, dict):
+            return celaut.Service.Api.Protocol(tags=declaration)
+
+        protocol = celaut.Service.Api.Protocol()
+
+        tags = declaration.get('tags')
+        if tags is not None:
+            if isinstance(tags, str) or not isinstance(tags, list) or \
+                    not all(isinstance(tag, str) for tag in tags):
+                raise ValueError(
+                    f"service.json {where}: 'tags' must be a list of strings, got "
+                    f"{type(tags).__name__} {tags!r}."
+                )
+            protocol.tags.extend(tags)
+
+        prose = declaration.get('prose')
+        if prose is not None:
+            if not isinstance(prose, str):
+                raise ValueError(
+                    f"service.json {where}: 'prose' must be a string, got "
+                    f"{type(prose).__name__} {prose!r}."
+                )
+            protocol.prose = prose
+
+        if 'formal' in declaration:
+            protocol.formal = self._parse_formal(
+                declaration['formal'], f"{where}: 'formal'"
+            )
+
+        return protocol
+
+    def _parse_formal(self, declaration, where: str) -> bytes:
+        """A flat ``{key: value}`` object -> the ``formal`` bytes every reader expects.
+
+        Written by ``node_identity.component_formal`` rather than joined here: that
+        function sorts the keys, and a ``formal`` is compared **byte for byte** by
+        everything that reads one (``same_component``, `match_networks`), so two
+        service.json files declaring the same parameters in a different key order
+        have to pack to the same bytes. Building them anywhere else would be a
+        second encoder to keep in step with the comparison.
+
+        Values are strings and only strings. JSON can hold a number, and a
+        cumulative-difficulty value stopped fitting in an IEEE double long ago --
+        accepting `1.2e19` here would mean packing a rounded requirement that no
+        peer can satisfy, with nothing in the spec showing where the digits went.
+        Quoting the value costs the author one pair of quotes and keeps what was
+        written and what was packed the same string.
+
+        The result is read back with ``parse_component_formal`` before it is
+        returned: that is the function every consumer will use on these bytes, so a
+        key carrying an ``=`` or a newline is caught while the author is still
+        looking at their service.json rather than at a launch that fails.
+        """
+        from src.identity.node_identity import (
+            ComponentFormalError,
+            component_formal,
+            parse_component_formal,
+        )
+
+        if not isinstance(declaration, dict):
+            raise ValueError(
+                f"service.json {where}: must be an object of string key/value pairs, "
+                f"got {type(declaration).__name__} {declaration!r}."
+            )
+
+        for key, value in declaration.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError(
+                    f"service.json {where}: keys must be non-empty strings, got {key!r}."
+                )
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"service.json {where}: value of {key!r} must be a string, got "
+                    f"{type(value).__name__} {value!r}. A formal body is text "
+                    f"(key=value lines); a JSON number would be re-spelled on the way "
+                    f"in, and large integers -- cumulative work, for one -- do not "
+                    f"survive that intact."
+                )
+
+        formal = component_formal(declaration)
+        try:
+            parse_component_formal(formal)
+        except ComponentFormalError as e:
+            raise ValueError(
+                f"service.json {where}: not a readable key=value body: {e}"
+            ) from None
+        return formal
+
+    def _parsed_networks(self) -> List[celaut.Service.Network]:
+        """``service.json``'s ``network`` entries as ``Service.Network`` messages.
+
+        Pure: called once from ``_validate_service_json_shape`` (so a malformed
+        declaration is refused in ``__init__``, before BuildKit spends minutes
+        building an image for a service that cannot be published) and again from
+        ``parseNetwork`` for the messages themselves.
+
+        ``tags`` and ``prose`` are read exactly as before, ``[]``-style, so their
+        absence still raises ``KeyError`` -- only earlier.
+
+        A `formal` this does **not** understand is still packed: the vocabulary of a
+        communication domain belongs to the domain, not to the packer, and #366's
+        contract is that unrecognized keys are preserved and enforced by nobody. The
+        one vocabulary it does read is ``pow.``, and only when a ``pow:`` tag is
+        present *and* a ``formal`` was declared: an empty ``formal`` under a ``pow:``
+        tag is the legitimate "any peer on this chain" an ancestor declares when it
+        grants a whole chain rather than one instance of it, so refusing it here
+        would refuse the parents of the very services this exists for.
+        """
+        networks: List[celaut.Service.Network] = []
+        if not self.json.get('network'):
+            return networks
+
+        for index, json_network in enumerate(self.json.get("network", [])):
+            if not isinstance(json_network, dict):
+                raise ValueError(
+                    f"service.json network[{index}]: each entry must be an object, got "
+                    f"{type(json_network).__name__} {json_network!r}."
+                )
+            network = celaut.Service.Network()
+            network.tags.extend(json_network['tags'])
+            network.prose = json_network['prose']
+
+            # Absent `formal` writes nothing -- not empty bytes, which is what an
+            # unconditional assignment would leave. Both are the same on the wire
+            # for a proto3 scalar, and this keeps it that way by construction: the
+            # spec is hashed into the service id, and a service that did not
+            # declare one must keep the id it has.
+            if 'formal' in json_network:
+                network.formal = self._parse_formal(
+                    json_network['formal'], f"network[{index}]: 'formal'"
+                )
+
+            for stack_index, protocol in enumerate(
+                json_network.get('protocol_stack', []) or []
+            ):
+                network.protocol_stack.append(
+                    self._parse_protocol_descriptor(
+                        protocol,
+                        f"network[{index}]: 'protocol_stack'[{stack_index}]",
+                    )
+                )
+
+            self._validate_pow_network(network, index)
+            networks.append(network)
+
+        return networks
+
+    def _validate_pow_network(self, network: celaut.Service.Network, index: int) -> None:
+        """Run a ``pow:`` ask through the parser that will read it at launch.
+
+        Imported where it is used rather than at module import: this worker is
+        deliberately kept light (see the BuildKit note above), and ``pow_networks``
+        pulls in the HTTP client it resolves peers with, which a pack that declares
+        no ``pow:`` network has no use for.
+
+        Validation only -- nothing here contacts a peer. What it catches is the ask
+        being malformed: a missing ``pow.block_id``, a difficulty that is not a
+        base-10 integer, a ``pow:ergo`` tag whose body says ``pow.chain=bitcoin``.
+        Every one of those is a property of the text in front of the author, and
+        every one of them would otherwise first be reported by a node launching the
+        published service.
+        """
+        if not network.formal:
+            return
+
+        from src.manager.pow_networks import (
+            POW_TAG_PREFIX,
+            PowFormalError,
+            parse_pow_formal,
+        )
+
+        tag = next((t for t in network.tags if t.startswith(POW_TAG_PREFIX)), None)
+        if tag is None:
+            return
+
+        try:
+            parse_pow_formal(network.formal, tag=tag)
+        except PowFormalError as e:
+            raise ValueError(
+                f"service.json network[{index}] (tag {tag!r}): {e}"
+            ) from None
+
     def parseNetwork(self):
-        if self.json.get('network'):
-            for json_network in self.json.get("network", []):
-                network = celaut.Service.Network()
-                network.tags.extend(json_network['tags'])
-                network.prose = json_network['prose']
-                self.service.network.append(network)
+        for network in self._parsed_networks():
+            self.service.network.append(network)
 
     def save(self) -> Tuple[str, celaut.Metadata, str]:
         # What gets stored is a `celaut.Service`, the schema every reader of a
