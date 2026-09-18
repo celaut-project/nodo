@@ -33,6 +33,7 @@ def _detect_local_preflight_failure(
             metadata=metadata,
             config=configuration,
             arch=get_arch_tag(service=service, metadata=metadata),
+            service=service,
         )
         if estimated_cost:
             return None
@@ -291,6 +292,7 @@ def launch_service(
                 configuration=configuration,
                 recursion_guard_token=recursion_guard_token,
                 arch=get_arch_tag(service=service, metadata=metadata),
+                service=service,
         ):
             try:
                 if require_parent_colocation and peer != 'local':

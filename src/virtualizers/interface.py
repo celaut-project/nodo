@@ -103,6 +103,7 @@ def remove_built_service(service_hash: str) -> int:
 def resolve_billable_resources(
         resources: celaut_pb2.Sysresources,
         service_hash: Optional[str] = None,
+        service: Optional[celaut_pb2.Service] = None,
 ) -> celaut_pb2.Sysresources:
     """What an instance requesting `resources` will actually be billed for.
 
@@ -117,11 +118,19 @@ def resolve_billable_resources(
     Pass ``service_hash`` when it is known: a service already built here reports the
     exact image its instances receive, so the quote is that figure rather than the
     floor.
+
+    Pass ``service`` too where the manifest is in hand. A ``read_mode=ro`` service
+    holds only its image -- no writable capacity at all -- so the floors describe
+    nothing it was given, and quoting them would price a 12 MB capsule at the
+    128 MiB MIN_ROOTFS_BYTES it never receives. Without the manifest the floors
+    stay, which over-quotes rather than under-quotes and is the recoverable
+    direction.
     """
     family = _default_family()
     return family.billable_resources(
         resources,
         built_rootfs_size_bytes=family.built_rootfs_size_bytes(service_hash) if service_hash else None,
+        read_only=family.is_read_only(service) if service is not None else False,
     )
 
 

@@ -128,6 +128,7 @@ def execution_balancer(
         ignore_network: str = None,
         recursion_guard_token: str = None,
         arch: Optional[str] = None,
+        service: Optional[celaut.Service] = None,
 ) -> Generator[tuple[str, celaut_pb2.EstimatedCost], None, None]:
     """Every candidate's price for this service, cheapest first.
 
@@ -136,6 +137,10 @@ def execution_balancer(
     figure the balancer compares against its peers is the one this node would
     actually charge. A peer prices the same service by its own policy and answers
     with the result, so nothing has to be told to it.
+
+    ``service`` is the manifest, and is local-only for the same reason: it is read
+    to notice a ``read_mode=ro`` declaration, which changes what this node's disk
+    floors mean for the quote it offers. A peer applies its own.
     """
 
     # sorted by cost, tuple of celaut.Instances or 'local' and cost
@@ -149,6 +154,7 @@ def execution_balancer(
             metadata=metadata,
             config=configuration,
             arch=arch,
+            service=service,
         )
         if _local:
             peers['local'] = _local

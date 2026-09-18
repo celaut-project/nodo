@@ -270,11 +270,93 @@ while [ "$i" -lt "$WAIT_SECONDS" ]; do
 done
 [ -b /dev/vda ] || fatal "timed out waiting for /dev/vda after ${WAIT_SECONDS}s"
 
-mount -t ext4 -o rw /dev/vda /newroot || fatal "cannot mount /dev/vda on /newroot"
+# How to mount the rootfs, taken from the kernel cmdline the node built.
+#
+# `rootfstype=` and `ro`/`rw` are the kernel's own spellings, and the node emits
+# both from the one fact it records at build time (bundle.json `rootfs_format`).
+# Nothing here guesses: a squashfs or erofs image has no writable implementation
+# in the kernel, so mounting one `rw` does not degrade, it fails -- and it fails
+# in here, where a guest that cannot reach its console looks like a hang.
+#
+# Absent is ext4 + rw, which is what every bundle built before this existed is and
+# what every cmdline written before this said.
+ROOTFSTYPE=ext4
+ROOTACCESS=rw
+for token in $(cat /proc/cmdline 2>/dev/null || true); do
+    case "$token" in
+        rootfstype=*) ROOTFSTYPE="${token#rootfstype=}" ;;
+        ro) ROOTACCESS=ro ;;
+        rw) ROOTACCESS=rw ;;
+    esac
+done
+
+case "$ROOTFSTYPE" in
+    ext4|squashfs|erofs) ;;
+    *) fatal "unsupported rootfstype '$ROOTFSTYPE' on the kernel cmdline" ;;
+esac
+
+log "mounting rootfs: type=$ROOTFSTYPE access=$ROOTACCESS"
+if [ "$ROOTACCESS" = "ro" ]; then
+    # A read-only image cannot receive this instance's own files, and the node has
+    # three to deliver: __config__, .__nodo_entrypoint and (when there are shares)
+    # .__nodo_virtiofs. On the writable path they are written straight into the
+    # image offline, with debugfs; squashfs and erofs have no writer, in debugfs or
+    # anywhere else, so they arrive on a second virtio-blk device instead and are
+    # laid over the image here.
+    #
+    # Overlay rather than a mountpoint inside the guest, because __config__ is read
+    # by the SERVICE, at the absolute path the node promised it -- /__config__ --
+    # and a service must not have to learn that this node happened to build it a
+    # compressed image. The upper layer is a tmpfs: it holds three small files and
+    # whatever the service writes outside /tmp, it is discarded with the VM, and it
+    # is RAM the instance is already billed for as memory rather than disk. So the
+    # image stays the only thing on disk, which is the whole point of #369.
+    #
+    # CONFIG_OVERLAY_FS is already in the guest kernel (it is what an in-guest
+    # dockerd uses), so this needs nothing new from the kernel side.
+    mkdir -p /lower /overlay /meta
+    mount -t "$ROOTFSTYPE" -o ro /dev/vda /lower \
+        || fatal "cannot mount /dev/vda ($ROOTFSTYPE, ro) on /lower"
+    mount -t tmpfs -o mode=755,nosuid,nodev tmpfs /overlay \
+        || fatal "cannot mount the overlay tmpfs for a read-only rootfs"
+    mkdir -p /overlay/upper /overlay/work
+    mount -t overlay overlay \
+        -o lowerdir=/lower,upperdir=/overlay/upper,workdir=/overlay/work /newroot \
+        || fatal "cannot mount the overlay over a read-only rootfs"
+
+    [ -b /dev/vdb ] || fatal "read-only rootfs but no metadata device at /dev/vdb"
+    mount -t ext4 -o ro /dev/vdb /meta || fatal "cannot mount the metadata device"
+    for meta_file in __config__ .__nodo_entrypoint .__nodo_virtiofs; do
+        [ -f "/meta/$meta_file" ] || continue
+        cp "/meta/$meta_file" "/newroot/$meta_file" \
+            || fatal "cannot place /$meta_file from the metadata device"
+    done
+    umount /meta || log "warning: could not unmount the metadata device"
+else
+    mount -t "$ROOTFSTYPE" -o "$ROOTACCESS" /dev/vda /newroot \
+        || fatal "cannot mount /dev/vda ($ROOTFSTYPE, $ROOTACCESS) on /newroot"
+fi
 configure_guest_network
 
 mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/run /newroot/tmp
-chmod 1777 /newroot/tmp || fatal "cannot set /newroot/tmp permissions"
+
+# /tmp and /run on tmpfs.
+#
+# On the writable path this is unchanged behaviour for /run (it was already a
+# tmpfs) and unchanged for /tmp (a writable rootfs holds it). On a read-only
+# rootfs both are mandatory: /tmp is the one thing the issue grants an immutable
+# service genuinely needs to write, and /run is where anything speaking to a
+# local socket puts it. Without them a ro guest gets EROFS on its first write and
+# dies as PID 1.
+#
+# `chmod 1777 /tmp` becomes the tmpfs's own mode option on the ro path, because
+# the directory under it belongs to a filesystem that cannot be chmod'ed.
+if [ "$ROOTACCESS" = "ro" ]; then
+    mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /newroot/tmp \
+        || fatal "cannot mount /tmp (tmpfs) for a read-only rootfs"
+else
+    chmod 1777 /newroot/tmp || fatal "cannot set /newroot/tmp permissions"
+fi
 
 mount --move /proc /newroot/proc || fatal "cannot move /proc to new root"
 mount --move /sys /newroot/sys || fatal "cannot move /sys to new root"
@@ -351,7 +433,7 @@ fatal "switch_root returned unexpectedly"
 INIT_EOF
 chmod 0755 "$ROOT/init"
 
-printf 'nodo-ch-initramfs:v1\narch:%s\n' "$ARCH_TAG" > "$ROOT/etc/nodo-ch-initramfs.marker"
+printf 'nodo-ch-initramfs:v2\narch:%s\n' "$ARCH_TAG" > "$ROOT/etc/nodo-ch-initramfs.marker"
 
 # Byte-reproducible output, so CI's published artifact can be checked against a
 # local rebuild of the same commit — which is what makes the pinned digest in
