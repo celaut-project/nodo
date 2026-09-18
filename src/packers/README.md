@@ -111,8 +111,16 @@
 - `config_declaration.path` is serialized to `container.config_declaration.path`.
 - If `service.json` provides slash-based input (for example `"/config/runtime/node.pb"`), packer normalizes it to segmented form.
 - `api[].transport` is required and serialized to `api.slot[].transport.tags` (host transport, e.g. `tcp`, `udp`).
-- `api[].protocol` is serialized to `api.slot[].protocol_stack[*].tags` (application protocol stack over transport).
+- `api[].protocol` is serialized to `api.slot[].protocol_stack[*].tags` (application protocol stack over transport). It may also be the full tags/prose/formal object form, read by the same descriptor parser as `network[].protocol_stack`.
 - `api[].mu_per_call` is serialized to `api.slot[].mu_per_call` (amounts in MU, the node's unit of account).
+- `network[].formal` is a flat object of **string** key/value pairs, serialized to
+  `Service.Network.formal` as the sorted `key=value` body (`node_identity.component_formal`).
+  Non-string values are refused, not stringified. When the entry also carries a `pow:*` tag,
+  the body is run through `src/manager/pow_networks.parse_pow_formal` at pack time, so a
+  malformed ask fails here instead of at launch; keys outside the `pow.` vocabulary are
+  preserved, not refused. `network[].protocol_stack[]` entries are tags/prose/formal
+  descriptors. Absent, both serialize exactly as before — the spec is hashed into the
+  service id. See `docs/PACKING.md` and `docs/NETWORKS.md`.
 - `resources.start_time_ms` no longer exists.
 - `possible_environment_workload[]` declares the **worst-case descendant workloads** the service
   may request during its lifetime, for scheduling admission decisions. It is serialized

@@ -975,6 +975,68 @@ The older `entrypoint` top-level field is still supported and will be automatica
 |-------|------|----------|-------------|
 | `tags` | array of strings | Yes | Network type identifiers. Required when a `network` entry is present — omitting it raises `KeyError` |
 | `prose` | string | Yes | Human-readable description of the network requirement. Required when a `network` entry is present — omitting it raises `KeyError` |
+| `formal` | object of string → string | No | The machine-readable ask. Encoded to `Service.Network.formal` as the sorted `key=value` body every celaut descriptor uses (`node_identity.component_formal`). Values must be **JSON strings** — a number is refused, not stringified |
+| `protocol_stack` | array of protocol descriptors | No | Protocols the peers in this domain must speak. Each entry is either a bare list of tags (`["http"]`) or an object with `tags` / `prose` / `formal`, read by the same parser as an api slot's `protocol` |
+
+##### `formal` — what a network *is*, not just what it is called
+
+A tag names a *class* of communication domain; `formal` says which instance of that
+class is meant. `pow:ergo` names the Ergo network — `formal` says *which* Ergo
+network: peers whose main chain contains block B and carries at least D cumulative
+work. Two services on the same chain asking for different blocks are not in the same
+domain, and tags alone cannot express that.
+
+The encoding is the one every other celaut descriptor uses: `key=value` lines,
+sorted by key, UTF-8. It is written here from a flat JSON object, so authoring order
+never changes the packed bytes — which matters because `formal` is compared **byte
+for byte** by `match_networks` and `same_component`.
+
+**Values are strings and only strings.** JSON numbers are refused rather than
+converted: a cumulative-difficulty value outgrew an IEEE double long ago, so
+accepting `1152921504606846976` unquoted would mean packing a rounded requirement no
+peer can satisfy, with nothing in the spec showing where the digits went.
+
+**Unrecognized keys are preserved, not refused.** The vocabulary of a domain belongs
+to the domain, not to the packer. A key outside the one the node reads rides along in
+the packed bytes, is round-tripped by every reader, and is enforced by none of them —
+that is the contract set in [#366](https://github.com/celaut-project/nodo/pull/366).
+What *is* refused is a missing required key or a malformed value of one that is
+understood: validating what is known is a different thing from rejecting what is not.
+
+**A `pow:` ask is parsed at pack time.** When an entry carries both a `pow:*` tag and
+a `formal`, the packer runs it through `src/manager/pow_networks.parse_pow_formal` —
+the very function that will read it at launch. A missing `pow.block_id`, a difficulty
+that is not a base-10 integer, or a `pow:ergo` tag whose body says
+`pow.chain=bitcoin` fails the **pack**, not a node launching the published service.
+Nothing contacts a peer: this is validation of the text, not resolution. A `pow:` tag
+with no `formal` is left alone — that is the legitimate "any peer on this chain" an
+ancestor declares when granting a whole chain (see [`NETWORKS.md`](NETWORKS.md)).
+
+```json
+{
+    "network": [
+        {
+            "tags": ["pow:ergo"],
+            "prose": "An Ergo node whose main chain contains this block",
+            "formal": {
+                "pow.chain": "ergo",
+                "pow.block_id": "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b",
+                "pow.min_cumulative_difficulty": "1152921504606846976",
+                "pow.max_tip_age_s": "3600"
+            },
+            "protocol_stack": [
+                {"tags": ["ergo-node-api"], "formal": {"api.version": "4"}}
+            ]
+        }
+    ]
+}
+```
+
+> **An entry that declares neither `formal` nor `protocol_stack` packs to exactly the
+> bytes it did before this was added.** The spec is hashed into the service id, so an
+> empty field written where there was none would give every existing service a new id
+> on its next repack, for no change in meaning. Pinned by
+> `tests/test_packer_network_formal.py`.
 
 > ⚠️ **This is the syntax, not the authorization.** What a service *declares*
 > here is a request. What it is *granted* is that request intersected with what
@@ -2075,7 +2137,8 @@ Once the `.service.zip` is received, the packer extracts it and begins a multi-s
 │  └── names only (envs); no descriptors embedded  │
 │                                                  │
 │  Network requirements                            │
-│  └── tags + prose per network entry              │
+│  └── tags + prose + formal + protocol_stack      │
+│      per network entry                           │
 └────────────┬─────────────────────────────────────┘
              │
              ▼
@@ -2198,7 +2261,7 @@ The tar archive is extracted to a local directory. The total size of all exporte
 Every file, directory, symlink, and device node in the exported filesystem is traversed recursively. File permissions and ownership metadata are captured and stored as extended attributes on each entry. Files below a configured size threshold are embedded directly as raw bytes in the service specification. Files above that threshold are written to separate content-addressed blocks stored on disk, with only a reference hash kept in the specification. This deduplicates large identical files across services and keeps the specification itself compact.
 
 **Metadata Parsing**
-All runtime configuration declared in `service.json` is read and embedded into the service specification: resource limits, entrypoint path, config file location, architecture, API slots with their transport and protocol tags, prices per method, environment-variable names (declared via `envs`; per-variable `.field` descriptors are not embedded — no target field in `pack.proto`), and network access requirements.
+All runtime configuration declared in `service.json` is read and embedded into the service specification: resource limits, entrypoint path, config file location, architecture, API slots with their transport and protocol tags, prices per method, environment-variable names (declared via `envs`; per-variable `.field` descriptors are not embedded — no target field in `pack.proto`), and network access requirements with their `formal` body and `protocol_stack` descriptors.
 
 **Service Spec., Hashing & Storage**
 The service identifier is generated by hashing the fully serialized Service definition—including container specification, API, and network requirements—where filesystem hashing incorporates either the raw filesystem bytes or the reconstructed multiblock directory contents, after which the resulting digests, tags, and nested filesystem hash are stored in a HashTag tree structure with duplicate-hash-type validation enforced before finalization.
