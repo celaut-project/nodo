@@ -9,7 +9,13 @@ from src.manager.network_env import (
     PeerEnvLookup,
     filter_peers_by_environment,
 )
-from src.identity.node_identity import same_component
+from src.identity.node_identity import (
+    ComponentFormalError,
+    parse_component_formal,
+    same_component,
+)
+from src.manager.network_templates import find_placeholders
+from src.utils.logger import LOGGER
 from src.utils.network_policy import enforce_network_policy
 from src.manager.network_defaults import configured_endpoints, endpoint_addresses
 from src.manager.pow_networks import POW_TAG_PREFIX, resolve_pow_network
@@ -22,6 +28,18 @@ class NetworkAuthorizationError(Exception):
 
     Raised instead of granting: the launch is aborted rather than continued with a
     set of networks nobody checked.
+    """
+
+
+class NetworkRequestRejected(Exception):
+    """A ``Gateway.ResolveNetwork`` request asked for more than the caller declared.
+
+    Distinct from :class:`NetworkAuthorizationError` (this node could not work out
+    what the caller is allowed) and from ``NetworkPolicyRejection`` (the operator
+    refuses the domain to anyone): here the node knows exactly who is asking and what
+    they declared, and the request does not fit inside it. The three are separate
+    because a caller can act on the difference -- fix the request, retry later, or
+    stop asking this node.
     """
 
 def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
@@ -170,9 +188,170 @@ def resolve_network(
         peer_env_lookup=peer_env_lookup,
     )
 
+def _formal_pairs(formal: bytes, whose: str) -> Dict[str, str]:
+    """``formal`` as pairs for the subset check, or a rejection saying whose is bad.
+
+    Unlike the template layer's tolerant reader, this one raises: the whole check is
+    a comparison of two documents, and a document that cannot be read is not one that
+    agreed with the other. ``whose`` names which side failed, because the caller can
+    fix its own request and can do nothing about the declaration on this node.
+    """
+    try:
+        return parse_component_formal(formal)
+    except ComponentFormalError as e:
+        raise NetworkRequestRejected(f"{whose} formal is not a key=value body: {e}") from None
+
+
+def request_fits_declaration(
+    declared: celaut.Service.Network,
+    requested: celaut.Service.Network,
+) -> Optional[str]:
+    """``None`` if ``requested`` fits inside ``declared``, else why it does not (#385).
+
+    The rule a ``Gateway.ResolveNetwork`` request is held to, stated once so it can be
+    read and tested as a rule rather than inferred from a handler. A request fits when:
+
+    * **the tags are the same set.** A tag is what the operator's ``service_networks``
+      policy is written against and what dispatches the resolution, so a request that
+      renames the domain is asking about a different domain -- not a narrowing of this
+      one. Set equality, not intersection: ``match_networks`` may accept one shared
+      tag between two *declarations* (they are loose by design), but this is not two
+      declarations, it is a caller proposing a completion of its own.
+    * **every key the declaration fixed is present in the request with exactly that
+      value.** These are the identity keys plus whatever selection the author already
+      made. A request that drops one broadens the ask -- ``pow.block_id`` removed
+      turns "contains block B" into "any peer" -- and a request that alters one asks
+      for a domain the service never declared. Both are refused, and dropping is
+      refused as firmly as altering precisely because it is the one that *looks*
+      harmless.
+    * **keys the declaration left templated may be filled with anything**, including
+      another template (a caller narrowing in two steps), and
+    * **the request may add keys the declaration never mentioned.** Adding is always a
+      narrowing: every reader of a ``formal`` either enforces a key or carries it, so
+      a key the author did not write can only cost the caller peers, never gain it
+      any. This is what makes "the instantiator picks" expressible at all.
+
+    The asymmetry is the point. Templates and additions narrow; removals and edits
+    broaden; only the narrowing direction is granted.
+    """
+    if set(declared.tags) != set(requested.tags):
+        return (
+            f"tags {sorted(requested.tags)} are not the declared {sorted(declared.tags)}. "
+            "A ResolveNetwork request completes a domain the caller declared; it does "
+            "not name a different one."
+        )
+
+    declared_pairs = _formal_pairs(declared.formal, "the declared network's")
+    requested_pairs = _formal_pairs(requested.formal, "the requested network's")
+    open_keys = set(find_placeholders(declared.formal))
+
+    for key, value in declared_pairs.items():
+        if key in open_keys:
+            continue
+        if key not in requested_pairs:
+            return (
+                f"the request drops {key!r}, which the service declared as {value!r}. "
+                "Dropping a fixed key broadens the ask; only keys the declaration "
+                "left as ${VAR} may be filled, and new keys may be added."
+            )
+        if requested_pairs[key] != value:
+            return (
+                f"the request changes {key!r} from {value!r} to "
+                f"{requested_pairs[key]!r}. That key is fixed by the service's own "
+                "declaration; a caller may fill a ${VAR} or add a key, not rewrite "
+                "what the author decided."
+            )
+
+    return None
+
+
+def check_network_request(
+    declared_networks: List[celaut.Service.Network],
+    requested: celaut.Service.Network,
+) -> None:
+    """Raise :class:`NetworkRequestRejected` unless ``requested`` fits some declaration.
+
+    Some, not all: a service declares several networks and is asking about one of
+    them, so the request is accepted if it fits **any** of them. The rejection then
+    reports every declaration it was measured against and why each one refused it,
+    because a verdict against one of a set says nothing useful on its own -- the same
+    reasoning the network policy's rejection report is built on.
+
+    A caller that declared no network at all is refused outright rather than granted
+    the generous reading: an empty declaration is "I asked for no domain", and
+    resolving one for it would make the whole check optional for anybody willing to
+    declare nothing.
+    """
+    if not declared_networks:
+        raise NetworkRequestRejected(
+            "the calling instance's service declares no network, so there is nothing "
+            f"for a request about {sorted(requested.tags)} to fit inside."
+        )
+
+    reasons = []
+    for index, declared in enumerate(declared_networks, start=1):
+        reason = request_fits_declaration(declared, requested)
+        if reason is None:
+            return
+        reasons.append(f"  #{index} {sorted(declared.tags)}: {reason}")
+
+    raise NetworkRequestRejected(
+        f"the request for {sorted(requested.tags)} does not fit any network the "
+        "calling instance's service declares:\n" + "\n".join(reasons)
+    )
+
+
+def declared_networks_of_caller(caller_ip: str) -> Optional[List[celaut.Service.Network]]:
+    """The networks declared by the local instance at ``caller_ip``, or ``None``.
+
+    ``None`` means **"this node cannot tell who is asking"**, and it is not the same
+    answer as an empty list. A ``ResolveNetwork`` caller is very often not a local
+    instance at all -- it is another celaut node, asking as a peer, over the same RPC
+    (``pow_networks._peer_suggested_endpoints`` makes exactly that call) -- and such a
+    caller has no spec on this node to be measured against. The subset check does not
+    apply to it, and inventing an empty declaration for it would turn the check into a
+    blanket refusal of peer-to-peer resolution.
+
+    The identification is the one ``ModifyServiceSystemResources`` already uses: the
+    gRPC peer's address against ``local_instances.ip``. It is reused rather than
+    re-derived so there is one answer on this node to "which instance is this", and a
+    guest that cannot be identified for one RPC is not identified for the other.
+
+    A spec that is on the registry but unreadable right now returns ``None`` too, and
+    that is a deliberate difference from ``filter_networks_with_ancestors``, which
+    aborts on the same condition. It aborts because it is deciding what to *open* for
+    a guest that is about to run, where "cannot tell" must not read as "allowed". Here
+    nothing is opened: the answer is a list of addresses the caller verifies itself,
+    so falling back to the pre-#385 behaviour costs a caller-side check nobody was
+    doing a week ago, and failing closed on a transient memory-lock timeout would
+    break resolution for an instance that is behaving perfectly.
+    """
+    if not caller_ip:
+        return None
+    container_id = sc.get_local_instance_id_by_uri(uri=caller_ip)
+    if not container_id:
+        return None
+    try:
+        # `get_service_id_by_container_id` raises a bare Exception for "no row",
+        # which is why this catches broadly rather than naming the registry errors:
+        # every way of not arriving at a spec has the same consequence here, and the
+        # consequence is the pre-#385 behaviour, not a refusal.
+        service_id = sc.get_service_id_by_container_id(id=container_id)
+        spec = load_service_from_disk(service_hash=service_id)
+    except Exception as e:
+        LOGGER(
+            f"[NETWORKS] ResolveNetwork: {caller_ip} is local instance {container_id} "
+            f"but its spec could not be read ({type(e).__name__}: {e}); the request is "
+            "not checked against a declaration."
+        )
+        return None
+    return list(spec.network)
+
+
 def resolve_network_for_peer(
     network: celaut.Service.Network,
     subject: str = "",
+    caller_ip: str = "",
 ) -> celaut.ConfigurationFile.NetworkResolution:
     """Answer another node's ``Gateway.ResolveNetwork`` question about ``network``.
 
@@ -194,8 +373,44 @@ def resolve_network_for_peer(
     No environment filter either: ``Network.environment_variable`` picks among *this*
     node's own instances by the requesting instance's value, and a remote caller is not
     one of them.
+
+    A third, added by #385: **when the caller is a local instance, the request has to
+    fit what its own service declared** (:func:`check_network_request`). Before this,
+    the RPC resolved any ``Service.Network`` handed to it, so a guest allowed to reach
+    ``pow:ergo`` with block B pinned could ask for ``pow:ergo`` with no block at all
+    and be answered with peers on any Ergo-shaped chain -- the deferred-resolution
+    path would otherwise have been a way around the declaration it exists to complete.
+    The check applies only when ``caller_ip`` identifies a local instance; a remote
+    node asking as a peer has no spec here and keeps the behaviour it had.
+
+    Note what the check does **not** do: it does not grant. It only refuses requests
+    that do not fit; the operator policy above still decides whether this node reaches
+    the domain at all, and it runs first, so a caller learns "not from this node"
+    before it learns anything about its own declaration.
     """
     enforce_network_policy(networks=[network], subject=subject)
+
+    # An unfilled `${VAR}` is not a question this node can answer: there is no peer
+    # holding a block named after a variable. Refused here, and before the caller is
+    # identified, because it is a property of the request itself and the answer is
+    # the same for a local guest and a remote node. Deliberately *not* substituted
+    # from anything on this node either: the whole point of a template is that the
+    # value comes from whoever instantiated the service, and this node filling one in
+    # from its own environment would be picking the chain on their behalf.
+    open_keys = find_placeholders(network.formal)
+    if open_keys:
+        raise NetworkRequestRejected(
+            f"the requested formal still carries unfilled templates: "
+            f"{', '.join(sorted(open_keys))}. A ResolveNetwork request has to be the "
+            "completed ask -- this node does not fill a ${VAR} in on a caller's "
+            "behalf, because which instance of the protocol is meant is the caller's "
+            "decision to make."
+        )
+
+    declared = declared_networks_of_caller(caller_ip)
+    if declared is not None:
+        check_network_request(declared_networks=declared, requested=network)
+
     return celaut.ConfigurationFile.NetworkResolution(
         tags=list(network.tags),
         peer_instances=resolve_network(network, ask_peers=False),
