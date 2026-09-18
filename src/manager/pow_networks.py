@@ -93,10 +93,15 @@ KNOWN_CHAINS = ("ergo", "bitcoin")
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_MAX_PEERS = 8
 
-#: Conventional Ergo node REST port, used when a ``restApiUrl`` names no port and
-#: no scheme default applies.
-ERGO_DEFAULT_PORT = 9053
-_SCHEME_PORTS = {"http": 80, "https": 443}
+#: Fallback P2P port for a candidate whose P2P endpoint was never observed. It is a
+#: *default*, overridable at ``pow_networks.ERGO_P2P_PORT``, and nothing downstream
+#: knows it exists: the resolver puts a concrete port in every ``Instance.Uri`` it
+#: emits, so the firewall and the guest read an address rather than re-deriving one.
+#: 9030 is what the reference node ships with, and observation bears that out without
+#: making it a rule -- of 58 peers on one mainnet node's ``/peers/connected``, 53 were
+#: on 9030 and five were not (9020, 9029, 9031, 1540). Those five are exactly why an
+#: observed port is preferred over this one wherever there is one.
+ERGO_DEFAULT_P2P_PORT = 9030
 
 
 class PowFormalError(ValueError):
@@ -290,6 +295,22 @@ def _max_peers() -> int:
     return value if value > 0 else DEFAULT_MAX_PEERS
 
 
+def _default_p2p_port() -> int:
+    """The P2P port to assume for a candidate whose own was never observed.
+
+    Configurable because assuming one is the weak half of this: a node on a
+    non-default port is reachable, and the operator who knows that can say so once
+    instead of losing every such peer. Out of range or unreadable falls back rather
+    than raising -- a typo in one key is not worth failing a launch over, and the
+    fallback is the same value the key defaults to.
+    """
+    try:
+        value = int(env_manager.get(f"{CONFIG_BLOCK}.ERGO_P2P_PORT", ERGO_DEFAULT_P2P_PORT))
+    except (TypeError, ValueError):
+        return ERGO_DEFAULT_P2P_PORT
+    return value if 0 < value < 65536 else ERGO_DEFAULT_P2P_PORT
+
+
 def _configured_endpoints(tag: str) -> List[str]:
     """Use the same operator defaults as every other communication domain."""
     return configured_endpoints(tag, config=env_manager)
@@ -383,19 +404,90 @@ def candidate_urls(
     return ordered
 
 
-def _uri_for(url: str) -> Optional[Tuple[str, int]]:
-    """``(ip, port)`` for a peer URL, or None when it cannot be pinned to one.
+def crawled_p2p_addresses() -> Dict[str, str]:
+    """``restApiUrl -> "host:port"`` for every crawl entry that recorded a P2P endpoint.
 
-    The firewall writes rules against addresses, so a hostname has to be resolved
-    here -- which re-imports every caveat of DNS resolution (no DNSSEC, IPv4 only,
-    frozen at launch). Preferring the numeric form when the crawl recorded one is
-    the mitigation available at this layer.
+    The crawl (``src/manager/ergo.py``) is the one source that *observes* a peer's P2P
+    address: ``/peers/connected`` entries carry ``address`` next to ``restApiUrl``, and
+    the crawl now keeps it as ``p2pAddress``. Read separately from :func:`candidate_urls`
+    rather than folded into it because it answers a different question -- that function
+    decides *who to ask*, this one *where the one we asked actually speaks the chain*.
+
+    Backward compatible in both directions: an entry written by an older nodo has no
+    ``p2pAddress`` and simply contributes nothing, which is the same position every
+    non-crawl candidate is in.
     """
+    peers_path = str(env_manager.get("ledgers.ergo.HTTP_PEERS_PATH", "") or "").strip()
+    if not peers_path or not os.path.exists(peers_path):
+        return {}
+    try:
+        with open(peers_path, "r", encoding="utf-8") as handle:
+            crawled = json.load(handle)
+    except (OSError, ValueError) as e:
+        logger(f"[POW] could not read {peers_path}: {type(e).__name__}: {e}")
+        return {}
+    if not isinstance(crawled, dict):
+        return {}
+
+    addresses: Dict[str, str] = {}
+    for url, entry in crawled.items():
+        if not isinstance(entry, dict):
+            continue
+        address = entry.get("p2pAddress")
+        if isinstance(address, str) and address.strip():
+            addresses[str(url).strip().rstrip("/")] = address.strip()
+    return addresses
+
+
+def _p2p_uri_for(url: str, p2p_address: Optional[str] = None) -> Optional[Tuple[str, int]]:
+    """``(ip, port)`` of a verified candidate's **P2P** endpoint, or None.
+
+    Two cases, and the difference between them is whether anything ever saw the port:
+
+    * ``p2p_address`` given (``"1.2.3.4:9030"``, from the crawl's ``/peers/connected``
+      ``address``): host and port both come from it. This is an observation, and it is
+      the case where a peer on a non-conventional port is still reached correctly.
+    * ``p2p_address`` absent -- ``ledgers.ergo.NODE_URL``, ``default_instances``, a peer's
+      ``ResolveNetwork`` answer, or a crawl entry an older nodo wrote. The REST host is
+      reused with :func:`_default_p2p_port`, and **the assumption is logged**, because
+      the port is the one thing here nobody checked.
+
+    Reusing the REST *host* is not an assumption of the same kind: it is where the node
+    that answered ``/info`` lives. Only the port is being guessed.
+
+    Verification is unaffected and stays on the REST URL (:func:`ergo_peer_satisfies`):
+    what is being answered is "does this node's chain contain B", which only the REST
+    API can say. This function decides what the *guest* is then allowed to dial.
+    """
+    if p2p_address:
+        host, _, port_text = p2p_address.rpartition(":")
+        host = host.strip().strip("[]")
+        try:
+            port = int(port_text)
+        except ValueError:
+            port = 0
+        if host and 0 < port < 65536:
+            return _resolve_host(host, port)
+        logger(f"[POW] {url}: unusable p2pAddress {p2p_address!r}; falling back to the default port")
+
     parsed = urlparse(url if "//" in url else f"//{url}")
     host = parsed.hostname
     if not host:
         return None
-    port = parsed.port or _SCHEME_PORTS.get((parsed.scheme or "").lower()) or ERGO_DEFAULT_PORT
+    port = _default_p2p_port()
+    logger(
+        f"[POW] {url}: no observed P2P address; assuming {host}:{port} "
+        f"(pow_networks.ERGO_P2P_PORT)"
+    )
+    return _resolve_host(host, port)
+
+
+def _resolve_host(host: str, port: int) -> Optional[Tuple[str, int]]:
+    """``(ip, port)`` for a host that may be a name. Shared by both uri builders.
+
+    ``getaddrinfo`` on a numeric literal is a parse, not a lookup, so the crawl's
+    already-numeric addresses cost nothing and take no DNS caveat.
+    """
     try:
         infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
     except socket.gaierror as e:
@@ -535,6 +627,26 @@ def resolve_pow_network(
     records of a single name -- and it would leave the guest unable to tell the peers
     apart in its own ``__config__``.
 
+    **The uri is the peer's P2P endpoint, not its REST one.** A service declaring
+    ``pow:ergo`` is asking for chain peers -- something to sync a chain against -- and
+    the REST API is not that: it is the interface this node used to *check* the peer, on
+    a port no chain protocol is spoken on. Emitting the REST address was therefore
+    granting egress that could not be used for what it was granted for, which is the
+    worst shape a firewall rule can have: it is both useless and open. The two roles are
+    not interchangeable and they are not both wanted, so the REST uri is **not** also
+    emitted in the slot. A guest that wanted a REST API would be asking for one, and
+    that ask is a different network descriptor -- not a second uri smuggled into this
+    one, which the guest could not tell apart from the first anyway, since an
+    ``Instance.Uri`` carries no scheme and no role. Deciding for it by widening the hole
+    is not a service to it.
+
+    Where the port comes from is the other half. This node does not assume a port for a
+    network: the crawl observes each peer's P2P address (``/peers/connected.address``)
+    and that is what is emitted, so a peer on 9031 is reached on 9031. Only a candidate
+    whose P2P endpoint nobody ever saw -- ``NODE_URL``, ``default_instances``, a peer's
+    ``ResolveNetwork`` answer -- falls back to ``pow_networks.ERGO_P2P_PORT`` (9030), and
+    that fallback is logged where it happens.
+
     That this is safe took a fix at the other end: ``configure_guest_firewall_policy``
     stopped at the first peer instance it could write a rule for, so N instances would
     have opened the first peer and silently dropped the rest. It now writes a rule for
@@ -569,13 +681,14 @@ def resolve_pow_network(
     i_slot = 1  # Internal port usage is irrelevant for an externally-reached peer.
     peers: List[celaut.Instance] = []
     seen_addresses = set()
+    p2p_addresses = crawled_p2p_addresses()
 
     for url in candidate_urls(network, pow_tag, ask_peers=ask_peers):
         if len(peers) >= limit:
             break
         if not ergo_peer_satisfies(url, requirement, timeout=timeout):
             continue
-        address = _uri_for(url)
+        address = _p2p_uri_for(url, p2p_addresses.get(url.rstrip("/")))
         if address is None:
             continue
         if address in seen_addresses:

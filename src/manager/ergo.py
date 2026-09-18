@@ -33,6 +33,36 @@ def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
         logger(f"Error connecting to Ergo node: {e}")
         return None
 
+def _p2p_address(peer: Dict) -> Optional[str]:
+    """``host:port`` of a ``/peers/connected`` entry's P2P endpoint, or None.
+
+    Ergo serializes the field as Java's ``InetSocketAddress.toString()``, so what
+    arrives is ``/1.2.3.4:9030`` when the peer was reached by address and
+    ``name/1.2.3.4:9030`` when a name was resolved first. The part after the last
+    ``/`` is the one that was actually connected to, which is the one worth keeping.
+
+    This is the only place the P2P port is *observed* rather than assumed. A node's
+    own ``/info`` does not carry its P2P address -- it reports ``restApiUrl`` and
+    nothing else addressable -- so a peer learned from anywhere but this crawl has no
+    observed port and gets the configured default instead (see
+    ``src/manager/pow_networks.py``).
+    """
+    raw = peer.get("address")
+    if not isinstance(raw, str):
+        return None
+    candidate = raw.rsplit("/", 1)[-1].strip()
+    # Rightmost colon: an IPv6 literal is bracketed, so this is the port separator.
+    host, separator, port = candidate.rpartition(":")
+    if not separator or not host:
+        return None
+    try:
+        if not 0 < int(port) < 65536:
+            return None
+    except ValueError:
+        return None
+    return candidate
+
+
 def get_refresh_peers() -> Dict[str, Dict]:
     http_peers_file = env_manager.get("ledgers.ergo.HTTP_PEERS_PATH")
     if not os.path.exists(http_peers_file):
@@ -63,6 +93,12 @@ def get_refresh_peers() -> Dict[str, Dict]:
                     
                     node_info = __available_ergo_node(rest_api_url)
                     if node_info:
+                        # Added alongside the existing keys, never replacing the
+                        # entry's shape: a file written by an older nodo simply has
+                        # no p2pAddress, and every reader already tolerates that.
+                        p2p_address = _p2p_address(peer)
+                        if p2p_address:
+                            node_info["p2pAddress"] = p2p_address
                         available_peers[rest_api_url] = node_info
                         logger(f"Found available Ergo node: {rest_api_url}")
                         fetch_peers(rest_api_url)
