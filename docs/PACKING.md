@@ -1076,6 +1076,14 @@ hashed into the service id.
 > on its next repack, for no change in meaning. Pinned by
 > `tests/test_packer_network_formal.py`.
 
+> **A tag is a concrete hostname or a label — never a glob.** `*.googlevideo.com`
+> fails the pack (#391): the resolver has no wildcard support, and before the
+> packer refused it the tag reached DNS on the launching node and failed the
+> launch as `Cannot resolve domain: *.googlevideo.com`. Declare each host as its
+> own tag, or `*` for open egress and narrow inside the service. A hostname that
+> exists but does not resolve at launch time yields no peers for that tag and a
+> log line; it does not fail the launch.
+>
 > ⚠️ **This is the syntax, not the authorization.** What a service *declares*
 > here is a request. What it is *granted* is that request intersected with what
 > every generation above it declared — the direct father's spec, then its
