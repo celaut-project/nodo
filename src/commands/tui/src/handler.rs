@@ -8,6 +8,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 /// the page behind it would act on something the user cannot see.
 pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
     match app.input_mode {
+        // The KyA gate is a decision, and a decision is not something a stray wheel
+        // event or a click on the page behind it should be able to make. Scrolling is
+        // not offered either: the overlay's own ↑/↓ do that, and a wheel event here
+        // would be indistinguishable from one aimed at whatever it is covering
+        // (issue #395).
+        InputMode::AcceptKya => {}
         InputMode::Normal => match mouse.kind {
             MouseEventKind::ScrollUp => app.on_up(),
             MouseEventKind::ScrollDown => app.on_down(),
@@ -27,6 +33,30 @@ pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
 /// Handle keyboard input without allowing page shortcuts to leak into modal input.
 pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
     match app.input_mode {
+        // The KyA, before anything else in this function and before any page shortcut
+        // can be read (issue #395). First arm on purpose: the question is what running
+        // the node is conditional on, so there must be no key that acts on the node
+        // while it is unanswered -- not `r`, not Tab, not a page's `d`.
+        //
+        // Declining quits, exactly as `nodo`'s CLI onboarding exits 1 on a refusal.
+        // Esc and q decline rather than dismiss, because they are the keys that mean
+        // "I am not doing this" everywhere else in this interface, and a gate they
+        // merely closed would be a gate that could be walked past.
+        InputMode::AcceptKya => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (_, KeyCode::Char('y') | KeyCode::Char('Y')) => app.accept_kya(),
+                (_, KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Char('q')) => {
+                    app.decline_kya()
+                }
+                (_, KeyCode::Up) => app.scroll_details(-1),
+                (_, KeyCode::Down) => app.scroll_details(1),
+                (_, KeyCode::PageUp) => app.scroll_details(-10),
+                (_, KeyCode::PageDown) => app.scroll_details(10),
+                _ => {}
+            }
+            return Ok(());
+        }
         // Yes/no confirmation for destructive actions.
         InputMode::Confirm => {
             match (key.modifiers, key.code) {
@@ -174,6 +204,13 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Pricing => {
             app.open_price_editor()
+        }
+        // ENERGY mirrors Config's `e` and adds Enter, because the page is a list of
+        // one-key decisions and Enter is what "work this row" means on every other
+        // list in this interface (issue #395).
+        (_, KeyCode::Enter) if app.page() == Page::Energy => app.open_energy_editor(),
+        (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Energy => {
+            app.open_energy_editor()
         }
         // The CELL page: Enter works the selected lever, `e` reaches the keys behind
         // it, `p` picks a posture and `d` says how this node differs from one.

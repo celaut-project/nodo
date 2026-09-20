@@ -39,8 +39,15 @@ async fn main() -> AppResult<()> {
         return Ok(());
     }
 
-    // Create an application.
-    let mut app = App::new();
+    // Create an application, behind the KyA gate.
+    //
+    // The question the CLI has always asked on first run (`src/commands/onboarding.py`)
+    // and this console did not, which meant an operator whose first command is
+    // `nodo tui` was never asked it at all (issue #395). Applied here rather than
+    // inside `App::new()` so it is one visible line in the entry point, and so that
+    // constructing an `App` stays a pure thing that does not consult the filesystem
+    // for a marker.
+    let mut app = App::new().with_kya_gate();
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(io::stderr());
