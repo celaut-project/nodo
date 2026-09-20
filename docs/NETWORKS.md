@@ -162,6 +162,31 @@ A node indexes an instance as a member of a network only if **both** of the foll
 | **1. Declares the network in `Service.Network`**     | The service *wants* to connect to peers in that network.                                                                             |
 | **2. Exposes the `protocol_stack` in `Service.Api`** | The service *can* be consumed by others. If it does not expose the required protocols, it is treated as a consumer-only participant. |
 
+* **Implementation:** `local_network_instances()` in `src/manager/networks.py`
+* **Consumer:** `resolve_network()`, for every non-`pow:` domain, at launch and over
+  `Gateway.ResolveNetwork`
+
+The members found this way are offered as `peer_instances` in the
+`NetworkResolution` **alongside** whatever the operator's `default_instances` or a
+DNS lookup of the tag produced: a guest declaring `postgres` reaches both the
+`postgres` this node runs and the one written in `config.yaml`. Condition 1 is
+judged by `match_networks` (formal when both sides carry one, a shared tag
+otherwise); condition 2 by pairing the slot's `protocol_stack` with the network's
+the way any protocol stack on this node is compared. A network that states no
+`protocol_stack` is satisfied by any slot.
+
+What is offered per member is only the slot(s) that satisfied condition 2, with
+their published addresses -- the consumer writes a firewall rule per address it is
+handed, and an unrelated admin port on the same instance is not opened for it. A
+member with no published address (the launcher recorded none; the caller was
+expected to tunnel) is not offered. Over `Gateway.ResolveNetwork` the calling
+instance is never offered itself. `Network.environment_variable` filters members
+by their recorded launch environment, the same way it filters every other peer.
+
+`pow:` domains do not take members this way: there, membership is verified chain
+state, and a local instance that wants to be found enters through the same
+candidate list as every other endpoint.
+
 ---
 
 ## Authorization: the Ancestor Chain

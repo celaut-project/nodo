@@ -250,10 +250,14 @@ class ResolveNetworkForPeerTests(unittest.TestCase):
         requested = _network(["pow:ergo"], {"pow.chain": "ergo", "pow.block_id": BLOCK})
         with patch.object(
             nets, "declared_networks_of_caller", return_value=None
+        ), patch.object(
+            nets.sc, "get_local_instance_id_by_uri", return_value=None
         ), patch.object(nets, "resolve_network", return_value=[]) as resolve:
             resolution = nets.resolve_network_for_peer(requested, caller_ip="1.2.3.4")
         self.assertEqual(list(resolution.tags), ["pow:ergo"])
         resolve.assert_called_once()
+        # Nobody to exclude from the answer: the caller is not an instance here.
+        self.assertIsNone(resolve.call_args.kwargs["requester_id"])
 
     def test_a_local_caller_completing_its_own_template_is_answered(self):
         declared = [
@@ -262,9 +266,15 @@ class ResolveNetworkForPeerTests(unittest.TestCase):
         requested = _network(["pow:ergo"], {"pow.chain": "ergo", "pow.block_id": BLOCK})
         with patch.object(
             nets, "declared_networks_of_caller", return_value=declared
+        ), patch.object(
+            nets.sc, "get_local_instance_id_by_uri", return_value="container-1"
+        ), patch.object(
+            nets.sc, "get_local_instance_envs", return_value=None
         ), patch.object(nets, "resolve_network", return_value=[]) as resolve:
             nets.resolve_network_for_peer(requested, caller_ip="10.0.0.9")
         resolve.assert_called_once()
+        # A local caller is on the registry and must not be handed itself (#387).
+        self.assertEqual(resolve.call_args.kwargs["requester_id"], "container-1")
 
     def test_a_local_caller_broadening_its_own_ask_is_refused_before_resolving(self):
         declared = [
