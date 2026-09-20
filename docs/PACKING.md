@@ -1076,6 +1076,13 @@ hashed into the service id.
 > on its next repack, for no change in meaning. Pinned by
 > `tests/test_packer_network_formal.py`.
 
+> **Every tag in an entry is resolved, and what they yield is accumulated.** An
+> entry declaring `["google.com", "www.google.com"]` is granted both names'
+> addresses, as two peers in `network_resolution` (#390). Tags that name no peer
+> — `ipv4`, `public`, `*` — contribute nothing and hide nothing; they are what
+> the operator's `service_networks` policy is written against. When an entry has
+> several tags and not all of them produced peers, the node logs how many did.
+>
 > ⚠️ **This is the syntax, not the authorization.** What a service *declares*
 > here is a request. What it is *granted* is that request intersected with what
 > every generation above it declared — the direct father's spec, then its
