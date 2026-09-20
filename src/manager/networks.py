@@ -263,6 +263,15 @@ def resolve_network(
 ) -> List[celaut.Instance]:
     """Peer instances for one declared communication domain.
 
+    **The tags of an entry are synonyms**, so the walk below stops at the first one
+    that resolves rather than accumulating what every tag yields. They are alternative
+    names for the single destination the entry declares -- the reading
+    ``docs/CONCEPTS.md`` gives a scheme component's tags, and the one that makes
+    :func:`match_networks` right to conclude identity from a single shared tag. A
+    service wanting two destinations declares two entries; an entry answered under one
+    of its names has been answered. Stopping early is the semantics, not an
+    optimization.
+
     ``ask_peers=False`` forbids the resolution from asking other celaut nodes, and is
     passed by ``Gateway.ResolveNetwork`` when answering one. It is what keeps a question
     from being relayed: see :func:`pow_networks.candidate_urls`.
