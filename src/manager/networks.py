@@ -44,44 +44,58 @@ class NetworkRequestRejected(Exception):
     stop asking this node.
     """
 
-# Ports a hostname tag opens when its network's `protocol_stack` says nothing more
-# precise. What `resolve_domain` always opened, kept as the fallback so a service
-# declaring a bare hostname resolves exactly as before (#389).
+# What a hostname tag opens when its entry names no port: the pair `resolve_domain` has
+# always opened, and as much as a name on its own can say (#389).
 DEFAULT_HOSTNAME_PORTS = (80, 443)
 
-# Well-known ports by protocol tag, for a `protocol_stack` entry carrying no `port=`
-# in its formal. Only protocols whose port is fixed by convention are listed; a
-# `grpc` entry names no port on its own, and gets one only from its formal.
-_PORT_BY_PROTOCOL_TAG = {"http": 80, "https": 443, "tls": 443, "ssh": 22, "dns": 53}
 
+def hostname_ports(network: celaut.Service.Network) -> List[int]:
+    """The ports a hostname tag is opened on, from the network entry's ``formal``.
 
-def hostname_ports(protocol_stack) -> List[int]:
-    """The ports a hostname tag should be opened on, from the network's ``protocol_stack``.
+    **A declaration does not choose a peer's port.** Everything else this module
+    resolves is an instance running on some node, and that node assigned the port when
+    it published it -- whatever the instance would have preferred. That is why an
+    ``Instance.Uri`` carries a port and a ``Service.Network`` does not: local members
+    are offered on the ports their launcher recorded, the operator's seeds on the ports
+    the operator wrote down, and a ``pow:`` peer on the P2P port somebody observed it
+    on.
 
-    Each entry contributes one port: ``port=<n>`` in its ``formal`` if it says so
-    (a formal is ``key=value`` lines, read tolerantly -- a formal that is not one
-    contributes nothing rather than refusing the launch), else the convention for
-    its tag. Entries that name neither contribute nothing. A stack that yields no
-    port at all -- including the empty one every pre-#389 service declares -- falls
-    back to :data:`DEFAULT_HOSTNAME_PORTS`, so nothing already published changes.
+    A hostname is the one exception, because there is no instance and no node that
+    published one -- only a name this node looks up. The port has nowhere else to come
+    from, and what the entry states is the *standard* port the service answering to
+    that name is expected to be on: ``port=<n>`` in the entry's ``formal``, the same
+    ``key=value`` body every other parameter of an entry is written in, ``${VAR}``
+    selection included (#385) since it is substituted before this runs.
+
+    An entry that states no port opens :data:`DEFAULT_HOSTNAME_PORTS`, which is what a
+    bare hostname tag has always meant.
+
+    A ``port`` this node cannot honour -- not a port number, in a ``formal`` that is not
+    readable -- yields **nothing**, and the caller grants nothing for the tag. Falling
+    back to 80 and 443 there would open two ports nobody asked for on the strength of a
+    declaration this node could not read: the hole ``docs/NETWORKS.md`` already refuses
+    for a ``pow:`` peer's second uri, at once useless for the ask and open. The packer
+    refuses that shape (``_validate_network_ports``), so only a pack made before it did
+    reaches here.
     """
-    ports: List[int] = []
-    for protocol in protocol_stack:
-        port = None
-        if protocol.formal:
-            try:
-                value = parse_component_formal(protocol.formal).get("port")
-                port = int(value) if value is not None else None
-            except (ComponentFormalError, ValueError):
-                port = None
-        if port is None:
-            port = next(
-                (_PORT_BY_PROTOCOL_TAG[t] for t in protocol.tags if t in _PORT_BY_PROTOCOL_TAG),
-                None,
-            )
-        if port is not None and 0 < port < 65536 and port not in ports:
-            ports.append(port)
-    return ports or list(DEFAULT_HOSTNAME_PORTS)
+    if not network.formal:
+        return list(DEFAULT_HOSTNAME_PORTS)
+
+    try:
+        value = parse_component_formal(network.formal).get("port")
+    except ComponentFormalError as e:
+        LOGGER(f"[NETWORKS] a network entry's formal is not readable ({e}).")
+        return []
+
+    if value is None:
+        return list(DEFAULT_HOSTNAME_PORTS)
+    if not (value.isdigit() and 0 < int(value) < 65536):
+        LOGGER(
+            f"[NETWORKS] a network entry declares port={value!r}, which is not a port "
+            "number."
+        )
+        return []
+    return [int(value)]
 
 
 def resolve_domain(domain: str, ports=DEFAULT_HOSTNAME_PORTS) -> List[celaut.Instance.Uri]:
@@ -93,6 +107,9 @@ def resolve_domain(domain: str, ports=DEFAULT_HOSTNAME_PORTS) -> List[celaut.Ins
     URL -- and therefore calls ``getaddrinfo`` -- fails before it ever uses the allow
     written here. These addresses are usable by a program that reads them out of
     ``__config__`` and connects to them directly (#389).
+
+    ``ports`` is what :func:`hostname_ports` read out of the network entry, defaulting
+    to what a bare hostname tag has always opened.
     """
     try:
         ips = list({
@@ -383,8 +400,22 @@ def resolve_network(
         if not tag.islower() or '.' not in tag:
             continue
 
+        ports = hostname_ports(network)
+        if not ports:
+            # The entry names a host and a port this node cannot read (`hostname_ports`
+            # logged which). Granting the historical 80 and 443 instead would open what
+            # nobody declared, so the posture is the one taken just below for a name
+            # that does not resolve: the tag yields no peers and the guest boots
+            # with default-deny toward it.
+            LOGGER(
+                f"[NETWORKS] tag {tag!r} names a host, but its entry declares a port "
+                "this node cannot read; no peers granted for it. "
+                "The guest boots without an allow toward it."
+            )
+            continue
+
         try:
-            uris = resolve_domain(tag, ports=hostname_ports(network.protocol_stack))
+            uris = resolve_domain(tag, ports=ports)
         except ValueError as e:
             # A name that does not resolve is not a reason to fail the launch (#391).
             # It used to be: the error escaped to the launcher's catch-all, which
