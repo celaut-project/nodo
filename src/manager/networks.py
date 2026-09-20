@@ -101,26 +101,23 @@ def resolve_network(
 ) -> List[celaut.Instance]:
     """Peer instances for one declared communication domain.
 
+    **The tags of an entry are synonyms**, so the walk below stops at the first one
+    that resolves rather than accumulating what every tag yields. They are alternative
+    names for the single destination the entry declares -- the reading
+    ``docs/CONCEPTS.md`` gives a scheme component's tags, and the one that makes
+    :func:`match_networks` right to conclude identity from a single shared tag. A
+    service wanting two destinations declares two entries; an entry answered under one
+    of its names has been answered. Stopping early is the semantics, not an
+    optimization.
+
     ``ask_peers=False`` forbids the resolution from asking other celaut nodes, and is
     passed by ``Gateway.ResolveNetwork`` when answering one. It is what keeps a question
     from being relayed: see :func:`pow_networks.candidate_urls`.
-
-    **Every tag is resolved, and their peers are accumulated** (#390). A network is as
-    many destinations as it names: that is the reading the operator's policy already
-    applies (``docs/NETWORKS.md``, "Every tag must pass" -- a tag nobody vetted is a
-    destination nobody vetted), and until this change the resolver disagreed with it,
-    stopping at the first tag that produced anything. An entry declaring
-    ``["google.com", "www.google.com"]`` was granted the first name's addresses only,
-    with nothing in the log to tell that from being granted both. Now each tag is
-    looked up by whichever source answers it -- PoW verification, the operator's
-    seeds, DNS -- and a tag that yields nothing is noted rather than hidden.
-
-    One ``Instance`` per hostname, holding every address that name resolves to: a
-    name's A records are one peer at several addresses, which is the shape
-    ``allow_connection_to_instance`` opens as a unit. Two names are two peers.
     """
-    peers: List[celaut.Instance] = []
-    contributing = 0
+    # Wildcard "*" (open-internet egress) and any unresolved tag resolve to no
+    # concrete peer instances; initialise uris so an unmatched loop cannot raise
+    # UnboundLocalError (it previously did for tag "*").
+    uris: List[celaut.Instance.Uri] = []
     for tag in network.tags:
         # A `pow:<chain>` tag names a PoW communication domain, whose actual ask
         # lives in `Network.formal` (issue #78,
@@ -130,76 +127,74 @@ def resolve_network(
         # name lookup. The prefix carries no `.`, so such a tag could never have
         # reached the DNS heuristic below anyway; the order is for clarity.
         if tag.startswith(POW_TAG_PREFIX):
-            found = resolve_pow_network(network, tag=tag, ask_peers=ask_peers)
-            if found:
-                contributing += 1
-                peers.extend(found)
+            peers = resolve_pow_network(network, tag=tag, ask_peers=ask_peers)
+            if peers:
+                return filter_peers_by_environment(
+                    network=network,
+                    peers=peers,
+                    requester_env_values=requester_env_values,
+                    peer_env_lookup=peer_env_lookup,
+                )
             continue
 
         # Operator seeds apply to any tag; PoW above still verifies its candidates.
         addresses = endpoint_addresses(configured_endpoints(tag, config=env_manager))
         if addresses:
-            contributing += 1
-            peers.extend(
-                _peer_at([celaut.Instance.Uri(ip=ip, port=port)], network.protocol_stack)
-                for ip, port in addresses
+            peers = [celaut.Instance(
+                api=celaut.Service.Api(slot=[celaut.Service.Api.Slot(
+                    port=1, transport=celaut.Service.Api.Protocol(tags=["tcp"]),
+                    protocol_stack=network.protocol_stack)]),
+                uri_slot=[celaut.Instance.Uri_Slot(internal_port=1,
+                    uri=[celaut.Instance.Uri(ip=ip, port=port)])],
+            ) for ip, port in addresses]
+            return filter_peers_by_environment(
+                network=network, peers=peers,
+                requester_env_values=requester_env_values, peer_env_lookup=peer_env_lookup,
             )
-            continue
 
         if tag in LEDGERS_WITHOUT_URIS:
             continue
 
-        uris: List[celaut.Instance.Uri] = []
         if "ergo" in tag:
             uris = resolve_ergo_network()
+            if uris:
+                break
 
-        # Wildcard "*" and any tag not shaped like a hostname resolve to no concrete
-        # peer instances: such a tag is honoured at the firewall layer (allow-all
-        # egress for "*") or vetted by the operator's policy, and names no peer.
-        if not uris and tag.islower() and '.' in tag:
-            uris = resolve_domain(tag)
+        if not tag.islower() or '.' not in tag:
+            continue
 
+        uris = resolve_domain(tag)
         if uris:
-            contributing += 1
-            peers.append(_peer_at(uris, network.protocol_stack))
+            break
 
-    if len(network.tags) > 1 and contributing < len(network.tags):
-        # The one line that tells "granted one of five" from "granted five" (#390).
-        # Not every tag is meant to name a peer -- "public", "ipv4", "*" name none --
-        # so this is information, not an error; but a service whose second hostname
-        # is missing from its __config__ should be able to find out why here.
-        LOGGER(
-            f"[NETWORKS] {list(network.tags)}: {contributing} of {len(network.tags)} "
-            f"tag(s) contributed peer instances ({len(peers)} in total)."
-        )
+    if not uris:
+        # No concrete peer URIs (e.g. wildcard "*"): the tag is honoured at the
+        # firewall layer (allow-all egress); there is no peer instance to advertise.
+        return []
 
-    return filter_peers_by_environment(
-        network=network,
-        peers=peers,
-        requester_env_values=requester_env_values,
-        peer_env_lookup=peer_env_lookup,
-    )
+    client_protocol_stack = network.protocol_stack
+    i_slot = 1  # Default slot id (because internal port usage is irrelevant here)
 
-
-def _peer_at(
-    uris: List[celaut.Instance.Uri], protocol_stack
-) -> celaut.Instance:
-    """One peer reachable at ``uris``, speaking the network's ``protocol_stack``.
-
-    Slot id 1 by convention: the internal port is irrelevant for a peer this node
-    did not launch, and the firewall pairs ``uri_slot`` with ``api.slot`` by it.
-    """
-    i_slot = 1
-    return celaut.Instance(
+    instance = celaut.Instance(
         api=celaut.Service.Api(
             slot=[celaut.Service.Api.Slot(
                 port=i_slot,
                 transport=celaut.Service.Api.Protocol(tags=["tcp"]),
-                protocol_stack=protocol_stack,
+                protocol_stack=client_protocol_stack
             )],
-            payment_contracts=[],
+            payment_contracts=[]
         ),
-        uri_slot=[celaut.Instance.Uri_Slot(internal_port=i_slot, uri=uris)],
+        uri_slot=[celaut.Instance.Uri_Slot(
+            internal_port = i_slot,
+            uri=uris
+        )]
+    )
+
+    return filter_peers_by_environment(
+        network=network,
+        peers=[instance],
+        requester_env_values=requester_env_values,
+        peer_env_lookup=peer_env_lookup,
     )
 
 def _formal_pairs(formal: bytes, whose: str) -> Dict[str, str]:
