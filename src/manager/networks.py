@@ -42,9 +42,55 @@ class NetworkRequestRejected(Exception):
     stop asking this node.
     """
 
-def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
+# Ports a hostname tag opens when its network's `protocol_stack` says nothing more
+# precise. What `resolve_domain` always opened, kept as the fallback so a service
+# declaring a bare hostname resolves exactly as before (#389).
+DEFAULT_HOSTNAME_PORTS = (80, 443)
+
+# Well-known ports by protocol tag, for a `protocol_stack` entry carrying no `port=`
+# in its formal. Only protocols whose port is fixed by convention are listed; a
+# `grpc` entry names no port on its own, and gets one only from its formal.
+_PORT_BY_PROTOCOL_TAG = {"http": 80, "https": 443, "tls": 443, "ssh": 22, "dns": 53}
+
+
+def hostname_ports(protocol_stack) -> List[int]:
+    """The ports a hostname tag should be opened on, from the network's ``protocol_stack``.
+
+    Each entry contributes one port: ``port=<n>`` in its ``formal`` if it says so
+    (a formal is ``key=value`` lines, read tolerantly -- a formal that is not one
+    contributes nothing rather than refusing the launch), else the convention for
+    its tag. Entries that name neither contribute nothing. A stack that yields no
+    port at all -- including the empty one every pre-#389 service declares -- falls
+    back to :data:`DEFAULT_HOSTNAME_PORTS`, so nothing already published changes.
     """
-    Resolve a domain to its associated IPv4 addresses.
+    ports: List[int] = []
+    for protocol in protocol_stack:
+        port = None
+        if protocol.formal:
+            try:
+                value = parse_component_formal(protocol.formal).get("port")
+                port = int(value) if value is not None else None
+            except (ComponentFormalError, ValueError):
+                port = None
+        if port is None:
+            port = next(
+                (_PORT_BY_PROTOCOL_TAG[t] for t in protocol.tags if t in _PORT_BY_PROTOCOL_TAG),
+                None,
+            )
+        if port is not None and 0 < port < 65536 and port not in ports:
+            ports.append(port)
+    return ports or list(DEFAULT_HOSTNAME_PORTS)
+
+
+def resolve_domain(domain: str, ports=DEFAULT_HOSTNAME_PORTS) -> List[celaut.Instance.Uri]:
+    """A hostname's IPv4 addresses, one ``Uri`` per (address, port).
+
+    What this grants is **addresses**, and only that. The guest is not given a way to
+    look the name up: nodo serves no DNS and opens no port 53 (see the note in
+    ``virtualizers/microvm/network.py``), so a program inside the guest that takes a
+    URL -- and therefore calls ``getaddrinfo`` -- fails before it ever uses the allow
+    written here. These addresses are usable by a program that reads them out of
+    ``__config__`` and connects to them directly (#389).
     """
     try:
         ips = list({
@@ -52,17 +98,11 @@ def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
             for info in socket.getaddrinfo(domain, None)
             if info[0] == socket.AF_INET
         })
-
-
-        # TODO Must be based on the network client protocol stack. ¿?
-
-        # Auxiliar, only http and https
         return [
             celaut.Instance.Uri(ip=ip, port=port)
             for ip in ips
-            for port in [80, 443]  # Ports should be based on the protocol stack ¿?
+            for port in ports
         ]
-    
     except socket.gaierror:
         raise ValueError(f"Cannot resolve domain: {domain}")
 
@@ -154,7 +194,7 @@ def resolve_network(
         if not tag.islower() or '.' not in tag:
             continue
 
-        uris = resolve_domain(tag)
+        uris = resolve_domain(tag, ports=hostname_ports(network.protocol_stack))
         if uris:
             break
 

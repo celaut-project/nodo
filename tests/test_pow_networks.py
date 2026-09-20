@@ -958,7 +958,7 @@ class ResolveNetworkDispatchTests(unittest.TestCase):
         ) as dns:
             result = self.networks.resolve_network(network)
 
-        dns.assert_called_once_with("example.test")
+        dns.assert_called_once_with("example.test", ports=[80, 443])
         self.assertEqual(
             [(u.ip, u.port) for u in result[0].uri_slot[0].uri], [("203.0.113.1", 80)]
         )
