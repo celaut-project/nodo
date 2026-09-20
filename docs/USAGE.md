@@ -276,7 +276,12 @@ These are the most commonly used commands for daily tasks:
   `nodo tui`
 
 - **info**  
-  Displays service status, version, and configuration details.  
+  Displays service status, version, the node's identity key, and configuration
+  details. The `Node id:` line is the node's Ed25519 public key in hex — the same
+  string the reputation system keys every opinion by, so it is what you compare
+  against when a peer says it vouched for you, and what you paste when asking one to.
+  It reads `unavailable (no identity mnemonic yet)` on a node that has not been
+  started long enough to derive one.  
   **Example:**  
   `nodo info`
 
