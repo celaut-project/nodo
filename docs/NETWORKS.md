@@ -240,7 +240,7 @@ Both lists empty — the shipped default — restricts nothing.
 |---|---|
 | Blacklist first | It is evaluated over every tag before the whitelist is, so a tag on both lists is rejected and reported as blacklisted. |
 | Glob, case-insensitive | `fnmatch` over the tag, lowercased on both sides. Glob over the *tag* and nothing else: `google.com` does not match `www.google.com` — write `*google.com`. |
-| Every tag must pass | A non-empty whitelist has to cover each tag of each declared network. A network is not one destination, it is as many as it names: `resolve_network` walks the tags one by one and stops at the first that resolves, and the firewall reads them one by one too. A tag nobody vetted is a destination nobody vetted. |
+| Every tag must pass | A non-empty whitelist has to cover each tag of each declared network. A network is one destination under every name it answers to: the tags of an entry are synonyms, `resolve_network` takes the first of them that resolves, and the firewall reads them one by one. Which name answers is not the operator's to pick, so each of them has to be one the operator would have allowed. A tag nobody vetted is a destination nobody vetted. |
 | No network, no question | A service that declares none is always accepted; it asked for no domain. Same for a network with no tags, and for an empty tag: they name nothing, the resolver ignores them and the firewall opens nothing for them. |
 | `blacklist: ["*"]` | Refuses every service that declares any tagged network — "nothing beyond this node". |
 

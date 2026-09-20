@@ -978,6 +978,37 @@ The older `entrypoint` top-level field is still supported and will be automatica
 | `formal` | object of string → string | No | The machine-readable ask. Encoded to `Service.Network.formal` as the sorted `key=value` body every celaut descriptor uses (`node_identity.component_formal`). Values must be **JSON strings** — a number is refused, not stringified. A value may be the template `"${VAR_NAME}"`, filled in at launch by the instantiator |
 | `protocol_stack` | array of protocol descriptors | No | Protocols the peers in this domain must speak. Each entry is either a bare list of tags (`["http"]`) or an object with `tags` / `prose` / `formal`, read by the same parser as an api slot's `protocol` |
 
+##### `tags` — synonyms of one destination
+
+The tags of an entry are alternative names for the **single** destination that entry
+declares, never a list of destinations. `docs/CONCEPTS.md` reads a signature scheme's
+component tags the same way: agreeing on any one of them is agreeing on the thing.
+
+```json
+{
+    "network": [
+        {
+            "tags": ["google.com", "www.google.com"],
+            "prose": "Google's search front end, under either of its names"
+        },
+        {
+            "tags": ["api.coingecko.com"],
+            "prose": "Spot prices. A different destination, so a different entry"
+        },
+        {
+            "tags": ["ipv4", "public"],
+            "prose": "Egress to the open internet, naming no peer in particular"
+        }
+    ]
+}
+```
+
+Three entries are three communication domains. The first names one of them twice —
+`resolve_network` answers with whichever of the two resolves first, and a service
+that wanted both hosts as separate peers writes them as separate entries. That is
+also why the operator's `service_networks` policy vets *every* tag of an entry
+(see [`NETWORKS.md`](NETWORKS.md)): any of the synonyms may be the one that answers.
+
 ##### `formal` — what a network *is*, not just what it is called
 
 A tag names a *class* of communication domain; `formal` says which instance of that
@@ -1076,6 +1107,21 @@ hashed into the service id.
 > on its next repack, for no change in meaning. Pinned by
 > `tests/test_packer_network_formal.py`.
 
+> **The tags of an entry are synonyms.** They are alternative names for the single
+> destination that entry declares, read the way `docs/CONCEPTS.md` reads the tags of
+> a signature-scheme component: agreeing on any one of them is agreeing on the
+> thing. So `["google.com", "www.google.com"]` is one destination under two names,
+> and `resolve_network` answers with the first of them that resolves — which one
+> that is, nobody declares. Names that resolve to nothing on their own — `ipv4`,
+> `public`, `*` — describe the domain rather than name a peer in it; they are what
+> the operator's `service_networks` policy is written against, and it vets every
+> name in the entry precisely because any of them may be the one that answers.
+>
+> **Two destinations are two entries**, each with its own `prose`, `formal` and
+> `protocol_stack` — which is what those fields are for. An entry is one
+> communication domain, and `match_networks` compares two of them by a single
+> shared tag for the same reason: one shared name is one shared thing.
+>
 > ⚠️ **This is the syntax, not the authorization.** What a service *declares*
 > here is a request. What it is *granted* is that request intersected with what
 > every generation above it declared — the direct father's spec, then its
