@@ -44,7 +44,13 @@ def _load_networks_module():
     saved = {name: sys.modules.get(name) for name in stubbed}
 
     sql_stub = types.ModuleType("src.database.sql_connection")
-    sql_stub.SQLConnection = type("SQLConnection", (), {})
+    sql_stub.SQLConnection = type(
+        "SQLConnection", (),
+        # A node running no instances: `resolve_network` asks the registry for
+        # local members of every non-PoW domain (#387), and these tests are
+        # about the other sources.
+        {"get_all_internal_containers_ids": lambda self: []},
+    )
     utils_stub = types.ModuleType("src.utils.utils")
     utils_stub.load_service_from_disk = lambda service_hash: None
     sys.modules[stubbed[0]] = sql_stub
