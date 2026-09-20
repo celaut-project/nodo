@@ -1,5 +1,5 @@
 import socket, os, json
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
@@ -8,11 +8,13 @@ from src.utils.utils import load_service_from_disk
 from src.manager.network_env import (
     PeerEnvLookup,
     filter_peers_by_environment,
+    peer_env_matches,
 )
 from src.identity.node_identity import (
     ComponentFormalError,
     parse_component_formal,
     same_component,
+    same_component_stack,
 )
 from src.manager.network_templates import find_placeholders
 from src.utils.logger import LOGGER
@@ -93,22 +95,200 @@ def resolve_ergo_network() -> List[celaut.Instance.Uri]:
     except:
         return []
 
+def _instance_env_values(instance_id: str) -> Optional[Dict[str, bytes]]:
+    """The launch environment of a local instance, as ``filter_peers_by_environment``
+    wants it, or ``None`` when the node recorded none.
+
+    The same column ``shares.instance_env_values`` reads, parsed the same way; not
+    imported from there because that module drags the shared-filesystem stack in, and
+    this one is loaded by tests that stub everything below the database.
+    """
+    raw = sc.get_local_instance_envs(id=instance_id)
+    if not raw:
+        return None
+    try:
+        stored = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(stored, dict):
+        return None
+    return {
+        key: value.encode("utf-8") if isinstance(value, str) else bytes(value)
+        for key, value in stored.items()
+    }
+
+
+def _slot_exposes(slot: celaut.Service.Api.Slot, network: celaut.Service.Network) -> bool:
+    """Whether one API slot offers what peers of ``network`` are expected to speak.
+
+    ``same_component_stack`` is the comparison every other protocol stack on this node
+    gets (a peer's transport stack, a signature scheme), so it is the one used here
+    too: the slot has to pair up one-to-one with the network's ``protocol_stack``,
+    formal deciding where both sides carry one and a shared tag otherwise.
+
+    A network that states no ``protocol_stack`` asks nothing of the slot but that it
+    exist: the requirement is then only that the instance *can* be consumed, which any
+    slot satisfies. Comparing against an empty stack literally would instead require
+    a slot that declares nothing, which no service that means to be reached writes.
+    """
+    if not len(network.protocol_stack):
+        return True
+    return same_component_stack(slot.protocol_stack, network.protocol_stack)
+
+
+def local_network_instances(
+    network: celaut.Service.Network,
+    requester_id: Optional[str] = None,
+) -> List[Tuple[str, celaut.Instance]]:
+    """The instances this node runs that are members of ``network`` (#387).
+
+    The rule is the one ``docs/NETWORKS.md`` ("Network Instance Indexing") has
+    stated since before it was implemented: an instance is indexed as a member of a
+    network only if **both**
+
+    1. its service declares that network in ``Service.network`` -- it *wants* peers
+       there (``match_networks``: formal when both carry one, a shared tag otherwise),
+       and
+    2. its service exposes, in some ``Service.Api`` slot, the ``protocol_stack`` the
+       network expects of its peers -- it *can* be consumed there. An instance that
+       only declares the network is a consumer of it, not a node of it, and is not
+       offered to anyone.
+
+    What is returned per member is not its stored ``Instance`` verbatim but a view of
+    it narrowed to the slots that satisfied condition 2, with the ``uri_slot`` entries
+    for those ports. The consumer of a resolution writes a firewall rule per URI it is
+    handed (``configure_guest_firewall_policy``), so an instance that also exposes an
+    unrelated admin port is not opened on that port to a guest that asked for the
+    network on another. A member with no advertisable address on any qualifying slot
+    (the launcher recorded none -- the caller was expected to tunnel) is skipped, since
+    there is nothing to hand out.
+
+    ``requester_id`` names the instance the resolution is for, when it is one this
+    node runs, and it is never listed as its own peer. At launch the instance is not on
+    the registry yet, so nothing needs excluding; over ``Gateway.ResolveNetwork`` it is,
+    and would otherwise satisfy both conditions by construction.
+
+    An instance whose spec or definition cannot be read right now is skipped with a
+    log line, not raised over. This is a source of *candidates*, like the operator's
+    seeds: nothing is granted by naming one, and the launch that is waiting for the
+    answer is not made to fail because an unrelated instance was mid-teardown.
+
+    Pairs of ``(instance_id, Instance)`` rather than bare Instances so the caller can
+    filter by the member's launch environment (``Network.environment_variable``)
+    without re-deriving which row a view came from.
+    """
+    members: List[Tuple[str, celaut.Instance]] = []
+    for instance_id in sc.get_all_internal_containers_ids():
+        if requester_id and instance_id == requester_id:
+            continue
+        try:
+            service_id = sc.get_service_id_by_container_id(id=instance_id)
+            spec = load_service_from_disk(service_hash=service_id)
+        except Exception as e:
+            LOGGER(
+                f"[NETWORKS] skipping local instance {instance_id} as a network member: "
+                f"its spec could not be read ({type(e).__name__}: {e})."
+            )
+            continue
+
+        if not any(match_networks(network, declared) for declared in spec.network):
+            continue
+
+        exposing = [slot for slot in spec.api.slot if _slot_exposes(slot, network)]
+        if not exposing:
+            continue
+
+        serialized = sc.get_internal_instance(id=instance_id)
+        if not serialized:
+            # Registered but its definition not yet stored: the guest is still
+            # booting and its published addresses are not known.
+            continue
+        stored = celaut.Instance()
+        try:
+            stored.ParseFromString(serialized)
+        except Exception as e:
+            LOGGER(
+                f"[NETWORKS] skipping local instance {instance_id} as a network member: "
+                f"its stored definition is unreadable ({e})."
+            )
+            continue
+
+        ports = {slot.port for slot in exposing}
+        uri_slots = [
+            uri_slot for uri_slot in stored.uri_slot
+            if uri_slot.internal_port in ports and len(uri_slot.uri)
+        ]
+        if not uri_slots:
+            continue
+
+        member = celaut.Instance(
+            api=celaut.Service.Api(
+                slot=exposing,
+                payment_contracts=stored.api.payment_contracts,
+            ),
+            uri_slot=uri_slots,
+        )
+        members.append((instance_id, member))
+    return members
+
+
+def _local_peers(
+    network: celaut.Service.Network,
+    requester_env_values: Optional[Dict[str, bytes]],
+    requester_id: Optional[str],
+) -> List[celaut.Instance]:
+    """Local members of ``network``, filtered by its ``environment_variable``.
+
+    The environment filter is applied here from the node's own records, whatever
+    ``peer_env_lookup`` the caller passed for the other sources: a local instance's
+    launch environment is something this node knows exactly, and it is the case the
+    filter was written for -- several instances of one service on one node, of which
+    only those sharing the requester's discriminator are its peers.
+    """
+    members = local_network_instances(network, requester_id=requester_id)
+    if not network.environment_variable:
+        return [instance for _, instance in members]
+    return [
+        instance for instance_id, instance in members
+        if peer_env_matches(network, requester_env_values, _instance_env_values(instance_id))
+    ]
+
+
 def resolve_network(
     network: celaut.Service.Network,
     requester_env_values: Optional[Dict[str, bytes]] = None,
     peer_env_lookup: Optional[PeerEnvLookup] = None,
     ask_peers: bool = True,
+    requester_id: Optional[str] = None,
 ) -> List[celaut.Instance]:
     """Peer instances for one declared communication domain.
 
     ``ask_peers=False`` forbids the resolution from asking other celaut nodes, and is
     passed by ``Gateway.ResolveNetwork`` when answering one. It is what keeps a question
     from being relayed: see :func:`pow_networks.candidate_urls`.
+
+    ``requester_id`` is the local instance the answer is for, if it is one, so that it
+    is not offered itself as a peer (:func:`local_network_instances`).
+
+    Sources, for a tag that is not a ``pow:`` domain: **the instances this node runs**
+    that are members of the network (#387), and **the operator's seeds** for the tag
+    (``service_networks.default_instances``), and failing the latter, a DNS lookup of
+    a tag shaped like a hostname. The local members are always included alongside
+    whichever of the other two answered: a guest that declares ``postgres`` should
+    reach both the ``postgres`` this node runs and the one the operator wrote down,
+    and neither source knows about the other.
+
+    Local members are **not** offered for a ``pow:`` network. Membership there is
+    decided by verifying each candidate's chain state, not by what its spec declares,
+    and ``resolve_pow_network`` owns that verification; a local instance that wants
+    to be found for one enters through the same candidate list as everyone else.
     """
     # Wildcard "*" (open-internet egress) and any unresolved tag resolve to no
     # concrete peer instances; initialise uris so an unmatched loop cannot raise
     # UnboundLocalError (it previously did for tag "*").
     uris: List[celaut.Instance.Uri] = []
+    is_pow = any(tag.startswith(POW_TAG_PREFIX) for tag in network.tags)
+    local = [] if is_pow else _local_peers(network, requester_env_values, requester_id)
     for tag in network.tags:
         # A `pow:<chain>` tag names a PoW communication domain, whose actual ask
         # lives in `Network.formal` (issue #78,
@@ -138,7 +318,7 @@ def resolve_network(
                 uri_slot=[celaut.Instance.Uri_Slot(internal_port=1,
                     uri=[celaut.Instance.Uri(ip=ip, port=port)])],
             ) for ip, port in addresses]
-            return filter_peers_by_environment(
+            return local + filter_peers_by_environment(
                 network=network, peers=peers,
                 requester_env_values=requester_env_values, peer_env_lookup=peer_env_lookup,
             )
@@ -160,8 +340,9 @@ def resolve_network(
 
     if not uris:
         # No concrete peer URIs (e.g. wildcard "*"): the tag is honoured at the
-        # firewall layer (allow-all egress); there is no peer instance to advertise.
-        return []
+        # firewall layer (allow-all egress); there is no external peer instance to
+        # advertise. Local members, if any, are still the answer.
+        return local
 
     client_protocol_stack = network.protocol_stack
     i_slot = 1  # Default slot id (because internal port usage is irrelevant here)
@@ -181,7 +362,7 @@ def resolve_network(
         )]
     )
 
-    return filter_peers_by_environment(
+    return local + filter_peers_by_environment(
         network=network,
         peers=[instance],
         requester_env_values=requester_env_values,
@@ -411,9 +592,21 @@ def resolve_network_for_peer(
     if declared is not None:
         check_network_request(declared_networks=declared, requested=network)
 
+    # A local caller is on the registry by now and, declaring the network and quite
+    # possibly exposing its protocols, would qualify as its own peer (#387). Its
+    # launch environment is what the network's `environment_variable`, if any, is
+    # matched against -- the same records the launch-time resolution reads.
+    requester_id = sc.get_local_instance_id_by_uri(uri=caller_ip) if caller_ip else None
+    requester_env = _instance_env_values(requester_id) if requester_id else None
+
     return celaut.ConfigurationFile.NetworkResolution(
         tags=list(network.tags),
-        peer_instances=resolve_network(network, ask_peers=False),
+        peer_instances=resolve_network(
+            network,
+            requester_env_values=requester_env,
+            ask_peers=False,
+            requester_id=requester_id,
+        ),
     )
 
 
