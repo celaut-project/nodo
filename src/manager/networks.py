@@ -343,7 +343,28 @@ def resolve_network(
         if not tag.islower() or '.' not in tag:
             continue
 
-        uris = resolve_domain(tag)
+        try:
+            uris = resolve_domain(tag)
+        except ValueError as e:
+            # A name that does not resolve is not a reason to fail the launch (#391).
+            # It used to be: the error escaped to the launcher's catch-all, which
+            # tore the VM down and reported `Cannot resolve domain: <tag>` -- for a
+            # typo, a host that is down right now, or a `*.cdn.example` glob the
+            # packer now refuses but older packs still carry. The posture taken is
+            # the one `build_network_resolution` already takes for a deferred
+            # template: the tag yields no peers, the guest boots with default-deny
+            # toward it, and the reason is on the log. Naming a glob as what it is,
+            # because "cannot resolve" is a true statement that points away from
+            # the cause.
+            shape = (
+                "is a wildcard hostname, which the resolver does not support"
+                if tag.startswith("*") else "did not resolve"
+            )
+            LOGGER(
+                f"[NETWORKS] tag {tag!r} {shape} ({e}); no peers granted for it. "
+                "The guest boots without an allow toward it."
+            )
+            uris = []
         if uris:
             break
 

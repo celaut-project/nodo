@@ -813,6 +813,7 @@ class ZipContainerPacker:
             network = celaut.Service.Network()
             network.tags.extend(json_network['tags'])
             network.prose = json_network['prose']
+            self._refuse_wildcard_hostnames(network, index)
 
             # Absent `formal` writes nothing -- not empty bytes, which is what an
             # unconditional assignment would leave. Both are the same on the wire
@@ -839,6 +840,29 @@ class ZipContainerPacker:
             networks.append(network)
 
         return networks
+
+    def _refuse_wildcard_hostnames(self, network: celaut.Service.Network, index: int) -> None:
+        """A tag shaped ``*.example.com`` is a glob, and the resolver has no globs (#391).
+
+        Refused here, where the author is looking at the text, rather than at launch:
+        such a tag is lowercase and dotted, so it passed the hostname heuristic in
+        ``resolve_network`` and reached the resolver, which raised ``Cannot resolve
+        domain: *.example.com`` -- a DNS error naming a host nobody meant literally,
+        surfacing from a failed launch on some other node. The declaration is in
+        ``service.json``; that is where the refusal belongs.
+
+        Only the ``*.`` shape (and a bare ``*`` followed by anything) is a glob. The
+        wildcard ``*`` on its own is open egress and stays legal; a tag with an
+        embedded ``*`` elsewhere is not a hostname and is skipped by the resolver
+        like any other non-hostname tag, so it needs no refusing.
+        """
+        for tag in network.tags:
+            if isinstance(tag, str) and tag.startswith("*") and len(tag) > 1:
+                raise ValueError(
+                    f"service.json network[{index}]: tag {tag!r} is a wildcard hostname, "
+                    "which the resolver does not support. Declare each concrete host as "
+                    "its own tag, or '*' for open egress and narrow inside the service."
+                )
 
     def _validate_pow_network(self, network: celaut.Service.Network, index: int) -> None:
         """Run a ``pow:`` ask through the parser that will read it at launch.

@@ -1122,6 +1122,14 @@ hashed into the service id.
 > communication domain, and `match_networks` compares two of them by a single
 > shared tag for the same reason: one shared name is one shared thing.
 >
+> **A tag is a concrete hostname or a label — never a glob.** `*.googlevideo.com`
+> fails the pack (#391): the resolver answers names, and no resolver answers a
+> wildcard. Declare each host as its own tag, or `*` for open egress and narrow
+> inside the service. A name that does not resolve at launch time — a glob in an
+> older pack, a typo, a host that is down right now — yields no peers for that
+> tag: the next synonym is tried, the reason is on the log, and the guest boots
+> with default-deny toward that host. It does not fail the launch.
+>
 > ⚠️ **This is the syntax, not the authorization.** What a service *declares*
 > here is a request. What it is *granted* is that request intersected with what
 > every generation above it declared — the direct father's spec, then its
