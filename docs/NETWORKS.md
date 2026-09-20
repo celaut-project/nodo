@@ -299,11 +299,33 @@ what it can reach. The firewall is what confines a running guest
 
 ## Use Cases
 
-### 1. DNS
+### 1. Hostname tags
 
 > "Give me access to `www.google.com`."
 
-A simple DNS network where peers resolve domain names.
+A tag that is lowercase and contains a `.` is resolved **on the node** to its IPv4
+addresses (`resolve_domain`) and the guest is granted those addresses, one `Uri`
+per address and port. The ports come from the network's `protocol_stack` (#389):
+`port=<n>` in an entry's `formal`, else the convention for its tag (`http` → 80,
+`https`/`tls` → 443, `ssh` → 22, `dns` → 53). A stack naming no port — including
+the empty one — opens 80 and 443, as it always has.
+
+**What is granted is addresses, not name resolution.** nodo serves no DNS and
+opens no port 53 toward anything (see the note in
+`src/virtualizers/microvm/network.py`); the guest's default-deny covers UDP as
+well as TCP. So:
+
+| Program inside the guest | Works with a hostname tag? |
+|---|---|
+| Reads `network_resolution` from `__config__` and connects to the addresses (the way `ergo-node` consumes its peers) | **Yes** — this is what the tag is for. |
+| Takes a URL and calls `getaddrinfo()` — `curl`, `yt-dlp`, any HTTP library, any TLS client that needs the name for SNI | **No.** It fails at the lookup, before it ever reaches the allowed address. The declaration looks correct and the service makes no request. |
+
+A service in the second row today declares `["*"]` and narrows inside the image
+(exact-host check after parsing, one program allowed to open sockets). The design
+that would close the gap — a service that reads `network_resolution` and serves
+DNS from it to its siblings, reachable on 53 through an ordinary peer allow — is the
+one the `network.py` note points at, and does not exist yet. Until it does, do not
+write a hostname tag for a program that takes names.
 
 ---
 

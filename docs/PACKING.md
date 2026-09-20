@@ -1130,6 +1130,15 @@ hashed into the service id.
 > tag: the next synonym is tried, the reason is on the log, and the guest boots
 > with default-deny toward that host. It does not fail the launch.
 >
+> **A hostname tag grants addresses, not name resolution.** The node resolves
+> the name itself and opens the resulting IPs on the ports the entry's
+> `protocol_stack` names (80 and 443 if it names none). Nothing inside the guest
+> can *look the name up*: no DNS is served and port 53 is not opened. A program
+> that reads addresses from `__config__` works; a program handed a URL
+> (`curl`, `yt-dlp`, any HTTP client) fails at `getaddrinfo()` and never
+> reaches the allow. Such a service must declare `"*"` today and narrow inside
+> the image. See [`NETWORKS.md`](NETWORKS.md#1-hostname-tags) (#389).
+>
 > ⚠️ **This is the syntax, not the authorization.** What a service *declares*
 > here is a request. What it is *granted* is that request intersected with what
 > every generation above it declared — the direct father's spec, then its

@@ -36,7 +36,7 @@ def test_bad_defaults_fall_back_to_existing_dns_resolution():
     with patch.object(module, "env_manager", config({"custom.test": ["tcp://host:999999"]})), \
          patch.object(module, "resolve_domain", return_value=[celaut.Instance.Uri(ip="10.0.0.4", port=443)]) as dns:
         peers = module.resolve_network(_network(tags=("custom.test",), formal=b""))
-    dns.assert_called_once_with("custom.test")
+    dns.assert_called_once_with("custom.test", ports=[80, 443])
     assert peers[0].uri_slot[0].uri[0].port == 443
 
 
