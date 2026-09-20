@@ -162,6 +162,31 @@ A node indexes an instance as a member of a network only if **both** of the foll
 | **1. Declares the network in `Service.Network`**     | The service *wants* to connect to peers in that network.                                                                             |
 | **2. Exposes the `protocol_stack` in `Service.Api`** | The service *can* be consumed by others. If it does not expose the required protocols, it is treated as a consumer-only participant. |
 
+* **Implementation:** `local_network_instances()` in `src/manager/networks.py`
+* **Consumer:** `resolve_network()`, for every non-`pow:` domain, at launch and over
+  `Gateway.ResolveNetwork`
+
+The members found this way are offered as `peer_instances` in the
+`NetworkResolution` **alongside** whatever the operator's `default_instances` or a
+DNS lookup of the tag produced: a guest declaring `postgres` reaches both the
+`postgres` this node runs and the one written in `config.yaml`. Condition 1 is
+judged by `match_networks` (formal when both sides carry one, a shared tag
+otherwise); condition 2 by pairing the slot's `protocol_stack` with the network's
+the way any protocol stack on this node is compared. A network that states no
+`protocol_stack` is satisfied by any slot.
+
+What is offered per member is only the slot(s) that satisfied condition 2, with
+their published addresses -- the consumer writes a firewall rule per address it is
+handed, and an unrelated admin port on the same instance is not opened for it. A
+member with no published address (the launcher recorded none; the caller was
+expected to tunnel) is not offered. Over `Gateway.ResolveNetwork` the calling
+instance is never offered itself. `Network.environment_variable` filters members
+by their recorded launch environment, the same way it filters every other peer.
+
+`pow:` domains do not take members this way: there, membership is verified chain
+state, and a local instance that wants to be found enters through the same
+candidate list as every other endpoint.
+
 ---
 
 ## Authorization: the Ancestor Chain
@@ -215,7 +240,7 @@ Both lists empty — the shipped default — restricts nothing.
 |---|---|
 | Blacklist first | It is evaluated over every tag before the whitelist is, so a tag on both lists is rejected and reported as blacklisted. |
 | Glob, case-insensitive | `fnmatch` over the tag, lowercased on both sides. Glob over the *tag* and nothing else: `google.com` does not match `www.google.com` — write `*google.com`. |
-| Every tag must pass | A non-empty whitelist has to cover each tag of each declared network. A network is not one destination, it is as many as it names: `resolve_network` walks the tags one by one and stops at the first that resolves, and the firewall reads them one by one too. A tag nobody vetted is a destination nobody vetted. |
+| Every tag must pass | A non-empty whitelist has to cover each tag of each declared network. A network is one destination under every name it answers to: the tags of an entry are synonyms, `resolve_network` takes the first of them that resolves, and the firewall reads them one by one. Which name answers is not the operator's to pick, so each of them has to be one the operator would have allowed. A tag nobody vetted is a destination nobody vetted. |
 | No network, no question | A service that declares none is always accepted; it asked for no domain. Same for a network with no tags, and for an empty tag: they name nothing, the resolver ignores them and the firewall opens nothing for them. |
 | `blacklist: ["*"]` | Refuses every service that declares any tagged network — "nothing beyond this node". |
 
