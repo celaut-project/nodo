@@ -216,12 +216,28 @@ sees — which is what makes this TUI the supported way to edit a serving node.
 Two consequences worth knowing:
 
 - **The restart needs root**, because `nodo.service` is a system unit
-  (`nodo daemon restart` → `systemctl`). Run the TUI as root to edit configuration on
-  a serving node; without it the restart fails, and the change is reverted rather
-  than half-applied.
+  (`nodo daemon restart` → `systemctl`, refused outright by `daemon_command` under a
+  non-zero euid). Run the TUI as root to edit configuration on a serving node;
+  without it the restart fails, and the change is reverted rather than half-applied.
 - **A node that is not serving is edited without a restart** — there is no running
   node to disagree with the file, so the change simply stands and the next start
   reads it. The status line says which of the two happened.
+
+This pair is also why a config edit can look as though one particular key has been
+singled out for a sudo prompt while its neighbours have not. It never is. `config.yaml`
+is `chmod a+w` by `install.sh`, `chown`ed to the installing user and rewritten `0o666`
+on every save, and every editor on every page — the ENERGY page's `PRICE_PER_KWH`, a
+price nudge, a CELL profile, a raw Config row — goes through the one
+`write_config_value` funnel into the one transaction above. The file is never the
+obstacle and the key is never the obstacle; the restart is. What varies is only
+**whether something is serving**, so the same edit is refused on a running node and
+lands silently on a stopped one.
+
+The editor now says this before the value is typed, rather than leaving it to be
+inferred from a value that was written and then put back: an `EditConfig` popup opened
+by an unprivileged process against a node reporting `running` carries a one-line
+warning naming the restart. The revert itself is unchanged — a node running settings
+that are not the settings on disk is the worse outcome, and always was.
 
 Values are handed to `yq` through the environment, never interpolated into the
 expression, so nothing typed here can be read as yq syntax. `env()` rather than

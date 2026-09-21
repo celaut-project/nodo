@@ -21,6 +21,11 @@ serde_yaml = "0.9"
 # Collapsible tree view for the Config page (issue #248). 0.20.0 is the newest
 # release built on ratatui ^0.26, matching the pinned ratatui above.
 tui-tree-widget = "0.20.0"
+# `geteuid`, for the one question the TUI has to answer before it lets an operator
+# type a config value: whether the restart that change needs can actually happen
+# (see `config_write_needs_root` in app.rs). Already in the tree as a transitive
+# dependency of sysinfo/tokio; named here because this crate now calls it directly.
+libc = "0.2"
 # Re-derives each instance's tap interface name (sha1 of the instance id) the same
 # way the CH virtualizer programmed it, so the live network counters need no new
 # catalogue column. Not a security use — but hand-rolling the digest would risk
