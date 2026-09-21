@@ -3609,12 +3609,78 @@ fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
     }
 }
 
+/// Break `text` into lines of at most `width` characters, on word boundaries.
+///
+/// Characters, not bytes: these messages contain box-drawing rules and backticks in
+/// a terminal whose columns are characters, and splitting a multi-byte one produces
+/// a replacement glyph. A word longer than the whole width is left over-long rather
+/// than cut mid-token -- a truncated path or command is worse than a ragged line,
+/// because it is one the operator might paste.
+fn wrapped(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        let would_be = if current.is_empty() {
+            word.chars().count()
+        } else {
+            current.chars().count() + 1 + word.chars().count()
+        };
+        if !current.is_empty() && would_be > width {
+            lines.push(std::mem::take(&mut current));
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(word);
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
 fn draw_input_popup(frame: &mut Frame, app: &App) {
     let (mut content, hint) = edit_popup_body(app);
-    let height = (content.len() as u16 + 2).max(3) + 2;
+    // Why a config edit may not stick, said before the value is typed rather than
+    // after it is silently reverted.
+    //
+    // It is not this key, and it is not the file: config.yaml is world-writable by
+    // install.sh and every editor here goes through one `yq` transaction. It is the
+    // *restart* that transaction owes a serving node, which is `systemctl` and
+    // therefore root -- so the same edit lands quietly on a stopped node and is
+    // undone on a running one. That asymmetry is what made it look as though one
+    // setting had been singled out.
+    let root_hint = app.config_write_root_hint().filter(|_| {
+        matches!(
+            app.input_mode,
+            InputMode::EditConfig | InputMode::AddConfigItem
+        )
+    });
+    // Measured against the popup's own inner width, so the box grows by however
+    // many rows the warning actually takes on this terminal instead of by a guess.
+    let probe = centered_rect(72, 3, frame.size());
+    let hint_rows = root_hint
+        .map(|hint| wrapped(hint, probe.width.saturating_sub(2) as usize).len() as u16)
+        .unwrap_or(0);
+    let height = (content.len() as u16 + 2).max(3) + 2 + hint_rows;
     let area = centered_rect(72, height, frame.size());
     frame.render_widget(Clear, area);
     content.push(Line::from(Span::styled(hint, Style::default().fg(MUTED))));
+    if let Some(root_hint) = root_hint {
+        // Wrapped here rather than through `Paragraph::wrap`, which would also
+        // reflow the value being edited -- a YAML literal broken across lines is a
+        // different literal, and this popup is where an operator checks what they
+        // typed.
+        for line in wrapped(root_hint, area.width.saturating_sub(2) as usize) {
+            content.push(Line::from(Span::styled(line, Style::default().fg(WARN))));
+        }
+    }
     let popup = Paragraph::new(content)
         .block(
             Block::bordered()
@@ -6859,5 +6925,121 @@ mod alert_banner {
             .join("\n");
 
         assert!(!screen.contains("ACTION REQUIRED"), "{screen}");
+    }
+}
+
+
+/// Why a config edit may not stick, and why it looked like one key had been singled
+/// out for a sudo prompt.
+///
+/// It is not the key and it is not the file. `config.yaml` is `chmod a+w` by
+/// install.sh, `chown`ed to the installing user and rewritten `0o666` by
+/// `ConfigManager._atomic_write`; `yq -i` renames into the same directory. Every
+/// editor in this TUI -- the ENERGY page's kWh price, a price nudge, a CELL profile,
+/// a raw Config row -- goes through the one `write_config_value`/`write_config_values`
+/// funnel into the one `apply_config_change` transaction.
+///
+/// What needs root is the *restart* that transaction owes a **serving** node, which
+/// is `nodo daemon restart` -> `systemctl`, refused outright by `daemon_command`
+/// under a non-zero euid. So the same edit lands silently on a stopped node and is
+/// written-then-reverted on a running one. That is the asymmetry the operator saw.
+#[cfg(test)]
+mod config_write_root_hint {
+    use super::render;
+    use crate::app::{App, EditKind, InputMode, Page};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn app_editing_the_kwh_price(service_status: &str) -> App {
+        let mut app = App::new();
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Energy)
+            .unwrap();
+        app.node_info.service_status = service_status.to_string();
+        app.input_mode = InputMode::EditConfig;
+        app.input_title = "Edit energy.PRICE_PER_KWH".to_string();
+        app.input = "0.21".to_string();
+        app.edit_kind = EditKind::Number;
+        app
+    }
+
+    fn screen(app: &mut App) -> String {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The whole point of the fix: the operator is told *before* typing, and told
+    /// the real reason, instead of watching a value be written and put back.
+    #[test]
+    fn an_unprivileged_edit_against_a_serving_node_is_warned_about_up_front() {
+        let mut app = app_editing_the_kwh_price("running");
+        // The test process is not root on CI or on a developer's machine; if it
+        // somehow is, the hint is correctly absent and there is nothing to assert.
+        if !app.config_write_needs_root() {
+            return;
+        }
+
+        let screen = screen(&mut app);
+
+        assert!(screen.contains("needs root"), "{screen}");
+        // And it names the actual cause, because "needs root" on its own is what
+        // sent the operator looking at the key and at the file permissions.
+        assert!(screen.contains("daemon restart"), "{screen}");
+    }
+
+    /// A stopped node owes no restart, so the same edit is unprivileged -- and this
+    /// is exactly the asymmetry that made the requirement look arbitrary.
+    #[test]
+    fn the_same_edit_against_a_stopped_node_needs_nothing() {
+        let mut app = app_editing_the_kwh_price("not running");
+
+        assert!(!app.config_write_needs_root());
+        assert!(!screen(&mut app).contains("needs root"));
+    }
+
+    /// It is a property of the transaction, not of the key: the kWh price, a peer
+    /// price and a raw Config row all answer the same way, because there is one
+    /// writer behind all three.
+    #[test]
+    fn the_requirement_does_not_depend_on_which_key_is_being_edited() {
+        let mut energy = app_editing_the_kwh_price("running");
+        let mut config = app_editing_the_kwh_price("running");
+        config.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Config)
+            .unwrap();
+        config.input_title = "Edit main.STORAGE".to_string();
+
+        assert_eq!(
+            energy.config_write_needs_root(),
+            config.config_write_needs_root()
+        );
+        assert_eq!(
+            screen(&mut energy).contains("needs root"),
+            screen(&mut config).contains("needs root")
+        );
+    }
+
+    /// The hint belongs to config editing. The Connect box and the Config filter go
+    /// nowhere near `apply_config_change`, and a root warning on them would be a
+    /// claim that is simply false.
+    #[test]
+    fn the_hint_is_not_shown_on_modals_that_write_nothing() {
+        let mut app = app_editing_the_kwh_price("running");
+        app.input_mode = InputMode::FilterConfig;
+        app.input_title = "Filter".to_string();
+
+        assert!(!screen(&mut app).contains("needs root"));
     }
 }
