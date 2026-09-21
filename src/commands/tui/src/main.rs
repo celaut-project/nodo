@@ -28,9 +28,9 @@ fn print_version() {
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
-    // Parsed by hand rather than with a CLI crate: this binary takes no options
-    // at all beyond the two below, and a dependency to recognise them would be
-    // one more thing CI has to build for every target.
+    // Parsed by hand rather than with a CLI crate: this binary takes three options
+    // in total (`--version`, `-V`, `--theme`), and a dependency to recognise them
+    // would be one more thing CI has to build for every shipped target.
     if std::env::args()
         .skip(1)
         .any(|arg| arg == "--version" || arg == "-V")
@@ -38,6 +38,24 @@ async fn main() -> AppResult<()> {
         print_version();
         return Ok(());
     }
+
+    // The colour scheme, before anything is drawn (issue #395).
+    //
+    // Installed as a process-wide value rather than carried on `App`, because it is a
+    // property of the run and not of any one widget: the alternative is threading a
+    // `&Theme` through forty draw functions and the helpers that exist precisely to
+    // be callable without ceremony.
+    //
+    // Resolved here rather than inside `App::new()` for the same reason the KyA gate
+    // is applied here: building an `App` stays a pure thing that does not consult the
+    // environment, so every rendering test draws in a known theme instead of in
+    // whatever the machine running the test has configured.
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let config = tui::app::Paths::discover().config;
+    let document = std::fs::read_to_string(&config)
+        .ok()
+        .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok());
+    tui::theme::set_current(tui::theme::Theme::resolve(document.as_ref(), &argv));
 
     // Create an application, behind the KyA gate.
     //

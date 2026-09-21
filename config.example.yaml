@@ -630,6 +630,26 @@ ui:
   #     SYMBOL: "USD"
   #     DECIMALS: 2
 
+  # Colour scheme for `nodo tui`. Edited from the TUI's Config page.
+  #
+  #   ubuntu  the Ubuntu terminal palette (aubergine #300A24, orange #E95420) and
+  #           the default -- nodo is installed by a bash script onto a Linux server,
+  #           and the terminal that script ran in is overwhelmingly GNOME Terminal on
+  #           Ubuntu, so the console looks like part of the machine it administers
+  #   dark    the palette this console had before themes existed (cyan accent)
+  #   light   for a pale terminal, where white-on-white is simply not there
+  #   mono    no hue at all: for a monochrome terminal, for an operator who cannot
+  #           distinguish these hues, and for a screenshot that has to survive being
+  #           printed. Nothing is conveyed by colour alone, so nothing is lost.
+  #
+  # "default" is an accepted spelling of "ubuntu". An unrecognised name falls back to
+  # it rather than refusing to start: a console that will not open because of a
+  # misspelt colour scheme is a console that cannot be used to fix the misspelling.
+  #
+  # `nodo tui --theme <name>` and NODO_TUI_THEME override this for one run, so two
+  # themes can be compared without a config write and the node restart that carries.
+  THEME: ubuntu
+
 # Deposit sizing. These are shares, not amounts: the node derives the figures from the
 # ledger's own floor (an Ergo transaction costs a fee and cannot create an output below
 # the minimum box value), so a deposit is never quietly eaten by its own fee.

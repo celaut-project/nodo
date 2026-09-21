@@ -370,10 +370,15 @@ pub enum EditKind {
 /// though it also accepts an arbitrary hex hash-id: the picker offers the
 /// four canonical algorithm names (`src/utils/hashing.py`'s `HASH_SPECS`) as a
 /// fast path, and typing a hex id past it still works exactly as before.
-fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
+pub fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
     match path {
         "network.DELEGATION_TUNNEL_POLICY" => Some(&["auto", "always", "never"]),
         "hashing.HASH" => Some(&["sha2_256", "sha3_256", "shake_256", "blake2b_256"]),
+        // The colour scheme, cycled with ↑/↓ rather than typed (issue #395). The one
+        // key on this page whose whole set is known and short, and the one where a
+        // typo costs nothing — an unrecognised name falls back to the default rather
+        // than refusing to draw.
+        "ui.THEME" => Some(&crate::theme::NAMES),
         _ => None,
     }
 }
