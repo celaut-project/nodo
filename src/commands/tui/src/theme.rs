@@ -50,6 +50,10 @@ pub struct Theme {
     /// Text drawn *on* an accent or warning background, where the ordinary text
     /// colour would be unreadable.
     pub inverse_text: Color,
+    /// The whole frame's background. Painted over `frame.size()` before anything
+    /// else, so the console owns every cell rather than showing through to the
+    /// terminal's own colours.
+    pub background: Color,
     /// The background of a popup, which has to cover whatever it is drawn over.
     pub popup_background: Color,
     /// The unfilled part of a gauge.
@@ -75,6 +79,7 @@ pub const UBUNTU: Theme = Theme {
     bad: Color::Rgb(0xCC, 0x00, 0x00),
     text: Color::Rgb(0xFF, 0xFF, 0xFF),
     inverse_text: Color::Rgb(0x30, 0x0A, 0x24),
+    background: Color::Rgb(0x30, 0x0A, 0x24),
     popup_background: Color::Rgb(0x30, 0x0A, 0x24),
     gauge_background: Color::Rgb(0x30, 0x0A, 0x24),
     series: [
@@ -99,6 +104,7 @@ pub const DARK: Theme = Theme {
     bad: Color::Red,
     text: Color::White,
     inverse_text: Color::Black,
+    background: Color::Black,
     popup_background: Color::Black,
     gauge_background: Color::Black,
     series: [
@@ -126,6 +132,7 @@ pub const LIGHT: Theme = Theme {
     bad: Color::Red,
     text: Color::Black,
     inverse_text: Color::White,
+    background: Color::White,
     popup_background: Color::White,
     gauge_background: Color::White,
     series: [Color::Blue, Color::Magenta, Color::Green, Color::Cyan],
@@ -149,6 +156,11 @@ pub const MONO: Theme = Theme {
     bad: Color::White,
     text: Color::White,
     inverse_text: Color::Black,
+    // The one theme that keeps the terminal's own background. Mono exists for a
+    // terminal whose colours are already a deliberate choice (a genuinely
+    // monochrome one, a recording, a printout); painting over it would be this
+    // theme asserting the single thing it is meant not to assert.
+    background: Color::Reset,
     popup_background: Color::Black,
     gauge_background: Color::Black,
     series: [Color::White, Color::Gray, Color::White, Color::Gray],
@@ -279,6 +291,7 @@ mod tests {
         // whole purpose is to be a specific palette, so "it is some orange" is not
         // the property being claimed.
         assert_eq!(UBUNTU.accent, Color::Rgb(0xE9, 0x54, 0x20));
+        assert_eq!(UBUNTU.background, Color::Rgb(0x30, 0x0A, 0x24));
         assert_eq!(UBUNTU.popup_background, Color::Rgb(0x30, 0x0A, 0x24));
         assert_eq!(UBUNTU.text, Color::Rgb(0xFF, 0xFF, 0xFF));
     }
@@ -375,6 +388,18 @@ mod tests {
         assert_eq!(LIGHT.text, Color::Black);
         assert_ne!(LIGHT.muted, Color::DarkGray);
         assert_ne!(LIGHT.popup_background, Color::Black);
+        assert_eq!(LIGHT.background, Color::White);
+    }
+
+    /// Every theme but `mono` states a background. `mono` is the one that must not:
+    /// it exists for a terminal whose colours are already a deliberate choice.
+    #[test]
+    fn only_the_mono_theme_defers_to_the_terminal_background() {
+        for theme in [UBUNTU, DARK, LIGHT] {
+            assert_ne!(theme.background, Color::Reset, "{}", theme.name);
+            assert_ne!(theme.background, theme.text, "{}", theme.name);
+        }
+        assert_eq!(MONO.background, Color::Reset);
     }
 
     /// Series colours are for telling adjacent things apart, so they have to differ
