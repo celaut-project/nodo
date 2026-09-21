@@ -200,8 +200,8 @@ _last_refresh: Optional[float] = None
 def tick() -> None:
     """Refresh the standings if they are due. Self-gating, and never raises.
 
-    Called from the manager's short-interval loop, the same way the donation, energy and
-    DDNS ticks are: that loop runs every few seconds, so the gate is here rather than in
+    Called from the manager's short-interval loop, the same way the donation and energy
+    ticks are: that loop runs every few seconds, so the gate is here rather than in
     the caller's schedule.
     """
     global _last_refresh

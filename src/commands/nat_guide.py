@@ -1,9 +1,9 @@
 """``nodo nat-guide`` — what to change on the router so this node is reachable.
 
 Service tunneling means a single port has to be reachable from the Internet instead
-of one per service, and DDNS keeps a name pointing at the node. Neither does the
-last step: the router still has to forward that port inward. This prints the
-instructions for *this* machine, with its own addresses and port filled in.
+of one per service. That does not do the last step: the router still has to
+forward that port inward. This prints the instructions for *this* machine, with
+its own addresses and port filled in.
 
 Design
 ------
@@ -88,14 +88,7 @@ def _gateway_port_is_listening(port: int) -> Optional[bool]:
 
 def collect_facts() -> Dict[str, object]:
     """Everything the guide needs from this host. Undetected values stay None."""
-    from src.manager.ddns import status as ddns_status
-
     port = env_manager.gateway_port_or_none() or 0
-
-    try:
-        ddns = ddns_status()
-    except Exception:
-        ddns = {}
 
     public_tcp_port = resolve_public_port(env_manager.get("network.PUBLIC_TCP_PORT", ""), port) if port else None
 
@@ -105,9 +98,6 @@ def collect_facts() -> Dict[str, object]:
         "local_ip": _detect_local_ip(),
         "router_ip": _detect_default_gateway(),
         "listening": _gateway_port_is_listening(port),
-        "ddns_enabled": bool(ddns.get("enabled")),
-        "ddns_hostname": ddns.get("hostname"),
-        "ddns_resolves_to": ddns.get("resolves_to"),
         "direct_exposure": not bool(env_manager.get("network.DISABLE_EXPOSE_OUTSIDE", False)),
         "free_ports_range": env_manager.get("network.FREE_PORTS_RANGE", []) or [],
     }
@@ -199,36 +189,11 @@ def render_guide(facts: Dict[str, object]) -> str:
     )
     lines.append("")
 
-    if facts.get("ddns_enabled"):
-        hostname = facts.get("ddns_hostname") or "not set"
-        lines.append("DNS:")
-        lines.append(f"  DDNS is enabled for {hostname}.")
-        resolves = facts.get("ddns_resolves_to")
-        if resolves:
-            lines.append(f"  It currently resolves to {resolves}.")
-            lines.append(
-                f"  If that is not your public address, the record is stale or the "
-                f"provider saw a different source address."
-            )
-        else:
-            lines.append(
-                "  It does not resolve yet — check ddns.DOMAIN and ddns.TOKEN, and the "
-                "node's log for [DDNS] lines."
-            )
-    else:
-        lines.append("DNS:")
-        lines.append(
-            "  DDNS is disabled. Peers will have to reach a bare IP, which changes on "
-            "most home connections. See the ddns.* settings in config.yaml."
-        )
-    lines.append("")
-
     lines.append("Checking it worked:")
-    target = facts.get("ddns_hostname") if facts.get("ddns_enabled") else "<your public IP>"
     check_port = public_port if public_port else (port or '<gateway port>')
     lines.append(
         f"  From OUTSIDE your network (mobile data, a remote host):\n"
-        f"      nc -vz {target or '<your public IP>'} {check_port}"
+        f"      nc -vz <your public IP> {check_port}"
     )
     lines.append(
         "  Testing from inside your own network usually succeeds regardless of the "

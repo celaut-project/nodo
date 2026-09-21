@@ -265,61 +265,22 @@ static LEVERS: &[Lever] = &[
         label: "findable outside",
         question: "Should nodes on the internet be able to find and reach me?",
         consequence: "Publishes this node's address on its reputation proof. Either way the router still needs a forward for the gateway port: press n for the steps.",
-        // Three positions rather than two, because publishing an address and keeping
-        // a hostname pointed at it are separately answerable: a node on a static
-        // address wants the first and not the second, and DDNS without a hostname
-        // and token configured is a manager that logs an error every interval.
         kind: LeverKind::Cycle(&[
             LeverState {
                 label: "no",
                 writes: &[
-                    ("ddns.ENABLED", "false"),
                     ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
                 ],
             },
             LeverState {
                 label: "address",
                 writes: &[
-                    ("ddns.ENABLED", "false"),
-                    ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
-                ],
-            },
-            LeverState {
-                label: "+ hostname",
-                writes: &[
-                    ("ddns.ENABLED", "true"),
                     ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
                 ],
             },
         ]),
         warning: None,
         secret: false,
-    },
-    Lever {
-        id: "ddns-domain",
-        organelle: Organelle::Channels,
-        label: "ddns hostname",
-        question: "Which hostname should keep pointing at this node?",
-        consequence: "deSEC only, e.g. my-node.dedyn.io. Without it, and its token, findable-outside has nothing to publish to.",
-        kind: LeverKind::Scalar {
-            path: "ddns.DOMAIN",
-            unit: "",
-        },
-        warning: None,
-        secret: false,
-    },
-    Lever {
-        id: "ddns-token",
-        organelle: Organelle::Channels,
-        label: "ddns token",
-        question: "The provider API token for that hostname.",
-        consequence: "A bearer credential for the DNS record. Stored in config.yaml and never shown here.",
-        kind: LeverKind::Scalar {
-            path: "ddns.TOKEN",
-            unit: "",
-        },
-        warning: None,
-        secret: true,
     },
     Lever {
         id: "instance-ports",
@@ -1215,7 +1176,6 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
-            ("ddns.ENABLED", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
             ("service_networks.blacklist", "[]"),
@@ -1254,7 +1214,6 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
-            ("ddns.ENABLED", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
             ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
@@ -1296,9 +1255,6 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "true"),
-            // The hostname is left alone: DDNS needs a domain and a token this
-            // profile cannot invent, so the CHANNELS lever is where it gets turned on.
-            ("ddns.ENABLED", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
             ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
@@ -1337,7 +1293,6 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "true"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "false"),
-            ("ddns.ENABLED", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
             ("service_networks.blacklist", "[]"),
@@ -1372,7 +1327,6 @@ static PROFILES: &[Profile] = &[
             ("network.CONSIDER_DEV_AS_INTERNAL", "true"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
-            ("ddns.ENABLED", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
             ("service_networks.blacklist", "[]"),
@@ -2018,8 +1972,6 @@ mod tests {
                 "virtualizers.ch.KERNEL_PATHS",
                 "network.GATEWAY_PORT",
                 "network.PUBLIC_IP",
-                "ddns.DOMAIN",
-                "ddns.TOKEN",
             ];
             for profile in profiles() {
                 for (path, _) in profile.writes {

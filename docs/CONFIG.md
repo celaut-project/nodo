@@ -345,30 +345,6 @@ enforcement points: [`NETWORKS.md`](NETWORKS.md).
 On the `nodo tui` Config page, `a` appends a pattern to the selected list and `d`
 removes the selected one.
 
-## `ddns`
-
-Keeps a hostname pointing at this node's public IP, so peers can find it by name
-when the address changes. The manager publishes once at startup and then every
-`INTERVAL_SECONDS`.
-
-| Key | Default | Meaning |
-|---|---|---|
-| `ddns.ENABLED` | `false` | Whether to publish at all. |
-| `ddns.PROVIDER` | `desec` | Only `desec` is implemented (`update.dedyn.io`, dyndns2). An unknown value falls back to it. |
-| `ddns.DOMAIN` | `""` | Hostname to keep updated, e.g. `my-node.dedyn.io`. |
-| `ddns.TOKEN` | `""` | Provider API token. A secret; it never appears in logs or `nodo info`. |
-| `ddns.INTERVAL_SECONDS` | `600` | Republish cadence. Invalid values fall back to the default. |
-
-By default **no address is sent** and the provider records the request's source
-address — behind NAT that is the only value guaranteed to be right. Set
-`network.PUBLIC_IP` to override it (static address, or ingress ≠ egress).
-
-Publishing a name is not the same as being reachable: the router must still
-forward the gateway port to this host. Run **`nodo nat-guide`** for the steps with
-this machine's addresses filled in; `nodo info` and `sudo nodo doctor` report what
-resolves and whether the port is listening. Nothing verifies the forwarding from
-*outside* yet — that needs a peer to connect back.
-
 ## `energy`
 
 What this machine costs in electricity, and how much of that is each guest. The
