@@ -2,8 +2,8 @@ use crate::app::{
     format_bytes, format_bytes_compact, format_rate_compact, percent, segment_token, shorten,
     unix_now, App, DemandByHour,
     Client, ClientDetail, ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
-    PageGroup, PaymentRow, Peer, PeerDetail, PriceEntry, ReputationEvent, ReputationTotals, Service,
-    ServiceDetail, HISTORY_POINTS,
+    LedgerEarnings, PageGroup, PaymentRow, Peer, PeerDetail, PriceEntry, ReputationEvent, ReputationTotals, Service,
+    ServiceDetail,
 };
 use crate::cell::{self, Lever, LeverStatus, Organelle};
 use crate::schedule;
@@ -311,24 +311,268 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     draw_ergo(frame, app, middle[0]);
     draw_health(frame, app, middle[1]);
 
-    let charts =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[2]);
-    draw_sparkline(
+    // What this node is worth being, when it works, and what it costs to run.
+    //
+    // These three replaced the CPU and MEMORY history sparklines (issue #395). The
+    // sparklines drew the same two numbers HOST CAPACITY draws immediately above
+    // them, one gauge and one chart of the same quantity, and the history added
+    // nothing an operator acts on: a spike two minutes ago in a node they are
+    // watching right now is not a decision. The three panels here each summarise a
+    // page that is otherwise a whole tab away, which is what a front page is for.
+    //
+    // Each reads the same state its own page reads -- `app.earnings`,
+    // `app.schedule()`, `app.node_energy` -- through the same helpers. Nothing here
+    // fetches: a summary with its own data path is a summary that can disagree with
+    // the page it summarises, and the operator has no way to tell which is lying.
+    let summaries = Layout::horizontal([
+        Constraint::Percentage(34),
+        Constraint::Percentage(33),
+        Constraint::Percentage(33),
+    ])
+    .split(rows[2]);
+    draw_card(
         frame,
-        charts[0],
-        "CPU HISTORY",
-        app.cpu_history.iter().copied().collect(),
-        app.stats.cpu_percent,
+        summaries[0],
+        "EARNINGS",
+        earnings_summary_lines(app),
+        series(2),
+    );
+    draw_card(
+        frame,
+        summaries[1],
+        "SCHEDULE",
+        schedule_summary_lines(app),
+        series(0),
+    );
+    draw_card(
+        frame,
+        summaries[2],
+        "ENERGY",
+        energy_summary_lines(app),
         warn(),
     );
-    draw_sparkline(
-        frame,
-        charts[1],
-        "MEMORY HISTORY",
-        app.ram_history.iter().copied().collect(),
-        percent(app.stats.memory_used, app.stats.memory_total),
-        accent(),
-    );
+}
+
+/// The EARNINGS page in five lines: what came in, over the windows that fit.
+///
+/// Summed across payment networks, which the page itself deliberately does not do --
+/// but for a different reason than the page's. The page keeps them apart because only
+/// one network can pay any given peer, so a total is money the operator cannot spend
+/// as one sum. Here the question is "is this node earning at all", which a total
+/// answers and a per-network breakdown obscures; the count of networks is named so the
+/// figure is not mistaken for a single balance, and the page is one keypress away.
+fn earnings_summary_lines(app: &App) -> Vec<Line<'static>> {
+    if app.earnings.is_empty() {
+        return vec![
+            Line::from(Span::styled(
+                "Nothing paid in yet.",
+                Style::default().fg(muted()),
+            )),
+            Line::from(Span::styled(
+                "A node nobody has paid has earned zero,",
+                Style::default().fg(muted()),
+            )),
+            Line::from(Span::styled(
+                "which is a measurement, not a gap.",
+                Style::default().fg(muted()),
+            )),
+        ];
+    }
+
+    let sum = |pick: fn(&LedgerEarnings) -> u128| -> u128 {
+        app.earnings.iter().map(pick).sum()
+    };
+    let mut lines = vec![
+        metric_line("Last day", app.money.format_raw(&sum(|e| e.day).to_string())),
+        metric_line("Last week", app.money.format_raw(&sum(|e| e.week).to_string())),
+        metric_line(
+            "Last month",
+            app.money.format_raw(&sum(|e| e.month).to_string()),
+        ),
+        metric_line("All time", app.money.format_raw(&sum(|e| e.total).to_string())),
+    ];
+
+    // Named rather than folded into the totals: a network that keeps refusing
+    // deposits is the operator's problem to see. It is money a client tried to pay
+    // and this node could not validate, so nothing arrived for it.
+    let refused = sum(|e| e.refused);
+    if refused > 0 {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<12}", "Refused"), Style::default().fg(muted())),
+            Span::styled(
+                app.money.format_raw(&refused.to_string()),
+                Style::default().fg(bad()).bold(),
+            ),
+        ]));
+    } else {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "across {} payment network{}",
+                app.earnings.len(),
+                if app.earnings.len() == 1 { "" } else { "s" }
+            ),
+            Style::default().fg(muted()),
+        )));
+    }
+    lines
+}
+
+/// The SCHEDULE page in four lines: open or closed now, and when that changes.
+///
+/// "When does this flip" is the fact the page exists to answer and the one an
+/// operator wants without navigating anywhere -- a node that is about to stop taking
+/// work in twenty minutes is worth knowing about before it does.
+///
+/// Reads `schedule()`, which is the draft when one is being edited, so this agrees
+/// with what the SCHEDULE page is showing rather than with what is on disk. An
+/// unapplied edit is named, because a summary that quietly previewed an uncommitted
+/// change would be reporting a schedule the node is not enforcing.
+fn schedule_summary_lines(app: &App) -> Vec<Line<'static>> {
+    let schedule = app.schedule();
+    let now = app.now_minute;
+
+    if !schedule.enabled {
+        return vec![
+            Line::from(vec![
+                Span::styled(format!("{:<12}", "Hours"), Style::default().fg(muted())),
+                Span::styled("not enforced", Style::default().fg(good()).bold()),
+            ]),
+            Line::from(Span::styled(
+                "This node takes work at any hour.",
+                Style::default().fg(muted()),
+            )),
+        ];
+    }
+
+    let open = schedule.contains(now);
+    let mut lines = vec![Line::from(vec![
+        Span::styled(format!("{:<12}", "Right now"), Style::default().fg(muted())),
+        Span::styled(
+            if open { "OPEN" } else { "CLOSED" },
+            Style::default()
+                .fg(if open { good() } else { bad() })
+                .bold(),
+        ),
+    ])];
+
+    lines.push(match schedule.minutes_until_flip(now) {
+        Some(minutes) => metric_line(
+            if open { "Closes in" } else { "Opens in" },
+            format_duration_minutes(minutes),
+        ),
+        // `always_open` and a schedule with no usable window both land here, and they
+        // are different facts. A window list that refuses every hour is a node that
+        // takes no work at all, which is worth saying plainly rather than leaving as
+        // a blank where a countdown belongs.
+        None if open => metric_line("Closes in", "never — open all day"),
+        None => metric_line("Opens in", "never — no hours set"),
+    });
+
+    let open_minutes: u32 = schedule
+        .windows
+        .iter()
+        .map(|window| window.open_minutes() as u32)
+        .sum();
+    lines.push(metric_line(
+        "Open for",
+        format!(
+            "{} a day · {} window{}",
+            format_duration_minutes(open_minutes.min(u16::MAX as u32) as u16),
+            schedule.windows.len(),
+            if schedule.windows.len() == 1 { "" } else { "s" }
+        ),
+    ));
+    lines.push(metric_line("At closing", schedule.on_close.as_str()));
+
+    if app.schedule_is_dirty() {
+        lines.push(Line::from(Span::styled(
+            "unapplied edit — shown, not enforced",
+            Style::default().fg(warn()),
+        )));
+    }
+    lines
+}
+
+/// The ENERGY page in four lines: the draw, what it costs, and where it came from.
+///
+/// The source is named on its own line because it is the difference between a reading
+/// and a guess, and the two are drawn identically otherwise. `model` is an estimate
+/// from two coefficients an operator may never have measured, and a `floor` is a
+/// partial reading that misses whatever the counter does not cover (a discrete GPU,
+/// most of the board) -- neither is the machine's consumption, and a card that showed
+/// the number without the qualifier would be presenting one as the other.
+fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
+    let energy = &app.node_energy;
+    if energy.watts.is_none() {
+        return vec![
+            Line::from(vec![
+                Span::styled(format!("{:<12}", "Power"), Style::default().fg(muted())),
+                Span::styled("unmeasured", Style::default().fg(muted()).bold()),
+            ]),
+            Line::from(Span::styled(
+                "No sample yet. Nothing is assumed:",
+                Style::default().fg(muted()),
+            )),
+            Line::from(Span::styled(
+                "a guessed wattage reads like a",
+                Style::default().fg(muted()),
+            )),
+            Line::from(Span::styled(
+                "measured one. See the ENERGY page.",
+                Style::default().fg(muted()),
+            )),
+        ];
+    }
+
+    let mut lines = vec![
+        metric_line("Power", format_watts(energy.watts)),
+        metric_line("Electricity", node_cost_line(energy)),
+    ];
+
+    // The same qualifier `node_power_line` puts on the NODE card, on its own line
+    // here because there is room for it to be read rather than skimmed past.
+    let source = if energy.backend.is_empty() {
+        "measured".to_string()
+    } else if energy.backend == "model" {
+        "model estimate — not measured".to_string()
+    } else if energy.is_floor {
+        format!("{} — a floor, not the whole machine", energy.backend)
+    } else {
+        energy.backend.clone()
+    };
+    lines.push(Line::from(Span::styled(
+        source,
+        Style::default().fg(if energy.backend == "model" || energy.is_floor {
+            warn()
+        } else {
+            muted()
+        }),
+    )));
+
+    if energy.price_per_kwh <= 0.0 {
+        // Zero is the honest default rather than a missing value: a cost computed
+        // from somebody else's tariff is a number nobody can act on.
+        lines.push(Line::from(Span::styled(
+            "no tariff set — watts only",
+            Style::default().fg(muted()),
+        )));
+    }
+    lines
+}
+
+/// Minutes as something a person reads: `45m`, `2h 30m`, `8h`.
+///
+/// Not `150 minutes`. The figures here are working hours and countdowns, and an
+/// operator deciding whether they have time before the node closes should not be
+/// doing division to find out.
+fn format_duration_minutes(minutes: u16) -> String {
+    let hours = minutes / 60;
+    let rest = minutes % 60;
+    match (hours, rest) {
+        (0, minutes) => format!("{minutes}m"),
+        (hours, 0) => format!("{hours}h"),
+        (hours, minutes) => format!("{hours}h {minutes}m"),
+    }
 }
 
 /// How many rows the ACTION REQUIRED banner needs: one per alert plus its border,
@@ -529,29 +773,6 @@ fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, value: u64, color: Col
             Style::default().fg(text_colour()).bold(),
         ));
     frame.render_widget(gauge, area);
-}
-
-fn draw_sparkline(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    data: Vec<u64>,
-    current: u64,
-    color: Color,
-) {
-    let title = format!(" {title} • {current}% • last {} samples ", HISTORY_POINTS);
-    frame.render_widget(
-        Sparkline::default()
-            .block(
-                Block::bordered()
-                    .title(Span::styled(title, Style::default().fg(color).bold()))
-                    .border_style(Style::default().fg(muted())),
-            )
-            .data(&data)
-            .max(100)
-            .style(Style::default().fg(color)),
-        area,
-    );
 }
 
 fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -7456,3 +7677,337 @@ mod themes {
     }
 }
 
+
+/// Prints the new OVERVIEW, for the PR description.
+/// `cargo test -p tui overview_preview -- --ignored --nocapture`
+#[cfg(test)]
+mod overview_preview {
+    use super::render;
+    use crate::app::{App, LedgerEarnings, NodeEnergy, Page};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    #[ignore]
+    fn preview() {
+        let mut app = App::new();
+        app.tabs.select_page(Page::Overview);
+        app.earnings = vec![LedgerEarnings {
+            ledger: "ergo".to_string(),
+            day: 120_000_000,
+            week: 940_000_000,
+            month: 3_600_000_000,
+            year: 21_000_000_000,
+            total: 24_500_000_000,
+            refused: 0,
+        }];
+        app.node_energy = NodeEnergy {
+            watts: Some(84.0),
+            price_per_kwh: 0.21,
+            currency: "EUR".to_string(),
+            backend: "rapl".to_string(),
+            is_floor: true,
+        };
+        app.config_document = serde_yaml::from_str(
+            "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '08:00'\n      END: '20:00'\n  ON_CLOSE: refuse\n",
+        )
+        .ok();
+        app.now_minute = 9 * 60 + 30;
+
+        let mut terminal = Terminal::new(TestBackend::new(116, 26)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        for row in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|column| buffer.get(column, row).symbol())
+                .collect();
+            println!("{}", line.trim_end());
+        }
+    }
+}
+
+/// The OVERVIEW summary panels that replaced the CPU and MEMORY history charts
+/// (issue #395).
+///
+/// The sparklines drew the same two numbers HOST CAPACITY draws immediately above
+/// them -- one gauge and one chart of the same quantity -- and the history added
+/// nothing an operator acts on: a spike two minutes ago, on a node they are watching
+/// right now, is not a decision. The three panels each summarise a page that is
+/// otherwise a whole tab away, which is what a front page is for.
+///
+/// Each reads the same state its own page reads. A summary with its own data path is
+/// a summary that can disagree with the page it summarises, and the operator has no
+/// way to tell which one is lying.
+#[cfg(test)]
+mod overview_summaries {
+    use super::render;
+    use crate::app::{App, LedgerEarnings, NodeEnergy, Page};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn overview(app: &mut App) -> String {
+        app.tabs.select_page(Page::Overview);
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn earning_node() -> App {
+        let mut app = App::new();
+        app.earnings = vec![
+            LedgerEarnings {
+                ledger: "ergo".to_string(),
+                day: 120_000_000,
+                week: 940_000_000,
+                month: 3_600_000_000,
+                year: 21_000_000_000,
+                total: 24_500_000_000,
+                refused: 0,
+            },
+            LedgerEarnings {
+                ledger: "bitcoin".to_string(),
+                day: 80_000_000,
+                week: 60_000_000,
+                month: 400_000_000,
+                year: 1_000_000_000,
+                total: 1_500_000_000,
+                refused: 0,
+            },
+        ];
+        app
+    }
+
+    /// The two charts are gone, and nothing was left behind referring to them.
+    #[test]
+    fn the_cpu_and_memory_history_charts_are_gone() {
+        let screen = overview(&mut App::new());
+
+        assert!(!screen.contains("CPU HISTORY"), "{screen}");
+        assert!(!screen.contains("MEMORY HISTORY"), "{screen}");
+        // HOST CAPACITY stays: it is where those two numbers belong, and it is the
+        // reason the charts were redundant rather than merely unloved.
+        assert!(screen.contains("HOST CAPACITY"), "{screen}");
+    }
+
+    #[test]
+    fn the_three_summaries_are_drawn_in_their_place() {
+        let screen = overview(&mut App::new());
+
+        for panel in ["EARNINGS", "SCHEDULE", "ENERGY"] {
+            assert!(screen.contains(panel), "no {panel} panel:\n{screen}");
+        }
+    }
+
+    /// The earnings figures are summed across payment networks -- which the EARNINGS
+    /// page deliberately does not do, for a different question. The page keeps them
+    /// apart because only one network can pay any given peer, so a total is money the
+    /// operator cannot spend as one sum. Here the question is "is this node earning
+    /// at all", which a total answers.
+    #[test]
+    fn earnings_are_totalled_across_payment_networks() {
+        let screen = overview(&mut earning_node());
+
+        // 0.12 + 0.08 ERG for the day.
+        assert!(screen.contains("0.2 ERG"), "{screen}");
+        // And the count is named, so the figure is not read as one balance.
+        assert!(screen.contains("2 payment networks"), "{screen}");
+    }
+
+    /// A node nobody has paid has earned zero, which is a measurement rather than a
+    /// gap -- and the panel says so instead of drawing an empty box.
+    #[test]
+    fn a_node_nobody_has_paid_says_so() {
+        let screen = overview(&mut App::new());
+
+        assert!(screen.contains("Nothing paid in yet"), "{screen}");
+    }
+
+    /// Refused deposits are named rather than folded in: money a client tried to pay
+    /// and this node could not validate is the operator's problem to see.
+    #[test]
+    fn refused_deposits_take_the_place_of_the_network_count() {
+        let mut app = earning_node();
+        app.earnings[0].refused = 500_000_000;
+
+        let screen = overview(&mut app);
+
+        assert!(screen.contains("Refused"), "{screen}");
+    }
+
+    fn scheduled_node(config: &str, now: u16) -> App {
+        let mut app = App::new();
+        app.config_document = serde_yaml::from_str(config).ok();
+        app.now_minute = now;
+        app
+    }
+
+    /// "When does this flip" is the fact the SCHEDULE page exists to answer, and the
+    /// one worth having without navigating: a node about to stop taking work in
+    /// twenty minutes is worth knowing about before it does.
+    #[test]
+    fn the_schedule_panel_says_whether_it_is_open_and_when_that_changes() {
+        let screen = overview(&mut scheduled_node(
+            "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '08:00'\n      END: '20:00'\n  ON_CLOSE: refuse\n",
+            9 * 60 + 30,
+        ));
+
+        assert!(screen.contains("OPEN"), "{screen}");
+        // Readable, not "630 minutes": an operator deciding whether they have time
+        // before the node closes should not be doing division.
+        assert!(screen.contains("10h 30m"), "{screen}");
+        assert!(screen.contains("12h a day"), "{screen}");
+    }
+
+    #[test]
+    fn a_closed_node_counts_down_to_opening_instead() {
+        let screen = overview(&mut scheduled_node(
+            "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '08:00'\n      END: '20:00'\n  ON_CLOSE: stop\n",
+            7 * 60,
+        ));
+
+        assert!(screen.contains("CLOSED"), "{screen}");
+        assert!(screen.contains("Opens in"), "{screen}");
+        assert!(screen.contains("1h"), "{screen}");
+    }
+
+    /// Hours that are not enforced are a different state from "open right now", and
+    /// a countdown on a node with no schedule would be inventing one.
+    #[test]
+    fn a_node_with_no_enforced_hours_says_that_rather_than_open() {
+        let screen = overview(&mut scheduled_node(
+            "activity_window:\n  ENABLED: false\n",
+            12 * 60,
+        ));
+
+        assert!(screen.contains("not enforced"), "{screen}");
+        assert!(!screen.contains("Closes in"), "{screen}");
+    }
+
+    /// The panel reads `schedule()`, which is the draft while one is being edited --
+    /// so it agrees with the SCHEDULE page rather than with disk. That is right, and
+    /// it has to be labelled: a summary quietly previewing an uncommitted change
+    /// would be reporting a schedule the node is not enforcing.
+    #[test]
+    fn an_unapplied_schedule_edit_is_shown_but_named_as_unapplied() {
+        let mut app = scheduled_node(
+            "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '08:00'\n      END: '20:00'\n  ON_CLOSE: refuse\n",
+            9 * 60,
+        );
+        let mut draft = app.schedule_saved();
+        draft.windows[0].end = 18 * 60;
+        app.schedule_draft = Some(draft);
+
+        let screen = overview(&mut app);
+
+        assert!(screen.contains("unapplied edit"), "{screen}");
+        assert!(screen.contains("10h a day"), "{screen}");
+    }
+
+    /// The energy source is named because it is the difference between a reading and
+    /// a guess, and the two are otherwise drawn identically. A `floor` misses
+    /// whatever the counter does not cover -- a discrete GPU, most of the board --
+    /// and is not the machine's consumption.
+    #[test]
+    fn the_energy_panel_qualifies_a_partial_reading() {
+        let mut app = App::new();
+        app.node_energy = NodeEnergy {
+            watts: Some(84.0),
+            price_per_kwh: 0.21,
+            currency: "EUR".to_string(),
+            backend: "rapl".to_string(),
+            is_floor: true,
+        };
+
+        let screen = overview(&mut app);
+
+        assert!(screen.contains("84 W"), "{screen}");
+        assert!(screen.contains("0.0176 EUR/h"), "{screen}");
+        assert!(screen.contains("a floor"), "{screen}");
+    }
+
+    /// An estimate from two coefficients the operator may never have measured is
+    /// drawn exactly like a measurement unless it is labelled one.
+    #[test]
+    fn a_modelled_wattage_is_called_an_estimate() {
+        let mut app = App::new();
+        app.node_energy = NodeEnergy {
+            watts: Some(60.0),
+            price_per_kwh: 0.0,
+            currency: String::new(),
+            backend: "model".to_string(),
+            is_floor: false,
+        };
+
+        let screen = overview(&mut app);
+
+        assert!(screen.contains("not measured"), "{screen}");
+        // Zero is the honest default rather than a missing value: a cost from
+        // somebody else's tariff is a number nobody can act on.
+        assert!(screen.contains("no tariff set"), "{screen}");
+    }
+
+    #[test]
+    fn an_unmeasured_node_says_unmeasured_rather_than_zero() {
+        let screen = overview(&mut App::new());
+
+        assert!(screen.contains("unmeasured"), "{screen}");
+        assert!(!screen.contains("0 W"), "{screen}");
+    }
+
+    /// The panels summarise; they do not fetch. A second data path is a second thing
+    /// that can be stale, and an operator comparing the front page with the EARNINGS
+    /// tab has no way to tell which of the two is wrong.
+    #[test]
+    fn the_summaries_agree_with_the_pages_they_summarise() {
+        let mut app = earning_node();
+        app.config_document = serde_yaml::from_str(
+            "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '08:00'\n      END: '20:00'\n  ON_CLOSE: refuse\n",
+        )
+        .ok();
+        app.now_minute = 9 * 60;
+
+        let front = overview(&mut app);
+
+        // The same `app.earnings` the EARNINGS page reads, and the same
+        // `app.schedule()` the SCHEDULE page reads -- asserted by reading the page
+        // and finding the same figures rather than by trusting the call sites.
+        app.tabs.select_page(Page::Earnings);
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let earnings_page: String = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // The per-network figures the page shows add up to the total the front page
+        // shows. Both derive from one `app.earnings`, which is the property.
+        assert!(front.contains("0.2 ERG"), "{front}");
+        assert!(earnings_page.contains("0.12 ERG"), "{earnings_page}");
+        assert!(earnings_page.contains("0.08 ERG"), "{earnings_page}");
+    }
+
+    /// The page still fits a small terminal. Three panels where there were two is
+    /// more to lay out, and OVERVIEW is the page most likely to be left open in a
+    /// split pane.
+    #[test]
+    fn the_overview_still_renders_on_a_small_terminal() {
+        for (width, height) in [(80, 24), (100, 30), (200, 50)] {
+            let mut app = earning_node();
+            app.tabs.select_page(Page::Overview);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        }
+    }
+}

@@ -24,7 +24,6 @@ use tui_tree_widget::TreeState;
 /// Application result type.
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 
-pub const HISTORY_POINTS: usize = 120;
 const DATA_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const WALLET_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 /// How often the on-chain reputation report is re-read. Far slower than the wallet,
@@ -2315,12 +2314,17 @@ pub struct App {
     pub instances_grouped: bool,
     pub app_logs: Vec<String>,
     pub node_logs: Vec<String>,
-    pub cpu_history: VecDeque<u64>,
-    pub ram_history: VecDeque<u64>,
     pub stats: DashboardStats,
     pub node_info: NodeInfo,
     /// Latest energy sample (issue #258). Missing until the node has written a row.
     pub node_energy: NodeEnergy,
+    /// Whether [`Self::refresh`] should re-answer the operator alerts from disk.
+    ///
+    /// Off by default and turned on by `with_operator_alerts()` in `main.rs`, so
+    /// building an `App` stays a pure thing that does not consult the filesystem for
+    /// them. Without this every rendering test would draw whatever banner the machine
+    /// running it happens to deserve, over the page it was written for.
+    pub poll_alerts: bool,
     /// What the operator has to act on: the gateway port's firewall rule, and a
     /// missing Java runtime.
     ///
@@ -2426,14 +2430,13 @@ impl Default for App {
             instances_grouped: false,
             app_logs: vec!["TUI ready".to_string()],
             node_logs: read_last_lines(&paths.log, 250).unwrap_or_default(),
-            cpu_history: VecDeque::from(vec![0; HISTORY_POINTS]),
-            ram_history: VecDeque::from(vec![0; HISTORY_POINTS]),
             stats: DashboardStats::default(),
             node_info: NodeInfo {
                 service_status: "checking…".to_string(),
                 ..NodeInfo::default()
             },
             node_energy: NodeEnergy::default(),
+            poll_alerts: false,
             alerts: crate::alerts::Alerts::default(),
             paths,
             input_mode: InputMode::Normal,
@@ -2512,6 +2515,20 @@ impl App {
         let mut app = Self::default();
         app.refresh_local(true);
         app
+    }
+
+    /// Start answering the operator alerts from disk (issue #395).
+    ///
+    /// A separate step from construction, taken once in `main.rs`, for the same
+    /// reason `with_kya_gate` is: the checks read files on this machine, and a
+    /// constructor that consulted them would make every rendering test depend on
+    /// them too -- a banner drawn over the page a test was written for, appearing and
+    /// disappearing with whatever else happens to be on the disk at the time.
+    pub fn with_operator_alerts(mut self) -> Self {
+        self.poll_alerts = true;
+        self.alerts
+            .poll(&self.paths.config, self.config_document.as_ref());
+        self
     }
 
     /// Raise the KyA gate when this installation has not accepted one yet (#395).
@@ -4581,8 +4598,17 @@ impl App {
         // outlived its condition would be one the operator learns to ignore, and
         // there is deliberately no way to dismiss one except by fixing it. Uses the
         // `config_document` just re-read above, so this costs two `stat` calls.
-        self.alerts
-            .poll(&self.paths.config, self.config_document.as_ref());
+        //
+        // Only once the interface has actually started (`with_operator_alerts`).
+        // `App::new()` runs this same refresh, and an `App` built in a test would
+        // otherwise inherit whatever the machine running it happens to have on disk
+        // -- a stray `.gateway_notice`, no JRE -- and draw a banner over the page
+        // the test was written for. Same discipline, and the same reason, as the KyA
+        // gate (see `with_kya_gate`).
+        if self.poll_alerts {
+            self.alerts
+                .poll(&self.paths.config, self.config_document.as_ref());
+        }
         // After the lists, since a selection that vanished takes its detail with it.
         self.load_selection_details();
         self.node_logs = read_last_lines(&self.paths.log, 250).unwrap_or_default();
@@ -4621,9 +4647,6 @@ impl App {
             .iter()
             .map(|instance| instance.disk_limit)
             .sum();
-        push_history(&mut self.cpu_history, self.stats.cpu_percent);
-        let ram_percent = percent(self.stats.memory_used, self.stats.memory_total);
-        push_history(&mut self.ram_history, ram_percent);
     }
 
     /// Turn the cumulative counters just read into rates, using the previous sweep's
@@ -6212,13 +6235,6 @@ fn counter_rate(previous: Option<u64>, current: Option<u64>, elapsed_secs: f64) 
         return None;
     }
     Some((current - previous) as f64 / elapsed_secs)
-}
-
-fn push_history(history: &mut VecDeque<u64>, value: u64) {
-    if history.len() >= HISTORY_POINTS {
-        history.pop_front();
-    }
-    history.push_back(value);
 }
 
 pub fn percent(used: u64, total: u64) -> u64 {
@@ -9463,13 +9479,28 @@ ergo: Cold Wallet: 9cold\n";
         /// because there is no way to run the real entry point from a test, and the
         /// failure it guards against -- somebody refactoring the line away -- is
         /// otherwise completely silent.
+        ///
+        /// The operator alerts are pinned in the same line for the same reason. Both
+        /// are deliberately kept out of `App::new()` so that constructing an `App`
+        /// consults no files; the cost of that decision is that the real program has
+        /// to remember to ask, so the fact that it does is a test.
         #[test]
         fn main_asks_the_kya_before_it_draws_anything() {
             let main = include_str!("main.rs");
             assert!(
-                main.contains("App::new().with_kya_gate()"),
+                main.contains("with_kya_gate()"),
                 "main.rs must build its App behind the KyA gate"
             );
+            assert!(
+                main.contains("with_operator_alerts()"),
+                "main.rs must switch on the operator alerts, or the banner never appears"
+            );
+            // Order matters: an unanswered KyA covers the whole screen, and polling
+            // the alerts first means the banner is already correct underneath it
+            // rather than one tick behind when the gate comes down.
+            let alerts = main.find("with_operator_alerts()").unwrap();
+            let gate = main.find("with_kya_gate()").unwrap();
+            assert!(alerts < gate, "the alerts should be primed before the gate");
         }
     }
 
