@@ -1,22 +1,18 @@
 //! The hours this node takes work in, as something you can see.
 //!
-//! `activity_window` is a list of windows and a closing policy, and typed into flat
-//! fields it reads as two unrelated numbers per window: that `START 22:00` with
-//! `END 06:00` means "open all night" is a fact about the code, not about anything on
-//! screen. The same is true of the two answers an operator actually wants — is it open
-//! *now*, and how many hours a day is this machine being rented out — neither of which
-//! is a value in the file. And a night shift plus a weekday lunch break is two windows,
-//! not one, so the page has to draw more than a single stretch of the day.
+//! Typed into flat fields, `activity_window` reads as two unrelated numbers per
+//! window: that `START 22:00` with `END 06:00` means "open all night" is a fact
+//! about the code rather than about anything on screen. So is whether it is open
+//! *now*, which is in no field at all.
 //!
-//! So the page draws the day and this module is the arithmetic behind it. Kept apart
-//! from the drawing because the wrap-around is the part worth testing, and a test that
-//! has to build a `Frame` to ask "is 03:00 inside 22:00→06:00" tests the wrong thing.
+//! The page draws the day; this module is the arithmetic behind it. Kept apart
+//! because the wrap-around is the part worth testing, and a test that builds a
+//! `Frame` to ask "is 03:00 inside 22:00→06:00" tests the wrong thing.
 //!
-//! Mirrors `src/utils/activity_window.py`, which is what the node actually enforces:
-//! `parse_clock` accepts the same spellings, START is inclusive, END exclusive, a window
-//! whose end precedes its start is one night rather than an empty set, and the node is
-//! open whenever the clock falls inside *any* configured window. Where the two must
-//! agree, they agree by both being tested against the same cases.
+//! Mirrors `src/utils/activity_window.py`, which is what the node enforces: START
+//! inclusive, END exclusive, an end preceding its start is one night rather than an
+//! empty set, and the node is open inside *any* configured window. Both sides are
+//! tested against the same cases.
 
 pub const MINUTES_PER_DAY: u16 = 24 * 60;
 

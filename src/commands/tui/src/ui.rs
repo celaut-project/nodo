@@ -677,11 +677,9 @@ fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
 
 /// One block per payment system this node offers, and never a total.
 ///
-/// Two payment systems are two balances in two places, held on different chains in
-/// different money, and only one of them can pay any given peer -- so adding them up
-/// would name a figure the operator cannot spend, and picking one would hide the other.
-/// The card used to be "ERGO WALLET" and read one wallet, which is why it went blank
-/// the moment `nodo info` started printing a block per contract.
+/// Two payment systems are two balances on different chains in different money, and
+/// only one can pay any given peer: a sum would name a figure the operator cannot
+/// spend, and picking one would hide the other.
 fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
@@ -1071,10 +1069,10 @@ fn energy_detail(instance: &Instance) -> String {
     }
 }
 
-/// The NODE card's power line: the figure, and which source stands behind it. The
-/// source is named rather than described, because they are not interchangeable — a
-/// package counter, a rail, the power supply's input and a plug at the wall measure
-/// four different things, and `floor` says the number is short of the whole machine.
+/// The NODE card's power line: the figure, and which source stands behind it.
+///
+/// Named rather than described: a package counter, a rail and a plug at the wall
+/// measure different things, and `floor` says the number is short of the machine.
 /// A combined source arrives already named for its parts (`rapl+nvml`).
 fn node_power_line(energy: &crate::app::NodeEnergy) -> String {
     match energy.watts {
@@ -1112,11 +1110,11 @@ fn node_cost_line(energy: &crate::app::NodeEnergy) -> String {
     }
 }
 
-/// The burn line for the detail card: both the per-minute and per-hour figures, plus
-/// how many samples the average is built from and how long ago it was last updated — a
-/// rate from two stale samples must not read like a fresh one. It prices *reserved*
-/// resources at current scarcity, so it is the cost of keeping the instance running at
-/// present prices, not measured resource usage (#245); the label says so.
+/// The burn line for the detail card: per-minute and per-hour, with the sample count
+/// and age -- a rate from two stale samples must not read like a fresh one.
+///
+/// Prices *reserved* resources at current scarcity, so it is cost at present prices
+/// rather than measured usage (#245), and the label says so.
 fn burn_detail(instance: &Instance, money: &Money) -> String {
     match (instance.mu_per_minute, instance.mu_per_hour) {
         (Some(per_minute), Some(per_hour)) => {
@@ -1297,11 +1295,10 @@ fn build_tree_lines<'a>(
     }
 }
 
-/// Who started an instance whose father is not another instance on this node: one of
-/// our clients, or a father we cannot resolve at all. `None` when the instance has no
-/// father, or when it has one that this node runs (the tree already nests those).
+/// Who started an instance whose father is not another instance on this node. `None`
+/// when it has no father, or one this node runs (the tree already nests those).
 ///
-/// Mirrors the `internal_service` / `client` / `unknown` split `list_instances` does in
+/// Mirrors the `internal_service`/`client`/`unknown` split in
 /// `src/commands/instances.py`.
 fn external_parent_label(instance: &Instance, client_ids: &HashSet<&str>) -> Option<Span<'static>> {
     let father = instance.father_id.as_str();
@@ -1368,9 +1365,9 @@ fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// The selected service: what it is, and how it has behaved here.
 ///
-/// The reputation is the service's own, accumulated over every instance of it that
-/// ever ran on this node — an instance is gone minutes after it misbehaves, so a score
-/// tied to one would answer nothing when the service is started again.
+/// The reputation is the service's own, over every instance of it that ever ran
+/// here: an instance is gone minutes after it misbehaves, so a score tied to one
+/// would answer nothing the next time the service is started.
 fn service_detail_lines(
     service: Option<&Service>,
     detail: Option<&ServiceDetail>,
@@ -1418,9 +1415,7 @@ fn service_detail_lines(
 
 /// The peers page: who we talk to, and everything we have paid them.
 ///
-/// Peers and clients used to share one page, which is why the peer detail card had to
-/// fight two tables for height. They are separate concerns -- a peer is someone we pay,
-/// a client is someone who pays us -- and each now has the room to say so.
+/// Separate from clients: a peer is someone we pay, a client someone who pays us.
 fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
     // The card sizes itself to what the selected peer actually has: contracts, the
     // payments made to it, the events behind its score. It yields first when the
@@ -1547,13 +1542,11 @@ fn draw_clients(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// The two things a node earns by being up: money, and the network's opinion of it.
 ///
-/// They are drawn apart because they are different kinds of quantity. Money is a flow,
-/// so it is read over windows -- what came in yesterday, last week, last month. The
-/// network's opinion is a stock: it is what is staked on this node now, and the chain
-/// cannot be made to say when it was earned (a proof re-dates every one of its
-/// opinions when it republishes, so a window over those dates would measure its
-/// submission cadence). Windowing it anyway would put a figure on the page that reads
-/// like the money above it and means nothing of the kind.
+/// Drawn apart because they are different kinds of quantity. Money is a flow, read
+/// over windows. Reputation is a stock -- what is staked now -- and the chain cannot
+/// say when it was earned, since a proof re-dates its opinions when it republishes.
+/// A window over those dates would measure submission cadence while reading like the
+/// money above it.
 fn draw_earnings(frame: &mut Frame, app: &mut App, area: Rect) {
     const MIN_OPINIONS_HEIGHT: u16 = 4;
     let notes = reputation_lines(app);
@@ -1580,15 +1573,12 @@ fn draw_earnings(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// What this node donates, what is waiting to go out, and to whom.
 ///
-/// A non-zero donation default is only honest if the operator can see what it does, so
-/// this card exists to be read rather than to look tidy: the percentage as configured,
-/// the debt not yet paid, what has actually left, and the wallets that received it with
-/// their shares.
+/// A non-zero donation default is only honest if the operator can see what it does.
 ///
-/// The two lists are drawn separately because they mean different things. Funding a
-/// wallet costs money; counting one is a free opinion that weighs other peers'
+/// The two lists mean different things and are drawn separately: funding a wallet
+/// costs money, while counting one is a free opinion that weighs other peers'
 /// donations when this node routes work. An address in one and not the other is
-/// usually an oversight, and it is named as such.
+/// usually an oversight, and is named as such.
 fn donation_lines(app: &App) -> Vec<Line<'static>> {
     let donations = &app.donations;
     let mut lines = Vec::new();
@@ -1671,9 +1661,8 @@ fn donation_lines(app: &App) -> Vec<Line<'static>> {
 
 /// One line per wallet of a list: where it goes and what share of the list it takes.
 ///
-/// The share, not just the raw weight, because the raw weights are normalised before
-/// anything is split -- weights of 70 and 30 pay exactly what 0.7 and 0.3 pay, and an
-/// operator comparing the two would otherwise have nothing on screen saying so.
+/// The share, not just the weight: weights are normalised before anything is split,
+/// so 70 and 30 pay exactly what 0.7 and 0.3 pay.
 fn donation_wallet_lines(
     label: &str,
     wallets: &[DonationWallet],
@@ -1729,9 +1718,8 @@ fn donation_wallet_lines(
 
 /// What came in, per payment network, over each window.
 ///
-/// One row per network rather than one total, because they are not interchangeable: a
-/// node paid over two networks holds two balances in two places, and summing them
-/// would name a figure the operator cannot spend.
+/// One row per network rather than a total: two networks are two balances in two
+/// places, and a sum would name a figure the operator cannot spend.
 fn draw_money_taken_in(frame: &mut Frame, app: &App, area: Rect) {
     let refused: u128 = app.earnings.iter().map(|entry| entry.refused).sum();
     let title = if refused > 0 {
@@ -2052,10 +2040,9 @@ fn format_age(published_at: Option<i64>, now: i64) -> String {
 
 /// Everything the Clients page knows about the selected client.
 ///
-/// Deliberately says nothing about *who* the client is: a client id has no link back
-/// to a peer (`peer.remote_client_id` is our id inside a remote peer, not a key into
-/// our `clients` table -- issue #178), so the card shows what this client did here and
-/// nothing inferred.
+/// Deliberately nothing about *who* they are: a client id has no link back to a peer
+/// (`peer.remote_client_id` is our id inside a remote peer, issue #178), so the card
+/// shows what this client did here and nothing inferred.
 fn client_detail_lines(
     money: &Money,
     client: Option<&Client>,
@@ -2253,12 +2240,12 @@ fn status_color(status: &str) -> Color {
     }
 }
 
-/// Full breakdown of the peer highlighted in the peers table: identity, our balance
-/// with it, reputation, and every payment contract it has registered — ledger,
-/// contract, payout address and per-unit rate per instance. Before this the only
-/// way to get at any of it was a raw sqlite query (issue #231).
-/// `compact` collapses each contract onto a single line and drops the fields the
-/// peers table already shows verbatim, for terminals too short for the full card.
+/// Full breakdown of the peer highlighted in the peers table: identity, balance,
+/// reputation, and every payment contract it has registered. Previously reachable
+/// only through a raw sqlite query (issue #231).
+///
+/// `compact` collapses each contract onto one line for terminals too short for the
+/// full card.
 fn peer_detail_lines(
     money: &Money,
     peer: Option<&Peer>,
@@ -2416,22 +2403,17 @@ fn peer_detail_lines(
 
 /// The pricing page: what this node charges, as bars you can nudge.
 ///
-/// Recurring and one-off prices get their own chart because their magnitudes are
-/// unrelated -- a build price three orders of magnitude above a tunnel-open price would
-/// flatten the whole one-off group to nothing on a shared axis. Exact figures live in
-/// the table below, which is also where the selection lives; the bars are for judging
-/// proportion at a glance while editing.
+/// Recurring and one-off prices get separate charts: on a shared axis a build price
+/// three orders of magnitude above a tunnel-open one flattens the whole group. Exact
+/// figures are in the table below, which is also where the selection lives.
 /// The CELL page: the node drawn as a cell, and its policies as levers inside it.
 ///
-/// The membrane is the page's own frame, and the organelles are boxes inside it: the
-/// three that face outward above the nucleus, the three that keep the node alive
-/// below. The anatomy is load-bearing, not decoration -- what an operator is looking
-/// for ("can anyone reach me?", "what do I let a stranger's service do?") is found by
-/// asking which part of a cell would be responsible for it.
+/// The anatomy is load-bearing rather than decoration: what an operator is looking
+/// for ("can anyone reach me?") is found by asking which part of a cell would be
+/// responsible for it.
 ///
-/// Two layouts, one cursor: wide terminals get the grid, narrow ones an accordion
-/// where only the focused organelle opens. The keys behave identically in both, so
-/// there is one interaction to learn and one to keep correct.
+/// Two layouts, one cursor: wide terminals get the grid, narrow ones an accordion.
+/// The keys behave identically in both.
 fn draw_cell(frame: &mut Frame, app: &mut App, area: Rect) {
     let document = app.config_document.clone();
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Min(6)]).split(area);
@@ -2486,15 +2468,15 @@ fn draw_profile_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-/// The outward-facing organelles above, the self-preserving ones below, and the nucleus
-/// banded across the middle.
+/// The outward-facing organelles above, the self-preserving ones below, and the
+/// nucleus banded across the middle.
 ///
-/// The nucleus is horizontal and central because it is what everything else depends
-/// on and the only part whose loss is permanent: a mnemonic is not recoverable, and
-/// a row of it beside "keep failures for 7 days" would read as equally routine.
+/// The nucleus is central because its loss is the only permanent one: a mnemonic is
+/// not recoverable, and a row of it beside "keep failures for 7 days" would read as
+/// equally routine.
 ///
-/// The two rows hold three and four, which is what reading order costs: the split is
-/// "does this face outwards or inwards", not "how do these divide by three".
+/// The rows hold three and four: the split is "outwards or inwards", not "how do
+/// these divide evenly".
 fn draw_cell_grid(
     frame: &mut Frame,
     app: &mut App,
@@ -2539,9 +2521,8 @@ fn draw_cell_grid(
 
 /// One column, with only the focused organelle open.
 ///
-/// A narrow terminal cannot show six boxes of rows at once, and a grid squeezed into
-/// one would clip the values -- which on this page are the whole content. So the rest
-/// collapse to a single summary line each and stay one keypress away.
+/// A grid squeezed into a narrow terminal clips the values, which on this page are
+/// the whole content. The rest collapse to a summary line each.
 fn draw_cell_accordion(
     frame: &mut Frame,
     app: &mut App,
@@ -2619,12 +2600,9 @@ fn draw_organelle(
     )
     .split(inner);
 
-    // The grid hands every box a share of the band, which can be shorter than the
-    // organelle's own list -- and a lever drawn nowhere is a lever the operator cannot
-    // reach, on a page whose whole job is to be the reachable half of the config. So
-    // the box scrolls: the selected row is always drawn, and the ones above it slide
-    // off the top. Unfocused boxes start at the first lever, which is what the eye
-    // expects of a box it is not driving.
+    // A box's share of the band can be shorter than its lever list, and a lever drawn
+    // nowhere cannot be operated. So the box scrolls: the selected row is always
+    // drawn. Unfocused boxes start at the first lever.
     let visible = rows.len();
     let offset = if focused && visible > 0 && app.cell.lever >= visible {
         (app.cell.lever + 1).saturating_sub(visible)
@@ -2807,15 +2785,11 @@ fn draw_profile_popup(frame: &mut Frame, app: &App) {
 
 /// The hours this node takes work in, drawn as the day it is.
 ///
-/// `activity_window` is two times of day, and typed into two fields they read as two
-/// unrelated numbers: that 22:00 with 06:00 means one stretch through midnight is a
-/// fact about the code rather than anything on screen. So is the answer to the question
-/// an operator opens this page with -- is it open *now* -- which is in neither field.
+/// The bar answers what two scalar fields cannot: the open stretch is one run of
+/// blocks whether or not it crosses midnight, and a marker says where now is.
 ///
-/// The bar answers both by being a day: the open stretch is one run of blocks whether
-/// or not it crosses midnight, and a marker says where now is. Moving a cursor along it
-/// also makes an unusable hour inexpressible, where the two scalar editors it replaces
-/// took `25:00` happily and let the node refuse to start on it.
+/// A cursor along it also makes an unusable hour inexpressible, where the editors it
+/// replaces took `25:00` happily and let the node refuse to start on it.
 fn draw_schedule(frame: &mut Frame, app: &mut App, area: Rect) {
     let schedule = app.schedule();
     let now = app.now_minute;
@@ -2941,10 +2915,9 @@ fn draw_day_bar(
 
 /// The demand rows drawn beneath the working day, on its axis.
 ///
-/// Sparklines rather than numbers: what matters is the shape against the window above,
-/// not a figure per hour. Refusals get their own row because they are the number that
-/// can change a decision -- an hour the operator is closed through and work arrived in
-/// anyway is the one hour worth reconsidering.
+/// Sparklines rather than numbers: the shape against the window above is what
+/// matters. Refusals get their own row -- an hour closed through that work arrived in
+/// anyway is the one worth reconsidering.
 fn demand_lines(
     demand: &DemandByHour,
     days: u16,
@@ -3018,11 +2991,12 @@ fn demand_lines(
     lines
 }
 
-/// One line per window (`opens`/`closes` spans, a remove marker), a toggle line each
-/// for whether the schedule is enforced and what closing time does, and an `+ add
-/// window` line -- every one of them a mouse target, whose position is recorded as it
-/// is laid out (`app.schedule_*_area(s)`), the same "record while drawing, hit-test on
-/// click" pattern the CELL page uses for its levers.
+/// One line per window, a toggle line each for enforcement and closing behaviour, and
+/// an `+ add window` line.
+///
+/// Every one is a mouse target whose position is recorded as it is laid out
+/// (`app.schedule_*_area(s)`) -- the same record-while-drawing pattern the CELL page
+/// uses.
 fn draw_schedule_summary(
     frame: &mut Frame,
     area: Rect,
@@ -3313,11 +3287,9 @@ fn draw_price_bars(
         return;
     }
 
-    // A zero-height bar prints no value -- BarChart draws the amount inside the bar --
-    // so "free" has to ride in the label, which is always rendered. Without it a price
-    // deliberately set to nothing looks identical to a missing feature. Amounts small
-    // but non-zero legitimately render as a short bar; the table beside the chart is
-    // what carries every exact figure.
+    // BarChart draws the amount inside the bar, so a zero-height bar prints nothing
+    // and "free" has to ride in the always-rendered label -- otherwise a price
+    // deliberately set to nothing looks like a missing feature.
     let bars: Vec<Bar> = group
         .iter()
         .map(|entry| {
@@ -3349,13 +3321,10 @@ fn draw_price_bars(
     frame.render_widget(chart, area);
 }
 
-/// A linear bar height flattens a price 1000x below its neighbour to nothing (#381),
-/// which defeats the one thing the chart is for: judging proportion at a glance.
-/// `ln(1 + mu)` compresses that range into something a fixed number of terminal
-/// rows can actually show, at the cost of the chart itself no longer being linear --
-/// which is exactly why the block title says "log scale". The table beside the
-/// chart, and `text_value` on each bar, still carry the real number; only the
-/// height is log-scaled.
+/// A linear height flattens a price 1000x below its neighbour to nothing (#381),
+/// which defeats what the chart is for. `ln(1 + mu)` fits that range into the rows
+/// available, at the cost of the chart not being linear -- which is why the title
+/// says "log scale". Only the height is scaled; the labels carry the real number.
 fn log_bar_value(mu: u64) -> u64 {
     ((1.0 + mu as f64).ln() * 1_000_000.0).round() as u64
 }
@@ -3397,13 +3366,10 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
             money.format_mu(entry.mu.saturating_mul(app.scarcity.max_multiplier)),
         ));
 
-        // The whole reason this page has to mention the virtualizer at all: a memory
-        // price is not what the node earns per GiB it commits. The guest kernel's own
-        // footprint comes out of the VM's RAM before the service sees any of it, so
-        // the node boots the VM larger than the service declared -- and absorbs the
-        // difference, so a client never pays for the kernel underneath it. Set a
-        // memory price without that in view and it under-recovers, silently, by an
-        // amount that differs per architecture.
+        // Why this page mentions the virtualizer at all: a memory price is not what
+        // the node earns per GiB it commits. The node boots the VM larger than the
+        // service declared and absorbs the difference, so a price set without that in
+        // view under-recovers by an amount that differs per architecture.
         if let (Some(arch), Some((effective, multiplier))) =
             (entry.arch, app.effective_memory_mu(entry))
         {
@@ -3446,11 +3412,9 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
         .items
         .iter()
         .map(|entry| {
-            // A per-arch row that config.yaml does not set is showing the scalar price
-            // it inherits, not a price of its own. Saying so is the difference between
-            // "arm64 costs this" and "arm64 has been given its own rate" -- editing it
-            // is what turns the first into the second, and the operator should be able
-            // to tell which they are looking at before they nudge it.
+            // A per-arch row config.yaml does not set shows the scalar it inherits,
+            // not a price of its own -- the difference between "arm64 costs this" and
+            // "arm64 has its own rate", which editing it is what creates.
             let amount = if entry.inherited {
                 format!("{} (inherited)", money.format_mu(entry.mu))
             } else {
@@ -3486,16 +3450,12 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
 /// The ENERGY page: the `energy:` block as a list of decisions with their reasons
 /// beside them (issue #395).
 ///
-/// Two columns, and the right one is the point of the page. The keys are all
-/// reachable on Config already; what Config cannot show is the paragraph in
-/// `config.example.yaml` that says `IDLE_WATTS` must be *measured* rather than
-/// guessed, or that enabling NVML adds to a reading where every other source replaces
-/// it. So the left column is the catalogue and the current value, and the right one is
-/// the sentence that makes the value mean something.
+/// Two columns, and the right one is the point: the keys are on Config already, but
+/// Config cannot show the paragraph saying `IDLE_WATTS` must be *measured* rather
+/// than guessed.
 ///
-/// Rows record where they were drawn (`energy_row_areas`) so the mouse can find them:
-/// three separate bordered sections is not a geometry a generic table hit test can
-/// retrace.
+/// Rows record where they were drawn (`energy_row_areas`) so the mouse can find
+/// them: three bordered sections is not a geometry a generic hit test can retrace.
 fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
     let columns = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
         .split(area);
@@ -3588,9 +3548,8 @@ fn draw_energy_section(
 
 /// Green for a source that is switched on, muted for one that is not.
 ///
-/// Worth colouring because "which of these five is actually measuring anything" is
-/// the question the page is most often opened to answer, and it is otherwise five
-/// `false`s and three empty strings to read one at a time.
+/// "Which of these five is measuring anything" is what the page is most often opened
+/// to answer, and it is otherwise five `false`s to read one at a time.
 fn energy_value_colour(entry: &crate::energy::EnergyEntry, app: &App) -> Color {
     match app.energy_value(entry) {
         Some(value) if value == "true" => good(),
@@ -3692,11 +3651,11 @@ fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 /// Build the collapsible configuration tree from the flat, document-ordered
-/// [`ConfigEntry`] list. Each mapping/sequence becomes a branch and every scalar
-/// a leaf; the branch structure comes straight from each entry's
-/// `path_segments`, so the data model is unchanged — this only shapes how it is
-/// drawn. `needle` (already lowercased; empty means no filter) highlights the
-/// nodes that match, without removing any of the others.
+/// [`ConfigEntry`] list: mappings and sequences become branches, scalars leaves.
+///
+/// The structure comes from each entry's `path_segments`, so this only shapes how
+/// the unchanged data model is drawn. `needle` (lowercased, empty for no filter)
+/// highlights matches without removing anything.
 fn build_config_tree(entries: &[ConfigEntry], needle: &str) -> Vec<TreeItem<'static, String>> {
     // An ordered intermediate tree: children stay in document order, and a node
     // either carries a scalar (`leaf`) or has children, never both.
@@ -4100,12 +4059,9 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
     };
     let confirming = app.input_mode == InputMode::ConfirmWrites;
     let gating = app.input_mode == InputMode::AcceptKya;
-    // A diff of five keys in a box of thirty rows reads as if something is missing.
-    // The overlay is sized to what it holds, up to the room there is.
-    //
-    // The KyA gate is the exception and takes everything there is: it is not covering
-    // a page the operator is working on, it *is* the screen, and the less of the
-    // document fits the more of it gets skipped (issue #395).
+    // A diff of five keys in a box of thirty rows reads as if something is missing,
+    // so the overlay is sized to what it holds. The KyA gate is the exception and
+    // takes everything: it is not covering a page, it *is* the screen (issue #395).
     let height = if gating {
         // Everything but the footer, which carries the two keys that answer it: an
         // overlay that covered its own instructions would be the one thing on screen
@@ -4240,11 +4196,9 @@ mod tests {
         }
     }
 
-    /// The working day has to be legible as a day: which hours are open, where now is,
-    /// and whether the thing is even being enforced. Drawn rather than described,
-    /// because the layout is the feature -- these are the mistakes a reading of the
-    /// code does not catch (a bar spanning half the pane, an axis stopping at 21, a
-    /// summary line whose three figures contradict each other).
+    /// The working day has to be legible as a day. Drawn rather than described,
+    /// because the layout is the feature: a bar spanning half the pane or an axis
+    /// stopping at 21 is not a mistake reading the code catches.
     mod schedule_page {
         use super::super::draw_schedule;
         use crate::app::{App, Page};
@@ -4398,10 +4352,8 @@ mod tests {
         }
 
         /// A drawn row without the pane border, so a column index is an hour rather
-        /// than an hour plus one. Every row here lives inside a bordered block, and
-        /// indexing straight into the screen line reads the cell next door -- which
-        /// only shows up where neighbouring cells differ, so it hid in the bar tests
-        /// and appeared in the demand ones.
+        /// than an hour plus one. Indexing straight into the screen line reads the
+        /// cell next door, which only shows where neighbouring cells differ.
         fn cells(line: &str) -> Vec<char> {
             line.chars().filter(|glyph| *glyph != '│').collect()
         }
@@ -4547,11 +4499,9 @@ mod tests {
             assert!(screen.contains("MEMBRANE"), "the membrane frames the page");
         }
 
-        /// The grid gives every box a fixed share of its band, and an organelle can
-        /// hold more levers than that share has rows -- WALL, with the ceilings and the
-        /// hours in it, is the first one that does. A lever that is drawn nowhere
-        /// cannot be operated, so the box scrolls to whatever is selected rather than
-        /// clipping the tail off the list.
+        /// An organelle can hold more levers than its share of the band has rows --
+        /// WALL is the first that does. A lever drawn nowhere cannot be operated, so
+        /// the box scrolls to the selection rather than clipping the tail.
         #[test]
         fn a_lever_past_the_bottom_of_its_box_is_still_drawn() {
             let wall = cell::Organelle::ALL
@@ -4914,11 +4864,9 @@ mod tests {
 
         /// What the operator is actually deciding when they set a memory price.
         ///
-        /// The node boots a guest larger than the service declared, so the guest
-        /// kernel's footprint does not come out of the service's share -- and absorbs
-        /// the difference deliberately, so a client never pays for the kernel underneath
-        /// it. A memory price therefore earns less per GiB of host RAM than it says,
-        /// by a different amount per architecture. These pin that the page says so.
+        /// The node boots a guest larger than declared and absorbs the difference, so
+        /// a memory price earns less per GiB of host RAM than it says, by a different
+        /// amount per architecture. These pin that the page says so.
         mod overhead_guidance {
             use crate::app::{App, GuestKernelReserve, Money, PriceEntry, StatefulList};
             use ratatui::{backend::TestBackend, Terminal};

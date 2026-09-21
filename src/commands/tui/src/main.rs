@@ -6,17 +6,16 @@ use tui::event::{Event, EventHandler};
 use tui::handler::{handle_key_events, handle_mouse_events};
 use tui::tui::Tui;
 
-/// One line, and exit. This is what makes a cheap liveness check possible at all.
+/// One line, and exit. What makes a cheap liveness check possible at all.
 ///
-/// `nodo tui` will only execute a prebuilt binary it has verified against this
-/// host, and the last step of that check is starting it
-/// (`src/utils/rust_toolchain.py`). Every other entry point takes over the
-/// terminal, so without a flag that prints and exits, the only way to find out
-/// whether a shipped binary runs here is to let it try to draw -- which on a
-/// mismatch leaves the operator looking at a blank screen instead of a reason.
+/// `nodo tui` only runs a prebuilt binary it has verified against this host, and the
+/// last step of that check is starting it (`src/utils/rust_toolchain.py`). Every
+/// other entry point takes over the terminal, so without this the only way to test a
+/// shipped binary is to let it try to draw -- which on a mismatch shows a blank
+/// screen instead of a reason.
 ///
-/// It also records the target the binary was built for, so a binary separated
-/// from its `tui.host-triple` marker can still say what it is.
+/// Also records the target it was built for, so a binary separated from its
+/// `tui.host-triple` marker can still say what it is.
 fn print_version() {
     println!(
         "{} {} ({})",
