@@ -444,6 +444,16 @@ fi
 # and untouched, kept or not by this path.
 if [ -f /newroot/.__nodo_envs ]; then
     log "applying guest environment variables from .__nodo_envs"
+    # This script's own control variables (PATH -- needed by every command
+    # below, including base64 in this very loop -- and ENTRYPOINT, read for
+    # the exec check and switch_root just after) must survive this loop
+    # whatever name a declared env var happens to use. src/utils/guest_env.py
+    # already refuses PATH/ENTRYPOINT before this file is ever written, but
+    # that check lives in Python, on the other side of a file on disk; saving
+    # and restoring here is what keeps a boot from depending on that staying
+    # true forever, or on the file having gone through it at all.
+    __nodo_init_path="$PATH"
+    __nodo_init_entrypoint="$ENTRYPOINT"
     while IFS=' ' read -r env_name env_b64; do
         [ -n "$env_name" ] || continue
         if env_value=$(printf '%s' "$env_b64" | base64 -d 2>/dev/null); then
@@ -452,6 +462,9 @@ if [ -f /newroot/.__nodo_envs ]; then
             log "warning: could not base64-decode env var '$env_name', skipping"
         fi
     done < /newroot/.__nodo_envs
+    PATH="$__nodo_init_path"
+    ENTRYPOINT="$__nodo_init_entrypoint"
+    unset __nodo_init_path __nodo_init_entrypoint
 fi
 
 [ -x "/newroot$ENTRYPOINT" ] || fatal "entrypoint is not executable: $ENTRYPOINT"

@@ -23,20 +23,34 @@ from typing import Dict, Mapping
 
 from src.utils import logger as log
 
-#: The C identifier shape every environment variable already has -- the same
-#: one ``src/manager/network_templates.py`` uses for ``${VAR}`` placeholders in
-#: ``formal``. The guest's ``/init`` interpolates a kept name literally into
-#: ``export "$name=$value"``; restricting it to this shape is what keeps that
-#: interpolation from ever needing to be anything cleverer than a literal.
-NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+#: The C identifier shape every environment variable already has. The one
+#: definition of that shape: ``src/manager/network_templates.py`` imports it
+#: for its own ``${VAR}`` placeholder grammar rather than writing it out a
+#: second time, so the two can never quietly drift apart.
+IDENTIFIER_PATTERN = r"[A-Za-z_][A-Za-z0-9_]*"
 
-#: Names that would change how the entrypoint's *own* process resolves symbols
-#: or shared libraries before it ever runs a line of its own logic. This is not
-#: a defence against the instantiator -- they already own everything inside
-#: their own instance -- it is defence against a ``service.json`` ``envs``
-#: declaration, or a launch config copied from elsewhere, accidentally handing
-#: a linker knob to a process nobody meant to hand one to.
-DENIED_NAMES = frozenset({"LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT"})
+#: The guest's ``/init`` interpolates a kept name literally into
+#: ``export "$name=$value"``; restricting it to :data:`IDENTIFIER_PATTERN` is
+#: what keeps that interpolation from ever needing to be anything cleverer
+#: than a literal.
+NAME_RE = re.compile(f"^{IDENTIFIER_PATTERN}$")
+
+#: Names that would change how the entrypoint's *own* process resolves symbols,
+#: shared libraries or interpreter code before it ever runs a line of its own
+#: logic, plus the two names ``bash/build_ch_initramfs.sh``'s ``/init`` needs
+#: intact for itself after this module's output is exported into its shell
+#: (``PATH``, to keep resolving every command the rest of ``/init`` still runs,
+#: and ``ENTRYPOINT``, which it reads right after for the exec check and
+#: ``switch_root``). This is not a defence against the instantiator -- they
+#: already own everything inside their own instance -- it is defence against a
+#: ``service.json`` ``envs`` declaration, or a launch config copied from
+#: elsewhere, accidentally handing a dangerous knob, or a name ``/init`` itself
+#: depends on, to a process nobody meant to hand one to.
+DENIED_NAMES = frozenset({
+    "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+    "PYTHONPATH", "NODE_OPTIONS", "BASH_ENV", "ENV", "IFS", "GCONV_PATH",
+    "PATH", "ENTRYPOINT",
+})
 
 #: Not an ``execve()``/``ARG_MAX`` limit -- each kept entry becomes one line of
 #: base64 in ``.__nodo_envs``, decoded and exported by a busybox ash script with

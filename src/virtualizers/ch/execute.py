@@ -323,18 +323,12 @@ def execute(
         # top of the ones already inside __config__.config.environment_variables
         # unconditionally. Optional: no file at all when none of the declared
         # variables survives src.utils.guest_env.linux_env_vars.
-        envs_file_bytes = rootfs.build_guest_envs_file(config=config)
-        if envs_file_bytes is not None:
-            with open(envs_host_path, "wb") as f:
-                f.write(envs_file_bytes)
-            guest_metadata.put(
-                host_file=envs_host_path,
-                guest_target=rootfs.GUEST_ENVS_PATH,
-            )
-            log.LOGGER(
-                f"[CH][{vmachine_id}] guest env vars injection completed: "
-                f"{rootfs.GUEST_ENVS_PATH}"
-            )
+        rootfs.inject_guest_envs(
+            config=config,
+            envs_host_path=envs_host_path,
+            guest_metadata=guest_metadata,
+            log_prefix=log_prefix,
+        )
 
         # Shared filesystems (parent -> child inheritance), whose whole model
         # lives in src/utils/shared_filesystems.py and is materialized the same
