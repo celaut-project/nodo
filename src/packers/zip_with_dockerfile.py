@@ -837,6 +837,7 @@ class ZipContainerPacker:
                 )
 
             self._validate_pow_network(network, index)
+            self._validate_network_ports(network, index)
             networks.append(network)
 
         return networks
@@ -863,6 +864,37 @@ class ZipContainerPacker:
                     "which the resolver does not support. Declare each concrete host as "
                     "its own tag, or '*' for open egress and narrow inside the service."
                 )
+
+    def _validate_network_ports(self, network: celaut.Service.Network, index: int) -> None:
+        """Refuse a ``formal`` whose ``port`` a node could not honour (#389).
+
+        A hostname tag is opened on the port its entry states -- and only a hostname
+        tag: every other peer this node resolves is an instance published on the port
+        the node running it assigned, which no declaration gets to choose
+        (``networks.hostname_ports``). The one an entry may state is the standard port
+        of the service its name answers to, written ``port=<n>`` in the entry's
+        ``formal``.
+
+        Refused for the reason :meth:`_validate_pow_network` refuses a malformed ask:
+        the value is a property of the text in front of the author, and a node reading
+        it later grants nothing for the tag, which a guest reports exactly the way it
+        reports a host it was never meant to reach. A ``${VAR}`` port is not malformed
+        -- it is a selection key the instantiator fills (#385), checked once filled.
+        """
+        from src.identity.node_identity import parse_component_formal
+        from src.manager.network_templates import find_placeholders
+
+        if not network.formal or "port" in find_placeholders(network.formal):
+            return
+
+        value = parse_component_formal(network.formal).get("port")
+        if value is None:
+            return
+        if not (value.isdigit() and 0 < int(value) < 65536):
+            raise ValueError(
+                f"service.json network[{index}]: declares port={value!r}, which is not "
+                "a port number (1-65535)."
+            )
 
     def _validate_pow_network(self, network: celaut.Service.Network, index: int) -> None:
         """Run a ``pow:`` ask through the parser that will read it at launch.

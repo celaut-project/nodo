@@ -975,8 +975,8 @@ The older `entrypoint` top-level field is still supported and will be automatica
 |-------|------|----------|-------------|
 | `tags` | array of strings | Yes | Network type identifiers. Required when a `network` entry is present — omitting it raises `KeyError` |
 | `prose` | string | Yes | Human-readable description of the network requirement. Required when a `network` entry is present — omitting it raises `KeyError` |
-| `formal` | object of string → string | No | The machine-readable ask. Encoded to `Service.Network.formal` as the sorted `key=value` body every celaut descriptor uses (`node_identity.component_formal`). Values must be **JSON strings** — a number is refused, not stringified. A value may be the template `"${VAR_NAME}"`, filled in at launch by the instantiator |
-| `protocol_stack` | array of protocol descriptors | No | Protocols the peers in this domain must speak. Each entry is either a bare list of tags (`["http"]`) or an object with `tags` / `prose` / `formal`, read by the same parser as an api slot's `protocol` |
+| `formal` | object of string → string | No | The machine-readable ask. Encoded to `Service.Network.formal` as the sorted `key=value` body every celaut descriptor uses (`node_identity.component_formal`). Values must be **JSON strings** — a number is refused, not stringified. A value may be the template `"${VAR_NAME}"`, filled in at launch by the instantiator. A `port` key is read by the hostname resolution (#389) as the standard port the name answers on, and refused at pack time if it is not a port number |
+| `protocol_stack` | array of protocol descriptors | No | Protocols the peers in this domain must speak. Each entry is either a bare list of tags (`["http"]`) or an object with `tags` / `prose` / `formal`, read by the same parser as an api slot's `protocol`. It says nothing about ports: a peer's port is assigned by the node publishing it, not chosen by a declaration |
 
 ##### `tags` — synonyms of one destination
 
@@ -1129,6 +1129,22 @@ hashed into the service id.
 > older pack, a typo, a host that is down right now — yields no peers for that
 > tag: the next synonym is tried, the reason is on the log, and the guest boots
 > with default-deny toward that host. It does not fail the launch.
+>
+> **A hostname tag grants addresses, not name resolution.** The node resolves the
+> name itself and opens the resulting IPs on the port the entry's `formal` states as
+> `port=<n>` — the standard port the name is expected to answer on, which is the one
+> case where a declaration says a port at all: every other peer is an instance
+> published on the port the node running it assigned. An entry stating no port opens
+> 80 and 443, as a bare hostname tag always has; one stating a port this node could
+> not honour fails the pack. Nothing is read out of a `protocol_stack` or guessed
+> from a tag — `https` is a protocol's name, not 443.
+>
+> Nothing inside the guest can *look the name up*: no DNS is served and port 53 is
+> not opened for it. A program that reads addresses from `__config__` works; a
+> program handed a URL (`curl`, `yt-dlp`, any HTTP client) fails at
+> `getaddrinfo()` and never reaches the allow. Such a service must declare `"*"`
+> today and narrow inside the image. See
+> [`NETWORKS.md`](NETWORKS.md#1-hostname-tags) (#389).
 >
 > ⚠️ **This is the syntax, not the authorization.** What a service *declares*
 > here is a request. What it is *granted* is that request intersected with what
