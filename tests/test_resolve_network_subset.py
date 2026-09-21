@@ -270,11 +270,31 @@ class ResolveNetworkForPeerTests(unittest.TestCase):
             nets.sc, "get_local_instance_id_by_uri", return_value="container-1"
         ), patch.object(
             nets.sc, "get_local_instance_envs", return_value=None
-        ), patch.object(nets, "resolve_network", return_value=[]) as resolve:
+        ), patch.object(nets, "resolve_network", return_value=[]) as resolve, patch.object(
+            nets, "grant_resolved_network"
+        ) as grant:
             nets.resolve_network_for_peer(requested, caller_ip="10.0.0.9")
         resolve.assert_called_once()
         # A local caller is on the registry and must not be handed itself (#387).
         self.assertEqual(resolve.call_args.kwargs["requester_id"], "container-1")
+        # #404: a request that fit the caller's own declaration is granted, not just
+        # answered -- opened for the same VM the caller was identified as.
+        grant.assert_called_once()
+        self.assertEqual(grant.call_args.kwargs["vmachine_id"], "container-1")
+        self.assertEqual(list(grant.call_args.kwargs["resolution"].tags), ["pow:ergo"])
+
+    def test_an_unidentified_caller_is_never_granted(self):
+        """No VM here to open anything on for a peer-to-peer caller (#404)."""
+        requested = _network(["pow:ergo"], {"pow.chain": "ergo", "pow.block_id": BLOCK})
+        with patch.object(
+            nets, "declared_networks_of_caller", return_value=None
+        ), patch.object(
+            nets.sc, "get_local_instance_id_by_uri", return_value=None
+        ), patch.object(nets, "resolve_network", return_value=[]), patch.object(
+            nets, "grant_resolved_network"
+        ) as grant:
+            nets.resolve_network_for_peer(requested, caller_ip="1.2.3.4")
+        grant.assert_not_called()
 
     def test_a_local_caller_broadening_its_own_ask_is_refused_before_resolving(self):
         declared = [
@@ -326,6 +346,49 @@ class ResolveNetworkForPeerTests(unittest.TestCase):
             with self.assertRaises(np.NetworkPolicyRejection):
                 nets.resolve_network_for_peer(requested, caller_ip="10.0.0.9")
         identify.assert_not_called()
+
+
+@unittest.skipIf(IMPORT_ERROR, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class GrantResolvedNetworkTests(unittest.TestCase):
+    """The other half of deferred resolution: opening firewall, not just answering (#404)."""
+
+    def _instance(self):
+        instance = celaut.Instance()
+        instance.uri_slot.add()
+        return instance
+
+    def test_a_wildcard_tag_allows_all_egress_instead_of_per_peer_rules(self):
+        resolution = celaut.ConfigurationFile.NetworkResolution(tags=["*"])
+        resolution.peer_instances.append(self._instance())
+        with patch.object(
+            nets, "allow_all_egress", return_value=True
+        ) as allow_all, patch.object(
+            nets, "allow_connection_to_instance"
+        ) as allow_one:
+            nets.grant_resolved_network(vmachine_id="vm-1", resolution=resolution)
+        allow_all.assert_called_once_with(vmachine_id="vm-1")
+        allow_one.assert_not_called()
+
+    def test_every_peer_instance_gets_its_own_rule(self):
+        resolution = celaut.ConfigurationFile.NetworkResolution(tags=["pow:ergo"])
+        resolution.peer_instances.append(self._instance())
+        resolution.peer_instances.append(self._instance())
+        with patch.object(
+            nets, "allow_connection_to_instance", return_value=True
+        ) as allow_one:
+            nets.grant_resolved_network(vmachine_id="vm-1", resolution=resolution)
+        self.assertEqual(allow_one.call_count, 2)
+        for call in allow_one.call_args_list:
+            self.assertEqual(call.kwargs["vmachine_id"], "vm-1")
+
+    def test_a_failed_rule_is_logged_not_raised(self):
+        resolution = celaut.ConfigurationFile.NetworkResolution(tags=["pow:ergo"])
+        resolution.peer_instances.append(self._instance())
+        with patch.object(
+            nets, "allow_connection_to_instance", return_value=False
+        ), patch.object(nets, "LOGGER") as logger:
+            nets.grant_resolved_network(vmachine_id="vm-1", resolution=resolution)
+        self.assertTrue(logger.called)
 
 
 if __name__ == "__main__":

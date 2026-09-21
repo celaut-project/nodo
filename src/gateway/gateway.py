@@ -100,22 +100,29 @@ class Gateway(celaut_pb2_grpc.Gateway):
         was holding. ``resolve_network`` already dispatches on the tag, so this exposes
         exactly the function the node runs for its own guests (issue #78).
 
-        **Not a grant.** The reply is what this node believes; the caller opens nothing
-        on the strength of it and verifies each address the way it verifies one from its
-        own config. A lying answer therefore costs the caller a wasted request, which is
-        what makes it safe to ask a stranger at all.
+        **Not a grant, for a peer.** To another node asking as a peer -- the RPC's
+        older use, no guest and no firewall of ours involved -- the reply is only
+        what this node believes; that caller opens nothing on the strength of it and
+        verifies each address the way it verifies one from its own config. A lying
+        answer therefore costs the caller a wasted request, which is what makes it
+        safe to ask a stranger at all.
 
-        **Bounded by what the caller declared, when the caller is one of this node's
-        own guests** (issue #385). A local instance is identified by its address the
-        same way ``ModifyServiceSystemResources`` identifies one, its service spec is
-        read, and the requested network has to fit inside a network that spec declares:
-        same tags, every key the declaration fixed present and unchanged, keys it left
-        as ``${VAR}`` free to fill, new keys free to add. Without that, deferred
+        **Bounded by what the caller declared, and a grant, when the caller is one of
+        this node's own guests** (issue #385, and the firewall side of it, #404). A
+        local instance is identified by its address the same way
+        ``ModifyServiceSystemResources`` identifies one, its service spec is read, and
+        the requested network has to fit inside a network that spec declares: same
+        tags, every key the declaration fixed present and unchanged, keys it left as
+        ``${VAR}`` free to fill, new keys free to add. Without that, deferred
         resolution would be a way around the declaration it exists to complete -- a
         guest that declared ``pow:ergo`` pinned to block B could ask here for
-        ``pow:ergo`` pinned to nothing. A caller this node cannot identify as a local
-        instance -- another node asking as a peer, which is the RPC's other and older
-        use -- has no spec here to be measured against and is answered as before.
+        ``pow:ergo`` pinned to nothing. A request that fits is, this time, a grant:
+        the addresses returned are also opened in that guest's firewall
+        (``networks.grant_resolved_network``), the same rules launch itself would have
+        written had this network resolved by then -- deferred resolution otherwise
+        told a guest where to go and left it unable to get there. A caller this node
+        cannot identify as a local instance has no spec here to be measured against,
+        nothing granted, and is answered as before.
 
         The operator's policy and the no-relaying rule live in
         ``networks.resolve_network_for_peer``, with the reasoning for each -- this is the

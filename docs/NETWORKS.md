@@ -519,6 +519,31 @@ declaration it was measured against and why each refused it, for the same reason
 policy's rejection report names every declared network: a verdict on one of a set
 says nothing useful alone.
 
+#### The grant
+
+For a local guest, a request that fits is not only answered, it is granted (issue
+[#404](https://github.com/celaut-project/nodo/issues/404)). `configure_guest_firewall_policy`
+writes a VM's firewall once, at launch, from whatever `build_network_resolution`
+managed to resolve *then*; a network deferred because of an unfilled `${VAR}`
+(#385) is completed later, over this RPC, and until #404 that completion changed
+nothing about the firewall — the guest learned the right addresses and stayed
+default-deny toward every one of them, because nothing ever wrote a rule for a
+resolution that arrived after boot.
+
+`networks.grant_resolved_network()` closes that gap: once a request passes the
+subset check above, the same `allow_connection_to_instance`/`allow_all_egress`
+primitives launch itself uses are called again, this time for the requesting
+guest's VM, opening exactly the addresses the answer names. Nothing is reset first
+— the launch-time default-deny policy stands, and this only adds to it, the same
+way a second call to `configure_guest_firewall_policy` would if launch itself made
+one. A rule that fails to apply is logged, not raised: the RPC has already
+committed to answering the guest by that point, and there is no retry the guest
+could usefully make.
+
+This is strictly narrower than what the subset check already bounds the request
+to: nothing is opened that the request would not have fit at launch, only *when*
+it opens changes.
+
 #### When the caller cannot be identified
 
 The caller is identified by its address against `local_instances.ip` — the same
@@ -546,8 +571,8 @@ The operator's policy runs **first**, before the caller is identified, so a call
 learns "not from this node" before it learns anything about its own declaration.
 
 * **Implementation:** `request_fits_declaration()`, `check_network_request()`,
-  `declared_networks_of_caller()` in `src/manager/networks.py`; the handler in
-  `src/gateway/gateway.py`
+  `declared_networks_of_caller()`, `grant_resolved_network()` in
+  `src/manager/networks.py`; the handler in `src/gateway/gateway.py`
 * **Tests:** `tests/test_resolve_network_subset.py`
 
 Full design, and an audit of what the DNS path guarantees today:
