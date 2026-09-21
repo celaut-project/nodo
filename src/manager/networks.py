@@ -16,6 +16,7 @@ from src.utils.logger import LOGGER
 from src.utils.network_policy import enforce_network_policy
 from src.manager.network_defaults import configured_endpoints, endpoint_addresses
 from src.manager.pow_networks import POW_TAG_PREFIX, resolve_pow_network
+from src.virtualizers.firewall import allow_all_egress, allow_connection_to_instance
 
 env_manager = ConfigManager()
 sc = SQLConnection()
@@ -575,6 +576,58 @@ def declared_networks_of_caller(caller_ip: str) -> Optional[List[celaut.Service.
     return list(spec.network)
 
 
+def grant_resolved_network(
+    vmachine_id: str,
+    resolution: celaut.ConfigurationFile.NetworkResolution,
+) -> None:
+    """Open firewall rules for a network a local instance just completed (#404).
+
+    ``configure_guest_firewall_policy`` writes a VM's firewall once, at launch, from
+    whatever ``build_network_resolution`` could resolve *then*. A network deferred
+    past launch -- an unfilled ``${VAR}`` (#385) -- is answered later over
+    ``Gateway.ResolveNetwork``, but until now that answer was informational only:
+    the guest learned the right addresses and stayed default-deny toward every one
+    of them, because nothing ever wrote a rule for a resolution that arrived after
+    boot. This is the missing half, called from :func:`resolve_network_for_peer`
+    once a request is confirmed to fit the calling instance's own declaration --
+    the same ``allow_connection_to_instance``/``allow_all_egress`` primitives launch
+    itself uses, invoked here instead, additive rather than replacing anything.
+    ``block_all`` is deliberately not called again: that is launch's job, run once
+    per VM, and this only adds to the deny-by-default policy already standing for
+    ``vmachine_id``.
+
+    Best-effort, like the launch-time policy it mirrors: a rule that fails to apply
+    is logged, not raised, because this runs after the RPC has already committed to
+    answering the guest, and there is no retry the guest could usefully perform.
+    """
+    tag = resolution.tags[0] if resolution.tags else "<untagged>"
+
+    if any(t == "*" for t in resolution.tags):
+        if not allow_all_egress(vmachine_id=vmachine_id):
+            LOGGER(
+                f"[NETWORKS] ResolveNetwork grant for {vmachine_id}: failed to allow "
+                f"all egress for network tag {tag!r}."
+            )
+        return
+
+    applied = 0
+    for instance in resolution.peer_instances:
+        if allow_connection_to_instance(vmachine_id=vmachine_id, instance=instance):
+            applied += 1
+
+    if applied:
+        LOGGER(
+            f"[NETWORKS] ResolveNetwork grant for {vmachine_id}: opened firewall for "
+            f"network tag {tag!r}, {applied} of {len(resolution.peer_instances)} peer "
+            "instance(s)."
+        )
+    elif resolution.peer_instances:
+        LOGGER(
+            f"[NETWORKS] ResolveNetwork grant for {vmachine_id}: no firewall rule "
+            f"could be applied for network tag {tag!r}."
+        )
+
+
 def resolve_network_for_peer(
     network: celaut.Service.Network,
     subject: str = "",
@@ -638,7 +691,7 @@ def resolve_network_for_peer(
     # possibly exposing its protocols, would qualify as its own peer (#387).
     requester_id = sc.get_local_instance_id_by_uri(uri=caller_ip) if caller_ip else None
 
-    return celaut.ConfigurationFile.NetworkResolution(
+    resolution = celaut.ConfigurationFile.NetworkResolution(
         tags=list(network.tags),
         peer_instances=resolve_network(
             network,
@@ -646,6 +699,17 @@ def resolve_network_for_peer(
             requester_id=requester_id,
         ),
     )
+
+    # #404: a request that reached here having been checked against a declaration
+    # (``declared is not None``) is not just answered, it is granted -- the same
+    # firewall rules launch would have written for this network had it resolved by
+    # then. A caller this node could not identify as a local instance (``declared is
+    # None``, e.g. another node asking as a peer) has no VM here to open anything
+    # on, so it keeps the informational-only answer it always had.
+    if declared is not None and requester_id is not None:
+        grant_resolved_network(vmachine_id=requester_id, resolution=resolution)
+
+    return resolution
 
 
 def match_networks(a: celaut.Service.Network, b: celaut.Service.Network) -> bool:
