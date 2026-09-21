@@ -216,7 +216,7 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     // moment the condition is fixed, rather than reserving space for an alert that
     // is usually absent. A permanently empty strip above the cards would be a strip
     // the eye stops reading, which is precisely the failure being fixed.
-    let banner_height = alert_banner_height(app);
+    let banner_height = alert_banner_height(app, area.width);
     let area = if banner_height > 0 {
         let split =
             Layout::vertical([Constraint::Length(banner_height), Constraint::Min(0)]).split(area);
@@ -575,18 +575,65 @@ fn format_duration_minutes(minutes: u16) -> String {
     }
 }
 
-/// How many rows the ACTION REQUIRED banner needs: one per alert plus its border,
-/// and zero when there is nothing wrong.
+/// How many rows the ACTION REQUIRED banner needs, and zero when there is nothing
+/// wrong.
 ///
 /// Zero rather than a collapsed block, so a healthy node's OVERVIEW is exactly the
 /// page it was before this existed. Space permanently reserved for a warning is
 /// space that stops carrying one.
-fn alert_banner_height(app: &App) -> u16 {
+///
+/// `width` is needed because these messages wrap: the gateway alert carries a port,
+/// a path and a sentence, which is two lines on anything narrower than a very wide
+/// terminal. Measured rather than assumed — a fixed row per alert silently truncated
+/// the second one, which on a node with both problems meant the missing-Java line
+/// was the one that never got read.
+fn alert_banner_height(app: &App, width: u16) -> u16 {
     if app.alerts.is_empty() {
         return 0;
     }
-    app.alerts.iter().count() as u16 + 2
+    let rows: usize = app
+        .alerts
+        .iter()
+        .map(|alert| alert_banner_lines(&alert.summary, width).len())
+        .sum();
+    rows as u16 + 2
 }
+
+/// One alert's message, split into the lines it will actually occupy.
+///
+/// The single place that decides this, so `alert_banner_height` and
+/// `draw_alert_banner` cannot disagree. They already did once: the height reserved a
+/// row per alert while the paragraph wrapped freely, and the second alert -- the
+/// missing-JRE one -- was silently cut off on any terminal narrower than very wide.
+///
+/// The badge occupies its full padded width on the first line, which is two columns
+/// more than the word inside it. Counting the trimmed form is how the last few
+/// characters of the message went missing even after the row count was fixed.
+fn alert_banner_lines(summary: &str, width: u16) -> Vec<String> {
+    let inner = width.saturating_sub(2).max(1) as usize;
+    let badge = ACTION_REQUIRED_TAG.chars().count();
+    let first_width = inner.saturating_sub(badge).max(1);
+
+    // Wrap the first line against the width left beside the badge, then the rest
+    // against the full width, since continuation lines carry no badge.
+    let all = wrapped(summary, first_width);
+    let Some(first) = all.first().cloned() else {
+        return vec![String::new()];
+    };
+    let rest = summary
+        .strip_prefix(first.as_str())
+        .map(str::trim_start)
+        .unwrap_or("");
+    let mut lines = vec![first];
+    if !rest.is_empty() {
+        lines.extend(wrapped(rest, inner));
+    }
+    lines
+}
+
+/// The tag that marks a line the operator has to act on. Matches `ACTION_REQUIRED`
+/// in `src/utils/operator_alerts.py`, so the TUI and `nodo info` say the same words.
+const ACTION_REQUIRED_TAG: &str = " ACTION REQUIRED ";
 
 /// The things the operator has to act on, at the top of the first page they see.
 ///
@@ -602,31 +649,44 @@ fn alert_banner_height(app: &App) -> u16 {
 /// hook) and it already exists in `.gateway_notice` and in `nodo info`. A banner
 /// that filled half the page would be a banner the operator resents.
 fn draw_alert_banner(frame: &mut Frame, app: &App, area: Rect) {
-    let lines: Vec<Line> = app
-        .alerts
-        .iter()
-        .map(|alert| {
-            Line::from(vec![
-                Span::styled(
-                    " ACTION REQUIRED ",
-                    Style::default().fg(inverse_text()).bg(bad()).bold(),
-                ),
-                Span::raw(" "),
-                Span::styled(alert.summary.clone(), Style::default().fg(text_colour()).bold()),
-            ])
-        })
-        .collect();
+    // Wrapped here rather than by `Paragraph::wrap`, so the lines drawn are exactly
+    // the lines `alert_banner_height` counted. Letting the widget wrap independently
+    // is what silently dropped the second alert: the box was sized for one row each
+    // and the paragraph produced more.
+    let mut lines: Vec<Line> = Vec::new();
+    for alert in app.alerts.iter() {
+        for (index, line) in alert_banner_lines(&alert.summary, area.width)
+            .into_iter()
+            .enumerate()
+        {
+            // The badge is drawn only where it actually is — on the first line of
+            // each message. A continuation line that repeated the colour would read
+            // as a second alert.
+            if index == 0 {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        ACTION_REQUIRED_TAG,
+                        Style::default().fg(inverse_text()).bg(bad()).bold(),
+                    ),
+                    Span::styled(line, Style::default().fg(text_colour()).bold()),
+                ]));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    line,
+                    Style::default().fg(text_colour()).bold(),
+                )));
+            }
+        }
+    }
     frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::bordered()
-                    .title(Span::styled(
-                        " THIS NODE NEEDS YOU ",
-                        Style::default().fg(bad()).bold(),
-                    ))
-                    .border_style(Style::default().fg(bad())),
-            )
-            .wrap(Wrap { trim: true }),
+        Paragraph::new(lines).block(
+            Block::bordered()
+                .title(Span::styled(
+                    " THIS NODE NEEDS YOU ",
+                    Style::default().fg(bad()).bold(),
+                ))
+                .border_style(Style::default().fg(bad())),
+        ),
         area,
     );
 }
@@ -7210,11 +7270,15 @@ mod alert_banner {
             .join("\n")
     }
 
+    /// The real messages, not shortened ones. The wrapping these provoke on an
+    /// ordinary terminal is exactly what the height arithmetic has to get right, so a
+    /// fixture with a convenient one-line summary would test the easy case and miss
+    /// the bug that truncated the second alert.
     fn port_alert() -> OperatorAlert {
         OperatorAlert {
             key: "gateway_port_firewall",
-            summary: "TCP 52285 must be open in the host firewall before this node \
-                      can serve."
+            summary: "TCP 52285 must be open in the host firewall before this node can \
+                      serve. See /opt/nodo/.gateway_notice for the exact command."
                 .to_string(),
         }
     }
@@ -7222,7 +7286,9 @@ mod alert_banner {
     fn java_alert() -> OperatorAlert {
         OperatorAlert {
             key: "java_missing",
-            summary: "Java is not installed, so this node cannot settle payments."
+            summary: "Java is not installed, so this node cannot settle payments or \
+                      publish reputation. Install it with `sudo /bin/bash \
+                      /opt/nodo/bash/install_java.sh /opt/nodo`."
                 .to_string(),
         }
     }
@@ -7285,13 +7351,56 @@ mod alert_banner {
     #[test]
     fn the_banner_is_as_tall_as_it_needs_to_be_and_no_taller() {
         let mut app = App::new();
-        assert_eq!(alert_banner_height(&app), 0);
+        assert_eq!(alert_banner_height(&app, 200), 0);
 
         app.alerts.set(vec![port_alert()]);
-        assert_eq!(alert_banner_height(&app), 3);
+        assert_eq!(alert_banner_height(&app, 200), 3);
 
         app.alerts.set(vec![port_alert(), java_alert()]);
-        assert_eq!(alert_banner_height(&app), 4);
+        assert_eq!(alert_banner_height(&app, 200), 4);
+    }
+
+    /// ...and it grows when the messages wrap, which they do on any ordinary
+    /// terminal: the gateway alert carries a port, a path and a sentence.
+    ///
+    /// A fixed row per alert sized the box for one line each and let the paragraph
+    /// produce more, so the second alert was silently cut off -- meaning a node with
+    /// both problems showed the operator only the first of them.
+    #[test]
+    fn a_wrapped_alert_gets_the_rows_it_actually_needs() {
+        let mut app = App::new();
+        app.alerts.set(vec![port_alert(), java_alert()]);
+
+        let wide = alert_banner_height(&app, 200);
+        let narrow = alert_banner_height(&app, 90);
+
+        assert!(narrow > wide, "narrow {narrow} should exceed wide {wide}");
+    }
+
+    /// The real test of the above: on a terminal where both messages wrap, both are
+    /// still fully on screen.
+    #[test]
+    fn both_alerts_survive_a_terminal_narrow_enough_to_wrap_them() {
+        let mut app = App::new();
+        app.alerts.set(vec![port_alert(), java_alert()]);
+        app.tabs.select_page(Page::Overview);
+        let mut terminal = Terminal::new(TestBackend::new(90, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let screen: String = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(screen.matches("ACTION REQUIRED").count(), 2, "{screen}");
+        // The tail of each message, so a banner that merely started both but
+        // truncated one fails here.
+        assert!(screen.contains("exact command"), "{screen}");
+        assert!(screen.contains("install_java.sh"), "{screen}");
     }
 
     /// It is on OVERVIEW and nowhere else. A banner repeated on twelve pages is
@@ -8008,6 +8117,47 @@ mod overview_summaries {
             app.tabs.select_page(Page::Overview);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        }
+    }
+}
+
+/// Prints the ACTION REQUIRED banner, for the PR description.
+/// `cargo test -p tui banner_preview -- --ignored --nocapture`
+#[cfg(test)]
+mod banner_preview {
+    use super::render;
+    use crate::alerts::OperatorAlert;
+    use crate::app::{App, Page};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    #[ignore]
+    fn preview() {
+        let mut app = App::new();
+        app.tabs.select_page(Page::Overview);
+        app.alerts.set(vec![
+            OperatorAlert {
+                key: "gateway_port_firewall",
+                summary: "TCP 52285 must be open in the host firewall before this node can \
+                          serve. See /opt/nodo/.gateway_notice for the exact command."
+                    .to_string(),
+            },
+            OperatorAlert {
+                key: "java_missing",
+                summary: "Java is not installed, so this node cannot settle payments or \
+                          publish reputation. Install it with `sudo /bin/bash \
+                          /opt/nodo/bash/install_java.sh /opt/nodo`."
+                    .to_string(),
+            },
+        ]);
+        let mut terminal = Terminal::new(TestBackend::new(116, 12)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        for row in 0..9 {
+            let line: String = (0..buffer.area.width)
+                .map(|column| buffer.get(column, row).symbol())
+                .collect();
+            println!("{}", line.trim_end());
         }
     }
 }
