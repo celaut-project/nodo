@@ -5,11 +5,6 @@ from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
 from src.utils.registry_errors import ServiceNotInRegistry, ServiceSpecUnavailable
 from src.utils.utils import load_service_from_disk
-from src.manager.network_env import (
-    PeerEnvLookup,
-    filter_peers_by_environment,
-    peer_env_matches,
-)
 from src.identity.node_identity import (
     ComponentFormalError,
     parse_component_formal,
@@ -152,29 +147,6 @@ def resolve_ergo_network() -> List[celaut.Instance.Uri]:
     except:
         return []
 
-def _instance_env_values(instance_id: str) -> Optional[Dict[str, bytes]]:
-    """The launch environment of a local instance, as ``filter_peers_by_environment``
-    wants it, or ``None`` when the node recorded none.
-
-    The same column ``shares.instance_env_values`` reads, parsed the same way; not
-    imported from there because that module drags the shared-filesystem stack in, and
-    this one is loaded by tests that stub everything below the database.
-    """
-    raw = sc.get_local_instance_envs(id=instance_id)
-    if not raw:
-        return None
-    try:
-        stored = json.loads(raw)
-    except (ValueError, TypeError):
-        return None
-    if not isinstance(stored, dict):
-        return None
-    return {
-        key: value.encode("utf-8") if isinstance(value, str) else bytes(value)
-        for key, value in stored.items()
-    }
-
-
 def _slot_exposes(slot: celaut.Service.Api.Slot, network: celaut.Service.Network) -> bool:
     """Whether one API slot offers what peers of ``network`` are expected to speak.
 
@@ -230,9 +202,8 @@ def local_network_instances(
     seeds: nothing is granted by naming one, and the launch that is waiting for the
     answer is not made to fail because an unrelated instance was mid-teardown.
 
-    Pairs of ``(instance_id, Instance)`` rather than bare Instances so the caller can
-    filter by the member's launch environment (``Network.environment_variable``)
-    without re-deriving which row a view came from.
+    Pairs of ``(instance_id, Instance)`` rather than bare Instances, matching the
+    other member sources this module builds.
     """
     members: List[Tuple[str, celaut.Instance]] = []
     for instance_id in sc.get_all_internal_containers_ids():
@@ -291,30 +262,17 @@ def local_network_instances(
 
 def _local_peers(
     network: celaut.Service.Network,
-    requester_env_values: Optional[Dict[str, bytes]],
     requester_id: Optional[str],
 ) -> List[celaut.Instance]:
-    """Local members of ``network``, filtered by its ``environment_variable``.
-
-    The environment filter is applied here from the node's own records, whatever
-    ``peer_env_lookup`` the caller passed for the other sources: a local instance's
-    launch environment is something this node knows exactly, and it is the case the
-    filter was written for -- several instances of one service on one node, of which
-    only those sharing the requester's discriminator are its peers.
-    """
-    members = local_network_instances(network, requester_id=requester_id)
-    if not network.environment_variable:
-        return [instance for _, instance in members]
+    """Local members of ``network``, as bare Instances."""
     return [
-        instance for instance_id, instance in members
-        if peer_env_matches(network, requester_env_values, _instance_env_values(instance_id))
+        instance for _, instance in
+        local_network_instances(network, requester_id=requester_id)
     ]
 
 
 def resolve_network(
     network: celaut.Service.Network,
-    requester_env_values: Optional[Dict[str, bytes]] = None,
-    peer_env_lookup: Optional[PeerEnvLookup] = None,
     ask_peers: bool = True,
     requester_id: Optional[str] = None,
 ) -> List[celaut.Instance]:
@@ -354,7 +312,7 @@ def resolve_network(
     # UnboundLocalError (it previously did for tag "*").
     uris: List[celaut.Instance.Uri] = []
     is_pow = any(tag.startswith(POW_TAG_PREFIX) for tag in network.tags)
-    local = [] if is_pow else _local_peers(network, requester_env_values, requester_id)
+    local = [] if is_pow else _local_peers(network, requester_id)
     for tag in network.tags:
         # A `pow:<chain>` tag names a PoW communication domain, whose actual ask
         # lives in `Network.formal` (issue #78,
@@ -366,12 +324,7 @@ def resolve_network(
         if tag.startswith(POW_TAG_PREFIX):
             peers = resolve_pow_network(network, tag=tag, ask_peers=ask_peers)
             if peers:
-                return filter_peers_by_environment(
-                    network=network,
-                    peers=peers,
-                    requester_env_values=requester_env_values,
-                    peer_env_lookup=peer_env_lookup,
-                )
+                return peers
             continue
 
         # Operator seeds apply to any tag; PoW above still verifies its candidates.
@@ -384,10 +337,7 @@ def resolve_network(
                 uri_slot=[celaut.Instance.Uri_Slot(internal_port=1,
                     uri=[celaut.Instance.Uri(ip=ip, port=port)])],
             ) for ip, port in addresses]
-            return local + filter_peers_by_environment(
-                network=network, peers=peers,
-                requester_env_values=requester_env_values, peer_env_lookup=peer_env_lookup,
-            )
+            return local + peers
 
         if tag in LEDGERS_WITHOUT_URIS:
             continue
@@ -463,12 +413,7 @@ def resolve_network(
         )]
     )
 
-    return local + filter_peers_by_environment(
-        network=network,
-        peers=[instance],
-        requester_env_values=requester_env_values,
-        peer_env_lookup=peer_env_lookup,
-    )
+    return local + [instance]
 
 def _formal_pairs(formal: bytes, whose: str) -> Dict[str, str]:
     """``formal`` as pairs for the subset check, or a rejection saying whose is bad.
@@ -652,10 +597,6 @@ def resolve_network_for_peer(
       it knows, and a caller wanting more breadth asks more nodes itself, which keeps
       the cost with whoever chose to spend it.
 
-    No environment filter either: ``Network.environment_variable`` picks among *this*
-    node's own instances by the requesting instance's value, and a remote caller is not
-    one of them.
-
     A third, added by #385: **when the caller is a local instance, the request has to
     fit what its own service declared** (:func:`check_network_request`). Before this,
     the RPC resolved any ``Service.Network`` handed to it, so a guest allowed to reach
@@ -694,17 +635,13 @@ def resolve_network_for_peer(
         check_network_request(declared_networks=declared, requested=network)
 
     # A local caller is on the registry by now and, declaring the network and quite
-    # possibly exposing its protocols, would qualify as its own peer (#387). Its
-    # launch environment is what the network's `environment_variable`, if any, is
-    # matched against -- the same records the launch-time resolution reads.
+    # possibly exposing its protocols, would qualify as its own peer (#387).
     requester_id = sc.get_local_instance_id_by_uri(uri=caller_ip) if caller_ip else None
-    requester_env = _instance_env_values(requester_id) if requester_id else None
 
     return celaut.ConfigurationFile.NetworkResolution(
         tags=list(network.tags),
         peer_instances=resolve_network(
             network,
-            requester_env_values=requester_env,
             ask_peers=False,
             requester_id=requester_id,
         ),

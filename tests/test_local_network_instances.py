@@ -34,11 +34,10 @@ def _protocol(*tags, formal=b""):
     return celaut.Service.Api.Protocol(tags=list(tags), formal=formal)
 
 
-def _network(tags=("postgres",), protocol_stack=(), environment_variable=""):
+def _network(tags=("postgres",), protocol_stack=()):
     return celaut.Service.Network(
         tags=list(tags),
         protocol_stack=list(protocol_stack),
-        environment_variable=environment_variable,
     )
 
 
@@ -66,7 +65,7 @@ class _Registry:
     """``sc`` and ``load_service_from_disk`` over a dict of fake instances."""
 
     def __init__(self, instances):
-        # id -> dict(spec=Service, stored=bytes|None, envs=str|None)
+        # id -> dict(spec=Service, stored=bytes|None)
         self.instances = instances
 
     def get_all_internal_containers_ids(self):
@@ -79,9 +78,6 @@ class _Registry:
 
     def get_internal_instance(self, id):
         return self.instances[id].get("stored")
-
-    def get_local_instance_envs(self, id):
-        return self.instances[id].get("envs")
 
     def get_local_instance_id_by_uri(self, uri):
         for instance_id, row in self.instances.items():
@@ -101,8 +97,8 @@ PG = _protocol("postgres-wire", "pgwire")
 HTTP = _protocol("http")
 
 
-def _member(spec, stored=None, envs=None, ip=None):
-    return {"spec": spec, "stored": stored, "envs": envs, "ip": ip}
+def _member(spec, stored=None, ip=None):
+    return {"spec": spec, "stored": stored, "ip": ip}
 
 
 @unittest.skipIf(IMPORT_ERROR, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -280,30 +276,6 @@ class ResolveNetworkWithLocalMembersTests(unittest.TestCase):
         self.assertEqual(
             [p.uri_slot[0].uri[0].ip for p in peers], ["10.0.0.5", "198.51.100.1"]
         )
-
-    def test_the_environment_variable_filters_local_members_by_launch_env(self):
-        network = _network(("postgres",), [PG], environment_variable="PG_CLUSTER")
-        spec = _spec(networks=[network], slots=[(5432, [PG])])
-        registry = _Registry({
-            "pg-a": _member(spec, stored=_stored((5432, [("10.0.0.5", 31000)])),
-                            envs='{"PG_CLUSTER": "alpha"}'),
-            "pg-b": _member(spec, stored=_stored((5432, [("10.0.0.6", 31001)])),
-                            envs='{"PG_CLUSTER": "beta"}'),
-            "pg-none": _member(spec, stored=_stored((5432, [("10.0.0.7", 31002)]))),
-        })
-        peers = self._resolve(
-            registry, network, requester_env_values={"PG_CLUSTER": b"beta"}
-        )
-        self.assertEqual([p.uri_slot[0].uri[0].ip for p in peers], ["10.0.0.6"])
-
-    def test_a_requester_without_the_variable_matches_no_local_member(self):
-        network = _network(("postgres",), [PG], environment_variable="PG_CLUSTER")
-        spec = _spec(networks=[network], slots=[(5432, [PG])])
-        registry = _Registry({
-            "pg-a": _member(spec, stored=_stored((5432, [("10.0.0.5", 31000)])),
-                            envs='{"PG_CLUSTER": "alpha"}'),
-        })
-        self.assertEqual(self._resolve(registry, network, requester_env_values=None), [])
 
     def test_a_pow_network_never_takes_local_members(self):
         """Membership of a PoW domain is verified chain state, not a declaration."""

@@ -288,15 +288,6 @@ message Service {
 
         // Protocol stack expected from the peers in this communication domain.
         repeated Api.Protocol protocol_stack = 4;
-
-        // Name of an environment variable used to filter compatible peer
-        // instances during ConfigurationFile.NetworkResolution. Only peers
-        // whose value for this environment variable matches the requesting
-        // instance's value are returned. Empty => no env-based filtering.
-        //
-        // Example: many PostgreSQL instances may exist on the network, but
-        // only those sharing the same value of e.g. "PG_CLUSTER" are peers.
-        string environment_variable = 5;
     }
 
     // Natural language description.

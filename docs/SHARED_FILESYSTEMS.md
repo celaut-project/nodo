@@ -61,12 +61,12 @@ the spec chose, so with a separator a child could reach a share it was never
 granted by pushing the separator into its own tag.
 
 The **name of the variable** is part of the identity, not only its value. That is
-what makes the match symmetric, the way `peer_env_matches` requires both sides to
-agree: without it, a child declaring no `share_env` would derive the same id as a
-parent that declares one but was launched with no value for it, skipping the
-discriminator altogether. A variable that is declared on both sides but set on
-neither is still a match — two instances missing the same variable are in the
-same unnamed domain.
+what makes the match symmetric -- both sides must agree on which variable
+discriminates, not just on its value: without it, a child declaring no `share_env`
+would derive the same id as a parent that declares one but was launched with no
+value for it, skipping the discriminator altogether. A variable that is declared
+on both sides but set on neither is still a match — two instances missing the
+same variable are in the same unnamed domain.
 
 | declared | `share_id` | effect |
 | --- | --- | --- |
