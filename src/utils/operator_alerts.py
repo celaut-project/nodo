@@ -68,10 +68,31 @@ class OperatorAlert:
         return f"{ACTION_REQUIRED} {self.summary}"
 
 
-def gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]:
+def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> Optional[OperatorAlert]:
     """The gateway port is not usable, and the node cannot serve until it is.
 
-    Two distinguishable states, and they want different words:
+    The summary leads with the **consequence** rather than with the mechanism: what
+    an operator has to learn from one line in a wall of output is that this node is
+    not doing its job, and only then why.
+
+    ``serving`` distinguishes the two ways that happens, because they read very
+    differently from the operator's chair:
+
+    * ``False`` -- **NOT SERVING.** No node process is answering. Nothing is
+      running to be reached.
+    * ``True`` -- **RUNNING BUT UNREACHABLE.** The process is up and answering
+      locally, so every local check looks healthy, and no peer can get to it. This
+      is the failure worth naming precisely: it is indistinguishable from a working
+      node without going outside the host.
+    * ``None`` -- not known here, so the wording claims only what it can:
+      inaccessible from outside.
+
+    Passed in rather than probed. ``nodo info`` already calls ``is_serving()`` on
+    the line above this one and the TUI already polls the same answer, so the fact
+    is free at both call sites; asking again here would put a socket connect on a
+    path whose whole point is that it is two ``stat`` calls.
+
+    Two distinguishable *causes*, each with its own fix:
 
     * **Unassigned.** ``network.GATEWAY_PORT`` is still ``auto``. Nothing has been
       opened and nothing can be reached; the fix is one privileged start.
@@ -85,10 +106,10 @@ def gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]:
       lifetime to keep in step.
 
     A port that is assigned with no notice beside it is the ordinary state and
-    produces nothing. This never probes: proving reachability rebuilds a network
-    namespace (``src/utils/firewall/reachability.py``) and is the daemon's job,
-    once per boot. Reporting a *stored verdict* is what makes this cheap enough to
-    run on every `nodo info`.
+    produces nothing. This never probes the *network*: proving reachability
+    rebuilds a network namespace (``src/utils/firewall/reachability.py``) and is
+    the daemon's job, once per boot. Reporting a *stored verdict* is what makes
+    this cheap enough to run on every `nodo info`.
     """
     from src.utils.config import GATEWAY_NOTICE_FILE, ConfigManager, coerce_gateway_port
 
@@ -114,8 +135,8 @@ def gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]:
         return OperatorAlert(
             key="gateway_port_unassigned",
             summary=(
-                "The gateway port is not assigned, so this node cannot serve. "
-                "Run 'sudo nodo serve' once to pick and open one."
+                "NOT SERVING - no gateway port is assigned, so no peer can reach "
+                "this node and it earns nothing. Assign and open one: sudo nodo serve"
             ),
             detail=pending or "",
         )
@@ -124,13 +145,28 @@ def gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]:
         return OperatorAlert(
             key="gateway_port_firewall",
             summary=(
-                f"TCP {port} must be open in the host firewall before this node can "
-                f"serve. See {notice_path} for the exact command."
+                f"{_unreachable_lead(serving)} TCP {port} is not open in the host "
+                f"firewall, so peers cannot reach this node. Open it: see "
+                f"{notice_path} for the exact command."
             ),
             detail=pending,
         )
 
     return None
+
+
+def _unreachable_lead(serving: Optional[bool]) -> str:
+    """The first words of the firewall alert: what is wrong, before why.
+
+    Three states rather than two, because "the process is up and nobody can reach
+    it" is the one an operator cannot discover from inside the host -- every local
+    check answers, and the node is earning nothing.
+    """
+    if serving is True:
+        return "RUNNING BUT UNREACHABLE -"
+    if serving is False:
+        return "NOT SERVING -"
+    return "NOT REACHABLE FROM OUTSIDE -"
 
 
 def java_alert() -> Optional[OperatorAlert]:
@@ -192,14 +228,18 @@ def java_is_available() -> bool:
     return java_alert() is None
 
 
-def collect(config_manager=None) -> List[OperatorAlert]:
+def collect(config_manager=None, serving: Optional[bool] = None) -> List[OperatorAlert]:
     """Every pending alert, in the order they should be read.
 
     The gateway port comes first because it is the one that stops the node
     entirely: a node that cannot serve has no use for a payment system.
+
+    ``serving`` is threaded through rather than asked for here, so the one caller
+    that already knows it (`nodo info`, which prints it on the line above) does not
+    pay for a second socket connect.
     """
     alerts = []
-    for alert in (gateway_port_alert(config_manager), java_alert()):
+    for alert in (gateway_port_alert(config_manager, serving), java_alert()):
         if alert is not None:
             alerts.append(alert)
     return alerts

@@ -193,8 +193,13 @@ if __name__ == '__main__':
                 warn_if_not_serving()
 
             case "info":
+                # Reused by the alert block at the end of this command, so the
+                # firewall notice can say whether the node is down or up-and-
+                # unreachable without asking the same question a second time.
+                serving = None
                 try:
-                    status = "running" if is_serving() else "not running"
+                    serving = is_serving()
+                    status = "running" if serving else "not running"
                     print(f"Nodo service is currently {status}.", flush=True)
                 except Exception as e:
                     print(f"Error checking nodo.service status: {e}", flush=True)
@@ -258,7 +263,7 @@ if __name__ == '__main__':
                 # exactly like a healthy one.
                 try:
                     from src.utils.operator_alerts import collect as collect_alerts
-                    alerts = collect_alerts()
+                    alerts = collect_alerts(serving=serving)
                     if alerts:
                         print(flush=True)
                         for alert in alerts:
