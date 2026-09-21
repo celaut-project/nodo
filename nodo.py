@@ -236,33 +236,6 @@ if __name__ == '__main__':
                         flush=True
                     )
 
-                try:
-                    from src.manager.ddns import status as ddns_status
-                    ddns_info = ddns_status()
-                    if ddns_info["enabled"]:
-                        resolves = ddns_info["resolves_to"] or "does not resolve"
-                        print(
-                            f"DDNS: {ddns_info['hostname'] or 'no domain set'} "
-                            f"({ddns_info['provider']}) -> {resolves}",
-                            flush=True
-                        )
-                        if ddns_info["resolves_to"] and port:
-                            from src.utils.network import resolve_public_port
-                            public_port = resolve_public_port(
-                                env_manager.get("network.PUBLIC_TCP_PORT", ""), port
-                            )
-                            print(
-                                f"  Reachable from outside only if your router forwards "
-                                f"{ddns_info['resolves_to']}:{public_port} to this host's "
-                                f"port {port}.",
-                                flush=True
-                            )
-                        print("  Run 'nodo nat-guide' for the router steps.", flush=True)
-                    else:
-                        print("DDNS: disabled (see ddns.ENABLED)", flush=True)
-                except Exception as e:
-                    log.LOGGER(f"Error getting DDNS status: {e}.")
-
                 reputation_proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
                 
                 try:

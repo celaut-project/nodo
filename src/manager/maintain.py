@@ -7,7 +7,6 @@ from bee_rpc import client as beerpc
 
 from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
 from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
-from src.manager.ddns import ddns_tick
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu
@@ -682,9 +681,6 @@ def manager_thread():
         log_java_dependency_warning(log.LOGGER, feature="Ergo payments or reputation")
     check_dev_clients()
     check_ergo_node_availability()
-    # Publish the public IP right away rather than after a whole interval: a node
-    # that just booted with a new address is exactly when the record is stalest.
-    ddns_tick()
     if SUBMIT_REPUTATION_AT_INIT:
         try:
             _reputation_interface().submit_reputation(force_submit=True)
@@ -756,10 +752,6 @@ def _manager_pass(short_interval_count: int) -> int:
     # Node energy sample (issue #258). Self-gates to energy.SAMPLE_INTERVAL_SECONDS
     # and never raises. Informational only — does not feed MU pricing or low_demand.
     energy_tick()
-
-    # Publish this node's public IP to its DDNS provider (OFF unless
-    # ddns.ENABLED). Self-gates to ddns.INTERVAL_SECONDS and never raises.
-    ddns_tick()
 
     # Read what other nodes donated, off each chain, into SQLite (issue #282).
     # Self-gates to its own hourly interval and never raises. This is the only

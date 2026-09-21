@@ -3363,14 +3363,6 @@ impl App {
                 let Some(state) = states.get(next) else {
                     return;
                 };
-                // DDNS with no hostname and no token is a manager that logs an error
-                // every interval and publishes nothing, so this position is refused
-                // rather than written: the operator is told what is missing instead
-                // of being left with a setting that looks on and does nothing.
-                if let Some(missing) = self.missing_prerequisite(state.writes, document.as_ref()) {
-                    self.status = missing;
-                    return;
-                }
                 let writes: Vec<(String, String)> = state
                     .writes
                     .iter()
@@ -3388,34 +3380,6 @@ impl App {
                     Some(lever.consequence),
                     lever.warning,
                 );
-            }
-        }
-    }
-
-    /// Why a lever position cannot be written yet, if it cannot.
-    ///
-    /// Only DDNS has one: turning it on without the hostname and token it publishes
-    /// to is not a posture, it is a misconfiguration. Everything else in the
-    /// catalogue is writable on its own.
-    fn missing_prerequisite(
-        &self,
-        writes: &[(&str, &str)],
-        document: Option<&Value>,
-    ) -> Option<String> {
-        if !writes.iter().any(|(path, value)| *path == "ddns.ENABLED" && *value == "true") {
-            return None;
-        }
-        let set = |path: &str| -> bool {
-            yaml_scalar(document, &path.split('.').collect::<Vec<_>>())
-                .map(|value| !value.trim().is_empty())
-                .unwrap_or(false)
-        };
-        match (set("ddns.DOMAIN"), set("ddns.TOKEN")) {
-            (true, true) => None,
-            (false, true) => Some("Set the ddns hostname first (e on \"ddns hostname\")".to_string()),
-            (true, false) => Some("Set the ddns token first (e on \"ddns token\")".to_string()),
-            (false, false) => {
-                Some("Set the ddns hostname and token first, then turn this on".to_string())
             }
         }
     }
@@ -6423,35 +6387,6 @@ mod tests {
             assert_eq!(app.page(), Page::Pricing);
         }
 
-        /// Turning DDNS on without the hostname and token it publishes to would
-        /// leave a manager logging an error every interval, so the position is
-        /// refused with what is missing rather than written.
-        #[test]
-        fn ddns_cannot_be_turned_on_before_it_has_a_hostname() {
-            let mut app = on_cell_page();
-            app.config_document = Some(
-                serde_yaml::from_str(
-                    "ddns:\n  ENABLED: false\n  DOMAIN: \"\"\n  TOKEN: \"\"\ngeneral_flags:\n  SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF: true\n",
-                )
-                .unwrap(),
-            );
-            let lever = crate::cell::lever("findable").unwrap();
-            // At "address", the next position is "+ hostname", which needs both.
-            assert_eq!(app.cell_status(lever), LeverStatus::State(1));
-            app.cell.lever = Organelle::Channels
-                .levers()
-                .iter()
-                .position(|candidate| candidate.id == "findable")
-                .unwrap();
-            app.toggle_selected_lever();
-            assert!(
-                app.status.contains("hostname"),
-                "the operator is told what is missing: {}",
-                app.status
-            );
-            assert!(app.pending_action.is_none(), "nothing was queued to write");
-        }
-
         /// A change is never written on the keystroke that asks for it: the diff is
         /// shown first, and only y applies it.
         #[test]
@@ -6586,7 +6521,7 @@ mod tests {
         #[test]
         fn a_value_never_appears_in_the_expression() {
             let writes = vec![(
-                "ddns.TOKEN".to_string(),
+                "publisher.TOKEN".to_string(),
                 "\" | .[\"identity\"][\"MNEMONIC\"] = \"stolen\"".to_string(),
             )];
             let (expression, values) = chained_write(&writes);

@@ -1,6 +1,6 @@
 """Sampling tick: measure, attribute, persist.
 
-Wired into ``manager_thread`` as ``energy_tick()``, same shape as ``ddns_tick``:
+Wired into ``manager_thread`` as ``energy_tick()``, same shape as ``donations_tick``:
 calling it more often than ``energy.SAMPLE_INTERVAL_SECONDS`` is a cheap no-op,
 and it never raises.
 
