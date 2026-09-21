@@ -15,12 +15,12 @@ from unittest.mock import patch
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
-    from src.virtualizers.microvm import bundle, network, process, rootfs
+    from src.virtualizers.microvm import bundle, initramfs, network, process, rootfs
     from src.virtualizers.microvm.errors import MicroVMError
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
     celaut = None  # type: ignore[assignment]
-    bundle = network = process = rootfs = None  # type: ignore[assignment]
+    bundle = initramfs = network = process = rootfs = None  # type: ignore[assignment]
     MicroVMError = Exception  # type: ignore[assignment]
 
 
@@ -61,11 +61,18 @@ class EntrypointValidationTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class InitramfsValidationTests(unittest.TestCase):
-    def _write_initramfs(self, tmp_path, *, marker="nodo-ch-initramfs:v1", entries=True):
+    def _write_initramfs(self, tmp_path, *, marker="__CURRENT_CONTRACT_VERSION__", entries=True):
         # A real gzip'd newc cpio archive, built with cpio itself, rather than a
         # mock of the listing: the validator's whole job is to read the format that
         # bash/build_ch_initramfs.sh emits and that the kernel consumes, so mocking
         # the reader would leave exactly that unverified.
+        #
+        # The default marker tracks initramfs.CONTRACT_VERSION rather than a
+        # hardcoded string, so "accepted" stays accepted the next time the contract
+        # version bumps instead of silently drifting into an "accepted" test that
+        # actually exercises the version-skew rejection.
+        if marker == "__CURRENT_CONTRACT_VERSION__":
+            marker = f"nodo-ch-initramfs:{initramfs.CONTRACT_VERSION}"
         root = Path(tmp_path) / "root"
         (root / "bin").mkdir(parents=True)
         (root / "etc").mkdir(parents=True)
@@ -149,6 +156,50 @@ class GuestInjectionTests(unittest.TestCase):
             self.assertEqual(
                 rootfs.runtime_disk_bytes(log_prefix="[CH][vm-1]", rootfs_path=missing),
                 0,
+            )
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class GuestEnvsFileTests(unittest.TestCase):
+    """.__nodo_envs (#405): the second, additive delivery of a declared
+    environment variable, on top of the unconditional one inside __config__."""
+
+    def test_no_config_at_all_yields_nothing_to_deliver(self):
+        self.assertIsNone(rootfs.build_guest_envs_file(config=None))
+
+    def test_a_config_with_no_environment_variables_yields_nothing_to_deliver(self):
+        config = celaut.Configuration()
+        self.assertIsNone(rootfs.build_guest_envs_file(config=config))
+
+    def test_a_config_where_every_variable_fails_validation_yields_nothing(self):
+        config = celaut.Configuration()
+        config.environment_variables["LD_PRELOAD"] = b"/tmp/evil.so"
+        self.assertIsNone(rootfs.build_guest_envs_file(config=config))
+
+    def test_kept_variables_are_written_as_one_sorted_name_base64value_line_each(self):
+        import base64
+
+        config = celaut.Configuration()
+        config.environment_variables["ZEBRA"] = b"z-value"
+        config.environment_variables["ALPHA"] = b"a-value"
+        config.environment_variables["LD_PRELOAD"] = b"/tmp/evil.so"  # dropped
+
+        contents = rootfs.build_guest_envs_file(config=config)
+        self.assertIsNotNone(contents)
+        lines = contents.decode("ascii").splitlines()
+
+        self.assertEqual(
+            lines,
+            [
+                f"ALPHA {base64.b64encode(b'a-value').decode('ascii')}",
+                f"ZEBRA {base64.b64encode(b'z-value').decode('ascii')}",
+            ],
+        )
+        # Round-trips: what a guest's base64 -d would recover matches the source.
+        for name, b64value in (line.split(" ", 1) for line in lines):
+            self.assertEqual(
+                base64.b64decode(b64value),
+                config.environment_variables[name],
             )
 
 

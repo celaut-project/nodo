@@ -409,6 +409,7 @@ def execute(
     rootfs_path = runtime_dir / ROOTFS_IMAGE_NAMES[ROOTFS_FORMAT_EXT4]
     config_host_path = runtime_dir / "__config__"
     entrypoint_host_path = runtime_dir / ".__nodo_entrypoint"
+    envs_host_path = runtime_dir / ".__nodo_envs"
     stdout_path = runtime_dir / "qemu.stdout.log"
     stderr_path = runtime_dir / "qemu.stderr.log"
     serial_log_path = runtime_dir / "qemu.serial.log"
@@ -493,6 +494,17 @@ def execute(
         # install in someone else's filesystem. See the note in
         # src/virtualizers/microvm/network.py.
         log.LOGGER(f"[QEMU][{vmachine_id}] guest metadata injected (config/entrypoint)")
+
+        # Environment variables also delivered as real Linux env vars (#405), on
+        # top of the ones already inside __config__.config.environment_variables
+        # unconditionally. Optional: no file at all when none of the declared
+        # variables survives src.utils.guest_env.linux_env_vars.
+        rootfs.inject_guest_envs(
+            config=config,
+            envs_host_path=envs_host_path,
+            guest_metadata=guest_metadata,
+            log_prefix=log_prefix,
+        )
 
         # Shared filesystems (parent -> child inheritance). Identical semantics to
         # CH, and the same materialization: only the guest device wiring

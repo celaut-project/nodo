@@ -19,3 +19,6 @@ ip
 # block device and are copied onto the overlay before switch_root.
 cp
 umount
+# Guest env vars from .__nodo_envs (#405): decoding the base64 value on each
+# line before export.
+base64

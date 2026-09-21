@@ -23,9 +23,10 @@ from typing import FrozenSet, Set, Tuple
 
 # Bump together with the marker that bash/build_ch_initramfs.sh stamps: they are
 # one version. It covers /init's contract with execute.py -- which files it expects
-# in the service rootfs (`__config__`, `.__nodo_entrypoint`, `.__nodo_virtiofs`)
-# and how it reads them. The image is pinned by digest while that contract lives in
-# the code, so this is what keeps a pinned asset from silently outliving it.
+# in the service rootfs (`__config__`, `.__nodo_entrypoint`, `.__nodo_virtiofs`,
+# `.__nodo_envs`) and how it reads them. The image is pinned by digest while that
+# contract lives in the code, so this is what keeps a pinned asset from silently
+# outliving it.
 #
 # v2 (#369): /init reads `rootfstype=` and `ro`/`rw` off the kernel cmdline instead
 # of assuming ext4+rw, and on `ro` it overlays the image and takes the three
@@ -35,7 +36,16 @@ from typing import FrozenSet, Set, Tuple
 # on a ro bundle needs the /dev/vdb this checkout's execute.py attaches. Refusing
 # the skew here is what turns either into one error at launch instead of a guest
 # that hangs in the initramfs with nothing on its console.
-CONTRACT_VERSION = "v2"
+#
+# v3 (#405): /init additionally reads an optional `.__nodo_envs` file and
+# `export`s the KEY=VALUE pairs it decodes from it into the entrypoint's own
+# environment before switch_root, on top of the same values already delivered,
+# unconditionally, inside __config__.config.environment_variables. A v2
+# initramfs handed a bundle whose execute.py wrote a `.__nodo_envs` simply never
+# reads it -- the entrypoint still boots, just without those Linux env vars --
+# so this bump is about keeping /init's read half in step with execute.py's
+# write half, not about a launch that would otherwise fail outright.
+CONTRACT_VERSION = "v3"
 
 MARKER_PATH = "etc/nodo-ch-initramfs.marker"
 MARKER_KEY = "nodo-ch-initramfs"

@@ -964,6 +964,23 @@ The older `entrypoint` top-level field is still supported and will be automatica
 
 > **Note:** Per-variable `<name>.field` descriptors are **not** currently embedded. There is no target field for them in the packed schema (`pack.proto`'s `Container` has no `environment_variables` field), so the packer records the names only. Embedding descriptors would require adding that field to `pack.proto` first.
 
+At launch the values for these names come from `Configuration.environment_variables`
+(`nodo execute -e <key> <value>`). A service always finds them inside `__config__`
+(`config.environment_variables`) whether or not it reads the rest of this section —
+but a name that also matches the shape `[A-Za-z_][A-Za-z0-9_]*`, is not one of a
+short reserved list (`LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`), and whose value
+carries no `NUL` byte and stays under 32 KiB, is *additionally* delivered as a real
+Linux environment variable on the entrypoint's own process — so `os.getenv("MY_ENV_VAR")`
+works with no protobuf parsing needed. A name that fails that check is never dropped,
+it simply is not handed to the process directly; it still lives in `__config__` exactly
+as before. See `src/utils/guest_env.py` for the exact rule.
+
+One difference between the two paths: a value's trailing newline(s), if it had any, do
+not survive the Linux env var (the guest's `/init` decodes it through shell command
+substitution, which strips them). `__config__.config.environment_variables` always
+carries the exact bytes; a service that needs a value's trailing whitespace intact
+should read it from there instead of from its own environment.
+
 ---
 
 #### `network`

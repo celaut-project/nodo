@@ -9,6 +9,7 @@ and (when there are shares) the virtiofs mount plan -- and pull a share's seed
 data back out of it the same way, so this is one implementation, not a convention
 two backends each re-implement.
 """
+import base64
 import posixpath
 import shutil
 import tempfile
@@ -20,6 +21,7 @@ from src.database.sql_connection import SQLConnection
 from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.manager.network_templates import Missing, substitute
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
+from src.utils import guest_env
 from src.utils import logger as log
 from src.utils.network_policy import enforce_network_policy
 from src.virtualizers.microvm.errors import MicroVMError
@@ -34,6 +36,12 @@ sc = SQLConnection()
 GUEST_CONFIG_TARGETS = ["/__config__"]
 
 GUEST_ENTRYPOINT_PATH = "/.__nodo_entrypoint"
+
+# Optional (#405): present only when at least one declared environment variable
+# passes src.utils.guest_env.linux_env_vars. Absent means an ordinary service --
+# no envs declared, or none of them survived validation -- and /init does
+# nothing with it, the same way it treats a missing .__nodo_virtiofs.
+GUEST_ENVS_PATH = "/.__nodo_envs"
 
 # The metadata disk: a second virtio-blk device carrying exactly the per-instance
 # files the node would otherwise write into the rootfs image itself.
@@ -54,7 +62,20 @@ GUEST_METADATA_MOUNT = "/.__nodo_meta"
 # Sized for a handful of small files: a serialized ConfigurationFile, one line of
 # entrypoint, and a virtiofs mount plan. 4 MiB is far above any of them and still
 # below the noise floor of a guest's memory, and the image is sparse besides.
+#
+# .__nodo_envs (#405) is the one entry whose size is not fixed: each variable
+# src.utils.guest_env keeps is capped individually, but not their number, so a
+# service declaring enough of them can still approach this budget. Left
+# unchecked, that overflow would surface as ``mkfs.ext4 -d`` failing with an
+# opaque "No space left on device"; the check below turns it into a clear error
+# naming the actual byte counts instead.
 METADATA_DISK_BYTES = 4 * 1024 * 1024
+
+# ext4's own bookkeeping (superblock, group descriptors, inode table, root and
+# lost+found) is not available to the files staged into it; reserving a slice
+# for it up front keeps the check below from being any looser than ``mkfs.ext4``
+# itself would be.
+METADATA_DISK_OVERHEAD_BYTES = 512 * 1024
 
 
 def guest_config_targets(service: celaut.Service) -> List[str]:
@@ -128,6 +149,15 @@ def build_metadata_disk(runtime_dir: Path, entries: Dict[str, Path]) -> Path:
     image_path = runtime_dir / METADATA_DISK_NAME
     if image_path.exists():
         image_path.unlink()
+
+    budget = METADATA_DISK_BYTES - METADATA_DISK_OVERHEAD_BYTES
+    total_bytes = sum(host_file.stat().st_size for host_file in entries.values())
+    if total_bytes > budget:
+        raise MicroVMError(
+            f"metadata disk entries total {total_bytes} bytes, over the "
+            f"{budget}-byte budget of the {METADATA_DISK_BYTES}-byte metadata "
+            "disk -- declare fewer or smaller environment variables"
+        )
 
     with tempfile.TemporaryDirectory(dir=str(runtime_dir)) as staging:
         staging_dir = Path(staging)
@@ -349,6 +379,59 @@ def build_configuration_file(
         cfg.initial_sysresources.CopyFrom(resources)
 
     return cfg
+
+
+def build_guest_envs_file(config: Optional[celaut.Configuration]) -> Optional[bytes]:
+    """The ``.__nodo_envs`` file contents, or ``None`` when there is nothing to deliver.
+
+    One line per kept variable, ``NAME BASE64VALUE``: the value is base64
+    rather than raw so a byte string that happens to contain a newline (legal
+    in ``Configuration.environment_variables``, a ``map<string, bytes>``) stays
+    on its own line, and so ``bash/build_ch_initramfs.sh`` -- which has no
+    ``sed``/``awk`` to lean on -- never has to parse anything more than
+    whitespace-separated fields. ``NAME`` is already restricted to
+    ``guest_env.NAME_RE`` by :func:`src.utils.guest_env.linux_env_vars`, so it
+    is never itself base64 and never contains a space.
+
+    ``None`` (not an empty file) when nothing survives validation, so callers
+    can skip writing and injecting a file that would do nothing -- the same
+    shape as ``.__nodo_virtiofs`` for a service that declares no shares.
+    """
+    if not config:
+        return None
+
+    kept = guest_env.linux_env_vars(config.environment_variables)
+    if not kept:
+        return None
+
+    lines = [
+        f"{name} {base64.b64encode(value).decode('ascii')}"
+        for name, value in sorted(kept.items())
+    ]
+    return ("\n".join(lines) + "\n").encode("ascii")
+
+
+def inject_guest_envs(
+    config: Optional[celaut.Configuration],
+    envs_host_path: Path,
+    guest_metadata: "GuestMetadata",
+    log_prefix: str,
+) -> None:
+    """Build ``.__nodo_envs`` (if there is anything to put in it) and deliver it.
+
+    The one step of the launch sequence CH and QEMU would otherwise each
+    reimplement: both call this the same way, right after the entrypoint
+    metadata is staged, so a future change to the sequence (error handling,
+    logging, ordering) is made once. A no-op, writing nothing and injecting
+    nothing, when :func:`build_guest_envs_file` returns ``None``.
+    """
+    envs_file_bytes = build_guest_envs_file(config=config)
+    if envs_file_bytes is None:
+        return
+    with open(envs_host_path, "wb") as f:
+        f.write(envs_file_bytes)
+    guest_metadata.put(host_file=envs_host_path, guest_target=GUEST_ENVS_PATH)
+    log.LOGGER(f"{log_prefix} guest env vars injected: {GUEST_ENVS_PATH}")
 
 
 def runtime_disk_bytes(log_prefix: str, rootfs_path: Path) -> int:
