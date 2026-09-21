@@ -119,6 +119,19 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
+    // The banner takes its rows off the top of the page and gives them back the
+    // moment the condition is fixed, rather than reserving space for an alert that
+    // is usually absent. A permanently empty strip above the cards would be a strip
+    // the eye stops reading, which is precisely the failure being fixed.
+    let banner_height = alert_banner_height(app);
+    let area = if banner_height > 0 {
+        let split =
+            Layout::vertical([Constraint::Length(banner_height), Constraint::Min(0)]).split(area);
+        draw_alert_banner(frame, app, split[0]);
+        split[1]
+    } else {
+        area
+    };
     let rows = Layout::vertical([
         Constraint::Length(9),
         Constraint::Length(7),
@@ -222,6 +235,62 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
         app.ram_history.iter().copied().collect(),
         percent(app.stats.memory_used, app.stats.memory_total),
         ACCENT,
+    );
+}
+
+/// How many rows the ACTION REQUIRED banner needs: one per alert plus its border,
+/// and zero when there is nothing wrong.
+///
+/// Zero rather than a collapsed block, so a healthy node's OVERVIEW is exactly the
+/// page it was before this existed. Space permanently reserved for a warning is
+/// space that stops carrying one.
+fn alert_banner_height(app: &App) -> u16 {
+    if app.alerts.is_empty() {
+        return 0;
+    }
+    app.alerts.iter().count() as u16 + 2
+}
+
+/// The things the operator has to act on, at the top of the first page they see.
+///
+/// Both of these conditions were already detected and already written down — in
+/// `storage/app.log`, and at the end of a `nodo serve` that systemd swallowed. A
+/// node whose gateway port is shut cannot serve, and a node with no Java cannot be
+/// paid, and from this screen both of them used to look like a node in perfect
+/// health. So they are drawn here: red, bordered, above everything, and gone the
+/// moment they are fixed.
+///
+/// One line each, not the full instructions: the detail is long (a firewall command
+/// with a front-end-specific syntax, a scan of what else is rejecting on the input
+/// hook) and it already exists in `.gateway_notice` and in `nodo info`. A banner
+/// that filled half the page would be a banner the operator resents.
+fn draw_alert_banner(frame: &mut Frame, app: &App, area: Rect) {
+    let lines: Vec<Line> = app
+        .alerts
+        .iter()
+        .map(|alert| {
+            Line::from(vec![
+                Span::styled(
+                    " ACTION REQUIRED ",
+                    Style::default().fg(Color::Black).bg(BAD).bold(),
+                ),
+                Span::raw(" "),
+                Span::styled(alert.summary.clone(), Style::default().fg(Color::White).bold()),
+            ])
+        })
+        .collect();
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::bordered()
+                    .title(Span::styled(
+                        " THIS NODE NEEDS YOU ",
+                        Style::default().fg(BAD).bold(),
+                    ))
+                    .border_style(Style::default().fg(BAD)),
+            )
+            .wrap(Wrap { trim: true }),
+        area,
     );
 }
 
@@ -6643,5 +6712,152 @@ mod cell_preview {
                 println!("{line}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+/// The ACTION REQUIRED banner on OVERVIEW.
+///
+/// The two conditions it carries — the gateway port needing a firewall rule, and
+/// a missing Java runtime — were detected already and written only to
+/// `storage/app.log`, which is a file nobody opens until something is visibly
+/// broken. A node that cannot serve and a node that cannot be paid both looked,
+/// from this screen, exactly like a healthy one.
+mod alert_banner {
+    use super::{alert_banner_height, render};
+    use crate::alerts::OperatorAlert;
+    use crate::app::{App, Page};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn overview_with(alerts: Vec<OperatorAlert>) -> String {
+        let mut app = App::new();
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Overview)
+            .unwrap();
+        app.alerts.set(alerts);
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn port_alert() -> OperatorAlert {
+        OperatorAlert {
+            key: "gateway_port_firewall",
+            summary: "TCP 52285 must be open in the host firewall before this node \
+                      can serve."
+                .to_string(),
+        }
+    }
+
+    fn java_alert() -> OperatorAlert {
+        OperatorAlert {
+            key: "java_missing",
+            summary: "Java is not installed, so this node cannot settle payments."
+                .to_string(),
+        }
+    }
+
+    /// The point of the whole change: the firewall instruction reaches the screen
+    /// the operator leaves open, instead of only the log file.
+    #[test]
+    fn the_gateway_port_alert_is_drawn_above_the_cards() {
+        let screen = overview_with(vec![port_alert()]);
+
+        assert!(screen.contains("ACTION REQUIRED"), "{screen}");
+        assert!(screen.contains("TCP 52285"), "{screen}");
+
+        let banner = screen
+            .lines()
+            .position(|line| line.contains("ACTION REQUIRED"))
+            .expect("a banner line");
+        // The card's own border, not merely the string "NODE": the banner's
+        // own title contains it too, and a test that matched that would pass
+        // while asserting nothing.
+        let node_card = screen
+            .lines()
+            .position(|line| line.contains("\u{250c} NODE \u{2500}"))
+            .expect("the NODE card");
+        // Above, not beside: a warning under the fold is a warning nobody has
+        // scrolled to.
+        assert!(banner < node_card, "banner at {banner}, NODE at {node_card}:\n{screen}");
+    }
+
+    #[test]
+    fn the_java_alert_names_the_consequence_rather_than_the_symptom() {
+        let screen = overview_with(vec![java_alert()]);
+
+        // "Java is not installed" is a fact about the machine. "cannot settle
+        // payments" is the thing the operator is losing by it, and it is the
+        // reason this is on the front page at all: nothing crashes without Java,
+        // the node simply stops being payable and looks fine doing it.
+        assert!(screen.contains("cannot settle payments"), "{screen}");
+    }
+
+    #[test]
+    fn both_alerts_get_their_own_line() {
+        let screen = overview_with(vec![port_alert(), java_alert()]);
+
+        assert_eq!(screen.matches("ACTION REQUIRED").count(), 2, "{screen}");
+    }
+
+    /// A healthy node's OVERVIEW is exactly the page it was before this existed.
+    /// Space permanently reserved for a warning is space that stops carrying one.
+    #[test]
+    fn a_healthy_node_gets_no_banner_and_no_reserved_space() {
+        let screen = overview_with(Vec::new());
+
+        assert!(!screen.contains("ACTION REQUIRED"), "{screen}");
+        assert!(!screen.contains("THIS NODE NEEDS YOU"), "{screen}");
+    }
+
+    /// The banner is sized to its contents, so the cards below keep their own
+    /// heights rather than being squeezed by a fixed strip.
+    #[test]
+    fn the_banner_is_as_tall_as_it_needs_to_be_and_no_taller() {
+        let mut app = App::new();
+        assert_eq!(alert_banner_height(&app), 0);
+
+        app.alerts.set(vec![port_alert()]);
+        assert_eq!(alert_banner_height(&app), 3);
+
+        app.alerts.set(vec![port_alert(), java_alert()]);
+        assert_eq!(alert_banner_height(&app), 4);
+    }
+
+    /// It is on OVERVIEW and nowhere else. A banner repeated on twelve pages is
+    /// a banner that becomes part of the furniture.
+    #[test]
+    fn the_banner_belongs_to_overview() {
+        let mut app = App::new();
+        app.alerts.set(vec![port_alert()]);
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Logs)
+            .unwrap();
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let screen: String = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(!screen.contains("ACTION REQUIRED"), "{screen}");
     }
 }
