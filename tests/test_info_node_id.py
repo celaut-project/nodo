@@ -77,8 +77,8 @@ class InfoNodeIdTests(unittest.TestCase):
         """Wrapped like every neighbouring block: `nodo info` prints what it can.
 
         Identity lives behind config that may be unreadable on a half-installed node,
-        and the address, the DDNS status and the wallets underneath it are exactly
-        what somebody diagnosing that install needs.
+        and the address and the wallets underneath it are exactly what somebody
+        diagnosing that install needs.
         """
         printed, logged = _run(RuntimeError("no config"))
 

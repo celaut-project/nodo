@@ -739,27 +739,6 @@ def _doctor_network_checks():
             flush=True
         )
 
-    if facts.get("ddns_enabled"):
-        hostname = facts.get("ddns_hostname") or "(no domain set)"
-        resolves = facts.get("ddns_resolves_to")
-        if resolves:
-            print(f"[OK] DDNS {hostname} resolves to {resolves}.", flush=True)
-            if resolves == facts.get("local_ip"):
-                print(
-                    "[WARN] It resolves to this machine's own LAN address, so peers "
-                    "outside your network cannot use it. That usually means the "
-                    "provider recorded a private source address.",
-                    flush=True
-                )
-        else:
-            print(
-                f"[WARN] DDNS is enabled but {hostname} does not resolve. Check "
-                "ddns.DOMAIN / ddns.TOKEN and the [DDNS] lines in the node log.",
-                flush=True
-            )
-    else:
-        print("[WARN] DDNS is disabled; peers must reach a bare IP (see ddns.*).", flush=True)
-
     print(
         "  Whether the router forwards the port cannot be verified from this host. "
         "Run 'nodo nat-guide' for the steps, then test from outside your network.",

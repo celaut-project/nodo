@@ -239,7 +239,7 @@ responsible for something is the part of the config responsible for it too:
 
 | Organelle | What it decides |
 |---|---|
-| `CHANNELS · reach` | The gateway port, whether this node publishes its address, DDNS, whether an instance gets a port of its own |
+| `CHANNELS · reach` | The gateway port, whether this node publishes its address, whether an instance gets a port of its own |
 | `RIBOSOMES · work` | Whether outside work is taken at all, foreign architectures, descendant admission, spare-capacity work |
 | `VESICLES · voice` | Delegating work to peers and paying for it, announcing to peers, how much an announcement carries |
 | `NUCLEUS · identity & wallet` | The identity mnemonic, the Ergo wallet, the cold wallet, and whether payments are real |

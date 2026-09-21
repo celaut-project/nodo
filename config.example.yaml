@@ -528,20 +528,6 @@ pow_networks:
   # answering such a question never relays it, so asking cannot fan out beyond this.
   ASK_PEERS: 4
 
-# Dynamic DNS: keep a hostname pointing at this node's public IP, so peers can
-# find it by name when the address changes. Tunneling means only the gateway port
-# needs to be reachable -- but it still needs forwarding on the router, which is
-# the operator's job. `nodo info` reports whether that looks done.
-ddns:
-  ENABLED: false
-  PROVIDER: desec  # Only "desec" is implemented (update.dedyn.io, dyndns2 protocol).
-  DOMAIN: ""  # The hostname to keep updated, e.g. "my-node.dedyn.io".
-  TOKEN: ""  # Provider API token. Treat as a secret.
-  INTERVAL_SECONDS: 600  # How often the address is republished. The manager also publishes once at startup.
-  # Which address gets published: by default none is sent and the provider records
-  # the request's source address, which is the only value that is certainly right
-  # behind NAT. Set network.PUBLIC_IP to override that.
-
 logs:
   MEMORY_LOGS: false
   DEBUG_MODE: false

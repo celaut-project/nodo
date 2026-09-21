@@ -22,9 +22,6 @@ def _facts(**overrides) -> dict:
         "local_ip": "192.168.1.34",
         "router_ip": "192.168.1.1",
         "listening": True,
-        "ddns_enabled": True,
-        "ddns_hostname": "my-node.dedyn.io",
-        "ddns_resolves_to": "203.0.113.7",
         "direct_exposure": True,
         "free_ports_range": [{"START": 50000, "END": 60000}],
     }
@@ -103,22 +100,10 @@ class GuideRenderingTests(unittest.TestCase):
 
         self.assertNotIn("listening locally", guide)
 
-    def test_ddns_enabled_puts_the_hostname_in_the_check_command(self):
+    def test_the_check_command_targets_the_public_ip_placeholder(self):
         guide = nat_guide.render_guide(_facts())
 
-        self.assertIn("nc -vz my-node.dedyn.io 8090", guide)
-        self.assertIn("resolves to 203.0.113.7", guide)
-
-    def test_ddns_disabled_says_peers_face_a_changing_ip(self):
-        guide = nat_guide.render_guide(_facts(ddns_enabled=False))
-
-        self.assertIn("DDNS is disabled", guide)
-        self.assertIn("<your public IP>", guide)
-
-    def test_ddns_that_does_not_resolve_is_reported(self):
-        guide = nat_guide.render_guide(_facts(ddns_resolves_to=None))
-
-        self.assertIn("does not resolve yet", guide)
+        self.assertIn("nc -vz <your public IP> 8090", guide)
 
     def test_the_free_ports_range_is_only_mentioned_for_direct_exposure(self):
         with_direct = nat_guide.render_guide(_facts())
