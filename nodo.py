@@ -249,7 +249,26 @@ if __name__ == '__main__':
                     payment_info = "N/A"
                 
                 print(f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}", flush=True)
-                
+
+                # What the operator has to *do*, last and separated, because in a
+                # terminal the last thing printed is the first thing read. Both of
+                # these conditions were previously announced only to app.log and to
+                # the tail of a `nodo serve` that systemd swallowed, so a node whose
+                # gateway port is shut or whose Java is missing looked, from here,
+                # exactly like a healthy one.
+                try:
+                    from src.utils.operator_alerts import collect as collect_alerts
+                    alerts = collect_alerts()
+                    if alerts:
+                        print(flush=True)
+                        for alert in alerts:
+                            print(alert.as_line(), flush=True)
+                except Exception as e:
+                    # Never the thing that breaks `nodo info`: this block exists to
+                    # add a warning, and a warning system that can take down the
+                    # command it warns through is worse than no warning.
+                    log.LOGGER(f"Error collecting operator alerts: {e}.")
+
                 # dev_client = SQLConnection().get_dev_clients()[0]
                 # print(f"Dev client for dev purposes: {dev_client}")
 

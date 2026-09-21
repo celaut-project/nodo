@@ -1,3 +1,7 @@
+/// What the node needs its operator to *do*: the gateway port's firewall rule and
+/// a missing Java runtime, surfaced where an operator actually looks.
+pub mod alerts;
+
 /// The CELL page: policy levers and profiles.
 pub mod cell;
 
