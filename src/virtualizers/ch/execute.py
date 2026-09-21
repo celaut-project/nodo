@@ -213,6 +213,7 @@ def execute(
     api_socket_path = _api_socket_path(vmachine_id)
     config_host_path = runtime_dir / "__config__"
     entrypoint_host_path = runtime_dir / ".__nodo_entrypoint"
+    envs_host_path = runtime_dir / ".__nodo_envs"
     stdout_path = runtime_dir / "cloud-hypervisor.stdout.log"
     stderr_path = runtime_dir / "cloud-hypervisor.stderr.log"
     serial_log_path: Optional[Path] = None
@@ -317,6 +318,23 @@ def execute(
             f"[CH][{vmachine_id}] guest entrypoint injection completed: "
             f"{rootfs.GUEST_ENTRYPOINT_PATH}"
         )
+
+        # Environment variables also delivered as real Linux env vars (#405), on
+        # top of the ones already inside __config__.config.environment_variables
+        # unconditionally. Optional: no file at all when none of the declared
+        # variables survives src.utils.guest_env.linux_env_vars.
+        envs_file_bytes = rootfs.build_guest_envs_file(config=config)
+        if envs_file_bytes is not None:
+            with open(envs_host_path, "wb") as f:
+                f.write(envs_file_bytes)
+            guest_metadata.put(
+                host_file=envs_host_path,
+                guest_target=rootfs.GUEST_ENVS_PATH,
+            )
+            log.LOGGER(
+                f"[CH][{vmachine_id}] guest env vars injection completed: "
+                f"{rootfs.GUEST_ENVS_PATH}"
+            )
 
         # Shared filesystems (parent -> child inheritance), whose whole model
         # lives in src/utils/shared_filesystems.py and is materialized the same

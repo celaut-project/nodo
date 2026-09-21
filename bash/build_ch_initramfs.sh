@@ -298,11 +298,11 @@ esac
 log "mounting rootfs: type=$ROOTFSTYPE access=$ROOTACCESS"
 if [ "$ROOTACCESS" = "ro" ]; then
     # A read-only image cannot receive this instance's own files, and the node has
-    # three to deliver: __config__, .__nodo_entrypoint and (when there are shares)
-    # .__nodo_virtiofs. On the writable path they are written straight into the
-    # image offline, with debugfs; squashfs and erofs have no writer, in debugfs or
-    # anywhere else, so they arrive on a second virtio-blk device instead and are
-    # laid over the image here.
+    # up to four to deliver: __config__, .__nodo_entrypoint and (when applicable)
+    # .__nodo_virtiofs and .__nodo_envs. On the writable path they are written
+    # straight into the image offline, with debugfs; squashfs and erofs have no
+    # writer, in debugfs or anywhere else, so they arrive on a second virtio-blk
+    # device instead and are laid over the image here.
     #
     # Overlay rather than a mountpoint inside the guest, because __config__ is read
     # by the SERVICE, at the absolute path the node promised it -- /__config__ --
@@ -326,7 +326,7 @@ if [ "$ROOTACCESS" = "ro" ]; then
 
     [ -b /dev/vdb ] || fatal "read-only rootfs but no metadata device at /dev/vdb"
     mount -t ext4 -o ro /dev/vdb /meta || fatal "cannot mount the metadata device"
-    for meta_file in __config__ .__nodo_entrypoint .__nodo_virtiofs; do
+    for meta_file in __config__ .__nodo_entrypoint .__nodo_virtiofs .__nodo_envs; do
         [ -f "/meta/$meta_file" ] || continue
         cp "/meta/$meta_file" "/newroot/$meta_file" \
             || fatal "cannot place /$meta_file from the metadata device"
@@ -425,6 +425,35 @@ if [ -f /newroot/.__nodo_virtiofs ]; then
     rm -f /tmp/.__nodo_virtiofs.lines
 fi
 
+# Environment variables for the entrypoint's own process (#405), on top of the
+# same values it can already read by parsing __config__ -- this is an additive,
+# optional convenience, never the only way to get at them. Absent file =>
+# ordinary service, nothing declared or nothing survived the node's validation
+# (src/utils/guest_env.py), same shape as an absent .__nodo_virtiofs.
+#
+# Format: one "NAME BASE64VALUE" per line. NAME is already restricted to
+# [A-Za-z_][A-Za-z0-9_]* on the node side before this file is ever written, so
+# nothing here re-checks it -- this only decodes and exports what the node
+# already decided was safe to hand the guest's real environment. `export
+# "$env_name=$env_value"` is one shell word, quoted, so nothing in $env_value
+# is re-parsed as shell syntax.
+#
+# A value's trailing newline(s), if it had any, do not survive command
+# substitution here -- a guest that needs the exact bytes back reads
+# __config__ instead, which carries every declared variable unconditionally
+# and untouched, kept or not by this path.
+if [ -f /newroot/.__nodo_envs ]; then
+    log "applying guest environment variables from .__nodo_envs"
+    while IFS=' ' read -r env_name env_b64; do
+        [ -n "$env_name" ] || continue
+        if env_value=$(printf '%s' "$env_b64" | base64 -d 2>/dev/null); then
+            export "$env_name=$env_value"
+        else
+            log "warning: could not base64-decode env var '$env_name', skipping"
+        fi
+    done < /newroot/.__nodo_envs
+fi
+
 [ -x "/newroot$ENTRYPOINT" ] || fatal "entrypoint is not executable: $ENTRYPOINT"
 
 log "switch_root -> $ENTRYPOINT"
@@ -433,7 +462,7 @@ fatal "switch_root returned unexpectedly"
 INIT_EOF
 chmod 0755 "$ROOT/init"
 
-printf 'nodo-ch-initramfs:v2\narch:%s\n' "$ARCH_TAG" > "$ROOT/etc/nodo-ch-initramfs.marker"
+printf 'nodo-ch-initramfs:v3\narch:%s\n' "$ARCH_TAG" > "$ROOT/etc/nodo-ch-initramfs.marker"
 
 # Byte-reproducible output, so CI's published artifact can be checked against a
 # local rebuild of the same commit — which is what makes the pinned digest in

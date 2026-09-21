@@ -9,6 +9,7 @@ and (when there are shares) the virtiofs mount plan -- and pull a share's seed
 data back out of it the same way, so this is one implementation, not a convention
 two backends each re-implement.
 """
+import base64
 import posixpath
 import shutil
 import tempfile
@@ -20,6 +21,7 @@ from src.database.sql_connection import SQLConnection
 from src.gateway.utils import generate_node_peer_info, peer_gateway_instance
 from src.manager.network_templates import Missing, substitute
 from src.manager.networks import filter_networks_with_ancestors, resolve_network
+from src.utils import guest_env
 from src.utils import logger as log
 from src.utils.network_policy import enforce_network_policy
 from src.virtualizers.microvm.errors import MicroVMError
@@ -34,6 +36,12 @@ sc = SQLConnection()
 GUEST_CONFIG_TARGETS = ["/__config__"]
 
 GUEST_ENTRYPOINT_PATH = "/.__nodo_entrypoint"
+
+# Optional (#405): present only when at least one declared environment variable
+# passes src.utils.guest_env.linux_env_vars. Absent means an ordinary service --
+# no envs declared, or none of them survived validation -- and /init does
+# nothing with it, the same way it treats a missing .__nodo_virtiofs.
+GUEST_ENVS_PATH = "/.__nodo_envs"
 
 # The metadata disk: a second virtio-blk device carrying exactly the per-instance
 # files the node would otherwise write into the rootfs image itself.
@@ -349,6 +357,36 @@ def build_configuration_file(
         cfg.initial_sysresources.CopyFrom(resources)
 
     return cfg
+
+
+def build_guest_envs_file(config: Optional[celaut.Configuration]) -> Optional[bytes]:
+    """The ``.__nodo_envs`` file contents, or ``None`` when there is nothing to deliver.
+
+    One line per kept variable, ``NAME BASE64VALUE``: the value is base64
+    rather than raw so a byte string that happens to contain a newline (legal
+    in ``Configuration.environment_variables``, a ``map<string, bytes>``) stays
+    on its own line, and so ``bash/build_ch_initramfs.sh`` -- which has no
+    ``sed``/``awk`` to lean on -- never has to parse anything more than
+    whitespace-separated fields. ``NAME`` is already restricted to
+    ``guest_env.NAME_RE`` by :func:`src.utils.guest_env.linux_env_vars`, so it
+    is never itself base64 and never contains a space.
+
+    ``None`` (not an empty file) when nothing survives validation, so callers
+    can skip writing and injecting a file that would do nothing -- the same
+    shape as ``.__nodo_virtiofs`` for a service that declares no shares.
+    """
+    if not config:
+        return None
+
+    kept = guest_env.linux_env_vars(config.environment_variables)
+    if not kept:
+        return None
+
+    lines = [
+        f"{name} {base64.b64encode(value).decode('ascii')}"
+        for name, value in sorted(kept.items())
+    ]
+    return ("\n".join(lines) + "\n").encode("ascii")
 
 
 def runtime_disk_bytes(log_prefix: str, rootfs_path: Path) -> int:
