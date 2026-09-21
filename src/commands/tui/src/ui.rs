@@ -11,15 +11,10 @@ use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
 use tui_tree_widget::{Tree, TreeItem};
 
-// Every colour drawn in this file comes from `crate::theme` (issue #395). What used
-// to be five `const`s plus seventy-odd bare `Color::` literals scattered through the
-// draw functions is now five accessors and a `series` set, so a theme is one struct
-// rather than a search-and-replace across six thousand lines.
+// Every colour drawn in this file comes from `crate::theme` (issue #395).
 //
-// The accessors are functions rather than constants because the theme is chosen at
-// startup from config/env/flag, and a `const` cannot be. They are `#[inline]` and read
-// an uncontended `RwLock` once per call, on a path that already allocates a `String`
-// per line.
+// Functions rather than constants because the theme is chosen at startup from
+// config/env/flag, and a `const` cannot be.
 
 /// Selected tabs, focused borders, the node's own identity.
 #[inline]
@@ -151,17 +146,11 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 
 /// The top row: the five groups, one of which is open (issue #395).
 ///
-/// The bands were introduced as a heavier rule inside a single row of twelve tabs.
-/// That marked where they began without reducing what had to be read — twelve titles
-/// were still twelve titles, and on an 80-column terminal the last of them was cut
-/// off, which is a page that cannot be clicked. So the groups became the primary row
-/// and their pages the secondary one: five things to read, and a second row that is
-/// never longer than five titles.
+/// Twelve tabs in one row was twelve titles to read, with the last cut off at 80
+/// columns. Groups became the primary row and their pages the secondary one.
 ///
-/// Labelled by the group, not by its first page. `OVERVIEW` happens to be its
-/// group's only member, but `INSTANCES` is not what `WORKLOAD` means — a group named
-/// after its first page would send somebody looking for CLIENTS past a label that
-/// appears to be about instances.
+/// Labelled by the group rather than by its first page: a group named `INSTANCES`
+/// would send somebody looking for CLIENTS past a label about instances.
 fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let titles = PageGroup::ALL
         .iter()
@@ -198,13 +187,11 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
 
 /// The second row: the pages inside the open group, and only those.
 ///
-/// Drawn at all only when the group holds more than one — a row containing a single
-/// already-selected title is a row that says nothing and costs the page below it a
-/// line. `render` decides that and gives this function no space when the answer is
-/// no, so the two cannot disagree about whether the row exists.
+/// Drawn only when the group holds more than one. `render` decides that and gives
+/// this function no space otherwise, so the two cannot disagree about whether the
+/// row exists.
 ///
-/// Borderless and indented under the group row rather than boxed: it is a
-/// continuation of the row above, and a second box would read as a second thing to
+/// Borderless rather than boxed: a second box would read as a second thing to
 /// navigate rather than as the inside of the first.
 fn draw_page_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let group = app.tabs.group();
@@ -325,19 +312,9 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     draw_ergo(frame, app, middle[0]);
     draw_health(frame, app, middle[1]);
 
-    // What this node is worth being, when it works, and what it costs to run.
-    //
-    // These three replaced the CPU and MEMORY history sparklines (issue #395). The
-    // sparklines drew the same two numbers HOST CAPACITY draws immediately above
-    // them, one gauge and one chart of the same quantity, and the history added
-    // nothing an operator acts on: a spike two minutes ago in a node they are
-    // watching right now is not a decision. The three panels here each summarise a
-    // page that is otherwise a whole tab away, which is what a front page is for.
-    //
-    // Each reads the same state its own page reads -- `app.earnings`,
-    // `app.schedule()`, `app.node_energy` -- through the same helpers. Nothing here
-    // fetches: a summary with its own data path is a summary that can disagree with
-    // the page it summarises, and the operator has no way to tell which is lying.
+    // Each panel summarises a page that is otherwise a whole tab away, reading the
+    // same state that page reads. Nothing here fetches: a summary with its own data
+    // path can disagree with the page it summarises.
     let summaries = Layout::horizontal([
         Constraint::Percentage(34),
         Constraint::Percentage(33),
@@ -369,12 +346,10 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
 
 /// The EARNINGS page in five lines: what came in, over the windows that fit.
 ///
-/// Summed across payment networks, which the page itself deliberately does not do --
-/// but for a different reason than the page's. The page keeps them apart because only
-/// one network can pay any given peer, so a total is money the operator cannot spend
-/// as one sum. Here the question is "is this node earning at all", which a total
-/// answers and a per-network breakdown obscures; the count of networks is named so the
-/// figure is not mistaken for a single balance, and the page is one keypress away.
+/// Summed across payment networks, which the page itself does not do: there the
+/// total would be money the operator cannot spend as one sum, but here the question
+/// is "is this node earning at all". The network count is named so the figure is not
+/// read as a single balance.
 fn earnings_summary_lines(app: &App) -> Vec<Line<'static>> {
     if app.earnings.is_empty() {
         return vec![
@@ -433,14 +408,9 @@ fn earnings_summary_lines(app: &App) -> Vec<Line<'static>> {
 
 /// The SCHEDULE page in four lines: open or closed now, and when that changes.
 ///
-/// "When does this flip" is the fact the page exists to answer and the one an
-/// operator wants without navigating anywhere -- a node that is about to stop taking
-/// work in twenty minutes is worth knowing about before it does.
-///
-/// Reads `schedule()`, which is the draft when one is being edited, so this agrees
-/// with what the SCHEDULE page is showing rather than with what is on disk. An
-/// unapplied edit is named, because a summary that quietly previewed an uncommitted
-/// change would be reporting a schedule the node is not enforcing.
+/// Reads `schedule()`, the draft when one is being edited, so this agrees with the
+/// SCHEDULE page rather than with disk. An unapplied edit is named: a summary that
+/// quietly previewed one would report a schedule the node is not enforcing.
 fn schedule_summary_lines(app: &App) -> Vec<Line<'static>> {
     let schedule = app.schedule();
     let now = app.now_minute;
@@ -509,12 +479,10 @@ fn schedule_summary_lines(app: &App) -> Vec<Line<'static>> {
 
 /// The ENERGY page in four lines: the draw, what it costs, and where it came from.
 ///
-/// The source is named on its own line because it is the difference between a reading
-/// and a guess, and the two are drawn identically otherwise. `model` is an estimate
-/// from two coefficients an operator may never have measured, and a `floor` is a
-/// partial reading that misses whatever the counter does not cover (a discrete GPU,
-/// most of the board) -- neither is the machine's consumption, and a card that showed
-/// the number without the qualifier would be presenting one as the other.
+/// The source gets its own line because it is the difference between a reading and a
+/// guess: `model` is an estimate from coefficients nobody may have measured, and a
+/// `floor` misses whatever the counter does not cover. Neither is the machine's
+/// consumption, and the number alone would present one as the other.
 fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
     let energy = &app.node_energy;
     if energy.watts.is_none() {
@@ -576,9 +544,8 @@ fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
 
 /// Minutes as something a person reads: `45m`, `2h 30m`, `8h`.
 ///
-/// Not `150 minutes`. The figures here are working hours and countdowns, and an
-/// operator deciding whether they have time before the node closes should not be
-/// doing division to find out.
+/// Not `150 minutes`: these are countdowns, and reading one should not need
+/// division.
 fn format_duration_minutes(minutes: u16) -> String {
     let hours = minutes / 60;
     let rest = minutes % 60;
@@ -589,18 +556,11 @@ fn format_duration_minutes(minutes: u16) -> String {
     }
 }
 
-/// How many rows the ACTION REQUIRED banner needs, and zero when there is nothing
-/// wrong.
+/// How many rows the ACTION REQUIRED banner needs; zero when nothing is wrong, so a
+/// healthy OVERVIEW is exactly the page it was without it.
 ///
-/// Zero rather than a collapsed block, so a healthy node's OVERVIEW is exactly the
-/// page it was before this existed. Space permanently reserved for a warning is
-/// space that stops carrying one.
-///
-/// `width` is needed because these messages wrap: the gateway alert carries a port,
-/// a path and a sentence, which is two lines on anything narrower than a very wide
-/// terminal. Measured rather than assumed — a fixed row per alert silently truncated
-/// the second one, which on a node with both problems meant the missing-Java line
-/// was the one that never got read.
+/// `width` is needed because these messages wrap. Measured rather than assumed: a
+/// fixed row per alert silently truncated the second one.
 fn alert_banner_height(app: &App, width: u16) -> u16 {
     if app.alerts.is_empty() {
         return 0;
@@ -616,13 +576,11 @@ fn alert_banner_height(app: &App, width: u16) -> u16 {
 /// One alert's message, split into the lines it will actually occupy.
 ///
 /// The single place that decides this, so `alert_banner_height` and
-/// `draw_alert_banner` cannot disagree. They already did once: the height reserved a
-/// row per alert while the paragraph wrapped freely, and the second alert -- the
-/// missing-JRE one -- was silently cut off on any terminal narrower than very wide.
+/// `draw_alert_banner` cannot disagree — they already did once, and the second
+/// alert was silently cut off.
 ///
-/// The badge occupies its full padded width on the first line, which is two columns
-/// more than the word inside it. Counting the trimmed form is how the last few
-/// characters of the message went missing even after the row count was fixed.
+/// The badge occupies its full padded width on the first line, two columns more
+/// than the word inside it.
 fn alert_banner_lines(summary: &str, width: u16) -> Vec<String> {
     let inner = width.saturating_sub(2).max(1) as usize;
     let badge = ACTION_REQUIRED_TAG.chars().count();
@@ -651,17 +609,12 @@ const ACTION_REQUIRED_TAG: &str = " ACTION REQUIRED ";
 
 /// The things the operator has to act on, at the top of the first page they see.
 ///
-/// Both of these conditions were already detected and already written down — in
-/// `storage/app.log`, and at the end of a `nodo serve` that systemd swallowed. A
-/// node whose gateway port is shut cannot serve, and a node with no Java cannot be
-/// paid, and from this screen both of them used to look like a node in perfect
-/// health. So they are drawn here: red, bordered, above everything, and gone the
-/// moment they are fixed.
+/// Both conditions were already detected and written to `storage/app.log`, which
+/// nobody opens until something is visibly broken. Drawn above everything, and gone
+/// the moment they are fixed.
 ///
-/// One line each, not the full instructions: the detail is long (a firewall command
-/// with a front-end-specific syntax, a scan of what else is rejecting on the input
-/// hook) and it already exists in `.gateway_notice` and in `nodo info`. A banner
-/// that filled half the page would be a banner the operator resents.
+/// One line each: the full instructions are long and already in `.gateway_notice`
+/// and `nodo info`.
 fn draw_alert_banner(frame: &mut Frame, app: &App, area: Rect) {
     // Wrapped here rather than by `Paragraph::wrap`, so the lines drawn are exactly
     // the lines `alert_banner_height` counted. Letting the widget wrap independently
@@ -836,11 +789,9 @@ fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, value: u64, color: Color) {
-    // The percentage carries its own background rather than only a foreground.
-    // `Gauge` swaps fg and bg for the cells the label covers, so a label that set
-    // only a colour lands on a bar of that same colour once the fill reaches it --
-    // which under `mono`, where the bar and the text are both white, is a number
-    // that disappears at exactly the moment it starts to matter.
+    // The percentage carries its own background. `Gauge` swaps fg and bg for the
+    // cells the label covers, so a foreground-only label lands on a bar of the same
+    // colour once the fill reaches it -- invisible under `mono`.
     let gauge = Gauge::default()
         .block(
             Block::default()
@@ -4037,11 +3988,9 @@ fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
 
 /// Break `text` into lines of at most `width` characters, on word boundaries.
 ///
-/// Characters, not bytes: these messages contain box-drawing rules and backticks in
-/// a terminal whose columns are characters, and splitting a multi-byte one produces
-/// a replacement glyph. A word longer than the whole width is left over-long rather
-/// than cut mid-token -- a truncated path or command is worse than a ragged line,
-/// because it is one the operator might paste.
+/// Characters, not bytes: splitting a multi-byte one produces a replacement glyph.
+/// An over-long word is left ragged rather than cut mid-token, because a truncated
+/// path is one the operator might paste.
 fn wrapped(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![text.to_string()];
@@ -4073,13 +4022,9 @@ fn wrapped(text: &str, width: usize) -> Vec<String> {
 
 fn draw_input_popup(frame: &mut Frame, app: &App) {
     let (mut content, hint) = edit_popup_body(app);
-    // Why a config edit may not stick, said before the value is typed rather than
-    // after it is silently reverted.
-    //
-    // Never the file: config.yaml is world-writable by install.sh. It is the
-    // *restart* the transaction owes a serving node, which is systemctl and
-    // therefore root -- so a key the node re-reads from disk (`energy.*`) owes no
-    // restart and shows no hint, and a key read once at start-up does.
+    // Why a config edit may not stick, said before the value is typed. Never the
+    // file: it is the *restart* the transaction owes a serving node, so a key the
+    // node re-reads from disk (`energy.*`) owes none and shows no hint.
     let root_hint = app.config_write_root_hint().filter(|_| {
         matches!(
             app.input_mode,
@@ -6561,14 +6506,11 @@ mod tests {
 
         /// Every page is reachable with the mouse across the two rows (issue #395).
         ///
-        /// Read off a real render rather than from the arithmetic, because the two
-        /// rows are laid out by two calls into the same `title_row_at` and one wrong
-        /// offset means a click landing on the neighbouring tab -- which is the kind
-        /// of thing nobody reports and everybody works around.
+        /// Read off a real render rather than from the arithmetic: one wrong offset
+        /// means a click landing on the neighbouring tab.
         ///
-        /// Each page takes two clicks now: its group on the top row, then the page
-        /// itself on the second. That is the trade the grouping makes, and it is
-        /// worth stating as a test rather than leaving implied.
+        /// Each page takes two clicks now — its group, then the page. That is the
+        /// trade the grouping makes, stated rather than implied.
         #[test]
         fn every_page_is_reachable_through_its_group() {
             for page in Page::ALL {
@@ -6628,11 +6570,9 @@ mod tests {
             }
         }
 
-        /// The top row shows the five GROUPS and not the twelve pages.
-        ///
-        /// This is the change Josemi asked for, stated as the property it has to
-        /// hold: an operator orienting themselves reads five labels, not twelve
-        /// titles of which the last was being cut off at 80 columns.
+        /// The top row shows the five GROUPS and not the twelve pages: an operator
+        /// orienting themselves reads five labels, not twelve titles of which the
+        /// last was cut off at 80 columns.
         #[test]
         fn the_top_row_shows_groups_rather_than_every_page() {
             let mut app = App::new();
@@ -6673,11 +6613,8 @@ mod tests {
             assert!(!row.contains("CLIENTS"), "{row}");
         }
 
-        /// A group with one page draws no second row at all.
-        ///
-        /// A row holding a single already-selected title says nothing, and it costs
-        /// the page below it a line -- which on a 24-row terminal is a line OVERVIEW
-        /// needs for its cards.
+        /// A group with one page draws no second row: a single already-selected
+        /// title says nothing and costs the page below it a line.
         #[test]
         fn a_single_page_group_spends_no_row_on_itself() {
             let mut app = App::new();
@@ -7264,11 +7201,9 @@ mod cell_preview {
 #[cfg(test)]
 /// The ACTION REQUIRED banner on OVERVIEW.
 ///
-/// The two conditions it carries — the gateway port needing a firewall rule, and
-/// a missing Java runtime — were detected already and written only to
-/// `storage/app.log`, which is a file nobody opens until something is visibly
-/// broken. A node that cannot serve and a node that cannot be paid both looked,
-/// from this screen, exactly like a healthy one.
+/// Both conditions were detected already and written only to `storage/app.log`. A
+/// node that cannot serve and one that cannot be paid both looked, from this screen,
+/// exactly like a healthy one.
 mod alert_banner {
     use super::{alert_banner_height, render};
     use crate::alerts::OperatorAlert;
@@ -7388,11 +7323,8 @@ mod alert_banner {
     }
 
     /// ...and it grows when the messages wrap, which they do on any ordinary
-    /// terminal: the gateway alert carries a port, a path and a sentence.
-    ///
-    /// A fixed row per alert sized the box for one line each and let the paragraph
-    /// produce more, so the second alert was silently cut off -- meaning a node with
-    /// both problems showed the operator only the first of them.
+    /// terminal. A fixed row per alert let the paragraph produce more than the box
+    /// was sized for, so a node with both problems showed only the first.
     #[test]
     fn a_wrapped_alert_gets_the_rows_it_actually_needs() {
         let mut app = App::new();
@@ -7458,20 +7390,12 @@ mod alert_banner {
 }
 
 
-/// Why a config edit may not stick, and why it looked like one key had been singled
-/// out for a sudo prompt.
+/// Why a config edit may not stick, said before the value is typed.
 ///
-/// It is not the key and it is not the file. `config.yaml` is `chmod a+w` by
-/// install.sh, `chown`ed to the installing user and rewritten `0o666` by
-/// `ConfigManager._atomic_write`; `yq -i` renames into the same directory. Every
-/// editor in this TUI -- the ENERGY page's kWh price, a price nudge, a CELL profile,
-/// a raw Config row -- goes through the one `write_config_value`/`write_config_values`
-/// funnel into the one `apply_config_change` transaction.
-///
-/// What needs root is the *restart* that transaction owes a **serving** node, which
-/// is `nodo daemon restart` -> `systemctl`, refused outright by `daemon_command`
-/// under a non-zero euid. So the same edit lands silently on a stopped node and is
-/// written-then-reverted on a running one. That is the asymmetry the operator saw.
+/// Never the file: config.yaml is world-writable by install.sh. What needs root is
+/// the *restart* the transaction owes a serving node (`nodo daemon restart` ->
+/// systemctl, refused under a non-zero euid), so a key the node re-reads from disk
+/// owes none and shows no hint.
 #[cfg(test)]
 mod config_write_root_hint {
     use super::render;
@@ -7554,12 +7478,9 @@ mod config_write_root_hint {
         assert!(!screen(&mut app).contains("needs root"));
     }
 
-    /// The kWh price needs nothing, on a serving node, as an unprivileged process.
-    ///
-    /// This is the fix for "energy configuration still requires sudo". The node
-    /// re-reads the `energy:` block from disk itself
-    /// (`src/manager/energy/monitor.py`), so the write is the entire change and
-    /// there is no restart to be refused.
+    /// The kWh price needs nothing, on a serving node, as an unprivileged process:
+    /// the node re-reads the `energy:` block itself, so the write is the whole
+    /// change and there is no restart to be refused.
     #[test]
     fn editing_the_kwh_price_on_a_serving_node_needs_no_root() {
         let mut app = app_editing_the_kwh_price("running");
@@ -7636,16 +7557,11 @@ mod two_level_tab_bar_preview {
 
 /// Themes reach the screen (issue #395).
 ///
-/// The property that matters is not that a `Theme` struct exists but that switching
-/// it changes what is drawn -- which is only true if every colour goes through it.
-/// Before this change `ui.rs` held five constants and seventy-odd bare `Color::`
-/// literals, so a "theme" would have recoloured a third of the interface and left the
-/// rest cyan.
+/// The property that matters is that switching a theme changes what is drawn, which
+/// is only true if every colour goes through it.
 ///
-/// These tests install a theme, render, and read the cells back. They are serialised
-/// by a mutex: the theme is process-global (it is a property of the run, not of a
-/// widget), and `cargo test` runs test functions on threads, so two of these racing
-/// would each see the other's palette.
+/// Serialised by a mutex: the theme is process-global and `cargo test` runs these on
+/// threads, so two racing would each see the other's palette.
 #[cfg(test)]
 mod themes {
     use super::render;
@@ -7710,12 +7626,10 @@ mod themes {
         counts
     }
 
-    /// The theme colours the *background*, not just the text on top of it.
+    /// The theme colours the *background*, not just the text on it: a single cell
+    /// left at `Reset` shows the terminal's own colour through the console.
     ///
-    /// No cell is left at `Color::Reset` on a page with no popup open: a single
-    /// uncovered cell shows the terminal's own colour through the console, which is
-    /// what a theme is for. `mono` is excluded by construction -- its background
-    /// *is* `Reset`, deliberately, and it is asserted separately below.
+    /// `mono` is excluded by construction and asserted separately below.
     #[test]
     fn every_cell_carries_the_themed_background() {
         for theme in [UBUNTU, DARK, LIGHT] {
@@ -7875,11 +7789,9 @@ mod themes {
 
     /// No theme paints text in the colour of the background under it.
     ///
-    /// The failure this catches is a foreground chosen against a dark terminal and
-    /// then left to sit on a light one -- which is how the light theme ends up with
-    /// rows that are simply not there. Now that the frame carries a background of
-    /// its own, the comparison is against that rather than against `Reset`, so it
-    /// holds for every theme instead of one.
+    /// Catches a foreground chosen against a dark terminal and left to sit on a
+    /// light one. Now that the frame has a background, this holds for every theme
+    /// rather than only where the comparison was against `Reset`.
     #[test]
     fn no_theme_paints_text_in_the_colour_behind_it() {
         for theme in [UBUNTU, DARK, LIGHT, MONO] {
@@ -8019,15 +7931,8 @@ mod overview_preview {
 /// The OVERVIEW summary panels that replaced the CPU and MEMORY history charts
 /// (issue #395).
 ///
-/// The sparklines drew the same two numbers HOST CAPACITY draws immediately above
-/// them -- one gauge and one chart of the same quantity -- and the history added
-/// nothing an operator acts on: a spike two minutes ago, on a node they are watching
-/// right now, is not a decision. The three panels each summarise a page that is
-/// otherwise a whole tab away, which is what a front page is for.
-///
-/// Each reads the same state its own page reads. A summary with its own data path is
-/// a summary that can disagree with the page it summarises, and the operator has no
-/// way to tell which one is lying.
+/// The sparklines charted the same two numbers HOST CAPACITY gauges directly above
+/// them. These three each summarise a page that is otherwise a whole tab away.
 #[cfg(test)]
 mod overview_summaries {
     use super::render;
@@ -8096,11 +8001,9 @@ mod overview_summaries {
         }
     }
 
-    /// The earnings figures are summed across payment networks -- which the EARNINGS
-    /// page deliberately does not do, for a different question. The page keeps them
-    /// apart because only one network can pay any given peer, so a total is money the
-    /// operator cannot spend as one sum. Here the question is "is this node earning
-    /// at all", which a total answers.
+    /// Summed across payment networks, which the EARNINGS page does not do: there a
+    /// total would be money the operator cannot spend as one sum, but the question
+    /// here is "is this node earning at all".
     #[test]
     fn earnings_are_totalled_across_payment_networks() {
         let screen = overview(&mut earning_node());
