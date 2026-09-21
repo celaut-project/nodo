@@ -62,9 +62,14 @@ impl Alerts {
     /// when the condition does. There is deliberately no acknowledge, dismiss or
     /// snooze: an alert that can be silenced without fixing anything is an alert
     /// that tells the next operator nothing.
-    pub fn poll(&mut self, config: &Path, config_document: Option<&serde_yaml::Value>) {
+    pub fn poll(
+        &mut self,
+        config: &Path,
+        config_document: Option<&serde_yaml::Value>,
+        serving: Option<bool>,
+    ) {
         let mut found = Vec::new();
-        if let Some(alert) = gateway_port_alert(config, config_document) {
+        if let Some(alert) = gateway_port_alert(config, config_document, serving) {
             found.push(alert);
         }
         if let Some(alert) = java_alert(config_document) {
@@ -143,17 +148,27 @@ fn assigned_port(document: Option<&serde_yaml::Value>) -> Option<u16> {
 
 /// The gateway port is not usable, and the node cannot serve until it is.
 ///
-/// Two distinguishable states with two different fixes, so they get two different
+/// The summary leads with the **consequence**, because what an operator has to
+/// take from one line on a banner is that this node is not doing its job -- the
+/// mechanism is the second half of the sentence.
+///
+/// `serving` separates the two ways that happens. A node that is *up* and
+/// unreachable is the one worth naming precisely: every local check answers, so
+/// from inside the host it is indistinguishable from a working node, and it is
+/// earning nothing the whole time. `None` claims only what it knows.
+///
+/// Two distinguishable causes with two different fixes, so they get two different
 /// messages: nothing assigned at all (one privileged start), and a port assigned
 /// with a pending notice beside it (a firewall command, which the notice itself
 /// spells out).
 ///
-/// Never probes. Proving reachability rebuilds a network namespace and is the
-/// daemon's job, once per boot; this reports the stored verdict, which is what
-/// makes it cheap enough to run on a tick.
+/// Never probes the network. Proving reachability rebuilds a network namespace and
+/// is the daemon's job, once per boot; this reports the stored verdict, which is
+/// what makes it cheap enough to run on a tick.
 fn gateway_port_alert(
     config: &Path,
     document: Option<&serde_yaml::Value>,
+    serving: Option<bool>,
 ) -> Option<OperatorAlert> {
     // A config that could not be read at all says nothing about the port. Claiming
     // "unassigned" because the YAML failed to parse would send the operator to fix
@@ -169,19 +184,33 @@ fn gateway_port_alert(
     match assigned_port(document) {
         None => Some(OperatorAlert {
             key: "gateway_port_unassigned",
-            summary: "The gateway port is not assigned, so this node cannot serve. \
-                      Run 'sudo nodo serve' once to pick and open one."
+            summary: "NOT SERVING - no gateway port is assigned, so no peer can reach \
+                      this node and it earns nothing. Assign and open one: sudo nodo serve"
                 .to_string(),
         }),
         Some(port) if notice.is_some() => Some(OperatorAlert {
             key: "gateway_port_firewall",
             summary: format!(
-                "TCP {port} must be open in the host firewall before this node can serve. \
-                 See {} for the exact command.",
+                "{} TCP {port} is not open in the host firewall, so peers cannot reach \
+                 this node. Open it: see {} for the exact command.",
+                unreachable_lead(serving),
                 gateway_notice_path(config).display()
             ),
         }),
         Some(_) => None,
+    }
+}
+
+/// The first words of the firewall alert: what is wrong, before why.
+///
+/// Three states rather than two. "The process is up and nobody outside can reach
+/// it" is the one an operator cannot discover from inside the host, and the one
+/// this banner exists for.
+fn unreachable_lead(serving: Option<bool>) -> &'static str {
+    match serving {
+        Some(true) => "RUNNING BUT UNREACHABLE -",
+        Some(false) => "NOT SERVING -",
+        None => "NOT REACHABLE FROM OUTSIDE -",
     }
 }
 
@@ -272,7 +301,7 @@ mod tests {
         let config = dir.join("config.yaml");
         let document = document("network:\n  GATEWAY_PORT: 52285\n");
 
-        assert_eq!(gateway_port_alert(&config, Some(&document)), None);
+        assert_eq!(gateway_port_alert(&config, Some(&document), None), None);
     }
 
     #[test]
@@ -282,13 +311,54 @@ mod tests {
         fs::write(dir.join(GATEWAY_NOTICE_FILE), "open TCP 52285").unwrap();
         let document = document("network:\n  GATEWAY_PORT: 52285\n");
 
-        let alert = gateway_port_alert(&config, Some(&document)).expect("an alert");
+        let alert = gateway_port_alert(&config, Some(&document), None).expect("an alert");
 
         assert_eq!(alert.key, "gateway_port_firewall");
         // The number, not just "the gateway port": an instruction the operator
         // cannot carry out without going and looking something up is half an
         // instruction.
         assert!(alert.summary.contains("52285"), "{}", alert.summary);
+    }
+
+    /// The consequence comes first. A line that opens with the mechanism is a line
+    /// an operator has to finish reading before learning that their node is down.
+    #[test]
+    fn the_firewall_alert_leads_with_the_consequence() {
+        let dir = scratch("leads");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(GATEWAY_NOTICE_FILE), "open TCP 52285").unwrap();
+        let document = document("network:\n  GATEWAY_PORT: 52285\n");
+
+        for (serving, lead) in [
+            (Some(false), "NOT SERVING -"),
+            (Some(true), "RUNNING BUT UNREACHABLE -"),
+            (None, "NOT REACHABLE FROM OUTSIDE -"),
+        ] {
+            let alert = gateway_port_alert(&config, Some(&document), serving).expect("an alert");
+
+            assert!(alert.summary.starts_with(lead), "{}", alert.summary);
+            assert!(
+                alert.summary.contains("peers cannot reach this node"),
+                "{}",
+                alert.summary
+            );
+        }
+    }
+
+    /// A node that is up and unreachable is the state no check inside the host can
+    /// see, so it is the one the wording has to distinguish.
+    #[test]
+    fn a_running_node_and_a_stopped_one_do_not_get_the_same_sentence() {
+        let dir = scratch("distinguish");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(GATEWAY_NOTICE_FILE), "open TCP 52285").unwrap();
+        let document = document("network:\n  GATEWAY_PORT: 52285\n");
+
+        let up = gateway_port_alert(&config, Some(&document), Some(true)).expect("an alert");
+        let down = gateway_port_alert(&config, Some(&document), Some(false)).expect("an alert");
+
+        assert_ne!(up.summary, down.summary);
+        assert_eq!(up.key, down.key);
     }
 
     /// The condition being fixed is the only thing that clears the banner, and the
@@ -300,11 +370,11 @@ mod tests {
         let notice = dir.join(GATEWAY_NOTICE_FILE);
         fs::write(&notice, "open TCP 52285").unwrap();
         let document = document("network:\n  GATEWAY_PORT: 52285\n");
-        assert!(gateway_port_alert(&config, Some(&document)).is_some());
+        assert!(gateway_port_alert(&config, Some(&document), None).is_some());
 
         fs::remove_file(&notice).unwrap();
 
-        assert_eq!(gateway_port_alert(&config, Some(&document)), None);
+        assert_eq!(gateway_port_alert(&config, Some(&document), None), None);
     }
 
     /// `auto` is not "a port that might be closed", it is "no port at all", and the
@@ -315,9 +385,10 @@ mod tests {
         let config = dir.join("config.yaml");
         let document = document("network:\n  GATEWAY_PORT: auto\n");
 
-        let alert = gateway_port_alert(&config, Some(&document)).expect("an alert");
+        let alert = gateway_port_alert(&config, Some(&document), None).expect("an alert");
 
         assert_eq!(alert.key, "gateway_port_unassigned");
+        assert!(alert.summary.starts_with("NOT SERVING -"), "{}", alert.summary);
         assert!(alert.summary.contains("sudo nodo serve"), "{}", alert.summary);
     }
 
@@ -328,7 +399,7 @@ mod tests {
         fs::write(dir.join(GATEWAY_NOTICE_FILE), "   \n").unwrap();
         let document = document("network:\n  GATEWAY_PORT: 52285\n");
 
-        assert_eq!(gateway_port_alert(&config, Some(&document)), None);
+        assert_eq!(gateway_port_alert(&config, Some(&document), None), None);
     }
 
     #[test]
@@ -336,7 +407,7 @@ mod tests {
         let dir = scratch("unreadable");
         let config = dir.join("config.yaml");
 
-        assert_eq!(gateway_port_alert(&config, None), None);
+        assert_eq!(gateway_port_alert(&config, None, None), None);
     }
 
     /// A port written as a quoted string is the same port. `yq` and PyYAML disagree
@@ -348,7 +419,7 @@ mod tests {
         let config = dir.join("config.yaml");
         let document = document("network:\n  GATEWAY_PORT: \"52285\"\n");
 
-        assert_eq!(gateway_port_alert(&config, Some(&document)), None);
+        assert_eq!(gateway_port_alert(&config, Some(&document), None), None);
     }
 
     #[test]
@@ -411,7 +482,11 @@ mod tests {
 
         // `auto` guarantees the port alert; whether Java is present depends on the
         // machine, so only the port's *position* is asserted.
-        alerts.poll(&config, Some(&document("network:\n  GATEWAY_PORT: auto\n")));
+        alerts.poll(
+            &config,
+            Some(&document("network:\n  GATEWAY_PORT: auto\n")),
+            None,
+        );
 
         assert_eq!(
             alerts.iter().next().map(|alert| alert.key),
@@ -427,10 +502,18 @@ mod tests {
         let dir = scratch("refix");
         let config = dir.join("config.yaml");
         let mut alerts = Alerts::default();
-        alerts.poll(&config, Some(&document("network:\n  GATEWAY_PORT: auto\n")));
+        alerts.poll(
+            &config,
+            Some(&document("network:\n  GATEWAY_PORT: auto\n")),
+            None,
+        );
         assert!(alerts.has("gateway_port_unassigned"));
 
-        alerts.poll(&config, Some(&document("network:\n  GATEWAY_PORT: 52285\n")));
+        alerts.poll(
+            &config,
+            Some(&document("network:\n  GATEWAY_PORT: 52285\n")),
+            None,
+        );
 
         assert!(!alerts.has("gateway_port_unassigned"));
     }
@@ -455,6 +538,19 @@ mod tests {
             assert!(
                 python.contains(&format!("key=\"{key}\"")),
                 "{key} is raised by the TUI but not by src/utils/operator_alerts.py"
+            );
+        }
+
+        // And the same three leads, so `nodo info` and the banner do not describe
+        // the same node in two different states.
+        for lead in [
+            "NOT SERVING -",
+            "RUNNING BUT UNREACHABLE -",
+            "NOT REACHABLE FROM OUTSIDE -",
+        ] {
+            assert!(
+                python.contains(lead),
+                "the TUI leads with {lead:?}, which src/utils/operator_alerts.py does not"
             );
         }
     }

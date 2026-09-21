@@ -91,6 +91,41 @@ class GatewayPortAlertTests(unittest.TestCase):
         # And the full instructions travel with it, for the places with room.
         self.assertIn("firewall-cmd", alert.detail)
 
+    def test_the_firewall_alert_leads_with_the_consequence(self):
+        """What is wrong first, why second.
+
+        A line that opens with the mechanism is a line the operator has to finish
+        reading before learning that their node is not serving anybody -- and in
+        `nodo info` it sits among a dozen ordinary `key: value` lines.
+        """
+        self._write_notice()
+        manager = _FakeConfigManager(self.config_path, 52285)
+
+        for serving, lead in (
+            (False, "NOT SERVING -"),
+            (True, "RUNNING BUT UNREACHABLE -"),
+            (None, "NOT REACHABLE FROM OUTSIDE -"),
+        ):
+            alert = operator_alerts.gateway_port_alert(manager, serving)
+
+            self.assertTrue(alert.summary.startswith(lead), alert.summary)
+            self.assertIn("peers cannot reach this node", alert.summary)
+
+    def test_a_running_node_and_a_stopped_one_do_not_get_the_same_sentence(self):
+        """Up-and-unreachable is the state nothing inside the host can see.
+
+        Every local check answers, the node looks healthy from the machine it runs
+        on, and it is earning nothing the entire time. It is worth its own words.
+        """
+        self._write_notice()
+        manager = _FakeConfigManager(self.config_path, 52285)
+
+        up = operator_alerts.gateway_port_alert(manager, serving=True)
+        down = operator_alerts.gateway_port_alert(manager, serving=False)
+
+        self.assertNotEqual(up.summary, down.summary)
+        self.assertEqual(up.key, down.key)
+
     def test_the_alert_clears_when_the_notice_is_removed(self):
         """Proving the port reachable deletes the file; the alert has to go with it.
 
@@ -119,6 +154,7 @@ class GatewayPortAlertTests(unittest.TestCase):
 
         self.assertIsNotNone(alert)
         self.assertEqual(alert.key, "gateway_port_unassigned")
+        self.assertTrue(alert.summary.startswith("NOT SERVING -"), alert.summary)
         self.assertIn("sudo nodo serve", alert.summary)
 
     def test_an_empty_notice_file_is_not_an_alert(self):
@@ -272,8 +308,27 @@ class NodoInfoWiringTests(unittest.TestCase):
         info_arm = source.split('case "info":', 1)[1].split('case "logs":', 1)[0]
 
         self.assertIn("operator_alerts", info_arm)
-        self.assertIn("collect_alerts()", info_arm)
+        self.assertIn("collect_alerts(serving=serving)", info_arm)
         self.assertIn("as_line()", info_arm)
+
+    def test_info_reuses_the_serving_check_it_already_made(self):
+        """The alert says whether the node is down or up-and-unreachable.
+
+        `nodo info` prints that status on its first line, so the answer is already
+        in hand: asking `is_serving()` a second time would put another socket
+        connect on a command whose alert block is meant to cost two `stat` calls.
+        """
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "nodo.py"), "r") as handle:
+            source = handle.read()
+
+        info_arm = source.split('case "info":', 1)[1].split('case "logs":', 1)[0]
+
+        self.assertEqual(info_arm.count("is_serving()"), 1)
+        self.assertLess(
+            info_arm.index("serving = is_serving()"),
+            info_arm.index("collect_alerts(serving=serving)"),
+        )
 
 
 if __name__ == "__main__":
