@@ -90,6 +90,13 @@ pub enum Page {
 /// that edits something had to read every title, because nothing said where the
 /// read-only pages stopped and the editors began. Four bands, each answering one
 /// question, and the divider between them is what the eye lands on (issue #395).
+///
+/// The bands were first drawn as a heavier rule inside a single row. That marked the
+/// boundaries without reducing what had to be read: twelve titles were still twelve
+/// titles on screen at once, and on an 80-column terminal the last of them was cut
+/// off entirely. So the bands are now the *primary* row and the pages inside the
+/// active one are the second — five things to read instead of twelve, and the second
+/// row is never longer than five titles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageGroup {
     /// Where this node stands right now.
@@ -102,6 +109,59 @@ pub enum PageGroup {
     Record,
     /// The pages that change the node rather than describe it.
     Settings,
+}
+
+impl PageGroup {
+    /// Group order, and the single source of truth for a group's index.
+    ///
+    /// Derived from [`Page::ALL`] in the sense that it must agree with it — pinned by
+    /// a test — but written out, because the top row's order is a fact about the top
+    /// row and a reader should be able to see it without folding twelve pages down
+    /// into five.
+    pub const ALL: [PageGroup; 5] = [
+        PageGroup::Status,
+        PageGroup::Activity,
+        PageGroup::Money,
+        PageGroup::Record,
+        PageGroup::Settings,
+    ];
+
+    /// The short name on the group row.
+    ///
+    /// Not the name of the first page inside it: `OVERVIEW` happens to be its
+    /// group's only page, but `INSTANCES` is not what `WORKLOAD` means, and a group
+    /// labelled by its first member would send an operator looking for CLIENTS into
+    /// a group that appears to be about instances.
+    pub fn title(self) -> &'static str {
+        match self {
+            PageGroup::Status => "OVERVIEW",
+            PageGroup::Activity => "WORKLOAD",
+            PageGroup::Money => "EARNINGS",
+            PageGroup::Record => "LOGS",
+            PageGroup::Settings => "SETTINGS",
+        }
+    }
+
+    /// The pages in this group, in [`Page::ALL`] order.
+    ///
+    /// Filtered from `Page::ALL` rather than listed again: one place decides what is
+    /// in a group and where it sits, so a page moved there cannot end up in one
+    /// order on the second row and another in the hit test.
+    pub fn pages(self) -> Vec<Page> {
+        Page::ALL
+            .iter()
+            .copied()
+            .filter(|page| page.group() == self)
+            .collect()
+    }
+
+    /// Position in [`PageGroup::ALL`].
+    pub fn index(self) -> usize {
+        PageGroup::ALL
+            .iter()
+            .position(|group| *group == self)
+            .unwrap_or(0)
+    }
 }
 
 impl Page {
@@ -182,54 +242,51 @@ impl Page {
 /// 140-column terminal once the row grew to twelve tabs and four group rules
 /// (issue #395). A tab bar that does not fit is a page that cannot be clicked.
 pub const TAB_DIVIDER: &str = "│";
-/// The heavier rule that marks where one group of tabs ends and the next begins,
-/// prepended to the first title of each new group *on top of* the ordinary divider.
+/// Which of a row of `titles` covers column `x`, given the row's own `Rect`.
 ///
-/// A prefix rather than a second `Tabs` widget, or a second row: the selection, the
-/// highlight and the mouse hit test all key off one index into [`Page::ALL`], and
-/// splitting the row would mean keeping three copies of each in step for what is a
-/// purely visual fact about an unchanged row (issue #395).
-pub const TAB_GROUP_MARK: &str = "┃ ";
-
-/// The group rule that precedes the tab at `index`, or `None` when it continues the
-/// group before it (and for the very first tab, which begins the row).
+/// Retraces what `Tabs` lays out rather than asking it — the widget keeps no hit
+/// map. Each title sits in one space of padding, the title, one space of padding,
+/// and tabs are joined by [`TAB_DIVIDER`]. Measured in characters, not bytes.
 ///
-/// One function so the renderer and the hit test cannot disagree: `draw_tabs`
-/// prepends exactly what this returns, and `tab_at` advances by exactly its width.
-/// A boundary drawn in one and not counted in the other is a click that lands on the
-/// neighbouring page, which is the kind of bug nobody reports and everybody works
-/// around.
-pub fn tab_group_mark(index: usize) -> Option<&'static str> {
-    let page = *Page::ALL.get(index)?;
-    let previous = *Page::ALL.get(index.checked_sub(1)?)?;
-    (previous.group() != page.group()).then_some(TAB_GROUP_MARK)
-}
-
-/// Which tab covers column `x`, given the bordered block the tab bar was drawn in.
-///
-/// Retraces what `Tabs` lays out rather than asking it: the widget keeps no hit map.
-/// Each title sits in `padding_left + title + padding_right` (one space each side, the
-/// default this TUI keeps), tabs are joined by [`TAB_DIVIDER`], and the first tab of
-/// each group carries [`TAB_GROUP_MARK`] inside its own cell (issue #395). Measured in
-/// characters, not bytes: the box-drawing rules are multi-byte.
-fn tab_at(x: u16, area: Rect) -> Option<usize> {
+/// One function for both rows so the group row and the page row cannot drift into
+/// two slightly different pieces of arithmetic, which is the kind of bug that shows
+/// up as a click landing on the neighbouring tab and gets worked around rather than
+/// reported. `x_offset` is where the titles begin: the bordered group row starts one
+/// column in, the borderless page row starts at its own left edge.
+fn title_row_at(x: u16, area: Rect, titles: &[&str], x_offset: u16) -> Option<usize> {
     let divider_width = TAB_DIVIDER.chars().count() as u16;
-    let mut cursor = area.x + 1; // the block's left border
-    for (index, page) in Page::ALL.iter().enumerate() {
+    let mut cursor = area.x + x_offset;
+    for (index, title) in titles.iter().enumerate() {
         if index > 0 {
             cursor += divider_width;
         }
-        let mark = tab_group_mark(index)
-            .map(|mark| mark.chars().count() as u16)
-            .unwrap_or(0);
-        // one space of padding each side, plus the group rule when this tab opens one
-        let width = mark + page.title().chars().count() as u16 + 2;
+        let width = title.chars().count() as u16 + 2;
         if x >= cursor && x < cursor + width {
             return Some(index);
         }
         cursor += width;
     }
     None
+}
+
+/// Which group the click at column `x` on the group row landed on.
+pub fn group_at(x: u16, area: Rect) -> Option<PageGroup> {
+    let titles: Vec<&str> = PageGroup::ALL.iter().map(|group| group.title()).collect();
+    title_row_at(x, area, &titles, 1).map(|index| PageGroup::ALL[index])
+}
+
+/// Which page of `group` the click at column `x` on the page row landed on.
+///
+/// `None` for a group with one page, which draws no page row at all — a row
+/// containing a single title that is already selected is a row that only costs the
+/// pages below it a line.
+pub fn page_at(x: u16, area: Rect, group: PageGroup) -> Option<Page> {
+    let pages = group.pages();
+    if pages.len() <= 1 {
+        return None;
+    }
+    let titles: Vec<&str> = pages.iter().map(|page| page.title()).collect();
+    title_row_at(x, area, &titles, 0).map(|index| pages[index])
 }
 
 /// How many rows below the first visible one a click at terminal row `y` lands, for a
@@ -1971,6 +2028,63 @@ impl TabsState {
         Page::ALL[self.index]
     }
 
+    /// The group the current page is in, which is the group highlighted on the top
+    /// row. Derived rather than stored: two pieces of state that can disagree about
+    /// which group is open is a bug waiting for a page to be moved.
+    pub fn group(&self) -> PageGroup {
+        self.page().group()
+    }
+
+    /// Move to the group `delta` steps away, wrapping, and land on its first page.
+    ///
+    /// Its *first* page rather than the one last visited in it. A remembered
+    /// position would mean `]` twice and `[` twice does not return you to where you
+    /// started, which is the one property that makes a wrapping row navigable
+    /// without looking. The first page of each group is also the one its label
+    /// promises: WORKLOAD opens on INSTANCES, SETTINGS on CELL.
+    pub fn cycle_group(&mut self, delta: isize) {
+        let groups = PageGroup::ALL.len() as isize;
+        let current = self.group().index() as isize;
+        let next = (current + delta).rem_euclid(groups) as usize;
+        self.select_group(PageGroup::ALL[next]);
+    }
+
+    /// Open `group` on its first page. A no-op if it is already the open group, so
+    /// pressing a group's own number key does not throw away the page you are on.
+    pub fn select_group(&mut self, group: PageGroup) {
+        if self.group() == group {
+            return;
+        }
+        if let Some(index) = Page::ALL.iter().position(|page| page.group() == group) {
+            self.index = index;
+        }
+    }
+
+    /// Move `delta` tabs within the current group, wrapping inside it.
+    ///
+    /// Within, not across. Tab used to walk all twelve pages, which on a row of
+    /// twelve was the only way to get anywhere; with the groups on their own row it
+    /// would mean Tab silently changing which group is highlighted, so the two axes
+    /// of navigation are kept on two sets of keys.
+    pub fn cycle_tab(&mut self, delta: isize) {
+        let pages = self.group().pages();
+        if pages.len() <= 1 {
+            return;
+        }
+        let current = pages
+            .iter()
+            .position(|page| *page == self.page())
+            .unwrap_or(0) as isize;
+        let next = (current + delta).rem_euclid(pages.len() as isize) as usize;
+        self.select_page(pages[next]);
+    }
+
+    pub fn select_page(&mut self, page: Page) {
+        if let Some(index) = Page::ALL.iter().position(|candidate| *candidate == page) {
+            self.index = index;
+        }
+    }
+
     pub fn next(&mut self) {
         self.index = (self.index + 1) % Page::ALL.len();
     }
@@ -2233,6 +2347,10 @@ pub struct App {
     /// `list_area` stays empty on pages with no table (Overview, Logs, Config — the
     /// config tree tracks its own rendered area).
     pub tabs_area: Rect,
+    /// Where the second row — the pages inside the open group — was last drawn, so a
+    /// click on a page title can be mapped back to it. `Rect::ZERO` for a group with
+    /// one page, which draws no second row at all.
+    pub page_tabs_area: Rect,
     pub list_area: Rect,
     pub sys: System,
     /// Previous sweep's per-instance counters, keyed by instance id, so CPU and
@@ -2325,6 +2443,7 @@ impl Default for App {
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             tabs_area: Rect::ZERO,
+            page_tabs_area: Rect::ZERO,
             list_area: Rect::ZERO,
             sys: System::new_all(),
             instance_counters: HashMap::new(),
@@ -2456,12 +2575,38 @@ impl App {
         self.tabs.page()
     }
 
+    /// Tab: the next page **within the open group**, wrapping inside it.
+    ///
+    /// Within, not across. Tab used to walk all twelve pages, because on one row of
+    /// twelve that was the only way to reach anything. With the groups on their own
+    /// row, a Tab that crossed a boundary would silently re-highlight the top row
+    /// while the operator was cycling the bottom one — so the two axes get two sets
+    /// of keys, and `[`/`]` move between groups.
     pub fn next_page(&mut self) {
-        self.tabs.next();
+        self.tabs.cycle_tab(1);
     }
 
     pub fn previous_page(&mut self) {
-        self.tabs.previous();
+        self.tabs.cycle_tab(-1);
+    }
+
+    /// `]` / `[`: the next or previous group, landing on its first page.
+    pub fn next_group(&mut self) {
+        self.tabs.cycle_group(1);
+    }
+
+    pub fn previous_group(&mut self) {
+        self.tabs.cycle_group(-1);
+    }
+
+    /// `1`..`5`: jump straight to a group.
+    ///
+    /// One-based, matching the labels as counted on screen rather than as indexed in
+    /// an array — nobody reading a row of five looks for a zeroth.
+    pub fn select_group_by_number(&mut self, number: usize) {
+        if let Some(group) = PageGroup::ALL.get(number.wrapping_sub(1)) {
+            self.tabs.select_group(*group);
+        }
     }
 
     /// →: enter the selected configuration branch (page-local, not page navigation —
@@ -2570,9 +2715,20 @@ impl App {
     /// is always the frame the user was looking at when they clicked.
     pub fn click_at(&mut self, column: u16, row: u16) {
         let position = Position::new(column, row);
+        // Two rows, two hit tests, in the order they are drawn: a click on a group
+        // label opens that group, a click on a page title inside the open group goes
+        // to that page. The page row is checked first because it is the narrower
+        // target and sits below the bordered group row, so a click can only be in
+        // one of them.
+        if self.page_tabs_area.contains(position) {
+            if let Some(page) = page_at(column, self.page_tabs_area, self.tabs.group()) {
+                self.tabs.select_page(page);
+            }
+            return;
+        }
         if self.tabs_area.contains(position) {
-            if let Some(index) = tab_at(column, self.tabs_area) {
-                self.tabs.index = index;
+            if let Some(group) = group_at(column, self.tabs_area) {
+                self.tabs.select_group(group);
             }
             return;
         }
@@ -6250,75 +6406,92 @@ mod tests {
     /// pinned here: a wrong offset silently selects the neighbouring tab or row.
     mod mouse_geometry {
         use super::super::{
-            tab_at, tab_group_mark, visible_row_at, Page, Rect, TabsState, TAB_DIVIDER,
+            group_at, page_at, visible_row_at, Page, PageGroup, Rect, TAB_DIVIDER,
         };
 
-        /// A bar wide enough for every tab, with a column of slack past the last one.
+        /// A row wide enough for every title in `titles`, with a column of slack past
+        /// the last one.
         ///
-        /// Derived from the page list rather than written down, so adding a page cannot
-        /// quietly turn "the column past the last tab" into "inside the last tab" and
-        /// leave both tests below passing for the wrong reason.
-        fn bar() -> Rect {
-            let titles: usize = (0..Page::ALL.len()).map(tab_cell_width).sum();
-            let dividers = TAB_DIVIDER.chars().count() * (Page::ALL.len() - 1);
+        /// Derived from the titles rather than written down, so adding a group or a
+        /// page cannot quietly turn "the column past the last tab" into "inside the
+        /// last tab" and leave the tests below passing for the wrong reason.
+        fn row(titles: &[&str], x_offset: u16) -> Rect {
+            let widths: usize = titles.iter().map(|title| title.chars().count() + 2).sum();
+            let dividers = TAB_DIVIDER.chars().count() * titles.len().saturating_sub(1);
             Rect {
                 x: 0,
                 y: 0,
-                width: (1 + titles + dividers + 1) as u16, // left border, tabs, slack
+                width: (x_offset as usize + widths + dividers + 1) as u16,
                 height: 3,
             }
         }
 
-        /// How wide the tab at `index` is, group rule included: a space each side of
-        /// the title, plus the heavier rule the first tab of a band carries inside its
-        /// own cell (issue #395).
-        fn tab_cell_width(index: usize) -> usize {
-            Page::ALL[index].title().chars().count()
-                + 2
-                + tab_group_mark(index)
-                    .map(|mark| mark.chars().count())
-                    .unwrap_or(0)
+        fn group_titles() -> Vec<&'static str> {
+            PageGroup::ALL.iter().map(|group| group.title()).collect()
         }
 
+        /// Every group label on the top row maps to its own group, with each label
+        /// claiming exactly its own width. One wrong offset and a click opens the
+        /// neighbouring group.
         #[test]
-        fn every_tab_title_maps_to_its_own_page() {
-            // Walk the bar cell by cell and collect which tab each column resolves to;
-            // every page must claim its title, in order, with gaps only on dividers.
-            let bar = bar();
-            let claimed: Vec<usize> = (bar.x..bar.x + bar.width)
-                .filter_map(|x| tab_at(x, bar))
+        fn every_group_label_maps_to_its_own_group() {
+            let titles = group_titles();
+            let bar = row(&titles, 1);
+            let claimed: Vec<PageGroup> = (bar.x..bar.x + bar.width)
+                .filter_map(|x| group_at(x, bar))
                 .collect();
-            let mut seen: Vec<usize> = claimed.clone();
+            let mut seen = claimed.clone();
             seen.dedup();
-            assert_eq!(seen, (0..Page::ALL.len()).collect::<Vec<_>>());
-            for (index, page) in Page::ALL.iter().enumerate() {
-                let width = claimed.iter().filter(|claim| **claim == index).count();
-                assert_eq!(width, tab_cell_width(index), "{page:?}");
+            assert_eq!(seen, PageGroup::ALL.to_vec());
+
+            for (index, group) in PageGroup::ALL.iter().enumerate() {
+                let width = claimed.iter().filter(|claim| *claim == group).count();
+                assert_eq!(
+                    width,
+                    titles[index].chars().count() + 2,
+                    "{group:?} claims the wrong number of columns"
+                );
             }
         }
 
-        /// The bands are where the issue says they are, and the rule is drawn at each
-        /// boundary and nowhere else (issue #395). Pinned because `tab_at` and
-        /// `draw_tabs` both widen a cell exactly where `tab_group_mark` says to, so a
-        /// boundary that moved without both being re-read is a click that lands on the
-        /// wrong page.
+        /// And the same for the second row, for every group that draws one.
         #[test]
-        fn the_group_rule_is_drawn_at_every_band_boundary_and_nowhere_else() {
-            let marked: Vec<Page> = Page::ALL
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| tab_group_mark(*index).is_some())
-                .map(|(_, page)| *page)
-                .collect();
-            assert_eq!(
-                marked,
-                vec![Page::Instances, Page::Earnings, Page::Logs, Page::Cell],
-                "the bands are Overview | activity | Earnings | Logs | editors"
-            );
-            assert!(
-                tab_group_mark(0).is_none(),
-                "the first tab opens the row, it does not follow a band"
-            );
+        fn every_page_title_maps_to_its_own_page() {
+            for group in PageGroup::ALL {
+                let pages = group.pages();
+                if pages.len() <= 1 {
+                    continue;
+                }
+                let titles: Vec<&str> = pages.iter().map(|page| page.title()).collect();
+                let bar = row(&titles, 0);
+                let claimed: Vec<Page> = (bar.x..bar.x + bar.width)
+                    .filter_map(|x| page_at(x, bar, group))
+                    .collect();
+                let mut seen = claimed.clone();
+                seen.dedup();
+                assert_eq!(seen, pages, "{group:?}");
+
+                for (index, page) in pages.iter().enumerate() {
+                    let width = claimed.iter().filter(|claim| *claim == page).count();
+                    assert_eq!(
+                        width,
+                        titles[index].chars().count() + 2,
+                        "{page:?} claims the wrong number of columns"
+                    );
+                }
+            }
+        }
+
+        /// A one-page group draws no second row, so nothing on that row can be hit.
+        /// Returning a page here would mean a click on the page BELOW the tab bar
+        /// silently changing tabs.
+        #[test]
+        fn a_single_page_group_answers_no_click_on_the_second_row() {
+            let bar = row(&["OVERVIEW"], 0);
+
+            for x in bar.x..bar.x + bar.width {
+                assert_eq!(page_at(x, bar, PageGroup::Status), None, "column {x}");
+            }
         }
 
         /// The order the issue asks for, read off the single source of truth.
@@ -6343,32 +6516,15 @@ mod tests {
             );
         }
 
-        /// Tab cycling walks `Page::ALL` and wraps, whatever its length is. Pinned
-        /// because the array grew by one for ENERGY and a hard-coded count would have
-        /// left the last tab unreachable with the keyboard.
         #[test]
-        fn cycling_reaches_every_page_and_wraps() {
-            let mut tabs = TabsState { index: 0 };
-            let mut visited = vec![tabs.page()];
-            for _ in 1..Page::ALL.len() {
-                tabs.next();
-                visited.push(tabs.page());
-            }
-            assert_eq!(visited, Page::ALL.to_vec());
-            tabs.next();
-            assert_eq!(tabs.page(), Page::Overview, "forward wraps");
-            tabs.previous();
-            assert_eq!(tabs.page(), Page::Config, "backward wraps");
-        }
-
-        #[test]
-        fn clicks_outside_any_tab_select_nothing() {
-            let bar = bar();
-            assert_eq!(tab_at(bar.x, bar), None, "left border");
+        fn clicks_outside_any_label_select_nothing() {
+            let titles = group_titles();
+            let bar = row(&titles, 1);
+            assert_eq!(group_at(bar.x, bar), None, "left border");
             assert_eq!(
-                tab_at(bar.x + bar.width - 1, bar),
+                group_at(bar.x + bar.width - 1, bar),
                 None,
-                "past the last tab"
+                "past the last label"
             );
         }
 
@@ -9489,6 +9645,217 @@ energy:
             app.open_energy_editor();
 
             assert_eq!(app.input_mode, InputMode::Normal);
+        }
+    }
+}
+
+
+/// Two-level navigation: five groups on the top row, the open group's pages on the
+/// second (issue #395).
+///
+/// The bands were introduced as a heavier rule inside one row of twelve tabs. That
+/// marked where they began without reducing what had to be read -- twelve titles
+/// were still twelve titles on screen at once, and at 80 columns the last of them
+/// was cut off, which is a page that cannot be clicked. The groups are now the
+/// primary row.
+#[cfg(test)]
+mod tab_groups {
+    use super::{Page, PageGroup, TabsState};
+
+    fn tabs_on(page: Page) -> TabsState {
+        TabsState {
+            index: Page::ALL.iter().position(|p| *p == page).unwrap(),
+        }
+    }
+
+    /// The one invariant tying the two rows together: `PageGroup::ALL` is the order
+    /// the groups are actually in, as `Page::ALL` lays them out. A group added to
+    /// one and not the other would be a label with nothing behind it, or a set of
+    /// pages with no way in.
+    #[test]
+    fn the_group_order_matches_the_page_order() {
+        let mut from_pages: Vec<PageGroup> = Vec::new();
+        for page in Page::ALL {
+            if from_pages.last() != Some(&page.group()) {
+                from_pages.push(page.group());
+            }
+        }
+
+        assert_eq!(from_pages, PageGroup::ALL.to_vec());
+    }
+
+    /// Groups do not interleave. If they did, "the pages of this group" would not be
+    /// a contiguous run of the tab bar, and the second row would show pages in an
+    /// order the first row does not imply.
+    #[test]
+    fn each_group_is_one_contiguous_run_of_pages() {
+        let mut seen: Vec<PageGroup> = Vec::new();
+        for page in Page::ALL {
+            if seen.last() != Some(&page.group()) {
+                assert!(
+                    !seen.contains(&page.group()),
+                    "{:?} appears in two separate runs of Page::ALL",
+                    page.group()
+                );
+                seen.push(page.group());
+            }
+        }
+    }
+
+    /// Every group has at least one page, so every label on the top row opens
+    /// something. A label that opened nothing would be a dead end an operator would
+    /// keep trying.
+    #[test]
+    fn every_group_holds_at_least_one_page() {
+        for group in PageGroup::ALL {
+            assert!(!group.pages().is_empty(), "{:?} has no pages", group);
+        }
+    }
+
+    /// Tab cycles WITHIN the open group and wraps inside it.
+    ///
+    /// Within, not across: with the groups on their own row, a Tab that crossed a
+    /// boundary would silently re-highlight the top row while the operator was
+    /// cycling the bottom one.
+    #[test]
+    fn tab_cycles_inside_the_group_and_wraps_there() {
+        let mut tabs = tabs_on(Page::Instances);
+        let pages = PageGroup::Activity.pages();
+
+        for expected in pages.iter().skip(1) {
+            tabs.cycle_tab(1);
+            assert_eq!(tabs.page(), *expected);
+        }
+        // Past the last page of the group is the first page of the same group, not
+        // the first page of the next one.
+        tabs.cycle_tab(1);
+        assert_eq!(tabs.page(), pages[0]);
+        assert_eq!(tabs.group(), PageGroup::Activity);
+    }
+
+    #[test]
+    fn shift_tab_wraps_backwards_inside_the_group() {
+        let mut tabs = tabs_on(Page::Instances);
+        let pages = PageGroup::Activity.pages();
+
+        tabs.cycle_tab(-1);
+
+        assert_eq!(tabs.page(), *pages.last().unwrap());
+    }
+
+    /// Tab on a one-page group does nothing, rather than escaping to another group.
+    /// A key that jumps somewhere unrelated because there was nowhere to go is worse
+    /// than a key that does nothing.
+    #[test]
+    fn tab_in_a_single_page_group_stays_put() {
+        let mut tabs = tabs_on(Page::Overview);
+
+        tabs.cycle_tab(1);
+        tabs.cycle_tab(-1);
+
+        assert_eq!(tabs.page(), Page::Overview);
+    }
+
+    /// `]` moves to the next group and lands on its FIRST page -- not on the page
+    /// last visited there.
+    ///
+    /// A remembered position would mean `]` twice then `[` twice does not return you
+    /// to where you started, which is the one property that makes a wrapping row
+    /// navigable without looking at it.
+    #[test]
+    fn the_group_keys_land_on_the_first_page_of_each_group() {
+        let mut tabs = tabs_on(Page::Overview);
+
+        tabs.cycle_group(1);
+        assert_eq!(tabs.page(), PageGroup::Activity.pages()[0]);
+
+        tabs.cycle_group(1);
+        assert_eq!(tabs.page(), PageGroup::Money.pages()[0]);
+    }
+
+    #[test]
+    fn the_group_keys_wrap_in_both_directions() {
+        let mut tabs = tabs_on(Page::Overview);
+
+        tabs.cycle_group(-1);
+        assert_eq!(tabs.group(), *PageGroup::ALL.last().unwrap());
+
+        tabs.cycle_group(1);
+        assert_eq!(tabs.group(), PageGroup::ALL[0]);
+    }
+
+    /// The round trip. Stated on its own because it is the reason the group keys do
+    /// not remember a position, and a future change that adds that memory would
+    /// break exactly this and nothing else.
+    #[test]
+    fn stepping_forward_and_back_returns_to_the_same_page() {
+        for start in Page::ALL {
+            let mut tabs = tabs_on(start);
+            let group = tabs.group();
+
+            tabs.cycle_group(1);
+            tabs.cycle_group(-1);
+
+            assert_eq!(tabs.group(), group);
+            assert_eq!(tabs.page(), group.pages()[0]);
+        }
+    }
+
+    /// Re-selecting the group you are already in does not throw away the page you
+    /// are on. Pressing a group's own number key is something an operator does while
+    /// orienting themselves, and losing their place for it would be a punishment.
+    #[test]
+    fn reopening_the_current_group_keeps_the_current_page() {
+        let mut tabs = tabs_on(Page::Clients);
+
+        tabs.select_group(PageGroup::Activity);
+
+        assert_eq!(tabs.page(), Page::Clients);
+    }
+
+    /// The digits are one-based, matching how the labels are counted on screen.
+    /// Nobody reading a row of five looks for a zeroth.
+    #[test]
+    fn the_number_keys_are_one_based_and_ignore_anything_out_of_range() {
+        let mut app = super::App::default();
+
+        app.select_group_by_number(1);
+        assert_eq!(app.tabs.group(), PageGroup::ALL[0]);
+
+        app.select_group_by_number(5);
+        assert_eq!(app.tabs.group(), PageGroup::ALL[4]);
+
+        // Out of range leaves things alone rather than clamping to an end: a
+        // mistyped key that silently jumped somewhere is worse than one that did
+        // nothing.
+        let before = app.page();
+        app.select_group_by_number(0);
+        app.select_group_by_number(9);
+        assert_eq!(app.page(), before);
+    }
+
+    /// Every page is reachable by keyboard from every other page, in at most a
+    /// group step plus a few tabs. The property the whole scheme exists to provide.
+    #[test]
+    fn every_page_is_reachable_from_every_other_page() {
+        for start in Page::ALL {
+            for target in Page::ALL {
+                let mut tabs = tabs_on(start);
+                tabs.select_group(target.group());
+                for _ in 0..target.group().pages().len() {
+                    if tabs.page() == target {
+                        break;
+                    }
+                    tabs.cycle_tab(1);
+                }
+                assert_eq!(
+                    tabs.page(),
+                    target,
+                    "could not reach {:?} from {:?}",
+                    target,
+                    start
+                );
+            }
         }
     }
 }
