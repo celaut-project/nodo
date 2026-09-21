@@ -2181,6 +2181,15 @@ pub struct App {
     pub node_info: NodeInfo,
     /// Latest energy sample (issue #258). Missing until the node has written a row.
     pub node_energy: NodeEnergy,
+    /// What the operator has to act on: the gateway port's firewall rule, and a
+    /// missing Java runtime.
+    ///
+    /// Both were detected already and announced only to `app.log`, which is a file
+    /// nobody opens until something is visibly broken — so a node that cannot serve
+    /// and a node that cannot be paid both looked, from this screen, exactly like a
+    /// healthy one. Polled on the data tick rather than computed in `draw`, because
+    /// drawing must not touch the filesystem.
+    pub alerts: crate::alerts::Alerts,
     pub paths: Paths,
     pub input_mode: InputMode,
     pub input: String,
@@ -2281,6 +2290,7 @@ impl Default for App {
                 ..NodeInfo::default()
             },
             node_energy: NodeEnergy::default(),
+            alerts: crate::alerts::Alerts::default(),
             paths,
             input_mode: InputMode::Normal,
             input: String::new(),
@@ -4328,6 +4338,12 @@ impl App {
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
+        // Re-answered from disk every tick rather than remembered: an alert that
+        // outlived its condition would be one the operator learns to ignore, and
+        // there is deliberately no way to dismiss one except by fixing it. Uses the
+        // `config_document` just re-read above, so this costs two `stat` calls.
+        self.alerts
+            .poll(&self.paths.config, self.config_document.as_ref());
         // After the lists, since a selection that vanished takes its detail with it.
         self.load_selection_details();
         self.node_logs = read_last_lines(&self.paths.log, 250).unwrap_or_default();
