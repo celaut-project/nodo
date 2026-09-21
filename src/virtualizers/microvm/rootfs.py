@@ -297,10 +297,9 @@ def build_network_resolution(
     # unexplained rejection this policy exists to replace.
     enforce_network_policy(networks=networks, subject="this instance")
 
-    # The requesting instance's own environment values drive Network peer
-    # filtering (Service.Network.environment_variable).
-    requester_env_values = dict(config.environment_variables) if config else None
-    env = requester_env_values or {}
+    # The requesting instance's own environment values feed `${VAR}` selection
+    # keys in a network's `formal` (#385).
+    env = dict(config.environment_variables) if config else {}
 
     resolutions: List[celaut.ConfigurationFile.NetworkResolution] = []
     for network in networks:
@@ -351,9 +350,7 @@ def build_network_resolution(
         resolutions.append(
             celaut.ConfigurationFile.NetworkResolution(
                 tags=network.tags,
-                peer_instances=resolve_network(
-                    network_to_resolve, requester_env_values=requester_env_values
-                ),
+                peer_instances=resolve_network(network_to_resolve),
             )
         )
 
