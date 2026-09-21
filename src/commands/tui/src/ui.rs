@@ -2,7 +2,7 @@ use crate::app::{
     format_bytes, format_bytes_compact, format_rate_compact, percent, segment_token, shorten,
     unix_now, App, DemandByHour,
     Client, ClientDetail, ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
-    PaymentRow, Peer, PeerDetail, PriceEntry, ReputationEvent, ReputationTotals, Service,
+    PageGroup, PaymentRow, Peer, PeerDetail, PriceEntry, ReputationEvent, ReputationTotals, Service,
     ServiceDetail, HISTORY_POINTS,
 };
 use crate::cell::{self, Lever, LeverStatus, Organelle};
@@ -20,8 +20,13 @@ const WARN: Color = Color::Yellow;
 const BAD: Color = Color::Red;
 
 pub fn render(app: &mut App, frame: &mut Frame) {
+    // The page row only exists for a group that has more than one page. A row
+    // holding a single already-selected title says nothing and costs the page below
+    // it a line, so OVERVIEW, EARNINGS and LOGS get their space back.
+    let page_row = if app.tabs.group().pages().len() > 1 { 1 } else { 0 };
     let layout = Layout::vertical([
         Constraint::Length(3),
+        Constraint::Length(page_row),
         Constraint::Min(8),
         Constraint::Length(2),
     ])
@@ -31,24 +36,28 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     // where things ended up this frame. Cleared here so a page without a table (or the
     // instances tree) cannot inherit the previous page's rows.
     app.tabs_area = layout[0];
+    app.page_tabs_area = if page_row > 0 { layout[1] } else { Rect::ZERO };
     app.list_area = Rect::ZERO;
 
     draw_tabs(frame, app, layout[0]);
-    match app.page() {
-        Page::Overview => draw_overview(frame, app, layout[1]),
-        Page::Instances => draw_instances(frame, app, layout[1]),
-        Page::Services => draw_services(frame, app, layout[1]),
-        Page::Peers => draw_peers(frame, app, layout[1]),
-        Page::Clients => draw_clients(frame, app, layout[1]),
-        Page::Earnings => draw_earnings(frame, app, layout[1]),
-        Page::Cell => draw_cell(frame, app, layout[1]),
-        Page::Pricing => draw_pricing(frame, app, layout[1]),
-        Page::Schedule => draw_schedule(frame, app, layout[1]),
-        Page::Energy => draw_energy(frame, app, layout[1]),
-        Page::Config => draw_config(frame, app, layout[1]),
-        Page::Logs => draw_logs(frame, app, layout[1]),
+    if page_row > 0 {
+        draw_page_tabs(frame, app, layout[1]);
     }
-    draw_footer(frame, app, layout[2]);
+    match app.page() {
+        Page::Overview => draw_overview(frame, app, layout[2]),
+        Page::Instances => draw_instances(frame, app, layout[2]),
+        Page::Services => draw_services(frame, app, layout[2]),
+        Page::Peers => draw_peers(frame, app, layout[2]),
+        Page::Clients => draw_clients(frame, app, layout[2]),
+        Page::Earnings => draw_earnings(frame, app, layout[2]),
+        Page::Cell => draw_cell(frame, app, layout[2]),
+        Page::Pricing => draw_pricing(frame, app, layout[2]),
+        Page::Schedule => draw_schedule(frame, app, layout[2]),
+        Page::Energy => draw_energy(frame, app, layout[2]),
+        Page::Config => draw_config(frame, app, layout[2]),
+        Page::Logs => draw_logs(frame, app, layout[2]),
+    }
+    draw_footer(frame, app, layout[3]);
 
     match app.input_mode {
         InputMode::Normal => {}
@@ -65,29 +74,23 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     }
 }
 
-/// The tab bar: one row, five visible bands (issue #395).
+/// The top row: the five groups, one of which is open (issue #395).
 ///
-/// One `Tabs` widget rather than one per group, because the selection, the highlight
-/// and the mouse hit test all key off a single index into `Page::ALL`, and splitting
-/// the row would mean keeping three copies of each in step. The grouping is carried
-/// by a heavier rule instead, prepended to the first title of each band on top of the
-/// widget's own divider — which is exactly the geometry `tab_at` retraces, through the
-/// same `tab_group_mark`.
+/// The bands were introduced as a heavier rule inside a single row of twelve tabs.
+/// That marked where they began without reducing what had to be read — twelve titles
+/// were still twelve titles, and on an 80-column terminal the last of them was cut
+/// off, which is a page that cannot be clicked. So the groups became the primary row
+/// and their pages the secondary one: five things to read, and a second row that is
+/// never longer than five titles.
 ///
-/// The rule is styled `MUTED` unconditionally, including on a selected tab: it is
-/// punctuation between groups, not part of the page's name, and highlighting it with
-/// the title would read as the selection being two characters wider than it is.
+/// Labelled by the group, not by its first page. `OVERVIEW` happens to be its
+/// group's only member, but `INSTANCES` is not what `WORKLOAD` means — a group named
+/// after its first page would send somebody looking for CLIENTS past a label that
+/// appears to be about instances.
 fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
-    let titles = Page::ALL
+    let titles = PageGroup::ALL
         .iter()
-        .enumerate()
-        .map(|(index, page)| match crate::app::tab_group_mark(index) {
-            Some(mark) => Line::from(vec![
-                Span::styled(mark, Style::default().fg(MUTED)),
-                Span::raw(page.title()),
-            ]),
-            None => Line::from(page.title()),
-        })
+        .map(|group| Line::from(group.title()))
         .collect::<Vec<_>>();
     let status_color = if app.node_info.service_status == "running" {
         GOOD
@@ -111,9 +114,38 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
     ]);
     let tabs = Tabs::new(titles)
         .block(Block::bordered().title(title))
-        .select(app.tabs.index)
+        .select(app.tabs.group().index())
         .style(Style::default().fg(MUTED))
         .highlight_style(Style::default().fg(ACCENT).bold())
+        .divider(crate::app::TAB_DIVIDER);
+    frame.render_widget(tabs, area);
+}
+
+/// The second row: the pages inside the open group, and only those.
+///
+/// Drawn at all only when the group holds more than one — a row containing a single
+/// already-selected title is a row that says nothing and costs the page below it a
+/// line. `render` decides that and gives this function no space when the answer is
+/// no, so the two cannot disagree about whether the row exists.
+///
+/// Borderless and indented under the group row rather than boxed: it is a
+/// continuation of the row above, and a second box would read as a second thing to
+/// navigate rather than as the inside of the first.
+fn draw_page_tabs(frame: &mut Frame, app: &App, area: Rect) {
+    let group = app.tabs.group();
+    let pages = group.pages();
+    let selected = pages
+        .iter()
+        .position(|page| *page == app.page())
+        .unwrap_or(0);
+    let titles = pages
+        .iter()
+        .map(|page| Line::from(page.title()))
+        .collect::<Vec<_>>();
+    let tabs = Tabs::new(titles)
+        .select(selected)
+        .style(Style::default().fg(MUTED))
+        .highlight_style(Style::default().fg(Color::White).bold().underlined())
         .divider(crate::app::TAB_DIVIDER);
     frame.render_widget(tabs, area);
 }
@@ -3492,43 +3524,55 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
         return;
     }
+    // Page-local keys only. The navigation keys are the same everywhere and are
+    // printed on their own line below, rather than repeated twelve times with
+    // twelve chances to fall out of step -- which is what "tab/shift+tab cycle" did
+    // on every one of these strings before the groups existed.
     let controls = match app.page() {
-        Page::Overview => "tab/shift+tab cycle  •  r refresh  •  q quit",
-        Page::Instances => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  g tree/flat  •  k kill  •  r refresh  •  q quit"
-        }
+        Page::Overview => "r refresh  \u{2022}  q quit",
+        Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  r refresh  \u{2022}  q quit",
         Page::Services => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  e execute  •  i details  •  d delete  •  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  d delete  \u{2022}  q quit"
         }
         Page::Peers => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  +/- reputation  •  c connect  •  d forget  •  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  d forget  \u{2022}  q quit"
         }
         Page::Clients => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  + credit  •  - debit  •  r refresh  •  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  r refresh  \u{2022}  q quit"
         }
-        Page::Earnings => {
-            "tab/shift+tab cycle  •  ↑/↓ select an opinion  •  r re-read the chain  •  q quit"
-        }
+        Page::Earnings => "\u{2191}/\u{2193} select an opinion  \u{2022}  r re-read the chain  \u{2022}  q quit",
         Page::Cell => {
-            "→/← organelle  •  ↑/↓ lever  •  ⏎ change  •  e keys behind it  •  p profiles  •  d deviations  •  n router guide"
+            "\u{2192}/\u{2190} organelle  \u{2022}  \u{2191}/\u{2193} lever  \u{2022}  \u{23ce} change  \u{2022}  e keys behind it  \u{2022}  p profiles  \u{2022}  d deviations  \u{2022}  n router guide"
         }
         Page::Pricing => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  +/- adjust 10%  •  e exact value  •  r refresh  •  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  +/- adjust 10%  \u{2022}  e exact value  \u{2022}  r refresh  \u{2022}  q quit"
         }
+        // The one page that keeps `[`/`]` for itself: they switch which window the
+        // arrows act on, which is why the group keys except it.
         Page::Schedule => {
-            "→/← move edge 30m  •  ↑/↓ which edge  •  w window on/off  •  c closing policy  •  ⏎ apply  •  esc discard  •  q quit"
+            "\u{2192}/\u{2190} move edge 30m  \u{2022}  \u{2191}/\u{2193} which edge  \u{2022}  [/] window  \u{2022}  w on/off  \u{2022}  c closing  \u{2022}  \u{23ce} apply  \u{2022}  esc discard"
         }
-        Page::Energy => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  ⏎ / e edit  •  r refresh  •  q quit"
-        }
+        Page::Energy => "\u{2191}/\u{2193} select  \u{2022}  \u{23ce} / e edit  \u{2022}  r refresh  \u{2022}  q quit",
         Page::Config => {
-            "tab/shift+tab cycle  •  ↑/↓ select  •  →/← branch  •  ⏎ toggle  •  e edit  •  a add to list  •  d remove element  •  / filter  •  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  / filter  \u{2022}  q quit"
         }
-        Page::Logs => "tab/shift+tab cycle  •  r refresh  •  q quit",
+        Page::Logs => "r refresh  \u{2022}  q quit",
+    };
+    // How to get anywhere, said once. SCHEDULE is the exception that has to be named
+    // where it applies: a footer advertising `[/] group` on the one page where those
+    // keys do something else would be advertising the wrong thing.
+    let navigation = if app.page() == Page::Schedule {
+        "1-5 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
+    } else {
+        "[/] or 1-5 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     };
     let lines = vec![
-        Line::from(Span::styled(&app.status, Style::default().fg(WARN))),
         Line::from(Span::styled(controls, Style::default().fg(MUTED))),
+        Line::from(vec![
+            Span::styled(navigation, Style::default().fg(MUTED)),
+            Span::raw("   "),
+            Span::styled(app.status.clone(), Style::default().fg(WARN)),
+        ]),
     ];
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
 }
@@ -6135,44 +6179,64 @@ mod tests {
             assert_eq!(app.page(), Page::Clients);
         }
 
-        /// Every tab, not just one — and read off a real render, because the tab bar
-        /// now carries a wider rule between groups and `tab_at` has to account for it
-        /// exactly (issue #395). One wrong offset and a click lands on the
-        /// neighbouring page, which is the kind of thing nobody reports.
+        /// Every page is reachable with the mouse across the two rows (issue #395).
         ///
-        /// A wide terminal on purpose: at 120 columns the twelve tabs are truncated,
-        /// and a title that is not fully drawn cannot be found to be clicked.
+        /// Read off a real render rather than from the arithmetic, because the two
+        /// rows are laid out by two calls into the same `title_row_at` and one wrong
+        /// offset means a click landing on the neighbouring tab -- which is the kind
+        /// of thing nobody reports and everybody works around.
+        ///
+        /// Each page takes two clicks now: its group on the top row, then the page
+        /// itself on the second. That is the trade the grouping makes, and it is
+        /// worth stating as a test rather than leaving implied.
         #[test]
-        fn every_tab_opens_its_own_page_after_the_regrouping() {
-            let mut app = App::new();
-            let mut terminal = Terminal::new(TestBackend::new(200, 30)).unwrap();
-            terminal.draw(|frame| render(&mut app, frame)).unwrap();
-            let buffer = terminal.backend().buffer().clone();
-            let screen: Vec<String> = (0..buffer.area.height)
-                .map(|y| {
-                    (0..buffer.area.width)
-                        .map(|x| buffer.get(x, y).symbol())
-                        .collect()
-                })
-                .collect();
-
+        fn every_page_is_reachable_through_its_group() {
             for page in Page::ALL {
-                let (y, x) = screen
+                let mut app = App::new();
+
+                // Row 1: open the group.
+                let screen = draw(&mut app);
+                let (gx, gy) = screen
                     .iter()
                     .enumerate()
-                    .take(3) // the tab bar, not a page that happens to print the word
+                    .take(3)
                     .find_map(|(y, row)| {
-                        row.find(page.title())
-                            .map(|byte| (y as u16, row[..byte].chars().count() as u16))
+                        row.find(page.group().title())
+                            .map(|byte| (row[..byte].chars().count() as u16, y as u16))
                     })
                     .unwrap_or_else(|| {
-                        panic!("{} is not on the tab bar:\n{}", page.title(), screen.join("\n"))
+                        panic!(
+                            "{} is not on the group row:\n{}",
+                            page.group().title(),
+                            screen.join("\n")
+                        )
+                    });
+                app.click_at(gx, gy);
+                assert_eq!(app.tabs.group(), page.group());
+
+                // Row 2: pick the page. A group of one draws no second row, and
+                // opening it has already landed on its only page.
+                if page.group().pages().len() == 1 {
+                    assert_eq!(app.page(), page);
+                    continue;
+                }
+                let screen = draw(&mut app);
+                let (px, py) = screen
+                    .iter()
+                    .enumerate()
+                    .take(5)
+                    .find_map(|(y, row)| {
+                        row.find(page.title())
+                            .map(|byte| (row[..byte].chars().count() as u16, y as u16))
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("{} is not on the page row:\n{}", page.title(), screen.join("\n"))
                     });
 
-                // Both ends of the title, so a hit test that is off by one in either
+                // Both ends of the title, so a hit test off by one in either
                 // direction fails rather than being saved by clicking the middle.
-                for column in [x, x + page.title().chars().count() as u16 - 1] {
-                    app.click_at(column, y);
+                for column in [px, px + page.title().chars().count() as u16 - 1] {
+                    app.click_at(column, py);
                     assert_eq!(
                         app.page(),
                         page,
@@ -6184,34 +6248,70 @@ mod tests {
             }
         }
 
-        /// The group rule is actually drawn, and between the bands the issue asks for.
-        /// Rendered rather than asserted on the constant: the whole point is that the
-        /// operator can see where one band ends.
+        /// The top row shows the five GROUPS and not the twelve pages.
+        ///
+        /// This is the change Josemi asked for, stated as the property it has to
+        /// hold: an operator orienting themselves reads five labels, not twelve
+        /// titles of which the last was being cut off at 80 columns.
         #[test]
-        fn the_tab_bar_shows_the_group_boundaries() {
+        fn the_top_row_shows_groups_rather_than_every_page() {
             let mut app = App::new();
-            let mut terminal = Terminal::new(TestBackend::new(200, 30)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
             terminal.draw(|frame| render(&mut app, frame)).unwrap();
             let buffer = terminal.backend().buffer();
             let bar: String = (0..buffer.area.width)
                 .map(|x| buffer.get(x, 1).symbol())
                 .collect();
 
-            // Four boundaries: after Overview, before Earnings, before Logs, before
-            // the editors.
-            assert_eq!(
-                bar.matches('\u{2503}').count(),
-                4,
-                "expected four group rules in: {bar}"
-            );
-            let position = |text: &str| bar.find(text).unwrap_or_else(|| panic!("{text} in {bar}"));
-            let rules: Vec<usize> = bar.match_indices('\u{2503}').map(|(at, _)| at).collect();
-            for (rule, follows) in rules.iter().zip(["INSTANCES", "EARNINGS", "LOGS", "CELL"]) {
-                assert!(
-                    *rule < position(follows),
-                    "a group rule should precede {follows} in: {bar}"
-                );
+            for group in PageGroup::ALL {
+                assert!(bar.contains(group.title()), "{} not in: {bar}", group.title());
             }
+            // And the pages that are NOT the open group's are not up here. PRICING
+            // belongs to SETTINGS, which is closed on a fresh start.
+            assert!(!bar.contains("PRICING"), "{bar}");
+            assert!(!bar.contains("INSTANCES"), "{bar}");
+        }
+
+        /// ...and the second row shows that group's pages, and only that group's.
+        #[test]
+        fn the_second_row_shows_only_the_open_groups_pages() {
+            let mut app = App::new();
+            app.tabs.select_group(PageGroup::Settings);
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer.get(x, 3).symbol())
+                .collect();
+
+            for page in PageGroup::Settings.pages() {
+                assert!(row.contains(page.title()), "{} not in: {row}", page.title());
+            }
+            // A page from another group has no business on this row: the whole
+            // problem being solved is that everything was visible at once.
+            assert!(!row.contains("INSTANCES"), "{row}");
+            assert!(!row.contains("CLIENTS"), "{row}");
+        }
+
+        /// A group with one page draws no second row at all.
+        ///
+        /// A row holding a single already-selected title says nothing, and it costs
+        /// the page below it a line -- which on a 24-row terminal is a line OVERVIEW
+        /// needs for its cards.
+        #[test]
+        fn a_single_page_group_spends_no_row_on_itself() {
+            let mut app = App::new();
+            app.tabs.select_group(PageGroup::Status);
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer.get(x, 3).symbol())
+                .collect();
+
+            // Row 3 is the first row of the page itself, not a tab row.
+            assert!(!row.trim().is_empty(), "the page should start here: {row}");
+            assert_eq!(app.page_tabs_area, ratatui::layout::Rect::ZERO);
         }
 
         /// The ENERGY page answers the mouse: its rows are three separate bordered
@@ -7041,5 +7141,34 @@ mod config_write_root_hint {
         app.input_title = "Filter".to_string();
 
         assert!(!screen(&mut app).contains("needs root"));
+    }
+}
+
+/// Prints the two-row tab bar for each group, for the PR description.
+/// `cargo test -p tui two_level_tab_bar_preview -- --ignored --nocapture`
+#[cfg(test)]
+mod two_level_tab_bar_preview {
+    use super::render;
+    use crate::app::{App, PageGroup};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    #[ignore]
+    fn preview() {
+        for group in PageGroup::ALL {
+            let mut app = App::new();
+            app.tabs.select_group(group);
+            let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            println!("--- {} open ---", group.title());
+            for row in 0..5 {
+                let line: String = (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect();
+                println!("{}", line.trim_end());
+            }
+            println!();
+        }
     }
 }

@@ -28,9 +28,28 @@ nobody can look at.
 
 ## Pages
 
-The tab bar is one row in five bands, separated by a heavier `┃` rule: where the node
-stands, what is running and who with, what it earned, what it logged, and then every
-page that *writes*. Everything left of the last rule only reads.
+The tab bar is **two rows**. The top row is the five groups — where the node stands,
+what is running and who with, what it earned, what it logged, and everything that
+*writes*. The second row is the pages of whichever group is open, and only those:
+
+```
+┌ NODO   operations console  running ────────────────────────────────┐
+│ OVERVIEW │ WORKLOAD │ EARNINGS │ LOGS │ SETTINGS                       │
+└────────────────────────────────────────────────────────┘
+ CELL │ PRICING │ SCHEDULE │ ENERGY │ CONFIG
+```
+
+The bands existed before this as a heavier `┃` rule inside a single row of twelve
+tabs. That marked where each band began without reducing what had to be read: twelve
+titles were still twelve titles on screen at once, and at 80 columns the last of them
+was cut off — which is a page that cannot be clicked. Five labels, and a second row
+never longer than five titles, is the same information at a third of the width.
+
+A group is labelled by what it *is*, not by its first page. `INSTANCES` is not what
+`WORKLOAD` means, and a group named after its first member would send somebody looking
+for CLIENTS past a label that appears to be about instances. A group holding one page
+(OVERVIEW, EARNINGS, LOGS) draws no second row at all — a row containing a single
+already-selected title says nothing and costs the page below it a line.
 
 | Page | Purpose |
 |---|---|
@@ -151,9 +170,24 @@ common case.
 
 ## Controls
 
+Navigation is two axes on two sets of keys, matching the two rows:
+
 | Key | Action |
 |---|---|
-| `Tab` / `Shift+Tab` | Next/previous page (both wrap) |
+| `[` / `]` | Previous/next **group**, landing on its first page (both wrap) |
+| `1`…`5` | Jump straight to a group, counted as the labels read on screen |
+| `Tab` / `Shift+Tab` | Next/previous **page within the open group** (wraps inside it) |
+| click | A group label opens that group; a page title on the second row opens that page |
+
+`[`/`]` are the group keys everywhere **except Schedule**, which uses them to switch
+which of its windows the arrows act on; `1`…`5` work there as they do everywhere. Tab
+no longer walks all twelve pages: with the groups on their own row, a Tab that crossed
+a boundary would silently re-highlight the top row while you were cycling the bottom
+one. The group keys always land on a group's *first* page rather than the one last
+visited there, so `]` twice then `[` twice returns you to where you started.
+
+| Key | Action |
+|---|---|
 | `↑` / `↓` | Select table row, move through the Config tree, or pick which edge of the working day the arrows move on Schedule |
 | `→` / `←` | Enter/leave a Config branch (see below), move between Cell organelles, move the selected edge of the working day by 30 min on Schedule; ignored by the other pages |
 | `r` | Force a refresh (on Earnings, re-reads the chain as well) |
