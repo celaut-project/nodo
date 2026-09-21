@@ -167,13 +167,38 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::CONTROL, KeyCode::Char('c'))
         | (KeyModifiers::NONE, KeyCode::Esc)
         | (KeyModifiers::NONE, KeyCode::Char('q')) => app.quit(),
-        // Tab cycles pages forward, Shift+Tab backward; both wrap. crossterm reports
-        // Shift+Tab as BackTab under the legacy encoding and as Tab + SHIFT under the
-        // kitty keyboard protocol, so match both or the binding silently dies depending
-        // on the terminal. ←/→ are no longer page navigation: they are page-local now
-        // and ignored by pages that do not claim them.
+        // Two rows, two axes, two sets of keys (issue #395).
+        //
+        // Tab/Shift+Tab move between the pages of the OPEN group, wrapping inside it.
+        // They used to walk all twelve pages, because on one undifferentiated row
+        // that was the only way to reach anything; with the groups on their own row,
+        // a Tab that crossed a boundary would silently re-highlight the top row while
+        // the operator was cycling the bottom one.
+        //
+        // crossterm reports Shift+Tab as BackTab under the legacy encoding and as
+        // Tab + SHIFT under the kitty keyboard protocol, so match both or the binding
+        // silently dies depending on the terminal. ←/→ are not page navigation: they
+        // are page-local and ignored by pages that do not claim them.
         (KeyModifiers::NONE, KeyCode::Tab) => app.next_page(),
         (_, KeyCode::BackTab) | (KeyModifiers::SHIFT, KeyCode::Tab) => app.previous_page(),
+        // `[`/`]` move between GROUPS, landing on the first page of each.
+        //
+        // Only where the page in front does not already claim them: SCHEDULE uses
+        // `[`/`]` to switch which of its windows the arrows act on, and it is the one
+        // page whose own list is navigated that way. The arm below it catches every
+        // other page, so the group keys work everywhere they are free to.
+        (KeyModifiers::NONE, KeyCode::Char(']')) if app.page() != Page::Schedule => {
+            app.next_group()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('[')) if app.page() != Page::Schedule => {
+            app.previous_group()
+        }
+        // 1..5 jump straight to a group, one-based as they are counted on screen.
+        // Nothing else in this interface binds a digit, so there is no page that has
+        // to be excepted the way SCHEDULE is above.
+        (KeyModifiers::NONE, KeyCode::Char(digit @ '1'..='5')) => {
+            app.select_group_by_number(digit as usize - '0' as usize)
+        }
         (_, KeyCode::Up) => app.on_up(),
         (_, KeyCode::Down) => app.on_down(),
         (_, KeyCode::Right) => app.on_right(),
