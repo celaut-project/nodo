@@ -356,19 +356,17 @@ they existed:
   These specific keys never existed. The tunnelling settings that do exist are
   `network.DELEGATION_TUNNEL_POLICY`, `network.TUNNEL_UDP_IDLE_TIMEOUT_S`, and the
   prices under `pricing.TUNNEL_OPEN_MU` / `pricing.NET_MU_PER_GIB` (see
-  *Metering*, above). Dynamic DNS is real too,
-  just under a plain top-level `ddns:` section rather than nested in `network.` —
-  see [CONFIG.md](CONFIG.md).
+  *Metering*, above).
 * **A persistent tunnel registry.** An early design kept one long-lived tunnel
   per service in a `tunnels` table. That approach was dropped: a tunnel lives
   exactly as long as its stream, and the table is gone. Delegated endpoints do
   survive restarts, but their state rides along in `delegated_instances` rather
   than in a registry of their own.
-* **A reachability check from outside.** DDNS publishing (`ddns.*`) and the router
-  guide (`nodo nat-guide`) both exist, but nothing confirms from *outside* that the
-  gateway port is really forwarded: a connection from inside the node's own network
-  succeeds either way. `nodo info` and `sudo nodo doctor` report what resolves and
-  whether the port is listening locally, which is as far as this host can get.
-  Confirming reachability needs a peer to try connecting back.
+* **A reachability check from outside.** The router guide (`nodo nat-guide`)
+  exists, but nothing confirms from *outside* that the gateway port is really
+  forwarded: a connection from inside the node's own network succeeds either way.
+  `nodo info` and `sudo nodo doctor` report what resolves and whether the port is
+  listening locally, which is as far as this host can get. Confirming
+  reachability needs a peer to try connecting back.
 * **IPv6** on the delegated-endpoint path.
 * **Latency-aware routing** based on `service.container.resources`.

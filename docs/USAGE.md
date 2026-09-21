@@ -439,15 +439,15 @@ These are intended for development or advanced maintenance environments:
   - Guest kernel (`vmlinuz`) presence and size validation
   - Custom initramfs presence and required entry validation
   - **KVM smoke test**: launches a minimal VM to verify that the Cloud Hypervisor binary can actually execute vCPUs on the host kernel
-  - **Inbound reachability**: gateway port resolvable and listening, and DDNS resolution — deferring the router steps to `nodo nat-guide`  
+  - **Inbound reachability**: gateway port resolvable and listening — deferring the router steps to `nodo nat-guide`  
   **Example:**  
   `sudo nodo doctor`
 
 - **nat-guide**  
   Prints how to make this node reachable from the Internet: which port to forward on
   your router (with this machine's own address, port and detected router filled in),
-  how DDNS fits, how to test it from outside, and what to check when it still fails
-  (CGNAT, a second router, the host firewall). Does **not** require superuser.  
+  how to test it from outside, and what to check when it still fails (CGNAT, a
+  second router, the host firewall). Does **not** require superuser.  
 
   Only the **gateway port** needs forwarding: service tunneling carries every service
   through it, so `FREE_PORTS_RANGE` only matters if you also want direct exposure.
