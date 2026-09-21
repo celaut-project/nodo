@@ -44,6 +44,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Cell => draw_cell(frame, app, layout[1]),
         Page::Pricing => draw_pricing(frame, app, layout[1]),
         Page::Schedule => draw_schedule(frame, app, layout[1]),
+        Page::Energy => draw_energy(frame, app, layout[1]),
         Page::Config => draw_config(frame, app, layout[1]),
         Page::Logs => draw_logs(frame, app, layout[1]),
     }
@@ -52,7 +53,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     match app.input_mode {
         InputMode::Normal => {}
         InputMode::Confirm => draw_confirm_popup(frame, app),
-        InputMode::Details | InputMode::ConfirmWrites => draw_details_popup(frame, app),
+        InputMode::AcceptKya | InputMode::Details | InputMode::ConfirmWrites => {
+            draw_details_popup(frame, app)
+        }
         InputMode::PickProfile => draw_profile_popup(frame, app),
         InputMode::Connect
         | InputMode::EditConfig
@@ -62,10 +65,29 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     }
 }
 
+/// The tab bar: one row, five visible bands (issue #395).
+///
+/// One `Tabs` widget rather than one per group, because the selection, the highlight
+/// and the mouse hit test all key off a single index into `Page::ALL`, and splitting
+/// the row would mean keeping three copies of each in step. The grouping is carried
+/// by a heavier rule instead, prepended to the first title of each band on top of the
+/// widget's own divider — which is exactly the geometry `tab_at` retraces, through the
+/// same `tab_group_mark`.
+///
+/// The rule is styled `MUTED` unconditionally, including on a selected tab: it is
+/// punctuation between groups, not part of the page's name, and highlighting it with
+/// the title would read as the selection being two characters wider than it is.
 fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let titles = Page::ALL
         .iter()
-        .map(|page| Line::from(page.title()))
+        .enumerate()
+        .map(|(index, page)| match crate::app::tab_group_mark(index) {
+            Some(mark) => Line::from(vec![
+                Span::styled(mark, Style::default().fg(MUTED)),
+                Span::raw(page.title()),
+            ]),
+            None => Line::from(page.title()),
+        })
         .collect::<Vec<_>>();
     let status_color = if app.node_info.service_status == "running" {
         GOOD
@@ -92,7 +114,7 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
         .select(app.tabs.index)
         .style(Style::default().fg(MUTED))
         .highlight_style(Style::default().fg(ACCENT).bold())
-        .divider(" │ ");
+        .divider(crate::app::TAB_DIVIDER);
     frame.render_widget(tabs, area);
 }
 
@@ -3027,6 +3049,167 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(table, area, &mut app.prices.state);
 }
 
+/// The ENERGY page: the `energy:` block as a list of decisions with their reasons
+/// beside them (issue #395).
+///
+/// Two columns, and the right one is the point of the page. The keys are all
+/// reachable on Config already; what Config cannot show is the paragraph in
+/// `config.example.yaml` that says `IDLE_WATTS` must be *measured* rather than
+/// guessed, or that enabling NVML adds to a reading where every other source replaces
+/// it. So the left column is the catalogue and the current value, and the right one is
+/// the sentence that makes the value mean something.
+///
+/// Rows record where they were drawn (`energy_row_areas`) so the mouse can find them:
+/// three separate bordered sections is not a geometry a generic table hit test can
+/// retrace.
+fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
+    let columns = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(area);
+
+    let entries = crate::energy::entries();
+    // One block per section, each as tall as the rows it holds plus its border and
+    // its one-line blurb. Sized to content rather than split evenly, so a section of
+    // two rows does not get the same height as one of seven and print five blank
+    // lines to fill it.
+    let mut sections: Vec<(crate::energy::EnergySection, Vec<usize>)> = Vec::new();
+    for (index, (section, _)) in entries.iter().enumerate() {
+        match sections.last_mut() {
+            Some((last, rows)) if last == section => rows.push(index),
+            _ => sections.push((*section, vec![index])),
+        }
+    }
+    let constraints: Vec<Constraint> = sections
+        .iter()
+        .map(|(_, rows)| Constraint::Length(rows.len() as u16 + 3))
+        .chain(std::iter::once(Constraint::Min(0)))
+        .collect();
+    let panes = Layout::vertical(constraints).split(columns[0]);
+
+    app.energy_row_areas.clear();
+    // `list_area` stays zero: this page is three blocks rather than one table, and a
+    // generic row hit test over it would land on the wrong key.
+    for (pane, (section, rows)) in panes.iter().zip(sections.iter()) {
+        draw_energy_section(frame, app, *pane, *section, rows);
+    }
+
+    draw_energy_help(frame, app, columns[1]);
+}
+
+/// One band of the ENERGY page, and the rows in it.
+fn draw_energy_section(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    section: crate::energy::EnergySection,
+    rows: &[usize],
+) {
+    let entries = crate::energy::entries();
+    let colour = match section {
+        crate::energy::EnergySection::Metering => ACCENT,
+        crate::energy::EnergySection::Model => WARN,
+        crate::energy::EnergySection::Sources => Color::Magenta,
+    };
+    let block = section_block(format!(" {} ", section.title()), colour);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height == 0 {
+        return;
+    }
+
+    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
+        section.blurb(),
+        Style::default().fg(MUTED).italic(),
+    ))];
+    for (offset, index) in rows.iter().enumerate() {
+        let (_, entry) = &entries[*index];
+        let selected = app.energy_selected == *index;
+        // `(not set)` rather than a blank: a key this installation's config predates
+        // and a key deliberately set to the empty string are different facts, and
+        // SMART_PLUG_URL can legitimately be the second.
+        let value = app
+            .energy_value(entry)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "(not set)".to_string());
+        let marker = if selected { "> " } else { "  " };
+        let key_style = if selected {
+            selected_style()
+        } else {
+            Style::default().fg(Color::White)
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{marker}{:<26}", entry.key()), key_style),
+            Span::styled(" ", Style::default()),
+            Span::styled(value, Style::default().fg(energy_value_colour(entry, app))),
+        ]));
+        // The row's own screen rectangle, for the mouse. The blurb takes the first
+        // inner line, so rows start one below it.
+        let y = inner.y + 1 + offset as u16;
+        if y < inner.y + inner.height {
+            app.energy_row_areas
+                .push((*index, Rect::new(inner.x, y, inner.width, 1)));
+        }
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Green for a source that is switched on, muted for one that is not.
+///
+/// Worth colouring because "which of these five is actually measuring anything" is
+/// the question the page is most often opened to answer, and it is otherwise five
+/// `false`s and three empty strings to read one at a time.
+fn energy_value_colour(entry: &crate::energy::EnergyEntry, app: &App) -> Color {
+    match app.energy_value(entry) {
+        Some(value) if value == "true" => GOOD,
+        Some(value) if value == "false" || value.is_empty() || value == "0" => MUTED,
+        Some(_) => Color::White,
+        None => MUTED,
+    }
+}
+
+/// The right-hand panel: what the selected key is, what it is set to, and why it
+/// matters. The last of those is the whole reason this page exists rather than a
+/// bookmark into the Config tree.
+fn draw_energy_help(frame: &mut Frame, app: &App, area: Rect) {
+    let Some(entry) = app.selected_energy() else {
+        frame.render_widget(
+            Paragraph::new("No setting selected.")
+                .block(section_block(" ABOUT ".to_string(), ACCENT)),
+            area,
+        );
+        return;
+    };
+    let value = app
+        .energy_value(entry)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "(not set)".to_string());
+    let lines = vec![
+        Line::from(Span::styled(
+            entry.label,
+            Style::default().fg(Color::White).bold(),
+        )),
+        Line::from(Span::styled(entry.path, Style::default().fg(MUTED))),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("now: ", Style::default().fg(MUTED)),
+            Span::styled(value, Style::default().fg(ACCENT).bold()),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(entry.help, Style::default().fg(Color::White))),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Written through the same backup, yq write, restart and revert as every \
+             other change (see the TUI README).",
+            Style::default().fg(MUTED).italic(),
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .block(section_block(" ABOUT ".to_string(), ACCENT)),
+        area,
+    );
+}
+
 fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
     let needle = app.config_filter.to_lowercase();
     // Owns its Strings (`'static`), so it doesn't borrow `app` and the tree state
@@ -3223,6 +3406,23 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
+    // The KyA gate owns the footer too: the keys that matter while it is up are its
+    // own, and a page's shortcuts printed underneath an unanswered question would be
+    // advertising keys that deliberately do nothing (issue #395).
+    if app.awaiting_kya() {
+        let lines = vec![
+            Line::from(Span::styled(
+                "Accepting is required to run this node.",
+                Style::default().fg(WARN),
+            )),
+            Line::from(Span::styled(
+                "y accept · n decline · ↑↓ scroll",
+                Style::default().fg(MUTED),
+            )),
+        ];
+        frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
+        return;
+    }
     let controls = match app.page() {
         Page::Overview => "tab/shift+tab cycle  •  r refresh  •  q quit",
         Page::Instances => {
@@ -3248,6 +3448,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         }
         Page::Schedule => {
             "→/← move edge 30m  •  ↑/↓ which edge  •  w window on/off  •  c closing policy  •  ⏎ apply  •  esc discard  •  q quit"
+        }
+        Page::Energy => {
+            "tab/shift+tab cycle  •  ↑/↓ select  •  ⏎ / e edit  •  r refresh  •  q quit"
         }
         Page::Config => {
             "tab/shift+tab cycle  •  ↑/↓ select  •  →/← branch  •  ⏎ toggle  •  e edit  •  a add to list  •  d remove element  •  / filter  •  q quit"
@@ -3391,18 +3594,32 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
         ),
         None => (String::new(), String::new(), 0, 0),
     };
+    let confirming = app.input_mode == InputMode::ConfirmWrites;
+    let gating = app.input_mode == InputMode::AcceptKya;
     // A diff of five keys in a box of thirty rows reads as if something is missing.
     // The overlay is sized to what it holds, up to the room there is.
-    let height = (lines + 2).clamp(8, frame.size().height.saturating_sub(4).max(8));
-    let area = centered_rect(80, height, frame.size());
+    //
+    // The KyA gate is the exception and takes everything there is: it is not covering
+    // a page the operator is working on, it *is* the screen, and the less of the
+    // document fits the more of it gets skipped (issue #395).
+    let height = if gating {
+        // Everything but the footer, which carries the two keys that answer it: an
+        // overlay that covered its own instructions would be the one thing on screen
+        // and still not say what to press.
+        frame.size().height.saturating_sub(4).max(8)
+    } else {
+        (lines + 2).clamp(8, frame.size().height.saturating_sub(4).max(8))
+    };
+    let area = centered_rect(if gating { 94 } else { 80 }, height, frame.size());
     frame.render_widget(Clear, area);
-    let confirming = app.input_mode == InputMode::ConfirmWrites;
-    let keys = if confirming {
+    let keys = if gating {
+        "y accept · n decline · ↑↓ scroll"
+    } else if confirming {
         "y apply • n cancel • ↑/↓ scroll"
     } else {
         "↑/↓ scroll • Esc close"
     };
-    let colour = if confirming { WARN } else { ACCENT };
+    let colour = if confirming || gating { WARN } else { ACCENT };
     let popup = Paragraph::new(text)
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false })
@@ -5783,6 +6000,105 @@ mod tests {
             assert_eq!(app.page(), Page::Clients);
         }
 
+        /// Every tab, not just one — and read off a real render, because the tab bar
+        /// now carries a wider rule between groups and `tab_at` has to account for it
+        /// exactly (issue #395). One wrong offset and a click lands on the
+        /// neighbouring page, which is the kind of thing nobody reports.
+        ///
+        /// A wide terminal on purpose: at 120 columns the twelve tabs are truncated,
+        /// and a title that is not fully drawn cannot be found to be clicked.
+        #[test]
+        fn every_tab_opens_its_own_page_after_the_regrouping() {
+            let mut app = App::new();
+            let mut terminal = Terminal::new(TestBackend::new(200, 30)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let screen: Vec<String> = (0..buffer.area.height)
+                .map(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer.get(x, y).symbol())
+                        .collect()
+                })
+                .collect();
+
+            for page in Page::ALL {
+                let (y, x) = screen
+                    .iter()
+                    .enumerate()
+                    .take(3) // the tab bar, not a page that happens to print the word
+                    .find_map(|(y, row)| {
+                        row.find(page.title())
+                            .map(|byte| (y as u16, row[..byte].chars().count() as u16))
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("{} is not on the tab bar:\n{}", page.title(), screen.join("\n"))
+                    });
+
+                // Both ends of the title, so a hit test that is off by one in either
+                // direction fails rather than being saved by clicking the middle.
+                for column in [x, x + page.title().chars().count() as u16 - 1] {
+                    app.click_at(column, y);
+                    assert_eq!(
+                        app.page(),
+                        page,
+                        "clicking column {column} of {} opened {:?}",
+                        page.title(),
+                        app.page()
+                    );
+                }
+            }
+        }
+
+        /// The group rule is actually drawn, and between the bands the issue asks for.
+        /// Rendered rather than asserted on the constant: the whole point is that the
+        /// operator can see where one band ends.
+        #[test]
+        fn the_tab_bar_shows_the_group_boundaries() {
+            let mut app = App::new();
+            let mut terminal = Terminal::new(TestBackend::new(200, 30)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let bar: String = (0..buffer.area.width)
+                .map(|x| buffer.get(x, 1).symbol())
+                .collect();
+
+            // Four boundaries: after Overview, before Earnings, before Logs, before
+            // the editors.
+            assert_eq!(
+                bar.matches('\u{2503}').count(),
+                4,
+                "expected four group rules in: {bar}"
+            );
+            let position = |text: &str| bar.find(text).unwrap_or_else(|| panic!("{text} in {bar}"));
+            let rules: Vec<usize> = bar.match_indices('\u{2503}').map(|(at, _)| at).collect();
+            for (rule, follows) in rules.iter().zip(["INSTANCES", "EARNINGS", "LOGS", "CELL"]) {
+                assert!(
+                    *rule < position(follows),
+                    "a group rule should precede {follows} in: {bar}"
+                );
+            }
+        }
+
+        /// The ENERGY page answers the mouse: its rows are three separate bordered
+        /// sections rather than one table, so `click_energy` reads the areas the draw
+        /// path recorded. A click has to land on the key it looks like it landed on.
+        #[test]
+        fn clicking_an_energy_row_selects_that_key() {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Energy).unwrap();
+            let screen = draw(&mut app);
+            let (x, y) = find(&screen, "NVML_ENABLED");
+
+            app.click_at(x, y);
+
+            assert_eq!(
+                app.selected_energy().map(|entry| entry.path),
+                Some("energy.NVML_ENABLED"),
+                "clicked ({x},{y}) of:\n{}",
+                screen.join("\n")
+            );
+        }
+
         /// A schedule with two windows, on the SCHEDULE page, ready to be clicked on.
         /// Every one of the SCHEDULE page's elements has to answer the mouse, not only
         /// the ones a table's `list_area` already covered — `click_at` had no arm for
@@ -5862,6 +6178,195 @@ mod tests {
             app.click_at(x + 1, y);
             assert_eq!(app.schedule().on_close, crate::schedule::OnClose::Stop);
         }
+    }
+
+    /// What the ENERGY page has to put on screen (issue #395).
+    ///
+    /// The page is not "the energy keys, again": every one of them is already on the
+    /// Config tree. What it adds is the sentence beside each key, and the point of
+    /// these tests is that the sentence is actually drawn — a page that lost its help
+    /// panel in a layout change would still look perfectly reasonable.
+    mod energy_page {
+        use super::*;
+
+        fn draw_energy_at(width: u16, height: u16) -> (App, Vec<String>) {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Energy).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let screen = (0..buffer.area.height)
+                .map(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer.get(x, y).symbol())
+                        .collect::<String>()
+                })
+                .collect();
+            (app, screen)
+        }
+
+        #[test]
+        fn the_sections_and_their_keys_are_drawn() {
+            let (_, screen) = draw_energy_at(140, 40);
+            let text = screen.join("\n");
+
+            for expected in [
+                "METERING",
+                "MODEL FALLBACK",
+                "MEASURED SOURCES",
+                "ENABLED",
+                "PRICE_PER_KWH",
+                "IDLE_WATTS",
+                "SMART_PLUG_URL",
+                "NVML_ENABLED",
+                "EXTERNAL_TIMEOUT_SECONDS",
+            ] {
+                assert!(text.contains(expected), "{expected} missing from:\n{text}");
+            }
+        }
+
+        /// The reason the page exists. A key with no explanation beside it is a key
+        /// that belonged on the Config tree.
+        #[test]
+        fn the_selected_key_gets_its_explanation() {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Energy).unwrap();
+            app.energy_selected = crate::energy::entries()
+                .iter()
+                .position(|(_, entry)| entry.path == "energy.IDLE_WATTS")
+                .unwrap();
+
+            let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer();
+            let text: String = (0..buffer.area.height)
+                .map(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer.get(x, y).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            assert!(text.contains("energy.IDLE_WATTS"), "{text}");
+            // The warning that is the whole reason this key needs prose: measure it.
+            assert!(text.contains("MEASURE"), "{text}");
+        }
+
+        /// Small terminals must not panic, same as every other page.
+        #[test]
+        fn it_renders_at_the_common_sizes() {
+            for (width, height) in [(80, 24), (140, 40)] {
+                draw_energy_at(width, height);
+            }
+        }
+    }
+
+    /// The KyA gate, as it is drawn (issue #395).
+    ///
+    /// The state machine is pinned in `app::tests::kya_gate`; what is checked here is
+    /// that the operator can actually see the question and the two keys that answer
+    /// it — a gate whose footer said "q quit" would be telling them the wrong thing
+    /// about what `q` does.
+    mod kya_overlay {
+        use super::*;
+
+        fn screen_of(app: &mut App) -> String {
+            let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+            terminal.draw(|frame| render(app, frame)).unwrap();
+            let buffer = terminal.backend().buffer();
+            (0..buffer.area.height)
+                .map(|y| {
+                    (0..buffer.area.width)
+                        .map(|x| buffer.get(x, y).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        /// The gate is raised against a directory this test owns, so the developer's
+        /// own `storage/.acceptedkya` (or absence of one) cannot decide the outcome.
+        fn gated_app() -> App {
+            let dir = std::env::temp_dir().join("nodo-tui-kya-render");
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("storage")).unwrap();
+            let mut app = App::default();
+            app.paths.storage = dir.join("storage");
+            app.with_kya_gate()
+        }
+
+        #[test]
+        fn the_document_and_its_two_keys_are_on_screen() {
+            let mut app = gated_app();
+            let text = screen_of(&mut app);
+
+            assert!(app.awaiting_kya());
+            assert!(text.contains("KNOW YOUR ASSUMPTIONS"), "{text}");
+            assert!(text.contains("y accept"), "{text}");
+            assert!(text.contains("n decline"), "{text}");
+        }
+
+        /// The footer must not advertise a page's shortcuts underneath an unanswered
+        /// question: those keys deliberately do nothing while the gate is up, and `q`
+        /// in particular means something different here.
+        #[test]
+        fn the_footer_belongs_to_the_gate_rather_than_to_the_page_behind_it() {
+            let mut app = gated_app();
+            let text = screen_of(&mut app);
+
+            assert!(text.contains("required to run this node"), "{text}");
+            assert!(
+                !text.contains("tab/shift+tab cycle"),
+                "the page's controls are still being offered:\n{text}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod energy_preview {
+    //! Prints the ENERGY page and the KyA gate once, so a change to either layout is
+    //! visible in the test output rather than only in a terminal nobody in CI has.
+    //! `cargo test -- --nocapture energy_preview` renders them (issue #395).
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn print(app: &mut App) {
+        let mut terminal = Terminal::new(TestBackend::new(140, 32)).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        for y in 0..buffer.area.height {
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer.get(x, y).symbol())
+                .collect();
+            println!("{row}");
+        }
+    }
+
+    #[test]
+    fn preview() {
+        let mut app = App::new();
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Energy)
+            .unwrap();
+        app.energy_selected = crate::energy::entries()
+            .iter()
+            .position(|(_, entry)| entry.path == "energy.IDLE_WATTS")
+            .unwrap();
+        print(&mut app);
+    }
+
+    #[test]
+    fn kya_preview() {
+        let dir = std::env::temp_dir().join("nodo-tui-kya-preview");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("storage")).unwrap();
+        let mut app = App::default();
+        app.paths.storage = dir.join("storage");
+        let mut app = app.with_kya_gate();
+        print(&mut app);
     }
 }
 

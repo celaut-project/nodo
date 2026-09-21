@@ -1,4 +1,5 @@
 use crate::cell::{self, Lever, LeverKind, LeverStatus, Organelle};
+use crate::energy::{self, EnergyEntry};
 use crate::schedule::{self};
 use prost::Message;
 use ratatui::layout::{Position, Rect};
@@ -72,28 +73,70 @@ pub enum Page {
     /// times: `activity_window` is one window even when it runs through midnight, and
     /// two separate fields cannot say so.
     Schedule,
+    /// What the machine costs to run, as watts and as money (`energy:`). Its own page
+    /// rather than a branch of Config because the block is a dozen keys spread over
+    /// five mutually exclusive measurement sources, and the comments that say which
+    /// one applies to a given machine are the whole difference between a reading and
+    /// a number somebody invented (issue #395).
+    Energy,
     Config,
     Logs,
 }
 
+/// Which band of the tab bar a page belongs to.
+///
+/// The tabs had grown to a dozen and read as one undifferentiated row, which is a
+/// navigation problem rather than a cosmetic one: an operator looking for the page
+/// that edits something had to read every title, because nothing said where the
+/// read-only pages stopped and the editors began. Four bands, each answering one
+/// question, and the divider between them is what the eye lands on (issue #395).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageGroup {
+    /// Where this node stands right now.
+    Status,
+    /// What is running here and who it is running for.
+    Activity,
+    /// What being up has been worth.
+    Money,
+    /// What the node did, in its own words.
+    Record,
+    /// The pages that change the node rather than describe it.
+    Settings,
+}
+
 impl Page {
-    pub const ALL: [Page; 11] = [
+    /// Tab order, and the single source of truth for a page's index.
+    ///
+    /// Grouped rather than merely listed (issue #395): status, then the four pages
+    /// that name what is happening and who with, then what it earned, then what it
+    /// logged, then every page that *writes*. Logs moved above the editors because it
+    /// is the last read-only page and belongs on that side of the divide; PEERS moved
+    /// before SERVICES because a node's peers are what it has, and its services are
+    /// what it can offer them. ENERGY sits among the editors with the other pages
+    /// that own one config block.
+    pub const ALL: [Page; 12] = [
         Page::Overview,
+        // What is running here and who it runs for. Instances first because it is
+        // what is happening now; peers before services because the peers are the
+        // network this node is part of and the services are what it brings to it.
         Page::Instances,
-        Page::Services,
         Page::Peers,
+        Page::Services,
         Page::Clients,
-        // After the two pages that name who we deal with, because it is the sum of
+        // After the pages that name who we deal with, because it is the sum of
         // what dealing with them came to.
         Page::Earnings,
+        // The last page that only reads, and the boundary of the read-only half.
+        Page::Logs,
         // The editors sit together and run from the most general to the most
-        // specific: postures, then the two that own a decision with a shape of its own
-        // -- prices as bars, the working day as a day -- then single keys.
+        // specific: postures, then the three that own a decision with a shape of its
+        // own -- prices as bars, the working day as a day, electricity as its own
+        // block of keys -- then single keys.
         Page::Cell,
         Page::Pricing,
         Page::Schedule,
+        Page::Energy,
         Page::Config,
-        Page::Logs,
     ];
 
     pub fn title(self) -> &'static str {
@@ -107,26 +150,84 @@ impl Page {
             Page::Cell => "CELL",
             Page::Pricing => "PRICING",
             Page::Schedule => "SCHEDULE",
+            Page::Energy => "ENERGY",
             Page::Config => "CONFIG",
             Page::Logs => "LOGS",
         }
     }
+
+    /// Which band this page belongs to. Only used to decide where a wider divider is
+    /// drawn, so it has no ordering of its own: [`Page::ALL`] remains the one place
+    /// order is written down, and a page moved there moves its group boundary with it.
+    pub fn group(self) -> PageGroup {
+        match self {
+            Page::Overview => PageGroup::Status,
+            Page::Instances | Page::Peers | Page::Services | Page::Clients => {
+                PageGroup::Activity
+            }
+            Page::Earnings => PageGroup::Money,
+            Page::Logs => PageGroup::Record,
+            Page::Cell | Page::Pricing | Page::Schedule | Page::Energy | Page::Config => {
+                PageGroup::Settings
+            }
+        }
+    }
+}
+
+/// The divider the `Tabs` widget draws between every pair of tabs.
+///
+/// One character, not `" │ "`: `Tabs` already pads each title with a space on each
+/// side, so the bare rule renders as ` OVERVIEW │ INSTANCES ` either way, and the two
+/// spaces it does not spend are two of the twenty-two that stopped CONFIG fitting on a
+/// 140-column terminal once the row grew to twelve tabs and four group rules
+/// (issue #395). A tab bar that does not fit is a page that cannot be clicked.
+pub const TAB_DIVIDER: &str = "│";
+/// The heavier rule that marks where one group of tabs ends and the next begins,
+/// prepended to the first title of each new group *on top of* the ordinary divider.
+///
+/// A prefix rather than a second `Tabs` widget, or a second row: the selection, the
+/// highlight and the mouse hit test all key off one index into [`Page::ALL`], and
+/// splitting the row would mean keeping three copies of each in step for what is a
+/// purely visual fact about an unchanged row (issue #395).
+pub const TAB_GROUP_MARK: &str = "┃ ";
+
+/// The group rule that precedes the tab at `index`, or `None` when it continues the
+/// group before it (and for the very first tab, which begins the row).
+///
+/// One function so the renderer and the hit test cannot disagree: `draw_tabs`
+/// prepends exactly what this returns, and `tab_at` advances by exactly its width.
+/// A boundary drawn in one and not counted in the other is a click that lands on the
+/// neighbouring page, which is the kind of bug nobody reports and everybody works
+/// around.
+pub fn tab_group_mark(index: usize) -> Option<&'static str> {
+    let page = *Page::ALL.get(index)?;
+    let previous = *Page::ALL.get(index.checked_sub(1)?)?;
+    (previous.group() != page.group()).then_some(TAB_GROUP_MARK)
 }
 
 /// Which tab covers column `x`, given the bordered block the tab bar was drawn in.
 ///
 /// Retraces what `Tabs` lays out rather than asking it: the widget keeps no hit map.
 /// Each title sits in `padding_left + title + padding_right` (one space each side, the
-/// default this TUI keeps) and tabs are joined by a 3-cell `" │ "` divider.
+/// default this TUI keeps), tabs are joined by [`TAB_DIVIDER`], and the first tab of
+/// each group carries [`TAB_GROUP_MARK`] inside its own cell (issue #395). Measured in
+/// characters, not bytes: the box-drawing rules are multi-byte.
 fn tab_at(x: u16, area: Rect) -> Option<usize> {
-    const DIVIDER_WIDTH: u16 = 3;
+    let divider_width = TAB_DIVIDER.chars().count() as u16;
     let mut cursor = area.x + 1; // the block's left border
     for (index, page) in Page::ALL.iter().enumerate() {
-        let width = page.title().chars().count() as u16 + 2; // one space of padding each side
+        if index > 0 {
+            cursor += divider_width;
+        }
+        let mark = tab_group_mark(index)
+            .map(|mark| mark.chars().count() as u16)
+            .unwrap_or(0);
+        // one space of padding each side, plus the group rule when this tab opens one
+        let width = mark + page.title().chars().count() as u16 + 2;
         if x >= cursor && x < cursor + width {
             return Some(index);
         }
-        cursor += width + DIVIDER_WIDTH;
+        cursor += width;
     }
     None
 }
@@ -149,6 +250,22 @@ fn visible_row_at(y: u16, area: Rect) -> Option<usize> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    /// The Know-your-Assumptions gate, shown once, before anything else is reachable
+    /// (issue #395).
+    ///
+    /// The CLI has asked this since `nodo` first ran (`src/commands/onboarding.py`),
+    /// and it records the answer in `storage/.acceptedkya`. `nodo tui` did not, which
+    /// meant the one question the node is conditional on could be skipped by starting
+    /// the console instead of the CLI -- and, on a machine where `nodo tui` is what an
+    /// operator types first, skipped permanently without anyone noticing.
+    ///
+    /// It is an `InputMode` rather than a separate screen before the event loop
+    /// because that is what makes it *inescapable* by construction: every key goes
+    /// through `handle_key_events`, which dispatches on this enum before it looks at
+    /// any page shortcut, so there is no key that reaches a page behind the overlay.
+    /// Declining calls `quit()`, exactly as the CLI exits non-zero: the KyA is what
+    /// running the node is conditional on, and a refusal is not a dismissible dialog.
+    AcceptKya,
     Connect,
     EditConfig,
     /// A new element for the list the Config page's selection points at.
@@ -1198,7 +1315,32 @@ impl Paths {
             storage,
         }
     }
+
+    /// Where the accepted-KyA marker lives: `<storage>/.acceptedkya`.
+    ///
+    /// The same file `src/commands/onboarding.py` writes (`KYA_MARKER`, under
+    /// `_marker(main_dir, name)` = `<main_dir>/storage/<name>`), and deliberately so:
+    /// the question is about the node, not about the interface it was asked through.
+    /// An operator who accepted in the CLI is never asked again by `nodo tui`, and
+    /// accepting here means the CLI does not ask either (issue #395).
+    ///
+    /// Resolved from `main.STORAGE` like everything else, rather than assuming
+    /// `<root>/storage`, because an installation is free to move it — and a marker
+    /// written to the wrong directory is a question asked forever.
+    pub fn kya_marker(&self) -> PathBuf {
+        self.storage.join(KYA_MARKER)
+    }
+
+    /// Where the KyA document itself lives, in the checkout this binary belongs to.
+    pub fn kya_document(&self) -> PathBuf {
+        self.root.join("docs").join("KyA.md")
+    }
 }
+
+/// The filename `src/commands/onboarding.py` records an accepted KyA under. Written
+/// out here rather than derived, because the two sides of this agreement are in
+/// different languages and the only thing tying them together is this string.
+pub const KYA_MARKER: &str = ".acceptedkya";
 
 /// How the operator's money is denominated.
 ///
@@ -1959,6 +2101,18 @@ pub struct App {
     pub config_document: Option<Value>,
     /// Editable price vector, and how the operator's money is denominated.
     pub prices: StatefulList<PriceEntry>,
+    /// Which row of the ENERGY page's fixed catalogue the cursor is on (issue #395).
+    ///
+    /// A plain index rather than a `StatefulList`, because the catalogue is a
+    /// compile-time constant: there is no refresh that could reorder it, and so
+    /// nothing for `StatefulList::refresh`'s re-find-by-id to protect against. The
+    /// values beside the rows are read from `config_document` at draw time, which is
+    /// the part that does change.
+    pub energy_selected: usize,
+    /// Where the ENERGY page last drew each row, so a click can be mapped back to the
+    /// key under it. Written by `draw_energy` each frame, same as the SCHEDULE page's
+    /// edge and button areas.
+    pub energy_row_areas: Vec<(usize, Rect)>,
     pub scarcity: Scarcity,
     pub money: Money,
     /// Which window the SCHEDULE page is editing, which of its edges the arrows move,
@@ -2093,6 +2247,8 @@ impl Default for App {
             cell: CellState::default(),
             config_document: read_yaml(&paths.config).ok(),
             prices: StatefulList::with_items(prices),
+            energy_selected: 0,
+            energy_row_areas: Vec::new(),
             scarcity,
             schedule_edge: schedule::Edge::Start,
             schedule_selected: 0,
@@ -2160,11 +2316,109 @@ impl Default for App {
     }
 }
 
+/// The KyA overlay's contents: the document, or an honest account of why it is not
+/// here (issue #395).
+///
+/// A missing `docs/KyA.md` does **not** refuse the operator, and that is the CLI's
+/// rule rather than a shortcut: `accept_kya` in `src/commands/onboarding.py` returns
+/// True when `bash/accept_kya.sh` is absent, on the reasoning that a missing document
+/// is a broken install, and a node that says so is more use than a node that exits
+/// without explaining itself. Refusing here would also make the TUI unusable from any
+/// installation that ships the binary without the docs tree — which is exactly what
+/// the released `tui-linux-amd64` asset is.
+fn kya_view(paths: &Paths) -> DetailsView {
+    let document = paths.kya_document();
+    let lines = match fs::read_to_string(&document) {
+        Ok(text) => text.lines().map(ToString::to_string).collect(),
+        Err(error) => vec![
+            format!("Could not read {} ({error}).", document.display()),
+            String::new(),
+            "The Know-your-Assumptions document is part of this installation and it is"
+                .to_string(),
+            "not where it should be, which means the install is incomplete rather than"
+                .to_string(),
+            "that there is nothing to agree to. It is also readable online:".to_string(),
+            "  https://github.com/celaut-project/nodo/blob/dev/docs/KyA.md".to_string(),
+            String::new(),
+            "In short: nodo is alpha software, you run it at your own risk, you are".to_string(),
+            "responsible for your own assets, and payments settle on a public chain".to_string(),
+            "and are irreversible.".to_string(),
+        ],
+    };
+    DetailsView {
+        title: "KNOW YOUR ASSUMPTIONS".to_string(),
+        lines,
+        scroll: 0,
+    }
+}
+
 impl App {
     pub fn new() -> Self {
         let mut app = Self::default();
         app.refresh_local(true);
         app
+    }
+
+    /// Raise the KyA gate when this installation has not accepted one yet (#395).
+    ///
+    /// A separate step from construction, taken once in `main.rs`, rather than
+    /// something `new()` does on its own. The gate depends on a file existing on this
+    /// machine, and a constructor that consulted the filesystem for it would make
+    /// every other thing built from an `App` depend on it too — a rendering test
+    /// would draw the overlay instead of the page it was written for, and, worse, the
+    /// gate would be tested only by accident. As one visible line in the program's
+    /// entry point it is somewhere a reader can find it, and
+    /// `main_asks_the_kya_before_it_draws_anything` pins that the line is still there.
+    ///
+    /// A no-op when the marker is present, so this is also the whole of the
+    /// "don't ask twice" rule: one `exists()` against the same path the CLI writes.
+    pub fn with_kya_gate(mut self) -> Self {
+        if !self.paths.kya_marker().exists() {
+            self.details = Some(kya_view(&self.paths));
+            self.input_mode = InputMode::AcceptKya;
+            self.status = "Read this before the node does anything.".to_string();
+        }
+        self
+    }
+
+    /// True while the KyA gate is up. Nothing but the gate's own keys should reach
+    /// the application in this state.
+    pub fn awaiting_kya(&self) -> bool {
+        self.input_mode == InputMode::AcceptKya
+    }
+
+    /// Accept the KyA: record it, and let the interface start (issue #395).
+    ///
+    /// A marker that could not be written is **not** fatal, which is the rule
+    /// `onboarding.py::_record` already follows: the operator is told, and the
+    /// question is asked again next time. The alternative — refusing to start
+    /// because a dotfile would not write — turns a read-only or full `storage/` into
+    /// a node nobody can look at, at exactly the moment somebody needs to.
+    pub fn accept_kya(&mut self) {
+        let marker = self.paths.kya_marker();
+        let recorded = fs::create_dir_all(&self.paths.storage)
+            .and_then(|()| fs::OpenOptions::new().create(true).append(true).open(&marker))
+            .map(|_| ());
+        self.details = None;
+        self.input_mode = InputMode::Normal;
+        self.status = match recorded {
+            Ok(()) => "KyA accepted • press r to refresh • q to quit".to_string(),
+            Err(error) => format!(
+                "KyA accepted, but {} could not be written ({error}); this will be asked again",
+                marker.display()
+            ),
+        };
+    }
+
+    /// Decline the KyA: stop, exactly as the CLI does.
+    ///
+    /// `accept_kya.sh` exits 1 on a refusal and `nodo.py` turns that into
+    /// `sys.exit(1)`. The KyA is what running the node is conditional on, so there is
+    /// no "declined but browsing" state to fall back to — and offering one through
+    /// the TUI would make the console the way around the question.
+    pub fn decline_kya(&mut self) {
+        self.details = None;
+        self.quit();
     }
 
     pub fn page(&self) -> Page {
@@ -2234,6 +2488,7 @@ impl App {
             }
             Page::Earnings => self.opinions.previous(),
             Page::Pricing => self.prices.previous(),
+            Page::Energy => self.move_energy_selection(-1),
             Page::Cell => {
                 let count = self.cell.organelle().levers().len();
                 if count > 0 {
@@ -2265,6 +2520,7 @@ impl App {
             }
             Page::Earnings => self.opinions.next(),
             Page::Pricing => self.prices.next(),
+            Page::Energy => self.move_energy_selection(1),
             Page::Cell => {
                 let count = self.cell.organelle().levers().len();
                 if count > 0 {
@@ -2301,6 +2557,10 @@ impl App {
         }
         if self.page() == Page::Schedule {
             self.click_schedule(position);
+            return;
+        }
+        if self.page() == Page::Energy {
+            self.click_energy(position);
             return;
         }
         if let Some(visible) = visible_row_at(row, self.list_area) {
@@ -2782,8 +3042,12 @@ impl App {
             }
             InputMode::PickProfile => self.submit_profile_selection(),
             // The writes confirmation answers y/n, never Enter: Enter on a
-            // twelve-key diff would apply it on a keystroke meant to scroll.
+            // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
+            // gate answers y/n for the same reason and one stronger: Enter is the
+            // key somebody presses to get past a screen, and getting past this one
+            // without reading it is precisely what it exists to prevent (#395).
             InputMode::Normal
+            | InputMode::AcceptKya
             | InputMode::Confirm
             | InputMode::ConfirmWrites
             | InputMode::Details => {}
@@ -3383,6 +3647,99 @@ impl App {
             "Router guide".to_string(),
             vec!["nat-guide".to_string()],
         );
+    }
+
+    // --- Energy -----------------------------------------------------------
+
+    /// The catalogue row the cursor is on (issue #395). The index is clamped rather
+    /// than trusted, so a catalogue that shrinks between builds cannot panic here.
+    pub fn selected_energy(&self) -> Option<&'static EnergyEntry> {
+        energy::entries()
+            .get(self.energy_selected)
+            .map(|(_, entry)| entry)
+    }
+
+    /// Move the ENERGY cursor, wrapping.
+    ///
+    /// Wraps because the catalogue is short and fully visible: with fourteen rows on
+    /// screen at once, stopping at the end is a keypress that does nothing for no
+    /// reason the operator can see. Same behaviour the CELL page's lever cursor has.
+    pub fn move_energy_selection(&mut self, delta: i32) {
+        let count = energy::entries().len();
+        if count == 0 {
+            return;
+        }
+        let next = (self.energy_selected as i32 + delta).rem_euclid(count as i32);
+        self.energy_selected = next as usize;
+    }
+
+    /// What config.yaml currently holds for one energy key, as text.
+    ///
+    /// `None` when the key is absent or is not a scalar, which the page renders as
+    /// `(not set)` rather than as an empty value: "this installation's config predates
+    /// the key" and "this key is set to the empty string" are different facts, and
+    /// `SMART_PLUG_URL` can legitimately be the second.
+    pub fn energy_value(&self, entry: &EnergyEntry) -> Option<String> {
+        yaml_scalar(
+            self.config_document.as_ref(),
+            &entry.path.split('.').collect::<Vec<_>>(),
+        )
+    }
+
+    /// Open the ordinary config editor on the selected energy key (issue #395).
+    ///
+    /// The same `EditConfig` popup the Config page opens, on the same path, writing
+    /// through the same backup/`yq`/restart/revert transaction. This page contributes
+    /// the catalogue and the explanation beside it, and nothing else: a second way to
+    /// write YAML would be a second set of quoting rules, a second backup policy, and
+    /// a second thing to keep in step with the restart flow.
+    ///
+    /// The widget comes from the catalogue rather than from the type of what happens
+    /// to be written now, because the two disagree where it matters: `PRICE_PER_KWH: 0`
+    /// parses as an integer and wants a number field either way, and an empty
+    /// `SMART_PLUG_URL` says nothing at all about what belongs in it.
+    pub fn open_energy_editor(&mut self) {
+        if self.page() != Page::Energy {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        let Some(entry) = self.selected_energy() else {
+            self.status = "Select a setting first".to_string();
+            return;
+        };
+        let current = self.energy_value(entry).unwrap_or_default();
+        self.input_mode = InputMode::EditConfig;
+        self.input_title = format!("Edit {}", entry.path);
+        self.input = current;
+        self.edit_config_path = Some(entry.config_path());
+        self.edit_config_secret = false;
+        self.edit_kind = entry.kind.to_edit_kind();
+        self.status = entry.label.to_string();
+    }
+
+    /// Route a click on the ENERGY page to the row under it.
+    ///
+    /// Reads the areas `draw_energy` recorded last frame rather than recomputing a
+    /// row height, the way the SCHEDULE page's hit test does: the page draws three
+    /// separate section blocks, each with its own border and heading, so there is no
+    /// single table geometry to retrace — and a hit test that guessed one would put
+    /// the cursor on a different key than the one under the pointer.
+    ///
+    /// Selects rather than opens: the help panel beside the table is the reason this
+    /// page exists, and a click that jumped straight into an editor would skip the
+    /// sentence explaining what the key does. `Enter`/`e` is the deliberate act.
+    fn click_energy(&mut self, position: Position) {
+        if let Some((index, _)) = self
+            .energy_row_areas
+            .iter()
+            .find(|(_, area)| area.contains(position))
+            .copied()
+        {
+            self.energy_selected = index;
+        }
     }
 
     // --- Pricing ----------------------------------------------------------
@@ -5834,7 +6191,9 @@ mod tests {
     /// Mouse hit tests. Both retrace geometry the widgets do not expose, so they are
     /// pinned here: a wrong offset silently selects the neighbouring tab or row.
     mod mouse_geometry {
-        use super::super::{tab_at, visible_row_at, Page, Rect};
+        use super::super::{
+            tab_at, tab_group_mark, visible_row_at, Page, Rect, TabsState, TAB_DIVIDER,
+        };
 
         /// A bar wide enough for every tab, with a column of slack past the last one.
         ///
@@ -5842,17 +6201,25 @@ mod tests {
         /// quietly turn "the column past the last tab" into "inside the last tab" and
         /// leave both tests below passing for the wrong reason.
         fn bar() -> Rect {
-            let titles: usize = Page::ALL
-                .iter()
-                .map(|page| page.title().chars().count() + 2) // a space each side
-                .sum();
-            let dividers = 3 * (Page::ALL.len() - 1); // " │ "
+            let titles: usize = (0..Page::ALL.len()).map(tab_cell_width).sum();
+            let dividers = TAB_DIVIDER.chars().count() * (Page::ALL.len() - 1);
             Rect {
                 x: 0,
                 y: 0,
                 width: (1 + titles + dividers + 1) as u16, // left border, tabs, slack
                 height: 3,
             }
+        }
+
+        /// How wide the tab at `index` is, group rule included: a space each side of
+        /// the title, plus the heavier rule the first tab of a band carries inside its
+        /// own cell (issue #395).
+        fn tab_cell_width(index: usize) -> usize {
+            Page::ALL[index].title().chars().count()
+                + 2
+                + tab_group_mark(index)
+                    .map(|mark| mark.chars().count())
+                    .unwrap_or(0)
         }
 
         #[test]
@@ -5868,8 +6235,72 @@ mod tests {
             assert_eq!(seen, (0..Page::ALL.len()).collect::<Vec<_>>());
             for (index, page) in Page::ALL.iter().enumerate() {
                 let width = claimed.iter().filter(|claim| **claim == index).count();
-                assert_eq!(width, page.title().chars().count() + 2, "{page:?}");
+                assert_eq!(width, tab_cell_width(index), "{page:?}");
             }
+        }
+
+        /// The bands are where the issue says they are, and the rule is drawn at each
+        /// boundary and nowhere else (issue #395). Pinned because `tab_at` and
+        /// `draw_tabs` both widen a cell exactly where `tab_group_mark` says to, so a
+        /// boundary that moved without both being re-read is a click that lands on the
+        /// wrong page.
+        #[test]
+        fn the_group_rule_is_drawn_at_every_band_boundary_and_nowhere_else() {
+            let marked: Vec<Page> = Page::ALL
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| tab_group_mark(*index).is_some())
+                .map(|(_, page)| *page)
+                .collect();
+            assert_eq!(
+                marked,
+                vec![Page::Instances, Page::Earnings, Page::Logs, Page::Cell],
+                "the bands are Overview | activity | Earnings | Logs | editors"
+            );
+            assert!(
+                tab_group_mark(0).is_none(),
+                "the first tab opens the row, it does not follow a band"
+            );
+        }
+
+        /// The order the issue asks for, read off the single source of truth.
+        #[test]
+        fn the_tabs_are_in_the_order_the_issue_asks_for() {
+            assert_eq!(
+                Page::ALL.to_vec(),
+                vec![
+                    Page::Overview,
+                    Page::Instances,
+                    Page::Peers,
+                    Page::Services,
+                    Page::Clients,
+                    Page::Earnings,
+                    Page::Logs,
+                    Page::Cell,
+                    Page::Pricing,
+                    Page::Schedule,
+                    Page::Energy,
+                    Page::Config,
+                ]
+            );
+        }
+
+        /// Tab cycling walks `Page::ALL` and wraps, whatever its length is. Pinned
+        /// because the array grew by one for ENERGY and a hard-coded count would have
+        /// left the last tab unreachable with the keyboard.
+        #[test]
+        fn cycling_reaches_every_page_and_wraps() {
+            let mut tabs = TabsState { index: 0 };
+            let mut visited = vec![tabs.page()];
+            for _ in 1..Page::ALL.len() {
+                tabs.next();
+                visited.push(tabs.page());
+            }
+            assert_eq!(visited, Page::ALL.to_vec());
+            tabs.next();
+            assert_eq!(tabs.page(), Page::Overview, "forward wraps");
+            tabs.previous();
+            assert_eq!(tabs.page(), Page::Config, "backward wraps");
         }
 
         #[test]
@@ -8564,6 +8995,471 @@ ergo: Cold Wallet: 9cold\n";
             assert!(detail.events.is_empty());
 
             let _ = fs::remove_dir_all(&dir);
+        }
+    }
+    /// The KyA gate (issue #395).
+    ///
+    /// Everything here is about the two ways this can fail *silently*: a gate that
+    /// never comes up on a node that never accepted, and a gate that comes up every
+    /// time on one that did. Neither shows as an error, and the first is the one that
+    /// matters -- it is the CLI's one refusal, quietly routed around by starting the
+    /// console instead.
+    ///
+    /// The live terminal is not driven here (there is none in a test run); what is
+    /// pinned is the state machine the terminal would drive: which mode the gate puts
+    /// the app in, which keys the handler routes to it, and what the two answers do.
+    mod kya_gate {
+        use super::super::*;
+        use crate::handler::{handle_key_events, handle_mouse_events};
+        use crossterm::event::{
+            KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers, MouseButton,
+            MouseEvent, MouseEventKind,
+        };
+
+        /// A throwaway MAIN_DIR with a `storage/` in it, removed on drop.
+        struct Install(PathBuf);
+
+        impl Install {
+            fn new(name: &str) -> Self {
+                let path = std::env::temp_dir().join(format!("nodo-tui-kya-{name}"));
+                let _ = fs::remove_dir_all(&path);
+                fs::create_dir_all(path.join("storage")).unwrap();
+                Self(path)
+            }
+
+            /// An `App` whose paths point at this install, with the gate applied --
+            /// the same two steps `main.rs` takes, against a directory a test owns.
+            fn app(&self) -> App {
+                let mut app = App::default();
+                app.paths.root = self.0.clone();
+                app.paths.storage = self.0.join("storage");
+                app.with_kya_gate()
+            }
+
+            fn accept_marker(&self) {
+                fs::write(self.0.join("storage").join(KYA_MARKER), "").unwrap();
+            }
+        }
+
+        impl Drop for Install {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        fn press(code: KeyCode) -> KeyEvent {
+            KeyEvent {
+                code,
+                modifiers: KeyModifiers::NONE,
+                kind: KeyEventKind::Press,
+                state: KeyEventState::NONE,
+            }
+        }
+
+        async fn send(app: &mut App, code: KeyCode) {
+            handle_key_events(press(code), app).await.unwrap();
+        }
+
+        #[test]
+        fn a_node_that_has_never_accepted_is_asked() {
+            let install = Install::new("fresh");
+            let app = install.app();
+
+            assert!(app.awaiting_kya());
+            assert_eq!(app.input_mode, InputMode::AcceptKya);
+            assert!(app.details.is_some(), "the document should be on screen");
+        }
+
+        /// The same criterion the CLI uses, and the same file: an operator who
+        /// accepted at a shell prompt is not asked again by the console.
+        #[test]
+        fn an_accepted_kya_is_not_asked_again() {
+            let install = Install::new("accepted");
+            install.accept_marker();
+
+            let app = install.app();
+
+            assert!(!app.awaiting_kya());
+            assert_eq!(app.input_mode, InputMode::Normal);
+        }
+
+        /// And the marker is the one `src/commands/onboarding.py` writes, at the path
+        /// it writes it to. This is the whole of the agreement between the two
+        /// languages, so it is asserted literally rather than derived.
+        #[test]
+        fn the_marker_is_the_one_the_cli_writes() {
+            let install = Install::new("marker-path");
+            let app = install.app();
+
+            assert_eq!(KYA_MARKER, ".acceptedkya");
+            assert_eq!(
+                app.paths.kya_marker(),
+                install.0.join("storage").join(".acceptedkya")
+            );
+        }
+
+        #[tokio::test]
+        async fn accepting_records_it_and_lets_the_interface_start() {
+            let install = Install::new("accept-key");
+            let mut app = install.app();
+
+            send(&mut app, KeyCode::Char('y')).await;
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.running, "accepting must not quit");
+            assert!(app.details.is_none(), "the overlay should be gone");
+            assert!(
+                app.paths.kya_marker().exists(),
+                "accepting must write the marker the CLI reads"
+            );
+            // And it stays accepted: a second start does not ask.
+            assert!(!install.app().awaiting_kya());
+        }
+
+        /// A refusal stops the node, exactly as `nodo`'s CLI exits 1 on one. There is
+        /// no "declined but browsing" state, because that would make the console the
+        /// way around the question.
+        #[tokio::test]
+        async fn declining_quits_without_recording_anything() {
+            let install = Install::new("decline");
+            let mut app = install.app();
+
+            send(&mut app, KeyCode::Char('n')).await;
+
+            assert!(!app.running, "declining must stop the TUI");
+            assert!(
+                !app.paths.kya_marker().exists(),
+                "a refusal must not be recorded as an acceptance"
+            );
+        }
+
+        /// Esc and q are the keys that mean "I am not doing this" everywhere else in
+        /// this interface. A gate they merely dismissed would be a gate that could be
+        /// walked past, so here they decline.
+        #[tokio::test]
+        async fn esc_and_q_decline_rather_than_dismiss() {
+            for key in [KeyCode::Esc, KeyCode::Char('q')] {
+                let install = Install::new("dismiss");
+                let mut app = install.app();
+
+                send(&mut app, key).await;
+
+                assert!(!app.running, "{key:?} should have declined");
+                assert!(!app.paths.kya_marker().exists());
+            }
+        }
+
+        /// The reason the gate is an `InputMode` and the first arm of the handler: no
+        /// page shortcut may leak past it. `r` refreshes, `d` deletes things, Tab
+        /// changes page -- none of them may do anything while the question is open.
+        #[tokio::test]
+        async fn no_page_shortcut_leaks_through_the_gate() {
+            let install = Install::new("leak");
+            let mut app = install.app();
+            let page = app.page();
+
+            for key in [
+                KeyCode::Tab,
+                KeyCode::Char('r'),
+                KeyCode::Char('d'),
+                KeyCode::Char('e'),
+                KeyCode::Char('a'),
+                KeyCode::Char('c'),
+                KeyCode::Char('p'),
+                KeyCode::Char('/'),
+                KeyCode::Enter,
+                KeyCode::Char(' '),
+            ] {
+                send(&mut app, key).await;
+                assert!(
+                    app.awaiting_kya(),
+                    "{key:?} got past the KyA gate"
+                );
+                assert_eq!(app.page(), page, "{key:?} changed page behind the gate");
+                assert!(app.running, "{key:?} quit instead of doing nothing");
+            }
+        }
+
+        /// The document is longer than the overlay on a small terminal, so it has to
+        /// scroll -- a question nobody can read to the end of is not a question.
+        #[tokio::test]
+        async fn the_document_scrolls() {
+            let install = Install::new("scroll");
+            let mut app = install.app();
+
+            send(&mut app, KeyCode::Down).await;
+            assert_eq!(app.details.as_ref().unwrap().scroll, 1);
+            send(&mut app, KeyCode::Up).await;
+            assert_eq!(app.details.as_ref().unwrap().scroll, 0);
+            // And it does not scroll off the top.
+            send(&mut app, KeyCode::Up).await;
+            assert_eq!(app.details.as_ref().unwrap().scroll, 0);
+        }
+
+        /// The mouse is ignored entirely: a click on the page behind the overlay
+        /// would act on something the operator cannot see, and a wheel event aimed at
+        /// whatever is underneath is indistinguishable from one aimed at the gate.
+        #[test]
+        fn the_mouse_does_nothing_while_the_gate_is_up() {
+            let install = Install::new("mouse");
+            let mut app = install.app();
+            let page = app.page();
+
+            for kind in [
+                MouseEventKind::ScrollUp,
+                MouseEventKind::ScrollDown,
+                MouseEventKind::Down(MouseButton::Left),
+            ] {
+                handle_mouse_events(
+                    MouseEvent {
+                        kind,
+                        column: 4,
+                        row: 1,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                    &mut app,
+                );
+            }
+
+            assert!(app.awaiting_kya());
+            assert_eq!(app.page(), page);
+            assert_eq!(app.details.as_ref().unwrap().scroll, 0);
+        }
+
+        /// A missing document is a broken install, not a refusal -- the rule
+        /// `onboarding.py::accept_kya` already follows, and the one that keeps a
+        /// released binary shipped without the docs tree usable. The operator is told
+        /// what is missing and may still continue.
+        #[test]
+        fn a_missing_document_says_so_and_still_lets_the_operator_answer() {
+            let install = Install::new("nodoc");
+            let mut app = install.app();
+            app.paths.root = install.0.join("does-not-exist");
+
+            let view = kya_view(&app.paths);
+            let text = view.lines.join("\n");
+
+            assert!(text.contains("Could not read"), "{text}");
+            assert!(text.contains("KyA.md"), "{text}");
+            // Not a blank refusal: the substance is restated, so somebody can still
+            // decide.
+            assert!(text.contains("at your own risk"), "{text}");
+        }
+
+        /// A marker that cannot be written is annoying (asked again next start), not
+        /// fatal. Refusing to start over a dotfile would turn a full or read-only
+        /// `storage/` into a node nobody can look at, exactly when somebody needs to.
+        #[test]
+        fn a_marker_that_cannot_be_written_is_not_fatal() {
+            let install = Install::new("unwritable");
+            let mut app = install.app();
+            // A path whose parent is a *file* can never be created.
+            let blocked = install.0.join("blocked");
+            fs::write(&blocked, "").unwrap();
+            app.paths.storage = blocked.join("storage");
+
+            app.accept_kya();
+
+            assert!(app.running, "a failed marker write must not stop the node");
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(
+                app.status.contains("asked again"),
+                "the operator should be told: {}",
+                app.status
+            );
+        }
+
+        /// The gate is applied in `main.rs`, before the draw loop. Read off the source
+        /// because there is no way to run the real entry point from a test, and the
+        /// failure it guards against -- somebody refactoring the line away -- is
+        /// otherwise completely silent.
+        #[test]
+        fn main_asks_the_kya_before_it_draws_anything() {
+            let main = include_str!("main.rs");
+            assert!(
+                main.contains("App::new().with_kya_gate()"),
+                "main.rs must build its App behind the KyA gate"
+            );
+        }
+    }
+
+    /// The ENERGY page (issue #395): a catalogue, a cursor, and the ordinary config
+    /// editor behind it. What is pinned is that it writes through the *existing*
+    /// pipeline -- a page with its own YAML writer would be a second set of quoting
+    /// rules and a second backup policy to keep in step.
+    mod energy_page {
+        use super::super::*;
+        use crate::energy;
+
+        fn app_on_energy() -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Energy)
+                .unwrap();
+            // Deliberately not the whole block: HWMON_CHIP and friends are absent, so
+            // the "a key this config predates reads as (not set)" case is covered too.
+            app.config_document = serde_yaml::from_str(
+                r#"
+energy:
+  ENABLED: true
+  PRICE_PER_KWH: 0.21
+  CURRENCY: "EUR"
+  PRICE_SOURCE: "fixed"
+  IDLE_WATTS: 0
+  SMART_PLUG_URL: ""
+  NVML_ENABLED: false
+"#,
+            )
+            .ok();
+            app
+        }
+
+        #[test]
+        fn the_cursor_moves_and_wraps() {
+            let mut app = app_on_energy();
+            let count = energy::entries().len();
+
+            app.on_down();
+            assert_eq!(app.energy_selected, 1);
+            app.on_up();
+            assert_eq!(app.energy_selected, 0);
+            // Up from the first row lands on the last: the catalogue is short and
+            // fully visible, so a keypress that does nothing has no visible reason.
+            app.on_up();
+            assert_eq!(app.energy_selected, count - 1);
+            app.on_down();
+            assert_eq!(app.energy_selected, 0);
+        }
+
+        /// Arrow keys on this page must not disturb any other page's selection: they
+        /// share `on_up`/`on_down`, and a missing `Page::Energy` arm would have fallen
+        /// through to whatever the catch-all does.
+        #[test]
+        fn moving_here_does_not_move_another_pages_cursor() {
+            let mut app = app_on_energy();
+            app.prices.state.select(Some(2));
+
+            app.on_down();
+
+            assert_eq!(app.prices.state.selected(), Some(2));
+        }
+
+        #[test]
+        fn the_current_value_is_read_from_the_config_document() {
+            let app = app_on_energy();
+            let price = energy::entries()
+                .iter()
+                .map(|(_, entry)| entry)
+                .find(|entry| entry.path == "energy.PRICE_PER_KWH")
+                .unwrap();
+            let idle = energy::entries()
+                .iter()
+                .map(|(_, entry)| entry)
+                .find(|entry| entry.path == "energy.IDLE_WATTS")
+                .unwrap();
+            let hwmon = energy::entries()
+                .iter()
+                .map(|(_, entry)| entry)
+                .find(|entry| entry.path == "energy.HWMON_CHIP")
+                .unwrap();
+
+            assert_eq!(app.energy_value(price).as_deref(), Some("0.21"));
+            assert_eq!(app.energy_value(idle).as_deref(), Some("0"));
+            // Absent from this document: `(not set)` on screen, never a silent blank
+            // that reads as "configured to nothing".
+            assert_eq!(app.energy_value(hwmon), None);
+        }
+
+        /// Enter opens the ordinary `EditConfig` popup, on the selected key's real
+        /// path. This is the whole design of the page: the catalogue and the
+        /// explanation are new, the writer is not.
+        #[test]
+        fn enter_opens_the_ordinary_config_editor_on_the_selected_key() {
+            let mut app = app_on_energy();
+            app.energy_selected = energy::entries()
+                .iter()
+                .position(|(_, entry)| entry.path == "energy.PRICE_PER_KWH")
+                .unwrap();
+
+            app.open_energy_editor();
+
+            assert_eq!(app.input_mode, InputMode::EditConfig);
+            assert_eq!(app.input, "0.21");
+            assert_eq!(app.edit_kind, EditKind::Number);
+            assert_eq!(
+                app.edit_config_path.as_deref(),
+                Some(
+                    [
+                        ConfigPathSegment::Key("energy".to_string()),
+                        ConfigPathSegment::Key("PRICE_PER_KWH".to_string()),
+                    ]
+                    .as_slice()
+                )
+            );
+            // And that path becomes the same yq expression any other page's write
+            // would produce for it.
+            assert_eq!(
+                yq_path_expression(app.edit_config_path.as_ref().unwrap()),
+                r#".["energy"]["PRICE_PER_KWH"]"#
+            );
+        }
+
+        /// The widget comes from the catalogue, not from the type of whatever is
+        /// currently written: an empty `SMART_PLUG_URL` says nothing about what
+        /// belongs in it, and a `PRICE_SOURCE` with one implemented value is a picker.
+        #[test]
+        fn the_editor_widget_comes_from_the_catalogue() {
+            let expected = [
+                ("energy.ENABLED", EditKind::Bool),
+                ("energy.SMART_PLUG_URL", EditKind::Text),
+                (
+                    "energy.PRICE_SOURCE",
+                    EditKind::Enum(vec!["fixed".to_string()]),
+                ),
+            ];
+            for (path, kind) in expected {
+                let mut app = app_on_energy();
+                app.energy_selected = energy::entries()
+                    .iter()
+                    .position(|(_, entry)| entry.path == path)
+                    .unwrap();
+
+                app.open_energy_editor();
+
+                assert_eq!(app.edit_kind, kind, "{path}");
+            }
+        }
+
+        /// Nothing edits config.yaml while a transaction holds its backup: the same
+        /// guard the Config and Pricing editors have, for the same reason.
+        #[tokio::test]
+        async fn the_editor_refuses_to_open_while_a_change_is_being_applied() {
+            let mut app = app_on_energy();
+            // A task that never finishes: what matters is that one is in flight, not
+            // what it would have returned.
+            app.config_task = Some(tokio::spawn(async {
+                std::future::pending::<()>().await;
+                unreachable!()
+            }));
+
+            app.open_energy_editor();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.status.contains("Busy"), "{}", app.status);
+        }
+
+        /// A page that is not open must not react to its own keys: `open_energy_editor`
+        /// is reachable from the global handler and guards on the page, the way the
+        /// pricing and cell editors do.
+        #[test]
+        fn the_editor_does_nothing_from_another_page() {
+            let mut app = App::default();
+            app.tabs.index = 0;
+
+            app.open_energy_editor();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
         }
     }
 }
