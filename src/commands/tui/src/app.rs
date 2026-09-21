@@ -445,6 +445,27 @@ fn chained_write(writes: &[(String, String)]) -> (String, Vec<(String, String)>)
     (expressions.join(" | "), values)
 }
 
+/// Whether this process could drive systemd, i.e. whether `nodo daemon restart`
+/// would get past its own euid check (`daemon_command`, src/commands/daemon.py).
+///
+/// Asked rather than assumed, and asked *here* rather than by trying the restart and
+/// reading the failure: the point is to warn the operator before they type a value,
+/// and a warning derived from an attempt is a warning that arrives after the attempt.
+///
+/// `#[cfg(unix)]` because there is nothing else this binary is built for -- the
+/// shipped targets are `tui-linux-*` -- but the fallback keeps a non-Unix build
+/// compiling rather than failing on a line that is not about it.
+#[cfg(unix)]
+fn is_root() -> bool {
+    // SAFETY: `geteuid` takes no arguments, touches no memory, and cannot fail.
+    unsafe { libc::geteuid() == 0 }
+}
+
+#[cfg(not(unix))]
+fn is_root() -> bool {
+    false
+}
+
 /// Longest a `nodo daemon restart` may take before it is called failed.
 const RESTART_TIMEOUT: Duration = Duration::from_secs(180);
 /// Longest to wait for the node to accept connections again after a restart.
@@ -3236,6 +3257,14 @@ impl App {
         }
         self.status = format!("{} • applying and restarting nodo…", write.label);
         self.config_follow_up = write.follow_up.clone();
+        // Said once, here, on the way in: this is the single funnel every config
+        // write in the interface passes through, so one line covers the ENERGY
+        // page's kWh price, a cell profile, a price nudge and a raw Config row
+        // alike. It was previously learned by watching a value be written and then
+        // silently put back.
+        if let Some(hint) = self.config_write_root_hint() {
+            self.app_logs.push(hint.to_string());
+        }
         self.config_task = Some(tokio::spawn(apply_config_change(
             self.paths.yq.clone(),
             self.paths.config.clone(),
@@ -3248,6 +3277,55 @@ impl App {
     /// config.yaml underneath it.
     pub fn config_write_running(&self) -> bool {
         self.config_task.is_some()
+    }
+
+    /// Whether a configuration change made right now would need root to land.
+    ///
+    /// **This is not about the file.** `config.yaml` is `chmod a+w` at install time
+    /// (`install.sh`) and rewritten `0o666` by `ConfigManager._atomic_write`, it is
+    /// `chown`ed to the installing user, and `yq -i` writes it through a rename in
+    /// the same directory. An unprivileged operator can write every key in it, and
+    /// the backup beside it, without ever being asked for a password.
+    ///
+    /// What needs root is the **restart**. `apply_config_change` is a transaction:
+    /// write, restart, and put the file back if the node does not come back --
+    /// because the invariant this whole editor exists to hold is that *what the file
+    /// says is what the running node loaded*. The restart is `nodo daemon restart`,
+    /// which is `systemctl stop` + `systemctl start`, and `daemon_command` in
+    /// `src/commands/daemon.py` refuses outright under a non-zero euid. So an
+    /// unprivileged edit to a **serving** node writes the value, fails the restart,
+    /// and gets reverted -- which from the operator's chair looks exactly like "this
+    /// particular setting needs sudo".
+    ///
+    /// It is therefore not a property of the key. `energy.PRICE_PER_KWH` is written
+    /// by the same `write_config_value` as every price, every cell lever and every
+    /// raw Config row; there is one writer and one transaction. It is a property of
+    /// **whether something is serving**, which is why the same edit succeeds
+    /// silently on a stopped node and is refused on a running one -- and why it
+    /// looked arbitrary.
+    ///
+    /// Read off `node_info.service_status`, which `nodo info` already reports and
+    /// this interface already polls, rather than opening a socket per keystroke. It
+    /// can be up to one wallet-refresh stale; that is acceptable for a *warning*,
+    /// and the transaction itself still asks the live question
+    /// (`serving_on(port_before)`) before deciding whether a restart is owed.
+    pub fn config_write_needs_root(&self) -> bool {
+        !is_root() && self.node_info.service_status == "running"
+    }
+
+    /// The one-line warning shown beside a config editor that is about to fail, or
+    /// `None` when the change can land.
+    ///
+    /// Said **before** the value is typed rather than after it is reverted. The
+    /// revert is correct and will stay -- a node running settings that are not the
+    /// settings on disk is the worse outcome -- but "your change was undone" is a
+    /// thing to learn from a message, not from watching a number go back.
+    pub fn config_write_root_hint(&self) -> Option<&'static str> {
+        self.config_write_needs_root().then_some(
+            "Applying this needs root: the node is serving, so the change is \
+             followed by `nodo daemon restart`, which is systemctl. Run the TUI \
+             with sudo, or stop the node and edit it here.",
+        )
     }
 
     /// Collect a finished configuration transaction and tell the operator what
