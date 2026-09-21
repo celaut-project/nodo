@@ -84,11 +84,9 @@ pub enum Page {
 
 /// Which band of the tab bar a page belongs to.
 ///
-/// The tabs had grown to a dozen and read as one undifferentiated row, which is a
-/// navigation problem rather than a cosmetic one: an operator looking for the page
-/// that edits something had to read every title, because nothing said where the
-/// read-only pages stopped and the editors began. Four bands, each answering one
-/// question, and the divider between them is what the eye lands on (issue #395).
+/// A dozen tabs read as one undifferentiated row: nothing said where the read-only
+/// pages stopped and the editors began, so finding one meant reading every title.
+/// Four bands, each answering one question (issue #395).
 ///
 /// A heavier rule inside a single row marked the boundaries without reducing what
 /// had to be read. The bands are now the *primary* row and the active one's pages
@@ -232,11 +230,9 @@ impl Page {
 
 /// The divider the `Tabs` widget draws between every pair of tabs.
 ///
-/// One character, not `" │ "`: `Tabs` already pads each title with a space on each
-/// side, so the bare rule renders as ` OVERVIEW │ INSTANCES ` either way, and the two
-/// spaces it does not spend are two of the twenty-two that stopped CONFIG fitting on a
-/// 140-column terminal once the row grew to twelve tabs and four group rules
-/// (issue #395). A tab bar that does not fit is a page that cannot be clicked.
+/// One character, not `" │ "`: `Tabs` pads each title already, so both render the
+/// same and the two spaces saved per divider are what kept CONFIG on screen at 140
+/// columns. A tab bar that does not fit is a page that cannot be clicked.
 pub const TAB_DIVIDER: &str = "│";
 /// Which of a row of `titles` covers column `x`, given the row's own `Rect`.
 ///
@@ -306,18 +302,14 @@ pub enum InputMode {
     /// The Know-your-Assumptions gate, shown once, before anything else is reachable
     /// (issue #395).
     ///
-    /// The CLI has asked this since `nodo` first ran (`src/commands/onboarding.py`),
-    /// and it records the answer in `storage/.acceptedkya`. `nodo tui` did not, which
-    /// meant the one question the node is conditional on could be skipped by starting
-    /// the console instead of the CLI -- and, on a machine where `nodo tui` is what an
-    /// operator types first, skipped permanently without anyone noticing.
+    /// The CLI has asked this since `nodo` first ran and records it in
+    /// `storage/.acceptedkya`; `nodo tui` did not, so the one question the node is
+    /// conditional on could be skipped by starting the console instead.
     ///
-    /// It is an `InputMode` rather than a separate screen before the event loop
-    /// because that is what makes it *inescapable* by construction: every key goes
-    /// through `handle_key_events`, which dispatches on this enum before it looks at
-    /// any page shortcut, so there is no key that reaches a page behind the overlay.
-    /// Declining calls `quit()`, exactly as the CLI exits non-zero: the KyA is what
-    /// running the node is conditional on, and a refusal is not a dismissible dialog.
+    /// An `InputMode` rather than a screen before the event loop, which is what makes
+    /// it inescapable by construction: every key goes through `handle_key_events`,
+    /// which dispatches on this enum before any page shortcut. Declining calls
+    /// `quit()`, as the CLI exits non-zero -- a refusal is not a dismissible dialog.
     AcceptKya,
     Connect,
     EditConfig,
@@ -355,17 +347,12 @@ pub enum EditKind {
     Enum(Vec<String>),
 }
 
-/// Fixed value sets for config keys whose comment in `config.example.yaml`
-/// documents a closed set of options. Deliberately small and explicit --
-/// listing a value here is a claim that it is a real, working setting.
+/// Fixed value sets for config keys whose comment in `config.example.yaml` documents
+/// a closed set of options. Listing a value here claims it is a real, working one.
 ///
-/// This does not have to be the *complete* set a key accepts: `Enum` only adds
-/// an ↑/↓ cycle-through-these on top of ordinary typing (see `EditKind::Enum`
-/// and `adjust_edit_value`), and `save_config_edit` validates the typed value
-/// as YAML, never against this list. So `hashing.HASH` belongs here even
-/// though it also accepts an arbitrary hex hash-id: the picker offers the
-/// four canonical algorithm names (`src/utils/hashing.py`'s `HASH_SPECS`) as a
-/// fast path, and typing a hex id past it still works exactly as before.
+/// Not necessarily the *complete* set a key accepts: `Enum` adds an ↑/↓ cycle on top
+/// of ordinary typing, and `save_config_edit` validates as YAML rather than against
+/// this list. So `hashing.HASH` belongs here despite also accepting a hex hash-id.
 pub fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
     match path {
         "network.DELEGATION_TUNNEL_POLICY" => Some(&["auto", "always", "never"]),
@@ -399,14 +386,12 @@ pub enum PendingAction {
     },
 }
 
-/// The `nodo` invocation a confirmed [`PendingAction`] turns into, plus the label its
-/// outcome is reported under. Every destructive action that has a CLI equivalent goes
-/// through the same CLI the operator would type, so the TUI can never do something
-/// `nodo` cannot.
+/// The `nodo` invocation a confirmed [`PendingAction`] turns into, and the label its
+/// outcome is reported under. Destructive actions go through the CLI the operator
+/// would type, so the TUI can never do something `nodo` cannot.
 ///
-/// `None` for the one action that has no such equivalent: no `nodo` subcommand edits a
-/// single config key, which is why the config editor writes through `yq` at all, so
-/// removing a list element takes that same path (`delete_config_list_item`).
+/// `None` where there is no equivalent: no `nodo` subcommand edits a single config
+/// key, which is why the config editor writes through `yq`.
 fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
     match action {
         PendingAction::DeleteService { id, label } => Some((
@@ -427,12 +412,9 @@ fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
 
 /// One configuration change, as the transaction that applies it.
 ///
-/// A change to config.yaml and the restart that makes the node read it are a single
-/// step here, and the file is put back if that restart does not happen. Before this,
-/// a write landed on disk and the operator was told to restart -- which left the
-/// node running settings that were no longer the settings on disk, for as long as it
-/// took someone to act on a status line. Every editor in this TUI now goes through
-/// the same transaction: raw config, prices, and cell levers alike.
+/// The write and whatever makes the node read it are a single step, and the file is
+/// put back if that step fails. Every editor in this TUI goes through this same
+/// transaction: raw config, prices and cell levers alike.
 #[derive(Debug, Clone)]
 struct ConfigWrite {
     /// What the status line calls this change.
@@ -587,17 +569,13 @@ const NODE_READY_POLL: Duration = Duration::from_millis(500);
 /// if the node does not come back.
 ///
 /// The invariant: **what the file says is what the running node loaded.** A change
-/// that cannot be restarted into is not a change, so it is undone rather than left
-/// on disk. The operator is never handed a node whose behaviour and configuration
-/// disagree, and never has to remember that they still owe it a restart.
+/// that cannot be restarted into is undone rather than left on disk, so the operator
+/// is never handed a node whose behaviour and configuration disagree.
 ///
-/// Also the single place that invalidates the gateway-port verdict. The node records
-/// "this port was proven reachable" in `<CACHE>/gateway_port_passed`
-/// (`src/utils/config.py`) and skips its startup probe while that holds; a port
-/// edited here has never been proven, so the file has to go or the next start would
-/// serve on an unchecked port. Compared before and after rather than matched against
-/// the expression, because an expression that touches the key can be shaped many
-/// ways and only the value actually matters.
+/// Also the single place that invalidates the gateway-port verdict: the node skips
+/// its startup probe while `<CACHE>/gateway_port_passed` holds, and a port edited
+/// here has never been proven. Compared before and after rather than matched against
+/// the expression, since only the value matters.
 async fn apply_config_change(
     yq: PathBuf,
     config: PathBuf,
@@ -991,10 +969,9 @@ pub struct ClientDetail {
 
 /// One wallet of a donation list, as `nodo donations --json` reports it.
 ///
-/// Weights are carried as text, exactly as written: they are money-adjacent decimals,
-/// and rendering one through an f64 would print 0.30000000000000004 next to a config
-/// file that says 0.3. `share` is the same weight normalised against its list, which is
-/// what actually decides how much this wallet gets.
+/// Weights are carried as text: through an f64 one would print 0.30000000000000004
+/// beside a config file that says 0.3. `share` is that weight normalised against its
+/// list, which is what decides how much the wallet gets.
 #[derive(Debug, Clone, Default)]
 pub struct DonationWallet {
     pub address: String,
@@ -1004,13 +981,11 @@ pub struct DonationWallet {
     /// does not count, or counts but does not fund, is the asymmetry an operator wants
     /// to see -- see `NodeDonations::warnings`.
     pub in_other_list: bool,
-    /// What has actually reached this wallet, per asset, in that asset's smallest unit
-    /// and as written. Empty for a wallet that has never been paid, and empty for a
-    /// counted wallet, which this node pays nothing.
+    /// What has actually reached this wallet, per asset, in that asset's smallest
+    /// unit and as written. Empty for a wallet never paid, and for a counted one.
     ///
-    /// It is here because a `share` is a claim and this is the only way to check it: a
-    /// wallet given 0.1 % should be able to show that something arrived. Per asset
-    /// because a credit in nanoERG says nothing about what it has had in a token.
+    /// A `share` is a claim and this is the only way to check it. Per asset, because
+    /// a credit in nanoERG says nothing about what arrived in a token.
     pub paid: Vec<(String, String)>,
 }
 
@@ -1041,11 +1016,9 @@ impl Identifiable for LedgerDonations {
 
 /// What this node donates and what it counts, from `nodo donations --json`.
 ///
-/// Read through the CLI rather than computed here, for the same reason the reputation
-/// page is: the credit arithmetic -- weight normalisation, the age multiplier, the
-/// saturating bonus -- decides where work is routed, and a second implementation of it
-/// in another language would be a second answer. The Python side is the one the
-/// balancer itself uses.
+/// Read through the CLI rather than recomputed: the credit arithmetic decides where
+/// work is routed, and a second implementation in another language would be a second
+/// answer. The Python side is the one the balancer uses.
 #[derive(Debug, Clone, Default)]
 pub struct NodeDonations {
     pub ledgers: Vec<LedgerDonations>,
@@ -1074,14 +1047,12 @@ impl NodeDonations {
 
 /// What one payment network has brought in, per window.
 ///
-/// Only accepted incoming payments count as earned: a `rejected` row is a deposit this
-/// node could not validate, so no balance was credited for it and nothing arrived. It
+/// Only accepted payments count as earned: a `rejected` row credited no balance. It
 /// is carried alongside rather than dropped, because a network that keeps refusing
-/// deposits is the operator's problem to see, not ours to hide.
+/// deposits is the operator's problem to see.
 ///
-/// Amounts stay in raw MU, as the catalogue stores them, and are rendered in the
-/// display unit at draw time like every other balance here. `u128` because MU exceeds
-/// what SQLite holds as an integer, which is why the column is TEXT in the first place.
+/// Amounts stay in raw MU and are rendered at draw time. `u128` because MU exceeds
+/// what SQLite holds as an integer, which is why the column is TEXT.
 #[derive(Debug, Clone, Default)]
 pub struct LedgerEarnings {
     /// Ledger tag from the payment row (`ergo`), or `unknown` for a row that carries
@@ -1104,11 +1075,9 @@ impl Identifiable for LedgerEarnings {
 
 /// Opinions added up, with for and against kept apart.
 ///
-/// Shares of the proofs that published them, so each figure is in `0..1` per opining
-/// proof and the two are not a single number by construction: a node with +0.4 and
-/// -0.3 against it is in a different position from one with +0.1 and no detractor, and
-/// only the net would call them the same. Mirrors `ReputationTotals` in
-/// `src/reputation_system/opinions.py`.
+/// Not a single net number by construction: +0.4 with -0.3 against is a different
+/// position from +0.1 with no detractor, and only the net would call them the same.
+/// Mirrors `ReputationTotals` in `src/reputation_system/opinions.py`.
 #[derive(Debug, Clone, Default)]
 pub struct ReputationTotals {
     pub positive: f64,
@@ -1117,9 +1086,8 @@ pub struct ReputationTotals {
     pub negative_proofs: u32,
     /// nanoERG of unrecoverable sunk cost behind the opinions in each direction.
     ///
-    /// The other half of the answer, and the half a share cannot give: minting a proof
-    /// is free, so a large share of cheap proofs and the same share of expensive ones
-    /// are very different positions to be in.
+    /// The half a share cannot give: minting a proof is free, so the same share of
+    /// cheap and of expensive proofs are very different positions.
     pub positive_backing: f64,
     pub negative_backing: f64,
 }
@@ -1182,11 +1150,9 @@ impl Identifiable for NodeOpinion {
 
 /// What the network stakes on this node, as `nodo reputation --json` reports it.
 ///
-/// Read through the CLI rather than from the chain directly: the lookup is a paginated
-/// explorer scan and the arithmetic is the ecosystem's, both of which already exist on
-/// the Python side (`src/reputation_system/opinions.py`). Re-deriving either here would
-/// be a second implementation of a number that has to agree with what other readers of
-/// the same chain compute.
+/// Read through the CLI rather than from the chain: the lookup and the arithmetic
+/// exist already in `src/reputation_system/opinions.py`, and re-deriving them would
+/// be a second answer to a number other readers of the same chain also compute.
 #[derive(Debug, Clone, Default)]
 pub struct NodeReputation {
     pub node_id: String,
@@ -1196,11 +1162,9 @@ pub struct NodeReputation {
     pub own_proof_ids: Vec<String>,
     /// Everything staked on this node, whenever it was staked.
     ///
-    /// The only aggregate there is. Reputation is a stock, not a flow, and the chain
-    /// cannot be made to answer "earned this week": revising an opinion spends its box
-    /// and writes a new one, and a nodo proof re-splits its whole supply on every
-    /// submission, so all of its dates reset together. A window over them would report
-    /// the publisher's submission cadence, which is why only money is windowed here.
+    /// Reputation is a stock rather than a flow, and the chain cannot answer "earned
+    /// this week": a proof re-dates its whole supply on every submission, so a window
+    /// over those dates would measure the publisher's cadence. Only money is windowed.
     pub standing: ReputationTotals,
     /// Every opinion behind `standing`. `App` keeps its own selectable list of these
     /// (see `App::opinions`); this is the report as it was read.
@@ -1239,12 +1203,9 @@ impl Identifiable for Service {
 
 /// What an instance is *using* right now, as opposed to what it was allocated.
 ///
-/// Every field is read from cgroupfs/sysfs on each refresh, exactly where
-/// `nodo observe` reads it (`src/commands/observe.py`,
-/// `src/virtualizers/ch/observability.py`). All of them stay `None` — never `0` —
-/// when the source file is absent or unreadable: a delegated instance has no local
-/// cgroup, a non-`ch` virtualizer has no tap, and a dying instance loses both
-/// mid-sweep. `0` would read as "idle", which is a different claim than "unknown".
+/// Read from cgroupfs/sysfs where `nodo observe` reads it. Every field stays `None`
+/// rather than `0` when its source is absent: a delegated instance has no local
+/// cgroup, and `0` would read as "idle", which is a different claim than "unknown".
 #[derive(Debug, Clone, Default)]
 pub struct InstanceUsage {
     pub memory_current: Option<u64>,
@@ -1288,12 +1249,10 @@ pub struct Instance {
     pub location: String,
     /// Parent instance id (from `father_id`); empty when this is a root.
     pub father_id: String,
-    /// Burn rate: what this instance costs to keep running, in MU per minute / per
-    /// hour, derived from the `instance_consumption` running average
-    /// (`mu_per_second`). `None` — rendered `—`, never `0` — when no maintenance tick
-    /// has charged it yet, and always `None` for delegated instances (their charge
-    /// happens on the owning peer). It prices *reserved* resources at current
-    /// scarcity, so it is "cost at present prices", not measured resource usage (#245).
+    /// Burn rate in MU per minute / per hour, from the `instance_consumption` running
+    /// average. `None` rather than `0` before the first charge, and always `None` for
+    /// delegated instances. Prices *reserved* resources at current scarcity, so it is
+    /// "cost at present prices" rather than measured usage (#245).
     pub mu_per_minute: Option<f64>,
     pub mu_per_hour: Option<f64>,
     /// How many samples the average is built from, and how long ago it was last
@@ -1334,10 +1293,9 @@ impl Instance {
 /// One instance's raw counters plus the rates last derived from them.
 ///
 /// `refresh()` rebuilds the instance list wholesale, so the previous sweep's
-/// counters have to be kept here, keyed by instance id, and matched up on the next
-/// one. The derived rates are stored alongside so a *forced* refresh landing a few
-/// milliseconds after the previous one can carry them forward instead of blanking
-/// the columns (see `MIN_RATE_INTERVAL`).
+/// counters are kept here by id. The derived rates are stored alongside so a forced
+/// refresh landing milliseconds later carries them forward rather than blanking the
+/// columns (see `MIN_RATE_INTERVAL`).
 #[derive(Debug, Clone)]
 struct InstanceCounters {
     sampled_at: Instant,
@@ -1483,15 +1441,13 @@ impl Paths {
 
     /// Where the accepted-KyA marker lives: `<storage>/.acceptedkya`.
     ///
-    /// The same file `src/commands/onboarding.py` writes (`KYA_MARKER`, under
-    /// `_marker(main_dir, name)` = `<main_dir>/storage/<name>`), and deliberately so:
-    /// the question is about the node, not about the interface it was asked through.
-    /// An operator who accepted in the CLI is never asked again by `nodo tui`, and
-    /// accepting here means the CLI does not ask either (issue #395).
+    /// The same file `src/commands/onboarding.py` writes, deliberately: the question
+    /// is about the node, not the interface it was asked through, so accepting in
+    /// either place answers it for both (issue #395).
     ///
-    /// Resolved from `main.STORAGE` like everything else, rather than assuming
-    /// `<root>/storage`, because an installation is free to move it — and a marker
-    /// written to the wrong directory is a question asked forever.
+    /// Resolved from `main.STORAGE` rather than assuming `<root>/storage`: an
+    /// installation may move it, and a marker in the wrong directory is a question
+    /// asked forever.
     pub fn kya_marker(&self) -> PathBuf {
         self.storage.join(KYA_MARKER)
     }
@@ -1509,25 +1465,22 @@ pub const KYA_MARKER: &str = ".acceptedkya";
 
 /// How the operator's money is denominated.
 ///
-/// Three separate things, and the TUI has to keep them apart the same way the node
-/// does: amounts are stored in **MU** (the node's unit of account, see
-/// `src/utils/monetary.py`), what an MU is worth is the *payment contract's* rate — for
-/// Ergo, `ledgers.ergo.payments.MU_PER_NANOERG`, whose Python side lives in
-/// `src/payment_system/contracts/ergo/rate.py` — and what the operator reads is
-/// `ui.DISPLAY_UNIT`. The TUI reads the catalogue database directly, so it resolves all
-/// three from `config.yaml` itself rather than asking the node; a second payment system
-/// would need its rate read here too.
+/// Three separate things the TUI keeps apart as the node does: amounts are stored in
+/// **MU** (`src/utils/monetary.py`), what an MU is worth is the payment contract's
+/// rate (`ledgers.ergo.payments.MU_PER_NANOERG`), and what the operator reads is
+/// `ui.DISPLAY_UNIT`.
+///
+/// Resolved from `config.yaml` rather than asked of the node, since the TUI reads the
+/// catalogue directly. A second payment system would need its rate read here too.
 #[derive(Debug, Clone)]
 pub struct Money {
     pub unit_name: String,
     pub symbol: String,
     /// MU in one display unit.
     pub mu_per_unit: f64,
-    /// Set when `mu_per_unit` is an exact power of ten, which lets formatting be a
-    /// digit shift on the decimal string instead of an f64 division — exact for any
-    /// balance, however large. The built-in units and any whole-numbered custom rate
-    /// land here; only an awkward custom rate falls back to floating point, where the
-    /// configured decimals round it anyway.
+    /// Set when `mu_per_unit` is an exact power of ten, which makes formatting a
+    /// digit shift on the decimal string rather than an f64 division -- exact for any
+    /// balance. Only an awkward custom rate falls back to floating point.
     pub mu_per_unit_pow10: Option<u32>,
     pub decimals: usize,
     /// MU bought by one nanoERG. Only meaningful against the Ergo ledger.
@@ -1744,24 +1697,21 @@ pub const PRICING_BY_ARCH_KEY: &str = "BY_ARCH";
 /// Prices that may be set per architecture, and the architectures they may be set for.
 /// Mirrors `PER_ARCH_PRICE_KEYS` in `src/utils/config_validation.py`.
 ///
-/// Only memory. It is the one resource whose real cost to the node depends on the
-/// guest's architecture: the guest kernel reserve the node absorbs and never bills
-/// differs per arch. The node hands a guest the vCPUs and the image it asked for
-/// whatever architecture it is, so nothing else has a per-arch cost to recover.
+/// Only memory: the guest kernel reserve the node absorbs differs per arch, and
+/// nothing else has a per-arch cost to recover.
 const PER_ARCH_PRICE_KEYS: [&str; 1] = ["RAM_MU_PER_GIB_HOUR"];
 pub const PRICED_ARCHITECTURES: [&str; 2] = ["linux/amd64", "linux/arm64"];
 
 /// The guest kernel reserve, per architecture: how much MORE than a service's declared
 /// memory the VM is booted with, so the service really gets what it declared.
 ///
-/// Mirrors `_DEFAULT_GUEST_KERNEL_RESERVE` in `src/virtualizers/ch/limits.py`, and is
-/// overridden from the same config keys the node reads, so what the operator is shown
-/// here is what the node will actually reserve.
+/// Mirrors `_DEFAULT_GUEST_KERNEL_RESERVE` in `src/virtualizers/ch/limits.py` and is
+/// overridden from the same config keys, so the figure shown is the one the node
+/// will reserve.
 ///
-/// This matters on the PRICING page because **the node absorbs it**. An instance is
-/// billed for the memory it declared and can use, never for the kernel underneath it,
-/// so every GiB sold commits more than a GiB of host RAM -- and by a different amount
-/// per architecture. A memory price set without it in view under-recovers, silently.
+/// It matters on the PRICING page because **the node absorbs it**: every GiB sold
+/// commits more than a GiB of host RAM, so a memory price set without it in view
+/// under-recovers silently.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GuestKernelReserve {
     pub fixed_mib: u64,
@@ -1780,11 +1730,9 @@ impl GuestKernelReserve {
         self.fixed_mib * 1024 * 1024 + (usable_bytes as f64 * self.ratio).ceil() as u64
     }
 
-    /// What one GiB sold actually costs the node in host RAM, as a multiplier.
-    ///
-    /// The figure a memory price has to be multiplied by to recover the overhead: at
-    /// 1.18, a node earning `p` per GiB-hour declared earns `p / 1.18` per GiB-hour of
-    /// host RAM it committed.
+    /// What one GiB sold actually costs the node in host RAM, as a multiplier: at
+    /// 1.18, a node earning `p` per GiB-hour declared earns `p / 1.18` per GiB-hour
+    /// of host RAM committed.
     pub fn commitment_multiplier(&self, usable_bytes: u64) -> f64 {
         if usable_bytes == 0 {
             return 1.0;
@@ -1795,10 +1743,9 @@ impl GuestKernelReserve {
 
 /// The ratio is the same on both arches because the physics is: one `struct page`
 /// per 4 KiB frame does not know what instruction set it describes. 2.5% clears the
-/// fitted measurements (1.80% amd64, 2.10% arm64) and the 1.5625% `struct page`
-/// floor with headroom, without scaling into hundreds of wasted MiB on a large guest
-/// -- margin on a multiplier is multiplied too, and the node absorbs it unbilled.
-/// The fixed part is what genuinely differs per arch, and is where margin is cheap.
+/// fitted measurements (1.80% amd64, 2.10% arm64) and the 1.5625% floor with
+/// headroom. Margin on a multiplier is multiplied too, so the fixed part -- which
+/// does differ per arch -- is where it is cheap.
 const DEFAULT_GUEST_KERNEL_RESERVE: [(&str, u64, f64); 2] = [
     ("linux/amd64", 40, GUEST_KERNEL_RESERVE_RATIO),
     ("linux/arm64", 32, GUEST_KERNEL_RESERVE_RATIO),
@@ -1877,11 +1824,9 @@ fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
         })
         .collect();
 
-    // One row per (architecture, per-arch-priceable key), always -- including the
-    // architectures the operator has not written a price for, which show the scalar
-    // they inherit. An arch that only appeared once it was already configured would
-    // need the operator to know the block exists before they could reach it, and the
-    // whole point of the page is that a price is editable where it is displayed.
+    // One row per (architecture, key), always -- including arches with no price
+    // written, which show the scalar they inherit. An arch that appeared only once
+    // configured would have to be known about before it could be reached.
     for arch in PRICED_ARCHITECTURES {
         for key in PER_ARCH_PRICE_KEYS {
             let (short, per, recurring) = PRICE_CATALOGUE
@@ -1936,10 +1881,9 @@ pub fn unix_now() -> Option<i64> {
 
 /// Minutes since local midnight.
 ///
-/// Asked of SQLite, which is already a dependency and already the only thing in this
-/// binary that knows what local time is: `std` has no local clock at all, and pulling
-/// in a date library for one number is a poor trade. Falls back to midnight, which
-/// draws the marker at 00:00 rather than refusing to draw the day.
+/// Asked of SQLite, the only thing in this binary that knows local time -- `std` has
+/// no local clock, and a date library for one number is a poor trade. Falls back to
+/// midnight rather than refusing to draw the day.
 pub fn local_minute_of_day() -> u16 {
     fn query() -> Option<u16> {
         let connection = rusqlite::Connection::open_in_memory().ok()?;
@@ -1955,14 +1899,12 @@ pub fn local_minute_of_day() -> u16 {
 
 /// The four keys a working day is, and the label the change is reported under.
 ///
-/// Pure, and separate from `App::commit_schedule`, for the reason `chained_write` is:
-/// starting the write spawns a task, so a test that went through the method would need
-/// a runtime to ask the only question worth asking -- what would reach config.yaml.
+/// Pure, and separate from `App::commit_schedule`, like `chained_write`: starting the
+/// write spawns a task, so a test going through the method would need a runtime to
+/// ask what reaches config.yaml.
 ///
-/// `WINDOWS` is written whole, as one flow-style YAML sequence, the same way a list
-/// lever writes its list (see `cell::path_segments`): the count of windows changes
-/// from one edit to the next, so there is no fixed set of per-window keys to assign
-/// into, only the list itself.
+/// `WINDOWS` is written whole as one flow-style sequence: the count of windows
+/// changes between edits, so there is no fixed set of per-window keys to assign into.
 pub fn schedule_writes(schedule: &schedule::Schedule) -> (String, Vec<(String, String)>) {
     let windows_yaml = format!(
         "[{}]",
@@ -2063,9 +2005,8 @@ fn yaml_at<'a>(document: Option<&'a Value>, keys: &[&str]) -> Option<&'a Value> 
 
 /// Read a scalar as text, whatever YAML type it happens to be.
 ///
-/// `yaml_string` only sees quoted strings, so a price written as a bare `1000000` --
-/// which is how prices are written, they are numbers -- reads as absent and would
-/// silently show as free. Anything that is not a scalar still reads as absent.
+/// `yaml_string` only sees quoted strings, so a bare `1000000` -- which is how
+/// prices are written -- would read as absent and show as free.
 fn yaml_scalar(document: Option<&Value>, keys: &[&str]) -> Option<String> {
     let mut value = document?;
     for key in keys {
@@ -2259,9 +2200,8 @@ impl<T: Identifiable> StatefulList<T> {
 /// Where the cursor is on the CELL page, and where the page last drew things so a
 /// click can be resolved back to them.
 ///
-/// The cursor is (organelle, lever) rather than a flat index: the levers are laid
-/// out in boxes, and ←/→ moving between boxes while ↑/↓ moves inside one is what
-/// makes the layout navigable without a mouse.
+/// (organelle, lever) rather than a flat index: ←/→ move between boxes while ↑/↓
+/// move inside one, which is what makes the layout navigable without a mouse.
 #[derive(Debug, Default)]
 pub struct CellState {
     pub organelle: usize,
@@ -2319,11 +2259,9 @@ pub struct App {
     pub prices: StatefulList<PriceEntry>,
     /// Which row of the ENERGY page's fixed catalogue the cursor is on (issue #395).
     ///
-    /// A plain index rather than a `StatefulList`, because the catalogue is a
-    /// compile-time constant: there is no refresh that could reorder it, and so
-    /// nothing for `StatefulList::refresh`'s re-find-by-id to protect against. The
-    /// values beside the rows are read from `config_document` at draw time, which is
-    /// the part that does change.
+    /// A plain index rather than a `StatefulList`: the catalogue is a compile-time
+    /// constant, so nothing can reorder it and there is nothing for re-find-by-id to
+    /// protect against.
     pub energy_selected: usize,
     /// Where the ENERGY page last drew each row, so a click can be mapped back to the
     /// key under it. Written by `draw_energy` each frame, same as the SCHEDULE page's
@@ -2334,12 +2272,10 @@ pub struct App {
     /// Which window the SCHEDULE page is editing, which of its edges the arrows move,
     /// and the schedule as edited but not yet applied.
     ///
-    /// A draft rather than a write per keypress: `activity_window.ENABLED`, `.WINDOWS`
-    /// and `.ON_CLOSE` are one decision, and applying them one at a time would restart
-    /// the node onto a combination nobody chose -- 22:00→06:00 arrived at through
-    /// 22:00→18:00, which is a day shift the operator never asked for and which
-    /// `ON_CLOSE: stop` would act on. `write_config_values` exists for exactly this, so
-    /// the page collects the change and commits it once.
+    /// A draft rather than a write per keypress: the three keys are one decision, and
+    /// applying them separately would restart the node onto a combination nobody
+    /// chose -- 22:00→06:00 reached through 22:00→18:00 is a day shift that
+    /// `ON_CLOSE: stop` would act on.
     pub schedule_edge: schedule::Edge,
     /// Index into `schedule().windows` of the window the arrows and `d` act on.
     /// Clamped to the list's length every time it changes size.
@@ -2360,10 +2296,9 @@ pub struct App {
     pub demand_days: u16,
     /// Minutes since local midnight, refreshed with the rest of the data.
     ///
-    /// Local because `activity_window` is local: a day drawn in UTC would be a
-    /// different day from the one the node enforces. Sampled on the data tick rather
-    /// than per frame, since drawing must not do work that can fail, and a marker on a
-    /// 24-hour bar only has to be right to the minute.
+    /// Local because `activity_window` is: a day drawn in UTC would not be the day
+    /// the node enforces. Sampled on the data tick, since a marker on a 24-hour bar
+    /// only has to be right to the minute.
     pub now_minute: u16,
     /// The guest kernel reserve per architecture, as the node will apply it. Shown on
     /// the pricing page because the node absorbs it: it is the gap between memory sold
@@ -2380,10 +2315,9 @@ pub struct App {
     pub donations: NodeDonations,
     /// The same report's opinions, as the page's selectable table.
     ///
-    /// A `StatefulList` of its own rather than a cursor into `reputation.opinions`,
-    /// because that is what keeps a selection on the opinion the operator picked
-    /// rather than on a row number: the report is re-read wholesale every few minutes,
-    /// and `StatefulList::refresh` re-finds the selected row by id across that.
+    /// A `StatefulList` rather than a cursor into `reputation.opinions`: the report
+    /// is re-read wholesale every few minutes, and `refresh` re-finds the selection
+    /// by id across that rather than leaving it on a row number.
     pub opinions: StatefulList<NodeOpinion>,
     pub peer_detail: Option<PeerDetail>,
     pub client_detail: Option<ClientDetail>,
@@ -2550,13 +2484,10 @@ impl Default for App {
 /// The KyA overlay's contents: the document, or an honest account of why it is not
 /// here (issue #395).
 ///
-/// A missing `docs/KyA.md` does **not** refuse the operator, and that is the CLI's
-/// rule rather than a shortcut: `accept_kya` in `src/commands/onboarding.py` returns
-/// True when `bash/accept_kya.sh` is absent, on the reasoning that a missing document
-/// is a broken install, and a node that says so is more use than a node that exits
-/// without explaining itself. Refusing here would also make the TUI unusable from any
-/// installation that ships the binary without the docs tree — which is exactly what
-/// the released `tui-linux-amd64` asset is.
+/// A missing `docs/KyA.md` does **not** refuse the operator. That is the CLI's rule
+/// (`accept_kya` returns True when the script is absent), and refusing here would
+/// make the TUI unusable from any install shipping the binary without the docs tree
+/// -- which is what the released `tui-linux-amd64` asset is.
 fn kya_view(paths: &Paths) -> DetailsView {
     let document = paths.kya_document();
     let lines = match fs::read_to_string(&document) {
@@ -2606,17 +2537,13 @@ impl App {
 
     /// Raise the KyA gate when this installation has not accepted one yet (#395).
     ///
-    /// A separate step from construction, taken once in `main.rs`, rather than
-    /// something `new()` does on its own. The gate depends on a file existing on this
-    /// machine, and a constructor that consulted the filesystem for it would make
-    /// every other thing built from an `App` depend on it too — a rendering test
-    /// would draw the overlay instead of the page it was written for, and, worse, the
-    /// gate would be tested only by accident. As one visible line in the program's
-    /// entry point it is somewhere a reader can find it, and
+    /// Separate from construction, taken once in `main.rs`: a constructor that
+    /// consulted the filesystem would make every rendering test draw the overlay
+    /// instead of the page it was written for.
     /// `main_asks_the_kya_before_it_draws_anything` pins that the line is still there.
     ///
-    /// A no-op when the marker is present, so this is also the whole of the
-    /// "don't ask twice" rule: one `exists()` against the same path the CLI writes.
+    /// A no-op when the marker is present, which is the whole of "don't ask twice":
+    /// one `exists()` against the same path the CLI writes.
     pub fn with_kya_gate(mut self) -> Self {
         if !self.paths.kya_marker().exists() {
             self.details = Some(kya_view(&self.paths));
@@ -2655,12 +2582,10 @@ impl App {
         };
     }
 
-    /// Decline the KyA: stop, exactly as the CLI does.
+    /// Decline the KyA: stop, exactly as the CLI does (`accept_kya.sh` exits 1).
     ///
-    /// `accept_kya.sh` exits 1 on a refusal and `nodo.py` turns that into
-    /// `sys.exit(1)`. The KyA is what running the node is conditional on, so there is
-    /// no "declined but browsing" state to fall back to — and offering one through
-    /// the TUI would make the console the way around the question.
+    /// There is no "declined but browsing" state: offering one would make the console
+    /// the way around the question.
     pub fn decline_kya(&mut self) {
         self.details = None;
         self.quit();
@@ -2808,10 +2733,8 @@ impl App {
     /// is always the frame the user was looking at when they clicked.
     pub fn click_at(&mut self, column: u16, row: u16) {
         let position = Position::new(column, row);
-        // Two rows, two hit tests, in the order they are drawn: a click on a group
-        // label opens that group, a click on a page title inside the open group goes
-        // to that page. The page row is checked first because it is the narrower
-        // target and sits below the bordered group row, so a click can only be in
+        // Two rows, two hit tests. The page row is checked first: it is the narrower
+        // target and sits below the bordered group row, so a click is only ever in
         // one of them.
         if self.page_tabs_area.contains(position) {
             if let Some(page) = page_at(column, self.page_tabs_area, self.tabs.group()) {
@@ -2913,8 +2836,7 @@ impl App {
     /// Reload the payment and reputation history behind the selected peer and client.
     ///
     /// Called when the selection moves and after each data refresh, never from the
-    /// draw path: a frame is redrawn on every keystroke and tick, and none of this
-    /// changes that often.
+    /// draw path: a frame is redrawn on every keystroke.
     pub fn load_selection_details(&mut self) {
         let database = self.paths.database.clone();
         self.peer_detail = self
@@ -3992,16 +3914,13 @@ impl App {
 
     /// Open the ordinary config editor on the selected energy key (issue #395).
     ///
-    /// The same `EditConfig` popup the Config page opens, on the same path, writing
-    /// through the same backup/`yq`/restart/revert transaction. This page contributes
-    /// the catalogue and the explanation beside it, and nothing else: a second way to
-    /// write YAML would be a second set of quoting rules, a second backup policy, and
-    /// a second thing to keep in step with the restart flow.
+    /// The same popup, path and transaction the Config page uses. This page
+    /// contributes the catalogue and the explanation beside it, and nothing else: a
+    /// second way to write YAML would be a second set of quoting rules.
     ///
-    /// The widget comes from the catalogue rather than from the type of what happens
-    /// to be written now, because the two disagree where it matters: `PRICE_PER_KWH: 0`
-    /// parses as an integer and wants a number field either way, and an empty
-    /// `SMART_PLUG_URL` says nothing at all about what belongs in it.
+    /// The widget comes from the catalogue rather than from the current value's type:
+    /// `PRICE_PER_KWH: 0` parses as an integer but wants a number field, and an empty
+    /// `SMART_PLUG_URL` says nothing about what belongs in it.
     pub fn open_energy_editor(&mut self) {
         if self.page() != Page::Energy {
             return;
@@ -4027,14 +3946,12 @@ impl App {
     /// Route a click on the ENERGY page to the row under it.
     ///
     /// Reads the areas `draw_energy` recorded last frame rather than recomputing a
-    /// row height, the way the SCHEDULE page's hit test does: the page draws three
-    /// separate section blocks, each with its own border and heading, so there is no
-    /// single table geometry to retrace — and a hit test that guessed one would put
-    /// the cursor on a different key than the one under the pointer.
+    /// row height: the page draws three section blocks with their own borders, so
+    /// there is no single table geometry to retrace.
     ///
-    /// Selects rather than opens: the help panel beside the table is the reason this
-    /// page exists, and a click that jumped straight into an editor would skip the
-    /// sentence explaining what the key does. `Enter`/`e` is the deliberate act.
+    /// Selects rather than opens. The help panel is the reason this page exists, and
+    /// a click straight into an editor would skip it; `Enter`/`e` is the deliberate
+    /// act.
     fn click_energy(&mut self, position: Position) {
         if let Some((index, _)) = self
             .energy_row_areas
@@ -4356,17 +4273,13 @@ impl App {
 
     /// What a memory price actually earns the node, per GiB of HOST RAM committed.
     ///
-    /// This is the number the operator is really setting and cannot see from the price
-    /// alone. A service declaring one GiB is billed for one GiB, but the node had to
-    /// boot its VM larger so the kernel's own footprint did not come out of the
-    /// service's share -- and the node absorbs that difference deliberately, so a
-    /// client never pays for the kernel underneath it. The price therefore has to
-    /// cover it, and by a different amount on each architecture.
+    /// The number the operator is really setting and cannot see from the price. A
+    /// service declaring one GiB is billed for one GiB, but the node boots the VM
+    /// larger so the kernel's footprint does not come out of the service's share --
+    /// it absorbs that difference, so the price has to cover it.
     ///
-    /// Quoted against a 1 GiB guest: the ratio part of the reserve is scale-free, and
-    /// the fixed part is not, so the effective rate depends on the size of the guest
-    /// it is quoted for. One reference size, stated, beats a figure that silently
-    /// means something different for every service.
+    /// Quoted against a 1 GiB guest, because the fixed part of the reserve is not
+    /// scale-free and the effective rate therefore depends on guest size.
     pub fn effective_memory_mu(&self, entry: &PriceEntry) -> Option<(f64, f64)> {
         if entry.key != "RAM_MU_PER_GIB_HOUR" {
             return None;
@@ -4732,13 +4645,11 @@ impl App {
     /// readings for the same instance id.
     ///
     /// The first tick after an instance appears has nothing to delta against, so its
-    /// rate columns show `—` rather than `0`: the instance may well be busy, we just
-    /// have not watched it for long enough to say. The counter map is rebuilt from the
-    /// instances present now, which is what keeps it from growing with every instance
-    /// that has ever run.
+    /// rate columns show `—` rather than `0`. The counter map is rebuilt from the
+    /// instances present now, so it does not grow with every instance ever run.
     ///
-    /// `now` is passed in rather than read here so a test can advance the clock without
-    /// sleeping through `MIN_RATE_INTERVAL`.
+    /// `now` is passed in so a test can advance the clock without sleeping through
+    /// `MIN_RATE_INTERVAL`.
     fn derive_instance_rates(&mut self, instances: &mut [Instance], now: Instant) {
         let mut counters = HashMap::with_capacity(instances.len());
         for instance in instances.iter_mut() {
@@ -5059,14 +4970,12 @@ fn parse_amount_and_unit(value: &str) -> (Option<f64>, String) {
 
 /// Peak instances held and work refused for a shut window, per hour of the clock.
 ///
-/// Two arrays of 24, folded from `demand_history` (issue #337): for each hour of the
-/// day, the worst hour of that name in the period, and the refusals accumulated across
-/// it. A mean would flatten a machine that is busy every evening into one that is
-/// mildly busy all day, which is the opposite of what choosing working hours needs to
-/// see; refusals add up, because there the total is the cost.
+/// Two arrays of 24, folded from `demand_history` (issue #337): the worst hour of
+/// each name, and the refusals accumulated across it. A mean would flatten a machine
+/// busy every evening into one mildly busy all day, which is the opposite of what
+/// choosing working hours needs to see.
 ///
-/// An absent table is an empty history, not an error: a node that has not run since the
-/// table was introduced simply has nothing to draw, and the page says so.
+/// An absent table is an empty history rather than an error.
 fn get_demand_by_hour(database: &Path, days: u16) -> SqlResult<DemandByHour> {
     let connection = Connection::open(database)?;
     let mut statement = connection.prepare(
@@ -5124,20 +5033,15 @@ impl DemandByHour {
 
 /// What each payment network brought in, over each window, from the `payments` table.
 ///
-/// One query for the whole page: the windows are evaluated by SQLite against
-/// `created_at`, which `record_payment` writes as UTC (`CURRENT_TIMESTAMP`), so the
-/// comparison is against `datetime('now')` in the same zone. The amounts are summed
-/// here rather than in SQL because `amount_mu` is TEXT — `SUM` over it would go through
-/// a float and start rounding somewhere above 2^53 MU.
+/// One query for the whole page. Amounts are summed here rather than in SQL because
+/// `amount_mu` is TEXT, and `SUM` over it would go through a float and start
+/// rounding above 2^53 MU.
 ///
-/// Rolling windows, not calendar ones: "the last week" has to be the same length of
-/// time on a Monday as on a Sunday for two readings of this page to be comparable.
-/// Money is the only thing on this page windowed at all -- see `NodeReputation`.
+/// Rolling windows rather than calendar ones, so two readings of this page are
+/// comparable on a Monday and on a Sunday.
 ///
-/// A payment with no date is in no window but is still in the all-time total, the same
-/// rule an undated opinion gets. `COALESCE` rather than leaving the comparison to
-/// return NULL: an unreadable flag would fail the whole query, and one odd row must not
-/// be able to blank the page.
+/// A payment with no date is in no window but still in the all-time total.
+/// `COALESCE` because one unreadable flag must not fail the whole query.
 fn get_earnings(database: &Path) -> SqlResult<Vec<LedgerEarnings>> {
     let connection = Connection::open(database)?;
     if !table_exists(&connection, "payments") {
@@ -6269,16 +6173,13 @@ fn read_net_counter(ifname: &str, counter: &str) -> Option<u64> {
 
 /// The vCPU allowance the runtime actually programmed, read from the cgroup's `cpu.max`.
 ///
-/// `apply_cpu_limit` (`ch/cgroups.py:117`) writes the resolved CFS pair to `cpu.max`.
-/// Since PR #251 that same resolved pair is persisted to the `local_instances` row (the
-/// launch path stores what `_resolve_initial_resources` produced, and hotplugs persist
-/// their resizes), so `get_instances` trusts the row first. This cgroupfs read is kept
-/// only as a defensive fallback for a row written before #251 that still holds `0 / 0`;
-/// it has no answer for delegated instances, which have no local cgroup.
+/// Since PR #251 the resolved pair is persisted to the `local_instances` row, so
+/// `get_instances` trusts the row first. This read is a fallback for rows written
+/// before #251 that still hold `0 / 0`; it has no answer for delegated instances,
+/// which have no local cgroup.
 ///
-/// The file is `"<quota|max> <period>"`; a literal `max` means unbounded, which is `None`
-/// here — the same answer as an unreadable file, because in both cases there is no
-/// ceiling to compare the percentage against.
+/// The file is `"<quota|max> <period>"`. A literal `max` is unbounded, which reads
+/// as `None` -- the same answer as an unreadable file, since neither gives a ceiling.
 fn read_cpu_max_allowance(path: &Path) -> Option<f64> {
     let contents = fs::read_to_string(path).ok()?;
     let mut fields = contents.split_whitespace();
@@ -6395,14 +6296,12 @@ pub fn shorten(value: &str, max: usize) -> String {
 const CONFIG_BACKUP_RETENTION: usize = 10;
 
 /// Snapshot `config` to `config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` beside it, then prune
-/// to the newest `CONFIG_BACKUP_RETENTION`. Timestamps are UTC so the filename sorts
-/// the same whatever the machine's timezone and matches the Python path byte for
-/// byte. Returns the backup path written.
+/// to the newest `CONFIG_BACKUP_RETENTION`. UTC, so the name sorts the same in any
+/// timezone and matches the Python path byte for byte.
 ///
-/// The four random digits make the snapshot one per write rather than one per second:
-/// the stamp alone gives two writes inside the same second the same name, and the
-/// second copy then overwrites the first -- destroying the only record of the state
-/// before it, which is the one a revert would want.
+/// The four random digits make it one snapshot per write rather than per second: two
+/// writes in the same second would share a name, and the second would overwrite the
+/// only record of the state a revert wants.
 fn backup_config(config: &Path) -> io::Result<PathBuf> {
     let backup = config.with_file_name(format!(
         "config-{}-{:04}.yaml",
@@ -8823,13 +8722,11 @@ ergo: Cold Wallet: 9cold\n";
 
     /// The history behind a peer and a client, read straight out of SQLite.
     ///
-    /// These queries are the whole point of the two detail cards, and a card that
-    /// silently renders nothing looks exactly like a peer with no history -- the same
-    /// confusion issue #231 was about, one table over. So they are exercised against a
-    /// real database rather than through the widgets.
+    /// A card that silently renders nothing looks exactly like a peer with no
+    /// history -- the confusion issue #231 was about, one table over -- so these are
+    /// exercised against a real database rather than through the widgets.
     /// What the EARNINGS page reads: money out of the catalogue, reputation out of
-    /// `nodo reputation --json`. Both are accounting, so the tests here are about the
-    /// ways a figure can be wrong rather than about the happy path.
+    /// `nodo reputation --json`. The tests are about the ways a figure can be wrong.
     mod earnings {
         use super::*;
 
@@ -9284,15 +9181,12 @@ ergo: Cold Wallet: 9cold\n";
     }
     /// The KyA gate (issue #395).
     ///
-    /// Everything here is about the two ways this can fail *silently*: a gate that
-    /// never comes up on a node that never accepted, and a gate that comes up every
-    /// time on one that did. Neither shows as an error, and the first is the one that
-    /// matters -- it is the CLI's one refusal, quietly routed around by starting the
-    /// console instead.
+    /// The two ways this fails *silently*: a gate that never comes up on a node that
+    /// never accepted, and one that comes up every time on a node that did. Neither
+    /// shows as an error.
     ///
-    /// The live terminal is not driven here (there is none in a test run); what is
-    /// pinned is the state machine the terminal would drive: which mode the gate puts
-    /// the app in, which keys the handler routes to it, and what the two answers do.
+    /// A test run has no terminal, so what is pinned is the state machine one would
+    /// drive: the mode the gate sets, the keys routed to it, and what the answers do.
     mod kya_gate {
         use super::super::*;
         use crate::handler::{handle_key_events, handle_mouse_events};

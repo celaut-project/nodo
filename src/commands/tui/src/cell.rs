@@ -1,27 +1,20 @@
 //! The CELL page's catalogue: the policies an operator actually chooses between,
 //! and what each choice writes into `config.yaml`.
 //!
-//! The Config page edits the whole YAML tree, ordered by where a key lives in the
-//! file. That is the right tool for someone who already knows which key they want,
-//! and no help at all to someone who has just installed nodo and wants to rent out
-//! their machine. This module is the other half: a closed catalogue of *decisions*,
-//! each one named by the question it answers rather than by the key it writes.
+//! The Config page edits the YAML tree, ordered by where a key lives. That helps
+//! someone who already knows which key they want. This is the other half: a closed
+//! catalogue of *decisions*, each named by the question it answers.
 //!
-//! Everything here is one primitive at three scales:
+//! One primitive at three scales -- a **lever state** is a small set of writes, a
+//! **profile** a whole posture of twenty-odd keys, and the Config page the same
+//! thing at one key.
 //!
-//! * a **lever state** is a small set of writes (one to five keys),
-//! * a **profile** is a large one (a whole posture, twenty-odd keys),
-//! * and the Config page is the same thing at one key.
+//! Nothing records which state or profile is active: it is **derived** by asking
+//! which set of writes `config.yaml` already satisfies. A stored marker would start
+//! lying the moment someone nudged one key elsewhere, and deriving it makes the
+//! deviation report free.
 //!
-//! Nothing records which state or profile is active. It is **derived** by reading
-//! `config.yaml` and asking which set of writes it already satisfies. A stored
-//! marker would start lying the moment someone nudged one key on the Config page;
-//! a derived one cannot. It also makes the deviation report free, and that report
-//! is the most instructive thing on the page: "you match CAUTIOUS RENTER except
-//! for these two keys" teaches an operator their own configuration.
-//!
-//! A lever whose keys match no state at all reads as `custom` and is never
-//! silently rounded to the nearest one.
+//! A lever matching no state reads as `custom`, never rounded to the nearest one.
 
 use crate::app::{ConfigPathSegment, Page};
 use serde_yaml::Value;

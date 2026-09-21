@@ -1,34 +1,17 @@
 //! The ENERGY page's catalogue: what the machine costs to run, and where that
 //! figure is allowed to come from (issue #395).
 //!
-//! The `energy:` block is already editable on the Config page, the same way every
-//! other key is, so this page exists for a reason that has nothing to do with being
-//! able to write the keys. It is that **the keys are meaningless without the
-//! comments beside them in `config.example.yaml`**, and a YAML tree cannot show a
-//! comment.
+//! The `energy:` block is editable on the Config page already. This page exists
+//! because the keys are meaningless without the comments beside them in
+//! `config.example.yaml`, and a YAML tree cannot show a comment: `IDLE_WATTS` must
+//! be *measured* rather than guessed, and the five sources are tried in a fixed
+//! order rather than being options to tick.
 //!
-//! Two examples of what that costs. `IDLE_WATTS` and `LOAD_WATTS` are the
-//! coefficients of the fallback model, and the config file says, at length, that they
-//! must be *measured with a plug-in meter* rather than guessed — because a plausible
-//! pair of numbers produces a wattage that is an order of magnitude out on a
-//! Raspberry Pi and half of what a two-socket server idles at, and once drawn on the
-//! Overview card it reads exactly like a measurement. And the five sources
-//! (smart plug, IPMI, hwmon, NVML, RAPL) are not a list of options to tick: they are
-//! tried in a fixed order, each sees a different part of the machine, and NVML *adds*
-//! to a partial reading where the others replace it. An operator who enables two of
-//! them without knowing that is not configuring a meter, they are inventing one.
+//! Nothing here writes YAML. `Enter` opens the same `EditConfig` popup the Config
+//! page opens, so there is one writer and one transaction.
 //!
-//! So the page is a fixed catalogue: one row per key, with the sentence that explains
-//! it, the value the file currently holds, and the ordinary config editor behind
-//! `Enter`. Nothing here writes YAML — [`crate::app::App::open_energy_editor`] opens
-//! the same `EditConfig` popup the Config page opens, which goes through the same
-//! backup/`yq`/restart/revert transaction as every other change. A second writer
-//! would be a second set of bugs.
-//!
-//! The catalogue mirrors the `energy:` block of `config.example.yaml`. Keeping the
-//! two in step is what makes this page an editor for the real configuration rather
-//! than a decoration; a key added there and not here is simply invisible on this
-//! page, and still reachable on Config.
+//! Mirrors the `energy:` block of `config.example.yaml`; a key added there and not
+//! here is invisible on this page and still reachable on Config.
 
 use crate::app::{ConfigPathSegment, EditKind, Identifiable};
 
