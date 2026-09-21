@@ -11,13 +11,74 @@ use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
 use tui_tree_widget::{Tree, TreeItem};
 
-const ACCENT: Color = Color::Cyan;
-const MUTED: Color = Color::DarkGray;
-const GOOD: Color = Color::Green;
-const WARN: Color = Color::Yellow;
+// Every colour drawn in this file comes from `crate::theme` (issue #395). What used
+// to be five `const`s plus seventy-odd bare `Color::` literals scattered through the
+// draw functions is now five accessors and a `series` set, so a theme is one struct
+// rather than a search-and-replace across six thousand lines.
+//
+// The accessors are functions rather than constants because the theme is chosen at
+// startup from config/env/flag, and a `const` cannot be. They are `#[inline]` and read
+// an uncontended `RwLock` once per call, on a path that already allocates a `String`
+// per line.
+
+/// Selected tabs, focused borders, the node's own identity.
+#[inline]
+fn accent() -> Color {
+    crate::theme::current().accent
+}
+
+/// Labels, dividers and help text: there to be read past rather than read.
+#[inline]
+fn muted() -> Color {
+    crate::theme::current().muted
+}
+
+/// Working, healthy, running, local.
+#[inline]
+fn good() -> Color {
+    crate::theme::current().good
+}
+
+/// Worth a look, not yet a problem.
+#[inline]
+fn warn() -> Color {
+    crate::theme::current().warn
+}
+
 /// For the things that cost the operator something: a payment nobody acknowledged,
-/// a deposit that was refused, a penalty. Yellow already means "look at this later".
-const BAD: Color = Color::Red;
+/// a deposit that was refused, a penalty. `warn` already means "look at this later".
+#[inline]
+fn bad() -> Color {
+    crate::theme::current().bad
+}
+
+/// Ordinary text: a value, as opposed to the label beside it.
+#[inline]
+fn text_colour() -> Color {
+    crate::theme::current().text
+}
+
+/// Text drawn *on* an accent or warning background, where `text` would be
+/// unreadable.
+#[inline]
+fn inverse_text() -> Color {
+    crate::theme::current().inverse_text
+}
+
+/// The background a popup paints over whatever it covers.
+#[inline]
+fn popup_background() -> Color {
+    crate::theme::current().popup_background
+}
+
+/// One of four hues for things that sit side by side and have to be told apart.
+/// Indexed rather than named because the difference between them IS the meaning:
+/// a field called "the colour of the donations card" would need a sibling for every
+/// widget ever added.
+#[inline]
+fn series(index: usize) -> Color {
+    crate::theme::current().series[index % 4]
+}
 
 pub fn render(app: &mut App, frame: &mut Frame) {
     // The page row only exists for a group that has more than one page. A row
@@ -93,14 +154,14 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
         .map(|group| Line::from(group.title()))
         .collect::<Vec<_>>();
     let status_color = if app.node_info.service_status == "running" {
-        GOOD
+        good()
     } else {
-        WARN
+        warn()
     };
     let title = Line::from(vec![
         Span::styled(
             " NODO ",
-            Style::default().fg(Color::Black).bg(ACCENT).bold(),
+            Style::default().fg(inverse_text()).bg(accent()).bold(),
         ),
         Span::raw("  operations console  "),
         Span::styled(
@@ -115,8 +176,8 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
     let tabs = Tabs::new(titles)
         .block(Block::bordered().title(title))
         .select(app.tabs.group().index())
-        .style(Style::default().fg(MUTED))
-        .highlight_style(Style::default().fg(ACCENT).bold())
+        .style(Style::default().fg(muted()))
+        .highlight_style(Style::default().fg(accent()).bold())
         .divider(crate::app::TAB_DIVIDER);
     frame.render_widget(tabs, area);
 }
@@ -144,8 +205,8 @@ fn draw_page_tabs(frame: &mut Frame, app: &App, area: Rect) {
         .collect::<Vec<_>>();
     let tabs = Tabs::new(titles)
         .select(selected)
-        .style(Style::default().fg(MUTED))
-        .highlight_style(Style::default().fg(Color::White).bold().underlined())
+        .style(Style::default().fg(muted()))
+        .highlight_style(Style::default().fg(text_colour()).bold().underlined())
         .divider(crate::app::TAB_DIVIDER);
     frame.render_widget(tabs, area);
 }
@@ -192,7 +253,7 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
             metric_line("Power", node_power_line(&app.node_energy)),
             metric_line("Elec.", node_cost_line(&app.node_energy)),
         ],
-        ACCENT,
+        accent(),
     );
     draw_card(
         frame,
@@ -213,7 +274,7 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
                 ),
             ),
         ],
-        Color::LightBlue,
+        series(0),
     );
     draw_card(
         frame,
@@ -232,7 +293,7 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
             metric_line("Nodo data", format_bytes(app.stats.storage_bytes)),
             metric_line("Services", app.services.items.len().to_string()),
         ],
-        Color::LightMagenta,
+        series(1),
     );
     draw_card(
         frame,
@@ -242,7 +303,7 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
             metric_line("Peers", app.peers.items.len().to_string()),
             metric_line("Clients", app.clients.items.len().to_string()),
         ],
-        Color::LightGreen,
+        series(2),
     );
 
     let middle =
@@ -258,7 +319,7 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
         "CPU HISTORY",
         app.cpu_history.iter().copied().collect(),
         app.stats.cpu_percent,
-        Color::Yellow,
+        warn(),
     );
     draw_sparkline(
         frame,
@@ -266,7 +327,7 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
         "MEMORY HISTORY",
         app.ram_history.iter().copied().collect(),
         percent(app.stats.memory_used, app.stats.memory_total),
-        ACCENT,
+        accent(),
     );
 }
 
@@ -304,10 +365,10 @@ fn draw_alert_banner(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(vec![
                 Span::styled(
                     " ACTION REQUIRED ",
-                    Style::default().fg(Color::Black).bg(BAD).bold(),
+                    Style::default().fg(inverse_text()).bg(bad()).bold(),
                 ),
                 Span::raw(" "),
-                Span::styled(alert.summary.clone(), Style::default().fg(Color::White).bold()),
+                Span::styled(alert.summary.clone(), Style::default().fg(text_colour()).bold()),
             ])
         })
         .collect();
@@ -317,9 +378,9 @@ fn draw_alert_banner(frame: &mut Frame, app: &App, area: Rect) {
                 Block::bordered()
                     .title(Span::styled(
                         " THIS NODE NEEDS YOU ",
-                        Style::default().fg(BAD).bold(),
+                        Style::default().fg(bad()).bold(),
                     ))
-                    .border_style(Style::default().fg(BAD)),
+                    .border_style(Style::default().fg(bad())),
             )
             .wrap(Wrap { trim: true }),
         area,
@@ -332,14 +393,14 @@ fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'a>
             format!(" {title} "),
             Style::default().fg(color).bold(),
         ))
-        .border_style(Style::default().fg(MUTED));
+        .border_style(Style::default().fg(muted()));
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label:<12}"), Style::default().fg(MUTED)),
-        Span::styled(value.into(), Style::default().fg(Color::White).bold()),
+        Span::styled(format!("{label:<12}"), Style::default().fg(muted())),
+        Span::styled(value.into(), Style::default().fg(text_colour()).bold()),
     ])
 }
 
@@ -356,7 +417,7 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
     if app.node_info.wallets.is_empty() {
         lines.push(Line::from(Span::styled(
             "No payment system configured, so nobody can pay this node.",
-            Style::default().fg(WARN),
+            Style::default().fg(warn()),
         )));
     }
 
@@ -368,8 +429,8 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
             wallet.ledger.to_uppercase()
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("{name:<9}"), Style::default().fg(MUTED)),
-            Span::styled(balance, Style::default().fg(Color::LightGreen).bold()),
+            Span::styled(format!("{name:<9}"), Style::default().fg(muted())),
+            Span::styled(balance, Style::default().fg(series(2)).bold()),
         ]));
         lines.push(Line::from(format!(
             "  at   {}",
@@ -395,13 +456,13 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
             "On-chain balances, not node balances • refreshes every 60s",
         ),
         Style::default().fg(if app.node_info.error.is_empty() {
-            MUTED
+            muted()
         } else {
-            WARN
+            warn()
         }),
     )));
 
-    draw_card(frame, area, "WALLETS", lines, Color::LightGreen);
+    draw_card(frame, area, "WALLETS", lines, series(2));
 }
 
 /// A balance with the unit the chain reported, or a dash when it could not be read.
@@ -420,9 +481,9 @@ fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::bordered()
         .title(Span::styled(
             " HOST CAPACITY ",
-            Style::default().fg(Color::Yellow).bold(),
+            Style::default().fg(warn()).bold(),
         ))
-        .border_style(Style::default().fg(MUTED));
+        .border_style(Style::default().fg(muted()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let rows = Layout::vertical([
@@ -431,13 +492,13 @@ fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(1),
     ])
     .split(inner);
-    draw_gauge(frame, rows[0], "CPU", app.stats.cpu_percent, Color::Yellow);
+    draw_gauge(frame, rows[0], "CPU", app.stats.cpu_percent, warn());
     draw_gauge(
         frame,
         rows[1],
         "RAM",
         percent(app.stats.memory_used, app.stats.memory_total),
-        ACCENT,
+        accent(),
     );
     frame.render_widget(
         Paragraph::new(format!(
@@ -445,17 +506,28 @@ fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
             format_bytes(app.stats.memory_used),
             format_bytes(app.stats.memory_total)
         ))
-        .style(Style::default().fg(MUTED)),
+        .style(Style::default().fg(muted())),
         rows[2],
     );
 }
 
 fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, value: u64, color: Color) {
+    // The percentage is styled explicitly because `Gauge`'s own default for it is a
+    // hard-coded white bold, which is invisible on a light terminal — a widget
+    // default is still a colour this interface is choosing, and the whole point of
+    // routing everything through the theme is that there is nowhere left that is not.
     let gauge = Gauge::default()
         .block(Block::default().title(label))
-        .gauge_style(Style::default().fg(color).bg(Color::Black))
+        .gauge_style(
+            Style::default()
+                .fg(color)
+                .bg(crate::theme::current().gauge_background),
+        )
         .percent(value.min(100) as u16)
-        .label(format!("{value}%"));
+        .label(Span::styled(
+            format!("{value}%"),
+            Style::default().fg(text_colour()).bold(),
+        ));
     frame.render_widget(gauge, area);
 }
 
@@ -473,7 +545,7 @@ fn draw_sparkline(
             .block(
                 Block::bordered()
                     .title(Span::styled(title, Style::default().fg(color).bold()))
-                    .border_style(Style::default().fg(MUTED)),
+                    .border_style(Style::default().fg(muted())),
             )
             .data(&data)
             .max(100)
@@ -499,9 +571,9 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             shorten(&instance.location, 14)
         };
         let location_style = if instance.is_local() {
-            Style::default().fg(GOOD)
+            Style::default().fg(good())
         } else {
-            Style::default().fg(WARN)
+            Style::default().fg(warn())
         };
         Row::new(vec![
             Cell::from(instance.name.clone()),
@@ -568,7 +640,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             " INSTANCES • {} local • {} remote ",
             local_count, remote_count
         ),
-        Color::LightBlue,
+        series(0),
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
@@ -628,7 +700,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         vec![Line::from(Span::styled(
             "Select an instance to inspect its complete identity and allocation.",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))]
     };
     draw_card(
@@ -636,7 +708,7 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         layout[1],
         "SELECTED INSTANCE",
         detail,
-        Color::LightBlue,
+        series(0),
     );
 }
 
@@ -655,9 +727,9 @@ fn format_cpu_percent(cpu_percent: Option<f64>) -> String {
 /// figure stops being informational and starts meaning "this one is throttling".
 fn cpu_load_color(instance: &Instance) -> Color {
     match (instance.usage.cpu_percent, instance.cpu_allowance_percent()) {
-        (None, _) => MUTED,
-        (Some(used), Some(allowance)) if allowance > 0.0 && used >= allowance * 0.9 => WARN,
-        _ => GOOD,
+        (None, _) => muted(),
+        (Some(used), Some(allowance)) if allowance > 0.0 && used >= allowance * 0.9 => warn(),
+        _ => good(),
     }
 }
 
@@ -879,7 +951,7 @@ fn draw_instances_tree(frame: &mut Frame, app: &App, area: Rect) {
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
             "No instances to display.",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )));
     }
 
@@ -890,7 +962,7 @@ fn draw_instances_tree(frame: &mut Frame, app: &App, area: Rect) {
                     " INSTANCE DEPENDENCY TREE • {} nodes • g toggles flat view ",
                     inst_map.len()
                 ),
-                Color::LightBlue,
+                series(0),
             ))
             .wrap(Wrap { trim: false }),
         area,
@@ -932,15 +1004,15 @@ fn build_tree_lines<'a>(
     };
     let mut spans = vec![
         Span::raw(format!("{indent}{marker}")),
-        Span::styled(label, Style::default().fg(Color::White).bold()),
-        Span::styled(format!("  [{}]", instance.service), Style::default().fg(MUTED)),
+        Span::styled(label, Style::default().fg(text_colour()).bold()),
+        Span::styled(format!("  [{}]", instance.service), Style::default().fg(muted())),
         Span::styled(
             format!("  {location}"),
-            Style::default().fg(if instance.is_local() { GOOD } else { WARN }),
+            Style::default().fg(if instance.is_local() { good() } else { warn() }),
         ),
         Span::styled(
             format!("  balance {}", money.format_raw(&instance.balance)),
-            Style::default().fg(ACCENT),
+            Style::default().fg(accent()),
         ),
     ];
     // Only roots can have a father this tree does not already show: a child is nested
@@ -982,14 +1054,14 @@ fn external_parent_label(instance: &Instance, client_ids: &HashSet<&str>) -> Opt
     Some(if client_ids.contains(father) {
         Span::styled(
             format!("  ← client {}", shorten(father, 20)),
-            Style::default().fg(Color::Magenta),
+            Style::default().fg(series(1)),
         )
     } else {
         // A father that is neither a local instance nor a known client: the row still
         // says where it came from, rather than reading as "started by nobody".
         Span::styled(
             format!("  ← {} (unknown)", shorten(father, 20)),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )
     })
 }
@@ -1022,7 +1094,7 @@ fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
     .header(header_row(vec!["Tag", "Content ID", "Stored size"]))
     .block(section_block(
         format!(" SERVICES • {} available ", app.services.items.len()),
-        Color::LightMagenta,
+        series(1),
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
@@ -1031,8 +1103,8 @@ fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
 
     frame.render_widget(
         Paragraph::new(card)
-            .block(section_block(" SELECTED SERVICE ", Color::LightMagenta))
-            .style(Style::default().fg(Color::White)),
+            .block(section_block(" SELECTED SERVICE ", series(1)))
+            .style(Style::default().fg(text_colour())),
         layout[1],
     );
 }
@@ -1049,14 +1121,14 @@ fn service_detail_lines(
     let Some(service) = service else {
         return vec![Line::from(Span::styled(
             "Select a service, then press e to execute it.",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))];
     };
 
     let mut lines = vec![
         Line::from(Span::styled(
             service.id.clone(),
-            Style::default().fg(Color::White),
+            Style::default().fg(text_colour()),
         )),
         Line::from(Span::styled(
             format!(
@@ -1064,7 +1136,7 @@ fn service_detail_lines(
                 nonempty(&service.tag, "untagged"),
                 format_bytes(service.size_bytes)
             ),
-            Style::default().fg(Color::White),
+            Style::default().fg(text_colour()),
         )),
     ];
 
@@ -1123,7 +1195,7 @@ fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
             Cell::from(peer.id.clone()),
             Cell::from(peer.uris.clone()),
             Cell::from(app.money.format_raw(&peer.balance)),
-            Cell::from(peer.reputation_score.clone()).style(Style::default().fg(GOOD).bold()),
+            Cell::from(peer.reputation_score.clone()).style(Style::default().fg(good()).bold()),
             Cell::from(match peer.proof_ids.len() {
                 0 => "none".to_string(),
                 1 => shorten(&peer.proof_ids[0], 18),
@@ -1150,14 +1222,14 @@ fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
     ]))
     .block(section_block(
         format!(" PEERS • {} connected ", app.peers.items.len()),
-        ACCENT,
+        accent(),
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
     app.list_area = split[0];
     frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
 
-    draw_card(frame, split[1], "SELECTED PEER", detail, ACCENT);
+    draw_card(frame, split[1], "SELECTED PEER", detail, accent());
 }
 
 /// The clients page: who pays us, and what they are running here.
@@ -1186,7 +1258,7 @@ fn draw_clients(frame: &mut Frame, app: &mut App, area: Rect) {
             Cell::from(client.last_usage.clone()),
             // A balance that never moves is the flag doing its job, not a bug.
             Cell::from(if client.unmetered { "never charged" } else { "" })
-                .style(Style::default().fg(MUTED)),
+                .style(Style::default().fg(muted())),
         ])
     });
     let client_table = Table::new(
@@ -1206,14 +1278,14 @@ fn draw_clients(frame: &mut Frame, app: &mut App, area: Rect) {
     ]))
     .block(section_block(
         format!(" CLIENTS • {} known ", app.clients.items.len()),
-        ACCENT,
+        accent(),
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
     app.list_area = split[0];
     frame.render_stateful_widget(client_table, split[0], &mut app.clients.state);
 
-    draw_card(frame, split[1], "SELECTED CLIENT", detail, ACCENT);
+    draw_card(frame, split[1], "SELECTED CLIENT", detail, accent());
 }
 
 /// The two things a node earns by being up: money, and the network's opinion of it.
@@ -1244,8 +1316,8 @@ fn draw_earnings(frame: &mut Frame, app: &mut App, area: Rect) {
     .split(area);
 
     draw_money_taken_in(frame, app, rows[0]);
-    draw_card(frame, rows[1], "DONATIONS PAID OUT", donations, Color::LightMagenta);
-    draw_card(frame, rows[2], "REPUTATION HELD ON THIS NODE", notes, ACCENT);
+    draw_card(frame, rows[1], "DONATIONS PAID OUT", donations, series(1));
+    draw_card(frame, rows[2], "REPUTATION HELD ON THIS NODE", notes, accent());
     draw_opinions(frame, app, rows[3]);
 }
 
@@ -1267,20 +1339,20 @@ fn donation_lines(app: &App) -> Vec<Line<'static>> {
     if !donations.is_read() {
         lines.push(Line::from(Span::styled(
             "Reading the donation state…",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )));
         return lines;
     }
     if !donations.error.is_empty() {
         lines.push(Line::from(Span::styled(
             donations.error.clone(),
-            Style::default().fg(WARN),
+            Style::default().fg(warn()),
         )));
     }
     if donations.ledgers.is_empty() {
         lines.push(Line::from(Span::styled(
             "No payment network is configured to donate.",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )));
         return lines;
     }
@@ -1289,22 +1361,22 @@ fn donation_lines(app: &App) -> Vec<Line<'static>> {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{}  ", ledger.ledger),
-                Style::default().fg(Color::White).bold(),
+                Style::default().fg(text_colour()).bold(),
             ),
-            Span::styled("donating ", Style::default().fg(MUTED)),
+            Span::styled("donating ", Style::default().fg(muted())),
             Span::styled(
                 format!("{} ", ledger.percentage),
-                Style::default().fg(Color::LightMagenta).bold(),
+                Style::default().fg(series(1)).bold(),
             ),
-            Span::styled("of what comes in   ", Style::default().fg(MUTED)),
-            Span::styled("paid ", Style::default().fg(MUTED)),
+            Span::styled("of what comes in   ", Style::default().fg(muted())),
+            Span::styled("paid ", Style::default().fg(muted())),
             Span::styled(
                 app.money.format_raw(&ledger.paid_mu.to_string()),
-                Style::default().fg(Color::LightGreen),
+                Style::default().fg(series(2)),
             ),
             Span::styled(
                 format!("  in {} transaction(s)", ledger.paid_count),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
         ]));
 
@@ -1323,8 +1395,8 @@ fn donation_lines(app: &App) -> Vec<Line<'static>> {
                 .join("   ")
         };
         lines.push(Line::from(vec![
-            Span::styled("     accrued  ", Style::default().fg(MUTED)),
-            Span::styled(owed, Style::default().fg(Color::White)),
+            Span::styled("     accrued  ", Style::default().fg(muted())),
+            Span::styled(owed, Style::default().fg(text_colour())),
         ]));
 
         lines.extend(donation_wallet_lines("funding ", &ledger.pay_wallets, "nobody funded"));
@@ -1334,7 +1406,7 @@ fn donation_lines(app: &App) -> Vec<Line<'static>> {
     for warning in &donations.warnings {
         lines.push(Line::from(Span::styled(
             format!("! {warning}"),
-            Style::default().fg(WARN),
+            Style::default().fg(warn()),
         )));
     }
     lines
@@ -1352,19 +1424,19 @@ fn donation_wallet_lines(
 ) -> Vec<Line<'static>> {
     if wallets.is_empty() {
         return vec![Line::from(vec![
-            Span::styled(format!("     {label}  "), Style::default().fg(MUTED)),
-            Span::styled(empty.to_string(), Style::default().fg(MUTED)),
+            Span::styled(format!("     {label}  "), Style::default().fg(muted())),
+            Span::styled(empty.to_string(), Style::default().fg(muted())),
         ])];
     }
     wallets
         .iter()
         .map(|wallet| {
             Line::from(vec![
-                Span::styled(format!("     {label}  "), Style::default().fg(MUTED)),
-                Span::styled(shorten(&wallet.address, 40), Style::default().fg(Color::White)),
+                Span::styled(format!("     {label}  "), Style::default().fg(muted())),
+                Span::styled(shorten(&wallet.address, 40), Style::default().fg(text_colour())),
                 Span::styled(
                     format!("  share {}", wallet.share),
-                    Style::default().fg(MUTED),
+                    Style::default().fg(muted()),
                 ),
                 Span::styled(
                     // What has actually reached it, which is what makes the share above
@@ -1383,7 +1455,7 @@ fn donation_wallet_lines(
                                 .join(", ")
                         )
                     },
-                    Style::default().fg(GOOD),
+                    Style::default().fg(good()),
                 ),
                 Span::styled(
                     if wallet.in_other_list {
@@ -1391,7 +1463,7 @@ fn donation_wallet_lines(
                     } else {
                         "  (not in the other list)".to_string()
                     },
-                    Style::default().fg(WARN),
+                    Style::default().fg(warn()),
                 ),
             ])
         })
@@ -1441,7 +1513,7 @@ fn draw_money_taken_in(frame: &mut Frame, app: &App, area: Rect) {
                     .chain((0..5).map(|_| money_cell(&app.money, 0)))
                     .collect::<Vec<_>>(),
             )
-            .style(Style::default().fg(MUTED)),
+            .style(Style::default().fg(muted())),
         );
     }
 
@@ -1465,7 +1537,7 @@ fn draw_money_taken_in(frame: &mut Frame, app: &App, area: Rect) {
             "Last year",
             "All time",
         ]))
-        .block(section_block(title, ACCENT)),
+        .block(section_block(title, accent())),
         area,
     );
 }
@@ -1477,7 +1549,7 @@ fn draw_money_taken_in(frame: &mut Frame, app: &App, area: Rect) {
 fn money_cell(money: &Money, amount: u128) -> Cell<'static> {
     let cell = Cell::from(money.format_raw(&amount.to_string()));
     if amount == 0 {
-        cell.style(Style::default().fg(MUTED))
+        cell.style(Style::default().fg(muted()))
     } else {
         cell
     }
@@ -1495,45 +1567,45 @@ fn reputation_lines(app: &App) -> Vec<Line<'static>> {
     if !reputation.is_read() {
         lines.push(Line::from(Span::styled(
             "Reading the chain…",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )));
     } else {
         let standing = &reputation.standing;
         lines.push(Line::from(vec![
             Span::styled(
                 format!("+{} ", format_share(standing.positive)),
-                Style::default().fg(GOOD).bold(),
+                Style::default().fg(good()).bold(),
             ),
-            Span::styled("for   ", Style::default().fg(MUTED)),
+            Span::styled("for   ", Style::default().fg(muted())),
             Span::styled(
                 format!("−{} ", format_share(standing.negative)),
-                Style::default().fg(if standing.negative > 0.0 { BAD } else { MUTED }),
+                Style::default().fg(if standing.negative > 0.0 { bad() } else { muted() }),
             ),
-            Span::styled("against   ", Style::default().fg(MUTED)),
+            Span::styled("against   ", Style::default().fg(muted())),
             Span::styled(
                 format!("net {}", format_signed_share(standing.net())),
-                Style::default().fg(if standing.net() < 0.0 { BAD } else { GOOD }),
+                Style::default().fg(if standing.net() < 0.0 { bad() } else { good() }),
             ),
             Span::styled(
                 format!("   {}", proof_count(standing)),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
         ]));
         // The half a share cannot give. Minting a proof costs nothing, so a share is
         // only as meaningful as what the proof staking it had to give up — and the
         // reputation contract makes that ERG unrecoverable, by its owner too.
         lines.push(Line::from(vec![
-            Span::styled("backed by ", Style::default().fg(MUTED)),
+            Span::styled("backed by ", Style::default().fg(muted())),
             Span::styled(
                 format_erg(standing.positive_backing),
-                Style::default().fg(GOOD),
+                Style::default().fg(good()),
             ),
-            Span::styled(" for / ", Style::default().fg(MUTED)),
+            Span::styled(" for / ", Style::default().fg(muted())),
             Span::styled(
                 format_erg(standing.negative_backing),
-                Style::default().fg(if standing.negative_backing > 0.0 { BAD } else { MUTED }),
+                Style::default().fg(if standing.negative_backing > 0.0 { bad() } else { muted() }),
             ),
-            Span::styled(" against, sunk and unrecoverable", Style::default().fg(MUTED)),
+            Span::styled(" against, sunk and unrecoverable", Style::default().fg(muted())),
         ]));
     }
 
@@ -1542,7 +1614,7 @@ fn reputation_lines(app: &App) -> Vec<Line<'static>> {
     // where they went.
     lines.push(Line::from(Span::styled(
         "a share of what each proof assigned · no windows: a republish re-dates it all",
-        Style::default().fg(MUTED),
+        Style::default().fg(muted()),
     )));
 
     if !reputation.own.is_empty() {
@@ -1564,7 +1636,7 @@ fn reputation_lines(app: &App) -> Vec<Line<'static>> {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )));
     }
 
@@ -1580,14 +1652,14 @@ fn reputation_lines(app: &App) -> Vec<Line<'static>> {
                 20,
             ),
         ),
-        Style::default().fg(MUTED),
+        Style::default().fg(muted()),
     )));
 
     if !reputation.error.is_empty() {
         // The previous figures stay on screen; this says they may be stale and why.
         lines.push(Line::from(Span::styled(
             format!("chain not read: {}", reputation.error),
-            Style::default().fg(WARN),
+            Style::default().fg(warn()),
         )));
     }
 
@@ -1606,10 +1678,10 @@ fn draw_opinions(frame: &mut Frame, app: &mut App, area: Rect) {
                     "Once the chain is read, every proof that has staked something on \
                      this node is listed here."
                 },
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ))])
             .wrap(Wrap { trim: true })
-            .block(section_block(" WHO STAKES ON THIS NODE ", ACCENT)),
+            .block(section_block(" WHO STAKES ON THIS NODE ", accent())),
             area,
         );
         return;
@@ -1626,15 +1698,15 @@ fn draw_opinions(frame: &mut Frame, app: &mut App, area: Rect) {
                 if opinion.positive { "+" } else { "−" },
                 format_share(opinion.weight)
             ))
-            .style(Style::default().fg(if opinion.positive { GOOD } else { BAD })),
+            .style(Style::default().fg(if opinion.positive { good() } else { bad() })),
             // What that share cost whoever published it. A proof sitting at the
             // min-box value has had nothing sacrificed into it, which is what tells a
             // cheap opinion from an expensive one.
             Cell::from(format_erg(opinion.backed_nanoerg)).style(Style::default().fg(
                 if opinion.backed_nanoerg > 0.0 {
-                    ACCENT
+                    accent()
                 } else {
-                    MUTED
+                    muted()
                 },
             )),
             // Long enough to identify the proof on an explorer, with the ellipsis
@@ -1663,7 +1735,7 @@ fn draw_opinions(frame: &mut Frame, app: &mut App, area: Rect) {
             " WHO STAKES ON THIS NODE • {} opinions ",
             app.opinions.items.len()
         ),
-        ACCENT,
+        accent(),
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
@@ -1736,7 +1808,7 @@ fn client_detail_lines(
     let Some(client) = client else {
         return vec![Line::from(Span::styled(
             "Select a client to inspect its deposits, instances and payments.",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))];
     };
 
@@ -1750,7 +1822,7 @@ fn client_detail_lines(
         if client.unmetered {
             lines.push(Line::from(Span::styled(
                 "Never charged (unmetered): one of this node's own dev clients.",
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             )));
         }
     }
@@ -1785,7 +1857,7 @@ fn client_detail_lines(
     if !detail.deposits.is_empty() {
         lines.push(Line::from(Span::styled(
             format!("Deposit tokens ({})", detail.deposits.len()),
-            Style::default().fg(ACCENT).bold(),
+            Style::default().fg(accent()).bold(),
         )));
         for deposit in &detail.deposits {
             lines.push(Line::from(vec![
@@ -1796,7 +1868,7 @@ fn client_detail_lines(
                 ),
                 Span::styled(
                     format!("{}  {}", deposit.created_at.clone(), shorten(&deposit.id, 20)),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(text_colour()),
                 ),
             ]));
         }
@@ -1805,18 +1877,18 @@ fn client_detail_lines(
     if !detail.instances.is_empty() {
         lines.push(Line::from(Span::styled(
             format!("Instances started here ({})", detail.instances.len()),
-            Style::default().fg(ACCENT).bold(),
+            Style::default().fg(accent()).bold(),
         )));
         for instance in &detail.instances {
             lines.push(Line::from(vec![
-                Span::styled("  ● ", Style::default().fg(GOOD)),
+                Span::styled("  ● ", Style::default().fg(good())),
                 Span::styled(
                     nonempty(&instance.name, "unnamed").to_string(),
-                    Style::default().fg(Color::White).bold(),
+                    Style::default().fg(text_colour()).bold(),
                 ),
                 Span::styled(
                     format!("  {}", shorten(&instance.id, 24)),
-                    Style::default().fg(MUTED),
+                    Style::default().fg(muted()),
                 ),
             ]));
         }
@@ -1835,13 +1907,13 @@ fn payment_lines(
     if payments.is_empty() {
         return vec![Line::from(Span::styled(
             empty.to_string(),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))];
     }
 
     let mut lines = vec![Line::from(Span::styled(
         format!("{title} ({})", payments.len()),
-        Style::default().fg(ACCENT).bold(),
+        Style::default().fg(accent()).bold(),
     ))];
     for payment in payments {
         // The transaction id when there is one -- a simulated contract settles nothing
@@ -1856,17 +1928,17 @@ fn payment_lines(
             Span::styled("  ● ", Style::default().fg(status_color(&payment.status))),
             Span::styled(
                 format!("{:<20}", payment.created_at.clone()),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
             Span::styled(
                 format!("{:>14}  ", money.format_raw(&payment.amount)),
-                Style::default().fg(Color::White).bold(),
+                Style::default().fg(text_colour()).bold(),
             ),
             Span::styled(
                 format!("{:<14}", payment.status.clone()),
                 Style::default().fg(status_color(&payment.status)),
             ),
-            Span::styled(reference, Style::default().fg(MUTED)),
+            Span::styled(reference, Style::default().fg(muted())),
         ]));
     }
     lines
@@ -1877,21 +1949,21 @@ fn reputation_event_lines(events: &[ReputationEvent]) -> Vec<Line<'static>> {
     if events.is_empty() {
         return vec![Line::from(Span::styled(
             "No reputation event recorded yet.".to_string(),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))];
     }
 
     let mut lines = vec![Line::from(Span::styled(
         format!("Reputation history ({})", events.len()),
-        Style::default().fg(ACCENT).bold(),
+        Style::default().fg(accent()).bold(),
     ))];
     for event in events {
-        let color = if event.amount < 0 { BAD } else { GOOD };
+        let color = if event.amount < 0 { bad() } else { good() };
         lines.push(Line::from(vec![
             Span::styled("  ● ", Style::default().fg(color)),
             Span::styled(
                 format!("{:<20}", event.created_at.clone()),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
             Span::styled(
                 format!("{:>+6}  ", event.amount),
@@ -1900,14 +1972,14 @@ fn reputation_event_lines(events: &[ReputationEvent]) -> Vec<Line<'static>> {
             // Stored as `payment_unacknowledged`; read as "payment unacknowledged".
             Span::styled(
                 format!("{:<26}", event.reason.replace('_', " ")),
-                Style::default().fg(Color::White),
+                Style::default().fg(text_colour()),
             ),
             Span::styled(
                 event
                     .score_after
                     .map(|score| format!("→ {score}"))
                     .unwrap_or_default(),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
         ]));
     }
@@ -1918,9 +1990,9 @@ fn reputation_event_lines(events: &[ReputationEvent]) -> Vec<Line<'static>> {
 /// nothing came of it" have to stand out from the ones that worked.
 fn status_color(status: &str) -> Color {
     match status {
-        "communicated" | "accepted" | "payed" => GOOD,
-        "unacknowledged" | "rejected" => BAD,
-        _ => WARN,
+        "communicated" | "accepted" | "payed" => good(),
+        "unacknowledged" | "rejected" => bad(),
+        _ => warn(),
     }
 }
 
@@ -1940,7 +2012,7 @@ fn peer_detail_lines(
     let Some(peer) = peer else {
         return vec![Line::from(Span::styled(
             "Select a peer to inspect its endpoints, reputation and payment contracts.",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))];
     };
 
@@ -1974,8 +2046,8 @@ fn peer_detail_lines(
         ));
         for proof_id in &peer.proof_ids {
             lines.push(Line::from(vec![
-                Span::styled("      proof  ", Style::default().fg(MUTED)),
-                Span::styled(shorten(proof_id, 46), Style::default().fg(Color::White)),
+                Span::styled("      proof  ", Style::default().fg(muted())),
+                Span::styled(shorten(proof_id, 46), Style::default().fg(text_colour())),
             ]));
         }
         // What this peer's on-chain donations earn it here, and only here: the credit
@@ -2024,14 +2096,14 @@ fn peer_detail_lines(
     if peer.contracts.is_empty() {
         lines.push(Line::from(Span::styled(
             "No payment method registered for this peer.",
-            Style::default().fg(WARN),
+            Style::default().fg(warn()),
         )));
         return lines;
     }
 
     lines.push(Line::from(Span::styled(
         format!("Payment methods ({})", peer.contracts.len()),
-        Style::default().fg(ACCENT).bold(),
+        Style::default().fg(accent()).bold(),
     )));
     for contract in &peer.contracts {
         // The asset names the money: on Ergo one contract is paid in ERG and in every
@@ -2040,8 +2112,8 @@ fn peer_detail_lines(
         let asset = shorten(nonempty(&contract.asset, &contract.ledger.to_uppercase()), 12);
         if compact {
             lines.push(Line::from(vec![
-                Span::styled("  ● ", Style::default().fg(GOOD)),
-                Span::styled(contract.ledger.clone(), Style::default().fg(GOOD).bold()),
+                Span::styled("  ● ", Style::default().fg(good())),
+                Span::styled(contract.ledger.clone(), Style::default().fg(good()).bold()),
                 Span::styled(
                     format!(
                         "  {}  {}  {}  1 {} = {} MU",
@@ -2051,34 +2123,34 @@ fn peer_detail_lines(
                         asset,
                         nonempty(&contract.mu_per_unit, "—")
                     ),
-                    Style::default().fg(Color::White),
+                    Style::default().fg(text_colour()),
                 ),
             ]));
             continue;
         }
         lines.push(Line::from(vec![
-            Span::styled("  ● ", Style::default().fg(GOOD)),
-            Span::styled(contract.ledger.clone(), Style::default().fg(GOOD).bold()),
+            Span::styled("  ● ", Style::default().fg(good())),
+            Span::styled(contract.ledger.clone(), Style::default().fg(good()).bold()),
             Span::styled(
                 format!("  {}  contract {}", asset, shorten(&contract.contract_hash, 24)),
-                Style::default().fg(Color::White),
+                Style::default().fg(text_colour()),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("      address  ", Style::default().fg(MUTED)),
+            Span::styled("      address  ", Style::default().fg(muted())),
             Span::styled(
                 shorten(nonempty(&contract.address, "—"), 46),
-                Style::default().fg(Color::White),
+                Style::default().fg(text_colour()),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("      rate     ", Style::default().fg(MUTED)),
+            Span::styled("      rate     ", Style::default().fg(muted())),
             Span::styled(
                 // What this peer says one unit of its ledger buys in ITS MU. This is
                 // what makes a price it quotes convertible into money we understand,
                 // so it is stated as an equation rather than as a bare number.
                 format!("1 {} = {} MU", asset, nonempty(&contract.mu_per_unit, "—")),
-                Style::default().fg(Color::White),
+                Style::default().fg(text_colour()),
             ),
         ]));
     }
@@ -2114,10 +2186,10 @@ fn draw_cell(frame: &mut Frame, app: &mut App, area: Rect) {
     // The membrane: everything inside it is this node, everything outside is not.
     let membrane = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(MUTED))
+        .border_style(Style::default().fg(muted()))
         .title(Span::styled(
             " MEMBRANE · inside vs outside ",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))
         .title_alignment(Alignment::Center);
     let inside = membrane.inner(rows[1]);
@@ -2137,13 +2209,13 @@ fn draw_cell(frame: &mut Frame, app: &mut App, area: Rect) {
 /// Which posture this node is closest to, and how to see where it differs.
 fn draw_profile_bar(frame: &mut Frame, app: &App, area: Rect) {
     let report = app.cell_profile();
-    let colour = if report.deviations.is_empty() { GOOD } else { WARN };
+    let colour = if report.deviations.is_empty() { good() } else { warn() };
     let line = Line::from(vec![
-        Span::styled(" closest profile ", Style::default().fg(MUTED)),
+        Span::styled(" closest profile ", Style::default().fg(muted())),
         Span::styled(report.summary(), Style::default().fg(colour).bold()),
         Span::styled(
             format!(" ({}/{} keys)", report.matched(), report.total),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ),
         Span::styled(
             if area.width >= 92 {
@@ -2151,7 +2223,7 @@ fn draw_profile_bar(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 ""
             },
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ),
     ]);
     frame.render_widget(Paragraph::new(line), area);
@@ -2265,7 +2337,7 @@ fn draw_organelle(
         } else {
             BorderType::Rounded
         })
-        .border_style(Style::default().fg(if focused { colour } else { MUTED }))
+        .border_style(Style::default().fg(if focused { colour } else { muted() }))
         .title(Line::from(vec![
             Span::styled(
                 format!(" {} ", organelle.title()),
@@ -2273,7 +2345,7 @@ fn draw_organelle(
             ),
             Span::styled(
                 format!("· {} ", organelle.subtitle()),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
         ]));
     let inner = block.inner(area);
@@ -2347,7 +2419,7 @@ fn draw_collapsed_organelle(
                 format!("{:<14}", organelle.title()),
                 Style::default().fg(organelle_colour(organelle)),
             ),
-            Span::styled(summary, Style::default().fg(MUTED)),
+            Span::styled(summary, Style::default().fg(muted())),
         ])),
         area,
     );
@@ -2372,10 +2444,10 @@ fn lever_line(
     };
     let value = status.label(lever);
     let value_colour = match &status {
-        LeverStatus::Custom | LeverStatus::Unset => WARN,
-        LeverStatus::Link => ACCENT,
-        _ if lever.warning.is_some() => BAD,
-        _ => Color::White,
+        LeverStatus::Custom | LeverStatus::Unset => warn(),
+        LeverStatus::Link => accent(),
+        _ if lever.warning.is_some() => bad(),
+        _ => text_colour(),
     };
     // The label is padded to a fixed column so the values line up down the box: a
     // ragged right edge on eight rows is what makes a panel hard to scan.
@@ -2384,14 +2456,14 @@ fn lever_line(
     Line::from(vec![
         Span::styled(
             if selected { "▸" } else { " " },
-            Style::default().fg(ACCENT).bold(),
+            Style::default().fg(accent()).bold(),
         ),
         Span::styled(
             format!("{label:<label_width$} "),
             if selected {
-                Style::default().fg(Color::White).bold()
+                Style::default().fg(text_colour()).bold()
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(muted())
             },
         ),
         Span::styled(format!("{marker} "), Style::default().fg(value_colour)),
@@ -2401,14 +2473,14 @@ fn lever_line(
 
 fn organelle_colour(organelle: Organelle) -> Color {
     match organelle {
-        Organelle::Channels => ACCENT,
-        Organelle::Ribosomes => Color::LightBlue,
-        Organelle::Vesicles => Color::LightMagenta,
-        Organelle::Nucleus => WARN,
-        Organelle::Immune => Color::Red,
-        Organelle::Wall => Color::LightYellow,
-        Organelle::Mitochondria => GOOD,
-        Organelle::Vacuole => MUTED,
+        Organelle::Channels => accent(),
+        Organelle::Ribosomes => series(0),
+        Organelle::Vesicles => series(1),
+        Organelle::Nucleus => warn(),
+        Organelle::Immune => bad(),
+        Organelle::Wall => series(3),
+        Organelle::Mitochondria => good(),
+        Organelle::Vacuole => muted(),
     }
 }
 
@@ -2420,10 +2492,10 @@ fn draw_profile_popup(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, area);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(ACCENT))
+        .border_style(Style::default().fg(accent()))
         .title(Span::styled(
             " APPLY A PROFILE ",
-            Style::default().fg(ACCENT).bold(),
+            Style::default().fg(accent()).bold(),
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -2440,34 +2512,34 @@ fn draw_profile_popup(frame: &mut Frame, app: &App) {
         lines.push(Line::from(vec![
             Span::styled(
                 if selected { "▸ " } else { "  " },
-                Style::default().fg(ACCENT).bold(),
+                Style::default().fg(accent()).bold(),
             ),
             Span::styled(
                 format!("{:<18}", profile.label),
                 if selected {
-                    Style::default().fg(Color::White).bold()
+                    Style::default().fg(text_colour()).bold()
                 } else {
-                    Style::default().fg(Color::Gray)
+                    Style::default().fg(muted())
                 },
             ),
             Span::styled(
                 distance,
-                Style::default().fg(if report.deviations.is_empty() { GOOD } else { MUTED }),
+                Style::default().fg(if report.deviations.is_empty() { good() } else { muted() }),
             ),
         ]));
         lines.push(Line::from(Span::styled(
             format!("    {}", profile.blurb),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "A profile sets policy only — never an identity, a wallet or a path.",
-        Style::default().fg(MUTED),
+        Style::default().fg(muted()),
     )));
     lines.push(Line::from(Span::styled(
         "⏎ see exactly what changes  ·  Esc cancel",
-        Style::default().fg(WARN),
+        Style::default().fg(warn()),
     )));
     frame.render_widget(Paragraph::new(lines), inner);
 }
@@ -2518,7 +2590,7 @@ fn draw_day_bar(
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if dirty { WARN } else { MUTED }))
+        .border_style(Style::default().fg(if dirty { warn() } else { muted() }))
         .title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -2559,10 +2631,10 @@ fn draw_day_bar(
         let open = schedule.contains(minute);
         let is_now = now >= minute && now < minute + per_slot;
         let (glyph, colour) = match (open, is_now) {
-            (true, true) => ('█', GOOD),
-            (true, false) => ('█', if dirty { WARN } else { ACCENT }),
-            (false, true) => ('▒', BAD),
-            (false, false) => ('░', MUTED),
+            (true, true) => ('█', good()),
+            (true, false) => ('█', if dirty { warn() } else { accent() }),
+            (false, true) => ('▒', bad()),
+            (false, false) => ('░', muted()),
         };
         bar.push(Span::styled(glyph.to_string(), Style::default().fg(colour)));
     }
@@ -2579,17 +2651,17 @@ fn draw_day_bar(
 
     let open_now = schedule.contains(now);
     let state = if open_now { "OPEN" } else { "CLOSED" };
-    let state_colour = if open_now { GOOD } else { BAD };
+    let state_colour = if open_now { good() } else { bad() };
 
     let mut lines = vec![
-        Line::from(Span::styled(ticks, Style::default().fg(MUTED))),
-        Line::from(Span::styled(axis, Style::default().fg(MUTED))),
+        Line::from(Span::styled(ticks, Style::default().fg(muted()))),
+        Line::from(Span::styled(axis, Style::default().fg(muted()))),
         Line::from(bar),
         Line::from(Span::styled(marker, Style::default().fg(state_colour))),
         Line::from(vec![
             Span::styled(
                 format!("now {} · ", schedule::format_clock(now)),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
             Span::styled(
                 state,
@@ -2623,7 +2695,7 @@ fn demand_lines(
             format!(
                 "No demand recorded yet — the last {days} days will appear here as the node runs."
             ),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ))];
     }
 
@@ -2649,36 +2721,36 @@ fn demand_lines(
         Line::from(spans)
     };
 
-    let mut lines = vec![spark(&demand.held, Color::Blue)];
+    let mut lines = vec![spark(&demand.held, series(0))];
     let refused = demand.total_refused();
     if refused > 0 {
-        lines.push(spark(&demand.refused, BAD));
+        lines.push(spark(&demand.refused, bad()));
         lines.push(Line::from(vec![
-            Span::styled("peak ", Style::default().fg(MUTED)),
+            Span::styled("peak ", Style::default().fg(muted())),
             Span::styled(
                 format!("{} held", demand.peak_held()),
-                Style::default().fg(Color::Blue),
+                Style::default().fg(series(0)),
             ),
-            Span::styled(" · ", Style::default().fg(MUTED)),
+            Span::styled(" · ", Style::default().fg(muted())),
             Span::styled(
                 format!("{refused} refused for being closed"),
-                Style::default().fg(BAD),
+                Style::default().fg(bad()),
             ),
             Span::styled(
                 format!(" · last {days} days"),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
         ]));
     } else {
         lines.push(Line::from(vec![
-            Span::styled("peak ", Style::default().fg(MUTED)),
+            Span::styled("peak ", Style::default().fg(muted())),
             Span::styled(
                 format!("{} held", demand.peak_held()),
-                Style::default().fg(Color::Blue),
+                Style::default().fg(series(0)),
             ),
             Span::styled(
                 format!(" · nothing refused for being closed · last {days} days"),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
         ]));
     }
@@ -2702,7 +2774,7 @@ fn draw_schedule_summary(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(MUTED))
+        .border_style(Style::default().fg(muted()))
         .title(" THE HOURS ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -2728,14 +2800,14 @@ fn draw_schedule_summary(
     lines.push(Line::from(Span::styled(
         enabled_text,
         Style::default()
-            .fg(if schedule.enabled { GOOD } else { MUTED })
+            .fg(if schedule.enabled { good() } else { muted() })
             .add_modifier(Modifier::BOLD),
     )));
 
     if schedule.windows.is_empty() {
         lines.push(Line::from(Span::styled(
             "No windows yet.",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )));
     } else {
         for (index, window) in schedule.windows.iter().enumerate() {
@@ -2746,11 +2818,11 @@ fn draw_schedule_summary(
 
             let marker = if is_selected_window { "› " } else { "  " };
             x += marker.chars().count() as u16;
-            spans.push(Span::styled(marker, Style::default().fg(ACCENT)));
+            spans.push(Span::styled(marker, Style::default().fg(accent())));
 
             let label = format!("W{} ", index + 1);
             x += label.chars().count() as u16;
-            spans.push(Span::styled(label, Style::default().fg(MUTED)));
+            spans.push(Span::styled(label, Style::default().fg(muted())));
 
             for edge in [schedule::Edge::Start, schedule::Edge::End] {
                 let minute = match edge {
@@ -2761,9 +2833,9 @@ fn draw_schedule_summary(
                 let width = text.chars().count() as u16;
                 let highlighted = is_selected_window && edge == selected_edge;
                 let style = if highlighted {
-                    Style::default().fg(Color::Black).bg(ACCENT)
+                    Style::default().fg(inverse_text()).bg(accent())
                 } else {
-                    Style::default().fg(ACCENT)
+                    Style::default().fg(accent())
                 };
                 app.schedule_edge_areas
                     .push((index, edge, Rect::new(x, row, width, 1)));
@@ -2778,17 +2850,17 @@ fn draw_schedule_summary(
                 index,
                 Rect::new(x, row, remove_text.chars().count() as u16, 1),
             ));
-            spans.push(Span::styled(remove_text, Style::default().fg(BAD)));
+            spans.push(Span::styled(remove_text, Style::default().fg(bad())));
 
             if window.is_empty() {
                 spans.push(Span::styled(
                     "  empty — move an edge",
-                    Style::default().fg(MUTED),
+                    Style::default().fg(muted()),
                 ));
             } else if window.wraps() {
                 spans.push(Span::styled(
                     "  one window through midnight",
-                    Style::default().fg(MUTED),
+                    Style::default().fg(muted()),
                 ));
             }
 
@@ -2805,7 +2877,7 @@ fn draw_schedule_summary(
     );
     lines.push(Line::from(Span::styled(
         add_text,
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        Style::default().fg(accent()).add_modifier(Modifier::BOLD),
     )));
 
     // The span the windows describe, whether or not it is being enforced: a line
@@ -2819,23 +2891,23 @@ fn draw_schedule_summary(
         // No non-empty window at all: always open regardless of the switch.
         lines.push(Line::from(Span::styled(
             "Always open: every window is empty, so nothing is refused.",
-            Style::default().fg(WARN),
+            Style::default().fg(warn()),
         )));
     } else {
         lines.push(Line::from(Span::styled(
             format!("{} a day", hours_preview.open_duration()),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )));
         if !schedule.enabled {
             lines.push(Line::from(Span::styled(
                 "Always open: the schedule is off. Press `w` (or click above) to enforce these hours.",
-                Style::default().fg(WARN),
+                Style::default().fg(warn()),
             )));
         } else if let Some(minutes) = schedule.minutes_until_flip(now) {
             let verb = if schedule.contains(now) { "closes" } else { "opens" };
             lines.push(Line::from(Span::styled(
                 format!("{verb} in {}h {:02}m", minutes / 60, minutes % 60),
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             )));
         }
     }
@@ -2843,25 +2915,25 @@ fn draw_schedule_summary(
     app.schedule_on_close_area = Rect::new(inner.x, inner.y + lines.len() as u16, inner.width, 1);
     lines.push(Line::from(match schedule.on_close {
         schedule::OnClose::Refuse => vec![
-            Span::styled("at closing: ", Style::default().fg(MUTED)),
-            Span::styled("refuse", Style::default().fg(GOOD)),
+            Span::styled("at closing: ", Style::default().fg(muted())),
+            Span::styled("refuse", Style::default().fg(good())),
             Span::styled(
                 " — new work only. What runs keeps running and keeps being charged.",
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
         ],
         schedule::OnClose::Stop => vec![
-            Span::styled("at closing: ", Style::default().fg(MUTED)),
-            Span::styled("stop", Style::default().fg(BAD).add_modifier(Modifier::BOLD)),
+            Span::styled("at closing: ", Style::default().fg(muted())),
+            Span::styled("stop", Style::default().fg(bad()).add_modifier(Modifier::BOLD)),
             Span::styled(
                 " — running instances are destroyed mid-flight and refunded.",
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
         ],
     }));
     lines.push(Line::from(Span::styled(
         "Work from a dev client is exempt either way, so `nodo execute` and the core services keep working.",
-        Style::default().fg(MUTED),
+        Style::default().fg(muted()),
     )));
 
     frame.render_widget(Paragraph::new(lines), inner);
@@ -2871,33 +2943,33 @@ fn draw_schedule_help(frame: &mut Frame, area: Rect, app: &App) {
     let dirty = app.schedule_is_dirty();
     let mut lines = vec![Line::from(Span::styled(
         "←/→ move the selected edge   ↑/↓ switch edge   [/] switch window   a add   d remove   w on/off   c what closing does",
-        Style::default().fg(MUTED),
+        Style::default().fg(muted()),
     ))];
     lines.push(Line::from(Span::styled(
         "Click an edge to select it, [x] to remove a window, + add window, or the on/off and closing lines — the mouse reaches everything here.",
-        Style::default().fg(MUTED),
+        Style::default().fg(muted()),
     )));
     lines.push(Line::from(if dirty {
         vec![
-            Span::styled("Enter", Style::default().fg(WARN).add_modifier(Modifier::BOLD)),
+            Span::styled("Enter", Style::default().fg(warn()).add_modifier(Modifier::BOLD)),
             Span::styled(
                 " applies it (backup, write, restart, and revert if the node does not come back)   ",
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             ),
-            Span::styled("Esc", Style::default().fg(WARN)),
-            Span::styled(" discards", Style::default().fg(MUTED)),
+            Span::styled("Esc", Style::default().fg(warn())),
+            Span::styled(" discards", Style::default().fg(muted())),
         ]
     } else {
         vec![Span::styled(
             "Nothing to apply: this is the schedule the node is running.",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )]
     }));
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(MUTED))
+                .border_style(Style::default().fg(muted()))
                 .title(" EDIT "),
         ),
         area,
@@ -2920,7 +2992,7 @@ fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
         PriceChart {
             title: " RECURRING • charged while held (log scale) ",
             recurring: true,
-            color: ACCENT,
+            color: accent(),
         },
         &app.prices.items,
         selected.as_deref(),
@@ -2932,7 +3004,7 @@ fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
         PriceChart {
             title: " ONE-OFF • charged per event (log scale) ",
             recurring: false,
-            color: Color::Magenta,
+            color: series(1),
         },
         &app.prices.items,
         selected.as_deref(),
@@ -2997,11 +3069,11 @@ fn draw_price_bars(
                 } else {
                     entry.short.to_string()
                 }))
-                .style(Style::default().fg(if highlighted { Color::White } else { color }))
+                .style(Style::default().fg(if highlighted { text_colour() } else { color }))
                 .value_style(if highlighted {
-                    Style::default().fg(Color::Black).bg(Color::White).bold()
+                    Style::default().fg(inverse_text()).bg(text_colour()).bold()
                 } else {
-                    Style::default().fg(Color::Black).bg(color)
+                    Style::default().fg(inverse_text()).bg(color)
                 })
         })
         .collect();
@@ -3012,7 +3084,7 @@ fn draw_price_bars(
         .data(BarGroup::default().bars(&bars))
         .bar_width(width.saturating_sub(1).max(1))
         .bar_gap(1)
-        .label_style(Style::default().fg(MUTED));
+        .label_style(Style::default().fg(muted()));
     frame.render_widget(chart, area);
 }
 
@@ -3055,7 +3127,7 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
     if let Some(entry) = selected {
         lines.push(Line::from(Span::styled(
             entry.config_label(),
-            Style::default().fg(Color::White).bold(),
+            Style::default().fg(text_colour()).bold(),
         )));
         lines.push(metric_line("Price", format!("{} MU {}", entry.mu, entry.per)));
         lines.push(metric_line("That is", money.format_mu(entry.mu)));
@@ -3100,10 +3172,10 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
     lines.push(metric_line("1h example", "256MiB+1vCPU+10GiB"));
     lines.push(Line::from(Span::styled(
         format!("{:<12}~ {}", "", money.format_mu(hourly)),
-        Style::default().fg(GOOD),
+        Style::default().fg(good()),
     )));
 
-    draw_card(frame, area, "MONEY", lines, GOOD);
+    draw_card(frame, area, "MONEY", lines, good());
 }
 
 fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -3125,7 +3197,7 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
             };
             let row = Row::new(vec![entry.short.clone(), entry.mu.to_string(), amount]);
             if entry.arch.is_some() {
-                row.style(Style::default().fg(MUTED))
+                row.style(Style::default().fg(muted()))
             } else {
                 row
             }
@@ -3142,7 +3214,7 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
     .header(header_row(vec!["Price", "MU", money.symbol.as_str()]))
     .block(section_block(
         " PRICES • +/- adjust, e exact ".to_string(),
-        Color::Yellow,
+        warn(),
     ))
     .highlight_style(selected_style())
     .highlight_symbol("> ");
@@ -3206,9 +3278,9 @@ fn draw_energy_section(
 ) {
     let entries = crate::energy::entries();
     let colour = match section {
-        crate::energy::EnergySection::Metering => ACCENT,
-        crate::energy::EnergySection::Model => WARN,
-        crate::energy::EnergySection::Sources => Color::Magenta,
+        crate::energy::EnergySection::Metering => accent(),
+        crate::energy::EnergySection::Model => warn(),
+        crate::energy::EnergySection::Sources => series(1),
     };
     let block = section_block(format!(" {} ", section.title()), colour);
     let inner = block.inner(area);
@@ -3219,7 +3291,7 @@ fn draw_energy_section(
 
     let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
         section.blurb(),
-        Style::default().fg(MUTED).italic(),
+        Style::default().fg(muted()).italic(),
     ))];
     for (offset, index) in rows.iter().enumerate() {
         let (_, entry) = &entries[*index];
@@ -3235,7 +3307,7 @@ fn draw_energy_section(
         let key_style = if selected {
             selected_style()
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(text_colour())
         };
         lines.push(Line::from(vec![
             Span::styled(format!("{marker}{:<26}", entry.key()), key_style),
@@ -3260,10 +3332,10 @@ fn draw_energy_section(
 /// `false`s and three empty strings to read one at a time.
 fn energy_value_colour(entry: &crate::energy::EnergyEntry, app: &App) -> Color {
     match app.energy_value(entry) {
-        Some(value) if value == "true" => GOOD,
-        Some(value) if value == "false" || value.is_empty() || value == "0" => MUTED,
-        Some(_) => Color::White,
-        None => MUTED,
+        Some(value) if value == "true" => good(),
+        Some(value) if value == "false" || value.is_empty() || value == "0" => muted(),
+        Some(_) => text_colour(),
+        None => muted(),
     }
 }
 
@@ -3274,7 +3346,7 @@ fn draw_energy_help(frame: &mut Frame, app: &App, area: Rect) {
     let Some(entry) = app.selected_energy() else {
         frame.render_widget(
             Paragraph::new("No setting selected.")
-                .block(section_block(" ABOUT ".to_string(), ACCENT)),
+                .block(section_block(" ABOUT ".to_string(), accent())),
             area,
         );
         return;
@@ -3286,27 +3358,27 @@ fn draw_energy_help(frame: &mut Frame, app: &App, area: Rect) {
     let lines = vec![
         Line::from(Span::styled(
             entry.label,
-            Style::default().fg(Color::White).bold(),
+            Style::default().fg(text_colour()).bold(),
         )),
-        Line::from(Span::styled(entry.path, Style::default().fg(MUTED))),
+        Line::from(Span::styled(entry.path, Style::default().fg(muted()))),
         Line::from(""),
         Line::from(vec![
-            Span::styled("now: ", Style::default().fg(MUTED)),
-            Span::styled(value, Style::default().fg(ACCENT).bold()),
+            Span::styled("now: ", Style::default().fg(muted())),
+            Span::styled(value, Style::default().fg(accent()).bold()),
         ]),
         Line::from(""),
-        Line::from(Span::styled(entry.help, Style::default().fg(Color::White))),
+        Line::from(Span::styled(entry.help, Style::default().fg(text_colour()))),
         Line::from(""),
         Line::from(Span::styled(
             "Written through the same backup, yq write, restart and revert as every \
              other change (see the TUI README).",
-            Style::default().fg(MUTED).italic(),
+            Style::default().fg(muted()).italic(),
         )),
     ];
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
-            .block(section_block(" ABOUT ".to_string(), ACCENT)),
+            .block(section_block(" ABOUT ".to_string(), accent())),
         area,
     );
 }
@@ -3350,7 +3422,7 @@ fn draw_config(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let tree = Tree::new(&items)
         .expect("config tree identifiers are unique within each section")
-        .block(section_block(title, Color::Yellow))
+        .block(section_block(title, warn()))
         .highlight_style(selected_style())
         .node_closed_symbol("▸ ")
         .node_open_symbol("▾ ")
@@ -3456,17 +3528,17 @@ fn config_leaf_line(entry: &ConfigEntry, highlighted: bool) -> Line<'static> {
         .map(segment_token)
         .unwrap_or_default();
     let key_style = if highlighted {
-        Style::default().fg(Color::Black).bg(WARN).bold()
+        Style::default().fg(inverse_text()).bg(warn()).bold()
     } else {
-        Style::default().fg(Color::White)
+        Style::default().fg(text_colour())
     };
     Line::from(vec![
         Span::styled(key, key_style),
-        Span::styled(": ", Style::default().fg(MUTED)),
-        Span::styled(entry.display_value(), Style::default().fg(ACCENT)),
+        Span::styled(": ", Style::default().fg(muted())),
+        Span::styled(entry.display_value(), Style::default().fg(accent())),
         Span::styled(
             format!("  [{}]", entry.value_type),
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         ),
     ])
 }
@@ -3475,13 +3547,13 @@ fn config_leaf_line(entry: &ConfigEntry, highlighted: bool) -> Line<'static> {
 /// (reverse-video) when the section's path matches the active filter.
 fn config_branch_line(token: &str, count: usize, highlighted: bool) -> Line<'static> {
     let name_style = if highlighted {
-        Style::default().fg(Color::Black).bg(WARN).bold()
+        Style::default().fg(inverse_text()).bg(warn()).bold()
     } else {
-        Style::default().fg(WARN).bold()
+        Style::default().fg(warn()).bold()
     };
     Line::from(vec![
         Span::styled(token.to_string(), name_style),
-        Span::styled(format!("  ({count})"), Style::default().fg(MUTED)),
+        Span::styled(format!("  ({count})"), Style::default().fg(muted())),
     ])
 }
 
@@ -3491,16 +3563,16 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
     let node_text = visible_tail(&app.node_logs, split[0].height.saturating_sub(2) as usize);
     frame.render_widget(
         Paragraph::new(node_text)
-            .block(section_block(" NODE LOG • app.log ", Color::White))
-            .style(Style::default().fg(Color::Gray))
+            .block(section_block(" NODE LOG • app.log ", text_colour()))
+            .style(Style::default().fg(muted()))
             .wrap(Wrap { trim: false }),
         split[0],
     );
     let action_text = visible_tail(&app.app_logs, split[1].height.saturating_sub(2) as usize);
     frame.render_widget(
         Paragraph::new(action_text)
-            .block(section_block(" TUI ACTIONS ", ACCENT))
-            .style(Style::default().fg(Color::Gray))
+            .block(section_block(" TUI ACTIONS ", accent()))
+            .style(Style::default().fg(muted()))
             .wrap(Wrap { trim: false }),
         split[1],
     );
@@ -3514,11 +3586,11 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         let lines = vec![
             Line::from(Span::styled(
                 "Accepting is required to run this node.",
-                Style::default().fg(WARN),
+                Style::default().fg(warn()),
             )),
             Line::from(Span::styled(
                 "y accept · n decline · ↑↓ scroll",
-                Style::default().fg(MUTED),
+                Style::default().fg(muted()),
             )),
         ];
         frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
@@ -3567,11 +3639,11 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         "[/] or 1-5 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     };
     let lines = vec![
-        Line::from(Span::styled(controls, Style::default().fg(MUTED))),
+        Line::from(Span::styled(controls, Style::default().fg(muted()))),
         Line::from(vec![
-            Span::styled(navigation, Style::default().fg(MUTED)),
+            Span::styled(navigation, Style::default().fg(muted())),
             Span::raw("   "),
-            Span::styled(app.status.clone(), Style::default().fg(WARN)),
+            Span::styled(app.status.clone(), Style::default().fg(warn())),
         ]),
     ];
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
@@ -3606,7 +3678,7 @@ fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
             (
                 vec![Line::from(Span::styled(
                     label,
-                    Style::default().fg(Color::White).bold(),
+                    Style::default().fg(text_colour()).bold(),
                 ))],
                 "Space / ←/→ toggles • Enter saves • Esc cancels".to_string(),
             )
@@ -3625,9 +3697,9 @@ fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
                     Line::from(Span::styled(
                         format!("{marker}{option}"),
                         if selected {
-                            Style::default().fg(ACCENT).bold()
+                            Style::default().fg(accent()).bold()
                         } else {
-                            Style::default().fg(Color::White)
+                            Style::default().fg(text_colour())
                         },
                     ))
                 })
@@ -3715,14 +3787,14 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
     let height = (content.len() as u16 + 2).max(3) + 2 + hint_rows;
     let area = centered_rect(72, height, frame.size());
     frame.render_widget(Clear, area);
-    content.push(Line::from(Span::styled(hint, Style::default().fg(MUTED))));
+    content.push(Line::from(Span::styled(hint, Style::default().fg(muted()))));
     if let Some(root_hint) = root_hint {
         // Wrapped here rather than through `Paragraph::wrap`, which would also
         // reflow the value being edited -- a YAML literal broken across lines is a
         // different literal, and this popup is where an operator checks what they
         // typed.
         for line in wrapped(root_hint, area.width.saturating_sub(2) as usize) {
-            content.push(Line::from(Span::styled(line, Style::default().fg(WARN))));
+            content.push(Line::from(Span::styled(line, Style::default().fg(warn()))));
         }
     }
     let popup = Paragraph::new(content)
@@ -3730,11 +3802,11 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
             Block::bordered()
                 .title(Span::styled(
                     format!(" {} ", app.input_title),
-                    Style::default().fg(ACCENT).bold(),
+                    Style::default().fg(accent()).bold(),
                 ))
-                .border_style(Style::default().fg(ACCENT)),
+                .border_style(Style::default().fg(accent())),
         )
-        .style(Style::default().fg(Color::White).bg(Color::Black));
+        .style(Style::default().fg(text_colour()).bg(popup_background()));
     frame.render_widget(popup, area);
 }
 
@@ -3744,22 +3816,22 @@ fn draw_confirm_popup(frame: &mut Frame, app: &App) {
     let content = vec![
         Line::from(Span::styled(
             app.input_title.clone(),
-            Style::default().fg(Color::White).bold(),
+            Style::default().fg(text_colour()).bold(),
         )),
         Line::from(""),
         Line::from(Span::styled(
             "y confirms • n / Esc cancels",
-            Style::default().fg(MUTED),
+            Style::default().fg(muted()),
         )),
     ];
     let popup = Paragraph::new(content)
         .alignment(Alignment::Center)
         .block(
             Block::bordered()
-                .title(Span::styled(" CONFIRM ", Style::default().fg(WARN).bold()))
-                .border_style(Style::default().fg(WARN)),
+                .title(Span::styled(" CONFIRM ", Style::default().fg(warn()).bold()))
+                .border_style(Style::default().fg(warn())),
         )
-        .style(Style::default().fg(Color::White).bg(Color::Black));
+        .style(Style::default().fg(text_colour()).bg(popup_background()));
     frame.render_widget(popup, area);
 }
 
@@ -3798,7 +3870,7 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
     } else {
         "↑/↓ scroll • Esc close"
     };
-    let colour = if confirming || gating { WARN } else { ACCENT };
+    let colour = if confirming || gating { warn() } else { accent() };
     let popup = Paragraph::new(text)
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false })
@@ -3810,7 +3882,7 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
                 ))
                 .border_style(Style::default().fg(colour)),
         )
-        .style(Style::default().fg(Color::White).bg(Color::Black));
+        .style(Style::default().fg(text_colour()).bg(popup_background()));
     frame.render_widget(popup, area);
 }
 
@@ -3836,7 +3908,7 @@ fn header_row(labels: Vec<&str>) -> Row<'static> {
             .map(|label| Cell::from(label.to_string()))
             .collect::<Vec<_>>(),
     )
-    .style(Style::default().fg(ACCENT).bold())
+    .style(Style::default().fg(accent()).bold())
     .bottom_margin(1)
 }
 
@@ -3850,7 +3922,7 @@ fn section_block(title: impl Into<String>, color: Color) -> Block<'static> {
 }
 
 fn selected_style() -> Style {
-    Style::default().fg(Color::Black).bg(ACCENT).bold()
+    Style::default().fg(inverse_text()).bg(accent()).bold()
 }
 
 fn nonempty<'a>(value: &'a str, fallback: &'a str) -> &'a str {
@@ -4367,7 +4439,7 @@ mod tests {
     /// screen -- including a free one, and one three orders of magnitude below its
     /// neighbour, which on a linear scale would round to no bar at all.
     mod pricing {
-        use super::super::{draw_price_bars, log_bar_value, PriceChart, ACCENT};
+        use super::super::{accent, draw_price_bars, log_bar_value, PriceChart};
         use crate::app::{Money, PriceEntry};
         use ratatui::{backend::TestBackend, Terminal};
 
@@ -4414,7 +4486,7 @@ mod tests {
                         PriceChart {
                             title: " RECURRING ",
                             recurring: true,
-                            color: ACCENT,
+                            color: accent(),
                         },
                         prices,
                         selected,
@@ -4826,7 +4898,7 @@ mod tests {
     /// These tests pin the two halves of that: a live figure appears next to its
     /// allocation, and an instance we cannot see into says so instead of reading idle.
     mod instances {
-        use super::super::{cpu_detail, cpu_load_color, net_detail, GOOD, MUTED, WARN};
+        use super::super::{cpu_detail, cpu_load_color, good, muted, net_detail, warn};
         use crate::app::{Instance, InstanceUsage};
 
         fn instance(vcpus: Option<f64>, usage: InstanceUsage) -> Instance {
@@ -4875,7 +4947,7 @@ mod tests {
         fn an_unreadable_cpu_reads_as_unknown_in_both_the_text_and_the_colour() {
             let blind = instance(Some(2.0), InstanceUsage::default());
             assert!(cpu_detail(&blind).contains('—'), "{}", cpu_detail(&blind));
-            assert_eq!(cpu_load_color(&blind), MUTED);
+            assert_eq!(cpu_load_color(&blind), muted());
         }
 
         /// The colour is the at-a-glance signal for oversubscription, so it has to turn
@@ -4892,9 +4964,9 @@ mod tests {
                 ))
             };
             // 95% of one core is nearly saturated; the same figure on four cores is not.
-            assert_eq!(at(95.0, 1.0), WARN);
-            assert_eq!(at(95.0, 4.0), GOOD);
-            assert_eq!(at(390.0, 4.0), WARN);
+            assert_eq!(at(95.0, 1.0), warn());
+            assert_eq!(at(95.0, 4.0), good());
+            assert_eq!(at(390.0, 4.0), warn());
         }
 
         #[test]
@@ -6753,7 +6825,7 @@ mod config_tree {
         let has_highlight = (0..buffer.area.height).any(|y| {
             (0..buffer.area.width).any(|x| {
                 let cell = buffer.get(x, y);
-                cell.symbol() != " " && cell.style().bg == Some(WARN)
+                cell.symbol() != " " && cell.style().bg == Some(warn())
             })
         });
         assert!(has_highlight, "expected a non-selected filter match to be highlighted");
@@ -7172,3 +7244,215 @@ mod two_level_tab_bar_preview {
         }
     }
 }
+
+/// Themes reach the screen (issue #395).
+///
+/// The property that matters is not that a `Theme` struct exists but that switching
+/// it changes what is drawn -- which is only true if every colour goes through it.
+/// Before this change `ui.rs` held five constants and seventy-odd bare `Color::`
+/// literals, so a "theme" would have recoloured a third of the interface and left the
+/// rest cyan.
+///
+/// These tests install a theme, render, and read the cells back. They are serialised
+/// by a mutex: the theme is process-global (it is a property of the run, not of a
+/// widget), and `cargo test` runs test functions on threads, so two of these racing
+/// would each see the other's palette.
+#[cfg(test)]
+mod themes {
+    use super::render;
+    use crate::app::{App, Page};
+    use crate::theme::{self, Theme, DARK, LIGHT, MONO, UBUNTU};
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
+    use ratatui::Terminal;
+    use std::sync::Mutex;
+
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    /// Every foreground colour actually painted on a full render of `page`.
+    fn colours_drawn(theme: Theme, page: Page) -> Vec<Color> {
+        let _guard = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let restore = theme::current();
+        theme::set_current(theme);
+
+        let mut app = App::new();
+        app.tabs.select_page(page);
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let mut colours: Vec<Color> = Vec::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                let colour = buffer.get(x, y).fg;
+                if !colours.contains(&colour) {
+                    colours.push(colour);
+                }
+            }
+        }
+
+        theme::set_current(restore);
+        colours
+    }
+
+    /// The default really is the Ubuntu palette, on screen and not merely in a
+    /// struct: the orange accent and the white text are what the issue asks for.
+    #[test]
+    fn the_default_theme_paints_the_ubuntu_palette() {
+        let colours = colours_drawn(UBUNTU, Page::Overview);
+
+        assert!(
+            colours.contains(&Color::Rgb(0xE9, 0x54, 0x20)),
+            "no Ubuntu orange in {colours:?}"
+        );
+        assert!(
+            colours.contains(&Color::Rgb(0xFF, 0xFF, 0xFF)),
+            "no Ubuntu white in {colours:?}"
+        );
+        // And none of the old hard-coded palette survives on this page.
+        assert!(!colours.contains(&Color::Cyan), "{colours:?}");
+    }
+
+    /// Switching the theme changes what is painted. The whole point.
+    #[test]
+    fn switching_the_theme_changes_the_colours_on_screen() {
+        let ubuntu = colours_drawn(UBUNTU, Page::Overview);
+        let dark = colours_drawn(DARK, Page::Overview);
+
+        assert_ne!(ubuntu, dark);
+        assert!(dark.contains(&Color::Cyan), "{dark:?}");
+        assert!(!dark.contains(&Color::Rgb(0xE9, 0x54, 0x20)), "{dark:?}");
+    }
+
+    /// Every page, not just OVERVIEW. A colour left hard-coded on some page nobody
+    /// checked is exactly the failure mode this refactor exists to prevent, and it
+    /// would be invisible on the one page a test happened to render.
+    #[test]
+    fn no_page_keeps_a_hard_coded_colour_from_the_old_palette() {
+        for page in Page::ALL {
+            let colours = colours_drawn(UBUNTU, page);
+
+            for stale in [Color::Cyan, Color::LightBlue, Color::LightMagenta] {
+                assert!(
+                    !colours.contains(&stale),
+                    "{:?} still paints {stale:?}, so it is not going through the theme",
+                    page
+                );
+            }
+        }
+    }
+
+    /// The mono theme paints no hue on any page. Not decoration: anything it cannot
+    /// express is something the interface was saying with colour *alone*, and that is
+    /// a thing it should not be doing.
+    #[test]
+    fn the_mono_theme_paints_no_hue_on_any_page() {
+        for page in Page::ALL {
+            for colour in colours_drawn(MONO, page) {
+                assert!(
+                    matches!(
+                        colour,
+                        Color::Reset
+                            | Color::White
+                            | Color::Gray
+                            | Color::DarkGray
+                            | Color::Black
+                    ),
+                    "{:?} paints {colour:?} under the mono theme",
+                    page
+                );
+            }
+        }
+    }
+
+    /// The light theme paints no white text **on the terminal's own background**,
+    /// which on a pale terminal is text that is simply not there.
+    ///
+    /// Scoped to cells with no background of their own, because white on the blue
+    /// accent badge is exactly right and banning it outright would be asserting the
+    /// wrong thing. The failure this catches is a foreground chosen against a dark
+    /// terminal and then left to sit on a light one -- which is how a light theme
+    /// ends up with invisible rows.
+    #[test]
+    fn the_light_theme_paints_nothing_invisible_on_a_pale_terminal() {
+        for page in Page::ALL {
+            let _guard = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let restore = theme::current();
+            theme::set_current(LIGHT);
+
+            let mut app = App::new();
+            app.tabs.select_page(page);
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+
+            let mut invisible = Vec::new();
+            for y in 0..buffer.area.height {
+                for x in 0..buffer.area.width {
+                    let cell = buffer.get(x, y);
+                    // A blank carries no text, so its foreground says nothing about
+                    // legibility.
+                    if cell.symbol().trim().is_empty() {
+                        continue;
+                    }
+                    if cell.bg == Color::Reset && cell.fg == Color::White {
+                        invisible.push((x, y, cell.symbol().to_string()));
+                    }
+                }
+            }
+
+            theme::set_current(restore);
+
+            assert!(
+                invisible.is_empty(),
+                "{:?} paints white-on-nothing under the light theme: {invisible:?}",
+                page
+            );
+        }
+    }
+
+    /// Popups are themed too. They paint their own background over whatever they
+    /// cover, so a popup that kept a hard-coded black would be a black box in the
+    /// middle of a light terminal.
+    #[test]
+    fn a_popup_takes_its_background_from_the_theme() {
+        let _guard = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let restore = theme::current();
+        theme::set_current(LIGHT);
+
+        let mut app = App::new();
+        app.input_mode = crate::app::InputMode::EditConfig;
+        app.input_title = "Edit ui.THEME".to_string();
+        app.input = "light".to_string();
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let backgrounds: Vec<Color> = (0..buffer.area.height)
+            .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+            .map(|(x, y)| buffer.get(x, y).bg)
+            .collect();
+
+        theme::set_current(restore);
+
+        assert!(backgrounds.contains(&Color::White), "the popup is not themed");
+        assert!(!backgrounds.contains(&Color::Black), "a hard-coded black background survived");
+    }
+
+    /// The CONFIG page offers the theme as a picker rather than as free text, and
+    /// every name it offers resolves. A picker listing a value that silently falls
+    /// back to something else would be lying about what it does.
+    #[test]
+    fn the_config_page_offers_every_theme_by_name() {
+        let options = crate::app::known_enum_values("ui.THEME").expect("a picker");
+
+        assert_eq!(options, theme::NAMES);
+        for name in options {
+            let resolved = Theme::by_name(name);
+            assert!(
+                *name == "default" || resolved.name == *name,
+                "{name} resolves to {}",
+                resolved.name
+            );
+        }
+    }
+}
+
