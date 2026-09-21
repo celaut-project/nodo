@@ -18,7 +18,7 @@ talks to Ergo).
 
 | Step | Where |
 |---|---|
-| Service declares `Service.Network{tags, prose, formal, protocol_stack, environment_variable}` | `protos/celaut.proto:261-277` |
+| Service declares `Service.Network{tags, prose, formal, protocol_stack}` (`environment_variable` removed, #396) | `protos/celaut.proto:261-277` |
 | Operator policy over the declared tags | `src/utils/network_policy.py`, called from `src/gateway/launcher/launch_service.py:213` |
 | Ancestor chain intersects the request | `filter_networks_with_ancestors`, `src/manager/networks.py:133` |
 | Policy again, on what survived | `src/virtualizers/microvm/rootfs.py:124` |
@@ -185,9 +185,18 @@ The function's first line then returns every peer unchanged
 (`network_env.py:56-57`).
 
 This is right for DNS — an A record has no celaut environment — but it means the
-feature is, today, dead in the only path that reaches it. The guarantee is
-"`environment_variable` is honoured for peers whose environment the node can read",
-and there are none.
+feature was, at the time of this audit, dead in the only path that reached it.
+The guarantee would have been "`environment_variable` is honoured for peers whose
+environment the node can read", and there were none.
+
+**Removed in [#396](https://github.com/celaut-project/nodo/issues/396).** Never
+reachable from `service.json` authoring, bypassed for remote peers, and always
+inert in production for exactly the reason above. Its use case — several
+instances of one service, only the matching ones as peers — is now expressed with
+a `${VAR}` selection key in `formal` (§2.3, `docs/NETWORKS.md` "Partitioning by
+instance"), the mechanism `formal` templating already made packer-validated and
+enforced end to end (`request_fits_declaration`, `same_component`, the ancestor
+chain), instead of a field with no operational path.
 
 ## 1.7 `formal` is not read anywhere
 
@@ -258,7 +267,7 @@ the moment it does not.
 | `*` is confined | **No**, by design | `allow_all_egress` (`network.py:549-554`); one `*` in any tag list opens the whole VM. |
 | A tag that could not be opened fails the launch | **No** | Logged only (`network.py:571-574`). But an unresolvable *DNS* tag raises `ValueError` and aborts (`networks.py:45`). Two policies, unintentionally. |
 | Config and firewall agree on the addresses | **Yes** | Both read the same `network_resolution` object (`ch/execute.py:236`, `:308`). |
-| `environment_variable` filters DNS peers | **No**, correctly | No `peer_env_lookup` is ever passed; DNS peers have no celaut environment (`network_env.py:56-57`). |
+| `environment_variable` filters DNS peers | **Removed** (#396) | Was never reachable in production; superseded by a `${VAR}` selection key in `formal` (§1.6). |
 | `formal` constrains anything | **No** | Never parsed. `match_networks` is tag intersection (`networks.py:129-131`). |
 | Ancestor chain limits what a child may reach | **Yes** | `filter_networks_with_ancestors` (`networks.py:133`); an unreadable ancestor spec aborts rather than grants (`networks.py:167-181`). **This is a real guarantee.** |
 | Operator can refuse a domain | **Yes** | `service_networks` blacklist/whitelist, three enforcement points (`network_policy.py:44-52`). **This is a real guarantee.** |
@@ -621,9 +630,10 @@ This is why §2.3's canonical form matters: two nodes that mean the same require
 must produce the same bytes, and `canonical_formal` using deterministic protobuf serialization is what makes that
 true without anyone having to remember a rule.
 
-**`environment_variable`** — no change, and it stays inert for PoW peers for the
-same reason it is inert for DNS ones (§1.6): a chain node is not a celaut instance
-and has no environment to read.
+**`environment_variable`** — removed (#396, §1.6); it was inert for PoW peers for
+the same reason it was inert for DNS ones: a chain node is not a celaut instance
+and has no environment to read. Partitioning among PoW peers, if ever needed, is
+expressed the same way as everywhere else: a `${VAR}` selection key in `formal`.
 
 **Firewall** — each qualifying peer becomes **its own `Instance`** with one
 `Uri(ip, port)` naming that peer's **P2P endpoint**. They are separate operators,
@@ -721,6 +731,11 @@ once.
 | `config.example.yaml` | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ASK_PEERS`; `service_networks.default_instances` (any tag → uris). **Not `networks:`** — that would sit one letter from the `network:` block, the same trap `service_networks` is named around. |
 | `tests/` | `test_pow_networks.py` (the parser's accept/reject table, per-reason peer rejection, the instance-per-endpoint shape, the §2.5 source ordering, `match_networks`, `resolve_network_for_peer`), `test_network_discovery.py`, `identity/test_component_formal.py`, and two cases in `test_guest_policy_uses_the_right_hook.py`. No test touches the network or the clock. |
 | `docs/NETWORKS.md` | Use Case 3 spelled out, linking here. |
+
+**Since removed ([#396](https://github.com/celaut-project/nodo/issues/396)):**
+`Service.Network.environment_variable` and `src/manager/network_env.py` (§1.6,
+§2.8). Instance partitioning is expressed with a `${VAR}` selection key in
+`formal` instead.
 
 **Explicitly not in v1:** Bitcoin verification (the default backend is receive-only
 Esplora, which exposes neither `chainwork` nor a peer list), reading *or* publishing
