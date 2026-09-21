@@ -90,12 +90,9 @@ pub enum Page {
 /// read-only pages stopped and the editors began. Four bands, each answering one
 /// question, and the divider between them is what the eye lands on (issue #395).
 ///
-/// The bands were first drawn as a heavier rule inside a single row. That marked the
-/// boundaries without reducing what had to be read: twelve titles were still twelve
-/// titles on screen at once, and on an 80-column terminal the last of them was cut
-/// off entirely. So the bands are now the *primary* row and the pages inside the
-/// active one are the second — five things to read instead of twelve, and the second
-/// row is never longer than five titles.
+/// A heavier rule inside a single row marked the boundaries without reducing what
+/// had to be read. The bands are now the *primary* row and the active one's pages
+/// the second: five things to read instead of twelve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PageGroup {
     /// Where this node stands right now.
@@ -507,15 +504,13 @@ fn chained_write(writes: &[(String, String)]) -> (String, Vec<(String, String)>)
 }
 
 /// Whether this process could drive systemd, i.e. whether `nodo daemon restart`
-/// would get past its own euid check (`daemon_command`, src/commands/daemon.py).
+/// would get past its euid check (`daemon_command`, src/commands/daemon.py).
 ///
-/// Asked rather than assumed, and asked *here* rather than by trying the restart and
-/// reading the failure: the point is to warn the operator before they type a value,
-/// and a warning derived from an attempt is a warning that arrives after the attempt.
+/// Asked here rather than by trying the restart and reading the failure: the point
+/// is to warn before the value is typed.
 ///
-/// `#[cfg(unix)]` because there is nothing else this binary is built for -- the
-/// shipped targets are `tui-linux-*` -- but the fallback keeps a non-Unix build
-/// compiling rather than failing on a line that is not about it.
+/// `#[cfg(unix)]` because the shipped targets are `tui-linux-*`; the fallback keeps
+/// a non-Unix build compiling.
 #[cfg(unix)]
 fn is_root() -> bool {
     // SAFETY: `geteuid` takes no arguments, touches no memory, and cannot fail.
@@ -2041,11 +2036,8 @@ impl TabsState {
 
     /// Move to the group `delta` steps away, wrapping, and land on its first page.
     ///
-    /// Its *first* page rather than the one last visited in it. A remembered
-    /// position would mean `]` twice and `[` twice does not return you to where you
-    /// started, which is the one property that makes a wrapping row navigable
-    /// without looking. The first page of each group is also the one its label
-    /// promises: WORKLOAD opens on INSTANCES, SETTINGS on CELL.
+    /// Its *first* page, not the one last visited: a remembered position would mean
+    /// `]` twice then `[` twice does not return you where you started.
     pub fn cycle_group(&mut self, delta: isize) {
         let groups = PageGroup::ALL.len() as isize;
         let current = self.group().index() as isize;
@@ -2066,10 +2058,7 @@ impl TabsState {
 
     /// Move `delta` tabs within the current group, wrapping inside it.
     ///
-    /// Within, not across. Tab used to walk all twelve pages, which on a row of
-    /// twelve was the only way to get anywhere; with the groups on their own row it
-    /// would mean Tab silently changing which group is highlighted, so the two axes
-    /// of navigation are kept on two sets of keys.
+    /// Within, not across: the two axes of navigation are kept on two sets of keys.
     pub fn cycle_tab(&mut self, delta: isize) {
         let pages = self.group().pages();
         if pages.len() <= 1 {
@@ -2320,19 +2309,15 @@ pub struct App {
     pub node_energy: NodeEnergy,
     /// Whether [`Self::refresh`] should re-answer the operator alerts from disk.
     ///
-    /// Off by default and turned on by `with_operator_alerts()` in `main.rs`, so
-    /// building an `App` stays a pure thing that does not consult the filesystem for
-    /// them. Without this every rendering test would draw whatever banner the machine
-    /// running it happens to deserve, over the page it was written for.
+    /// Off by default, so building an `App` does not consult the filesystem and a
+    /// rendering test does not draw whatever banner its machine deserves.
     pub poll_alerts: bool,
     /// What the operator has to act on: the gateway port's firewall rule, and a
     /// missing Java runtime.
     ///
-    /// Both were detected already and announced only to `app.log`, which is a file
-    /// nobody opens until something is visibly broken — so a node that cannot serve
-    /// and a node that cannot be paid both looked, from this screen, exactly like a
-    /// healthy one. Polled on the data tick rather than computed in `draw`, because
-    /// drawing must not touch the filesystem.
+    /// Both were announced only to `app.log`, so a node that cannot serve and one
+    /// that cannot be paid looked identical from this screen. Polled on the data
+    /// tick, because drawing must not touch the filesystem.
     pub alerts: crate::alerts::Alerts,
     pub paths: Paths,
     pub input_mode: InputMode,
@@ -2519,11 +2504,9 @@ impl App {
 
     /// Start answering the operator alerts from disk (issue #395).
     ///
-    /// A separate step from construction, taken once in `main.rs`, for the same
-    /// reason `with_kya_gate` is: the checks read files on this machine, and a
-    /// constructor that consulted them would make every rendering test depend on
-    /// them too -- a banner drawn over the page a test was written for, appearing and
-    /// disappearing with whatever else happens to be on the disk at the time.
+    /// Separate from construction, like `with_kya_gate`: these checks read files, and
+    /// a constructor that consulted them would make every rendering test depend on
+    /// what the machine happens to have on disk.
     pub fn with_operator_alerts(mut self) -> Self {
         self.poll_alerts = true;
         // `None`: the first `nodo info` has not answered yet, so whether the node
@@ -2601,11 +2584,9 @@ impl App {
 
     /// Tab: the next page **within the open group**, wrapping inside it.
     ///
-    /// Within, not across. Tab used to walk all twelve pages, because on one row of
-    /// twelve that was the only way to reach anything. With the groups on their own
-    /// row, a Tab that crossed a boundary would silently re-highlight the top row
-    /// while the operator was cycling the bottom one — so the two axes get two sets
-    /// of keys, and `[`/`]` move between groups.
+    /// Within, not across: a Tab that crossed a boundary would re-highlight the top
+    /// row while the operator was cycling the bottom one. `[`/`]` move between
+    /// groups.
     pub fn next_page(&mut self) {
         self.tabs.cycle_tab(1);
     }
@@ -3496,10 +3477,9 @@ impl App {
     /// The one-line warning shown beside a config editor that is about to fail, or
     /// `None` when the change can land.
     ///
-    /// Said **before** the value is typed rather than after it is reverted. The
-    /// revert is correct and will stay -- a node running settings that are not the
-    /// settings on disk is the worse outcome -- but "your change was undone" is a
-    /// thing to learn from a message, not from watching a number go back.
+    /// Said before the value is typed. The revert stays -- a node running settings
+    /// that are not the settings on disk is worse -- but "your change was undone" is
+    /// a thing to learn from a message, not from watching a number go back.
     pub fn config_write_root_hint(&self) -> Option<&'static str> {
         self.config_write_needs_root().then_some(
             "Applying this needs root: the node is serving, so the change is \
@@ -4596,17 +4576,12 @@ impl App {
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
-        // Re-answered from disk every tick rather than remembered: an alert that
-        // outlived its condition would be one the operator learns to ignore, and
-        // there is deliberately no way to dismiss one except by fixing it. Uses the
-        // `config_document` just re-read above, so this costs two `stat` calls.
+        // Re-answered from disk every tick rather than remembered, so an alert
+        // cannot outlive its condition. Uses the `config_document` re-read above,
+        // so this costs two `stat` calls.
         //
-        // Only once the interface has actually started (`with_operator_alerts`).
-        // `App::new()` runs this same refresh, and an `App` built in a test would
-        // otherwise inherit whatever the machine running it happens to have on disk
-        // -- a stray `.gateway_notice`, no JRE -- and draw a banner over the page
-        // the test was written for. Same discipline, and the same reason, as the KyA
-        // gate (see `with_kya_gate`).
+        // Gated on `with_operator_alerts` so an `App` built in a test does not
+        // inherit whatever the machine running it has on disk.
         if self.poll_alerts {
             // Whether a node is *running* is already on screen, polled from
             // `nodo info`. Handed to the alert so the firewall banner can say
@@ -9701,11 +9676,8 @@ energy:
 /// Two-level navigation: five groups on the top row, the open group's pages on the
 /// second (issue #395).
 ///
-/// The bands were introduced as a heavier rule inside one row of twelve tabs. That
-/// marked where they began without reducing what had to be read -- twelve titles
-/// were still twelve titles on screen at once, and at 80 columns the last of them
-/// was cut off, which is a page that cannot be clicked. The groups are now the
-/// primary row.
+/// One row of twelve tabs was twelve titles to read at once, with the last cut off
+/// at 80 columns. The groups are now the primary row.
 #[cfg(test)]
 mod tab_groups {
     use super::{Page, PageGroup, TabsState};
@@ -9804,12 +9776,9 @@ mod tab_groups {
         assert_eq!(tabs.page(), Page::Overview);
     }
 
-    /// `]` moves to the next group and lands on its FIRST page -- not on the page
-    /// last visited there.
-    ///
-    /// A remembered position would mean `]` twice then `[` twice does not return you
-    /// to where you started, which is the one property that makes a wrapping row
-    /// navigable without looking at it.
+    /// `]` moves to the next group and lands on its FIRST page, not the one last
+    /// visited there: otherwise `]` twice then `[` twice does not return you where
+    /// you started.
     #[test]
     fn the_group_keys_land_on_the_first_page_of_each_group() {
         let mut tabs = tabs_on(Page::Overview);

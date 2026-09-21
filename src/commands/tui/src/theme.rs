@@ -1,75 +1,51 @@
-//! Colour themes, and the default that matches the terminal this runs in.
+//! Colour themes. Every colour the interface draws comes from one [`Theme`].
 //!
-//! Every colour the interface draws comes from one [`Theme`] struct. Before this,
-//! `ui.rs` held four `const`s and seventy-odd bare `Color::` literals scattered
-//! through the draw functions, which is not a theme with hard-coded values — it is
-//! no theme at all, because half the palette was unreachable from any one place.
+//! Fields are named for the role they play (`good`, `warn`, `bad`) rather than for
+//! the colour, so adding a widget does not add a field.
 //!
-//! **Roles, not colours.** The fields are named for what they mean (`good`, `warn`,
-//! `bad`, `muted`, `accent`) rather than for what they look like, so a theme is a
-//! set of answers rather than a lookup table. A theme that had to name "the colour
-//! of the memory gauge" would need a new field for every widget ever added; one that
-//! names "the colour of a thing that is fine" does not.
-//!
-//! **The default is Ubuntu.** `nodo` is installed by a bash script onto a Linux
-//! server, and the terminal that script ran in is overwhelmingly GNOME Terminal on
-//! Ubuntu. Matching its palette — the aubergine background, the `#E95420` orange —
-//! means the console looks like part of the machine it is administering rather than
-//! like an application that has been dropped on top of it.
-//!
-//! **Indexed colours where the terminal has an opinion, RGB where it does not.** The
-//! `dark`, `light` and `mono` themes use `Color::Indexed`/named ANSI colours, so they
-//! inherit whatever the operator has configured their terminal to mean by "red" —
-//! which is the point of those themes. `ubuntu` states its palette in RGB, because
-//! naming a specific palette is what it is for, and a themed console that changed
-//! colour with the terminal's own settings would not be one.
+//! `ubuntu` is the default and states its palette in RGB, because naming a specific
+//! palette is what it is for. The others use named ANSI colours and so inherit what
+//! the operator's terminal means by "red".
 
 use ratatui::style::Color;
 
 /// Every colour the interface can draw, by the role it plays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
-    /// The name this theme is selected by, which is also what `ui.THEME` holds.
+    /// The name this theme is selected by, and what `ui.THEME` holds.
     pub name: &'static str,
-    /// Selected tabs, focused borders, the node's own identity. The one colour that
-    /// means "this is the thing you are looking at".
+    /// Selected tabs, focused borders, the node's own identity.
     pub accent: Color,
-    /// Labels, dividers, help text, and anything else that is there to be read past
-    /// rather than read.
+    /// Labels, dividers and help text: there to be read past rather than read.
     pub muted: Color,
     /// Working, healthy, running, local.
     pub good: Color,
-    /// Worth a look, not yet a problem: a stopped node, a remote instance, an
-    /// unapplied edit.
+    /// Worth a look, not yet a problem.
     pub warn: Color,
-    /// Costs the operator something: an unacknowledged payment, a refused deposit, a
-    /// penalty — and the ACTION REQUIRED banner.
+    /// Costs the operator something, and the ACTION REQUIRED banner.
     pub bad: Color,
     /// Ordinary text, for a value as opposed to its label.
     pub text: Color,
-    /// Text drawn *on* an accent or warning background, where the ordinary text
-    /// colour would be unreadable.
+    /// Text drawn *on* an accent or warning background.
     pub inverse_text: Color,
-    /// The whole frame's background. Painted over `frame.size()` before anything
-    /// else, so the console owns every cell rather than showing through to the
-    /// terminal's own colours.
+    /// The whole frame's background, painted over `frame.size()` before anything
+    /// else so no cell shows the terminal's own colour through.
     pub background: Color,
     /// The background of a popup, which has to cover whatever it is drawn over.
     pub popup_background: Color,
     /// The unfilled part of a gauge.
     pub gauge_background: Color,
-    /// Four hues for cards and charts that sit side by side and need telling apart.
-    /// Not roles — the difference between them is the whole meaning — so they are a
-    /// numbered set rather than five more named fields.
+    /// Four hues for things that sit side by side and need telling apart. A
+    /// numbered set rather than named fields: the difference between them is the
+    /// whole meaning.
     pub series: [Color; 4],
 }
 
 /// The Ubuntu terminal palette, and the default.
 ///
-/// `#E95420` is Ubuntu's orange and `#300A24` the aubergine GNOME Terminal ships as
-/// its background there. The greens, yellows and reds are the standard Ubuntu ANSI
-/// set rather than invented neighbours, so a nodo console sitting beside `htop` or
-/// `journalctl` in the same terminal agrees with them about what red means.
+/// Ubuntu's own orange and aubergine, with the standard Ubuntu ANSI set for the
+/// rest, so a nodo console beside `htop` in the same terminal agrees with it about
+/// what red means.
 pub const UBUNTU: Theme = Theme {
     name: "ubuntu",
     accent: Color::Rgb(0xE9, 0x54, 0x20),
@@ -90,11 +66,8 @@ pub const UBUNTU: Theme = Theme {
     ],
 };
 
-/// The palette this console had before themes existed.
-///
-/// Kept as a theme rather than deleted, because an operator who is used to the cyan
-/// accent should be able to keep it — and because it is the one palette every
-/// screenshot and every existing test was written against.
+/// The palette this console had before themes existed, kept so an operator used to
+/// the cyan accent can keep it.
 pub const DARK: Theme = Theme {
     name: "dark",
     accent: Color::Cyan,
@@ -115,14 +88,10 @@ pub const DARK: Theme = Theme {
     ],
 };
 
-/// For a light terminal, where `DarkGray` on white is unreadable and `White` text is
-/// invisible.
+/// For a light terminal, where `White` text is invisible.
 ///
-/// The swap is not "invert the dark theme": the roles keep their hues, because red
-/// still has to mean trouble. What changes is the two that were chosen against a dark
-/// background — `text` becomes black, `muted` becomes a grey that is dark enough to
-/// read on white — and the blues and greens step down to their non-light variants,
-/// which are the ones with enough contrast against a pale background.
+/// Not an inversion: the roles keep their hues, because red still has to mean
+/// trouble. Only the colours chosen against a dark background change.
 pub const LIGHT: Theme = Theme {
     name: "light",
     accent: Color::Blue,
@@ -140,13 +109,9 @@ pub const LIGHT: Theme = Theme {
 
 /// No colour at all: weight and position carry everything.
 ///
-/// For a terminal that is genuinely monochrome, for an operator who cannot
-/// distinguish the hues this interface leans on, and for a recording or a screenshot
-/// that has to survive being printed. It is a real constraint rather than an
-/// aesthetic: anything this theme cannot express is something the interface was
-/// saying with colour *alone*, which is a thing it should not be doing. The gauges,
-/// the status words and the ACTION REQUIRED tag all still read, because each of them
-/// also carries text.
+/// A constraint rather than an aesthetic. Anything this theme cannot express is
+/// something the interface was saying with colour *alone*, which is a thing it
+/// should not be doing.
 pub const MONO: Theme = Theme {
     name: "mono",
     accent: Color::White,
@@ -182,16 +147,8 @@ impl Default for Theme {
 impl Theme {
     /// The theme called `name`, or [`UBUNTU`] for anything unrecognised.
     ///
-    /// `default` is an accepted spelling of `ubuntu` rather than a fifth theme: it is
-    /// what somebody writes in a config file meaning "whatever you think", and
-    /// resolving it here means `tui.theme: default` and an absent key produce the
-    /// same interface.
-    ///
-    /// An unknown name falls back rather than failing. A console that refuses to
-    /// start over a misspelt colour scheme is a console that cannot be used to fix
-    /// the misspelling — and this is the *only* setting in the interface where that
-    /// trade is obviously right, because nothing about it can be wrong in a way that
-    /// matters.
+    /// An unknown name falls back rather than failing: a console that refuses to
+    /// start over a misspelt colour scheme cannot be used to fix the misspelling.
     pub fn by_name(name: &str) -> Theme {
         let name = name.trim().to_ascii_lowercase();
         if name.is_empty() || name == "default" {
@@ -202,13 +159,11 @@ impl Theme {
             .unwrap_or(UBUNTU)
     }
 
-    /// The theme this run should use, from the config document, the environment and
-    /// the command line, in increasing order of deliberateness.
+    /// The theme this run should use: `--theme` beats `NODO_TUI_THEME` beats
+    /// `ui.THEME` beats the default, in increasing order of deliberateness.
     ///
-    /// `--theme` beats `NODO_TUI_THEME` beats `ui.THEME` beats the default. The flag
-    /// and the variable exist so a theme can be tried without editing config.yaml and
-    /// restarting the node through the config transaction — which is a heavy price
-    /// for looking at a colour, and would make comparing two themes a pair of node
+    /// The flag and the variable exist so a theme can be tried without going through
+    /// the config transaction, which would make comparing two themes a pair of node
     /// restarts.
     pub fn resolve(document: Option<&serde_yaml::Value>, argv: &[String]) -> Theme {
         if let Some(name) = theme_flag(argv) {
@@ -232,9 +187,8 @@ impl Theme {
 
 /// `--theme <name>` or `--theme=<name>` from `argv`, whichever spelling was used.
 ///
-/// Parsed by hand, like `--version` in `main.rs`: this binary takes three options in
-/// total, and a CLI crate to recognise them would be one more thing CI has to build
-/// for every shipped target.
+/// Parsed by hand, like `--version` in `main.rs`: this binary takes three options,
+/// and a CLI crate would be one more thing CI builds for every shipped target.
 fn theme_flag(argv: &[String]) -> Option<String> {
     let mut args = argv.iter();
     while let Some(argument) = args.next() {
@@ -250,23 +204,17 @@ fn theme_flag(argv: &[String]) -> Option<String> {
 
 /// The theme in force for this process.
 ///
-/// A global, set once in `main.rs` before the first frame, because a theme is a
-/// property of the *run* rather than of any one widget. The alternative is passing a
-/// `&Theme` through every one of the forty-odd draw functions and their helpers,
-/// several of which (`section_block`, `metric_line`, `spark`) exist precisely to be
-/// callable without ceremony — and a parameter threaded through everything for a
-/// value that never changes is how a codebase acquires forty signatures nobody can
-/// read.
+/// A global, set once in `main.rs`, because a theme is a property of the *run*
+/// rather than of any one widget: the alternative is a `&Theme` parameter on all
+/// forty-odd draw functions for a value that never changes.
 ///
 /// `RwLock` rather than `OnceLock` so the tests can pin a theme and put it back.
-/// Reads are uncontended in the single-threaded draw path.
 static CURRENT: std::sync::RwLock<Theme> = std::sync::RwLock::new(UBUNTU);
 
 /// The theme in force. Every colour in `ui.rs` comes from here.
 ///
-/// Falls back to the default if the lock is poisoned: a panicking draw must not turn
-/// into a console that cannot draw at all, and the worst case is that one frame is
-/// the wrong colour.
+/// Falls back to the default on a poisoned lock: the worst case is one frame in the
+/// wrong colour, which beats a console that cannot draw.
 pub fn current() -> Theme {
     CURRENT.read().map(|theme| *theme).unwrap_or(UBUNTU)
 }
@@ -287,21 +235,20 @@ mod tests {
         assert_eq!(Theme::default(), UBUNTU);
         assert_eq!(Theme::by_name("default"), UBUNTU);
         assert_eq!(Theme::by_name(""), UBUNTU);
-        // The colours the issue asks for, by value: this is the one theme whose
-        // whole purpose is to be a specific palette, so "it is some orange" is not
-        // the property being claimed.
+        // By value: this is the one theme whose purpose is a specific palette, so
+        // "it is some orange" is not the property being claimed.
         assert_eq!(UBUNTU.accent, Color::Rgb(0xE9, 0x54, 0x20));
         assert_eq!(UBUNTU.background, Color::Rgb(0x30, 0x0A, 0x24));
         assert_eq!(UBUNTU.popup_background, Color::Rgb(0x30, 0x0A, 0x24));
         assert_eq!(UBUNTU.text, Color::Rgb(0xFF, 0xFF, 0xFF));
     }
 
+
     #[test]
     fn every_theme_is_reachable_by_its_name() {
         for theme in ALL {
             assert_eq!(Theme::by_name(theme.name), theme, "{}", theme.name);
-            // Case is not a decision the operator should have to get right in a
-            // YAML file.
+            // Case is not a decision to get right in a YAML file.
             assert_eq!(
                 Theme::by_name(&theme.name.to_ascii_uppercase()),
                 theme,
@@ -311,8 +258,7 @@ mod tests {
         }
     }
 
-    /// Every advertised name resolves. A picker offering a value that falls back to
-    /// something else would be lying about what it does.
+    /// A picker offering a name that silently falls back would be lying.
     #[test]
     fn every_advertised_name_resolves_to_a_real_theme() {
         for name in NAMES {
@@ -325,8 +271,8 @@ mod tests {
         }
     }
 
-    /// A misspelt theme falls back rather than failing. A console that refuses to
-    /// start over a colour scheme cannot be used to fix the colour scheme.
+    /// A console that refuses to start over a colour scheme cannot be used to fix
+    /// the colour scheme.
     #[test]
     fn an_unknown_theme_falls_back_instead_of_failing() {
         assert_eq!(Theme::by_name("solarized-aubergine"), UBUNTU);
@@ -341,13 +287,11 @@ mod tests {
         assert_eq!(flag(&["--theme", "mono"]).as_deref(), Some("mono"));
         assert_eq!(flag(&["--theme=light"]).as_deref(), Some("light"));
         assert_eq!(flag(&["--version"]), None);
-        // A trailing `--theme` with nothing after it is not a name. Falling through
-        // to the default beats treating the next thing on the line as one.
+        // A trailing `--theme` with nothing after it is not a name.
         assert_eq!(flag(&["--theme"]), None);
     }
 
-    /// The precedence the resolution claims: the flag is the most deliberate thing
-    /// the operator did, so it wins.
+    /// The flag is the most deliberate thing the operator did, so it wins.
     #[test]
     fn the_flag_beats_the_config() {
         let document: serde_yaml::Value =
@@ -368,9 +312,8 @@ mod tests {
         assert_eq!(Theme::resolve(None, &[]), UBUNTU);
     }
 
-    /// The mono theme really is monochrome. It is not decoration: anything it cannot
-    /// express is something the interface was saying with colour alone, and this is
-    /// what keeps that honest as widgets are added.
+    /// Keeps mono honest as widgets are added: anything it cannot express is
+    /// something the interface was saying with colour alone.
     #[test]
     fn the_mono_theme_uses_no_hue_at_all() {
         for colour in [MONO.accent, MONO.good, MONO.warn, MONO.bad, MONO.text] {
@@ -381,8 +324,7 @@ mod tests {
         }
     }
 
-    /// The light theme does not draw white on white, or near-white grey on white.
-    /// The failure it exists to prevent is text that is simply not there.
+    /// The failure this prevents is text that is simply not there.
     #[test]
     fn the_light_theme_is_legible_on_a_pale_background() {
         assert_eq!(LIGHT.text, Color::Black);
@@ -402,8 +344,7 @@ mod tests {
         assert_eq!(MONO.background, Color::Reset);
     }
 
-    /// Series colours are for telling adjacent things apart, so they have to differ
-    /// from each other in every theme that has hues to spend.
+    /// Series colours tell adjacent things apart, so they have to differ.
     #[test]
     fn the_series_colours_are_distinct_where_there_are_hues_to_spend() {
         for theme in [UBUNTU, DARK, LIGHT] {
