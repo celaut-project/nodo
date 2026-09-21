@@ -5,6 +5,10 @@ pub mod cell;
 /// runs through midnight.
 pub mod schedule;
 
+/// The ENERGY page: what the machine costs to run, and where that figure may come
+/// from (issue #395).
+pub mod energy;
+
 /// Application.
 pub mod app;
 

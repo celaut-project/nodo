@@ -5,7 +5,32 @@ same `config.yaml`, SQLite database, registries, Cloud Hypervisor cgroups, logs,
 status used by the node. Paths are resolved from `config.yaml`; they are not hard-coded to a
 particular installation directory.
 
+## Know Your Assumptions, once
+
+The first time `nodo tui` runs on an installation that has never accepted the KyA, it
+opens on [`docs/KyA.md`](../../../docs/KyA.md) and nothing else: no page shortcut, no
+mouse event and no `Tab` reaches the interface behind it. `y` accepts, `n` (or `Esc`,
+or `q`) declines and **exits** — the KyA is what running the node is conditional on,
+so there is no dismissing it (issue #395).
+
+It is the same question, the same criterion and the same marker the CLI uses
+(`src/commands/onboarding.py`): acceptance is recorded in `storage/.acceptedkya`, so an
+operator who accepted at a shell prompt is never asked again here, and accepting here
+means `nodo` does not ask either. Before this, an operator whose first command was
+`nodo tui` was never asked at all.
+
+Two deliberate non-refusals, both matching the CLI. A **missing `docs/KyA.md`** is a
+broken install rather than a reason to refuse: the overlay says which file it could not
+read, restates the substance, and still takes an answer. A **marker that cannot be
+written** is not fatal either: the operator is told, and the question is asked again
+next start. Refusing to start over a dotfile would turn a full `storage/` into a node
+nobody can look at.
+
 ## Pages
+
+The tab bar is one row in five bands, separated by a heavier `┃` rule: where the node
+stands, what is running and who with, what it earned, what it logged, and then every
+page that *writes*. Everything left of the last rule only reads.
 
 | Page | Purpose |
 |---|---|
@@ -17,6 +42,7 @@ particular installation directory.
 | **Earnings** | What this node earned by being up, in both currencies it earns in, each drawn as the kind of quantity it is: money per payment network over the last day/week/month/year, because money is a flow; and what the network stakes on this node as a standing, with the ERG sunk behind it, because a chain that re-dates an opinion whenever its proof republishes cannot say when reputation was earned. Underneath, every proof that has staked something on this node. |
 | **Cell** | The node's policies as a set of named decisions, laid out as a cell: what it lets in, what work it takes, what it says to the network, what it distrusts, how it charges, and what it keeps. One row is one decision, and moving it writes every key that decision spans. Postures ("just me", "cautious renter", …) apply a whole set at once, and the page says which one this node is closest to. |
 | **Pricing** | What this node charges, per resource, as vertical bars you can nudge. Recurring and one-off prices are charted apart because their magnitudes are unrelated. Beside them: the display unit, what one MU is worth on the ledger, the scarcity ceiling, and a worked hourly example. |
+| **Energy** | The `energy:` block — whether the node measures its own electricity, what a kWh costs, the idle/load coefficients of the fallback model, and the five places a real reading can come from (metering plug, IPMI, hwmon, NVML, RAPL). Every one of these keys is editable on Config too; what this page adds is the paragraph beside each one, which is the part a YAML tree cannot show. `IDLE_WATTS` has to be *measured with a plug-in meter* rather than guessed, and NVML *adds* to a partial reading where every other source replaces it — neither is guessable from the key name, and both change what the number on Overview means. Informational throughout: energy never feeds MU pricing (issue #258). |
 | **Schedule** | The hours this node takes work in (`activity_window`), drawn as the day it is: every configured window's open stretch as its own run of blocks, a marker at the current hour, and what closing time does to work already running. Underneath, on the same axis, a month of demand folded onto the 24 hours of a clock — peak instances held, and the work refused because the schedule was shut. A night shift and a weekday lunch break are two windows, added and removed with `a`/`d` (or a click), each edited by moving an edge rather than by typing a time, so an unusable hour cannot be expressed. Every element answers the mouse as well as the keyboard: click an edge to select it, `[x]` to remove a window, `+ add window`, or the on/off and closing-time lines to toggle them. |
 | **Config** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited, and list elements can be added and removed. |
 | **Logs** | Tail of `storage/app.log` beside commands/actions launched from the TUI. |
@@ -137,17 +163,18 @@ common case.
 | `k` | Kill the selected instance |
 | `g` | Instances: dependency tree / flat list |
 | `i` | Service details |
-| `e` | Execute the selected service, or edit the selected Config, Pricing or Cell value |
+| `e` | Execute the selected service, or edit the selected Config, Pricing, Cell or Energy value |
 | `p` | Cell: apply a profile |
 | `+` / `-` | Adjust peer reputation on Peers, the selected price by 10 % on Pricing, or open a credit/debit amount modal on Clients |
 | `n` | Cell: the router steps (`nodo nat-guide`) |
 | `w` | Schedule: enforce the hours, or stop enforcing them |
 | `/` | Filter Config paths/values |
 | `x` | Clear the Config filter |
-| `Enter` / `Space` | Expand/collapse the selected Config section, move the selected Cell lever to its next position, or apply the edited working day on Schedule |
+| `Enter` / `Space` | Expand/collapse the selected Config section, move the selected Cell lever to its next position, apply the edited working day on Schedule, or edit the selected Energy key |
 | `Enter` / `Esc` | Save/cancel a modal. On Schedule, `Esc` gives up an unapplied edit before it gives up the interface: a second `Esc` still quits |
 | `Ctrl+U` | Clear modal input |
 | `q` or `Ctrl+C` | Exit |
+| `y` / `n` | Answer the KyA gate on first run: accept, or decline and exit |
 
 `d` on Peers runs `nodo disconnect <peer id>`, which drops the peer row together with
 its addresses and contract instances. The peer is **forgotten, not banned**: it can
@@ -162,8 +189,8 @@ column) and, on `Enter`, runs `nodo credit_client <client id> <amount>` or
 ## Applying a change
 
 Every configuration change made in this TUI — a raw key on Config, a price on Pricing,
-a lever or a profile on Cell, the working day on Schedule — is applied as one
-transaction:
+a lever or a profile on Cell, the working day on Schedule, an electricity setting on
+Energy — is applied as one transaction:
 
 1. `config.yaml` is snapshotted to `config-<YYYYMMDDHHMMSS>-<nnnn>.yaml` beside it (the ten
    most recent are kept, matching what the Python `ConfigManager` prunes to).

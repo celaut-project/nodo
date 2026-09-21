@@ -201,6 +201,30 @@ if __name__ == '__main__':
 
                 print(f"Nodo version: {get_git_commit()}", flush=True)
 
+                # The node's identity key, printed here because this is where an
+                # operator looks for "who am I on the network". It is not cosmetic:
+                # the reputation system keys every opinion this node publishes and
+                # every opinion published *about* it by exactly this hex string
+                # (`node_id` in src/reputation_system/interface.py), so an operator
+                # asking a peer to vouch for them, or reading a proof that names
+                # them, has no other way to find the string to compare against.
+                # Wrapped like its neighbours: identity lives behind a mnemonic that
+                # may not exist yet, and `nodo info` must still print the rest.
+                try:
+                    from src.identity.node_identity import get_node_public_key_hex
+                    node_id = get_node_public_key_hex()
+                    # None is a real, ordinary state -- a node that has not been
+                    # given an identity mnemonic yet -- and it is worth naming as
+                    # such rather than printing an empty value that reads like a bug.
+                    print(
+                        f"Node id: {node_id}" if node_id
+                        else "Node id: unavailable (no identity mnemonic yet)",
+                        flush=True
+                    )
+                except Exception as e:
+                    log.LOGGER(f"Error getting node identity: {e}.")
+                    print(f"Node id: unavailable ({e})", flush=True)
+
                 port = gateway_port()
                 if port:
                     print(f"Nodo address: {get_local_ip()}:{port}", flush=True)

@@ -393,6 +393,11 @@ or `low_demand` decision.
 | `energy.NVML_ENABLED` | `false` | Add the GPUs' draw, through `nvidia-smi`. |
 | `energy.EXTERNAL_TIMEOUT_SECONDS` | `2` | Ceiling for each subprocess or HTTP source, per sample. |
 
+Edited from the TUI's Energy page, which shows the reasoning above beside the key it
+applies to — notably that `IDLE_WATTS`/`LOAD_WATTS` have to be **measured** with a
+plug-in meter rather than estimated, and that `NVML_ENABLED` adds to a partial reading
+where every other source replaces one.
+
 ### Where the number comes from
 
 Sources are tried in order of how much of the machine each one sees, and the
