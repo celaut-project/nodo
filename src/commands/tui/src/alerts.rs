@@ -87,11 +87,23 @@ impl Alerts {
         self.alerts.iter().any(|alert| alert.key == key)
     }
 
-    /// Set the alerts directly. Test-only: the poll reads real files, and a
-    /// rendering test for the banner must not depend on the machine it runs on.
-    #[cfg(test)]
+    /// Set the alerts directly, for a test that needs a known banner state.
+    ///
+    /// Not `#[cfg(test)]`: it is called from `ui.rs`'s tests, which are a different
+    /// compilation context, and more importantly every *rendering* test needs to be
+    /// able to clear this. `poll` reads real files, so an `App` built in a test
+    /// inherits whatever the machine it runs on happens to have -- which makes a
+    /// banner appear in tests that are about something else entirely, and makes them
+    /// fail depending on what else is running. Same discipline the KyA gate follows
+    /// for the same reason (see `App::with_kya_gate`).
     pub fn set(&mut self, alerts: Vec<OperatorAlert>) {
         self.alerts = alerts;
+    }
+
+    /// Forget every alert, so a render is about the page rather than about the
+    /// machine. The form every rendering test wants.
+    pub fn clear(&mut self) {
+        self.alerts.clear();
     }
 }
 
