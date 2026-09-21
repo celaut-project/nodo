@@ -41,15 +41,12 @@ async fn main() -> AppResult<()> {
 
     // The colour scheme, before anything is drawn (issue #395).
     //
-    // Installed as a process-wide value rather than carried on `App`, because it is a
-    // property of the run and not of any one widget: the alternative is threading a
-    // `&Theme` through forty draw functions and the helpers that exist precisely to
-    // be callable without ceremony.
+    // Process-wide rather than carried on `App`: it is a property of the run, and the
+    // alternative is a `&Theme` parameter on forty draw functions.
     //
-    // Resolved here rather than inside `App::new()` for the same reason the KyA gate
-    // is applied here: building an `App` stays a pure thing that does not consult the
-    // environment, so every rendering test draws in a known theme instead of in
-    // whatever the machine running the test has configured.
+    // Resolved here rather than in `App::new()`, like the KyA gate, so building an
+    // `App` does not consult the environment and rendering tests draw in a known
+    // theme.
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let config = tui::app::Paths::discover().config;
     let document = std::fs::read_to_string(&config)
