@@ -293,6 +293,145 @@ class PriceSourceRegistryTests(unittest.TestCase):
     MONITOR_IMPORT_ERROR is not None,
     f"Missing runtime dependencies: {MONITOR_IMPORT_ERROR}",
 )
+class LiveReloadTests(unittest.TestCase):
+    """Editing the `energy:` block takes effect without restarting the daemon.
+
+    This is the whole of "energy configuration still requires sudo". The file was
+    always writable without root; what needed root was the *restart*, and the
+    restart was needed because ConfigManager reads config.yaml once per process.
+    The `energy:` block does not need that guarantee -- nothing is derived from it
+    and cached -- so it is re-read when the file moves, and no restart is owed.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.config = os.path.join(self.dir, "config.yaml")
+
+        # A stand-in for the process-lifetime ConfigManager: it answers from the
+        # tree as it was at boot and never re-reads, which is exactly the behaviour
+        # the reload has to work around rather than change.
+        class _FrozenConfig:
+            def __init__(self, path):
+                self.config_path = path
+
+            def get(self, key, default=None):
+                return default
+
+        self.addCleanup(setattr, energy_monitor, "_config", energy_monitor._config)
+        energy_monitor._config = lambda: _FrozenConfig(self.config)
+
+        self.addCleanup(self._reset_module_state)
+        self._reset_module_state()
+
+        self.logged = []
+        self.addCleanup(setattr, energy_monitor.log, "LOGGER", energy_monitor.log.LOGGER)
+        energy_monitor.log.LOGGER = self.logged.append
+
+    def _reset_module_state(self):
+        energy_monitor._overrides = None
+        energy_monitor._overrides_stamp = None
+        energy_monitor._price_sources.clear()
+        energy_monitor._unknown_price_sources.clear()
+        energy_monitor._measuring_backends.cache_clear()
+        energy_monitor._additive_backends.cache_clear()
+
+    def _write(self, body):
+        with open(self.config, "w") as handle:
+            handle.write(body)
+
+    def test_a_rewritten_price_is_used_by_the_next_reading(self):
+        """The one Josemi asked about: change the kWh price, no restart, no sudo."""
+        self._write("energy:\n  PRICE_PER_KWH: 0.20\n  CURRENCY: EUR\n")
+        self.assertAlmostEqual(energy_monitor._tariff().price_per_kwh, 0.20)
+
+        self._write("energy:\n  PRICE_PER_KWH: 0.35\n  CURRENCY: EUR\n")
+
+        self.assertAlmostEqual(energy_monitor._tariff().price_per_kwh, 0.35)
+
+    def test_the_price_source_cache_is_dropped_when_the_file_changes(self):
+        """The source is held between ticks, so it has to be let go on a change.
+
+        A `FixedPriceSource` built from the old tariff would keep quoting it
+        forever, which is the failure that makes a live reload look like it did
+        not happen.
+        """
+        self._write("energy:\n  PRICE_PER_KWH: 0.20\n")
+        first = energy_monitor._price_source()
+        self.assertIs(first, energy_monitor._price_source(), "held between ticks")
+
+        self._write("energy:\n  PRICE_PER_KWH: 0.35\n")
+
+        self.assertIsNot(first, energy_monitor._price_source())
+
+    def test_every_energy_key_is_live_not_just_the_price(self):
+        """The block reloads, rather than one key being special-cased."""
+        self._write("energy:\n  ENABLED: true\n  SAMPLE_INTERVAL_SECONDS: 120\n")
+        self.assertTrue(energy_monitor.is_enabled())
+        self.assertEqual(energy_monitor.interval_seconds(), 120)
+
+        self._write("energy:\n  ENABLED: false\n  SAMPLE_INTERVAL_SECONDS: 300\n")
+
+        self.assertFalse(energy_monitor.is_enabled())
+        self.assertEqual(energy_monitor.interval_seconds(), 300)
+
+    def test_an_unchanged_file_is_not_reread(self):
+        """The steady state is one `stat` per sample, not one YAML parse."""
+        self._write("energy:\n  PRICE_PER_KWH: 0.20\n")
+        energy_monitor._tariff()
+        stamp = energy_monitor._overrides_stamp
+
+        for _ in range(10):
+            energy_monitor._tariff()
+
+        self.assertEqual(energy_monitor._overrides_stamp, stamp)
+        self.assertEqual(
+            [line for line in self.logged if "reloaded" in line],
+            [],
+            "a file nobody touched must not announce a reload",
+        )
+
+    def test_a_half_written_config_keeps_the_last_good_block(self):
+        """Any writer leaves the file briefly unparseable.
+
+        Treating that instant as "the energy block is empty" would reset the tariff
+        to zero and silently stop costing anything -- for one tick, or forever if
+        the write failed.
+        """
+        self._write("energy:\n  PRICE_PER_KWH: 0.20\n")
+        self.assertAlmostEqual(energy_monitor._tariff().price_per_kwh, 0.20)
+
+        self._write("energy:\n  PRICE_PER_KWH: [unclosed\n")
+
+        self.assertAlmostEqual(energy_monitor._tariff().price_per_kwh, 0.20)
+
+    def test_a_deleted_config_keeps_the_last_good_block(self):
+        self._write("energy:\n  PRICE_PER_KWH: 0.20\n")
+        self.assertAlmostEqual(energy_monitor._tariff().price_per_kwh, 0.20)
+
+        os.unlink(self.config)
+
+        self.assertAlmostEqual(energy_monitor._tariff().price_per_kwh, 0.20)
+
+    def test_two_writes_in_the_same_second_are_two_different_versions(self):
+        """Which is what nudging a price in the TUI produces.
+
+        mtime has one-second granularity on some filesystems, so the stamp carries
+        the size as well.
+        """
+        self._write("energy:\n  PRICE_PER_KWH: 0.20\n")
+        self.assertAlmostEqual(energy_monitor._tariff().price_per_kwh, 0.20)
+
+        # No sleep: the point is that this is caught without waiting for the clock.
+        self._write("energy:\n  PRICE_PER_KWH: 0.999\n")
+
+        self.assertAlmostEqual(energy_monitor._tariff().price_per_kwh, 0.999)
+
+
+@unittest.skipIf(
+    MONITOR_IMPORT_ERROR is not None,
+    f"Missing runtime dependencies: {MONITOR_IMPORT_ERROR}",
+)
 class BusyCoresTests(unittest.TestCase):
     def test_host_percentage_becomes_core_time(self):
         cores = os.cpu_count() or 1

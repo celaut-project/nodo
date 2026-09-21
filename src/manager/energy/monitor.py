@@ -6,13 +6,32 @@ and it never raises.
 
 Every setting goes through ``_setting``, which answers with a default when the key
 is absent, so a config that does not mention ``energy`` at all still imports and
-runs. ``ConfigManager`` reads config.yaml once per process, so a changed tariff or
-a flipped ENABLED takes effect when the daemon restarts.
+runs.
+
+**The ``energy:`` block is re-read when config.yaml changes on disk.** Editing a
+tariff used to mean restarting the daemon, and restarting the daemon is systemd,
+and systemd is root -- so changing the price of a kWh needed sudo for reasons that
+had nothing to do with energy.
+
+This block can be reloaded live precisely because nothing is *derived* from it and
+cached elsewhere. ``ConfigManager`` deliberately reads config.yaml once per process
+(see its docstring, and issue #310): the identity keypair, the TLS certificate
+peers pin against this node's peer_id and the interpolated paths are all built once
+from that read, and re-reading mid-run would put them out of step with the config
+they were built from. None of that is true here. A tariff is used at the moment it
+is read and stored with the sample it priced; an interval is compared against a
+clock; the backend coefficients are read per tick. So this module watches the
+file's mtime itself and re-reads only ``energy:``, rather than asking ConfigManager
+to give up a cache that exists for good reasons.
+
+The cost is one ``stat`` per sample, on a path that already reads RAPL counters and
+queries cgroups at a default interval of sixty seconds.
 """
 
 from __future__ import annotations
 
 import os
+import threading
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -58,17 +77,96 @@ _last_tick_monotonic: Optional[float] = None
 _cpu_weights = CpuWeightTracker()
 _rapl = RaplBackend()
 # Price sources live as long as the process, so one that caches a day-ahead curve
-# keeps it between ticks instead of refetching every interval. Safe to hold: config
-# is read once per process, so a source built from it cannot go stale.
+# keeps it between ticks instead of refetching every interval. Dropped wholesale
+# when config.yaml changes: a source built from the old tariff would keep quoting it.
 _price_sources: Dict[str, PriceSource] = {}
 _unknown_price_sources: Set[str] = set()
+
+# The `energy:` block as last read from disk, and the (mtime, size) it was read at.
+# `None` means "not read yet", which is distinct from "read and empty".
+_overrides: Optional[Dict[str, object]] = None
+_overrides_stamp: Optional[tuple] = None
+_reload_lock = threading.Lock()
 
 
 def _config() -> ConfigManager:
     return ConfigManager()
 
 
+def _config_stamp(path: str) -> Optional[tuple]:
+    """What identifies this version of the file: mtime and size together.
+
+    Size is in it because mtime has one-second granularity on some filesystems,
+    and two writes inside the same second is exactly what an operator nudging a
+    price in the TUI produces.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size)
+
+
+def _reload_if_changed() -> Dict[str, object]:
+    """The `energy:` block as it is on disk right now.
+
+    Re-read only when the file's stamp has moved, so the steady state is one
+    ``stat`` per sample. A file that cannot be read or cannot be parsed leaves the
+    last good block in place: a half-written config.yaml -- which is a state that
+    exists, briefly, whenever anything writes one -- must not turn energy
+    accounting off or reset a tariff to zero.
+    """
+    global _overrides, _overrides_stamp
+
+    try:
+        path = _config().config_path
+    except Exception:
+        return _overrides or {}
+
+    stamp = _config_stamp(path)
+    with _reload_lock:
+        if stamp is not None and stamp == _overrides_stamp and _overrides is not None:
+            return _overrides
+
+        try:
+            import yaml
+
+            with open(path, "r") as handle:
+                document = yaml.safe_load(handle) or {}
+            block = document.get("energy") if isinstance(document, dict) else None
+            loaded = dict(block) if isinstance(block, dict) else {}
+        except Exception as exc:
+            if _overrides is None:
+                # Nothing good to fall back to, so fall through to ConfigManager's
+                # copy rather than claiming the block is empty.
+                log.LOGGER(f"{LOG_PREFIX} could not read {path}: {exc}")
+                return {}
+            return _overrides
+
+        if _overrides is not None and loaded != _overrides:
+            # The caches built from the old block go with it. `_price_source` holds
+            # a source built from the tariff, and `lru_cache`d backend lists hold
+            # the endpoints and the coefficients they were built with.
+            _price_sources.clear()
+            _unknown_price_sources.clear()
+            _measuring_backends.cache_clear()
+            _additive_backends.cache_clear()
+            log.LOGGER(f"{LOG_PREFIX} config.yaml changed; energy settings reloaded.")
+
+        _overrides, _overrides_stamp = loaded, stamp
+        return loaded
+
+
 def _setting(key: str, default):
+    """One `energy.` key, from the file as it stands rather than as it booted.
+
+    Falls back to ConfigManager for a key the file does not carry, which is what
+    keeps defaults and any interpolation it does working.
+    """
+    overrides = _reload_if_changed()
+    if key in overrides:
+        value = overrides[key]
+        return default if value is None else value
     try:
         value = _config().get(f"energy.{key}", default)
     except Exception:
@@ -137,7 +235,12 @@ _PRICE_SOURCE_BUILDERS: Dict[str, Callable[[], PriceSource]] = {
 
 
 def _price_source() -> PriceSource:
-    """The configured source, built on first use and kept for the process.
+    """The configured source, built on first use and kept until config.yaml moves.
+
+    Held between ticks so a source that caches a day-ahead curve does not refetch
+    it every interval, and dropped by ``_reload_if_changed`` when the file changes
+    -- otherwise a source built from the old tariff would go on quoting it after
+    the operator had edited the price.
 
     A name with no builder falls back to the fixed tariff, and says so once rather
     than once per sample: a typo in config must not write a log line every
