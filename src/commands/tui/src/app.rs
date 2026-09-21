@@ -2526,8 +2526,10 @@ impl App {
     /// disappearing with whatever else happens to be on the disk at the time.
     pub fn with_operator_alerts(mut self) -> Self {
         self.poll_alerts = true;
+        // `None`: the first `nodo info` has not answered yet, so whether the node
+        // is running is genuinely not known here. The next tick knows.
         self.alerts
-            .poll(&self.paths.config, self.config_document.as_ref());
+            .poll(&self.paths.config, self.config_document.as_ref(), None);
         self
     }
 
@@ -4606,8 +4608,18 @@ impl App {
         // the test was written for. Same discipline, and the same reason, as the KyA
         // gate (see `with_kya_gate`).
         if self.poll_alerts {
+            // Whether a node is *running* is already on screen, polled from
+            // `nodo info`. Handed to the alert so the firewall banner can say
+            // "running but unreachable" -- the state no local check can see --
+            // rather than only "not reachable". `None` until the first `nodo info`
+            // answers, which is what the third wording is for.
+            let serving = match self.node_info.service_status.as_str() {
+                "running" => Some(true),
+                "not running" => Some(false),
+                _ => None,
+            };
             self.alerts
-                .poll(&self.paths.config, self.config_document.as_ref());
+                .poll(&self.paths.config, self.config_document.as_ref(), serving);
         }
         // After the lists, since a selection that vanished takes its detail with it.
         self.load_selection_details();
