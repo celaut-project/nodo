@@ -18,11 +18,6 @@ message Network {
 
     // Protocols that peers in this network must support
     repeated Api.Protocol protocol_stack = 4;
-
-    // Environment variable used to filter compatible peers during
-    // network resolution. Only peers whose value matches that of
-    // the requester are returned. Empty = no filtering.
-    string environment_variable = 5;
 }
 ```
 
@@ -144,14 +139,20 @@ just to start.
 
 ---
 
-## Peer Filtering by Environment Variable
+## Partitioning by instance: a `${VAR}` selection key
 
-A network may contain multiple instances of the same service, but a client typically needs only those that share a particular property.
+A network may contain multiple instances of the same service, but a client
+typically needs only those that share a particular property.
 
-**Example:** Many PostgreSQL instances may exist, but a client only needs those belonging to its own cluster. By setting `environment_variable = "PG_CLUSTER"`, network resolution returns only the peers whose `PG_CLUSTER` matches the requester's value.
-
-* **Implementation:** `src/manager/network_env.py`
-* **Consumer:** `resolve_network()`
+**Example:** many PostgreSQL instances may exist, but a client only needs those
+belonging to its own cluster. A selection key such as `cluster=${PG_CLUSTER}` in
+the network's `formal` (see "`${VAR}` templates in `formal`" above) partitions
+the same way: the instantiator fills `PG_CLUSTER` in, `request_fits_declaration`
+and `same_component`/`match_networks` require an exact match on it, and only
+peers declaring the same value are treated as the same domain. This replaced a
+dedicated `Network.environment_variable` filter, which never had a path from
+`service.json` and was bypassed for remote peers; `formal` + `${VAR}` is the one
+mechanism, packer-validated and enforced end to end.
 
 ---
 
@@ -182,8 +183,7 @@ their published addresses -- the consumer writes a firewall rule per address it 
 handed, and an unrelated admin port on the same instance is not opened for it. A
 member with no published address (the launcher recorded none; the caller was
 expected to tunnel) is not offered. Over `Gateway.ResolveNetwork` the calling
-instance is never offered itself. `Network.environment_variable` filters members
-by their recorded launch environment, the same way it filters every other peer.
+instance is never offered itself.
 
 `pow:` domains do not take members this way: there, membership is verified chain
 state, and a local instance that wants to be found enters through the same

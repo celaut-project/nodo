@@ -36,18 +36,17 @@ one whose share came up empty. The launch fails instead, before anything is
 spent; see ``src/manager/shares.py``.
 
 The last two xattrs mirror ``Service.Network``: ``share_tag`` plays the part of
-``Network.tags`` (the logical domain) and ``share_env`` that of
-``Network.environment_variable``. A share is identified by::
+``Network.tags``, the logical domain. A share is identified by::
 
     name          = share_tag        if declared, else the exported path
     discriminator = env[share_env]   if share_env is declared, else ""
     share_id      = H(parent_instance_id, name, share_env, discriminator)
 
 The *name of the variable* is part of the identity, not only its value: that is
-what makes the match symmetric, the way ``peer_env_matches`` requires both sides
-to agree. Without it a child that declares no ``share_env`` would derive the same
-id as a parent that declares one but was launched with no value for it, skipping
-the discriminator altogether.
+what makes the match symmetric -- both sides must agree on which variable
+discriminates, not just on its value. Without it a child that declares no
+``share_env`` would derive the same id as a parent that declares one but was
+launched with no value for it, skipping the discriminator altogether.
 
 Naming a share independently of where it is mounted is what lets a child mount
 the parent's export wherever suits it, and what keeps the concrete dataset out of
