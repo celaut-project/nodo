@@ -71,6 +71,12 @@ fn popup_background() -> Color {
     crate::theme::current().popup_background
 }
 
+/// The whole frame's background, painted before anything else.
+#[inline]
+fn background() -> Color {
+    crate::theme::current().background
+}
+
 /// One of four hues for things that sit side by side and have to be told apart.
 /// Indexed rather than named because the difference between them IS the meaning:
 /// a field called "the colour of the donations card" would need a sibling for every
@@ -81,6 +87,14 @@ fn series(index: usize) -> Color {
 }
 
 pub fn render(app: &mut App, frame: &mut Frame) {
+    // The frame's own background, before anything else. Without it every cell no
+    // widget happens to cover keeps the terminal's colour, and a theme that cannot
+    // set the background is a theme showing through to somebody else's palette.
+    frame.render_widget(
+        Block::default().style(Style::default().bg(background())),
+        frame.size(),
+    );
+
     // The page row only exists for a group that has more than one page. A row
     // holding a single already-selected title says nothing and costs the page below
     // it a line, so OVERVIEW, EARNINGS and LOGS get their space back.
@@ -736,23 +750,29 @@ fn draw_ergo(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(format!("{name:<9}"), Style::default().fg(muted())),
             Span::styled(balance, Style::default().fg(series(2)).bold()),
         ]));
-        lines.push(Line::from(format!(
-            "  at   {}",
-            shorten(nonempty(&wallet.address, "not configured"), 28)
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  at   {}",
+                shorten(nonempty(&wallet.address, "not configured"), 28)
+            ),
+            Style::default().fg(text_colour()),
         )));
         // Only when there is one: a contract that sweeps nowhere is the default, and a
         // "not configured" line per contract would be most of the card.
         if !wallet.cold_address.is_empty() {
-            lines.push(Line::from(format!(
-                "  cold {}",
-                shorten(&wallet.cold_address, 28)
+            lines.push(Line::from(Span::styled(
+                format!("  cold {}", shorten(&wallet.cold_address, 28)),
+                Style::default().fg(text_colour()),
             )));
         }
     }
 
-    lines.push(Line::from(format!(
-        "Proof    {}",
-        shorten(nonempty(&app.node_info.reputation_proof, "not registered"), 28)
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Proof    {}",
+            shorten(nonempty(&app.node_info.reputation_proof, "not registered"), 28)
+        ),
+        Style::default().fg(text_colour()),
     )));
     lines.push(Line::from(Span::styled(
         nonempty(
@@ -816,12 +836,17 @@ fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, value: u64, color: Color) {
-    // The percentage is styled explicitly because `Gauge`'s own default for it is a
-    // hard-coded white bold, which is invisible on a light terminal — a widget
-    // default is still a colour this interface is choosing, and the whole point of
-    // routing everything through the theme is that there is nowhere left that is not.
+    // The percentage carries its own background rather than only a foreground.
+    // `Gauge` swaps fg and bg for the cells the label covers, so a label that set
+    // only a colour lands on a bar of that same colour once the fill reaches it --
+    // which under `mono`, where the bar and the text are both white, is a number
+    // that disappears at exactly the moment it starts to matter.
     let gauge = Gauge::default()
-        .block(Block::default().title(label))
+        .block(
+            Block::default()
+                .title(label)
+                .style(Style::default().fg(muted()).bg(background())),
+        )
         .gauge_style(
             Style::default()
                 .fg(color)
@@ -830,7 +855,7 @@ fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, value: u64, color: Col
         .percent(value.min(100) as u16)
         .label(Span::styled(
             format!("{value}%"),
-            Style::default().fg(text_colour()).bold(),
+            Style::default().fg(inverse_text()).bg(color).bold(),
         ));
     frame.render_widget(gauge, area);
 }
@@ -2774,6 +2799,7 @@ fn draw_profile_popup(frame: &mut Frame, app: &App) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(accent()))
+        .style(Style::default().fg(text_colour()).bg(popup_background()))
         .title(Span::styled(
             " APPLY A PROFILE ",
             Style::default().fg(accent()).bold(),
@@ -2822,7 +2848,10 @@ fn draw_profile_popup(frame: &mut Frame, app: &App) {
         "⏎ see exactly what changes  ·  Esc cancel",
         Style::default().fg(warn()),
     )));
-    frame.render_widget(Paragraph::new(lines), inner);
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().fg(text_colour()).bg(popup_background())),
+        inner,
+    );
 }
 
 /// The hours this node takes work in, drawn as the day it is.
@@ -7624,6 +7653,126 @@ mod themes {
         colours
     }
 
+    /// Every background colour actually painted on a full render of `page`, with
+    /// how many cells carry each.
+    fn backgrounds_drawn(theme: Theme, page: Page) -> Vec<(Color, usize)> {
+        let _guard = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let restore = theme::current();
+        theme::set_current(theme);
+
+        let mut app = App::new();
+        app.tabs.select_page(page);
+        let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let mut counts: Vec<(Color, usize)> = Vec::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                let colour = buffer.get(x, y).bg;
+                match counts.iter_mut().find(|(seen, _)| *seen == colour) {
+                    Some((_, count)) => *count += 1,
+                    None => counts.push((colour, 1)),
+                }
+            }
+        }
+
+        theme::set_current(restore);
+        counts
+    }
+
+    /// The theme colours the *background*, not just the text on top of it.
+    ///
+    /// No cell is left at `Color::Reset` on a page with no popup open: a single
+    /// uncovered cell shows the terminal's own colour through the console, which is
+    /// what a theme is for. `mono` is excluded by construction -- its background
+    /// *is* `Reset`, deliberately, and it is asserted separately below.
+    #[test]
+    fn every_cell_carries_the_themed_background() {
+        for theme in [UBUNTU, DARK, LIGHT] {
+            for page in Page::ALL {
+                let counts = backgrounds_drawn(theme, page);
+                assert!(
+                    !counts.iter().any(|(colour, _)| *colour == Color::Reset),
+                    "{} leaves cells unpainted on {:?}: {counts:?}",
+                    theme.name,
+                    page
+                );
+                let themed = counts
+                    .iter()
+                    .find(|(colour, _)| *colour == theme.background)
+                    .map(|(_, count)| *count)
+                    .unwrap_or(0);
+                // The frame fill is the majority of the screen; anything else is a
+                // widget that chose its own background for a reason.
+                assert!(
+                    themed > (120 * 30) / 2,
+                    "{} paints its background on only {themed} cells of {:?}",
+                    theme.name,
+                    page
+                );
+            }
+        }
+    }
+
+    /// The mono theme is the one that keeps the terminal's background, because the
+    /// terminal's colours are the thing it exists not to override.
+    #[test]
+    fn the_mono_theme_leaves_the_terminal_background_alone() {
+        assert_eq!(MONO.background, Color::Reset);
+        let counts = backgrounds_drawn(MONO, Page::Overview);
+        assert!(
+            counts.iter().any(|(colour, _)| *colour == Color::Reset),
+            "{counts:?}"
+        );
+    }
+
+    /// A popup paints its own background over the frame's, with nothing showing
+    /// through between the two: `Clear` resets the cells it covers, so a popup that
+    /// did not repaint would be a terminal-coloured hole in a themed console.
+    #[test]
+    fn a_popup_repaints_every_cell_it_covers() {
+        for mode in [
+            crate::app::InputMode::EditConfig,
+            crate::app::InputMode::Confirm,
+            crate::app::InputMode::Details,
+            crate::app::InputMode::PickProfile,
+        ] {
+            let _guard = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let restore = theme::current();
+            theme::set_current(UBUNTU);
+
+            let mut app = App::new();
+            app.input_mode = mode;
+            app.input_title = "Edit energy.PRICE_PER_KWH".to_string();
+            app.input = "0.21".to_string();
+            app.details = Some(crate::app::DetailsView {
+                title: "Details".to_string(),
+                lines: vec!["one".to_string(), "two".to_string()],
+                scroll: 0,
+            });
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal.draw(|frame| render(&mut app, frame)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+
+            let mut unpainted = Vec::new();
+            for y in 0..buffer.area.height {
+                for x in 0..buffer.area.width {
+                    if buffer.get(x, y).bg == Color::Reset {
+                        unpainted.push((x, y));
+                    }
+                }
+            }
+
+            theme::set_current(restore);
+
+            assert!(
+                unpainted.is_empty(),
+                "{mode:?} leaves {} cells showing the terminal through",
+                unpainted.len()
+            );
+        }
+    }
+
     /// The default really is the Ubuntu palette, on screen and not merely in a
     /// struct: the orange accent and the white text are what the issue asks for.
     #[test]
@@ -7694,49 +7843,52 @@ mod themes {
         }
     }
 
-    /// The light theme paints no white text **on the terminal's own background**,
-    /// which on a pale terminal is text that is simply not there.
+    /// No theme paints text in the colour of the background under it.
     ///
-    /// Scoped to cells with no background of their own, because white on the blue
-    /// accent badge is exactly right and banning it outright would be asserting the
-    /// wrong thing. The failure this catches is a foreground chosen against a dark
-    /// terminal and then left to sit on a light one -- which is how a light theme
-    /// ends up with invisible rows.
+    /// The failure this catches is a foreground chosen against a dark terminal and
+    /// then left to sit on a light one -- which is how the light theme ends up with
+    /// rows that are simply not there. Now that the frame carries a background of
+    /// its own, the comparison is against that rather than against `Reset`, so it
+    /// holds for every theme instead of one.
     #[test]
-    fn the_light_theme_paints_nothing_invisible_on_a_pale_terminal() {
-        for page in Page::ALL {
-            let _guard = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            let restore = theme::current();
-            theme::set_current(LIGHT);
+    fn no_theme_paints_text_in_the_colour_behind_it() {
+        for theme in [UBUNTU, DARK, LIGHT, MONO] {
+            for page in Page::ALL {
+                let _guard = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let restore = theme::current();
+                theme::set_current(theme);
 
-            let mut app = App::new();
-            app.tabs.select_page(page);
-            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
-            terminal.draw(|frame| render(&mut app, frame)).unwrap();
-            let buffer = terminal.backend().buffer().clone();
+                let mut app = App::new();
+                app.tabs.select_page(page);
+                let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+                terminal.draw(|frame| render(&mut app, frame)).unwrap();
+                let buffer = terminal.backend().buffer().clone();
 
-            let mut invisible = Vec::new();
-            for y in 0..buffer.area.height {
-                for x in 0..buffer.area.width {
-                    let cell = buffer.get(x, y);
-                    // A blank carries no text, so its foreground says nothing about
-                    // legibility.
-                    if cell.symbol().trim().is_empty() {
-                        continue;
-                    }
-                    if cell.bg == Color::Reset && cell.fg == Color::White {
-                        invisible.push((x, y, cell.symbol().to_string()));
+                let mut invisible = Vec::new();
+                for y in 0..buffer.area.height {
+                    for x in 0..buffer.area.width {
+                        let cell = buffer.get(x, y);
+                        // A blank carries no text, so its foreground says nothing
+                        // about legibility.
+                        if cell.symbol().trim().is_empty() {
+                            continue;
+                        }
+                        // `Reset` on `Reset` is the terminal's own pair, which is
+                        // legible by definition -- and is what `mono` asks for.
+                        if cell.fg == cell.bg && cell.bg != Color::Reset {
+                            invisible.push((x, y, cell.symbol().to_string()));
+                        }
                     }
                 }
+
+                theme::set_current(restore);
+
+                assert!(
+                    invisible.is_empty(),
+                    "{} paints invisible text on {page:?}: {invisible:?}",
+                    theme.name
+                );
             }
-
-            theme::set_current(restore);
-
-            assert!(
-                invisible.is_empty(),
-                "{:?} paints white-on-nothing under the light theme: {invisible:?}",
-                page
-            );
         }
     }
 
