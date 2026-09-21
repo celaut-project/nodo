@@ -150,9 +150,9 @@ Hypervisor initramfs speaks contract version '…', but this node needs '…'*.
 
 **Why:** the initramfs' `/init` and `src/virtualizers/microvm/bundle.py` share a
 contract — which files `execute.py` writes into the service rootfs
-(`__config__`, `.__nodo_entrypoint`, `.__nodo_virtiofs`) and how `/init` reads
-them. The initramfs is a pinned release asset while the contract lives in this
-checkout, so the two can be bumped out of step. `execute.py` compares its
+(`__config__`, `.__nodo_entrypoint`, `.__nodo_virtiofs`, `.__nodo_envs`) and how
+`/init` reads them. The initramfs is a pinned release asset while the contract
+lives in this checkout, so the two can be bumped out of step. `execute.py` compares its
 `INITRAMFS_CONTRACT_VERSION` against `etc/nodo-ch-initramfs.marker` inside the
 archive and refuses the launch, instead of letting the guest boot and park in
 `/init`'s fatal loop until the launch times out with nothing to show.

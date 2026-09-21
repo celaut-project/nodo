@@ -674,10 +674,14 @@ class InitramfsReadOnlyMountTests(unittest.TestCase):
     def test_the_contract_version_was_bumped_with_init(self):
         # /init's contract with execute.py changed in both directions (it reads
         # new cmdline tokens, and it needs a /dev/vdb this checkout attaches), so
-        # a pinned v1 asset must not silently outlive it.
+        # a pinned v1 asset must not silently outlive it. Asserting "moved past
+        # v1" rather than pinning the exact current version keeps this regression
+        # test from going stale at every later, unrelated contract bump (#405
+        # moved it again, to v3, for a change /init's v2 cmdline handling has
+        # nothing to do with).
         from src.virtualizers.microvm import initramfs as microvm_initramfs
 
-        self.assertEqual(microvm_initramfs.CONTRACT_VERSION, "v2")
+        self.assertNotEqual(microvm_initramfs.CONTRACT_VERSION, "v1")
         self.assertIn(
             f"nodo-ch-initramfs:{microvm_initramfs.CONTRACT_VERSION}", self.content
         )

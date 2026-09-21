@@ -59,11 +59,13 @@ from src.identity.node_identity import (
     component_formal,
     parse_component_formal,
 )
+from src.utils.guest_env import IDENTIFIER_PATTERN
 
 #: The one regex. ``NAME`` is the C identifier shape, which is what every shell and
 #: every ``environment_variables`` map already uses, so no legal variable name is
-#: unspellable and no illegal one is silently accepted.
-PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+#: unspellable and no illegal one is silently accepted. The shape itself lives in
+#: ``src.utils.guest_env.IDENTIFIER_PATTERN``, not here, so the two never drift.
+PLACEHOLDER = re.compile(rf"\$\{{({IDENTIFIER_PATTERN})\}}")
 
 
 @dataclass(frozen=True)
