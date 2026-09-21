@@ -44,9 +44,72 @@ class NetworkRequestRejected(Exception):
     stop asking this node.
     """
 
-def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
+# What a hostname tag opens when its entry names no port: the pair `resolve_domain` has
+# always opened, and as much as a name on its own can say (#389).
+DEFAULT_HOSTNAME_PORTS = (80, 443)
+
+
+def hostname_ports(network: celaut.Service.Network) -> List[int]:
+    """The ports a hostname tag is opened on, from the network entry's ``formal``.
+
+    **A declaration does not choose a peer's port.** Everything else this module
+    resolves is an instance running on some node, and that node assigned the port when
+    it published it -- whatever the instance would have preferred. That is why an
+    ``Instance.Uri`` carries a port and a ``Service.Network`` does not: local members
+    are offered on the ports their launcher recorded, the operator's seeds on the ports
+    the operator wrote down, and a ``pow:`` peer on the P2P port somebody observed it
+    on.
+
+    A hostname is the one exception, because there is no instance and no node that
+    published one -- only a name this node looks up. The port has nowhere else to come
+    from, and what the entry states is the *standard* port the service answering to
+    that name is expected to be on: ``port=<n>`` in the entry's ``formal``, the same
+    ``key=value`` body every other parameter of an entry is written in, ``${VAR}``
+    selection included (#385) since it is substituted before this runs.
+
+    An entry that states no port opens :data:`DEFAULT_HOSTNAME_PORTS`, which is what a
+    bare hostname tag has always meant.
+
+    A ``port`` this node cannot honour -- not a port number, in a ``formal`` that is not
+    readable -- yields **nothing**, and the caller grants nothing for the tag. Falling
+    back to 80 and 443 there would open two ports nobody asked for on the strength of a
+    declaration this node could not read: the hole ``docs/NETWORKS.md`` already refuses
+    for a ``pow:`` peer's second uri, at once useless for the ask and open. The packer
+    refuses that shape (``_validate_network_ports``), so only a pack made before it did
+    reaches here.
     """
-    Resolve a domain to its associated IPv4 addresses.
+    if not network.formal:
+        return list(DEFAULT_HOSTNAME_PORTS)
+
+    try:
+        value = parse_component_formal(network.formal).get("port")
+    except ComponentFormalError as e:
+        LOGGER(f"[NETWORKS] a network entry's formal is not readable ({e}).")
+        return []
+
+    if value is None:
+        return list(DEFAULT_HOSTNAME_PORTS)
+    if not (value.isdigit() and 0 < int(value) < 65536):
+        LOGGER(
+            f"[NETWORKS] a network entry declares port={value!r}, which is not a port "
+            "number."
+        )
+        return []
+    return [int(value)]
+
+
+def resolve_domain(domain: str, ports=DEFAULT_HOSTNAME_PORTS) -> List[celaut.Instance.Uri]:
+    """A hostname's IPv4 addresses, one ``Uri`` per (address, port).
+
+    What this grants is **addresses**, and only that. The guest is not given a way to
+    look the name up: nodo serves no DNS and opens no port 53 (see the note in
+    ``virtualizers/microvm/network.py``), so a program inside the guest that takes a
+    URL -- and therefore calls ``getaddrinfo`` -- fails before it ever uses the allow
+    written here. These addresses are usable by a program that reads them out of
+    ``__config__`` and connects to them directly (#389).
+
+    ``ports`` is what :func:`hostname_ports` read out of the network entry, defaulting
+    to what a bare hostname tag has always opened.
     """
     try:
         ips = list({
@@ -54,17 +117,11 @@ def resolve_domain(domain: str) -> List[celaut.Instance.Uri]:
             for info in socket.getaddrinfo(domain, None)
             if info[0] == socket.AF_INET
         })
-
-
-        # TODO Must be based on the network client protocol stack. ¿?
-
-        # Auxiliar, only http and https
         return [
             celaut.Instance.Uri(ip=ip, port=port)
             for ip in ips
-            for port in [80, 443]  # Ports should be based on the protocol stack ¿?
+            for port in ports
         ]
-    
     except socket.gaierror:
         raise ValueError(f"Cannot resolve domain: {domain}")
 
@@ -343,8 +400,22 @@ def resolve_network(
         if not tag.islower() or '.' not in tag:
             continue
 
+        ports = hostname_ports(network)
+        if not ports:
+            # The entry names a host and a port this node cannot read (`hostname_ports`
+            # logged which). Granting the historical 80 and 443 instead would open what
+            # nobody declared, so the posture is the one taken just below for a name
+            # that does not resolve: the tag yields no peers and the guest boots
+            # with default-deny toward it.
+            LOGGER(
+                f"[NETWORKS] tag {tag!r} names a host, but its entry declares a port "
+                "this node cannot read; no peers granted for it. "
+                "The guest boots without an allow toward it."
+            )
+            continue
+
         try:
-            uris = resolve_domain(tag)
+            uris = resolve_domain(tag, ports=ports)
         except ValueError as e:
             # A name that does not resolve is not a reason to fail the launch (#391).
             # It used to be: the error escaped to the launcher's catch-all, which

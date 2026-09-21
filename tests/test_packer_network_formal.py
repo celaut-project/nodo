@@ -416,5 +416,48 @@ class TestValidationRunsEarly(unittest.TestCase):
         packer._validate_service_json_shape()
 
 
+@unittest.skipIf(ZipContainerPacker is None, f"packer import failed: {IMPORT_ERROR}")
+class TestNetworkPortsAreValidatedAtPackTime(unittest.TestCase):
+    """A `port` in an entry's `formal` is read here before a node has to read it (#389).
+
+    It is the one port a declaration states -- the standard port the hostname answers
+    on -- and `networks.hostname_ports` grants nothing for a tag whose port it cannot
+    read. A guest granted nothing looks exactly like a guest that asked for nothing, so
+    the shape fails while the author is still looking at the file.
+    """
+
+    def _entry(self, port):
+        return {"tags": ["api.example.test"], "prose": "an api", "formal": {"port": port}}
+
+    def _refused(self, port):
+        with self.assertRaises(ValueError) as caught:
+            _networks({"network": [self._entry(port)]})
+        return str(caught.exception)
+
+    def test_a_port_packs(self):
+        network = _networks({"network": [self._entry("50051")]})[0]
+        self.assertEqual(parse_component_formal(network.formal), {"port": "50051"})
+
+    def test_a_port_that_is_not_a_number_is_refused_and_the_entry_is_named(self):
+        message = self._refused("https")
+        self.assertIn("network[0]", message)
+        self.assertIn("'https'", message)
+
+    def test_a_port_outside_the_range_is_refused(self):
+        self.assertIn("1-65535", self._refused("70000"))
+        self.assertIn("1-65535", self._refused("0"))
+
+    def test_a_templated_port_packs(self):
+        """A selection key the instantiator fills (#385), checked once it is filled."""
+        network = _networks({"network": [self._entry("${PORT}")]})[0]
+        self.assertEqual(parse_component_formal(network.formal), {"port": "${PORT}"})
+
+    def test_an_entry_saying_nothing_about_ports_packs(self):
+        _networks({"network": [{"tags": ["www.example.test"], "prose": "a host"}]})
+        _networks({"network": [
+            {"tags": ["www.example.test"], "prose": "a host", "formal": {"api.version": "4"}},
+        ]})
+
+
 if __name__ == "__main__":
     unittest.main()

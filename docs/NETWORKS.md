@@ -299,11 +299,57 @@ what it can reach. The firewall is what confines a running guest
 
 ## Use Cases
 
-### 1. DNS
+### 1. Hostname tags
 
 > "Give me access to `www.google.com`."
 
-A simple DNS network where peers resolve domain names.
+A tag that is lowercase and contains a `.` is resolved **on the node** to its IPv4
+addresses (`resolve_domain`) and the guest is granted those addresses, one `Uri`
+per address and port.
+
+**A declaration does not choose a peer's port.** Every other peer this module
+resolves is an instance running on some node, and *that* node assigned the port when
+it published it — local members are offered on the ports their launcher recorded, the
+operator's seeds on the ports the operator wrote down, a `pow:` peer on the P2P port
+somebody observed it on. Which is why an `Instance.Uri` carries a port and a
+`Service.Network` does not.
+
+A hostname is the one exception, because there is no instance and no node that
+published one — only a name this node looks up, so the port has nowhere else to come
+from. What the entry may state is the **standard** port the service answering to that
+name is expected to be on, written `port=<n>` in the entry's `formal` (#389), the same
+`key=value` body every other parameter of an entry goes in — `${VAR}` selection keys
+(#385) included, since the formal is substituted before the resolution runs.
+
+Nothing is read out of a `protocol_stack`, and nothing out of a tag. A stack says
+which protocols the peers speak; it is not where a port lives, and a tag is a
+protocol's plain name and never a number — `https` does not mean 443 here, for the
+reason `identity/transport_stack.py` gives: *"celaut has no conventions to fall back
+on, the proto is where a thing is defined"*.
+
+An entry that states no port opens 80 and 443, as a bare hostname tag always has. A
+`port` that cannot be honoured is refused at pack time, and a node reading one from an
+older pack grants **nothing** for that tag rather than falling back to 80 and 443:
+that fallback would open two ports nobody asked for on the strength of a declaration
+the node could not read — the same hole the `pow:` resolution refuses when it declines
+to emit a peer's REST uri alongside its P2P one.
+
+**What is granted is addresses, not name resolution.** nodo serves no DNS and
+opens no port 53 toward anything (see the note in
+`src/virtualizers/microvm/network.py`); the guest's default-deny covers UDP as
+well as TCP. So:
+
+| Program inside the guest | Works with a hostname tag? |
+|---|---|
+| Reads `network_resolution` from `__config__` and connects to the addresses (the way `ergo-node` consumes its peers) | **Yes** — this is what the tag is for. |
+| Takes a URL and calls `getaddrinfo()` — `curl`, `yt-dlp`, any HTTP library, any TLS client that needs the name for SNI | **No.** It fails at the lookup, before it ever reaches the allowed address. The declaration looks correct and the service makes no request. |
+
+A service in the second row today declares `["*"]` and narrows inside the image
+(exact-host check after parsing, one program allowed to open sockets). The design
+that would close the gap — a service that reads `network_resolution` and serves
+DNS from it to its siblings, reachable on 53 through an ordinary peer allow — is the
+one the `network.py` note points at, and does not exist yet. Until it does, do not
+write a hostname tag for a program that takes names.
 
 ---
 
