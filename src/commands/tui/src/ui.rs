@@ -4076,12 +4076,10 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
     // Why a config edit may not stick, said before the value is typed rather than
     // after it is silently reverted.
     //
-    // It is not this key, and it is not the file: config.yaml is world-writable by
-    // install.sh and every editor here goes through one `yq` transaction. It is the
-    // *restart* that transaction owes a serving node, which is `systemctl` and
-    // therefore root -- so the same edit lands quietly on a stopped node and is
-    // undone on a running one. That asymmetry is what made it look as though one
-    // setting had been singled out.
+    // Never the file: config.yaml is world-writable by install.sh. It is the
+    // *restart* the transaction owes a serving node, which is systemctl and
+    // therefore root -- so a key the node re-reads from disk (`energy.*`) owes no
+    // restart and shows no hint, and a key read once at start-up does.
     let root_hint = app.config_write_root_hint().filter(|_| {
         matches!(
             app.input_mode,
@@ -7481,17 +7479,34 @@ mod config_write_root_hint {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
-    fn app_editing_the_kwh_price(service_status: &str) -> App {
+    /// An open editor pointed at `key`, on a node in `service_status`.
+    fn app_editing(key: &str, service_status: &str) -> App {
         let mut app = App::new();
+        app.tabs.index = Page::ALL
+            .iter()
+            .position(|page| *page == Page::Config)
+            .unwrap();
+        app.node_info.service_status = service_status.to_string();
+        app.input_mode = InputMode::EditConfig;
+        app.input_title = format!("Edit {key}");
+        app.input = "0.21".to_string();
+        app.edit_kind = EditKind::Number;
+        app.edit_config_path = Some(crate::cell::path_segments(key));
+        app
+    }
+
+    /// A restart key: `ConfigManager` reads it once at start-up, so the node and
+    /// the file disagree until it restarts.
+    fn app_editing_a_restart_key(service_status: &str) -> App {
+        app_editing("low_demand.CPU_MAX_PERCENT", service_status)
+    }
+
+    fn app_editing_the_kwh_price(service_status: &str) -> App {
+        let mut app = app_editing("energy.PRICE_PER_KWH", service_status);
         app.tabs.index = Page::ALL
             .iter()
             .position(|page| *page == Page::Energy)
             .unwrap();
-        app.node_info.service_status = service_status.to_string();
-        app.input_mode = InputMode::EditConfig;
-        app.input_title = "Edit energy.PRICE_PER_KWH".to_string();
-        app.input = "0.21".to_string();
-        app.edit_kind = EditKind::Number;
         app
     }
 
@@ -7514,7 +7529,7 @@ mod config_write_root_hint {
     /// the real reason, instead of watching a value be written and put back.
     #[test]
     fn an_unprivileged_edit_against_a_serving_node_is_warned_about_up_front() {
-        let mut app = app_editing_the_kwh_price("running");
+        let mut app = app_editing_a_restart_key("running");
         // The test process is not root on CI or on a developer's machine; if it
         // somehow is, the hint is correctly absent and there is nothing to assert.
         if !app.config_write_needs_root() {
@@ -7533,33 +7548,48 @@ mod config_write_root_hint {
     /// is exactly the asymmetry that made the requirement look arbitrary.
     #[test]
     fn the_same_edit_against_a_stopped_node_needs_nothing() {
-        let mut app = app_editing_the_kwh_price("not running");
+        let mut app = app_editing_a_restart_key("not running");
 
         assert!(!app.config_write_needs_root());
         assert!(!screen(&mut app).contains("needs root"));
     }
 
-    /// It is a property of the transaction, not of the key: the kWh price, a peer
-    /// price and a raw Config row all answer the same way, because there is one
-    /// writer behind all three.
+    /// The kWh price needs nothing, on a serving node, as an unprivileged process.
+    ///
+    /// This is the fix for "energy configuration still requires sudo". The node
+    /// re-reads the `energy:` block from disk itself
+    /// (`src/manager/energy/monitor.py`), so the write is the entire change and
+    /// there is no restart to be refused.
     #[test]
-    fn the_requirement_does_not_depend_on_which_key_is_being_edited() {
-        let mut energy = app_editing_the_kwh_price("running");
-        let mut config = app_editing_the_kwh_price("running");
-        config.tabs.index = Page::ALL
-            .iter()
-            .position(|page| *page == Page::Config)
-            .unwrap();
-        config.input_title = "Edit main.STORAGE".to_string();
+    fn editing_the_kwh_price_on_a_serving_node_needs_no_root() {
+        let mut app = app_editing_the_kwh_price("running");
 
-        assert_eq!(
-            energy.config_write_needs_root(),
-            config.config_write_needs_root()
-        );
-        assert_eq!(
-            screen(&mut energy).contains("needs root"),
-            screen(&mut config).contains("needs root")
-        );
+        assert!(!app.config_write_needs_root());
+        assert!(!screen(&mut app).contains("needs root"));
+    }
+
+    /// And it really is the key that decides, not the page it was edited from: the
+    /// same key reached through the raw Config tree answers the same way.
+    #[test]
+    fn a_live_key_is_live_from_whichever_page_it_is_edited() {
+        let energy = app_editing_the_kwh_price("running");
+        let config = app_editing("energy.PRICE_PER_KWH", "running");
+
+        assert!(!energy.config_write_needs_root());
+        assert!(!config.config_write_needs_root());
+    }
+
+    /// The distinction is between keys the node re-reads and keys it does not, so
+    /// a restart key and a live key must not answer the same way on a serving node.
+    #[test]
+    fn a_restart_key_and_a_live_key_are_told_apart() {
+        let restart = app_editing_a_restart_key("running");
+        let live = app_editing_the_kwh_price("running");
+
+        if !restart.config_write_needs_root() {
+            return; // running as root; there is nothing to distinguish.
+        }
+        assert!(!live.config_write_needs_root());
     }
 
     /// The hint belongs to config editing. The Connect box and the Config filter go

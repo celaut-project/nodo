@@ -447,7 +447,61 @@ struct ConfigWrite {
     /// expression, so nothing an operator types can be read as yq syntax. `env()`
     /// (not `strenv()`) parses each one, which is what keeps a number a number.
     values: Vec<(String, String)>,
+    /// Whether the running node picks this change up on its own.
+    reload: Reload,
     follow_up: ConfigFollowUp,
+}
+
+/// How a written key reaches the running node.
+///
+/// The distinction is a property of **how the node reads the key**, not of the key
+/// being important: a setting nothing re-reads is a setting the node only has
+/// because it read it at start-up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reload {
+    /// The node re-reads this from disk by itself, so the write is the whole
+    /// change. No restart, and therefore no root.
+    Live,
+    /// `ConfigManager` read this once at start-up and will not read it again
+    /// (`ensure_loaded`, and issue #310 for why). The file and the running node
+    /// disagree until it restarts, so the transaction restarts it.
+    Restart,
+}
+
+/// Whether a dotted config path is re-read by the running node.
+///
+/// Only `energy.*` is, and only because `src/manager/energy/monitor.py` watches
+/// config.yaml's mtime and re-reads that block per sample. It can do that because
+/// nothing is derived from those keys and cached: a tariff is used at the moment it
+/// is read and stored with the sample it priced.
+///
+/// Everything else goes through `ConfigManager`, which reads config.yaml once per
+/// process on purpose -- the identity keypair, the TLS certificate peers pin
+/// against this node's peer_id and the interpolated paths are built from that one
+/// read, and re-reading mid-run would put them out of step with the config they
+/// were built from (issue #310). Reading a key at call time does not make it live:
+/// `env_manager.get` answers from the tree loaded at boot.
+///
+/// So this is a list of one, and it is kept as a list rather than as an
+/// `is_energy_key` because what it is asking is "does the node re-read this", and
+/// the answer moves as readers are added.
+const LIVE_CONFIG_PREFIXES: [&str; 1] = ["energy."];
+
+fn reload_for(paths: &[&str]) -> Reload {
+    // Every key in the write has to be live, because a write is one transaction:
+    // a change that touched a live key and a restart key would be half applied if
+    // the restart were skipped.
+    let live = !paths.is_empty()
+        && paths.iter().all(|path| {
+            LIVE_CONFIG_PREFIXES
+                .iter()
+                .any(|prefix| path.starts_with(prefix))
+        });
+    if live {
+        Reload::Live
+    } else {
+        Reload::Restart
+    }
 }
 
 /// What the interface has to do once a transaction lands, beyond the reload every
@@ -473,6 +527,9 @@ enum Applied {
     /// node to disagree with the file, so the change stands and the next start
     /// reads it.
     NotRunning,
+    /// Written, and the running node reads it from disk by itself. Nothing was
+    /// restarted, so nothing needed root.
+    Live,
 }
 
 /// Result of a configuration transaction.
@@ -598,6 +655,30 @@ async fn apply_config_change(
         let _ = fs::remove_file(cache.join("gateway_port_passed"));
     }
 
+    if write.reload == Reload::Live {
+        // The node re-reads these keys from disk itself, so the write *is* the
+        // change and there is no restart to owe -- which is the whole of "editing
+        // this needs sudo": it never needed root for the file, only for systemd.
+        //
+        // The file still has to parse, because the node reading it is the thing
+        // that makes this work: an unparseable config.yaml would leave the monitor
+        // holding its last good block and the operator believing the new value had
+        // taken. Verified here rather than trusted to yq's exit code, which is
+        // about the expression rather than about the document that came out.
+        if let Err(error) = verify_parses(&config) {
+            return fail(revert(
+                &backup,
+                &config,
+                &format!("{label} NOT applied: {error}"),
+            ));
+        }
+        let _ = fs::remove_file(&backup);
+        return ConfigTransaction {
+            label,
+            result: Ok(Applied::Live),
+        };
+    }
+
     if !was_serving {
         return ConfigTransaction {
             label,
@@ -635,6 +716,20 @@ async fn apply_config_change(
         label,
         result: Ok(Applied::Restarted),
     }
+}
+
+/// Whether config.yaml still parses as YAML after being written.
+///
+/// `yq` exiting zero says the expression ran, not that the document it produced is
+/// one the node can load. For a live key nothing restarts, so this is the only
+/// point at which a broken file would be caught before the operator is told the
+/// change landed.
+fn verify_parses(config: &Path) -> Result<(), String> {
+    let text = fs::read_to_string(config)
+        .map_err(|error| format!("could not re-read config.yaml: {error}"))?;
+    serde_yaml::from_str::<serde_yaml::Value>(&text)
+        .map(|_: serde_yaml::Value| ())
+        .map_err(|error| format!("config.yaml no longer parses: {error}"))
 }
 
 /// Put `backup` back over `config`, and say what state that leaves things in.
@@ -3066,10 +3161,12 @@ impl App {
 
         let value = self.input.clone();
         self.close_input();
+        let dotted = config_path_display(&path);
         self.start_config_write(ConfigWrite {
-            label: format!("Add to {}", config_path_display(&path)),
+            label: format!("Add to {dotted}"),
             expression: format!("{} += [env(NODO_TUI_V0)]", yq_path_expression(&path)),
             values: vec![("NODO_TUI_V0".to_string(), value)],
+            reload: reload_for(&[&dotted]),
             follow_up: ConfigFollowUp::OpenBranch(path_tokens(&path)),
         });
     }
@@ -3091,10 +3188,12 @@ impl App {
 
     /// Remove one element from a list in config.yaml.
     fn delete_config_list_item(&mut self, path: &[ConfigPathSegment], label: &str) {
+        let dotted = config_path_display(path);
         self.start_config_write(ConfigWrite {
             label: format!("Remove {label}"),
             expression: format!("del({})", yq_path_expression(path)),
             values: Vec::new(),
+            reload: reload_for(&[&dotted]),
             // Every index after the removed one shifts down, so the selection moves
             // to the list rather than staying on a position that now holds a
             // different element than the one that was on screen.
@@ -3386,10 +3485,12 @@ impl App {
         value: &str,
         follow_up: ConfigFollowUp,
     ) {
+        let dotted = config_path_display(path);
         self.start_config_write(ConfigWrite {
             label,
             expression: format!("{} = env(NODO_TUI_V0)", yq_path_expression(path)),
             values: vec![("NODO_TUI_V0".to_string(), value.to_string())],
+            reload: reload_for(&[&dotted]),
             follow_up,
         });
     }
@@ -3411,10 +3512,12 @@ impl App {
             return;
         }
         let (expression, values) = chained_write(writes);
+        let paths: Vec<&str> = writes.iter().map(|(path, _)| path.as_str()).collect();
         self.start_config_write(ConfigWrite {
             label,
             expression,
             values,
+            reload: reload_for(&paths),
             follow_up,
         });
     }
@@ -3435,15 +3538,22 @@ impl App {
             self.status = "Busy: a command is already running".to_string();
             return;
         }
-        self.status = format!("{} • applying and restarting nodo…", write.label);
+        self.status = match write.reload {
+            Reload::Live => format!("{} • writing…", write.label),
+            Reload::Restart => format!("{} • applying and restarting nodo…", write.label),
+        };
         self.config_follow_up = write.follow_up.clone();
         // Said once, here, on the way in: this is the single funnel every config
-        // write in the interface passes through, so one line covers the ENERGY
-        // page's kWh price, a cell profile, a price nudge and a raw Config row
-        // alike. It was previously learned by watching a value be written and then
-        // silently put back.
-        if let Some(hint) = self.config_write_root_hint() {
-            self.app_logs.push(hint.to_string());
+        // write in the interface passes through, so one line covers a cell profile,
+        // a price nudge and a raw Config row alike. It was previously learned by
+        // watching a value be written and then silently put back.
+        //
+        // Not said for a live key, which owes no restart and so needs no root --
+        // that is the point of the distinction.
+        if write.reload == Reload::Restart {
+            if let Some(hint) = self.config_write_root_hint() {
+                self.app_logs.push(hint.to_string());
+            }
         }
         self.config_task = Some(tokio::spawn(apply_config_change(
             self.paths.yq.clone(),
@@ -3459,38 +3569,42 @@ impl App {
         self.config_task.is_some()
     }
 
-    /// Whether a configuration change made right now would need root to land.
+    /// Whether a configuration change to `path` made right now would need root.
     ///
-    /// **This is not about the file.** `config.yaml` is `chmod a+w` at install time
+    /// **Never about the file.** `config.yaml` is `chmod a+w` at install time
     /// (`install.sh`) and rewritten `0o666` by `ConfigManager._atomic_write`, it is
     /// `chown`ed to the installing user, and `yq -i` writes it through a rename in
-    /// the same directory. An unprivileged operator can write every key in it, and
-    /// the backup beside it, without ever being asked for a password.
+    /// the same directory. An unprivileged operator can write every key in it.
     ///
-    /// What needs root is the **restart**. `apply_config_change` is a transaction:
-    /// write, restart, and put the file back if the node does not come back --
-    /// because the invariant this whole editor exists to hold is that *what the file
-    /// says is what the running node loaded*. The restart is `nodo daemon restart`,
-    /// which is `systemctl stop` + `systemctl start`, and `daemon_command` in
-    /// `src/commands/daemon.py` refuses outright under a non-zero euid. So an
-    /// unprivileged edit to a **serving** node writes the value, fails the restart,
-    /// and gets reverted -- which from the operator's chair looks exactly like "this
-    /// particular setting needs sudo".
+    /// What needs root is the **restart** -- `nodo daemon restart` is systemctl, and
+    /// `daemon_command` (`src/commands/daemon.py`) refuses under a non-zero euid.
+    /// So the question is whether this key owes one, which is a property of how the
+    /// *node* reads it: a key the running node re-reads from disk is applied by the
+    /// write itself, and a key `ConfigManager` loaded once at start-up is not.
     ///
-    /// It is therefore not a property of the key. `energy.PRICE_PER_KWH` is written
-    /// by the same `write_config_value` as every price, every cell lever and every
-    /// raw Config row; there is one writer and one transaction. It is a property of
-    /// **whether something is serving**, which is why the same edit succeeds
-    /// silently on a stopped node and is refused on a running one -- and why it
-    /// looked arbitrary.
+    /// `energy.*` is the live case (see [`LIVE_CONFIG_PREFIXES`]), so editing the
+    /// kWh price no longer needs root at all. Everything else still does while
+    /// something is serving.
     ///
     /// Read off `node_info.service_status`, which `nodo info` already reports and
     /// this interface already polls, rather than opening a socket per keystroke. It
-    /// can be up to one wallet-refresh stale; that is acceptable for a *warning*,
-    /// and the transaction itself still asks the live question
-    /// (`serving_on(port_before)`) before deciding whether a restart is owed.
+    /// can be up to one refresh stale; that is acceptable for a *warning*, and the
+    /// transaction itself still asks the live question (`serving_on(port_before)`)
+    /// before deciding whether a restart is owed.
+    pub fn config_write_needs_root_for(&self, path: &str) -> bool {
+        reload_for(&[path]) == Reload::Restart
+            && !is_root()
+            && self.node_info.service_status == "running"
+    }
+
+    /// Whether the change the operator is about to make needs root, for the key the
+    /// open editor is pointed at.
     pub fn config_write_needs_root(&self) -> bool {
-        !is_root() && self.node_info.service_status == "running"
+        match self.edit_config_path.as_deref() {
+            Some(path) => self.config_write_needs_root_for(&config_path_display(path)),
+            // No key in hand: answer for the general case, which is a restart key.
+            None => !is_root() && self.node_info.service_status == "running",
+        }
     }
 
     /// The one-line warning shown beside a config editor that is about to fail, or
@@ -3549,6 +3663,7 @@ impl App {
                     Applied::NotRunning => {
                         "applied • nodo is not serving, so it loads on next start".to_string()
                     }
+                    Applied::Live => "applied live (no restart)".to_string(),
                 };
                 self.status = format!("{} • {note}", transaction.label);
                 self.app_logs
@@ -9905,5 +10020,292 @@ mod tab_groups {
                 );
             }
         }
+    }
+}
+
+/// Which config keys the running node reads for itself, and what that means for
+/// whether an edit needs root (Josemi: "energy configuration still requires sudo").
+///
+/// The answer was never the file. It was that every write was followed by
+/// `nodo daemon restart`, because `ConfigManager` reads config.yaml once per
+/// process -- so an unprivileged edit to a serving node wrote the value, failed the
+/// restart, and was reverted. The `energy:` block does not need that restart: the
+/// monitor watches the file's mtime and re-reads it (`src/manager/energy/monitor.py`),
+/// so the write is the whole change.
+///
+/// These tests run the real `apply_config_change` against a scratch config.yaml with
+/// stub `yq` and `nodo` binaries, so what is asserted is whether a restart was
+/// *spawned* rather than whether a flag was set.
+#[cfg(test)]
+mod live_config_writes {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// Serialises the whole apply, because PATH is process-global and `cargo test`
+    /// runs these on threads. A `std::sync::Mutex` cannot be held across an await,
+    /// so the async work is run on its own runtime inside the critical section
+    /// (`block_in_place` + `block_on`) rather than awaited through the guard.
+    static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A scratch install: a config.yaml, a `yq` that really edits it, and a `nodo`
+    /// that records every invocation instead of touching systemd.
+    struct Scratch {
+        dir: PathBuf,
+    }
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "nodo-tui-live-{name}-{}-{:?}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ));
+            // `yq` is handed to the transaction by path and must NOT go on PATH:
+            // `which_yq()` in the tests above resolves the real one from there, and
+            // a stub of it visible process-wide would be picked up by whichever
+            // test happened to run alongside this one.
+            fs::create_dir_all(dir.join("bin")).unwrap();
+            fs::create_dir_all(dir.join("path")).unwrap();
+            fs::create_dir_all(dir.join("cache")).unwrap();
+            let scratch = Scratch { dir };
+            fs::write(
+                scratch.config(),
+                "energy:\n  PRICE_PER_KWH: 0.20\nlow_demand:\n  CPU_MAX_PERCENT: 50\n",
+            )
+            .unwrap();
+            scratch.write_stub(
+                "yq",
+                // Enough of `yq e -i '<path> = env(VAR)' <file>` for these writes:
+                // rewrite the one scalar under the one block. A real yq is not
+                // installed on every machine that runs `cargo test`, and this is a
+                // test about what the transaction *does*, not about yq.
+                r#"#!/usr/bin/env python3
+import os, re, sys
+
+expression, path = sys.argv[3], sys.argv[4]
+# `yq_path_expression` writes .["block"]["key"], which is what has to be parsed
+# here -- a stub that accepted a form the TUI does not emit would pass while the
+# real thing was broken.
+match = re.fullmatch(r'\.\["(\w+)"\]\["(\w+)"\] = env\((\w+)\)', expression)
+if not match:
+    sys.exit(1)
+_, key, variable = match.groups()
+value = os.environ[variable]
+with open(path) as handle:
+    lines = handle.read().splitlines(True)
+for index, line in enumerate(lines):
+    if line.startswith(f"  {key}: "):
+        lines[index] = f"  {key}: {value}\n"
+        break
+else:
+    sys.exit(1)
+with open(path, "w") as handle:
+    handle.writelines(lines)
+"#,
+            );
+            scratch.write_stub(
+                "nodo",
+                // Records the call and reports success, so a spawned restart is
+                // visible without anything being restarted.
+                &format!(
+                    "#!/bin/sh\necho \"$@\" >> {}\nexit 0\n",
+                    scratch.restart_log().display()
+                ),
+            );
+            scratch
+        }
+
+        /// `nodo` goes in the directory that is put on PATH, because
+        /// `restart_node` resolves it from there; everything else stays out of it.
+        fn write_stub(&self, name: &str, body: &str) {
+            let directory = if name == "nodo" { "path" } else { "bin" };
+            let path = self.dir.join(directory).join(name);
+            fs::write(&path, body).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        fn config(&self) -> PathBuf {
+            self.dir.join("config.yaml")
+        }
+
+        fn restart_log(&self) -> PathBuf {
+            self.dir.join("nodo-invocations.log")
+        }
+
+        fn yq(&self) -> PathBuf {
+            self.dir.join("bin").join("yq")
+        }
+
+        /// Every `nodo` subcommand this transaction ran.
+        fn nodo_calls(&self) -> String {
+            fs::read_to_string(self.restart_log()).unwrap_or_default()
+        }
+
+        fn config_text(&self) -> String {
+            fs::read_to_string(self.config()).unwrap_or_default()
+        }
+
+        async fn apply(&self, path: &str, value: &str) -> ConfigTransaction {
+            // `nodo` is resolved from PATH by `restart_node`, so the stub has to be
+            // on it for the negative assertion to mean anything: a test that simply
+            // had no `nodo` would pass for the wrong reason.
+            let segments = crate::cell::path_segments(path);
+            let write = ConfigWrite {
+                label: format!("Set {path}"),
+                expression: format!("{} = env(NODO_TUI_V0)", yq_path_expression(&segments)),
+                values: vec![("NODO_TUI_V0".to_string(), value.to_string())],
+                reload: reload_for(&[path]),
+                follow_up: ConfigFollowUp::None,
+            };
+            let (yq, config, cache, stub_path) = (
+                self.yq(),
+                self.config(),
+                self.dir.join("cache"),
+                self.dir.join("path"),
+            );
+
+            tokio::task::block_in_place(move || {
+                let _guard = PATH_LOCK
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let previous = std::env::var("PATH").unwrap_or_default();
+                std::env::set_var("PATH", format!("{}:{previous}", stub_path.display()));
+                let transaction = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("a runtime for the transaction")
+                    .block_on(apply_config_change(yq, config, cache, write));
+                std::env::set_var("PATH", previous);
+                transaction
+            })
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// The fix, as the thing an operator would observe: the value changes, and
+    /// nothing was restarted, so nothing could have been refused for want of root.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_energy_write_never_spawns_a_restart() {
+        let scratch = Scratch::new("energy");
+
+        let transaction = scratch.apply("energy.PRICE_PER_KWH", "0.35").await;
+
+        assert!(
+            matches!(transaction.result, Ok(Applied::Live)),
+            "{:?}",
+            transaction.result
+        );
+        assert!(
+            scratch.config_text().contains("PRICE_PER_KWH: 0.35"),
+            "{}",
+            scratch.config_text()
+        );
+        assert_eq!(
+            scratch.nodo_calls(),
+            "",
+            "an energy write must not run `nodo daemon restart`"
+        );
+    }
+
+    /// And the mechanism is not simply gone: a key the node reads once at start-up
+    /// still owes the restart, because the file and the running node would
+    /// otherwise disagree.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_restart_key_still_restarts_when_something_is_serving() {
+        let scratch = Scratch::new("restart");
+
+        let transaction = scratch.apply("low_demand.CPU_MAX_PERCENT", "70").await;
+
+        match transaction.result {
+            // Nothing is serving on this scratch install's gateway port, which is
+            // the honest outcome here: the transaction asks that question before
+            // deciding a restart is owed, and does not restart what is not running.
+            Ok(Applied::NotRunning) => {
+                assert_eq!(scratch.nodo_calls(), "", "nothing was running to restart");
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
+        assert!(
+            scratch.config_text().contains("CPU_MAX_PERCENT: 70"),
+            "{}",
+            scratch.config_text()
+        );
+    }
+
+    /// A live write still has to leave a file the node can read. Nothing restarts,
+    /// so this is the only point at which a broken document would be caught before
+    /// the operator is told the change landed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_live_write_that_breaks_the_document_is_reverted() {
+        let scratch = Scratch::new("broken");
+        let before = scratch.config_text();
+
+        // A value that turns the file into something that no longer parses.
+        let transaction = scratch.apply("energy.PRICE_PER_KWH", "[unclosed").await;
+
+        let error = transaction.result.expect_err("a broken document must not stand");
+        // Named rather than merely "an error": this test passed at one point
+        // because the stub yq was failing for its own reasons, which is exactly
+        // the wrong reason for it to pass.
+        assert!(error.contains("no longer parses"), "{error}");
+        assert_eq!(scratch.config_text(), before, "the file must be put back");
+        assert_eq!(scratch.nodo_calls(), "");
+    }
+
+    /// The catalogue, as a property rather than as a list to be read: `energy.*` is
+    /// live and the keys around it are not.
+    #[test]
+    fn only_the_keys_the_node_re_reads_are_live() {
+        assert_eq!(reload_for(&["energy.PRICE_PER_KWH"]), Reload::Live);
+        assert_eq!(reload_for(&["energy.ENABLED"]), Reload::Live);
+
+        for path in [
+            "low_demand.CPU_MAX_PERCENT",
+            "network.GATEWAY_PORT",
+            "main.STORAGE",
+            "ledgers.ergo.payments.COLD_WALLET",
+        ] {
+            assert_eq!(reload_for(&[path]), Reload::Restart, "{path}");
+        }
+    }
+
+    /// A write is one transaction, so a mixed one cannot skip the restart half of
+    /// it: that would apply the live keys and leave the rest on disk only.
+    #[test]
+    fn a_write_touching_both_kinds_of_key_restarts() {
+        assert_eq!(
+            reload_for(&["energy.PRICE_PER_KWH", "low_demand.CPU_MAX_PERCENT"]),
+            Reload::Restart
+        );
+        // And an empty write is not vacuously live.
+        assert_eq!(reload_for(&[]), Reload::Restart);
+    }
+
+    /// The Rust catalogue and the Python reader have to agree about which block is
+    /// re-read, or the TUI tells an operator a change took when it did not.
+    #[test]
+    fn the_live_block_matches_what_the_node_actually_re_reads() {
+        let monitor = fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../src/manager/energy/monitor.py"
+        ))
+        .expect("src/manager/energy/monitor.py ships with the repository");
+
+        assert!(
+            monitor.contains("_reload_if_changed"),
+            "the TUI treats energy.* as live, but the monitor no longer re-reads it"
+        );
+        assert!(
+            monitor.contains("def _config_stamp"),
+            "the reload is supposed to be driven by the file's stamp"
+        );
     }
 }
