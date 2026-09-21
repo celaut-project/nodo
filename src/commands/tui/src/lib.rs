@@ -2,6 +2,10 @@
 /// a missing Java runtime, surfaced where an operator actually looks.
 pub mod alerts;
 
+/// Colour themes. Every colour `ui` draws comes from here; the default matches the
+/// Ubuntu terminal this node is overwhelmingly installed from.
+pub mod theme;
+
 /// The CELL page: policy levers and profiles.
 pub mod cell;
 
