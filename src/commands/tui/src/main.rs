@@ -65,7 +65,7 @@ async fn main() -> AppResult<()> {
     // inside `App::new()` so it is one visible line in the entry point, and so that
     // constructing an `App` stays a pure thing that does not consult the filesystem
     // for a marker.
-    let mut app = App::new().with_kya_gate();
+    let mut app = App::new().with_operator_alerts().with_kya_gate();
 
     // Initialize the terminal user interface.
     let backend = CrosstermBackend::new(io::stderr());
