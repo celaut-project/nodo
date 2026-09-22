@@ -18,6 +18,16 @@ pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
             MouseEventKind::ScrollUp => app.on_up(),
             MouseEventKind::ScrollDown => app.on_down(),
             MouseEventKind::Down(MouseButton::Left) => app.click_at(mouse.column, mouse.row),
+            // Dragging a schedule window's edge along the day bar (issue #414). Only
+            // SCHEDULE has anything to drag; `drag_schedule` is a no-op elsewhere and
+            // while nothing is held.
+            MouseEventKind::Drag(MouseButton::Left) => {
+                app.drag_schedule(mouse.column, mouse.row)
+            }
+            // Let go on any button release, not just the left one: a release arriving
+            // for another button while the left is held would otherwise leave the edge
+            // stuck to the pointer after the gesture ended.
+            MouseEventKind::Up(_) => app.release_schedule_drag(),
             _ => {}
         },
         // The scrollable overlay is the one modal with anything to scroll.

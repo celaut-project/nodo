@@ -252,6 +252,76 @@ pub fn snap(minute: u16) -> u16 {
     rounded % MINUTES_PER_DAY
 }
 
+/// Where the 24-hour bar was drawn, and what one of its cells is worth.
+///
+/// The geometry the mouse needs, recorded by the draw so the click handler does not
+/// have to reconstruct a layout that depends on the width the pane happened to get.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScheduleBar {
+    /// Terminal column of the bar's first cell (midnight).
+    pub x: u16,
+    /// Terminal row the bar itself is drawn on.
+    pub y: u16,
+    /// How many cells the bar is wide. Always a whole number of hours.
+    pub width: u16,
+    /// Minutes one cell covers: 60, 30, 20 or 15.
+    pub per_slot: u16,
+}
+
+impl ScheduleBar {
+    /// The time of day column `x` points at, snapped to the edit grid.
+    ///
+    /// `None` outside the bar. Clamped to the last cell rather than wrapping at the
+    /// right-hand end: a drag that runs off the edge means "as late as it goes", and
+    /// wrapping it round to midnight would turn an overshoot into a different window.
+    pub fn minute_at(&self, x: u16) -> Option<u16> {
+        if self.width == 0 || x < self.x || x >= self.x + self.width {
+            return None;
+        }
+        let slot = (x - self.x).min(self.width - 1);
+        Some(snap(slot * self.per_slot))
+    }
+
+    /// Whether `position` is on the bar's own row.
+    pub fn contains(&self, x: u16, y: u16) -> bool {
+        y == self.y && x >= self.x && x < self.x + self.width
+    }
+}
+
+/// Which window edge a pointer at `minute` should grab, out of `windows`.
+///
+/// The nearer edge of the nearest window, measured around the clock so the edges of
+/// a window through midnight are as reachable as any other. `None` when there is
+/// nothing to grab.
+///
+/// Picking the nearest edge rather than requiring the pointer to be *on* one is what
+/// makes this usable at this resolution: one cell can be a whole hour, so an edge
+/// occupies no column of its own to aim at.
+pub fn nearest_edge(windows: &[Window], minute: u16) -> Option<(usize, Edge)> {
+    windows
+        .iter()
+        .enumerate()
+        .flat_map(|(index, window)| {
+            [
+                (index, Edge::Start, distance_around_clock(window.start, minute)),
+                (index, Edge::End, distance_around_clock(window.end, minute)),
+            ]
+        })
+        .min_by_key(|(_, _, distance)| *distance)
+        .map(|(index, edge, _)| (index, edge))
+}
+
+/// Minutes between two times of day, the short way round.
+///
+/// 23:30 and 00:30 are an hour apart, not twenty-three: the day is a circle, and an
+/// edge near midnight must not read as the furthest point from its own neighbour.
+fn distance_around_clock(left: u16, right: u16) -> u16 {
+    let left = left % MINUTES_PER_DAY;
+    let right = right % MINUTES_PER_DAY;
+    let forward = (left + MINUTES_PER_DAY - right) % MINUTES_PER_DAY;
+    forward.min(MINUTES_PER_DAY - forward)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,6 +484,94 @@ mod tests {
         assert_eq!(snap(parse_clock("22:14").unwrap()), parse_clock("22:00").unwrap());
         assert_eq!(snap(parse_clock("23:50").unwrap()), 0, "rounds up into the next day");
         assert_eq!(snap(parse_clock("00:00").unwrap()), 0);
+    }
+
+    #[test]
+    fn a_column_of_the_bar_is_a_time_of_day() {
+        // A 96-cell bar: quarter-hour cells, the finest the page draws.
+        let bar = ScheduleBar {
+            x: 1,
+            y: 5,
+            width: 96,
+            per_slot: 15,
+        };
+
+        assert_eq!(bar.minute_at(1), Some(0), "the first cell is midnight");
+        assert_eq!(bar.minute_at(1 + 48), Some(12 * 60), "halfway is noon");
+        // Snapped onto the edit grid, so a dragged edge lands where a nudged one
+        // would rather than on an odd quarter the arrows can never return to.
+        // `snap` rounds to the nearest half hour, ties upward.
+        assert_eq!(bar.minute_at(1 + 1), Some(30), "00:15 snaps to 00:30");
+        assert_eq!(bar.minute_at(1 + 2), Some(30), "00:30 is already on the grid");
+        assert_eq!(bar.minute_at(1 + 3), Some(60), "00:45 snaps to 01:00");
+        // Off the bar on either side.
+        assert_eq!(bar.minute_at(0), None);
+        assert_eq!(bar.minute_at(1 + 96), None);
+    }
+
+    #[test]
+    fn an_hour_wide_cell_still_reads_as_a_time() {
+        // The coarsest the page draws, on a narrow terminal.
+        let bar = ScheduleBar {
+            x: 0,
+            y: 3,
+            width: 24,
+            per_slot: 60,
+        };
+        assert_eq!(bar.minute_at(0), Some(0));
+        assert_eq!(bar.minute_at(9), Some(9 * 60));
+        assert_eq!(bar.minute_at(23), Some(23 * 60));
+    }
+
+    #[test]
+    fn a_drag_grabs_the_nearer_edge_of_the_nearer_window() {
+        let windows = schedule(&[("09:00", "18:00"), ("20:00", "22:00")]).windows;
+
+        // Just inside the first window's opening: its START.
+        assert_eq!(
+            nearest_edge(&windows, parse_clock("09:30").unwrap()),
+            Some((0, Edge::Start))
+        );
+        // Near its closing: its END.
+        assert_eq!(
+            nearest_edge(&windows, parse_clock("17:30").unwrap()),
+            Some((0, Edge::End))
+        );
+        // Closer to the second window than to the first.
+        assert_eq!(
+            nearest_edge(&windows, parse_clock("19:45").unwrap()),
+            Some((1, Edge::Start))
+        );
+        assert_eq!(
+            nearest_edge(&windows, parse_clock("21:50").unwrap()),
+            Some((1, Edge::End))
+        );
+    }
+
+    /// The day is a circle. An edge at 23:00 is an hour from 00:00, not twenty-three,
+    /// or the night shift's own edges become the hardest ones on the bar to grab.
+    #[test]
+    fn the_edges_of_a_night_shift_are_reachable_from_either_side_of_midnight() {
+        let windows = schedule(&[("22:00", "06:00")]).windows;
+
+        assert_eq!(
+            nearest_edge(&windows, parse_clock("23:00").unwrap()),
+            Some((0, Edge::Start))
+        );
+        // Past midnight, still nearer the start than the end.
+        assert_eq!(
+            nearest_edge(&windows, parse_clock("00:30").unwrap()),
+            Some((0, Edge::Start))
+        );
+        assert_eq!(
+            nearest_edge(&windows, parse_clock("05:00").unwrap()),
+            Some((0, Edge::End))
+        );
+    }
+
+    #[test]
+    fn there_is_nothing_to_grab_on_an_empty_schedule() {
+        assert_eq!(nearest_edge(&[], 0), None);
     }
 
     #[test]
