@@ -46,6 +46,9 @@ impl Alerts {
         if let Some(alert) = gateway_port_alert(config, config_document, serving) {
             found.push(alert);
         }
+        if let Some(alert) = plaintext_gateway_port_alert(config, config_document) {
+            found.push(alert);
+        }
         if let Some(alert) = java_alert(config_document) {
             found.push(alert);
         }
@@ -85,11 +88,23 @@ impl Alerts {
 /// `src/utils/config.py`.
 pub const GATEWAY_NOTICE_FILE: &str = ".gateway_notice";
 
+/// The plaintext gateway's own notice file -- a separate one, matching
+/// `GATEWAY_PLAINTEXT_NOTICE_FILE` in `src/utils/config.py`, so an unreachable TLS
+/// port and an unreachable plaintext port never answer for each other.
+pub const GATEWAY_PLAINTEXT_NOTICE_FILE: &str = ".gateway_plaintext_notice";
+
 fn gateway_notice_path(config: &Path) -> PathBuf {
     config
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(GATEWAY_NOTICE_FILE)
+}
+
+fn gateway_plaintext_notice_path(config: &Path) -> PathBuf {
+    config
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(GATEWAY_PLAINTEXT_NOTICE_FILE)
 }
 
 /// `network.GATEWAY_PORT` as a real port, or `None` for `auto`, empty or out of
@@ -193,6 +208,61 @@ fn unreachable_lead(serving: Option<bool>) -> &'static str {
         Some(false) => "NOT SERVING -",
         None => "NOT REACHABLE FROM OUTSIDE -",
     }
+}
+
+/// `network.GATEWAY_PLAINTEXT_PORT` resolved the way
+/// `ConfigManager.get_plaintext_gateway_port` resolves it: a literal number, `auto`
+/// as `GATEWAY_PORT + 1`, or `None` when it is `0`, empty, or there is no TLS port
+/// yet for `auto` to add one to.
+///
+/// `None` here means "nothing to check", not "unreachable" -- `0` is the operator's
+/// own choice to turn this off, and no base port means the primary
+/// `gateway_port_unassigned` alert already covers the node.
+fn plaintext_assigned_port(document: Option<&serde_yaml::Value>) -> Option<u16> {
+    let value = document?.get("network")?.get("GATEWAY_PLAINTEXT_PORT")?;
+    let text = match value {
+        serde_yaml::Value::String(text) => text.trim().to_string(),
+        serde_yaml::Value::Number(number) => number.to_string(),
+        _ => return None,
+    };
+    if text.is_empty() {
+        return None;
+    }
+    if text.eq_ignore_ascii_case("auto") {
+        return assigned_port(document)?.checked_add(1);
+    }
+    text.parse::<u16>().ok().filter(|port| *port > 0)
+}
+
+/// The guest-only counterpart of `gateway_port_alert`.
+///
+/// Different audience: the TLS port is what peers and the CLI dial, so its notice
+/// says peers cannot reach the node. The plaintext port is never announced to
+/// either -- it exists for the services this node launches, handed to them in
+/// `__config__.gateway` -- so what breaks when it is unreachable is every microVM
+/// this node runs, never a peer off this LAN. No `serving` split either: unlike the
+/// TLS port there is no "not serving at all" state to distinguish here, and `0`
+/// (the port turned off) is an ordinary configuration, not a condition to report.
+fn plaintext_gateway_port_alert(
+    config: &Path,
+    document: Option<&serde_yaml::Value>,
+) -> Option<OperatorAlert> {
+    let port = plaintext_assigned_port(document)?;
+
+    fs::read_to_string(gateway_plaintext_notice_path(config))
+        .ok()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())?;
+
+    Some(OperatorAlert {
+        key: "gateway_plaintext_port_unreachable",
+        summary: format!(
+            "TCP {port} (the plaintext gateway) is not reachable from the guest \
+             subnet, so services this node launches cannot call back into it. Fix \
+             it: see {} for the exact command.",
+            gateway_plaintext_notice_path(config).display()
+        ),
+    })
 }
 
 /// No Java runtime, so payments and reputation are silently unavailable.
@@ -563,6 +633,7 @@ mod tests {
             "gateway_port_unassigned",
             "gateway_port_firewall",
             "gateway_port_closed",
+            "gateway_plaintext_port_unreachable",
             "java_missing",
         ] {
             assert!(
@@ -598,5 +669,99 @@ mod tests {
             python.contains(&format!("GATEWAY_NOTICE_FILE = \"{GATEWAY_NOTICE_FILE}\"")),
             "the TUI looks for {GATEWAY_NOTICE_FILE}, which src/utils/config.py does not write"
         );
+        assert!(
+            python.contains(&format!(
+                "GATEWAY_PLAINTEXT_NOTICE_FILE = \"{GATEWAY_PLAINTEXT_NOTICE_FILE}\""
+            )),
+            "the TUI looks for {GATEWAY_PLAINTEXT_NOTICE_FILE}, which src/utils/config.py \
+             does not write"
+        );
+    }
+
+    #[test]
+    fn a_reachable_plaintext_port_with_nothing_pending_raises_nothing() {
+        let dir = scratch("plaintext-clean");
+        let config = dir.join("config.yaml");
+        let document = document("network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: auto\n");
+
+        assert_eq!(plaintext_gateway_port_alert(&config, Some(&document)), None);
+    }
+
+    #[test]
+    fn a_pending_plaintext_notice_names_the_port_and_the_file() {
+        let dir = scratch("plaintext-pending");
+        let config = dir.join("config.yaml");
+        fs::write(
+            dir.join(GATEWAY_PLAINTEXT_NOTICE_FILE),
+            "open TCP 52286, scoped to 192.168.200.0/24",
+        )
+        .unwrap();
+        let document = document("network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: auto\n");
+
+        let alert =
+            plaintext_gateway_port_alert(&config, Some(&document)).expect("an alert");
+
+        assert_eq!(alert.key, "gateway_plaintext_port_unreachable");
+        assert!(alert.summary.contains("52286"), "{}", alert.summary);
+        // Never "peers": this port is not announced to them at all.
+        assert!(!alert.summary.to_lowercase().contains("peer"), "{}", alert.summary);
+    }
+
+    /// `auto` derives from the TLS port, the same way the Python side does.
+    #[test]
+    fn auto_resolves_as_gateway_port_plus_one() {
+        let dir = scratch("plaintext-auto");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(GATEWAY_PLAINTEXT_NOTICE_FILE), "open it").unwrap();
+        let document = document("network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: auto\n");
+
+        let alert =
+            plaintext_gateway_port_alert(&config, Some(&document)).expect("an alert");
+
+        assert!(alert.summary.contains("52286"), "{}", alert.summary);
+    }
+
+    /// 0 is the operator's own choice -- services fall back to the TLS port -- so a
+    /// leftover notice from before it was disabled must not haunt the banner.
+    #[test]
+    fn a_disabled_plaintext_port_raises_nothing_even_with_a_stray_notice() {
+        let dir = scratch("plaintext-disabled");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(GATEWAY_PLAINTEXT_NOTICE_FILE), "open it").unwrap();
+        let document = document("network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: 0\n");
+
+        assert_eq!(plaintext_gateway_port_alert(&config, Some(&document)), None);
+    }
+
+    #[test]
+    fn the_plaintext_alert_clears_when_its_notice_is_removed() {
+        let dir = scratch("plaintext-clears");
+        let config = dir.join("config.yaml");
+        let notice = dir.join(GATEWAY_PLAINTEXT_NOTICE_FILE);
+        fs::write(&notice, "open it").unwrap();
+        let document = document("network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: auto\n");
+        assert!(plaintext_gateway_port_alert(&config, Some(&document)).is_some());
+
+        fs::remove_file(&notice).unwrap();
+
+        assert_eq!(plaintext_gateway_port_alert(&config, Some(&document)), None);
+    }
+
+    #[test]
+    fn polling_collects_the_plaintext_alert_between_the_tls_port_and_java() {
+        let dir = scratch("plaintext-order");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(GATEWAY_PLAINTEXT_NOTICE_FILE), "open it").unwrap();
+        let mut alerts = Alerts::default();
+
+        alerts.poll(
+            &config,
+            Some(&document(
+                "network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: auto\n",
+            )),
+            None,
+        );
+
+        assert!(alerts.has("gateway_plaintext_port_unreachable"));
     }
 }

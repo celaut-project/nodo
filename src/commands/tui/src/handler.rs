@@ -244,6 +244,8 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Pricing => {
             app.open_price_editor()
         }
+        (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Pricing => app.open_payment_rate_editor("ergo"),
+        (KeyModifiers::NONE, KeyCode::Char('b')) if app.page() == Page::Pricing => app.open_payment_rate_editor("bitcoin"),
         // ENERGY mirrors Config's `e` and adds Enter, because the page is a list of
         // one-key decisions and Enter is what "work this row" means on every other
         // list in this interface (issue #395).

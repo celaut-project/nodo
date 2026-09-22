@@ -813,7 +813,7 @@ if __name__ == '__main__':
             case "tx_history":
                 try:
                     from src.commands.tx_history import tx_history
-                    tx_history()
+                    tx_history(argv=sys.argv[2:])
                 except JavaDependencyMissing as e:
                     print_java_dependency_error(e)
                     os._exit(1)

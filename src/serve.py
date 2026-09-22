@@ -18,7 +18,7 @@ from src.utils.firewall.gateway import (
     operator_notice,
 )
 from src.utils.firewall.legacy import sweep_compat_tables
-from src.utils.firewall.reachability import ProbeResult
+from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
 from src.identity.grpc_transport import server_credentials
 from src.utils.network_policy import NetworkPolicy, NetworkPolicyConfigError
 
@@ -115,6 +115,115 @@ def _verify_gateway_port(port: int) -> None:
     # the original bug in a new place: a port nobody proved, never checked again.
     if probe.reachable is True:
         env_manager.mark_gateway_port_passed(port)
+
+
+def _verify_plaintext_gateway_port(port: int) -> None:
+    """The plaintext port's counterpart of ``_verify_gateway_port`` -- never fatal.
+
+    Guests are the only intended audience: the TLS port is what peers and the CLI
+    dial, and ``network.GATEWAY_PLAINTEXT_PORT`` is not announced to either (issue
+    #257 / ``docs/FIREWALL.md``). So a failure here means every service this node
+    launches from now on is handed an address in its ``__config__.gateway`` that it
+    cannot call back into -- resource changes, dependency launches and observation
+    all go quiet -- which is worth an operator alert, but never worth refusing to
+    serve: peers keep working through the TLS port regardless.
+
+    Reuses the exact probe the TLS port uses (``probe_tcp_from_bridge``, guest
+    subnet, real packet, not a read of the ruleset) because the failure mode is the
+    same one: an accept rule can exist and still lose to a foreign chain on the
+    same input hook. It does not, unlike the TLS path, open or withdraw any accept
+    rule of its own -- the plaintext port gets no *global* rule (only the per-VM
+    ones the launch path writes for the guest it hands this port to), so there is
+    nothing here for nodo to open or take back.
+    """
+    if not port:
+        return
+    if not bool(env_manager.get("network.VERIFY_GATEWAY_REACHABILITY", True)):
+        return
+    if env_manager.plaintext_gateway_port_passed(port):
+        log.LOGGER(
+            f"Plaintext gateway port {port} was already proven reachable in this "
+            "boot; skipping the probe."
+        )
+        return
+
+    bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch"))
+    gateway_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
+    subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
+    probe = probe_tcp_from_bridge(bridge=bridge, target_ip=gateway_ip, port=port, subnet=subnet)
+
+    if probe.reachable is True:
+        env_manager.mark_plaintext_gateway_port_passed(port)
+        log.LOGGER(
+            f"Verified plaintext gateway port {port} is reachable from {bridge}: "
+            f"{probe.detail}"
+        )
+        return
+
+    if probe.reachable is None:
+        log.LOGGER(
+            f"Could not verify the plaintext gateway port {port} from the guest "
+            f"subnet ({probe.detail}). Run 'nodo doctor' once an instance has run."
+        )
+        return
+
+    lines = [
+        f"The plaintext gateway port {port} is not reachable from the guest subnet "
+        f"{subnet}: {probe.detail} Every service this node launches from now on is "
+        "handed this address and will be unable to call back into it.",
+    ]
+    try:
+        from src.utils.firewall.backends import detect_backend
+
+        rejectors = detect_backend().foreign_input_rejectors()
+        lines.extend(rejectors.describe())
+    except Exception:
+        pass
+    lines.append("")
+    from src.utils.firewall.frontend import open_scoped_port_advice
+
+    lines.extend(open_scoped_port_advice(port, subnet=subnet, bridge=bridge))
+    lines.append("")
+    lines.append(
+        "Keep the rule scoped to that subnet: this port speaks plain gRPC with no "
+        "authentication, and opening it beyond the guests it is handed to would "
+        "hand every one of them, and anything else on this LAN, an unauthenticated "
+        "path into the node."
+    )
+
+    # emit_plaintext_gateway_notice owns the framing, the log line and the disk
+    # write; logging the same block here too would put two copies of one alert in
+    # app.log, which is the exact noise the framed-notice convention exists to cut.
+    env_manager.emit_plaintext_gateway_notice(
+        "plaintext gateway unreachable", "\n".join(lines)
+    )
+
+
+def _verify_gateway_ports(server, port: int, plaintext_port: int) -> None:
+    """Probe both gateway ports from the guest subnet, once ``server`` is listening.
+
+    An unreachable TLS port stops the node; an unreachable plaintext port never does.
+    Both are probed either way, so a refusal over the TLS port still leaves the
+    plaintext port's verdict (and its alert in `nodo info` / the TUI) behind.
+    """
+    try:
+        _verify_gateway_port(port)
+    except SystemExit:
+        # Probe the plaintext port before going down, while its listener is still up:
+        # the firewall that just blocked the TLS port almost always blocks this one
+        # too, and without this its alert never reaches `nodo info` or the TUI -- the
+        # operator opens the TLS port, restarts, and only then learns about the second.
+        # Never allowed to replace the refusal it runs inside of.
+        try:
+            _verify_plaintext_gateway_port(plaintext_port)
+        except Exception as e:
+            log.LOGGER(f'Could not probe the plaintext gateway port {plaintext_port}: {e}')
+        server.stop(0)
+        raise
+
+    # Never inside the try above: an unreachable plaintext port is an operator
+    # alert, not a reason to stop what the TLS check just proved works.
+    _verify_plaintext_gateway_port(plaintext_port)
 
 
 def _refuse_to_start(e: GatewayPortUnavailable) -> None:
@@ -246,10 +355,6 @@ def serve():
 
     # Only now can the guest-side probe distinguish "the firewall drops this" from
     # "nothing answers on this port".
-    try:
-        _verify_gateway_port(port)
-    except SystemExit:
-        server.stop(0)
-        raise
+    _verify_gateway_ports(server, port, plaintext_port)
 
     server.wait_for_termination()

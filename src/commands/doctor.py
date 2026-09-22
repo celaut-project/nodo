@@ -746,6 +746,7 @@ def _doctor_network_checks():
     )
 
     _doctor_guest_gateway_reachability()
+    _doctor_guest_plaintext_gateway_reachability()
     _doctor_guest_to_guest_forwarding()
 
 
@@ -848,6 +849,25 @@ def _doctor_guest_gateway_reachability():
     )
     print(f"  {probe.detail}", flush=True)
 
+    _print_input_rejectors(backend)
+    # The one thing worth adding: the command for the front-end actually running
+    # here, rather than a description of the property the operator must establish.
+    try:
+        from src.utils.firewall.frontend import open_port_advice
+
+        advice_lines = open_port_advice(port, bridge=bridge, subnet=subnet)
+    except Exception:
+        advice_lines = []
+    _print_suggestion(advice_lines)
+    print(
+        "  This tests the guest subnet only. Whether peers OUTSIDE this LAN can reach "
+        "the port is a separate question no check on this host can answer -- run "
+        "'nodo nat-guide'.",
+        flush=True
+    )
+
+
+def _print_input_rejectors(backend):
     # Three outcomes, all worth saying out loud: chains that can reject, a hook that
     # is clear, or a ruleset nobody could read. The last one used to print as the
     # middle one, which told the operator to go looking somewhere else entirely.
@@ -866,26 +886,117 @@ def _doctor_guest_gateway_reachability():
             "whatever the priority.",
             flush=True
         )
-    # The one thing worth adding: the command for the front-end actually running
-    # here, rather than a description of the property the operator must establish.
-    try:
-        from src.utils.firewall.frontend import open_port_advice
 
-        advice_lines = open_port_advice(port, bridge=bridge, subnet=subnet)
+
+def _print_suggestion(advice_lines):
+    if not advice_lines:
+        return
+    # Blank line plus the "Suggestion:" label used elsewhere in this command:
+    # otherwise this reads as more diagnostic narrative instead of the one
+    # actionable step, and gets lost after the reject-chain scan output above.
+    print(flush=True)
+    print(f"  Suggestion: {advice_lines[0]}", flush=True)
+    for line in advice_lines[1:]:
+        print(f"  {line}", flush=True)
+
+
+def _doctor_guest_plaintext_gateway_reachability():
+    """The same guest-side probe, for the port services are actually handed.
+
+    ``network.GATEWAY_PLAINTEXT_PORT`` (``auto`` = ``GATEWAY_PORT + 1``) is what goes
+    into every service's ``__config__.gateway``; the TLS port checked above is what
+    peers and the CLI dial. A firewall can let one through and not the other -- a
+    ``ufw allow`` for the TLS port says nothing about this one -- so checking only
+    the TLS port answers the peers' question and not the guests'.
+
+    There is no global accept rule to look for: nodo never opens this port wide (it
+    is unauthenticated plain gRPC), only per guest at launch, so the probe is the
+    whole check and the advice is scoped to the guest subnet.
+    """
+    print("\nGuest-facing plaintext gateway:", flush=True)
+
+    try:
+        from src.utils.config import ConfigManager
+        from src.utils.firewall.backends import detect_backend
+        from src.utils.firewall.reachability import probe_tcp_from_bridge
+    except Exception as e:
+        print(f"[WARN] Could not load the firewall helpers: {e}", flush=True)
+        return
+
+    try:
+        env_manager = ConfigManager()
+        if not env_manager.gateway_port_or_none():
+            # `auto` derives from the TLS port; the check above already said it is
+            # unassigned and what to do about it.
+            print(
+                "[WARN] Not checked: network.GATEWAY_PORT is not assigned, and the "
+                "plaintext port is derived from it.",
+                flush=True
+            )
+            return
+        port = env_manager.get_plaintext_gateway_port()
+    except Exception as e:
+        print(f"[WARN] Could not read the node config: {e}", flush=True)
+        return
+
+    if not port:
+        print(
+            "[INFO] network.GATEWAY_PLAINTEXT_PORT is disabled: services are handed the "
+            "TLS port, which the check above covers.",
+            flush=True
+        )
+        return
+    print(f"[OK] Plaintext gateway port resolves to {port}.", flush=True)
+
+    try:
+        bridge = str(env_manager.get("virtualizers.ch.NETWORK_BRIDGE_NAME", "nodo-br-ch"))
+        gateway_ip = str(env_manager.get("virtualizers.ch.NETWORK_GATEWAY_IP", "192.168.200.1"))
+        subnet = str(env_manager.get("virtualizers.ch.NETWORK_SUBNET", "192.168.200.0/24"))
+    except Exception as e:
+        print(f"[WARN] Could not read the guest network settings: {e}", flush=True)
+        return
+
+    # provide_listener for the same reason as above: doctor usually runs with the
+    # node stopped. With the node up, the daemon's own listener on the bridge answers.
+    probe = probe_tcp_from_bridge(
+        bridge=bridge,
+        target_ip=gateway_ip,
+        port=port,
+        subnet=subnet,
+        provide_listener=True,
+    )
+
+    if probe.reachable is True:
+        print(f"[OK] A guest on {bridge} can reach {gateway_ip}:{port}.", flush=True)
+        return
+
+    if probe.reachable is None:
+        print(f"[WARN] Could not test it: {probe.detail}", flush=True)
+        return
+
+    print(
+        f"[FAIL] A guest on {bridge} CANNOT reach {gateway_ip}:{port}. This is the "
+        "address every service is handed in its __config__.gateway, so none of them "
+        "could launch dependencies, modify its resources or observe traffic -- even "
+        "if the TLS port above is reachable.",
+        flush=True
+    )
+    print(f"  {probe.detail}", flush=True)
+
+    try:
+        _print_input_rejectors(detect_backend())
+    except Exception as e:
+        print(f"  Could not inspect the firewall backend: {e}", flush=True)
+    try:
+        from src.utils.firewall.frontend import open_scoped_port_advice
+
+        advice_lines = open_scoped_port_advice(port, subnet=subnet, bridge=bridge)
     except Exception:
         advice_lines = []
-    if advice_lines:
-        # Blank line plus the "Suggestion:" label used elsewhere in this command:
-        # otherwise this reads as more diagnostic narrative instead of the one
-        # actionable step, and gets lost after the reject-chain scan output above.
-        print(flush=True)
-        print(f"  Suggestion: {advice_lines[0]}", flush=True)
-        for line in advice_lines[1:]:
-            print(f"  {line}", flush=True)
+    _print_suggestion(advice_lines)
     print(
-        "  This tests the guest subnet only. Whether peers OUTSIDE this LAN can reach "
-        "the port is a separate question no check on this host can answer -- run "
-        "'nodo nat-guide'.",
+        f"  Keep the rule scoped to {subnet}: this port speaks plain gRPC with no "
+        "authentication, and must not be reachable from anywhere but the guests.",
         flush=True
     )
 

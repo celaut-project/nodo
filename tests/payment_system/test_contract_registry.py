@@ -86,7 +86,7 @@ class ProtocolTests(unittest.TestCase):
         broken = _contract()
         del broken.process_payment
         with mock.patch.object(registry, "CANDIDATES", (registry._Candidate("broken", "x"),)), \
-                mock.patch.object(registry, "_configured", return_value=True), \
+                mock.patch.object(registry, "is_configured", return_value=True), \
                 mock.patch("src.payment_system.contracts.registry.import_module",
                            return_value=broken):
             registry.forget_reports()
@@ -98,7 +98,7 @@ class AvailabilityTests(unittest.TestCase):
 
     def _offered(self, module, configured=True):
         with mock.patch.object(registry, "CANDIDATES", (registry._Candidate("x", "x.y"),)), \
-                mock.patch.object(registry, "_configured", return_value=configured), \
+                mock.patch.object(registry, "is_configured", return_value=configured), \
                 mock.patch("src.payment_system.contracts.registry.import_module",
                            return_value=module):
             registry.forget_reports()
@@ -120,7 +120,7 @@ class AvailabilityTests(unittest.TestCase):
 
     def test_a_module_that_will_not_import_is_not_offered_and_does_not_raise(self):
         with mock.patch.object(registry, "CANDIDATES", (registry._Candidate("x", "x.y"),)), \
-                mock.patch.object(registry, "_configured", return_value=True), \
+                mock.patch.object(registry, "is_configured", return_value=True), \
                 mock.patch("src.payment_system.contracts.registry.import_module",
                            side_effect=OSError("no libjvm")):
             registry.forget_reports()
@@ -139,7 +139,7 @@ class AvailabilityTests(unittest.TestCase):
         # All three calls under the same patches, so the only candidate in play is the
         # unusable one -- otherwise the real registry reports its own ledgers too.
         with mock.patch.object(registry, "CANDIDATES", (registry._Candidate("x", "x.y"),)), \
-                mock.patch.object(registry, "_configured", return_value=True), \
+                mock.patch.object(registry, "is_configured", return_value=True), \
                 mock.patch("src.payment_system.contracts.registry.import_module",
                            return_value=unusable), \
                 mock.patch.object(registry, "LOGGER", said.append):

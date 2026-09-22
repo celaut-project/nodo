@@ -25,6 +25,8 @@ from unittest.mock import patch
 
 from src.utils.config import (
     GATEWAY_NOTICE_FILE,
+    GATEWAY_PLAINTEXT_NOTICE_FILE,
+    GATEWAY_PLAINTEXT_PORT_PASSED_FILE,
     GATEWAY_PORT_PASSED_FILE,
     ConfigManager,
 )
@@ -60,6 +62,10 @@ class _ManagerCase(unittest.TestCase):
     @staticmethod
     def _marker(tmpdir):
         return Path(tmpdir) / "storage" / "__cache__" / GATEWAY_PORT_PASSED_FILE
+
+    @staticmethod
+    def _plaintext_marker(tmpdir):
+        return Path(tmpdir) / "storage" / "__cache__" / GATEWAY_PLAINTEXT_PORT_PASSED_FILE
 
 
 class GatewayPortResolutionTests(_ManagerCase):
@@ -423,6 +429,110 @@ class GatewayNoticeTests(_ManagerCase):
             manager.mark_gateway_port_passed(41000)
 
             self.assertFalse(notice.exists())
+
+
+@patch("src.utils.config.os.geteuid", return_value=1000)
+class PlaintextVerdictCacheTests(_ManagerCase):
+    """The plaintext port's counterpart of VerdictCacheTests.
+
+    A separate cache file, so proving one port never reads back as proving the
+    other -- but tied to network.GATEWAY_PORT as well as to its own key, because
+    `auto` resolves it as GATEWAY_PORT + 1: change the TLS port and the plaintext
+    port's *value* changes with it, whether or not GATEWAY_PLAINTEXT_PORT itself
+    was touched.
+    """
+
+    @patch("src.utils.config.ConfigManager._boot_id", return_value="boot-a")
+    def test_a_marked_port_reads_back_as_passed(self, _boot, _euid):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir, "58443")
+            manager.mark_plaintext_gateway_port_passed(58444)
+
+            self.assertTrue(manager.plaintext_gateway_port_passed(58444))
+            self.assertTrue(self._plaintext_marker(tmpdir).exists())
+
+    @patch("src.utils.config.ConfigManager._boot_id", return_value="boot-a")
+    def test_the_two_ports_do_not_share_a_verdict(self, _boot, _euid):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir, "58443")
+            manager.mark_gateway_port_passed(58443)
+            manager.mark_plaintext_gateway_port_passed(58444)
+
+            self.assertTrue(manager.gateway_port_passed(58443))
+            self.assertTrue(manager.plaintext_gateway_port_passed(58444))
+            # And neither file answers for the other port.
+            self.assertFalse(manager.gateway_port_passed(58444))
+            self.assertFalse(manager.plaintext_gateway_port_passed(58443))
+
+    @patch("src.utils.config.ConfigManager._boot_id", return_value="boot-a")
+    def test_writing_the_tls_port_throws_away_the_plaintext_verdict_too(
+        self, _boot, _euid
+    ):
+        # auto = GATEWAY_PORT + 1, so a new TLS port means a new plaintext port,
+        # proven or not.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir, "58443")
+            manager.mark_plaintext_gateway_port_passed(58444)
+
+            manager.set("network.GATEWAY_PORT", 52285)
+
+            self.assertFalse(self._plaintext_marker(tmpdir).exists())
+            self.assertFalse(manager.plaintext_gateway_port_passed(58444))
+
+    @patch("src.utils.config.ConfigManager._boot_id", return_value="boot-a")
+    def test_writing_the_plaintext_port_directly_throws_away_its_own_verdict(
+        self, _boot, _euid
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir, "58443")
+            manager.mark_plaintext_gateway_port_passed(58444)
+
+            manager.set("network.GATEWAY_PLAINTEXT_PORT", 52286)
+
+            self.assertFalse(self._plaintext_marker(tmpdir).exists())
+
+    @patch("src.utils.config.ConfigManager._boot_id", return_value="boot-a")
+    def test_writing_the_plaintext_port_leaves_the_tls_verdict_alone(
+        self, _boot, _euid
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir, "58443")
+            manager.mark_gateway_port_passed(58443)
+
+            manager.set("network.GATEWAY_PLAINTEXT_PORT", 52286)
+
+            self.assertTrue(manager.gateway_port_passed(58443))
+
+
+class PlaintextGatewayNoticeTests(_ManagerCase):
+    """The plaintext port's own notice file: same lifecycle, never fatal."""
+
+    @patch("src.utils.config.os.geteuid", return_value=1000)
+    def test_it_is_written_to_its_own_file(self, _euid):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir)
+            manager.emit_plaintext_gateway_notice(
+                "plaintext gateway unreachable", "open TCP 58444, scoped to the subnet"
+            )
+
+            notice = Path(tmpdir) / GATEWAY_PLAINTEXT_NOTICE_FILE
+            self.assertIn("scoped to the subnet", notice.read_text(encoding="utf-8"))
+            # And never the TLS port's own file -- an unrelated question about one
+            # port must not answer, or be answered by, the other.
+            self.assertFalse((Path(tmpdir) / GATEWAY_NOTICE_FILE).exists())
+
+    @patch("src.utils.config.ConfigManager._boot_id", return_value="boot-a")
+    @patch("src.utils.config.os.geteuid", return_value=1000)
+    def test_a_proven_port_clears_its_own_pending_notice_only(self, _euid, _boot):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir)
+            manager.emit_plaintext_gateway_notice("plaintext gateway unreachable", "fix it")
+            plaintext_notice = Path(tmpdir) / GATEWAY_PLAINTEXT_NOTICE_FILE
+            self.assertTrue(plaintext_notice.exists())
+
+            manager.mark_plaintext_gateway_port_passed(58444)
+
+            self.assertFalse(plaintext_notice.exists())
 
 
 if __name__ == "__main__":
