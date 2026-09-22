@@ -2253,6 +2253,14 @@ pub struct App {
     /// that cannot be paid looked identical from this screen. Polled on the data
     /// tick, because drawing must not touch the filesystem.
     pub alerts: crate::alerts::Alerts,
+    /// Why the peer list is empty, when it is empty because the query failed rather
+    /// than because this node knows nobody.
+    ///
+    /// `get_peers` used to be `unwrap_or_default()`-ed straight into the list, so a
+    /// schema the query had fallen behind rendered as `PEERS • 0 connected` — the
+    /// same screen a brand-new node draws, and the reason nobody noticed for a
+    /// release. The two states are not the same claim and no longer look the same.
+    pub peers_error: Option<String>,
     pub paths: Paths,
     pub input_mode: InputMode,
     pub input: String,
@@ -2357,6 +2365,7 @@ impl Default for App {
             node_energy: NodeEnergy::default(),
             poll_alerts: false,
             alerts: crate::alerts::Alerts::default(),
+            peers_error: None,
             paths,
             input_mode: InputMode::Normal,
             input: String::new(),
@@ -2745,6 +2754,23 @@ impl App {
         }
     }
 
+    /// Reload the peer list, keeping the reason when there is nothing to show.
+    ///
+    /// The one place `get_peers` reaches the page, so a query that fails cannot be
+    /// swallowed at one call site and reported at another. A failure leaves the last
+    /// good list on screen rather than blanking it: a peer this node knew a second
+    /// ago is still a peer, and replacing the table with nothing would hide the very
+    /// rows the error is about.
+    fn refresh_peers(&mut self) {
+        match get_peers(&self.paths.database) {
+            Ok(peers) => {
+                self.peers_error = None;
+                self.peers.refresh(peers);
+            }
+            Err(error) => self.peers_error = Some(error.to_string()),
+        }
+    }
+
     /// Reload the payment and reputation history behind the selected peer and client.
     ///
     /// Called when the selection moves and after each data refresh, never from the
@@ -2803,8 +2829,7 @@ impl App {
                     delta,
                     shorten(&peer.id, 16)
                 );
-                self.peers
-                    .refresh(get_peers(&self.paths.database).unwrap_or_default());
+                self.refresh_peers();
                 // The adjustment is an event like any other; show it without waiting
                 // for the next refresh.
                 self.load_selection_details();
@@ -4483,8 +4508,7 @@ impl App {
         let mut instances = get_instances(&self.paths, &service_names).unwrap_or_default();
         self.derive_instance_rates(&mut instances, Instant::now());
         self.instances.refresh(instances);
-        self.peers
-            .refresh(get_peers(&self.paths.database).unwrap_or_default());
+        self.refresh_peers();
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
@@ -5236,7 +5260,18 @@ fn json_u128(value: Option<&serde_json::Value>) -> u128 {
 }
 
 fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
+    // A node that has never been migrated has no database, or one with no `peer`
+    // table in it, and neither is a failure to report -- it is a node with no peers
+    // yet, which is exactly what an empty list says. `list_peers()` draws the same
+    // line ("the 'peer' table does not exist"). Anything past this point is a query
+    // that disagrees with a schema that *is* there, which is the case worth raising.
+    if !database.exists() {
+        return Ok(Vec::new());
+    }
     let connection = Connection::open(database)?;
+    if !table_exists(&connection, "peer") {
+        return Ok(Vec::new());
+    }
     // Our balance on a peer lives on the `peer` table's own `balance_mu` column. The old
     // `LEFT JOIN clients c ON p.client_id = c.id` was wrong: `peer.remote_client_id`
     // is our client id *inside the remote peer*, never a key into our local
@@ -5307,28 +5342,25 @@ fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
 /// surfaced none of it at all (issue #231). A method is ledger + contract + asset, so
 /// `token_id` comes back with the rest: without it two methods of one Ergo contract
 /// render as the same row twice, at two different rates.
+///
+/// `contract_instance.ledger` **is** the chain's tag. It used to be `ledger_hash`, a
+/// sha3 of a serialized description joined against `ledger(hash, content)` to get the
+/// tag back; `refactor(db): a ledger is its tag, so stop storing one` dropped both the
+/// column and the table's content, and this query kept asking for them. SQLite rejects
+/// the statement at `prepare`, so every peer on the page disappeared rather than every
+/// peer's contracts -- see `get_peers`.
 fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<PeerContract>> {
     let mut statement = connection.prepare(
-        "SELECT ci.contract_hash, ci.ledger_hash, ci.address, ci.mu_per_unit, l.content,
-                ci.token_id
+        "SELECT ci.contract_hash, ci.ledger, ci.address, ci.mu_per_unit, ci.token_id
          FROM contract_instance ci
-         LEFT JOIN ledger l ON ci.ledger_hash = l.hash
          WHERE ci.peer_id = ?1",
     )?;
     let contracts = statement
         .query_map([peer_id], |row| {
-            let ledger_hash: String = row.get(1)?;
-            let ledger_content: Option<Vec<u8>> = row.get(4)?;
-            // Peers only ever name a ledger by tag, so show the tag; the stored
-            // hash is the fallback when the row is unresolvable or untagged.
-            let ledger = ledger_content
-                .and_then(|bytes| protos::contract::Ledger::decode(&*bytes).ok())
-                .and_then(|ledger| ledger.tags.into_iter().next())
-                .unwrap_or(ledger_hash);
             Ok(PeerContract {
-                ledger,
+                ledger: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 contract_hash: row.get(0)?,
-                asset: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                asset: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
                 address: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 // Not ERG-formatted: this is a rate (MU per unit of the contract),
                 // not a balance. For ERG the rate is the peg itself, 1e9.
@@ -7546,65 +7578,88 @@ mod tests {
 
     use super::*;
 
-    /// A database with just the tables `get_peers` touches, one peer, and
-    /// whatever contract instances the caller asks for.
-    fn peer_database(dir: &Path, instances: &[(&str, &str, &str, Option<&[u8]>)]) -> PathBuf {
+    /// The `CREATE TABLE` the node's own migration would run for `name`.
+    ///
+    /// Lifted out of `src/database/migrate.py` rather than restated, because a
+    /// hand-written copy of a schema is exactly what let this query fall a rename
+    /// behind the node and render every peer away (issue #414). A test database that
+    /// does not fail when the real one would is a test that proves nothing.
+    fn migration_table(name: &str) -> String {
+        let python = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../src/database/migrate.py"
+        ))
+        .expect("src/database/migrate.py ships with the repository");
+        let marker = format!("CREATE TABLE IF NOT EXISTS {name} (");
+        let start = python
+            .find(&marker)
+            .unwrap_or_else(|| panic!("migrate.py no longer creates a '{name}' table"));
+        let rest = &python[start..];
+        let end = rest
+            .find("'''")
+            .unwrap_or_else(|| panic!("the '{name}' table's SQL is unterminated"));
+        rest[..end].to_string()
+    }
+
+    /// A database built from the node's *own* schema, holding one peer and whatever
+    /// contract instances the caller asks for.
+    fn peer_database(dir: &Path, instances: &[(&str, &str, &str)]) -> PathBuf {
         let path = dir.join("database.sqlite");
         let connection = Connection::open(&path).unwrap();
+        for table in ["peer", "uri", "ledger", "contract_instance"] {
+            connection.execute_batch(&migration_table(table)).unwrap();
+        }
         connection
             .execute_batch(
-                "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT, advertisement BLOB,
-                                    reputation_score INTEGER, remote_client_id TEXT);
-                 CREATE TABLE uri (id INTEGER PRIMARY KEY, peer_id TEXT, ip TEXT, port INTEGER);
-                 CREATE TABLE ledger (hash TEXT PRIMARY KEY, content BLOB);
-                 CREATE TABLE contract_instance (id INTEGER PRIMARY KEY, address TEXT,
-                                    ledger_hash TEXT, contract_hash TEXT,
-                                    token_id TEXT NOT NULL DEFAULT '', peer_id TEXT,
-                                    mu_per_unit TEXT);
-                 INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7, 'cli-7f3a');",
+                "INSERT INTO peer (id, advertisement, remote_client_id, balance_mu,
+                                   reputation_score)
+                 VALUES ('peer-1', NULL, 'cli-7f3a', '1000', 7);",
             )
             .unwrap();
-        for (contract_hash, ledger_hash, address, ledger_content) in instances {
+        for (contract_hash, ledger, address) in instances {
             connection
                 .execute(
-                    "INSERT INTO contract_instance (address, ledger_hash, contract_hash,
+                    "INSERT INTO contract_instance (address, ledger, contract_hash,
                                                     token_id, peer_id, mu_per_unit)
                      VALUES (?1, ?2, ?3, 'ERG', 'peer-1', '500')",
-                    rusqlite::params![address, ledger_hash, contract_hash],
+                    rusqlite::params![address, ledger, contract_hash],
                 )
                 .unwrap();
-            if let Some(content) = ledger_content {
-                connection
-                    .execute(
-                        "INSERT OR IGNORE INTO ledger (hash, content) VALUES (?1, ?2)",
-                        rusqlite::params![ledger_hash, content],
-                    )
-                    .unwrap();
-            }
         }
         path
     }
 
-    fn ergo_ledger_bytes() -> Vec<u8> {
-        let ledger = protos::contract::Ledger {
-            tags: vec!["ergo".to_string()],
-            prose: String::new(),
-            formal: Vec::new(),
-        };
-        ledger.encode_to_vec()
+    /// The regression: against the schema the node actually creates, the page lists
+    /// the peers that are in it.
+    ///
+    /// `get_peers` was reaching for `contract_instance.ledger_hash` and a
+    /// `ledger(hash, content)` join, both of which `refactor(db): a ledger is its tag`
+    /// removed. SQLite rejects that at `prepare`, the whole call returns `Err`, and
+    /// `unwrap_or_default()` turned it into an empty list -- so the page said "0
+    /// connected" about a node with peers, which is what `nodo peers` was listing all
+    /// along (issue #414).
+    #[test]
+    fn peers_are_listed_against_the_schema_the_node_actually_creates() {
+        let dir = std::env::temp_dir().join("nodo-tui-test-real-schema");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let database = peer_database(&dir, &[("contract-hash-1", "ergo", "addr-1")]);
+
+        let peers = get_peers(&database).expect("the query must survive the real schema");
+
+        assert_eq!(peers.len(), 1, "a peer in the database is a peer on the page");
+        assert_eq!(peers[0].id, "peer-1");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn peer_contracts_resolve_the_ledger_tag() {
-        // Peers name a ledger by tag; the stored hash is meaningless to a human.
+    fn peer_contracts_name_the_ledger_by_its_tag() {
+        // Peers only ever name a ledger by tag, and the column now *is* the tag --
+        // there is no hash left to resolve it from.
         let dir = std::env::temp_dir().join("nodo-tui-test-ledger-tag");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        let bytes = ergo_ledger_bytes();
-        let database = peer_database(
-            &dir,
-            &[("contract-hash-1", "ledger-hash-1", "addr-1", Some(&bytes))],
-        );
+        let database = peer_database(&dir, &[("contract-hash-1", "ergo", "addr-1")]);
 
         let peers = get_peers(&database).unwrap();
         assert_eq!(peers.len(), 1);
@@ -7618,30 +7673,16 @@ mod tests {
     }
 
     #[test]
-    fn peer_contracts_fall_back_to_the_raw_hash_when_the_ledger_is_unresolvable() {
-        let dir = std::env::temp_dir().join("nodo-tui-test-ledger-fallback");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        // No matching `ledger` row at all: better to show the hash than nothing.
-        let database = peer_database(&dir, &[("contract-hash-1", "ledger-hash-1", "addr-1", None)]);
-
-        let peers = get_peers(&database).unwrap();
-        assert_eq!(peers[0].contracts[0].ledger, "ledger-hash-1");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn every_contract_instance_of_a_peer_is_returned() {
         // The pre-#231 lookup could only ever surface a single instance.
         let dir = std::env::temp_dir().join("nodo-tui-test-multi-contract");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        let bytes = ergo_ledger_bytes();
         let database = peer_database(
             &dir,
             &[
-                ("contract-a", "ledger-hash-1", "addr-a", Some(&bytes)),
-                ("contract-b", "ledger-hash-2", "addr-b", None),
+                ("contract-a", "ergo", "addr-a"),
+                ("contract-b", "bitcoin", "addr-b"),
             ],
         );
 
@@ -7668,6 +7709,35 @@ mod tests {
         // Read off the `peer` row itself, never joined against our own `clients`
         // table -- that join is the bug #178 fixed.
         assert_eq!(peers[0].remote_client_id, "cli-7f3a");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A failure must leave a reason behind, or the page is back to claiming a node
+    /// with peers has none.
+    #[test]
+    fn a_query_that_fails_is_recorded_rather_than_rendered_as_an_empty_network() {
+        let dir = std::env::temp_dir().join("nodo-tui-test-peers-error");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        // A `peer` table with none of the columns the query reads: the same shape of
+        // failure a schema change produces.
+        let database = dir.join("database.sqlite");
+        Connection::open(&database)
+            .unwrap()
+            .execute_batch("CREATE TABLE peer (id TEXT PRIMARY KEY);")
+            .unwrap();
+
+        let mut app = App {
+            peers_error: None,
+            ..Default::default()
+        };
+        app.paths.database = database;
+        app.refresh_peers();
+
+        assert!(
+            app.peers_error.is_some(),
+            "a failed peer query must say so rather than render as zero peers"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
