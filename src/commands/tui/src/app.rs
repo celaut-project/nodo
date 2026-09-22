@@ -335,6 +335,12 @@ pub enum InputMode {
     Details,
     /// Profile picker on the CELL page: choose a posture, then confirm its diff.
     PickProfile,
+    /// Which of the config keys behind one CELL lever to edit (issue #414).
+    ///
+    /// A lever stands for several keys, and used to answer `e` with a read-only
+    /// list that ended by sending the operator to the Config page. This is that
+    /// list made actionable, over exactly the same keys.
+    PickLeverKey,
     /// Confirmation showing every key a lever or profile would change, before any
     /// of them is written. A posture is a dozen keys, and writing them without
     /// showing them is the failure this page exists to prevent.
@@ -2038,7 +2044,7 @@ fn yaml_at<'a>(document: Option<&'a Value>, keys: &[&str]) -> Option<&'a Value> 
 ///
 /// `yaml_string` only sees quoted strings, so a bare `1000000` -- which is how
 /// prices are written -- would read as absent and show as free.
-fn yaml_scalar(document: Option<&Value>, keys: &[&str]) -> Option<String> {
+pub fn yaml_scalar(document: Option<&Value>, keys: &[&str]) -> Option<String> {
     let mut value = document?;
     for key in keys {
         value = value.get(*key)?;
@@ -2342,6 +2348,10 @@ pub struct App {
     /// click handler would be a second implementation of the widget's layout, wrong
     /// the first time either side changed.
     pub price_bar_areas: Vec<(String, Rect)>,
+    /// The config keys the open lever-key picker is offering, and which one is
+    /// selected. Empty whenever the picker is closed.
+    pub lever_keys: Vec<&'static str>,
+    pub lever_key_index: usize,
     /// A month of demand folded onto the hours of a clock, drawn under the window on
     /// the SCHEDULE page so the hours can be chosen against what was actually asked
     /// for (issue #337).
@@ -2487,6 +2497,8 @@ impl Default for App {
             schedule_bar: None,
             schedule_drag: None,
             price_bar_areas: Vec::new(),
+            lever_keys: Vec::new(),
+            lever_key_index: 0,
             now_minute: local_minute_of_day(),
             demand: DemandByHour::default(),
             demand_days: DEMAND_HISTORY_DAYS,
@@ -3112,6 +3124,8 @@ impl App {
         self.edit_kind = EditKind::Text;
         self.pending_action = None;
         self.credit_client_id = None;
+        self.lever_keys.clear();
+        self.lever_key_index = 0;
     }
 
     /// True while a background `nodo` command is still running.
@@ -3441,6 +3455,7 @@ impl App {
                 self.status = format!("Configuration filter: {count} matching values");
             }
             InputMode::PickProfile => self.submit_profile_selection(),
+            InputMode::PickLeverKey => self.submit_lever_key_selection(),
             // The writes confirmation answers y/n, never Enter: Enter on a
             // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
             // gate answers y/n for the same reason and one stronger: Enter is the
@@ -3803,10 +3818,11 @@ impl App {
             return;
         };
         match lever.kind {
-            LeverKind::Link(page) => {
+            LeverKind::Link(page, _) => {
                 if let Some(index) = Page::ALL.iter().position(|candidate| *candidate == page) {
                     self.tabs.index = index;
-                    self.status = format!("{} is edited here", lever.label);
+                    self.status =
+                        format!("{} is edited here — or `e` on the CELL row for one key", lever.label);
                 }
             }
             LeverKind::Scalar { .. } => self.open_lever_editor(),
@@ -3845,17 +3861,33 @@ impl App {
     /// A cycle lever has no single key to edit, so `e` there lists the keys it owns
     /// instead: the operator gets to see exactly which settings one named position
     /// stands for, and the Config page remains the place to break them apart.
+    /// `e` on the selected lever: edit one of the keys behind it, here.
+    ///
+    /// A scalar lever is one key, so it opens straight into the editor. Anything
+    /// else stands for several, and used to answer with a read-only list ending in
+    /// "Edit them one at a time on the CONFIG page" -- a row that told the operator
+    /// what it controlled and then refused to control it (issue #414). It now opens
+    /// a picker over exactly those keys, and picking one opens the same editor, with
+    /// the same restart semantics and the same root warning as everywhere else.
     pub fn open_lever_editor(&mut self) {
         if self.page() != Page::Cell {
+            return;
+        }
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
             return;
         }
         let Some(lever) = self.cell.selected() else {
             return;
         };
-        let LeverKind::Scalar { path, .. } = lever.kind else {
-            self.show_lever_keys(lever);
-            return;
-        };
+        match lever.kind {
+            LeverKind::Scalar { path, .. } => self.edit_lever_key(lever, path),
+            _ => self.open_lever_key_picker(lever),
+        }
+    }
+
+    /// Open the value editor on one config key of `lever`.
+    fn edit_lever_key(&mut self, lever: &'static Lever, path: &'static str) {
         let document = self.config_document.clone();
         let current = yaml_scalar(document.as_ref(), &path.split('.').collect::<Vec<_>>())
             .unwrap_or_default();
@@ -3885,29 +3917,62 @@ impl App {
         self.status = lever.question.to_string();
     }
 
-    /// Show which config keys one lever stands for, and what they say now.
-    fn show_lever_keys(&mut self, lever: &'static Lever) {
+    /// Offer the keys one lever stands for, so any of them can be edited from here.
+    ///
+    /// A lever whose keys are all lists or mappings has nothing a single-value
+    /// editor can open, and says so rather than presenting a picker that refuses
+    /// every row -- `activity_window.WINDOWS` is a list of windows, and the SCHEDULE
+    /// page is genuinely the way to edit it.
+    fn open_lever_key_picker(&mut self, lever: &'static Lever) {
         let document = self.config_document.clone();
-        let mut lines = vec![
-            lever.question.to_string(),
-            String::new(),
-            lever.consequence.to_string(),
-            String::new(),
-            "This one row stands for these keys:".to_string(),
-        ];
-        for path in lever.paths() {
-            let value = yaml_scalar(document.as_ref(), &path.split('.').collect::<Vec<_>>())
-                .unwrap_or_else(|| "(not a scalar or not set)".to_string());
-            lines.push(format!("  {path} = {value}"));
+        let keys: Vec<&'static str> = lever
+            .paths()
+            .into_iter()
+            .filter(|path| {
+                yaml_scalar(document.as_ref(), &path.split('.').collect::<Vec<_>>()).is_some()
+            })
+            .collect();
+        if keys.is_empty() {
+            self.status = format!(
+                "{} has no single value to edit — Enter opens the page that edits it",
+                lever.label
+            );
+            return;
         }
-        lines.push(String::new());
-        lines.push("Edit them one at a time on the CONFIG page.".to_string());
-        self.details = Some(DetailsView {
-            title: lever.label.to_string(),
-            lines,
-            scroll: 0,
-        });
-        self.input_mode = InputMode::Details;
+        if keys.len() == 1 {
+            // One editable key: the picker would be a list of one, which is a
+            // keystroke asking the operator to confirm there was no choice.
+            self.edit_lever_key(lever, keys[0]);
+            return;
+        }
+        self.lever_keys = keys;
+        self.lever_key_index = 0;
+        self.input_mode = InputMode::PickLeverKey;
+        self.input_title = format!("Edit {}", lever.label);
+        self.status = "↑/↓ choose a key • Enter edit it • Esc cancel".to_string();
+    }
+
+    /// Move the selection in the lever-key picker.
+    pub fn move_lever_key_selection(&mut self, delta: i32) {
+        let count = self.lever_keys.len();
+        if count == 0 {
+            return;
+        }
+        let current = self.lever_key_index as i32;
+        self.lever_key_index = (current + delta).rem_euclid(count as i32) as usize;
+    }
+
+    /// Open the editor on the key the picker is standing on.
+    pub fn submit_lever_key_selection(&mut self) {
+        let Some(path) = self.lever_keys.get(self.lever_key_index).copied() else {
+            self.close_input();
+            return;
+        };
+        let Some(lever) = self.cell.selected() else {
+            self.close_input();
+            return;
+        };
+        self.edit_lever_key(lever, path);
     }
 
     /// Open the profile picker.
@@ -6925,7 +6990,7 @@ mod tests {
     /// The cursor is two-dimensional: ←/→ walk the organelles, ↑/↓ the levers inside
     /// the one in focus. Getting that wrong makes a lever unreachable by keyboard.
     mod cell_navigation {
-        use crate::app::{App, Page};
+        use crate::app::{App, InputMode, Page};
         use crate::cell::{LeverKind, LeverStatus, Organelle};
 
         fn on_cell_page() -> App {
@@ -6992,10 +7057,131 @@ mod tests {
             app.cell.lever = Organelle::Mitochondria
                 .levers()
                 .iter()
-                .position(|lever| matches!(lever.kind, LeverKind::Link(_)))
+                .position(|lever| matches!(lever.kind, LeverKind::Link(..)))
                 .unwrap();
             app.toggle_selected_lever();
             assert_eq!(app.page(), Page::Pricing);
+        }
+
+        /// `e` on a lever with several keys used to answer with a read-only list
+        /// ending in "Edit them one at a time on the CONFIG page" -- a row that told
+        /// the operator exactly what it controlled and then declined to control it
+        /// (issue #414). It now opens a picker over those same keys.
+        #[test]
+        fn a_multi_key_lever_offers_its_keys_instead_of_naming_another_page() {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str(
+                    "pricing:\n  RAM_MU_PER_GIB_HOUR: 1000000\n  CPU_MU_PER_VCPU_HOUR: 4000000\n",
+                )
+                .unwrap(),
+            );
+            while app.cell.organelle() != Organelle::Mitochondria {
+                app.on_right();
+            }
+            app.cell.lever = Organelle::Mitochondria
+                .levers()
+                .iter()
+                .position(|lever| lever.id == "prices")
+                .unwrap();
+
+            app.open_lever_editor();
+
+            assert_eq!(app.input_mode, InputMode::PickLeverKey);
+            assert!(
+                app.lever_keys.contains(&"pricing.RAM_MU_PER_GIB_HOUR"),
+                "{:?}",
+                app.lever_keys
+            );
+            // Only keys that are actually in the file: a row for a key the document
+            // does not have would open an editor on nothing.
+            assert!(
+                !app.lever_keys.contains(&"pricing.BUILD_MU"),
+                "{:?}",
+                app.lever_keys
+            );
+        }
+
+        /// Picking one opens the ordinary value editor, on that key, by name -- the
+        /// same editor with the same restart semantics as every other edit here.
+        #[test]
+        fn picking_a_key_opens_the_ordinary_editor_on_it() {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str(
+                    "pricing:\n  RAM_MU_PER_GIB_HOUR: 1000000\n  CPU_MU_PER_VCPU_HOUR: 4000000\n",
+                )
+                .unwrap(),
+            );
+            while app.cell.organelle() != Organelle::Mitochondria {
+                app.on_right();
+            }
+            app.cell.lever = Organelle::Mitochondria
+                .levers()
+                .iter()
+                .position(|lever| lever.id == "prices")
+                .unwrap();
+            app.open_lever_editor();
+            let chosen = app.lever_keys[app.lever_key_index];
+
+            app.submit_lever_key_selection();
+
+            assert_eq!(app.input_mode, InputMode::EditConfig);
+            assert!(app.input_title.contains(chosen), "{}", app.input_title);
+            // Prefilled with what the file says, not blank: an editor that forgets
+            // the current value makes every edit a retype.
+            assert!(!app.input.is_empty(), "the editor opened empty");
+            assert!(app.edit_config_path.is_some());
+        }
+
+        /// Enter still opens the page that edits the setting properly. The two are
+        /// not in competition: the page is better at the whole setting, `e` reaches
+        /// one key of it without leaving.
+        #[test]
+        fn enter_still_opens_the_page_that_owns_the_setting() {
+            let mut app = on_cell_page();
+            while app.cell.organelle() != Organelle::Mitochondria {
+                app.on_right();
+            }
+            app.cell.lever = Organelle::Mitochondria
+                .levers()
+                .iter()
+                .position(|lever| lever.id == "prices")
+                .unwrap();
+
+            app.toggle_selected_lever();
+
+            assert_eq!(app.page(), Page::Pricing);
+        }
+
+        /// A lever whose only key is a list has nothing a value editor can open, and
+        /// says so rather than offering a row that would refuse.
+        #[test]
+        fn a_lever_with_no_single_value_says_so_rather_than_offering_a_dead_row() {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str(
+                    "activity_window:\n  WINDOWS:\n    - START: '22:00'\n      END: '06:00'\n",
+                )
+                .unwrap(),
+            );
+            while app.cell.organelle() != Organelle::Wall {
+                app.on_right();
+            }
+            app.cell.lever = Organelle::Wall
+                .levers()
+                .iter()
+                .position(|lever| lever.id == "working-hours")
+                .unwrap();
+
+            app.open_lever_editor();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(
+                app.status.contains("no single value"),
+                "{}",
+                app.status
+            );
         }
 
         /// A change is never written on the keystroke that asks for it: the diff is
