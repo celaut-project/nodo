@@ -236,8 +236,9 @@ nodo export <service id|tag> /export/dir --raw
 # Publish a local service in chunks to the configured repository (see publisher.* in config)
 nodo publish <service id|tag>
 
-# Download a published service from a manifest URL and import it locally (the service id is recomputed from content on import)
-nodo download <manifest url> [-o <output dir>]
+# Download a published service and import it locally (the service id is recomputed from content on import).
+# Accepts a manifest URL (chunk URLs, one per line) or a direct HTTPS link to a .celaut.bee artifact.
+nodo download <manifest url | .celaut.bee https url> [-o <output dir>]
 ```
 
 ### Feasibility & Cost Estimation

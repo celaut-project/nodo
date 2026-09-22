@@ -870,7 +870,25 @@ def publish_service(
     return result
 
 
+def _is_direct_bee_url(url: str) -> bool:
+    """True when ``url`` points straight at a `.celaut.bee` artifact rather than
+    a plain-text manifest listing one chunk URL per line."""
+    return urlparse(url).path.lower().endswith(".celaut.bee")
+
+
 def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = None) -> Dict:
+    """Acquire a service from ``manifest_url`` and import it.
+
+    ``manifest_url`` may be either:
+      * a plain-text manifest listing one chunk URL per line (``nodo publish``'s
+        default output), each chunk fetched and concatenated in order; or
+      * a direct HTTPS link to a `.celaut.bee` artifact (path ending in
+        ``.celaut.bee``), downloaded as-is in a single request.
+
+    A response that is neither valid UTF-8 manifest text nor a recognizable
+    `.celaut.bee` URL is still treated as raw `.celaut.bee` bytes, so a link
+    missing that extension (e.g. behind a redirect) still works.
+    """
     config = ConfigManager()
     settings = _get_publisher_settings(config, require_token=False)
     target_dir = Path(output_dir or settings["output_dir"]).resolve()
@@ -880,40 +898,52 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
     if settings["token"]:
         headers["Authorization"] = f"token {settings['token']}"
 
-    manifest_bytes = _fetch_bytes(
+    path_parts = [part for part in urlparse(manifest_url).path.split("/") if part]
+    if len(path_parts) < 2:
+        raise PublisherError(f"Invalid manifest URL path: {manifest_url}")
+
+    fetched_bytes = _fetch_bytes(
         manifest_url,
         headers=headers,
         timeout_s=settings["timeout_s"],
         max_retry=settings["max_retry"],
         backoff_s=settings["backoff_s"],
     )
-    try:
-        manifest_text = manifest_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise PublisherError("Manifest must be UTF-8 plain text.") from exc
 
-    chunk_urls = [line.strip() for line in manifest_text.splitlines() if line.strip()]
-    if not chunk_urls:
-        raise PublisherError("Manifest is empty. It must contain one chunk URL per line.")
-
-    path_parts = [part for part in urlparse(manifest_url).path.split("/") if part]
-    if len(path_parts) < 2:
-        raise PublisherError(f"Invalid manifest URL path: {manifest_url}")
+    chunk_urls: List[str] = []
+    direct_bee_bytes: Optional[bytes] = None
+    if _is_direct_bee_url(manifest_url):
+        direct_bee_bytes = fetched_bytes
+    else:
+        try:
+            manifest_text = fetched_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            # Not UTF-8 manifest text either: treat the response itself as the
+            # raw .celaut.bee artifact.
+            direct_bee_bytes = fetched_bytes
+        else:
+            chunk_urls = [line.strip() for line in manifest_text.splitlines() if line.strip()]
+            if not chunk_urls:
+                raise PublisherError("Manifest is empty. It must contain one chunk URL per line.")
 
     uuid = uuid4().hex[:8]
     output_path = target_dir / f"{uuid}.celaut.bee"
 
-    with output_path.open("wb") as destination:
-        for index, chunk_url in enumerate(chunk_urls):
-            data = _fetch_bytes(
-                chunk_url,
-                headers=headers,
-                timeout_s=settings["timeout_s"],
-                max_retry=settings["max_retry"],
-                backoff_s=settings["backoff_s"],
-            )
-            destination.write(data)
-            print(f"Downloaded chunk {index + 1}/{len(chunk_urls)}", flush=True)
+    if direct_bee_bytes is not None:
+        output_path.write_bytes(direct_bee_bytes)
+        print(f"Downloaded '.celaut.bee' artifact directly from {manifest_url}", flush=True)
+    else:
+        with output_path.open("wb") as destination:
+            for index, chunk_url in enumerate(chunk_urls):
+                data = _fetch_bytes(
+                    chunk_url,
+                    headers=headers,
+                    timeout_s=settings["timeout_s"],
+                    max_retry=settings["max_retry"],
+                    backoff_s=settings["backoff_s"],
+                )
+                destination.write(data)
+                print(f"Downloaded chunk {index + 1}/{len(chunk_urls)}", flush=True)
 
     imported_service_id = None
     if settings["auto_import"]:
@@ -944,7 +974,7 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
     if imported_service_id:
         print(f"\nRun it with:\n   nodo execute {imported_service_id}\n(--remote in case you are in a ssh session)", flush=True)
     return {
-        "manifest": chunk_urls,
+        "manifest": chunk_urls or [manifest_url],
         "manifest_url": manifest_url,
         "service_hash": imported_service_id,
         "output_path": str(output_path),
