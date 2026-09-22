@@ -69,6 +69,53 @@ class GatewayPortAlertTests(unittest.TestCase):
         manager = _FakeConfigManager(self.config_path, 52285)
 
         self.assertIsNone(operator_alerts.gateway_port_alert(manager))
+        # Nor on a node that is up, which is what "working" means here.
+        self.assertIsNone(operator_alerts.gateway_port_alert(manager, serving=True))
+
+    def test_a_settled_port_nothing_is_listening_on_is_its_own_alert(self):
+        """Everything the operator would check is correct, and the node is still down.
+
+        The port is assigned, there is no pending firewall question, and nothing
+        answers on it. Neither of the other two alerts can say that -- one is about
+        a port that was never assigned, the other about a `.gateway_notice` that is
+        not on disk -- so without this the node is silently earning nothing while
+        every configuration an operator would inspect reads as fine.
+        """
+        manager = _FakeConfigManager(self.config_path, 52285)
+
+        alert = operator_alerts.gateway_port_alert(manager, serving=False)
+
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.key, "gateway_port_closed")
+        # Consequence first, as everywhere else on this banner.
+        self.assertTrue(alert.summary.startswith("NOT SERVING -"), alert.summary)
+        self.assertIn("52285", alert.summary)
+        self.assertIn("earns nothing", alert.summary)
+        self.assertIn("sudo nodo serve", alert.summary)
+
+    def test_an_unknown_serving_state_does_not_claim_the_port_is_dead(self):
+        """`None` is "not known here", which is not the same as "nothing answers".
+
+        It is the state before the TUI's first `nodo info` returns. Raising the
+        alert there would put a red banner on the first frame of every run.
+        """
+        manager = _FakeConfigManager(self.config_path, 52285)
+
+        self.assertIsNone(operator_alerts.gateway_port_alert(manager, serving=None))
+
+    def test_a_pending_firewall_notice_is_reported_instead_of_the_bare_silence(self):
+        """One cause, one alert, and the more specific diagnosis wins.
+
+        Both describe the same silence on the same port. The firewall one names the
+        command that fixes it; reporting the other alongside would be two lines
+        about one problem, one of which sends the operator to the wrong fix.
+        """
+        self._write_notice()
+        manager = _FakeConfigManager(self.config_path, 52285)
+
+        alert = operator_alerts.gateway_port_alert(manager, serving=False)
+
+        self.assertEqual(alert.key, "gateway_port_firewall")
 
     def test_a_pending_notice_beside_an_assigned_port_is_an_alert(self):
         """`.gateway_notice` on disk means the last look at this port ended badly.

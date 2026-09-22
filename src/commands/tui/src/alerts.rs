@@ -126,9 +126,16 @@ fn assigned_port(document: Option<&serde_yaml::Value>) -> Option<u16> {
 /// with a pending notice beside it (a firewall command, which the notice itself
 /// spells out).
 ///
-/// Never probes the network. Proving reachability rebuilds a network namespace and
-/// is the daemon's job, once per boot; this reports the stored verdict, which is
-/// what makes it cheap enough to run on a tick.
+/// Never probes the network, and never opens a socket of its own. `serving` is
+/// already the answer to "does anything accept a TCP connection on this port" --
+/// `is_serving()` in `src/commands/daemon.py` connects to `127.0.0.1:<port>`, and
+/// both callers here have that answer in hand before they ask. A second connect
+/// would buy the same fact twice and put a socket on a path whose whole point is
+/// that it is two `stat` calls.
+///
+/// Proving reachability from *outside* is a different question: it rebuilds a
+/// network namespace and is the daemon's job, once per boot. This reports the
+/// stored verdict.
 fn gateway_port_alert(
     config: &Path,
     document: Option<&serde_yaml::Value>,
@@ -158,6 +165,17 @@ fn gateway_port_alert(
                  this node. Open it: see {} for the exact command.",
                 unreachable_lead(serving),
                 gateway_notice_path(config).display()
+            ),
+        }),
+        // A port is assigned, the firewall has no open question about it, and still
+        // nothing accepts a connection on it. Everything is configured and the node
+        // is down -- the one state the two alerts above cannot express, and the one
+        // an operator is least likely to go looking for, because the config is right.
+        Some(port) if serving == Some(false) => Some(OperatorAlert {
+            key: "gateway_port_closed",
+            summary: format!(
+                "NOT SERVING - nothing is listening on TCP {port}, so no peer can reach \
+                 this node and it earns nothing while it is down. Start it: sudo nodo serve"
             ),
         }),
         Some(_) => None,
@@ -262,6 +280,67 @@ mod tests {
         let document = document("network:\n  GATEWAY_PORT: 52285\n");
 
         assert_eq!(gateway_port_alert(&config, Some(&document), None), None);
+        // Nor on a node that is up: this is the ordinary healthy state.
+        assert_eq!(
+            gateway_port_alert(&config, Some(&document), Some(true)),
+            None
+        );
+    }
+
+    /// The state where everything an operator would check is correct.
+    ///
+    /// The port is assigned, the firewall has no open question about it, and still
+    /// nothing answers on it. Neither alert above can say that: one is about a port
+    /// that was never assigned, the other about a `.gateway_notice` that is not
+    /// there. Without this the screen is silent while the node earns nothing.
+    #[test]
+    fn a_settled_port_nothing_is_listening_on_is_its_own_alert() {
+        let dir = scratch("closed");
+        let config = dir.join("config.yaml");
+        let document = document("network:\n  GATEWAY_PORT: 52285\n");
+
+        let alert =
+            gateway_port_alert(&config, Some(&document), Some(false)).expect("an alert");
+
+        assert_eq!(alert.key, "gateway_port_closed");
+        // Consequence first, as everywhere else on this banner.
+        assert!(alert.summary.starts_with("NOT SERVING -"), "{}", alert.summary);
+        assert!(alert.summary.contains("52285"), "{}", alert.summary);
+        assert!(
+            alert.summary.contains("earns nothing"),
+            "{}",
+            alert.summary
+        );
+        assert!(alert.summary.contains("sudo nodo serve"), "{}", alert.summary);
+    }
+
+    /// A node whose reachability is genuinely unknown claims nothing.
+    ///
+    /// `None` is the state before the first `nodo info` answers. Raising "nothing is
+    /// listening" there would put a red banner on every TUI for the first few
+    /// hundred milliseconds of every run.
+    #[test]
+    fn an_unknown_serving_state_does_not_claim_the_port_is_dead() {
+        let dir = scratch("unknown");
+        let config = dir.join("config.yaml");
+        let document = document("network:\n  GATEWAY_PORT: 52285\n");
+
+        assert_eq!(gateway_port_alert(&config, Some(&document), None), None);
+    }
+
+    /// One cause, one alert. A pending firewall notice is a more specific diagnosis
+    /// of the same silence, and it carries the command that fixes it -- so it wins.
+    #[test]
+    fn a_pending_firewall_notice_is_reported_instead_of_the_bare_silence() {
+        let dir = scratch("precedence");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(GATEWAY_NOTICE_FILE), "open TCP 52285").unwrap();
+        let document = document("network:\n  GATEWAY_PORT: 52285\n");
+
+        let alert =
+            gateway_port_alert(&config, Some(&document), Some(false)).expect("an alert");
+
+        assert_eq!(alert.key, "gateway_port_firewall");
     }
 
     #[test]
@@ -483,6 +562,7 @@ mod tests {
         for key in [
             "gateway_port_unassigned",
             "gateway_port_firewall",
+            "gateway_port_closed",
             "java_missing",
         ] {
             assert!(

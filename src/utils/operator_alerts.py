@@ -92,7 +92,7 @@ def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> O
     is free at both call sites; asking again here would put a socket connect on a
     path whose whole point is that it is two ``stat`` calls.
 
-    Two distinguishable *causes*, each with its own fix:
+    Three distinguishable *causes*, each with its own fix:
 
     * **Unassigned.** ``network.GATEWAY_PORT`` is still ``auto``. Nothing has been
       opened and nothing can be reached; the fix is one privileged start.
@@ -104,12 +104,20 @@ def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> O
       (``mark_gateway_port_passed``) or the port changes -- so its presence is
       exactly "there is an open question about this port", with no separate
       lifetime to keep in step.
+    * **Assigned, settled, and nothing is listening on it.** Config is right, the
+      firewall has no open question, and ``serving`` is False: the node is simply
+      down. Worth its own line precisely because everything an operator would think
+      to check is correct, so there is nothing to find by checking it -- and the
+      node earns nothing for as long as it stays down.
 
-    A port that is assigned with no notice beside it is the ordinary state and
-    produces nothing. This never probes the *network*: proving reachability
-    rebuilds a network namespace (``src/utils/firewall/reachability.py``) and is
-    the daemon's job, once per boot. Reporting a *stored verdict* is what makes
-    this cheap enough to run on every `nodo info`.
+    A port that is assigned with no notice beside it, on a node that *is* serving,
+    is the ordinary state and produces nothing. This never probes the *network*:
+    proving reachability rebuilds a network namespace
+    (``src/utils/firewall/reachability.py``) and is the daemon's job, once per boot.
+    Reporting a *stored verdict* is what makes this cheap enough to run on every
+    `nodo info`. It opens no socket of its own either -- ``serving`` already is the
+    result of one (``is_serving()`` connects to ``127.0.0.1:<port>``), and both
+    callers hold that answer before they ask.
     """
     from src.utils.config import GATEWAY_NOTICE_FILE, ConfigManager, coerce_gateway_port
 
@@ -150,6 +158,24 @@ def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> O
                 f"{notice_path} for the exact command."
             ),
             detail=pending,
+        )
+
+    if serving is False:
+        return OperatorAlert(
+            key="gateway_port_closed",
+            summary=(
+                f"NOT SERVING - nothing is listening on TCP {port}, so no peer can "
+                f"reach this node and it earns nothing while it is down. Start it: "
+                f"sudo nodo serve"
+            ),
+            detail=(
+                "The port is assigned and the host firewall has no open question "
+                "about it, so nothing in the configuration is wrong -- there is "
+                "simply no node process answering on it.\n"
+                "Start it with:\n  sudo nodo serve\n"
+                "If it was started and stopped on its own, storage/app.log holds "
+                "why."
+            ),
         )
 
     return None
