@@ -371,6 +371,10 @@ pub fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
 pub enum PendingAction {
     DeleteService { id: String, label: String },
     KillInstance { id: String, label: String },
+    /// Start an instance of a service. Confirmed like the destructive ones because
+    /// what it does is spend: the instance is funded out of this node's balance the
+    /// moment it launches, and goes on burning MU until something stops it.
+    ExecuteService { id: String, label: String },
     DisconnectPeer { id: String, label: String },
     /// Remove one element from a list in config.yaml. Confirmed like the others
     /// because dropping an entry from, say, a network policy loosens it silently.
@@ -401,6 +405,10 @@ fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
         PendingAction::KillInstance { id, label } => {
             Some((format!("Kill instance {label}"), vec!["kill".to_string(), id]))
         }
+        PendingAction::ExecuteService { id, label } => Some((
+            format!("Execute service {label}"),
+            vec!["execute".to_string(), id],
+        )),
         PendingAction::DisconnectPeer { id, label } => Some((
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
@@ -4234,19 +4242,37 @@ impl App {
         Some((target_mu as f64 * multiplier).ceil() as u64)
     }
 
+    /// Ask for confirmation before starting an instance of the selected service.
+    ///
+    /// `e` used to launch on the keystroke. Nothing about starting an instance is
+    /// undoable by pressing the key again: it is funded out of this node's balance
+    /// at launch and burns MU until it is killed, so a mistyped `e` on the Services
+    /// page spends money in the background with no way to take it back. Same
+    /// confirmation the kill on the Instances page gets, for the same reason --
+    /// these are the two keys on this interface that cost something.
     pub fn execute_selected_service(&mut self) {
         if self.page() != Page::Services {
             return;
         }
-        let Some(id) = self.services.state_id.clone() else {
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(service) = self.services.selected().cloned() else {
             self.status = "Select a service first".to_string();
             return;
         };
-        self.spawn_command(
-            CommandKind::Generic,
-            "Execute service".to_string(),
-            vec!["execute".to_string(), id],
-        );
+        let label = if service.tag.trim().is_empty() {
+            shorten(&service.id, 18)
+        } else {
+            service.tag.clone()
+        };
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Run {label}? It is funded now and burns until killed. (y/N)");
+        self.pending_action = Some(PendingAction::ExecuteService {
+            id: service.id.clone(),
+            label,
+        });
     }
 
     /// Open the read-only Details overlay for the selected service by running
@@ -8618,6 +8644,97 @@ ergo: Cold Wallet: 9cold\n";
             app.on_left();
             app.on_right();
             assert_eq!(app.page(), Page::Logs);
+        }
+    }
+
+    /// `e` on the Services page. The other key in this interface that spends.
+    mod running_a_service {
+        use super::*;
+
+        fn on_services_page(services: Vec<Service>) -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Services)
+                .unwrap();
+            app.services = StatefulList::with_items(services);
+            app.services.next();
+            app
+        }
+
+        fn service(id: &str, tag: &str) -> Service {
+            Service {
+                id: id.to_string(),
+                tag: tag.to_string(),
+                size_bytes: 0,
+            }
+        }
+
+        /// It used to launch on the keystroke. An instance is funded at launch and
+        /// burns until something kills it, so a mistyped `e` spent money with no way
+        /// to take it back.
+        #[test]
+        fn it_asks_before_spending_anything() {
+            let mut app = on_services_page(vec![service("svc-abc", "hello-world")]);
+
+            app.execute_selected_service();
+
+            assert_eq!(app.input_mode, InputMode::Confirm);
+            assert!(matches!(
+                app.pending_action,
+                Some(PendingAction::ExecuteService { ref id, .. }) if id == "svc-abc"
+            ));
+            assert!(app.command_task.is_none(), "nothing may run before the answer");
+        }
+
+        /// The question names what it costs, not just what it starts. "Run this?"
+        /// is answerable without knowing it is a spend; this is the fact that makes
+        /// the answer an informed one.
+        #[test]
+        fn the_question_says_what_it_costs() {
+            let mut app = on_services_page(vec![service("svc-abc", "hello-world")]);
+
+            app.execute_selected_service();
+
+            assert!(app.input_title.contains("hello-world"), "{}", app.input_title);
+            assert!(app.input_title.contains("burns"), "{}", app.input_title);
+            // Defaults to no, like every other confirmation here.
+            assert!(app.input_title.contains("(y/N)"), "{}", app.input_title);
+        }
+
+        /// An untagged service is named by its id rather than by a blank, so the
+        /// question is never "Run ?".
+        #[test]
+        fn an_untagged_service_is_named_by_its_id() {
+            let mut app = on_services_page(vec![service("svc-abcdef0123456789aa", "  ")]);
+
+            app.execute_selected_service();
+
+            assert!(app.input_title.contains("svc-ab"), "{}", app.input_title);
+            assert!(!app.input_title.contains("Run ?"), "{}", app.input_title);
+        }
+
+        #[test]
+        fn confirming_runs_the_command_the_operator_would_type() {
+            let (label, args) = pending_command(PendingAction::ExecuteService {
+                id: "svc-abc".to_string(),
+                label: "hello-world".to_string(),
+            })
+            .expect("executing a service is a `nodo` invocation");
+
+            assert_eq!(args, vec!["execute".to_string(), "svc-abc".to_string()]);
+            assert_eq!(label, "Execute service hello-world");
+        }
+
+        #[test]
+        fn with_nothing_selected_it_says_so_instead_of_asking() {
+            let mut app = on_services_page(Vec::new());
+
+            app.execute_selected_service();
+
+            assert_eq!(app.input_mode, InputMode::Normal);
+            assert!(app.pending_action.is_none());
+            assert!(app.status.contains("Select a service"), "{}", app.status);
         }
     }
 
