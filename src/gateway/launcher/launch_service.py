@@ -279,6 +279,14 @@ def launch_service(
         # launching the child is the authorization; there is no cross-node attach.
         require_parent_colocation = service_requires_parent_colocation(service)
         if require_parent_colocation:
+            # Co-location wins over `network.EXECUTE_LOCALLY: false`, and is not a
+            # loophole in it. The shared filesystem is materialized locally from the
+            # parent's own export: there is no cross-node attach, so "run it on a peer"
+            # is not a thing this service can do, and the balancer will offer no local
+            # candidate for it to be run as. The launch fails below with the
+            # co-location message rather than silently running here -- which is the
+            # honest outcome, since what was asked for is impossible rather than
+            # merely disallowed.
             log.LOGGER(
                 f"Service {service_id} inherits a shared filesystem from its parent "
                 f"{father_id}; pinning execution to the local node (no delegation)."
