@@ -26,10 +26,24 @@ def list_services():
         except Exception:
             name = ""
             
-        # Try to get the size
+        # What the service weighs, blocks included.
+        #
+        # `getsize` already totals both halves -- the parts stored in the service's
+        # own directory, and the content-addressed blocks it references -- so the
+        # old TODO here was already satisfied by the call it was written above.
+        # What was missing is that the two are different questions: the blocks are
+        # shared with every other service referencing the same bytes, so the total
+        # is what this service *is*, and the directory is what it *adds* to the
+        # disk. Both are printed, because a service that stores 64 bytes and weighs
+        # 8 GiB is neither figure on its own.
         try:
-            size = getsize(os.path.join(REGISTRY, service))  # TODO This should be taken with block size too.
-            size = f"{size / (1024 * 1024)} MB"
+            total = getsize(os.path.join(REGISTRY, service))
+            stored = sum(
+                os.path.getsize(os.path.join(dirpath, name))
+                for dirpath, _, names in os.walk(os.path.join(REGISTRY, service))
+                for name in names
+            )
+            size = f"{total / (1024 * 1024):.2f} MB ({stored / (1024 * 1024):.2f} MB stored here)"
         except Exception as e:
             size = f"0 - {e}"
             
