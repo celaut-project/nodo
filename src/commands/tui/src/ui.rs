@@ -2966,16 +2966,20 @@ fn draw_schedule(frame: &mut Frame, app: &mut App, area: Rect) {
 
     draw_day_bar(frame, rows[0], app, &schedule, now);
     draw_schedule_summary(frame, rows[1], app, &schedule, now);
+
     draw_schedule_help(frame, rows[2], app);
 }
 
 fn draw_day_bar(
     frame: &mut Frame,
     area: Rect,
-    app: &App,
+    app: &mut App,
     schedule: &schedule::Schedule,
     now: u16,
 ) {
+    // Cleared first: a pane too narrow to draw a bar in must not leave last frame's
+    // geometry behind for the mouse to hit.
+    app.schedule_bar = None;
     let dirty = app.schedule_is_dirty();
     let title = if dirty {
         " THE WORKING DAY • edited, not applied ".to_string()
@@ -2999,6 +3003,15 @@ fn draw_day_bar(
     let per_hour = (inner.width / 24).clamp(1, 4);
     let width = per_hour * 24;
     let per_slot = 60 / per_hour;
+
+    // Where the bar lands, for the mouse. Three lines down from the top of the pane:
+    // the hour ticks, the axis, then the bar itself (see the `lines` vector below).
+    app.schedule_bar = Some(schedule::ScheduleBar {
+        x: inner.x,
+        y: inner.y + 2,
+        width,
+        per_slot,
+    });
 
     let mut ticks = String::new();
     let mut axis = String::new();
@@ -3340,7 +3353,7 @@ fn draw_schedule_help(frame: &mut Frame, area: Rect, app: &App) {
         Style::default().fg(muted()),
     ))];
     lines.push(Line::from(Span::styled(
-        "Click an edge to select it, [x] to remove a window, + add window, or the on/off and closing lines — the mouse reaches everything here.",
+        "Drag along the bar above to move a window's nearest edge — either end, the day is a circle. Or click an edge label, [x] to remove a window, + add window, or the on/off and closing lines.",
         Style::default().fg(muted()),
     )));
     lines.push(Line::from(if dirty {
