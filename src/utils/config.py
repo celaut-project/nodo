@@ -45,6 +45,18 @@ GATEWAY_PORT_PASSED_FILE = "gateway_port_passed"
 # the kind of thing that silently stops working.
 GATEWAY_NOTICE_FILE = ".gateway_notice"
 
+# The plaintext gateway's own pair of the two files above. A separate pair, not a
+# shared one: the TLS port and the plaintext port are proven independently (the
+# daemon starts one before the other exists to answer, and either can pass while
+# the other fails), so one file recording both would have the second verdict
+# overwrite the first. See ``network.GATEWAY_PLAINTEXT_PORT`` in
+# ``src/serve.py`` -- this is the port handed to the services this node runs, not
+# the one peers or the CLI use, so its notice reads differently: unreachable here
+# never stops the node, and the fix it asks for is a rule scoped to the guest
+# subnet, never opened past it.
+GATEWAY_PLAINTEXT_PORT_PASSED_FILE = "gateway_plaintext_port_passed"
+GATEWAY_PLAINTEXT_NOTICE_FILE = ".gateway_plaintext_notice"
+
 
 def coerce_gateway_port(value: Any) -> Optional[int]:
     """The gateway port as an int, or None when it is unassigned or unusable.
@@ -288,25 +300,53 @@ class ConfigManager(metaclass=Singleton):
         except OSError:
             return ""
 
+    def _port_passed_at_unlocked(self, cache_file: str, port: int) -> bool:
+        """Shared body of ``gateway_port_passed`` and ``plaintext_gateway_port_passed``.
+
+        Anything unreadable, unparseable, about a different port or from a
+        different boot is a no -- the expensive answer (probe again) is the safe
+        one.
+        """
+        try:
+            with open(self._cache_path_unlocked(cache_file), "r") as f:
+                lines = f.read().split()
+        except OSError:
+            return False
+        if len(lines) != 2:
+            return False
+        boot = self._boot_id()
+        return bool(boot) and coerce_gateway_port(lines[0]) == port and lines[1] == boot
+
     def gateway_port_passed(self, port: int) -> bool:
         """Has ``port`` already been proven reachable, in this boot?
 
         The daemon asks this before probing: a verified port does not need a network
-        namespace built on every restart. Anything unreadable, unparseable, about a
-        different port or from a different boot is a no -- the expensive answer is
-        the safe one.
+        namespace built on every restart.
         """
         with self._lock:
             self.ensure_loaded()
-            try:
-                with open(self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE), "r") as f:
-                    lines = f.read().split()
-            except OSError:
-                return False
-            if len(lines) != 2:
-                return False
-            boot = self._boot_id()
-            return bool(boot) and coerce_gateway_port(lines[0]) == port and lines[1] == boot
+            return self._port_passed_at_unlocked(GATEWAY_PORT_PASSED_FILE, port)
+
+    def plaintext_gateway_port_passed(self, port: int) -> bool:
+        """The plaintext-port counterpart of ``gateway_port_passed``.
+
+        Kept in its own cache file (see ``GATEWAY_PLAINTEXT_PORT_PASSED_FILE``) so
+        proving one port says nothing about the other.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            return self._port_passed_at_unlocked(GATEWAY_PLAINTEXT_PORT_PASSED_FILE, port)
+
+    def _mark_port_passed_at_unlocked(self, cache_file: str, notice_file: str, port: int) -> None:
+        path = self._cache_path_unlocked(cache_file)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(f"{port}\n{self._boot_id()}\n")
+        except OSError as e:
+            self.log(f"Could not record the verified port {port} in {path}: {e}")
+            return
+        self._clear_notice_unlocked(notice_file)
 
     def mark_gateway_port_passed(self, port: int) -> None:
         """Record that ``port`` was proven reachable. Best-effort.
@@ -316,27 +356,41 @@ class ConfigManager(metaclass=Singleton):
         """
         with self._lock:
             self.ensure_loaded()
-            path = self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE)
-            try:
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                with open(path, "w") as f:
-                    f.write(f"{port}\n{self._boot_id()}\n")
-            except OSError as e:
-                self.log(f"Could not record the verified gateway port in {path}: {e}")
-                return
-            self._clear_gateway_notice_unlocked()
+            self._mark_port_passed_at_unlocked(GATEWAY_PORT_PASSED_FILE, GATEWAY_NOTICE_FILE, port)
+
+    def mark_plaintext_gateway_port_passed(self, port: int) -> None:
+        """The plaintext-port counterpart of ``mark_gateway_port_passed``."""
+        with self._lock:
+            self.ensure_loaded()
+            self._mark_port_passed_at_unlocked(
+                GATEWAY_PLAINTEXT_PORT_PASSED_FILE, GATEWAY_PLAINTEXT_NOTICE_FILE, port
+            )
 
     def clear_gateway_port_passed(self) -> None:
         """Forget the verdict, so the next start proves the port again.
 
         Called whenever network.GATEWAY_PORT is written: a verdict about the old port
-        says nothing about the new one. The TUI does the same thing on its own side
-        (src/commands/tui/src/app.rs), because it edits config.yaml through yq
-        without going through this class.
+        says nothing about the new one, and neither does a verdict about the
+        plaintext port -- ``auto`` derives it as ``GATEWAY_PORT + 1``, so a changed
+        TLS port changes what the plaintext one resolves to as well. The TUI does
+        the same thing on its own side (src/commands/tui/src/app.rs), because it
+        edits config.yaml through yq without going through this class.
         """
         with self._lock:
             self.ensure_loaded()
             self._clear_gateway_port_passed_unlocked()
+            self._clear_plaintext_gateway_port_passed_unlocked()
+
+    def clear_plaintext_gateway_port_passed(self) -> None:
+        """Forget the plaintext port's verdict, so the next start proves it again.
+
+        Called whenever network.GATEWAY_PLAINTEXT_PORT is written directly; a
+        change to network.GATEWAY_PORT goes through ``clear_gateway_port_passed``
+        instead, which clears both.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            self._clear_plaintext_gateway_port_passed_unlocked()
 
     def _clear_gateway_port_passed_unlocked(self) -> None:
         # The pending alert goes with it: it names the old port, so whatever it asked
@@ -350,9 +404,22 @@ class ConfigManager(metaclass=Singleton):
             except OSError:
                 continue
 
+    def _clear_plaintext_gateway_port_passed_unlocked(self) -> None:
+        for path in (
+            self._cache_path_unlocked(GATEWAY_PLAINTEXT_PORT_PASSED_FILE),
+            os.path.join(self._config_dir(), GATEWAY_PLAINTEXT_NOTICE_FILE),
+        ):
+            try:
+                os.unlink(path)
+            except OSError:
+                continue
+
     def _clear_gateway_notice_unlocked(self) -> None:
+        self._clear_notice_unlocked(GATEWAY_NOTICE_FILE)
+
+    def _clear_notice_unlocked(self, notice_file: str) -> None:
         try:
-            os.unlink(os.path.join(self._config_dir(), GATEWAY_NOTICE_FILE))
+            os.unlink(os.path.join(self._config_dir(), notice_file))
         except OSError:
             pass
 
@@ -369,18 +436,25 @@ class ConfigManager(metaclass=Singleton):
         )
         withdraw_gateway_port(port, log=self.log)
 
-    def _gateway_notice_unlocked(self, title: str, body: str) -> None:
+    def _gateway_notice_unlocked(
+        self, title: str, body: str, notice_file: str = GATEWAY_NOTICE_FILE
+    ) -> None:
         """Emit a gateway alert: to the log now, to the terminal last, to disk for later.
 
         Deferred rather than printed, because these are emitted while the config
         loads -- which on a fresh install is during nodo.py's imports -- and in a
         terminal the last thing printed is the first thing read. An alert in the
         middle of the scrollback is an alert nobody acts on.
+
+        ``notice_file`` defaults to the TLS gateway's own file; the plaintext
+        gateway writes to its own (``GATEWAY_PLAINTEXT_NOTICE_FILE``) so an
+        unrelated question about one port never clears, or is cleared by, an
+        answer about the other.
         """
         from src.utils.firewall.gateway import defer_operator_notice, operator_notice
 
         notice = operator_notice(title, body)
-        path = os.path.join(self._config_dir(), GATEWAY_NOTICE_FILE)
+        path = os.path.join(self._config_dir(), notice_file)
         try:
             with open(path, "w") as f:
                 f.write(notice)
@@ -398,6 +472,19 @@ class ConfigManager(metaclass=Singleton):
             + (f", and in {path}" if path else "")
         )
         defer_operator_notice(notice)
+
+    def emit_plaintext_gateway_notice(self, title: str, body: str) -> None:
+        """Public counterpart of ``_gateway_notice_unlocked`` for the plaintext port.
+
+        Called from ``serve.py`` after a conclusive reachability failure -- never
+        fatal, so it is the caller's job to decide the node keeps running, not
+        this method's. Writes to ``GATEWAY_PLAINTEXT_NOTICE_FILE`` and is cleared
+        by ``mark_plaintext_gateway_port_passed`` the moment the port is proven,
+        the same lifecycle ``.gateway_notice`` has for the TLS port.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            self._gateway_notice_unlocked(title, body, notice_file=GATEWAY_PLAINTEXT_NOTICE_FILE)
 
     def assign_gateway_port_if_unset(self) -> Optional[int]:
         """Assign the gateway port if there is none. Returns the port in force, or None.
@@ -815,8 +902,15 @@ class ConfigManager(metaclass=Singleton):
             # edits config.yaml with yq and clears it on its own side.
             previous = self._get_nested(self._config, keys)
             self._set_nested(self._config, keys, to_yaml_safe(value))
-            if keys[-1] == "GATEWAY_PORT" and self._get_nested(self._config, keys) != previous:
+            changed = self._get_nested(self._config, keys) != previous
+            if keys[-1] == "GATEWAY_PORT" and changed:
+                # Also invalidates the plaintext port's verdict: `auto` resolves it
+                # as GATEWAY_PORT + 1, so a changed TLS port changes what that
+                # port is too, whether or not GATEWAY_PLAINTEXT_PORT itself moved.
                 self._clear_gateway_port_passed_unlocked()
+                self._clear_plaintext_gateway_port_passed_unlocked()
+            elif keys[-1] == "GATEWAY_PLAINTEXT_PORT" and changed:
+                self._clear_plaintext_gateway_port_passed_unlocked()
             self._save_config_unlocked()
 
     def _interpolate_paths(self, data: Any, context: Optional[Dict[str, Any]] = None):
