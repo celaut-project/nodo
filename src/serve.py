@@ -199,6 +199,33 @@ def _verify_plaintext_gateway_port(port: int) -> None:
     )
 
 
+def _verify_gateway_ports(server, port: int, plaintext_port: int) -> None:
+    """Probe both gateway ports from the guest subnet, once ``server`` is listening.
+
+    An unreachable TLS port stops the node; an unreachable plaintext port never does.
+    Both are probed either way, so a refusal over the TLS port still leaves the
+    plaintext port's verdict (and its alert in `nodo info` / the TUI) behind.
+    """
+    try:
+        _verify_gateway_port(port)
+    except SystemExit:
+        # Probe the plaintext port before going down, while its listener is still up:
+        # the firewall that just blocked the TLS port almost always blocks this one
+        # too, and without this its alert never reaches `nodo info` or the TUI -- the
+        # operator opens the TLS port, restarts, and only then learns about the second.
+        # Never allowed to replace the refusal it runs inside of.
+        try:
+            _verify_plaintext_gateway_port(plaintext_port)
+        except Exception as e:
+            log.LOGGER(f'Could not probe the plaintext gateway port {plaintext_port}: {e}')
+        server.stop(0)
+        raise
+
+    # Never inside the try above: an unreachable plaintext port is an operator
+    # alert, not a reason to stop what the TLS check just proved works.
+    _verify_plaintext_gateway_port(plaintext_port)
+
+
 def _refuse_to_start(e: GatewayPortUnavailable) -> None:
     # Framed like every other gateway-port message, so it stays readable when it
     # lands between whatever else the start path is printing.
@@ -328,14 +355,6 @@ def serve():
 
     # Only now can the guest-side probe distinguish "the firewall drops this" from
     # "nothing answers on this port".
-    try:
-        _verify_gateway_port(port)
-    except SystemExit:
-        server.stop(0)
-        raise
-
-    # Never inside the try above: an unreachable plaintext port is an operator
-    # alert, not a reason to stop what the TLS check just proved works.
-    _verify_plaintext_gateway_port(plaintext_port)
+    _verify_gateway_ports(server, port, plaintext_port)
 
     server.wait_for_termination()
