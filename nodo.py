@@ -369,6 +369,20 @@ if __name__ == '__main__':
 
                 download_command(url=manifest_url, output_dir=output_dir)
 
+            case "get":
+                from src.commands.get_service import get_service
+
+                args = sys.argv[2:]
+                now = "--now" in args
+                if now:
+                    args.remove("--now")
+
+                if len(args) != 1:
+                    print("Usage: nodo get <service id|service tag> [--now]", flush=True)
+                    sys.exit(1)
+
+                get_service(service=args[0], now=now)
+
             case "integrity":
                 from src.commands.integrity import integrity_command
                 import sys
