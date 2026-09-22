@@ -25,6 +25,8 @@ use tui_tree_widget::TreeState;
 pub type AppResult<T> = std::result::Result<T, Box<dyn error::Error>>;
 
 const DATA_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+/// Refresh the visible schedule clock independently of local data reads.
+const CLOCK_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const WALLET_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 /// How often the on-chain reputation report is re-read. Far slower than the wallet,
 /// because it costs a paginated scan of the whole reputation contract and an opinion
@@ -564,6 +566,7 @@ async fn apply_config_change(
     // Asked before the write, because the change may be to the port itself: what
     // decides whether a restart is owed is whether a node is serving now.
     let port_before = read_gateway_port(&config);
+    let plaintext_before = read_gateway_plaintext_port_raw(&config);
     let was_serving = match restart_required(port_before.as_deref()).await {
         Ok(required) => required,
         Err(error) => return fail(error),
@@ -600,6 +603,16 @@ async fn apply_config_change(
     let port_after = read_gateway_port(&config);
     if port_after != port_before {
         let _ = fs::remove_file(cache.join("gateway_port_passed"));
+        // GATEWAY_PLAINTEXT_PORT's `auto` resolves as GATEWAY_PORT + 1 (see
+        // ConfigManager.get_plaintext_gateway_port), so a changed TLS port changes
+        // what the plaintext one *is* even when GATEWAY_PLAINTEXT_PORT itself was
+        // never touched by this write.
+        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
+    }
+
+    let plaintext_after = read_gateway_plaintext_port_raw(&config);
+    if plaintext_after != plaintext_before {
+        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
     }
 
     if !was_serving {
@@ -2112,6 +2125,19 @@ fn read_gateway_port(config: &Path) -> Option<String> {
         .and_then(|document| yaml_scalar(Some(&document), &["network", "GATEWAY_PORT"]))
 }
 
+/// `network.GATEWAY_PLAINTEXT_PORT` exactly as written, unresolved.
+///
+/// Read raw rather than through `alerts::plaintext_assigned_port`: this is a
+/// before/after diff to decide whether to drop `gateway_plaintext_port_passed`, so
+/// what matters is whether the *key* changed, not what it resolves to. Resolving
+/// `auto` here would also need the (possibly also-changing) TLS port, which the
+/// caller already diffs on its own.
+fn read_gateway_plaintext_port_raw(config: &Path) -> Option<String> {
+    read_yaml(config).ok().and_then(|document| {
+        yaml_scalar(Some(&document), &["network", "GATEWAY_PLAINTEXT_PORT"])
+    })
+}
+
 fn resolve_config_path(value: &str, main_dir: &Path, storage: Option<&Path>) -> PathBuf {
     let main = main_dir.to_string_lossy();
     let storage_text = storage
@@ -2403,12 +2429,18 @@ pub struct App {
     pub demand: DemandByHour,
     /// How many days of history `demand` covers.
     pub demand_days: u16,
-    /// Minutes since local midnight, refreshed with the rest of the data.
+    /// Minutes since local midnight: where "now" is on the working day.
     ///
-    /// Local because `activity_window` is: a day drawn in UTC would not be the day
-    /// the node enforces. Sampled on the data tick, since a marker on a 24-hour bar
-    /// only has to be right to the minute.
+    /// Local because `activity_window` is (`datetime.now()`, in `is_open`): a day drawn
+    /// in UTC would not be the day the node enforces.
+    ///
+    /// A plain field, and deliberately so -- it is what makes the marker testable. No
+    /// draw function asks the clock what time it is; they are handed this, so a test
+    /// can render two different "now"s and watch the marker move (`schedule_now` in
+    /// ui.rs). [`App::refresh_clock`] is the one place it is answered from the host.
     pub now_minute: u16,
+    /// Last schedule clock refresh.
+    last_clock_refresh: Instant,
     /// The guest kernel reserve per architecture, as the node will apply it. Shown on
     /// the pricing page because the node absorbs it: it is the gap between memory sold
     /// and host RAM committed, and it is what a memory price has to cover.
@@ -2422,6 +2454,11 @@ pub struct App {
     pub reputation: NodeReputation,
     /// What this node donates and what it counts, from `nodo donations --json`.
     pub donations: NodeDonations,
+    pub payment_report: serde_json::Value,
+    pub payment_error: String,
+    pub payment_rate_areas: Vec<(String, Rect)>,
+    payment_task: Option<JoinHandle<Result<serde_json::Value, String>>>,
+    last_payment_refresh: Option<Instant>,
     /// The same report's opinions, as the page's selectable table.
     ///
     /// A `StatefulList` rather than a cursor into `reputation.opinions`: the report
@@ -2545,6 +2582,7 @@ impl Default for App {
             lever_keys: Vec::new(),
             lever_key_index: 0,
             now_minute: local_minute_of_day(),
+            last_clock_refresh: now,
             demand: DemandByHour::default(),
             demand_days: DEMAND_HISTORY_DAYS,
             money: Money::load(&paths.config),
@@ -2552,6 +2590,11 @@ impl Default for App {
             earnings: Vec::new(),
             reputation: NodeReputation::default(),
             donations: NodeDonations::default(),
+            payment_report: serde_json::Value::Null,
+            payment_error: String::new(),
+            payment_rate_areas: Vec::new(),
+            payment_task: None,
+            last_payment_refresh: None,
             opinions: StatefulList::with_items(Vec::new()),
             peer_detail: None,
             client_detail: None,
@@ -2906,6 +2949,10 @@ impl App {
     /// `draw_price_bars` recorded last frame, so a bar is hit where it was actually
     /// drawn rather than where an arithmetic reconstruction thinks it was.
     fn click_pricing(&mut self, position: Position) {
+        if let Some((ledger, _)) = self.payment_rate_areas.iter().find(|(_, area)| area.contains(position)).cloned() {
+            self.open_payment_rate_editor(&ledger);
+            return;
+        }
         if let Some((id, _)) = self
             .price_bar_areas
             .iter()
@@ -3616,6 +3663,15 @@ impl App {
             return;
         }
 
+        let label_path = config_path_display(&path);
+        if label_path.ends_with("MU_PER_NANOERG") || label_path.ends_with("MU_PER_SATOSHI") {
+            let value = self.input.trim().parse::<f64>().unwrap_or(f64::NAN);
+            let scale = if label_path.ends_with("MU_PER_NANOERG") { 1e9 } else { 1e8 };
+            if !value.is_finite() || value <= 0.0 || !(value * scale).is_finite() || (value * scale).fract() != 0.0 {
+                self.status = "Rate must be positive and give a whole number of MU per coin".into();
+                return;
+            }
+        }
         let value = self.input.clone();
         let label = format!("Set {}", config_path_display(&path));
         self.close_input();
@@ -4267,6 +4323,23 @@ impl App {
         }
     }
 
+    pub fn open_payment_rate_editor(&mut self, ledger: &str) {
+        if self.config_write_running() { return; }
+        let key = match ledger {
+            "ergo" => "MU_PER_NANOERG",
+            "bitcoin" => "MU_PER_SATOSHI",
+            _ => return,
+        };
+        let path = format!("ledgers.{ledger}.payments.{key}");
+        self.input = yaml_scalar(self.config_document.as_ref(), &["ledgers", ledger, "payments", key])
+            .unwrap_or_else(|| if ledger == "ergo" { "1".into() } else { String::new() });
+        self.input_title = format!("Edit {path}");
+        self.edit_config_path = Some(cell::path_segments(&path));
+        self.edit_config_secret = false;
+        self.edit_kind = EditKind::Number;
+        self.input_mode = InputMode::EditConfig;
+    }
+
     // --- Pricing ----------------------------------------------------------
 
     /// Nudge the selected price up or down.
@@ -4849,6 +4922,27 @@ impl App {
     }
 
     pub async fn refresh(&mut self, force: bool) {
+        if self.payment_task.as_ref().map(|task| task.is_finished()).unwrap_or(false) {
+            match self.payment_task.take().unwrap().await {
+                Ok(Ok(report)) => { self.payment_report = report; self.payment_error.clear(); }
+                Ok(Err(error)) => self.payment_error = error,
+                Err(error) => self.payment_error = error.to_string(),
+            }
+        }
+        if self.page() == Page::Pricing && self.payment_task.is_none()
+            && (force || self.last_payment_refresh.map(|t| t.elapsed() >= Duration::from_secs(60)).unwrap_or(true)) {
+            self.last_payment_refresh = Some(Instant::now());
+            self.payment_task = Some(tokio::spawn(async {
+                let output = tokio::time::timeout(Duration::from_secs(45),
+                    Command::new("nodo").args(["tx_history", "--json"]).kill_on_drop(true).output())
+                    .await.map_err(|_| "Payment history timed out; rates remain editable".to_string())?
+                    .map_err(|e| e.to_string())?;
+                if !output.status.success() { return Err(failure_reason(&output)); }
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                serde_json::from_str(report_line(&stdout).ok_or("No payment report returned")?).map_err(|e| e.to_string())
+            }));
+        }
+        self.refresh_clock();
         self.refresh_local(force);
         self.poll_config_task().await;
         self.poll_command_task().await;
@@ -4875,12 +4969,20 @@ impl App {
         }
     }
 
+    /// Update the schedule marker on its own timer.
+    fn refresh_clock(&mut self) {
+        if self.last_clock_refresh.elapsed() < CLOCK_REFRESH_INTERVAL {
+            return;
+        }
+        self.last_clock_refresh = Instant::now();
+        self.now_minute = local_minute_of_day();
+    }
+
     fn refresh_local(&mut self, force: bool) {
         if !force && self.last_data_refresh.elapsed() < DATA_REFRESH_INTERVAL {
             return;
         }
         self.last_data_refresh = Instant::now();
-        self.now_minute = local_minute_of_day();
         self.demand = get_demand_by_hour(&self.paths.database, DEMAND_HISTORY_DAYS)
             .unwrap_or_default();
         self.paths = Paths::discover();
@@ -7532,6 +7634,35 @@ mod tests {
                     .map(|directory| directory.join("yq"))
                     .find(|candidate| candidate.exists())
             })
+        }
+
+        /// `read_gateway_plaintext_port_raw`: the raw key, not what `auto` resolves
+        /// to -- that resolution needs the (possibly also-changing) TLS port, which
+        /// the caller in `apply_config_change` diffs on its own.
+        #[test]
+        fn plaintext_port_is_read_raw_not_resolved() {
+            let dir = TempDir::new("plaintext-raw");
+            let config = dir.file("config.yaml");
+            fs::write(
+                &config,
+                "network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: auto\n",
+            )
+            .unwrap();
+
+            assert_eq!(
+                super::super::read_gateway_plaintext_port_raw(&config).as_deref(),
+                Some("auto"),
+                "the raw scalar, not GATEWAY_PORT + 1"
+            );
+        }
+
+        #[test]
+        fn a_missing_plaintext_key_reads_as_none() {
+            let dir = TempDir::new("plaintext-absent");
+            let config = dir.file("config.yaml");
+            fs::write(&config, "network:\n  GATEWAY_PORT: 52285\n").unwrap();
+
+            assert_eq!(super::super::read_gateway_plaintext_port_raw(&config), None);
         }
     }
 
@@ -11020,6 +11151,59 @@ energy:
     }
 }
 
+
+/// The schedule clock is independent of data refreshes.
+#[cfg(test)]
+mod the_clock_runs_on_its_own {
+    use super::{local_minute_of_day, App, CLOCK_REFRESH_INTERVAL, DATA_REFRESH_INTERVAL};
+    use std::time::{Duration, Instant};
+
+    /// An `App` whose clock is due to be re-read and whose data sweep is not.
+    fn app_with_a_stale_clock() -> App {
+        let mut app = App::new();
+        app.now_minute = 7 * 60;
+        let now = Instant::now();
+        app.last_clock_refresh = now.checked_sub(CLOCK_REFRESH_INTERVAL).unwrap_or(now);
+        app.last_data_refresh = now;
+        app
+    }
+
+    #[test]
+    fn the_clock_is_re_read_without_the_data_sweep_running() {
+        let mut app = app_with_a_stale_clock();
+        let before = app.last_data_refresh;
+
+        app.refresh_clock();
+
+        assert_eq!(app.now_minute, local_minute_of_day(), "the clock did not advance");
+        assert_eq!(
+            app.last_data_refresh, before,
+            "re-reading the clock ran the data sweep"
+        );
+    }
+
+    /// Cheap, but not free: one `strftime` per tick is fine, four a second is not,
+    /// and the marker cannot move faster than a cell a quarter of an hour anyway.
+    #[test]
+    fn it_is_not_re_read_on_every_tick() {
+        let mut app = App::new();
+        app.last_clock_refresh = Instant::now();
+        app.now_minute = 7 * 60;
+
+        app.refresh_clock();
+
+        assert_eq!(app.now_minute, 7 * 60, "the clock was re-read inside its interval");
+    }
+
+    /// The interval has to be well inside the bar's own resolution, or the marker
+    /// lands on a cell late and the OPEN/CLOSED beside it is briefly wrong.
+    #[test]
+    fn the_interval_is_finer_than_the_bar_can_show() {
+        assert!(CLOCK_REFRESH_INTERVAL < Duration::from_secs(15 * 60));
+        // The inexpensive data sweep may run more frequently than the minute display.
+        assert!(CLOCK_REFRESH_INTERVAL >= DATA_REFRESH_INTERVAL);
+    }
+}
 
 /// Two-level navigation: five groups on the top row, the open group's pages on the
 /// second (issue #395).

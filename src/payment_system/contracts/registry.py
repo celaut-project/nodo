@@ -242,11 +242,17 @@ def forget_reports() -> None:
     _reported.clear()
 
 
-def _configured(name: str) -> bool:
+def is_configured(name: str) -> bool:
     """Whether the operator has asked for this contract at all.
 
     The simulated contract is a flag; a real one is a `ledgers.<name>` block. A ledger
     nobody configured is not an error and is not reported -- it is simply not offered.
+
+    Public because "configured" and "offered" are different states an operator has to be
+    able to tell apart: a ledger with a block in config.yaml and no usable rate is not
+    the same thing as a ledger nobody asked for, and only :func:`contracts` knows about
+    the second. A report that showed only what is offered would answer "why is Bitcoin
+    missing" with silence.
     """
     config = ConfigManager()
     if name == "simulated":
@@ -277,7 +283,7 @@ def contracts() -> Dict[contract_hash, PaymentContract]:
     """
     offered: Dict[contract_hash, PaymentContract] = {}
     for candidate in CANDIDATES:
-        if not _configured(candidate.name):
+        if not is_configured(candidate.name):
             continue
         try:
             module = import_module(candidate.module_path)

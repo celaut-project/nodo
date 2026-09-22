@@ -19,3 +19,4 @@ storage/*
 .codex
 .claude
 .gateway_notice
+.gateway_plaintext_notice

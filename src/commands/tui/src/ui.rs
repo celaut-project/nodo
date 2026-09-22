@@ -3166,16 +3166,6 @@ fn draw_day_bar(
         bar.push(Span::styled(glyph.to_string(), Style::default().fg(colour)));
     }
 
-    // The marker sits under the bar rather than inside it: a cell that showed "now"
-    // instead of open/closed would hide the one thing the bar is for at the one hour
-    // the operator cares about most.
-    let mut marker = String::new();
-    let now_slot = (now / per_slot).min(width.saturating_sub(1));
-    for _ in 0..now_slot {
-        marker.push(' ');
-    }
-    marker.push('▲');
-
     let open_now = schedule.contains(now);
     let state = if open_now { "OPEN" } else { "CLOSED" };
     let state_colour = if open_now { good() } else { bad() };
@@ -3184,7 +3174,7 @@ fn draw_day_bar(
         Line::from(Span::styled(ticks, Style::default().fg(muted()))),
         Line::from(Span::styled(axis, Style::default().fg(muted()))),
         Line::from(bar),
-        Line::from(Span::styled(marker, Style::default().fg(state_colour))),
+        now_marker_line(now, per_slot, width, state, state_colour),
         Line::from(vec![
             Span::styled(
                 format!("now {} · ", schedule::format_clock(now)),
@@ -3203,6 +3193,51 @@ fn draw_day_bar(
     // busiest stretch (issue #337).
     lines.extend(demand_lines(&app.demand, app.demand_days, per_hour, width));
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The row under the bar carrying the "now" marker, with the clock travelling on it.
+///
+/// The marker sits *under* the bar rather than inside it: a cell that showed "now"
+/// instead of open/closed would hide the one thing the bar is for at the one hour the
+/// operator cares about most.
+///
+/// The time rides next to the arrow rather than staying in column zero, and that is the
+/// point of this function existing at all. A `▲` on an empty row moves one
+/// cell per `per_slot` minutes -- fifteen at the finest the page draws -- so over any
+/// stretch an operator actually watches, a marker with nothing beside it is
+/// indistinguishable from one that is stuck. A clock that moves with it is legible at a
+/// glance, and it is the same figure the summary line below states, so the two cannot
+/// disagree about what time it is.
+///
+/// Flips to the left of the marker near the end of the day: a label running off the
+/// right-hand edge would be clipped to "23:" exactly when the node is closest to
+/// closing.
+fn now_marker_line(
+    now: u16,
+    per_slot: u16,
+    width: u16,
+    state: &str,
+    colour: Color,
+) -> Line<'static> {
+    let now_slot = (now / per_slot).min(width.saturating_sub(1));
+    let label = format!("{} {}", schedule::format_clock(now), state);
+    let label_width = label.chars().count() as u16;
+
+    // +1 for the marker itself. Right-hand placement only while the whole label fits
+    // inside the bar, so it is never half a time of day.
+    if now_slot + 1 + label_width <= width {
+        return Line::from(vec![
+            Span::raw(" ".repeat(now_slot as usize)),
+            Span::styled("▲", Style::default().fg(colour).add_modifier(Modifier::BOLD)),
+            Span::styled(label, Style::default().fg(colour)),
+        ]);
+    }
+    let indent = now_slot.saturating_sub(label_width);
+    Line::from(vec![
+        Span::raw(" ".repeat(indent as usize)),
+        Span::styled(label, Style::default().fg(colour)),
+        Span::styled("▲", Style::default().fg(colour).add_modifier(Modifier::BOLD)),
+    ])
 }
 
 /// The demand rows drawn beneath the working day, on its axis.
@@ -3504,6 +3539,9 @@ fn draw_schedule_help(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
+    let sections = Layout::vertical([Constraint::Min(8), Constraint::Length(12)]).split(area);
+    draw_payment_systems(frame, app, sections[1]);
+    let area = sections[0];
     let columns = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
         .split(area);
     let left = Layout::vertical([
@@ -4532,6 +4570,7 @@ mod tests {
     mod schedule_page {
         use super::super::draw_schedule;
         use crate::app::{App, Page};
+        use ratatui::style::Color;
         use ratatui::{backend::TestBackend, Terminal};
 
         fn screen(width: u16, height: u16, config: &str, now: u16) -> String {
@@ -4688,6 +4727,36 @@ mod tests {
             line.chars().filter(|glyph| *glyph != '│').collect()
         }
 
+        /// The foreground colour of every cell of the day bar.
+        ///
+        /// An open hour and the open hour "now" falls in are the same glyph, so the
+        /// only place their difference exists is the colour -- and a test reading the
+        /// rendered text cannot see it.
+        fn bar_colours(width: u16, height: u16, config: &str, now: u16) -> Vec<Color> {
+            let mut app = App::new();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Schedule)
+                .unwrap();
+            app.config_document = Some(serde_yaml::from_str(config).unwrap());
+            app.now_minute = now;
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| draw_schedule(frame, &mut app, frame.size()))
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let row = (0..buffer.area.height)
+                .find(|row| {
+                    (0..buffer.area.width)
+                        .any(|column| matches!(buffer.get(column, *row).symbol(), "█" | "░"))
+                })
+                .expect("a day bar");
+            (0..buffer.area.width)
+                .filter(|column| buffer.get(*column, row).symbol() != "│")
+                .map(|column| buffer.get(column, row).style().fg.unwrap_or(Color::Reset))
+                .collect()
+        }
+
         #[test]
         fn the_axis_spans_the_whole_day() {
             let screen = screen(100, 24, NIGHT, 12 * 60);
@@ -4779,6 +4848,179 @@ mod tests {
                 .filter(|glyph| *glyph == '█' || *glyph == '░' || *glyph == '▒')
                 .count();
             assert_eq!(blocks, 24, "expected one cell per hour:\n{screen}");
+        }
+
+        /// The bar has to *move*, which is the one property a single rendering cannot
+        /// show.
+        ///
+        /// Drawn at two injected times rather than by waiting: `now` is a field on
+        /// `App` and no draw function asks the host clock what time it is, so "an hour
+        /// later" is a value rather than a sleep.
+        mod the_marker_travels_with_the_clock {
+            use super::{bar, cells, screen, DAY, NIGHT};
+
+            /// Which column the `▲` landed in, and what row it was on.
+            fn marker_column(screen: &str) -> usize {
+                let row = screen
+                    .lines()
+                    .find(|line| line.contains('▲'))
+                    .unwrap_or_else(|| panic!("no now-marker on screen:\n{screen}"));
+                cells(row)
+                    .iter()
+                    .position(|glyph| *glyph == '▲')
+                    .expect("the marker is on the row that contains it")
+            }
+
+            #[test]
+            fn an_hour_later_the_marker_is_further_along_the_day() {
+                let morning = screen(100, 24, DAY, 10 * 60);
+                let afternoon = screen(100, 24, DAY, 14 * 60);
+
+                let (early, late) = (marker_column(&morning), marker_column(&afternoon));
+                assert!(
+                    late > early,
+                    "the marker did not advance: 10:00 at {early}, 14:00 at {late}\
+                     \n{morning}\n{afternoon}"
+                );
+                // Four hours at four cells an hour, on a bar this wide.
+                assert_eq!(late - early, 16, "the marker moved the wrong distance");
+            }
+
+            /// Every quarter-hour step is visible at the finest resolution the bar
+            /// draws. A marker that only moved once an hour would be standing still
+            /// for most of the time anybody is looking at it.
+            #[test]
+            fn it_moves_within_the_hour_too() {
+                let columns: Vec<usize> = [0, 15, 30, 45]
+                    .iter()
+                    .map(|minutes| marker_column(&screen(100, 24, DAY, 10 * 60 + minutes)))
+                    .collect();
+
+                assert_eq!(columns, vec![columns[0], columns[0] + 1, columns[0] + 2, columns[0] + 3]);
+            }
+
+            /// The marker stands over the cell it describes. A label drawn beside it
+            /// must not push the arrow off the column whose open/closed state it is
+            /// pointing at.
+            #[test]
+            fn it_stands_over_the_cell_it_describes() {
+                for now in [0, 9 * 60, 12 * 60 + 30, 20 * 60] {
+                    let screen = screen(100, 24, DAY, now);
+                    let column = marker_column(&screen);
+                    let expected = (now / 15) as usize;
+                    assert_eq!(column, expected, "at {now} minutes:\n{screen}");
+                }
+            }
+
+            /// The same instant the bar's colour changes at, spelled out. The cell the
+            /// marker sits on is the one whose state flipped.
+            #[test]
+            fn the_open_closed_label_flips_when_the_window_does() {
+                // 09:00 is START, and START is inclusive.
+                let before = screen(100, 24, DAY, 8 * 60 + 45);
+                let after = screen(100, 24, DAY, 9 * 60);
+                assert!(before.contains("CLOSED"), "08:45 should be closed:\n{before}");
+                assert!(after.contains("OPEN"), "09:00 should be open:\n{after}");
+                assert!(!after.contains("CLOSED"), "09:00 still reads closed:\n{after}");
+
+                // 18:00 is END, and END is exclusive.
+                let last = screen(100, 24, DAY, 17 * 60 + 45);
+                let closed = screen(100, 24, DAY, 18 * 60);
+                assert!(last.contains("OPEN"), "17:45 should be open:\n{last}");
+                assert!(closed.contains("CLOSED"), "18:00 should be closed:\n{closed}");
+            }
+
+            /// The cell under the marker is the one whose state the label names, so
+            /// the two halves of the same claim cannot drift apart.
+            ///
+            /// A closed "now" is `▒` against its `░` neighbours; an open one is `█`
+            /// like its neighbours and is told apart by colour, which is why this
+            /// reads the buffer rather than the text.
+            #[test]
+            fn the_cell_under_the_marker_agrees_with_the_label() {
+                let closed = screen(100, 24, DAY, 3 * 60);
+                let column = marker_column(&closed);
+                let row = cells(bar(&closed));
+                assert_eq!(row[column], '▒', "the closed 'now' cell:\n{closed}");
+                assert_ne!(row[column + 4], '▒', "only 'now' is marked:\n{closed}");
+                assert!(closed.contains("CLOSED"), "{closed}");
+
+                let open = screen(100, 24, DAY, 12 * 60);
+                let column = marker_column(&open);
+                let row = cells(bar(&open));
+                assert_eq!(row[column], '█', "the open 'now' cell:\n{open}");
+                assert!(open.contains("OPEN"), "{open}");
+                assert_ne!(
+                    super::bar_colours(100, 24, DAY, 12 * 60)[column],
+                    super::bar_colours(100, 24, DAY, 12 * 60)[column + 4],
+                    "an open 'now' cell is not distinguished from the rest of the window"
+                );
+            }
+
+            /// The clock rides with the arrow. A `▲` alone on an empty row moves one
+            /// cell a quarter of an hour, which over any stretch somebody watches is
+            /// indistinguishable from a marker that is stuck.
+            #[test]
+            fn the_time_travels_next_to_the_marker() {
+                let screen = screen(100, 24, DAY, 14 * 60 + 30);
+                let row = screen.lines().find(|line| line.contains('▲')).unwrap();
+
+                assert!(row.contains("14:30"), "the marker carries no clock:\n{screen}");
+                // And it is the same figure the summary line states, so the two cannot
+                // disagree about what time it is.
+                assert!(screen.contains("now 14:30"), "{screen}");
+            }
+
+            /// Near midnight the label would run off the right-hand edge and be clipped
+            /// to half a time of day -- at exactly the hour a night-shift node is about
+            /// to close.
+            #[test]
+            fn the_clock_flips_to_the_left_at_the_end_of_the_day() {
+                let screen = screen(100, 24, NIGHT, 23 * 60 + 45);
+                let row = screen.lines().find(|line| line.contains('▲')).unwrap();
+
+                assert!(row.contains("23:45"), "the clock was clipped:\n{screen}");
+                let marker = row.find('▲').unwrap();
+                let clock = row.find("23:45").unwrap();
+                assert!(clock < marker, "the clock should sit left of the marker: {row:?}");
+            }
+
+            /// Midnight is a column, not an absence. `00:00` is minute zero, so the
+            /// marker belongs on the very first cell rather than nowhere.
+            #[test]
+            fn midnight_puts_the_marker_on_the_first_cell() {
+                let screen = screen(100, 24, NIGHT, 0);
+
+                assert_eq!(marker_column(&screen), 0, "{screen}");
+                // And a night shift is open through it.
+                assert!(screen.contains("OPEN"), "{screen}");
+            }
+
+            /// A day the node is open through the whole of still gets a marker: "where
+            /// are we" is a question a flat bar cannot answer either.
+            #[test]
+            fn a_schedule_that_is_off_still_says_where_now_is() {
+                let screen = screen(
+                    100,
+                    24,
+                    "activity_window:\n  ENABLED: false\n  WINDOWS:\n    - START: '09:00'\n      END: '18:00'\n",
+                    16 * 60,
+                );
+
+                assert_eq!(marker_column(&screen), 64, "{screen}");
+                assert!(screen.contains("now 16:00"), "{screen}");
+            }
+
+            /// The marker survives the coarsest bar the page draws, where one cell is
+            /// a whole hour and the label is most of the row.
+            #[test]
+            fn a_narrow_terminal_keeps_the_marker_on_the_bar() {
+                let screen = screen(40, 24, DAY, 20 * 60);
+                let column = marker_column(&screen);
+
+                assert_eq!(column, 20, "one cell per hour:\n{screen}");
+                assert!(screen.contains("20:00"), "{screen}");
+            }
         }
     }
 
@@ -8814,6 +9056,73 @@ mod banner_preview {
                 .map(|column| buffer.get(column, row).symbol())
                 .collect();
             println!("{}", line.trim_end());
+        }
+    }
+}
+
+fn draw_payment_systems(frame: &mut Frame, app: &mut App, area: Rect) {
+    let columns = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(area);
+    app.payment_rate_areas.clear();
+    for (index, (ledger, key, unit, shortcut)) in [
+        ("ergo", "MU_PER_NANOERG", "nanoERG", "g"),
+        ("bitcoin", "MU_PER_SATOSHI", "satoshi", "b"),
+    ].iter().enumerate() {
+        let block = Block::default().borders(Borders::ALL).title(format!(" {} • {} edit ratio ", ledger.to_uppercase(), shortcut));
+        let inner = block.inner(columns[index]);
+        let rate = app.config_document.as_ref().and_then(|d| d.get("ledgers"))
+            .and_then(|d| d.get(*ledger)).and_then(|d| d.get("payments")).and_then(|d| d.get(*key))
+            .map(|v| serde_yaml::to_string(v).unwrap_or_default().trim().to_string())
+            .unwrap_or_else(|| if *ledger == "ergo" { "1".into() } else { "not set".into() });
+        let mut lines = vec![Line::from(format!("{rate} MU / {unit} • click to edit"))];
+        app.payment_rate_areas.push((ledger.to_string(), Rect::new(inner.x, inner.y, inner.width, inner.height.min(1))));
+        let report = app.payment_report.get("ledgers").and_then(|v| v.as_array())
+            .and_then(|rows| rows.iter().find(|row| row["ledger"].as_str() == Some(*ledger)));
+        if let Some(report) = report {
+            let text = |key: &str| report[key].as_str().unwrap_or("").to_string();
+            lines.push(Line::from(if report["offered"].as_bool() == Some(true) { "Available".into() } else { text("unavailable_reason") }));
+            lines.push(Line::from(format!("Address: {}", text("address"))));
+            let error = text("history_error");
+            if !error.is_empty() { lines.push(Line::from(format!("History unavailable: {error}"))); }
+            else if let Some(txs) = report["transactions"].as_array() {
+                if txs.is_empty() { lines.push(Line::from("No recent transactions")); }
+                for tx in txs.iter().take(3) {
+                    lines.push(Line::from(format!("{} {} • {} confirmations", tx["direction"].as_str().unwrap_or("?"), tx["amount"].as_str().unwrap_or("?"), tx["confirmations"])));
+                    lines.push(Line::from(tx["id"].as_str().unwrap_or("").to_string()));
+                }
+            }
+        } else { lines.push(Line::from("Loading payment systems…")); }
+        if !app.payment_error.is_empty() { lines.push(Line::from(format!("History stale/unavailable: {}", app.payment_error))); }
+        frame.render_widget(Paragraph::new(lines).block(block), columns[index]);
+    }
+}
+
+#[cfg(test)]
+mod payment_panel_regressions {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn both_ledgers_render_and_clicks_edit_their_actual_config_keys() {
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Pricing).unwrap();
+        app.payment_report = serde_json::json!({"ledgers": [
+            {"ledger":"ergo", "offered":true, "address":"wallet", "transactions":[
+                {"id":"real-tx", "direction":"in", "amount":"2 ERG", "confirmations":4}
+            ]},
+            {"ledger":"bitcoin", "offered":false, "unavailable_reason":"Bitcoin not configured"}
+        ]});
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|f| draw_pricing(f, &mut app, f.size())).unwrap();
+        let buffer = terminal.backend().buffer();
+        let text: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        for expected in ["ERGO", "BITCOIN", "real-tx", "Bitcoin not configured", "MU / satoshi"] {
+            assert!(text.contains(expected), "missing {expected}");
+        }
+        for (ledger, area) in app.payment_rate_areas.clone() {
+            app.click_at(area.x, area.y);
+            assert_eq!(app.input_mode, crate::app::InputMode::EditConfig);
+            assert!(app.input_title.contains(&format!("ledgers.{ledger}.payments.MU_PER_")));
+            app.close_input();
         }
     }
 }
