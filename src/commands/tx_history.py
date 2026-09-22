@@ -10,21 +10,45 @@ Now each contract answers for its own chain, in one normalised shape
 is left here is the part that is nobody's chain: **who** was on the other side. The
 chain knows addresses; only this node knows which peer an address belonged to when it
 was paid, and which client a deposit token was issued to.
+
+Two audiences, one computation, the same shape as ``nodo reputation`` and ``nodo
+donations``: a person reads the printed form, and the TUI reads ``--json``. The TUI's
+PRICING page draws a block per payment system from :func:`report`, so what it shows is
+what this command prints rather than a second walk of the same chains -- and a second
+implementation of "is this ledger reachable" would be a second answer.
 """
 
+import json
+import sys
+import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
 from src.utils.logger import LOGGER
 
+# How many transactions a JSON report carries per ledger. Smaller than the printed
+# command's default: the reader is a panel a few rows tall, and every extra row costs
+# an explorer page.
+JSON_LIMIT = 5
 
-def tx_history(limit: int = 10):
+
+def tx_history(limit: int = 10, argv: Optional[List[str]] = None) -> bool:
     """Print one section per payment system this node offers.
 
     One section each rather than one merged list: two payment systems are two chains
     with their own money and their own confirmation counts, and interleaving them by
     timestamp would put figures in different units next to each other.
+
+    ``nodo tx_history [--json]``. Returns whether every offered ledger answered, which
+    is what the exit status is.
     """
+    argv = list(argv or [])
+    if "--json" in argv:
+        json.dump(report(limit=JSON_LIMIT), sys.stdout)
+        print()
+        sys.stdout.flush()
+        return True
+
     print("Transaction History")
     print("=" * 50)
 
@@ -40,7 +64,8 @@ def tx_history(limit: int = 10):
             "No payment system can report a history. Configure a ledger under "
             "`ledgers:` and check that its runtime is reachable."
         )
-        return
+        sys.stdout.flush()
+        return True
 
     # Resolved once for the whole page, not per section and not per transaction: both
     # are a single query, and the second (every deposit token this node ever issued) is
@@ -51,6 +76,173 @@ def tx_history(limit: int = 10):
         if index:
             print()
         _display_contract_history(contract, clients_by_token, limit)
+    sys.stdout.flush()
+    return True
+
+
+def report(limit: int = JSON_LIMIT, now: Optional[int] = None) -> dict:
+    """Everything this command knows, as the JSON the TUI reads.
+
+    One entry per **candidate** ledger, not per offered one, and the demo contract is
+    left out of both. "Configured but not usable" and "never configured" are different
+    facts with different fixes -- an unset `MU_PER_SATOSHI` against a `ledgers.bitcoin`
+    block nobody wrote -- and a report listing only what works answers "where is my
+    ledger" with nothing at all.
+
+    Never raises. Every per-ledger read is fenced: an explorer that times out costs that
+    ledger its transaction list and nothing else, because the rate and the address beside
+    it are config reads that are still true.
+    """
+    from src.payment_system.contracts.registry import (
+        CANDIDATES, attribute, contracts, is_configured,
+    )
+
+    offered = {
+        getattr(contract, "LEDGER", ""): contract
+        for contract in contracts().values()
+        if not attribute(contract, "is_demo")
+    }
+    clients_by_token = _clients_by_deposit_token() if offered else {}
+
+    ledgers = []
+    for candidate in CANDIDATES:
+        if candidate.name == "simulated":
+            continue
+        entry = {
+            "ledger": candidate.name,
+            "configured": bool(_safely(is_configured, candidate.name, default=False)),
+            "offered": candidate.name in offered,
+            "unavailable_reason": "",
+            "address": "",
+            "rate": _rate(candidate),
+            "transactions": [],
+            "history_error": "",
+        }
+        contract = offered.get(candidate.name)
+        if contract is None:
+            entry["unavailable_reason"] = _unavailable_reason(candidate, entry["configured"])
+            ledgers.append(entry)
+            continue
+        entry["address"] = _safely(contract.get_wallet_address, default="") or ""
+        entry["transactions"], entry["history_error"] = _transactions(
+            contract, clients_by_token, limit
+        )
+        ledgers.append(entry)
+
+    return {"ledgers": ledgers, "read_at": int(time.time()) if now is None else int(now)}
+
+
+def _safely(call, *args, default=None):
+    """``call(*args)``, or ``default`` when the chain, the config or the JVM says no.
+
+    Broad on purpose. This is a report: a ledger that cannot answer one question is
+    still worth every other line about it, and each caller decides what a missing
+    answer looks like.
+    """
+    try:
+        return call(*args)
+    except Exception as e:
+        LOGGER(f"tx_history report: {call.__name__} failed: {e}")
+        return default
+
+
+def _rate(candidate) -> dict:
+    """What one MU is worth on this ledger, from its own light rate module.
+
+    The rate module rather than the contract: it is the one part of a payment system
+    that is readable without a JVM or a socket, which is exactly the case this has to
+    report on -- an operator whose Bitcoin is unusable *because* of its rate needs to
+    read the rate.
+    """
+    from importlib import import_module
+
+    if not candidate.rate_path:
+        return {}
+    module = _safely(import_module, candidate.rate_path)
+    if module is None:
+        return {}
+    units = _safely(module.display_units, default={}) or {}
+    native = units.get(getattr(module, "UNIT_NAME", ""), {})
+    return {
+        "key": getattr(module, "RATE_KEY", ""),
+        "symbol": getattr(module, "UNIT_SYMBOL", ""),
+        "decimals": getattr(module, "UNIT_DECIMALS", 0),
+        # Per BASE unit (nanoERG, satoshi): the figure the config key holds, so what is
+        # shown is what an edit changes. `mu_per_unit` is derived from it.
+        "mu_per_base_unit": _rate_text(module),
+        "mu_per_unit": str(native.get("MU_PER_UNIT", "")),
+        "reason": _safely(getattr(module, "rate_reason", lambda: None), default=None) or "",
+    }
+
+
+def _rate_text(module) -> str:
+    """The configured per-base-unit rate as a string, or ``""`` when it is unusable.
+
+    Read through the module's own accessor -- ``mu_per_nanoerg`` / ``mu_per_satoshi`` --
+    rather than off the config key, so the validation that decides whether a rate may be
+    used at all is the validation this reports.
+    """
+    for name in ("mu_per_nanoerg", "mu_per_satoshi"):
+        accessor = getattr(module, name, None)
+        if callable(accessor):
+            value = _safely(accessor, default=None)
+            return "" if value is None else str(value)
+    return ""
+
+
+def _unavailable_reason(candidate, configured: bool) -> str:
+    """Why a configured ledger is not being offered, in the operator's own terms.
+
+    The contract's own ``unavailable_reason`` where there is one -- it is the sentence
+    the registry logs and it names the key to fix. A ledger nobody configured gets a
+    plain statement of that rather than a reason, because there is nothing wrong.
+    """
+    from importlib import import_module
+
+    if not configured:
+        return f"ledgers.{candidate.name} is not configured, so this node does not offer it."
+    module = _safely(import_module, candidate.module_path)
+    if module is None:
+        return (
+            f"The {candidate.name} contract could not be imported, so this node is not "
+            "offering it. See app.log for what it said on the way past."
+        )
+    reason = getattr(module, "unavailable_reason", None)
+    if callable(reason):
+        return str(_safely(reason, default="") or "")
+    return ""
+
+
+def _transactions(contract, clients_by_token: Dict[str, str], limit: int):
+    """``(rows, error)`` for one ledger, each row already joined to what this node knows.
+
+    An error rather than an empty list when the read fails: "could not look" is not
+    "nothing happened", and a wallet nobody has ever used is a fact worth being able
+    to state.
+    """
+    history = getattr(contract, "transaction_history", None)
+    if not callable(history):
+        return [], (
+            f"The {getattr(contract, 'LEDGER', '?')} contract does not report a "
+            "transaction history."
+        )
+    try:
+        rows = history(limit=limit) or []
+    except Exception as e:
+        return [], str(e)
+
+    payments = _payments_by_tx_id(rows)
+    return [
+        {
+            "id": row.get("id") or "",
+            "amount": _format_amount(row),
+            "timestamp": int(row.get("timestamp") or 0),
+            "confirmations": int(row.get("confirmations") or 0),
+            "direction": row.get("direction") or "unknown",
+            "counterparty": _counterparty_lines(row, payments, clients_by_token),
+        }
+        for row in rows
+    ], ""
 
 
 def _display_contract_history(contract, clients_by_token: Dict[str, str], limit: int):
