@@ -11,6 +11,7 @@ that answers nothing -- but never worth stopping the node: peers keep working
 through the TLS port regardless.
 """
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 try:
@@ -114,6 +115,59 @@ class VerifyPlaintextGatewayPortTests(unittest.TestCase):
         # Guest subnet only, never the wide-open form the TLS port's own advice
         # would produce -- this port is unauthenticated plain gRPC.
         self.assertIn("192.168.200.0/24", body)
+
+
+@unittest.skipIf(_IMPORT_ERROR is not None, f"src.serve unavailable: {_IMPORT_ERROR}")
+class VerifyGatewayPortsTests(unittest.TestCase):
+    """Both ports are probed, whatever the TLS port's verdict.
+
+    The plaintext probe used to run only after the TLS one passed, so a firewall
+    blocking both (the usual case: one INPUT policy covers every port) refused the
+    start over the TLS port and never wrote the plaintext alert -- `nodo info` and the
+    TUI showed one problem while the node had two.
+    """
+
+    def setUp(self):
+        self.order = []
+        self.server = unittest.mock.Mock()
+        self.server.stop.side_effect = lambda grace: self.order.append("stop")
+        self.plaintext = patch.object(
+            serve_module,
+            "_verify_plaintext_gateway_port",
+            side_effect=lambda port: self.order.append(("plaintext", port)),
+        ).start()
+        self.addCleanup(patch.stopall)
+
+    def test_a_refused_start_still_probes_the_plaintext_port_before_stopping(self):
+        patch.object(
+            serve_module, "_verify_gateway_port", side_effect=SystemExit(1)
+        ).start()
+
+        with self.assertRaises(SystemExit):
+            serve_module._verify_gateway_ports(self.server, PORT, PORT + 1)
+
+        # Before stop(): the probe needs the daemon's own listener to still be up.
+        self.assertEqual(self.order, [("plaintext", PORT + 1), "stop"])
+
+    def test_a_plaintext_probe_that_raises_never_replaces_the_refusal(self):
+        patch.object(
+            serve_module, "_verify_gateway_port", side_effect=SystemExit(1)
+        ).start()
+        self.plaintext.side_effect = RuntimeError("boom")
+        patch.object(serve_module.log, "LOGGER").start()
+
+        with self.assertRaises(SystemExit):
+            serve_module._verify_gateway_ports(self.server, PORT, PORT + 1)
+
+        self.server.stop.assert_called_once_with(0)
+
+    def test_a_reachable_tls_port_leaves_the_server_running(self):
+        patch.object(serve_module, "_verify_gateway_port").start()
+
+        serve_module._verify_gateway_ports(self.server, PORT, PORT + 1)
+
+        self.assertEqual(self.order, [("plaintext", PORT + 1)])
+        self.server.stop.assert_not_called()
 
 
 if __name__ == "__main__":
