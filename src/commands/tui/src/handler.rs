@@ -97,6 +97,19 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             }
             return Ok(());
         }
+        // Which of a lever's keys to edit. Same keys as the profile picker, since
+        // it is the same gesture: choose a row, Enter opens it.
+        InputMode::PickLeverKey => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (_, KeyCode::Up) => app.move_lever_key_selection(-1),
+                (_, KeyCode::Down) => app.move_lever_key_selection(1),
+                (_, KeyCode::Enter) => app.submit_input().await,
+                (_, KeyCode::Esc | KeyCode::Char('q')) => app.close_input(),
+                _ => {}
+            }
+            return Ok(());
+        }
         // Profile picker: choose a posture, then see its diff.
         InputMode::PickProfile => {
             match (key.modifiers, key.code) {

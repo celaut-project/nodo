@@ -424,6 +424,27 @@ network:
   # typing the command is overriding this default on purpose. Peers can still ask THIS
   # node to run services for them -- that direction is client.ACCEPT_NEW_DEPOSITS.
   DELEGATE_EXECUTION: true
+  # If false, this node never runs a service itself: the balancer stops pricing local
+  # execution and only ever selects a peer, so a service no peer will take fails
+  # instead of being run here. The mirror image of DELEGATE_EXECUTION, for a node that
+  # is meant to orchestrate rather than compute -- a laptop, a machine whose owner
+  # wants it to route work and not host it, or one being drained before maintenance.
+  #
+  # This is about what this node runs FOR ITSELF AND ITS CLIENTS. Peers asking this
+  # node to run services for them go through the same balancer and are refused too,
+  # which is the point; client.ACCEPT_NEW_DEPOSITS is the separate question of whether
+  # they may open an account at all.
+  #
+  # One exception, and it is a physical one rather than a carve-out: a service that
+  # inherits a directory from its parent (a `guest=true` xattr) is materialized from
+  # that parent's own rootfs and cannot run anywhere else. With this off there is no
+  # local candidate for it, so such a launch fails rather than being delegated to a
+  # peer that could not honour it either.
+  #
+  # Turning this off with DELEGATE_EXECUTION also off leaves no candidates at all and
+  # refuses every launch. That is a coherent thing to ask for -- a node that is only a
+  # wallet and a peer directory -- and nothing stops you, but it is worth meaning.
+  EXECUTE_LOCALLY: true
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.

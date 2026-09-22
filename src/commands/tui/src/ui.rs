@@ -136,6 +136,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             draw_details_popup(frame, app)
         }
         InputMode::PickProfile => draw_profile_popup(frame, app),
+        InputMode::PickLeverKey => draw_lever_key_popup(frame, app),
         InputMode::Connect
         | InputMode::EditConfig
         | InputMode::AddConfigItem
@@ -2880,6 +2881,67 @@ fn organelle_colour(organelle: Organelle) -> Color {
 
 /// The profile picker: the postures, ordered from the most closed to the most open,
 /// with how far this node already is from each.
+/// The keys behind one CELL lever, as a list any of which can be edited.
+///
+/// The row this replaces was read-only and ended with "Edit them one at a time on
+/// the CONFIG page": a panel that named what it controlled and then declined to
+/// control it. Each key is shown with what the file says now, because "which of
+/// these do I want" is not answerable from the key names alone.
+fn draw_lever_key_popup(frame: &mut Frame, app: &App) {
+    let area = centered_rect(74, app.lever_keys.len() as u16 + 6, frame.size());
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent()))
+        .style(Style::default().fg(text_colour()).bg(popup_background()))
+        .title(Span::styled(
+            format!(" {} ", app.input_title.to_uppercase()),
+            Style::default().fg(accent()).bold(),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (index, path) in app.lever_keys.iter().enumerate() {
+        let selected = index == app.lever_key_index;
+        let value = crate::app::yaml_scalar(
+            app.config_document.as_ref(),
+            &path.split('.').collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|| "unset".to_string());
+        lines.push(Line::from(vec![
+            Span::styled(
+                if selected { "▸ " } else { "  " },
+                Style::default().fg(accent()).bold(),
+            ),
+            Span::styled(
+                format!("{path:<44}"),
+                if selected {
+                    Style::default().fg(text_colour()).bold()
+                } else {
+                    Style::default().fg(muted())
+                },
+            ),
+            Span::styled(value, Style::default().fg(good())),
+        ]));
+    }
+    lines.push(Line::from(""));
+    // The same sentence every other editor on this interface ends with, because the
+    // consequence is the same one: the node reads config.yaml once, at start.
+    lines.push(Line::from(Span::styled(
+        "Editing one writes config.yaml and restarts the node onto it.",
+        Style::default().fg(muted()),
+    )));
+    lines.push(Line::from(Span::styled(
+        "↑/↓ choose  ·  ⏎ edit it  ·  Esc cancel",
+        Style::default().fg(warn()),
+    )));
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().fg(text_colour()).bg(popup_background())),
+        inner,
+    );
+}
+
 fn draw_profile_popup(frame: &mut Frame, app: &App) {
     let profiles = cell::profiles();
     let area = centered_rect(70, profiles.len() as u16 * 2 + 6, frame.size());
@@ -4038,7 +4100,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         }
         Page::Earnings => "\u{2191}/\u{2193} select an opinion  \u{2022}  r re-read the chain  \u{2022}  q quit",
         Page::Cell => {
-            "\u{2192}/\u{2190} organelle  \u{2022}  \u{2191}/\u{2193} lever  \u{2022}  \u{23ce} change  \u{2022}  e keys behind it  \u{2022}  p profiles  \u{2022}  d deviations  \u{2022}  n router guide"
+            "\u{2192}/\u{2190} organelle  \u{2022}  \u{2191}/\u{2193} lever  \u{2022}  \u{23ce} change  \u{2022}  e edit a key behind it  \u{2022}  p profiles  \u{2022}  d deviations  \u{2022}  n router guide"
         }
         Page::Pricing => {
             "\u{2191}/\u{2193} select  \u{2022}  +/- adjust 10%  \u{2022}  e exact value  \u{2022}  r refresh  \u{2022}  q quit"
@@ -4840,7 +4902,7 @@ mod tests {
                     "{} does not say what changing it does",
                     lever.id
                 );
-                if let LeverKind::Link(_) = lever.kind {
+                if let LeverKind::Link(..) = lever.kind {
                     continue;
                 }
                 assert!(!lever.paths().is_empty(), "{} writes nothing", lever.id);
@@ -6566,6 +6628,43 @@ mod tests {
             .collect::<String>();
 
         assert!(screen.contains("no identity yet"), "{screen}");
+    }
+
+    /// The picker that replaced "Edit them one at a time on the CONFIG page".
+    ///
+    /// The old panel named the keys a lever stood for and then sent the operator
+    /// somewhere else to change them. This one is the same list, actionable, with
+    /// the value beside each key -- "which of these do I want" is not answerable
+    /// from the key names alone.
+    #[test]
+    fn the_lever_key_picker_shows_each_key_with_what_it_says_now() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Cell).unwrap();
+        app.config_document = Some(
+            serde_yaml::from_str("pricing:\n  RAM_MU_PER_GIB_HOUR: 1000000\n").unwrap(),
+        );
+        app.input_mode = crate::app::InputMode::PickLeverKey;
+        app.input_title = "Edit prices".to_string();
+        app.lever_keys = vec!["pricing.RAM_MU_PER_GIB_HOUR"];
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(screen.contains("EDIT PRICES"), "{screen}");
+        assert!(screen.contains("pricing.RAM_MU_PER_GIB_HOUR"), "{screen}");
+        assert!(screen.contains("1000000"), "the value is not shown: {screen}");
+        // Every editor on this interface ends with the same sentence, because the
+        // consequence is the same: the node reads config.yaml once, at start.
+        assert!(screen.contains("restarts the node"), "{screen}");
+        // And never the line that used to send the operator away.
+        assert!(!screen.contains("one at a time on the CONFIG page"), "{screen}");
     }
 
     #[test]
