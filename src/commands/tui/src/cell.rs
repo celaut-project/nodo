@@ -111,10 +111,15 @@ pub enum LeverKind {
         /// Appended to the value when shown, e.g. "/tcp" or "%". Empty for none.
         unit: &'static str,
     },
-    /// Not a setting: the page that owns this properly. Prices are the case —
-    /// they have a whole page with bars and a worked example, and a second,
-    /// cruder editor for them here would only be a way to disagree with it.
-    Link(Page),
+    /// A setting with a page of its own that edits it better. Prices are the case:
+    /// a whole page of bars and a worked example, and a second, cruder editor for
+    /// them here would only be a way to disagree with it.
+    ///
+    /// Enter goes to that page. `keys` is what the setting *is* underneath, so `e`
+    /// can still edit it in place from here -- a row an operator cannot act on
+    /// without first being sent somewhere else is a row that failed to be a setting
+    /// (issue #414).
+    Link(Page, &'static [&'static str]),
 }
 
 /// One decision, named by the question it answers.
@@ -154,7 +159,7 @@ impl Lever {
                 }
             }
             LeverKind::Scalar { path, .. } => paths.push(path),
-            LeverKind::Link(_) => {}
+            LeverKind::Link(_, keys) => paths.extend(keys.iter().copied()),
         }
         paths
     }
@@ -211,7 +216,7 @@ impl LeverStatus {
             LeverStatus::Custom => "custom".to_string(),
             LeverStatus::Unset => "not set".to_string(),
             LeverStatus::Link => match lever.kind {
-                LeverKind::Link(page) => format!("{} page", page.title()),
+                LeverKind::Link(page, _) => format!("{} page", page.title()),
                 _ => "→".to_string(),
             },
         }
@@ -420,6 +425,25 @@ static LEVERS: &[Lever] = &[
             unit: "%",
         },
         warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "run-locally",
+        organelle: Organelle::Ribosomes,
+        label: "run work here",
+        question: "Does this machine run services itself, or only hand them to peers?",
+        consequence: "Delegate only makes this node an orchestrator: it prices nothing for itself, so work no peer will take fails instead of running here. Needs `delegate work` on, or nothing can run at all.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "delegate only",
+                writes: &[("network.EXECUTE_LOCALLY", "false")],
+            },
+            LeverState {
+                label: "run here",
+                writes: &[("network.EXECUTE_LOCALLY", "true")],
+            },
+        ]),
+        warning: Some("with `delegate work` set to never, nothing runs anywhere"),
         secret: false,
     },
     Lever {
@@ -924,7 +948,15 @@ static LEVERS: &[Lever] = &[
         label: "working hours",
         question: "What hours of the day does this node take work in?",
         consequence: "Edited on the SCHEDULE page, which draws the day: each window's open stretch is one run of blocks whether or not it crosses midnight, and a marker says where now is. A night shift and a lunch break are two windows, not one. Flat scalar fields could say neither, and took \"25:00\" without complaint.",
-        kind: LeverKind::Link(Page::Schedule),
+        // Only `WINDOWS`. The section's other two keys are the `after hours` lever's
+        // above, and one key has exactly one owning lever -- two levers writing the
+        // same key would push each other into `custom` on a decision neither touched.
+        //
+        // `WINDOWS` is a list of windows, which no single-value editor can open, so
+        // `e` here says so rather than offering a row that refuses. That is not a
+        // gap: the SCHEDULE page's bar is now draggable at both edges, which is a
+        // better editor for a list of hours than any text field would be.
+        kind: LeverKind::Link(Page::Schedule, &["activity_window.WINDOWS"]),
         warning: None,
         secret: false,
     },
@@ -935,7 +967,20 @@ static LEVERS: &[Lever] = &[
         label: "prices",
         question: "What does this node charge per resource?",
         consequence: "Edited on the PRICING page, which shows each price as a bar against the others and what the node really keeps once the guest kernel reserve is paid for.",
-        kind: LeverKind::Link(Page::Pricing),
+        // What the PRICING page's bars stand for. `e` edits one in place; Enter
+        // opens the page, where a price can be judged against the others.
+        kind: LeverKind::Link(
+            Page::Pricing,
+            &[
+                "pricing.RAM_MU_PER_GIB_HOUR",
+                "pricing.CPU_MU_PER_VCPU_HOUR",
+                "pricing.DISK_MU_PER_GIB_HOUR",
+                "pricing.NET_MU_PER_GIB",
+                "pricing.BUILD_MU",
+                "pricing.TUNNEL_OPEN_MU",
+                "pricing.MODIFY_RESOURCES_MU",
+            ],
+        ),
         warning: None,
         secret: false,
     },
@@ -1417,7 +1462,7 @@ fn satisfied(writes: &[(&str, &str)], document: Option<&Value>) -> bool {
 /// What `config.yaml` currently says this lever is set to.
 pub fn status(lever: &Lever, document: Option<&Value>) -> LeverStatus {
     match lever.kind {
-        LeverKind::Link(_) => LeverStatus::Link,
+        LeverKind::Link(..) => LeverStatus::Link,
         LeverKind::Scalar { path, .. } => match value_at(document, path) {
             Some(value) => LeverStatus::Value(rendered(value)),
             None => LeverStatus::Unset,
@@ -1584,6 +1629,61 @@ mod tests {
                     }
                     owner.push((path, lever.id));
                 }
+            }
+        }
+
+        /// A node that only orchestrates (issue #414).
+        ///
+        /// The mirror image of `delegate work`, and deliberately a separate lever
+        /// rather than a fourth position on that one: they are two independent
+        /// questions, and folding them together would make "never delegate" and
+        /// "never run here" mutually exclusive when they are not.
+        #[test]
+        fn a_node_can_be_told_never_to_run_work_itself() {
+            let run_locally = lever("run-locally").expect("the catalogue offers this decision");
+            let LeverKind::Cycle(states) = run_locally.kind else {
+                panic!("it is a choice between named positions");
+            };
+
+            let delegate_only = states
+                .iter()
+                .find(|state| state.label == "delegate only")
+                .expect("a position that runs nothing here");
+            assert_eq!(
+                delegate_only.writes,
+                &[("network.EXECUTE_LOCALLY", "false")]
+            );
+
+            // The two flags are separate keys on separate levers: turning one off
+            // must not write the other.
+            assert_eq!(run_locally.paths(), vec!["network.EXECUTE_LOCALLY"]);
+            let delegate = lever("delegate").unwrap();
+            assert!(!delegate.paths().contains(&"network.EXECUTE_LOCALLY"));
+        }
+
+        /// Both off is a node that refuses every launch. Coherent to ask for, and
+        /// worth being warned about before it is asked for.
+        #[test]
+        fn the_position_that_can_strand_every_launch_carries_a_warning() {
+            let run_locally = lever("run-locally").unwrap();
+            let warning = run_locally.warning.expect("a position this costly says so");
+            assert!(warning.contains("delegate work"), "{warning}");
+        }
+
+        /// The two `Link` levers name the keys they stand for, so `e` can edit one
+        /// in place instead of answering with the name of another page (issue #414).
+        #[test]
+        fn a_link_lever_still_names_the_keys_behind_it() {
+            for id in ["prices", "working-hours"] {
+                let link = lever(id).unwrap();
+                assert!(
+                    matches!(link.kind, LeverKind::Link(..)),
+                    "{id} is not a link"
+                );
+                assert!(
+                    !link.paths().is_empty(),
+                    "{id} names no keys, so `e` on it can do nothing"
+                );
             }
         }
 

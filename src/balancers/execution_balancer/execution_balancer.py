@@ -148,22 +148,36 @@ def execution_balancer(
     
     # TODO If there is noting on meta. Need to check the architecture on the buffer and write it on metadata.
 
-    try:
-        _local = generate_estimated_cost(
-            resources=resources,
-            metadata=metadata,
-            config=configuration,
-            arch=arch,
-            service=service,
-        )
-        if _local:
-            peers['local'] = _local
-    except UnsupportedArchitectureException as e:
-        log.LOGGER(e.__str__())
-        pass
-    except Exception as e:
-        log.LOGGER('Error getting the local cost ' + str(e))
-        raise e
+    # A node that does not run services itself does not price one. The local quote is
+    # not free -- `generate_estimated_cost` resolves the architecture, reads the
+    # service's manifest off disk and applies this node's whole pricing policy -- and
+    # every bit of it would be spent on a candidate that could never be selected.
+    # Skipping it leaves the peers as the only options, so the caller either delegates
+    # or fails, which is what network.EXECUTE_LOCALLY: false asks for.
+    #
+    # The mirror image of DELEGATE_EXECUTION below, and the two are independent: a
+    # node with both off has no candidates at all and refuses every launch, which is a
+    # coherent thing to ask for (a node that is only a wallet and a peer directory)
+    # and not this function's business to second-guess.
+    if env_manager.get("network.EXECUTE_LOCALLY", True):
+        try:
+            _local = generate_estimated_cost(
+                resources=resources,
+                metadata=metadata,
+                config=configuration,
+                arch=arch,
+                service=service,
+            )
+            if _local:
+                peers['local'] = _local
+        except UnsupportedArchitectureException as e:
+            log.LOGGER(e.__str__())
+            pass
+        except Exception as e:
+            log.LOGGER('Error getting the local cost ' + str(e))
+            raise e
+    else:
+        log.LOGGER('network.EXECUTE_LOCALLY is off; this node prices no work for itself.')
 
     # A node that will not delegate does not ask anyone for a price: the peer loop is
     # one GetServiceEstimatedCost round-trip per known peer, all of it spent on
