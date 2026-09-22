@@ -1270,6 +1270,18 @@ pub struct NodeInfo {
     pub service_status: String,
     pub version: String,
     pub address: String,
+    /// This node's identity public key, as `nodo info` prints it.
+    ///
+    /// Not cosmetic and not derivable from anything else on screen: the reputation
+    /// system keys every opinion this node publishes, and every opinion published
+    /// *about* it, by exactly this hex string. An operator asking a peer to vouch
+    /// for them, or reading a proof that names them, has nothing else to compare
+    /// against -- and until now the console that is left open all day was the one
+    /// place it could not be read.
+    ///
+    /// Empty while `nodo info` has not answered yet, or on a node that has been
+    /// given no identity mnemonic, which is an ordinary state rather than a fault.
+    pub node_id: String,
     pub reputation_proof: String,
     /// One entry per payment system this node offers, in the order `nodo info` printed
     /// them. A list rather than one wallet: two payment systems are two balances in two
@@ -4855,6 +4867,14 @@ pub fn parse_node_info(output: &str) -> NodeInfo {
             info.version = value.to_string();
         } else if let Some(value) = line.strip_prefix("Nodo address: ") {
             info.address = value.to_string();
+        } else if let Some(value) = line.strip_prefix("Node id: ") {
+            // `nodo info` prints "unavailable (...)" for a node with no identity
+            // mnemonic, and for one whose key could not be read. Neither is an id,
+            // and neither should be rendered as though it were: left empty, so the
+            // card says what it says about every other unknown field.
+            if !value.starts_with("unavailable") {
+                info.node_id = value.to_string();
+            }
         } else if let Some(value) = line.strip_prefix("Reputation Proof ID: ") {
             info.reputation_proof = value.to_string();
         } else if let Some((ledger, rest)) = split_wallet_line(line, "Wallet: ") {
@@ -7783,6 +7803,63 @@ Cold Wallet: 9cold\n";
         assert_eq!(info.wallets[0].address, "9wallet");
         assert_eq!(info.wallets[0].balance, Some(1.25));
         assert_eq!(info.wallets[0].cold_address, "9cold");
+    }
+
+    /// The string every opinion about this node is keyed by.
+    #[test]
+    fn parses_the_node_id() {
+        let output = "Nodo service is currently running.\n\
+Node id: 3f2a91c0deadbeef3f2a91c0deadbeef3f2a91c0deadbeef3f2a91c0deadbeef\n\
+Nodo address: 10.0.0.1:5000\n";
+
+        let info = parse_node_info(output);
+
+        assert_eq!(
+            info.node_id,
+            "3f2a91c0deadbeef3f2a91c0deadbeef3f2a91c0deadbeef3f2a91c0deadbeef"
+        );
+        // The address line is still an address, not an id: the two are adjacent in
+        // the output and both end in something that looks like a value.
+        assert_eq!(info.address, "10.0.0.1:5000");
+    }
+
+    /// A node with no identity mnemonic is an ordinary state, and `nodo info` says
+    /// so in prose. Storing that prose as the id would put "unavailable (no identity
+    /// mnemonic yet)" on the card in the place a key belongs, where it reads as a
+    /// key -- and would be compared against one.
+    #[test]
+    fn an_unavailable_node_id_is_no_id_rather_than_a_sentence() {
+        for line in [
+            "Node id: unavailable (no identity mnemonic yet)",
+            "Node id: unavailable (some error)",
+        ] {
+            let info = parse_node_info(&format!("{line}\n"));
+            assert_eq!(info.node_id, "", "{line}");
+        }
+    }
+
+    /// A node that has not been updated prints no such line, and must not make the
+    /// rest of the output unreadable.
+    #[test]
+    fn output_without_a_node_id_still_parses() {
+        let info = parse_node_info("Nodo service is currently running.\nNodo version: abc\n");
+
+        assert_eq!(info.node_id, "");
+        assert_eq!(info.version, "abc");
+    }
+
+    /// `nodo info` is where this string comes from, so the prefix the TUI strips has
+    /// to be the prefix nodo.py prints. Read rather than run: a Rust test suite has
+    /// no interpreter to hand, and the two drifting apart shows as a blank field.
+    #[test]
+    fn the_node_id_prefix_matches_what_nodo_info_prints() {
+        let python = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../nodo.py"))
+            .expect("nodo.py ships with the repository");
+
+        assert!(
+            python.contains("f\"Node id: {node_id}\""),
+            "nodo.py no longer prints `Node id: <id>`, which is what the TUI reads"
+        );
     }
 
     #[test]
