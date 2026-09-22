@@ -564,6 +564,7 @@ async fn apply_config_change(
     // Asked before the write, because the change may be to the port itself: what
     // decides whether a restart is owed is whether a node is serving now.
     let port_before = read_gateway_port(&config);
+    let plaintext_before = read_gateway_plaintext_port_raw(&config);
     let was_serving = serving_on(port_before.as_deref()).await;
 
     let backup = match backup_config(&config) {
@@ -594,6 +595,16 @@ async fn apply_config_change(
     let port_after = read_gateway_port(&config);
     if port_after != port_before {
         let _ = fs::remove_file(cache.join("gateway_port_passed"));
+        // GATEWAY_PLAINTEXT_PORT's `auto` resolves as GATEWAY_PORT + 1 (see
+        // ConfigManager.get_plaintext_gateway_port), so a changed TLS port changes
+        // what the plaintext one *is* even when GATEWAY_PLAINTEXT_PORT itself was
+        // never touched by this write.
+        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
+    }
+
+    let plaintext_after = read_gateway_plaintext_port_raw(&config);
+    if plaintext_after != plaintext_before {
+        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
     }
 
     if !was_serving {
@@ -2081,6 +2092,19 @@ fn read_gateway_port(config: &Path) -> Option<String> {
     read_yaml(config)
         .ok()
         .and_then(|document| yaml_scalar(Some(&document), &["network", "GATEWAY_PORT"]))
+}
+
+/// `network.GATEWAY_PLAINTEXT_PORT` exactly as written, unresolved.
+///
+/// Read raw rather than through `alerts::plaintext_assigned_port`: this is a
+/// before/after diff to decide whether to drop `gateway_plaintext_port_passed`, so
+/// what matters is whether the *key* changed, not what it resolves to. Resolving
+/// `auto` here would also need the (possibly also-changing) TLS port, which the
+/// caller already diffs on its own.
+fn read_gateway_plaintext_port_raw(config: &Path) -> Option<String> {
+    read_yaml(config).ok().and_then(|document| {
+        yaml_scalar(Some(&document), &["network", "GATEWAY_PLAINTEXT_PORT"])
+    })
 }
 
 fn resolve_config_path(value: &str, main_dir: &Path, storage: Option<&Path>) -> PathBuf {
@@ -7503,6 +7527,35 @@ mod tests {
                     .map(|directory| directory.join("yq"))
                     .find(|candidate| candidate.exists())
             })
+        }
+
+        /// `read_gateway_plaintext_port_raw`: the raw key, not what `auto` resolves
+        /// to -- that resolution needs the (possibly also-changing) TLS port, which
+        /// the caller in `apply_config_change` diffs on its own.
+        #[test]
+        fn plaintext_port_is_read_raw_not_resolved() {
+            let dir = TempDir::new("plaintext-raw");
+            let config = dir.file("config.yaml");
+            fs::write(
+                &config,
+                "network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: auto\n",
+            )
+            .unwrap();
+
+            assert_eq!(
+                super::super::read_gateway_plaintext_port_raw(&config).as_deref(),
+                Some("auto"),
+                "the raw scalar, not GATEWAY_PORT + 1"
+            );
+        }
+
+        #[test]
+        fn a_missing_plaintext_key_reads_as_none() {
+            let dir = TempDir::new("plaintext-absent");
+            let config = dir.file("config.yaml");
+            fs::write(&config, "network:\n  GATEWAY_PORT: 52285\n").unwrap();
+
+            assert_eq!(super::super::read_gateway_plaintext_port_raw(&config), None);
         }
     }
 

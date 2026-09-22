@@ -249,6 +249,109 @@ class GatewayPortAlertTests(unittest.TestCase):
         self.assertIsNotNone(alert)
 
 
+class _FakePlaintextConfigManager:
+    """Just enough ConfigManager for the plaintext gateway alert."""
+
+    def __init__(self, config_path, port):
+        self.config_path = config_path
+        self._port = port
+
+    def get_plaintext_gateway_port(self):
+        return self._port
+
+
+class PlaintextGatewayPortAlertTests(unittest.TestCase):
+    """The guest-only counterpart of GatewayPortAlertTests.
+
+    Different audience (microVMs, not peers), different trigger (a notice file of
+    its own, ``.gateway_plaintext_notice``), and one state the TLS port does not
+    have: turned off (``0``) is not a failure, so it must raise nothing at all.
+    """
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.config_path = os.path.join(self._dir.name, "config.yaml")
+        with open(self.config_path, "w") as handle:
+            handle.write("main: {}\n")
+
+    def _notice_path(self):
+        from src.utils.config import GATEWAY_PLAINTEXT_NOTICE_FILE
+
+        return os.path.join(self._dir.name, GATEWAY_PLAINTEXT_NOTICE_FILE)
+
+    def _write_notice(self, text="open TCP 52286, scoped to 192.168.200.0/24"):
+        with open(self._notice_path(), "w") as handle:
+            handle.write(text)
+
+    def test_a_reachable_port_with_nothing_pending_is_not_an_alert(self):
+        manager = _FakePlaintextConfigManager(self.config_path, 52286)
+
+        self.assertIsNone(operator_alerts.plaintext_gateway_port_alert(manager))
+
+    def test_a_pending_notice_names_the_port_and_talks_about_microvms(self):
+        self._write_notice()
+        manager = _FakePlaintextConfigManager(self.config_path, 52286)
+
+        alert = operator_alerts.plaintext_gateway_port_alert(manager)
+
+        self.assertIsNotNone(alert)
+        self.assertEqual(alert.key, "gateway_plaintext_port_unreachable")
+        self.assertIn("52286", alert.summary)
+        # Never "peers": this port is not announced to them at all.
+        self.assertNotIn("peer", alert.summary.lower())
+        self.assertIn("scoped to 192.168.200.0/24", alert.detail)
+
+    def test_the_port_turned_off_raises_nothing_even_with_a_stray_notice(self):
+        """0 is the operator's own choice (services fall back to the TLS port).
+
+        A leftover notice from before it was disabled must not haunt the banner
+        forever -- there is no `serving` state here to distinguish, unlike the TLS
+        port, and reporting a port nobody is checking any more is worse than
+        silence.
+        """
+        self._write_notice()
+        manager = _FakePlaintextConfigManager(self.config_path, 0)
+
+        self.assertIsNone(operator_alerts.plaintext_gateway_port_alert(manager))
+
+    def test_the_alert_clears_when_the_notice_is_removed(self):
+        self._write_notice()
+        manager = _FakePlaintextConfigManager(self.config_path, 52286)
+        self.assertIsNotNone(operator_alerts.plaintext_gateway_port_alert(manager))
+
+        os.unlink(self._notice_path())
+
+        self.assertIsNone(operator_alerts.plaintext_gateway_port_alert(manager))
+
+    def test_an_empty_notice_file_is_not_an_alert(self):
+        with open(self._notice_path(), "w"):
+            pass
+        manager = _FakePlaintextConfigManager(self.config_path, 52286)
+
+        self.assertIsNone(operator_alerts.plaintext_gateway_port_alert(manager))
+
+    def test_a_config_that_cannot_be_read_produces_no_alert(self):
+        class Exploding:
+            config_path = self.config_path
+
+            def get_plaintext_gateway_port(self):
+                raise RuntimeError("config.yaml is not valid YAML")
+
+        self.assertIsNone(operator_alerts.plaintext_gateway_port_alert(Exploding()))
+
+    def test_asking_never_spawns_a_process_or_opens_a_socket(self):
+        self._write_notice()
+        manager = _FakePlaintextConfigManager(self.config_path, 52286)
+
+        with mock.patch("subprocess.run", side_effect=AssertionError("spawned a process")), \
+             mock.patch("subprocess.Popen", side_effect=AssertionError("spawned a process")), \
+             mock.patch("socket.socket", side_effect=AssertionError("opened a socket")):
+            alert = operator_alerts.plaintext_gateway_port_alert(manager)
+
+        self.assertIsNotNone(alert)
+
+
 class JavaAlertTests(unittest.TestCase):
     def test_a_missing_runtime_is_an_alert_that_names_the_install_command(self):
         """The operator gets the command, not the diagnosis.
@@ -313,6 +416,8 @@ class CollectTests(unittest.TestCase):
             operator_alerts,
             "gateway_port_alert",
             return_value=operator_alerts.OperatorAlert("gateway_port_firewall", "port"),
+        ), mock.patch.object(
+            operator_alerts, "plaintext_gateway_port_alert", return_value=None
         ), mock.patch(
             "src.utils.java_dependency.ensure_java_runtime",
             side_effect=JavaDependencyMissing("no java"),
@@ -321,8 +426,36 @@ class CollectTests(unittest.TestCase):
 
         self.assertEqual([alert.key for alert in alerts], ["gateway_port_firewall", "java_missing"])
 
+    def test_the_plaintext_alert_sits_between_the_tls_port_and_java(self):
+        """Stops fewer things than the TLS port, more things than Java missing.
+
+        The TLS alert means the node is not serving anybody; the plaintext one
+        means the node is serving peers fine but every microVM it launches is cut
+        off from calling back into it. Reading order should say so.
+        """
+        from src.utils.java_dependency import JavaDependencyMissing
+
+        with mock.patch.object(operator_alerts, "gateway_port_alert", return_value=None), \
+             mock.patch.object(
+                 operator_alerts,
+                 "plaintext_gateway_port_alert",
+                 return_value=operator_alerts.OperatorAlert(
+                     "gateway_plaintext_port_unreachable", "plaintext"
+                 ),
+             ), mock.patch(
+                 "src.utils.java_dependency.ensure_java_runtime",
+                 side_effect=JavaDependencyMissing("no java"),
+             ):
+            alerts = operator_alerts.collect()
+
+        self.assertEqual(
+            [alert.key for alert in alerts],
+            ["gateway_plaintext_port_unreachable", "java_missing"],
+        )
+
     def test_a_healthy_node_collects_nothing(self):
         with mock.patch.object(operator_alerts, "gateway_port_alert", return_value=None), \
+             mock.patch.object(operator_alerts, "plaintext_gateway_port_alert", return_value=None), \
              mock.patch("src.utils.java_dependency.ensure_java_runtime", return_value=None):
             self.assertEqual(operator_alerts.collect(), [])
 

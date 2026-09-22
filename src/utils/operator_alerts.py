@@ -181,6 +181,61 @@ def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> O
     return None
 
 
+def plaintext_gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]:
+    """The guest-only counterpart of ``gateway_port_alert``.
+
+    Different audience, different alert. The TLS port is what peers and the CLI
+    dial, so its notice reads "peers cannot reach this node". The plaintext port
+    is never announced to either -- it exists for the services this node launches,
+    handed to them in ``__config__.gateway`` -- so the thing that breaks when it is
+    unreachable is every microVM this node runs, never a peer off this LAN. No
+    ``serving`` parameter either: unlike the TLS port, there is no "not serving at
+    all" state to distinguish from "up but unreachable" -- ``0`` just means the
+    operator turned this port off, which is an ordinary configuration and not an
+    alert.
+
+    Same cheapness contract as ``gateway_port_alert``: a config read and a
+    ``.gateway_plaintext_notice`` stat, nothing that touches the network.
+    """
+    from src.utils.config import GATEWAY_PLAINTEXT_NOTICE_FILE, ConfigManager
+
+    manager = config_manager or ConfigManager()
+    try:
+        port = manager.get_plaintext_gateway_port()
+    except Exception:
+        # Same reasoning as gateway_port_alert: a config that cannot be read is a
+        # bigger problem than this alert, and not this alert's to report.
+        return None
+
+    if not port:
+        # 0 (or GATEWAY_PLAINTEXT_PORT disabled) means the operator turned this
+        # off; services fall back to the TLS port instead, which is its own
+        # deliberate state, not a failure to report on.
+        return None
+
+    try:
+        notice_path = os.path.join(
+            os.path.dirname(os.path.realpath(manager.config_path)) or ".",
+            GATEWAY_PLAINTEXT_NOTICE_FILE,
+        )
+        pending = _read_text(notice_path)
+    except Exception:
+        pending = None
+
+    if not pending:
+        return None
+
+    return OperatorAlert(
+        key="gateway_plaintext_port_unreachable",
+        summary=(
+            f"TCP {port} (the plaintext gateway) is not reachable from the guest "
+            f"subnet, so services this node launches cannot call back into it. Fix "
+            f"it: see {notice_path} for the exact command."
+        ),
+        detail=pending,
+    )
+
+
 def _unreachable_lead(serving: Optional[bool]) -> str:
     """The first words of the firewall alert: what is wrong, before why.
 
@@ -258,14 +313,21 @@ def collect(config_manager=None, serving: Optional[bool] = None) -> List[Operato
     """Every pending alert, in the order they should be read.
 
     The gateway port comes first because it is the one that stops the node
-    entirely: a node that cannot serve has no use for a payment system.
+    entirely: a node that cannot serve has no use for a payment system. Its
+    plaintext counterpart comes next, ahead of Java, for the same reason one rung
+    down: it does not stop the node, but it does stop every service the node
+    launches from being able to call back into it.
 
     ``serving`` is threaded through rather than asked for here, so the one caller
     that already knows it (`nodo info`, which prints it on the line above) does not
     pay for a second socket connect.
     """
     alerts = []
-    for alert in (gateway_port_alert(config_manager, serving), java_alert()):
+    for alert in (
+        gateway_port_alert(config_manager, serving),
+        plaintext_gateway_port_alert(config_manager),
+        java_alert(),
+    ):
         if alert is not None:
             alerts.append(alert)
     return alerts
