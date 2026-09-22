@@ -250,6 +250,16 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
                 nonempty(&app.node_info.service_status, "checking…"),
             ),
             metric_line("Address", nonempty(&app.node_info.address, "—")),
+            // Who this node *is* on the network, beside where it is. Every opinion
+            // it publishes and every opinion published about it is keyed by this
+            // string, so it is what an operator has to hand a peer to be vouched
+            // for -- and the screen they leave open was the one place it could not
+            // be read. Shortened head-and-tail by `shorten`, which is what makes an
+            // id comparable at a glance; `nodo info` prints it whole.
+            metric_line(
+                "Node id",
+                shorten(nonempty(&app.node_info.node_id, "no identity yet"), 18),
+            ),
             metric_line("Version", shorten(&app.node_info.version, 18)),
             metric_line("Power", node_power_line(&app.node_energy)),
             metric_line("Elec.", node_cost_line(&app.node_energy)),
@@ -6302,6 +6312,57 @@ mod tests {
             .collect::<String>();
         assert!(!screen.contains("these words"));
         assert!(screen.contains("••••"));
+    }
+
+    /// Who this node is, on the screen an operator leaves open.
+    ///
+    /// Every opinion the reputation system publishes about this node is keyed by
+    /// this string, and it was readable only by running `nodo info` -- so being
+    /// vouched for meant leaving the console to find the thing to paste.
+    #[test]
+    fn the_node_card_shows_the_node_id() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Overview).unwrap();
+        app.node_info.node_id =
+            "3f2a91c0deadbeef3f2a91c0deadbeef3f2a91c0deadbeef3f2a91c0deadbeef".to_string();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(screen.contains("Node id"), "{screen}");
+        // Head and tail, which is what makes one id comparable against another at a
+        // glance. The whole string is `nodo info`'s job; 64 hex characters across a
+        // quarter-width card would push out the lines beside it.
+        assert!(screen.contains("3f2a91c0"), "{screen}");
+        assert!(screen.contains("deadbeef"), "{screen}");
+    }
+
+    /// A node that has been given no identity mnemonic yet. An ordinary state, and
+    /// one that must read as such rather than as a blank field or a bug.
+    #[test]
+    fn a_node_with_no_identity_says_so_rather_than_showing_an_empty_field() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Overview).unwrap();
+        app.node_info.node_id = String::new();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(screen.contains("no identity yet"), "{screen}");
     }
 
     #[test]
