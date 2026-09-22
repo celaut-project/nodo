@@ -71,6 +71,16 @@ def _row_arch(sys_req) -> str:
 wanted_services = set()
 wanted_services_retry = set()
 
+# Where `nodo get <service_id>` (no `--now`) drops a marker file for this process to
+# pick up. `wanted_services` above is in-memory and lives only inside whichever
+# process runs this module's manager loop (`nodo serve` / the `nodo.service` daemon);
+# a `nodo get` invocation is a separate, short-lived process and cannot reach it
+# directly, so this directory is the one channel between the two. Drained every short
+# interval by `drain_wanted_inbox`, straight into `add_wanted` -- the same set
+# `abstract_input_service_iterable.py` already feeds when a delegated execution is
+# missing a dependency -- so a queued `get` is retried exactly like any other want.
+WANTED_INBOX_DIR = f"{env_manager.get('CACHE')}wanted/"
+
 
 def _payment_process_module():
     from src.payment_system import payment_process
@@ -85,6 +95,27 @@ def add_wanted(service_id: str):
     if service_id not in wanted_services and service_id not in wanted_services_retry:
         log.LOGGER(f"Store the service hash on the wanted services set {service_id}")
         wanted_services.add(service_id)
+
+
+def drain_wanted_inbox():
+    """Move whatever `nodo get` queued from disk into `wanted_services`.
+
+    One file per queued id, named after it; the content is never read. Removed as
+    soon as it is handed to `add_wanted`, so this directory is a mailbox, not a
+    second, permanent record of what is wanted -- that stays the in-memory sets it
+    always was.
+    """
+    try:
+        queued = os.listdir(WANTED_INBOX_DIR)
+    except FileNotFoundError:
+        return
+
+    for service_id in queued:
+        add_wanted(service_id)
+        try:
+            os.remove(os.path.join(WANTED_INBOX_DIR, service_id))
+        except OSError:
+            pass
 
 def check_wanted_service(wanted: str):
     log.LOGGER(f"Check wanted service {wanted}")
@@ -733,6 +764,7 @@ def _manager_pass(short_interval_count: int) -> int:
             check_wanted_service(wanted_services_retry.pop())
     
     # Functions to be executed every short interval
+    drain_wanted_inbox()
     if wanted_services:
         check_wanted_service(wanted_services.pop())  # IMPORTANT! If you want to manually execute this function via a command, you must ensure thread safety.
     maintain_vmachines(debug_mode=DEBUG_MODE())

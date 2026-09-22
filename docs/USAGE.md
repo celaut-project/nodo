@@ -316,6 +316,16 @@ These are the most commonly used commands for daily tasks:
   `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`  
   `nodo download https://example.com/path/to/service.celaut.bee`
 
+- **get `<service id | service tag> [--now]`**  
+  Asks the network for a service this node does not hold, by hash. By default the id
+  is queued: the running node looks for it among its peers on its own, using
+  `Gateway.GetService`, the next time its manager thread ticks. With `--now`, this
+  command asks every known peer itself and blocks until it is found (or every peer
+  has been tried).
+  **Examples:**  
+  `nodo get 1234567890abcdef`  
+  `nodo get 1234567890abcdef --now`
+
 - **integrity `[<service id | service tag>] [--fix]`**  
   Verifies registry/metadata integrity for all services or a specific one.
   Use `--fix` to repair detected inconsistencies.
@@ -715,7 +725,7 @@ Nodo ships `<Tab>` completion for **bash** and **zsh**. It completes command nam
 commands that take one, the identifier of the relevant object:
 
 - **Service id or tag** — `execute`, `estimate`, `inspect`, `remove`, `publish`, `tag`,
-  `export`, `integrity`
+  `export`, `integrity`, `get`
 - **No argument** — `prune` (flags only: `--all`, `--dry-run`)
 - **Instance id or name** — `kill`, `observe`, `tunnel`, `increase_deposit`, `decrease_deposit`
 - **Peer id** — `disconnect`, `increase_peer_deposit`

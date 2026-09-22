@@ -45,6 +45,7 @@ GROUPS: List[Group] = [
         [
             ("pack <project dir>", "package a project (a dir, or a git URL)"),
             ("download <url> [-o <dir>]", "fetch a published service from its manifest"),
+            ("get <service> [--now]", "ask peers for one not held locally"),
             ("import <path>", "read a packaged '.celaut' file in"),
             ("export <service> <path>", "write it out as a file (--raw for the tree)"),
             ("publish <service>", "offer a service to the rest of the network"),
