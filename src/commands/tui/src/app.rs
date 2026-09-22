@@ -1129,7 +1129,19 @@ impl NodeReputation {
 pub struct Service {
     pub id: String,
     pub tag: String,
+    /// What this service occupies in the registry directory alone.
+    ///
+    /// Not what deleting it would free: the bulk of a service is usually in blocks,
+    /// which live outside this directory and are shared between every service that
+    /// references them.
     pub size_bytes: u64,
+    /// The whole service, blocks included -- what it would weigh as a single file,
+    /// and what it costs to send to a peer.
+    ///
+    /// `None` when the manifest could not be read or a block it names is missing,
+    /// because a total that silently omits the blocks it could not find is the same
+    /// number as one from a service that has none.
+    pub total_size_bytes: Option<u64>,
 }
 
 impl Identifiable for Service {
@@ -1434,6 +1446,9 @@ pub struct Paths {
     pub log: PathBuf,
     pub cgroups: PathBuf,
     pub cache: PathBuf,
+    /// `main.BLOCKDIR`: the content-addressed block store every service's large
+    /// content is shared through.
+    pub blocks: PathBuf,
     pub yq: PathBuf,
 }
 
@@ -1471,6 +1486,7 @@ impl Paths {
                 PathBuf::from("/sys/fs/cgroup"),
             ),
             cache: resolve(&["main", "CACHE"], storage.join("__cache__")),
+            blocks: resolve(&["main", "BLOCKDIR"], storage.join("__block__")),
             yq: resolve(&["dependencies", "yq", "BIN"], PathBuf::from("yq")),
             storage,
         }
@@ -6230,10 +6246,12 @@ fn get_services(paths: &Paths) -> Result<Vec<Service>, io::Error> {
         let id = entry.file_name().to_string_lossy().into_owned();
         let tag = read_service_tag(&paths.metadata.join(&id)).unwrap_or_else(|| "—".to_string());
         let size_bytes = path_size(&entry.path()).unwrap_or(0);
+        let total_size_bytes = service_total_size(&entry.path(), &paths.blocks);
         services.push(Service {
             id,
             tag,
             size_bytes,
+            total_size_bytes,
         });
     }
     services.sort_by(|left, right| left.tag.cmp(&right.tag).then(left.id.cmp(&right.id)));
@@ -6424,6 +6442,65 @@ fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
         lines.push_back(line.to_string());
     }
     Ok(lines.into_iter().collect())
+}
+
+/// The 36-byte pointer header every block file carries, which is not content.
+///
+/// Mirrors `BLOCK_LENGTH` in `bee_rpc.utils`, whose `get_pruned_block_length`
+/// subtracts it for exactly this figure. Restated rather than shelled out to: the
+/// TUI would otherwise spawn a Python interpreter per service per refresh, and this
+/// page can hold dozens of them.
+const BLOCK_POINTER_LENGTH: u64 = 36;
+
+/// The name of the manifest inside a service's registry directory.
+/// `METADATA_FILE_NAME` in `bee_rpc.utils`.
+const SERVICE_MANIFEST: &str = "_.json";
+
+/// Everything a service weighs, its blocks included.
+///
+/// The registry directory holds the parts of a service that are unique to it; the
+/// rest is content-addressed blocks under `main.BLOCKDIR`, shared with every other
+/// service that references the same bytes. So the directory's own size is what this
+/// service *adds* to the disk, and this is what it *is* -- and they can differ by
+/// orders of magnitude for a service whose weight is one large shared layer.
+///
+/// Computed here rather than through `nodo`: the manifest is a small JSON file and
+/// the blocks are `stat` calls, which is what this page already does for every other
+/// figure it shows. A Python helper would mean an interpreter spawn per service on
+/// every refresh, four times a second, to re-read files the TUI has open anyway.
+///
+/// Mirrors `bee_rpc.utils.getsize`: an integer entry is a local part, a list entry
+/// is `[block_id, ...]` and contributes the block file's size less its pointer
+/// header. `None` rather than a partial total when the manifest is unreadable or a
+/// block it names is missing -- a total quietly short by a 2 GiB layer is worse than
+/// no total, because it reads as a real measurement.
+fn service_total_size(service_dir: &Path, blocks: &Path) -> Option<u64> {
+    let manifest = fs::read_to_string(service_dir.join(SERVICE_MANIFEST)).ok()?;
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&manifest).ok()?;
+    let mut total: u64 = 0;
+    for entry in entries {
+        match entry {
+            // A local part, named by its index in this directory.
+            serde_json::Value::Number(index) => {
+                let part = service_dir.join(index.to_string());
+                total = total.checked_add(fs::metadata(part).ok()?.len())?;
+            }
+            // `[block_id, ...]`: content that lives in the shared block store.
+            serde_json::Value::Array(items) => {
+                let block_id = items.first()?.as_str()?;
+                // A block id is a file name from a manifest this node wrote. Refuse
+                // anything with a path separator in it rather than following it out
+                // of the block directory.
+                if block_id.is_empty() || block_id.contains('/') || block_id.contains('\\') {
+                    return None;
+                }
+                let length = fs::metadata(blocks.join(block_id)).ok()?.len();
+                total = total.checked_add(length.saturating_sub(BLOCK_POINTER_LENGTH))?;
+            }
+            _ => return None,
+        }
+    }
+    Some(total)
 }
 
 fn path_size(path: &Path) -> io::Result<u64> {
@@ -9446,6 +9523,170 @@ ergo: Cold Wallet: 9cold\n";
         }
     }
 
+    /// What a service really weighs (issue #414).
+    ///
+    /// The registry directory is what a service *adds* to the disk; its blocks are
+    /// content-addressed and shared, and for a service whose bulk is one large layer
+    /// they are nearly all of it. The page showed only the first figure, so a 2 GiB
+    /// service could read as 4 KiB.
+    mod service_size {
+        use super::*;
+
+        struct Registry {
+            dir: PathBuf,
+            services: PathBuf,
+            blocks: PathBuf,
+        }
+
+        impl Registry {
+            fn new(name: &str) -> Self {
+                let dir = std::env::temp_dir().join(format!("nodo-tui-size-{name}"));
+                let _ = fs::remove_dir_all(&dir);
+                let services = dir.join("__registry__");
+                let blocks = dir.join("__block__");
+                fs::create_dir_all(&services).unwrap();
+                fs::create_dir_all(&blocks).unwrap();
+                Self {
+                    dir,
+                    services,
+                    blocks,
+                }
+            }
+
+            /// A service directory holding `parts` (local bytes, by index) and
+            /// naming `blocks`, in the `_.json` shape `bee_rpc` writes.
+            fn service(&self, id: &str, parts: &[usize], blocks: &[&str]) -> PathBuf {
+                let dir = self.services.join(id);
+                fs::create_dir_all(&dir).unwrap();
+                let mut manifest = Vec::new();
+                for (index, size) in parts.iter().enumerate() {
+                    fs::write(dir.join(index.to_string()), vec![0u8; *size]).unwrap();
+                    manifest.push(serde_json::json!(index));
+                }
+                for block in blocks {
+                    manifest.push(serde_json::json!([block, 0]));
+                }
+                fs::write(
+                    dir.join(SERVICE_MANIFEST),
+                    serde_json::to_string(&manifest).unwrap(),
+                )
+                .unwrap();
+                dir
+            }
+
+            /// A block file of `content` bytes, plus the pointer header every one
+            /// carries on disk.
+            fn block(&self, id: &str, content: usize) {
+                let bytes = vec![0u8; content + BLOCK_POINTER_LENGTH as usize];
+                fs::write(self.blocks.join(id), bytes).unwrap();
+            }
+        }
+
+        impl Drop for Registry {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.dir);
+            }
+        }
+
+        #[test]
+        fn the_total_is_the_local_parts_plus_the_blocks() {
+            let registry = Registry::new("total");
+            registry.block("block-a", 4096);
+            registry.block("block-b", 1024);
+            let service = registry.service("svc", &[100, 200], &["block-a", "block-b"]);
+
+            let total = service_total_size(&service, &registry.blocks);
+
+            assert_eq!(total, Some(100 + 200 + 4096 + 1024));
+        }
+
+        /// The pointer header is not content. `bee_rpc`'s own
+        /// `get_pruned_block_length` subtracts it for exactly this figure, and
+        /// counting it would inflate every total by 36 bytes per block.
+        #[test]
+        fn a_blocks_pointer_header_is_not_counted_as_content() {
+            let registry = Registry::new("header");
+            registry.block("block-a", 0);
+            let service = registry.service("svc", &[], &["block-a"]);
+
+            assert_eq!(service_total_size(&service, &registry.blocks), Some(0));
+        }
+
+        /// The case the column exists for: a service that stores almost nothing of
+        /// its own and weighs gigabytes.
+        #[test]
+        fn a_service_whose_bulk_is_shared_reads_far_larger_than_what_it_stores() {
+            let registry = Registry::new("shared");
+            registry.block("big", 8 * 1024 * 1024);
+            let service = registry.service("svc", &[64], &["big"]);
+
+            let stored = path_size(&service).unwrap();
+            let total = service_total_size(&service, &registry.blocks).unwrap();
+
+            assert!(total > stored * 100, "stored {stored}, total {total}");
+        }
+
+        /// A total short by a block it could not find is the same number as one from
+        /// a service that has none, and it reads as a measurement. Better to say
+        /// nothing.
+        #[test]
+        fn a_missing_block_makes_the_total_unknown_rather_than_wrong() {
+            let registry = Registry::new("missing");
+            registry.block("present", 1024);
+            let service = registry.service("svc", &[10], &["present", "pruned-away"]);
+
+            assert_eq!(service_total_size(&service, &registry.blocks), None);
+        }
+
+        #[test]
+        fn a_service_with_no_manifest_has_no_total() {
+            let registry = Registry::new("no-manifest");
+            let dir = registry.services.join("svc");
+            fs::create_dir_all(&dir).unwrap();
+
+            assert_eq!(service_total_size(&dir, &registry.blocks), None);
+        }
+
+        /// A block id is a file name out of a manifest. One with a separator in it
+        /// is refused rather than followed out of the block directory.
+        #[test]
+        fn a_block_id_is_never_a_path() {
+            let registry = Registry::new("traversal");
+            let service = registry.service("svc", &[], &["../../etc/passwd"]);
+
+            assert_eq!(service_total_size(&service, &registry.blocks), None);
+        }
+
+        /// The two constants are `bee_rpc`'s, restated here so the TUI need not
+        /// spawn an interpreter per service per refresh. Read rather than run: a
+        /// Rust test suite has no interpreter to hand, and the two drifting apart
+        /// would show as every total being quietly wrong.
+        #[test]
+        fn the_block_constants_match_bee_rpc() {
+            let Ok(utils) = std::fs::read_to_string(
+                "/opt/homebrew/lib/python3.11/site-packages/bee_rpc/utils.py",
+            )
+            .or_else(|_| {
+                std::fs::read_to_string("/usr/lib/python3/dist-packages/bee_rpc/utils.py")
+            }) else {
+                // bee_rpc is a Python dependency and is not installed everywhere the
+                // Rust suite runs. Skipping is honest; asserting against a file that
+                // is not there would make this a test of the build machine.
+                return;
+            };
+
+            assert!(
+                utils.contains(&format!("BLOCK_LENGTH = {BLOCK_POINTER_LENGTH}")),
+                "bee_rpc's BLOCK_LENGTH is no longer {BLOCK_POINTER_LENGTH}, so every \
+                 service total this page shows is off by it per block"
+            );
+            assert!(
+                utils.contains(&format!("METADATA_FILE_NAME = '{SERVICE_MANIFEST}'")),
+                "bee_rpc no longer names its manifest {SERVICE_MANIFEST}"
+            );
+        }
+    }
+
     /// What the Instances page could not answer: how long has this been running,
     /// how long can it keep running, and whose work is it.
     mod instance_lifetime {
@@ -9663,6 +9904,7 @@ ergo: Cold Wallet: 9cold\n";
                 id: id.to_string(),
                 tag: tag.to_string(),
                 size_bytes: 0,
+                total_size_bytes: None,
             }
         }
 

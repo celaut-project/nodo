@@ -1449,20 +1449,33 @@ fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
             .split(area);
     let rows = app.services.items.iter().map(|service| {
         Row::new(vec![
-            service.tag.clone(),
-            service.id.clone(),
-            format_bytes(service.size_bytes),
+            Cell::from(service.tag.clone()),
+            Cell::from(service.id.clone()),
+            Cell::from(format_bytes(service.size_bytes)),
+            Cell::from(format_total_size(service))
+                .style(Style::default().fg(total_size_colour(service))),
         ])
     });
     let table = Table::new(
         rows,
         [
             Constraint::Length(28),
-            Constraint::Min(42),
+            Constraint::Min(38),
+            Constraint::Length(13),
             Constraint::Length(14),
         ],
     )
-    .header(header_row(vec!["Tag", "Content ID", "Stored size"]))
+    // "Stored" is what this service adds to the disk; "With blocks" is what it
+    // weighs. The two differ by every byte it shares with another service, which
+    // for a service whose bulk is one large layer is nearly all of it -- so a
+    // single figure was answering one of two quite different questions without
+    // saying which.
+    .header(header_row(vec![
+        "Tag",
+        "Content ID",
+        "Stored",
+        "With blocks",
+    ]))
     .block(section_block(
         format!(" SERVICES • {} available ", app.services.items.len()),
         series(1),
@@ -1478,6 +1491,51 @@ fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
             .style(Style::default().fg(text_colour())),
         layout[1],
     );
+}
+
+/// The `With blocks` cell: the whole service, or `—` when it could not be totalled.
+///
+/// Never a partial figure. A total silently short by a block it could not find is
+/// the same number as one from a service that has none, and it reads as a
+/// measurement rather than as a failure to measure.
+fn format_total_size(service: &Service) -> String {
+    service
+        .total_size_bytes
+        .map(format_bytes)
+        .unwrap_or_else(|| "—".to_string())
+}
+
+/// Colour for that cell: muted where the blocks add nothing (the service is all its
+/// own bytes, so the two columns agree) and accented where they are most of it --
+/// which is the case the column exists to make visible.
+fn total_size_colour(service: &Service) -> Color {
+    match service.total_size_bytes {
+        None => muted(),
+        Some(total) if total > service.size_bytes.saturating_mul(2) => accent(),
+        Some(_) => text_colour(),
+    }
+}
+
+/// The card's size line: both figures, and what the difference between them is.
+///
+/// Spelled out here because "stored" and "with blocks" are not self-explanatory
+/// from two numbers -- the point is that the second is not disk this service would
+/// free, it is what the service would weigh as a file, and where the gap comes from.
+fn size_detail(service: &Service) -> String {
+    match service.total_size_bytes {
+        None => format!(
+            "{} stored • total unknown (a block it names is missing)",
+            format_bytes(service.size_bytes)
+        ),
+        Some(total) if total <= service.size_bytes => {
+            format!("{} • no shared blocks", format_bytes(service.size_bytes))
+        }
+        Some(total) => format!(
+            "{} stored here • {} with its blocks, which are shared",
+            format_bytes(service.size_bytes),
+            format_bytes(total)
+        ),
+    }
 }
 
 /// The selected service: what it is, and how it has behaved here.
@@ -1505,7 +1563,7 @@ fn service_detail_lines(
             format!(
                 "{} • {}",
                 nonempty(&service.tag, "untagged"),
-                format_bytes(service.size_bytes)
+                size_detail(service)
             ),
             Style::default().fg(text_colour()),
         )),
@@ -6247,12 +6305,69 @@ mod tests {
         }
     }
 
+    /// A service's blocks are shared, so what it stores and what it weighs are two
+    /// different numbers -- and for a service whose bulk is one large layer they
+    /// differ by orders of magnitude. The page showed only the first.
+    #[test]
+    fn the_services_table_shows_the_weight_of_the_blocks_as_well_as_what_is_stored() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Services).unwrap();
+        app.services.refresh(vec![Service {
+            id: "service-1".to_string(),
+            tag: "demo".to_string(),
+            size_bytes: 64,
+            total_size_bytes: Some(8 * 1024 * 1024),
+        }]);
+        app.services.state.select(Some(0));
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(screen.contains("With blocks"), "{screen}");
+        assert!(screen.contains("8.0 MiB"), "missing the real weight: {screen}");
+        // And what it stores, which is the figure the page used to show alone.
+        assert!(screen.contains("64 B"), "{screen}");
+        // Both figures, and the card says why they differ.
+        assert!(screen.contains("shared"), "{screen}");
+    }
+
+    /// A total short by a block it could not find is the same number as one from a
+    /// service that has none, and it reads as a measurement rather than a failure
+    /// to measure.
+    #[test]
+    fn a_service_whose_total_cannot_be_computed_says_so_rather_than_showing_a_short_one() {
+        use super::{format_total_size, size_detail};
+
+        let unknown = Service {
+            id: "service-1".to_string(),
+            tag: "demo".to_string(),
+            size_bytes: 64,
+            total_size_bytes: None,
+        };
+
+        assert_eq!(format_total_size(&unknown), "—");
+        assert!(size_detail(&unknown).contains("unknown"), "{}", size_detail(&unknown));
+        assert!(
+            size_detail(&unknown).contains("missing"),
+            "the reason is not given: {}",
+            size_detail(&unknown)
+        );
+    }
+
     #[test]
     fn service_detail_shows_its_reputation_and_what_moved_it() {
         let service = Service {
             id: "service-1".to_string(),
             tag: "demo".to_string(),
             size_bytes: 1024,
+            total_size_bytes: Some(4096),
         };
         let detail = ServiceDetail {
             service_id: service.id.clone(),
@@ -6278,6 +6393,7 @@ mod tests {
             id: "service-1".to_string(),
             tag: "demo".to_string(),
             size_bytes: 1024,
+            total_size_bytes: Some(4096),
         };
         let detail = ServiceDetail {
             service_id: service.id.clone(),
