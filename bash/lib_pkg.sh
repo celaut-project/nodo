@@ -109,9 +109,22 @@ pkg_install_host_dependencies() {
                 || fail "Failed to install host dependencies. See the apt output above."
             ;;
         dnf)
-            dnf install -y "${packages[@]}" \
-                || fail "Failed to install host dependencies. See the dnf output above."
-            ;;
+              local dnf_opts=(
+                  --setopt=timeout=15
+                  --setopt=retries=3
+                  --setopt=minrate=1000
+                  --setopt=skip_if_unavailable=True
+              )
+              local attempt
+              for attempt in 1 2 3; do
+                  dnf makecache --refresh "${dnf_opts[@]}" && break
+                  echo "dnf makecache failed (attempt $attempt); clearing stale cache and retrying..."
+                  rm -f /var/lib/rpm/.rpm.lock 
+                  rm -rf /var/cache/dnf/*.solv /var/cache/dnf/*.solvx
+                  sleep $((attempt * 5))
+              done
+              ;;
+
     esac
 }
 
