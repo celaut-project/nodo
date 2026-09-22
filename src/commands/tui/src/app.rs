@@ -2324,6 +2324,17 @@ pub struct App {
     pub schedule_add_area: Rect,
     pub schedule_enabled_area: Rect,
     pub schedule_on_close_area: Rect,
+    /// Where the 24-hour bar was drawn last frame, and how many minutes one of its
+    /// cells covers. `None` before the page has been drawn, or when the pane is too
+    /// narrow for a bar at all.
+    ///
+    /// The bar is the page's picture of the day; dragging an edge along it is the
+    /// one gesture that matches what the operator is looking at. Recorded rather
+    /// than recomputed, for the same reason the price bars are: the layout depends
+    /// on the width the pane happened to get.
+    pub schedule_bar: Option<schedule::ScheduleBar>,
+    /// Which window edge the mouse is currently dragging, while a button is held.
+    pub schedule_drag: Option<(usize, schedule::Edge)>,
     /// Where each price bar was drawn last frame, by [`PriceEntry::id`].
     ///
     /// Recorded rather than recomputed: `BarChart` decides the bars' widths and gaps
@@ -2473,6 +2484,8 @@ impl Default for App {
             schedule_add_area: Rect::ZERO,
             schedule_enabled_area: Rect::ZERO,
             schedule_on_close_area: Rect::ZERO,
+            schedule_bar: None,
+            schedule_drag: None,
             price_bar_areas: Vec::new(),
             now_minute: local_minute_of_day(),
             demand: DemandByHour::default(),
@@ -2862,6 +2875,13 @@ impl App {
     /// on-close lines toggle exactly as their keys do. Geometry comes from the areas
     /// `draw_schedule` recorded last frame.
     fn click_schedule(&mut self, position: Position) {
+        // The bar first: it is the page's picture of the day, and dragging an edge
+        // along it is the one gesture that matches what the operator is looking at.
+        // A press grabs the nearest edge and moves it at once, so a plain click is a
+        // one-step drag and nothing has to be held to get an effect.
+        if self.grab_schedule_edge(position) {
+            return;
+        }
         if let Some((index, edge, _)) = self
             .schedule_edge_areas
             .iter()
@@ -2894,6 +2914,82 @@ impl App {
         if self.schedule_on_close_area.contains(position) {
             self.toggle_schedule_on_close();
         }
+    }
+
+    /// A press on the day bar: take hold of the nearest window edge and move it to
+    /// where the pointer is. Returns whether the press landed on the bar at all.
+    ///
+    /// Grabs the *nearest* edge rather than requiring the pointer to be on one. At
+    /// this resolution a cell can be a whole hour, so an edge has no column of its
+    /// own to aim at -- demanding a hit on one would make the gesture a lottery.
+    fn grab_schedule_edge(&mut self, position: Position) -> bool {
+        let Some(bar) = self.schedule_bar else {
+            return false;
+        };
+        if !bar.contains(position.x, position.y) {
+            return false;
+        }
+        let Some(minute) = bar.minute_at(position.x) else {
+            return false;
+        };
+        let schedule = self.schedule();
+        let Some((index, edge)) = schedule::nearest_edge(&schedule.windows, minute) else {
+            self.status = "No window yet — press `a` to add one".to_string();
+            return true;
+        };
+        self.schedule_selected = index;
+        self.schedule_edge = edge;
+        self.schedule_drag = Some((index, edge));
+        self.set_schedule_edge(index, edge, minute);
+        true
+    }
+
+    /// Continue a drag: move the edge already held to wherever the pointer now is.
+    ///
+    /// Keeps hold of the edge it grabbed rather than re-picking the nearest one on
+    /// every motion event. Re-picking would hand the drag over to the *other* edge
+    /// the moment the pointer crossed the middle of the window -- the edge would
+    /// appear to stick, and the one being dragged would jump.
+    pub fn drag_schedule(&mut self, column: u16, row: u16) {
+        if self.page() != Page::Schedule {
+            return;
+        }
+        let Some((index, edge)) = self.schedule_drag else {
+            return;
+        };
+        let Some(bar) = self.schedule_bar else {
+            return;
+        };
+        // Only the column matters: a drag that strays off the bar's row is still a
+        // drag, and dropping it there would make the gesture need a steady hand.
+        let Some(minute) = bar.minute_at(column.clamp(bar.x, bar.x + bar.width - 1)) else {
+            return;
+        };
+        let _ = row;
+        self.set_schedule_edge(index, edge, minute);
+    }
+
+    /// Let go of whatever edge the mouse was dragging.
+    pub fn release_schedule_drag(&mut self) {
+        self.schedule_drag = None;
+    }
+
+    /// Put one window's edge at `minute` in the draft.
+    ///
+    /// The draft, never the file: a drag crosses a lot of values on its way to the
+    /// one the operator means, and each of them would otherwise be a config write and
+    /// a node restart. `Enter` applies, exactly as it does for the arrow keys.
+    fn set_schedule_edge(&mut self, index: usize, edge: schedule::Edge, minute: u16) {
+        let mut schedule = self.schedule();
+        let Some(window) = schedule.windows.get_mut(index) else {
+            return;
+        };
+        match edge {
+            schedule::Edge::Start => window.start = minute,
+            schedule::Edge::End => window.end = minute,
+        }
+        self.schedule_draft = Some(schedule);
+        self.status = self.schedule_draft_status();
     }
 
     /// Select the row `visible` places below the top of the visible table, on whichever
@@ -8695,6 +8791,164 @@ ergo: Cold Wallet: 9cold\n";
 
         const NIGHT: &str = "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '22:00'\n      END: '06:00'\n  ON_CLOSE: refuse\n";
         const SPLIT: &str = "activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '22:00'\n      END: '06:00'\n    - START: '12:00'\n      END: '13:00'\n  ON_CLOSE: refuse\n";
+
+        /// Dragging an edge along the day bar (issue #414).
+        ///
+        /// The bar is the page's picture of the day, so moving an edge along it is
+        /// the gesture that matches what the operator is looking at. These drive the
+        /// real geometry -- the page is rendered first, and the coordinates come from
+        /// the rect the draw recorded, not from arithmetic about where it ought to be.
+        mod dragging_an_edge {
+            use super::*;
+            use ratatui::{backend::TestBackend, Terminal};
+
+            /// Render the page so `schedule_bar` holds this frame's geometry.
+            fn rendered(yaml: &str) -> App {
+                let mut app = on_schedule_page(yaml);
+                let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+                terminal
+                    .draw(|frame| crate::ui::render(&mut app, frame))
+                    .unwrap();
+                app
+            }
+
+            /// The column the bar draws `time` at.
+            fn column_of(app: &App, time: &str) -> u16 {
+                let bar = app.schedule_bar.expect("the page must record its bar");
+                bar.x + parse_clock(time).unwrap() / bar.per_slot
+            }
+
+            fn window(app: &App) -> crate::schedule::Window {
+                app.schedule().windows[0]
+            }
+
+            #[test]
+            fn the_page_records_where_it_drew_the_bar() {
+                let app = rendered(NIGHT);
+                let bar = app.schedule_bar.expect("a bar");
+
+                assert_eq!(bar.width % 24, 0, "the bar is a whole number of hours");
+                assert_eq!(
+                    bar.per_slot * (bar.width / 24),
+                    60,
+                    "every cell of an hour adds up to the hour"
+                );
+            }
+
+            /// A press grabs the nearest edge and moves it at once, so a plain click
+            /// is a one-step drag -- nothing has to be held to get an effect.
+            #[test]
+            fn a_press_moves_the_nearest_edge_to_the_pointer() {
+                let mut app = rendered(NIGHT); // 22:00 -> 06:00
+                let bar = app.schedule_bar.unwrap();
+
+                // Nearer 22:00 than 06:00, so it is the opening that moves.
+                app.click_at(column_of(&app, "21:00"), bar.y);
+
+                assert_eq!(format_clock(window(&app).start), "21:00");
+                assert_eq!(format_clock(window(&app).end), "06:00", "the other edge");
+                assert_eq!(app.schedule_edge, Edge::Start);
+            }
+
+            /// Both edges, which is the whole ask: the closing time is draggable from
+            /// its own end of the bar rather than only reachable by switching edges
+            /// with the keyboard first.
+            #[test]
+            fn the_other_edge_drags_from_its_own_end_of_the_bar() {
+                let mut app = rendered(NIGHT);
+                let bar = app.schedule_bar.unwrap();
+
+                app.click_at(column_of(&app, "05:00"), bar.y);
+
+                assert_eq!(app.schedule_edge, Edge::End);
+                assert_eq!(format_clock(window(&app).end), "05:00");
+                assert_eq!(format_clock(window(&app).start), "22:00", "the other edge");
+            }
+
+            /// A drag keeps hold of the edge it grabbed. Re-picking the nearest edge
+            /// on every motion event would hand the drag to the *other* edge the
+            /// moment the pointer crossed the middle of the window: the dragged edge
+            /// would appear to stick, and the other would jump.
+            #[test]
+            fn a_drag_keeps_the_edge_it_grabbed_even_past_the_middle() {
+                let mut app = rendered("activity_window:\n  ENABLED: true\n  WINDOWS:\n    - START: '09:00'\n      END: '18:00'\n  ON_CLOSE: refuse\n");
+                let bar = app.schedule_bar.unwrap();
+
+                // Grab the opening, then drag right past the middle of the window.
+                app.click_at(column_of(&app, "09:30"), bar.y);
+                assert_eq!(app.schedule_edge, Edge::Start);
+                app.drag_schedule(column_of(&app, "16:00"), bar.y);
+
+                assert_eq!(format_clock(window(&app).start), "16:00");
+                assert_eq!(
+                    format_clock(window(&app).end),
+                    "18:00",
+                    "the closing edge must not have been dragged instead"
+                );
+            }
+
+            /// Releasing ends the gesture. Without it the edge follows the pointer
+            /// around the screen afterwards.
+            #[test]
+            fn releasing_lets_go() {
+                let mut app = rendered(NIGHT);
+                let bar = app.schedule_bar.unwrap();
+                app.click_at(column_of(&app, "21:00"), bar.y);
+
+                app.release_schedule_drag();
+                app.drag_schedule(column_of(&app, "03:00"), bar.y);
+
+                assert_eq!(
+                    format_clock(window(&app).start),
+                    "21:00",
+                    "the edge moved after the button was released"
+                );
+            }
+
+            /// A drag that strays off the bar's row is still a drag: dropping it
+            /// there would make the gesture need a steady hand.
+            #[test]
+            fn a_drag_that_wanders_off_the_row_keeps_working() {
+                let mut app = rendered(NIGHT);
+                let bar = app.schedule_bar.unwrap();
+                app.click_at(column_of(&app, "21:00"), bar.y);
+
+                app.drag_schedule(column_of(&app, "20:00"), bar.y + 3);
+
+                assert_eq!(format_clock(window(&app).start), "20:00");
+            }
+
+            /// Nothing is written until Enter. A drag crosses a lot of values on the
+            /// way to the one the operator means, and each of them would otherwise be
+            /// a config write and a node restart.
+            #[test]
+            fn a_drag_edits_the_draft_and_writes_nothing() {
+                let mut app = rendered(NIGHT);
+                let bar = app.schedule_bar.unwrap();
+
+                app.click_at(column_of(&app, "21:00"), bar.y);
+
+                assert!(app.schedule_is_dirty(), "the draft holds the change");
+                assert!(
+                    !app.config_write_running(),
+                    "a drag must not write config.yaml"
+                );
+            }
+
+            /// A click elsewhere on the pane is not a drag, and must not grab
+            /// anything.
+            #[test]
+            fn a_click_off_the_bar_grabs_nothing() {
+                let mut app = rendered(NIGHT);
+                let bar = app.schedule_bar.unwrap();
+
+                // The axis row, one line above the bar itself.
+                app.click_at(column_of(&app, "21:00"), bar.y - 1);
+
+                assert!(app.schedule_drag.is_none());
+                assert!(!app.schedule_is_dirty(), "nothing was moved");
+            }
+        }
 
         #[test]
         fn the_schedule_is_read_from_the_config_document() {
