@@ -124,9 +124,12 @@ def report(limit: int = JSON_LIMIT, now: Optional[int] = None) -> dict:
             ledgers.append(entry)
             continue
         entry["address"] = _safely(contract.get_wallet_address, default="") or ""
-        entry["transactions"], entry["history_error"] = _transactions(
-            contract, clients_by_token, limit
-        )
+        try:
+            entry["transactions"], entry["history_error"] = _transactions(
+                contract, clients_by_token, limit
+            )
+        except Exception as error:
+            entry["history_error"] = str(error)
         ledgers.append(entry)
 
     return {"ledgers": ledgers, "read_at": int(time.time()) if now is None else int(now)}
