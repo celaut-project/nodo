@@ -89,6 +89,69 @@ def detect_frontend(port: int, *, run: Optional[Runner] = None) -> Optional[Fron
     return None
 
 
+def _firewalld_scoped(port: int, subnet: str, run: Runner) -> Optional[Frontend]:
+    if not shutil.which("firewall-cmd"):
+        return None
+    try:
+        proc = run(["firewall-cmd", "--state"])
+    except Exception:
+        return None
+    state = ((proc.stdout or "") + (proc.stderr or "")).strip().lower()
+    if proc.returncode != 0 or state != "running":
+        return None
+    rule = (
+        f'rule family="ipv4" source address="{subnet}" '
+        f'port protocol="tcp" port="{port}" accept'
+    )
+    return Frontend(
+        name="firewalld",
+        command=(
+            f"sudo firewall-cmd --permanent --add-rich-rule='{rule}' && "
+            "sudo firewall-cmd --reload"
+        ),
+    )
+
+
+def _ufw_scoped(port: int, subnet: str, run: Runner) -> Optional[Frontend]:
+    if not shutil.which("ufw"):
+        return None
+    try:
+        proc = run(["ufw", "status"])
+    except Exception:
+        return None
+    if "status: active" not in (proc.stdout or "").lower():
+        return None
+    return Frontend(
+        name="ufw",
+        command=f"sudo ufw allow from {subnet} to any port {port} proto tcp",
+    )
+
+
+_SCOPED_DETECTORS = (_firewalld_scoped, _ufw_scoped)
+
+
+def detect_scoped_frontend(
+    port: int, subnet: str, *, run: Optional[Runner] = None
+) -> Optional[Frontend]:
+    """Like :func:`detect_frontend`, but the rule only ever admits ``subnet``.
+
+    For a port that must never be reachable beyond the guests it was handed to:
+    ``sudo ufw allow <port>/tcp`` is right advice for a port peers off this LAN are
+    meant to reach, and wrong advice for one that is not. This asks the same
+    front-ends for the source-restricted form of the same rule, so the one command
+    nodo hands the operator is never wider than the port needs.
+    """
+    runner = run or _default_runner
+    for detector in _SCOPED_DETECTORS:
+        try:
+            frontend = detector(port, subnet, runner)
+        except Exception:
+            continue
+        if frontend is not None:
+            return frontend
+    return None
+
+
 def open_port_advice(
     port: int,
     *,
@@ -115,5 +178,41 @@ def open_port_advice(
         f"no command to name. What has to hold: inbound TCP {port} accepted on the "
         f"netfilter input hook, with no other base chain on that hook rejecting or "
         f"dropping it.{where} Apply that wherever this host's ruleset is managed.",
+        width=78,
+    )
+
+
+def open_scoped_port_advice(
+    port: int,
+    *,
+    subnet: str,
+    bridge: str = "",
+    run: Optional[Runner] = None,
+) -> List[str]:
+    """Like :func:`open_port_advice`, but the rule it hands over never leaves ``subnet``.
+
+    For the plaintext gateway port: unauthenticated plain gRPC that is only ever
+    supposed to answer the guests nodo itself launched. ``open_port_advice`` hands
+    the operator a rule with no source restriction at all, which is correct for the
+    TLS port -- it authenticates itself, and peers off this LAN are meant to reach
+    it too -- and wrong here, where reachable from *anywhere* is the failure mode,
+    not the fix. So the rule this advises is scoped from the start rather than
+    opened wide with a promise to narrow it later.
+    """
+    frontend = detect_scoped_frontend(port, subnet, run=run)
+    if frontend is not None:
+        return [
+            f"This host runs {frontend.name}. Open the port, admitting only {subnet}, with:",
+            f"  {frontend.command}",
+        ]
+
+    where = f" over {bridge}" if bridge else ""
+    return textwrap.wrap(
+        f"No running firewall front-end (firewalld, ufw) was found here, so nodo has "
+        f"no command to name. What has to hold: inbound TCP {port} accepted on the "
+        f"netfilter input hook for traffic from {subnet} only{where}, with no other "
+        f"base chain on that hook rejecting or dropping it, and not opened to "
+        f"anything outside that subnet. Apply that wherever this host's ruleset is "
+        f"managed.",
         width=78,
     )

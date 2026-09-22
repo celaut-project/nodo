@@ -92,5 +92,63 @@ class OpenPortAdviceTests(unittest.TestCase):
         self.assertNotIn("Guests reach", text)
 
 
+class DetectScopedFrontendTests(unittest.TestCase):
+    """Same detection, but the rule it names never admits more than one subnet."""
+
+    def _detect(self, present, outputs):
+        def which(name):
+            return f"/usr/sbin/{name}" if name in present else None
+
+        def run(command):
+            return _proc(outputs.get(command[0], ""))
+
+        with patch.object(fe.shutil, "which", side_effect=which):
+            return fe.detect_scoped_frontend(58443, "192.168.200.0/24", run=run)
+
+    def test_running_firewalld_gets_a_source_restricted_rich_rule(self):
+        found = self._detect({"firewall-cmd"}, {"firewall-cmd": "running\n"})
+        self.assertEqual(found.name, "firewalld")
+        self.assertIn('source address="192.168.200.0/24"', found.command)
+        self.assertIn('port="58443"', found.command)
+        self.assertIn("--reload", found.command)
+        # Never the wide-open form: no bare --add-port for this port.
+        self.assertNotIn("--add-port=58443", found.command)
+
+    def test_active_ufw_gets_a_from_clause(self):
+        found = self._detect({"ufw"}, {"ufw": "Status: active\n"})
+        self.assertEqual(found.name, "ufw")
+        self.assertEqual(
+            found.command, "sudo ufw allow from 192.168.200.0/24 to any port 58443 proto tcp"
+        )
+
+    def test_an_absent_binary_is_not_probed(self):
+        self.assertIsNone(self._detect(set(), {}))
+
+
+class OpenScopedPortAdviceTests(unittest.TestCase):
+    def test_it_is_the_scoped_command_when_a_front_end_was_detected(self):
+        with patch.object(
+            fe,
+            "detect_scoped_frontend",
+            return_value=fe.Frontend(
+                "ufw", "sudo ufw allow from 192.168.200.0/24 to any port 1 proto tcp"
+            ),
+        ):
+            lines = fe.open_scoped_port_advice(1, subnet="192.168.200.0/24", bridge="nodo-br-ch")
+        self.assertEqual(len(lines), 2)
+        self.assertIn("192.168.200.0/24", lines[1])
+
+    def test_it_states_the_restricted_property_when_nothing_was_detected(self):
+        with patch.object(fe, "detect_scoped_frontend", return_value=None):
+            lines = fe.open_scoped_port_advice(
+                58444, subnet="192.168.200.0/24", bridge="nodo-br-ch"
+            )
+        text = "\n".join(lines)
+        self.assertIn("58444", text)
+        self.assertIn("192.168.200.0/24", text)
+        self.assertIn("not opened to", text)
+        self.assertTrue(all(len(line) <= 78 for line in lines), lines)
+
+
 if __name__ == "__main__":
     unittest.main()
