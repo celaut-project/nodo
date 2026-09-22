@@ -85,12 +85,31 @@ pkg_update() {
                     rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock /var/lib/dpkg/lock*
                     dpkg --configure -a || true
                     apt-get update
-                }
+                } \
+                || echo "Warning: apt-get update kept failing; continuing with the existing package lists." >&2
             ;;
         dnf)
-            dnf makecache --refresh
+            local dnf_opts=(
+                --setopt=timeout=15
+                --setopt=retries=3
+                --setopt=minrate=1000
+                --setopt=skip_if_unavailable=True
+            )
+            local attempt ok=0
+            for attempt in 1 2 3; do
+                if dnf makecache --refresh "${dnf_opts[@]}"; then
+                    ok=1
+                    break
+                fi
+                echo "dnf makecache failed (attempt $attempt); clearing stale cache and retrying..."
+                rm -f /var/lib/rpm/.rpm.lock
+                rm -rf /var/cache/dnf/*.solv /var/cache/dnf/*.solvx
+                sleep $((attempt * 5))
+            done
+            [ "$ok" -eq 1 ] || echo "Warning: dnf makecache kept failing; continuing with the existing cache." >&2
             ;;
     esac
+    return 0
 }
 
 pkg_install_host_dependencies() {
