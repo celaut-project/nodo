@@ -564,7 +564,13 @@ async fn apply_config_change(
     // Asked before the write, because the change may be to the port itself: what
     // decides whether a restart is owed is whether a node is serving now.
     let port_before = read_gateway_port(&config);
-    let was_serving = serving_on(port_before.as_deref()).await;
+    let was_serving = match restart_required(port_before.as_deref()).await {
+        Ok(required) => required,
+        Err(error) => return fail(error),
+    };
+    if was_serving && !is_root() {
+        return fail("Configuration unchanged: restarting nodo requires root. Open the TUI with sudo nodo tui.".into());
+    }
 
     let backup = match backup_config(&config) {
         Ok(backup) => backup,
@@ -614,7 +620,7 @@ async fn apply_config_change(
     // systemd reports the unit started, and the process still has its assets,
     // migrations and reachability probe ahead of it. The port answering is the only
     // evidence that the new configuration was actually loadable.
-    if !wait_until_serving(port_after.as_deref()).await {
+    if !wait_until_serving(&config).await {
         let message = revert(
             &backup,
             &config,
@@ -665,6 +671,7 @@ async fn restart_node() -> Result<(), String> {
         Command::new("nodo")
             .arg("daemon")
             .arg("restart")
+            .kill_on_drop(true)
             .output(),
     )
     .await
@@ -684,6 +691,28 @@ async fn restart_node() -> Result<(), String> {
     } else {
         reason
     })
+}
+
+// A temporarily closed gateway is not evidence that the daemon is stopped.
+fn restart_decision(state: &str, serving: bool) -> Result<bool, String> {
+    match state.trim() {
+        "active" | "activating" | "reloading" | "deactivating" => Ok(true),
+        "inactive" | "failed" if !serving => Ok(false),
+        _ if serving => Ok(true),
+        _ => Err("Cannot determine nodo.service state; configuration unchanged. Check nodo daemon status.".into()),
+    }
+}
+
+async fn restart_required(port: Option<&str>) -> Result<bool, String> {
+    let serving = serving_on(port).await;
+    let output = tokio::time::timeout(Duration::from_secs(5),
+        Command::new("systemctl").args(["show", "nodo.service", "--property=ActiveState", "--value"])
+            .kill_on_drop(true).output()).await;
+    let state = match output {
+        Ok(Ok(output)) if output.status.success() => String::from_utf8_lossy(&output.stdout).into_owned(),
+        _ => String::new(),
+    };
+    restart_decision(&state, serving)
 }
 
 /// Whether anything is serving on the gateway port.
@@ -711,10 +740,10 @@ async fn serving_on(port: Option<&str>) -> bool {
 
 /// Wait for the node to accept connections on `port` again, up to
 /// `NODE_READY_TIMEOUT`. False means it never did.
-async fn wait_until_serving(port: Option<&str>) -> bool {
+async fn wait_until_serving(config: &Path) -> bool {
     let deadline = Instant::now() + NODE_READY_TIMEOUT;
     loop {
-        if serving_on(port).await {
+        if serving_on(read_gateway_port(config).as_deref()).await {
             return true;
         }
         if Instant::now() >= deadline {
@@ -11193,5 +11222,43 @@ mod tab_groups {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod restart_state_regressions {
+    use super::*;
+
+    #[test]
+    fn active_daemon_with_closed_gateway_still_owes_a_restart() {
+        for state in ["active", "activating", "reloading", "deactivating"] {
+            assert_eq!(restart_decision(state, false), Ok(true));
+        }
+    }
+
+    #[test]
+    fn only_a_confirmed_stopped_node_skips_restart() {
+        for state in ["inactive", "failed"] {
+            assert_eq!(restart_decision(state, false), Ok(false));
+            assert_eq!(restart_decision(state, true), Ok(true));
+        }
+        assert!(restart_decision("", false).is_err());
+        assert!(restart_decision("unknown", false).is_err());
+        assert_eq!(restart_decision("", true), Ok(true));
+    }
+
+    #[tokio::test]
+    async fn readiness_reads_the_assigned_port_instead_of_the_auto_sentinel() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let config = std::env::temp_dir().join(format!("nodo-ready-{}.yaml", std::process::id()));
+        std::fs::write(&config, "network:\n  GATEWAY_PORT: auto\n").unwrap();
+        let assigned_config = config.clone();
+        let port = listener.local_addr().unwrap().port();
+        let assign = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            std::fs::write(assigned_config, format!("network:\n  GATEWAY_PORT: {port}\n")).unwrap();
+        });
+        assert!(tokio::time::timeout(Duration::from_secs(2), wait_until_serving(&config)).await.unwrap());
+        assign.await.unwrap();
     }
 }
