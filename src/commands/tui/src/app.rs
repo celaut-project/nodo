@@ -289,11 +289,22 @@ pub fn page_at(x: u16, area: Rect, group: PageGroup) -> Option<Page> {
 /// `header_row` puts under it (`bottom_margin(1)`) — pinned by
 /// `mouse_clicks::a_click_lands_on_the_row_under_the_pointer`, which reads it off a
 /// real render rather than trusting this arithmetic.
-fn visible_row_at(y: u16, area: Rect) -> Option<usize> {
+/// Which visible row of the table drawn in `area` the pointer is over, if any.
+///
+/// Tests both axes. It used to take only `y`, which made every table's hit area the
+/// full width of the terminal: on PRICING, where the table occupies the right-hand
+/// 38% and two bar charts fill the rest, a click anywhere on the bars selected
+/// whatever price row happened to share that line. The row highlight moved somewhere
+/// the operator was not pointing, and `e` then edited it.
+fn visible_row_at(position: Position, area: Rect) -> Option<usize> {
     const HEADER_ROWS: u16 = 3;
+    if !area.contains(position) {
+        return None;
+    }
     let first_row = area.y + HEADER_ROWS;
     let last_row = area.y + area.height.checked_sub(1)?; // bottom border
-    (area.height > HEADER_ROWS && y >= first_row && y < last_row).then(|| (y - first_row) as usize)
+    (area.height > HEADER_ROWS && position.y >= first_row && position.y < last_row)
+        .then(|| (position.y - first_row) as usize)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2185,7 +2196,12 @@ impl<T: Identifiable> StatefulList<T> {
     /// click lands on, since a scrolled table's first visible row is `offset`, not 0.
     /// Ignores a click past the last row, so empty space below the table selects nothing.
     pub fn select_visible(&mut self, visible: usize) {
-        let index = self.state.offset() + visible;
+        self.select_visible_index(self.state.offset() + visible);
+    }
+
+    /// Select by absolute index, for a click that resolved to an item rather than to
+    /// a position on screen (a price bar, which is drawn in its own order).
+    pub fn select_visible_index(&mut self, index: usize) {
         if let Some(item) = self.items.get(index) {
             self.state_id = Some(item.id().to_string());
             self.state.select(Some(index));
@@ -2308,6 +2324,13 @@ pub struct App {
     pub schedule_add_area: Rect,
     pub schedule_enabled_area: Rect,
     pub schedule_on_close_area: Rect,
+    /// Where each price bar was drawn last frame, by [`PriceEntry::id`].
+    ///
+    /// Recorded rather than recomputed: `BarChart` decides the bars' widths and gaps
+    /// from the space it is given, and an arithmetic reconstruction of that in the
+    /// click handler would be a second implementation of the widget's layout, wrong
+    /// the first time either side changed.
+    pub price_bar_areas: Vec<(String, Rect)>,
     /// A month of demand folded onto the hours of a clock, drawn under the window on
     /// the SCHEDULE page so the hours can be chosen against what was actually asked
     /// for (issue #337).
@@ -2450,6 +2473,7 @@ impl Default for App {
             schedule_add_area: Rect::ZERO,
             schedule_enabled_area: Rect::ZERO,
             schedule_on_close_area: Rect::ZERO,
+            price_bar_areas: Vec::new(),
             now_minute: local_minute_of_day(),
             demand: DemandByHour::default(),
             demand_days: DEMAND_HISTORY_DAYS,
@@ -2795,7 +2819,40 @@ impl App {
             self.click_energy(position);
             return;
         }
-        if let Some(visible) = visible_row_at(row, self.list_area) {
+        if self.page() == Page::Pricing {
+            self.click_pricing(position);
+            return;
+        }
+        if let Some(visible) = visible_row_at(position, self.list_area) {
+            self.select_visible_row(visible);
+        }
+    }
+
+    /// Route a click on the PRICING page: a bar, or a row of the table beside it.
+    ///
+    /// The bars are the page's main feature and were not clickable at all -- an
+    /// operator could see which price was out of line with the rest and then had to
+    /// go and find its row in the table to change it. Geometry comes from the rects
+    /// `draw_price_bars` recorded last frame, so a bar is hit where it was actually
+    /// drawn rather than where an arithmetic reconstruction thinks it was.
+    fn click_pricing(&mut self, position: Position) {
+        if let Some((id, _)) = self
+            .price_bar_areas
+            .iter()
+            .find(|(_, area)| area.contains(position))
+            .cloned()
+        {
+            if let Some(index) = self
+                .prices
+                .items
+                .iter()
+                .position(|entry| entry.id == id)
+            {
+                self.prices.select_visible_index(index);
+            }
+            return;
+        }
+        if let Some(visible) = visible_row_at(position, self.list_area) {
             self.select_visible_row(visible);
         }
     }
@@ -6589,7 +6646,7 @@ mod tests {
     /// pinned here: a wrong offset silently selects the neighbouring tab or row.
     mod mouse_geometry {
         use super::super::{
-            group_at, page_at, visible_row_at, Page, PageGroup, Rect, TAB_DIVIDER,
+            group_at, page_at, visible_row_at, Page, PageGroup, Position, Rect, TAB_DIVIDER,
         };
 
         /// A row wide enough for every title in `titles`, with a column of slack past
@@ -6719,13 +6776,34 @@ mod tests {
                 width: 80,
                 height: 10,
             };
-            assert_eq!(visible_row_at(4, table), None, "top border");
-            assert_eq!(visible_row_at(5, table), None, "header");
-            assert_eq!(visible_row_at(6, table), None, "the header's bottom margin");
-            assert_eq!(visible_row_at(7, table), Some(0), "first row");
-            assert_eq!(visible_row_at(12, table), Some(5), "last row");
-            assert_eq!(visible_row_at(13, table), None, "bottom border");
-            assert_eq!(visible_row_at(99, table), None, "below the table");
+            let at = |y| visible_row_at(Position::new(4, y), table);
+            assert_eq!(at(4), None, "top border");
+            assert_eq!(at(5), None, "header");
+            assert_eq!(at(6), None, "the header's bottom margin");
+            assert_eq!(at(7), Some(0), "first row");
+            assert_eq!(at(12), Some(5), "last row");
+            assert_eq!(at(13), None, "bottom border");
+            assert_eq!(at(99), None, "below the table");
+        }
+
+        /// The hit test used to take only `y`, which made every table's clickable
+        /// area the full width of the terminal. On PRICING that meant a click on a
+        /// bar chart selected whatever price row shared its line -- the highlight
+        /// moved somewhere the operator was not pointing, and `e` then edited it.
+        #[test]
+        fn a_click_beside_the_table_is_not_a_click_in_it() {
+            let table = Rect {
+                x: 40,
+                y: 4,
+                width: 30,
+                height: 10,
+            };
+            let at = |x| visible_row_at(Position::new(x, 7), table);
+            assert_eq!(at(40), Some(0), "the table's own left edge");
+            assert_eq!(at(69), Some(0), "its right edge");
+            assert_eq!(at(39), None, "one column to the left of it");
+            assert_eq!(at(70), None, "one column to the right of it");
+            assert_eq!(at(0), None, "the far side of the screen");
         }
 
         #[test]
@@ -6736,8 +6814,12 @@ mod tests {
                 width: 80,
                 height: 3,
             };
-            assert_eq!(visible_row_at(2, squeezed), None);
-            assert_eq!(visible_row_at(0, Rect::ZERO), None, "unrendered page");
+            assert_eq!(visible_row_at(Position::new(4, 2), squeezed), None);
+            assert_eq!(
+                visible_row_at(Position::new(0, 0), Rect::ZERO),
+                None,
+                "unrendered page"
+            );
         }
     }
 

@@ -3380,6 +3380,9 @@ fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
     .split(columns[0]);
 
     let selected = app.prices.state_id.clone();
+    // Rebuilt every frame, so a bar that moved (a resize, a price appearing) is not
+    // clickable where it used to be.
+    let mut bar_areas = Vec::new();
     draw_price_bars(
         frame,
         left[0],
@@ -3391,6 +3394,7 @@ fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
         &app.prices.items,
         selected.as_deref(),
         &app.money,
+        &mut bar_areas,
     );
     draw_price_bars(
         frame,
@@ -3403,7 +3407,9 @@ fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
         &app.prices.items,
         selected.as_deref(),
         &app.money,
+        &mut bar_areas,
     );
+    app.price_bar_areas = bar_areas;
 
     // 13 rows fit the card's tallest state (a price selected, plus the worked
     // example on the last line); anything shorter silently clips the example.
@@ -3429,6 +3435,7 @@ fn draw_price_bars(
     prices: &[PriceEntry],
     selected: Option<&str>,
     money: &Money,
+    bar_areas: &mut Vec<(String, Rect)>,
 ) {
     let PriceChart {
         title,
@@ -3471,13 +3478,38 @@ fn draw_price_bars(
         .collect();
 
     let width = ((area.width.saturating_sub(4)) / group.len().max(1) as u16).clamp(3, 14);
+    let bar_width = width.saturating_sub(1).max(1);
+    let block = section_block(title.to_string(), color);
+    // Taken before the block is handed to the chart: the bars are laid out inside the
+    // border, and hit areas measured from `area` would be one cell out on both axes.
+    let inner = block.inner(area);
     let chart = BarChart::default()
-        .block(section_block(title.to_string(), color))
+        .block(block)
         .data(BarGroup::default().bars(&bars))
-        .bar_width(width.saturating_sub(1).max(1))
+        .bar_width(bar_width)
         .bar_gap(1)
         .label_style(Style::default().fg(muted()));
     frame.render_widget(chart, area);
+
+    // Each bar's column, so a click can find the price it stands for. The whole
+    // height of the pane, not just the drawn part of the bar: a cheap price draws a
+    // stub two rows tall, and requiring the pointer to land on those two rows would
+    // make the prices most in need of a look the hardest to select.
+    //
+    // Built from the same `bar_width`/`bar_gap` handed to the widget above, stepping
+    // left to right exactly as it lays them out.
+    let mut x = inner.x;
+    for entry in &group {
+        if x >= inner.right() {
+            break;
+        }
+        let visible = bar_width.min(inner.right() - x);
+        bar_areas.push((
+            entry.id.clone(),
+            Rect::new(x, inner.y, visible, inner.height),
+        ));
+        x = x.saturating_add(bar_width + 1);
+    }
 }
 
 /// A linear height flattens a price 1000x below its neighbour to nothing (#381),
@@ -4859,6 +4891,7 @@ mod tests {
                         prices,
                         selected,
                         &Money::default(),
+                        &mut Vec::new(),
                     );
                 })
                 .unwrap();
@@ -6717,6 +6750,98 @@ mod tests {
                 "clicked row {y} of:\n{}",
                 screen.join("\n")
             );
+        }
+
+        /// The PRICING page, where the old full-width hit test was visibly wrong.
+        ///
+        /// The table occupies the right-hand 38% of the page and two bar charts fill
+        /// the rest, so a click anywhere on the bars used to select whatever price
+        /// row happened to share that terminal line -- the highlight jumped somewhere
+        /// the operator was not pointing, and `e` edited *that*.
+        mod pricing {
+            use super::*;
+
+            fn on_pricing() -> App {
+                let mut app = App::new();
+                app.tabs.index = Page::ALL
+                    .iter()
+                    .position(|page| *page == Page::Pricing)
+                    .unwrap();
+                app
+            }
+
+            fn draw_wide(app: &mut App) {
+                let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+                terminal.draw(|frame| render(app, frame)).unwrap();
+            }
+
+            #[test]
+            fn the_bars_are_clickable() {
+                let mut app = on_pricing();
+                draw_wide(&mut app);
+                assert!(
+                    !app.price_bar_areas.is_empty(),
+                    "the page must record where it drew its bars"
+                );
+
+                // The second bar, so a hit on the first cannot pass by accident.
+                let (id, area) = app.price_bar_areas[1].clone();
+                app.click_at(area.x, area.y + area.height / 2);
+
+                assert_eq!(
+                    app.prices.state_id.as_deref(),
+                    Some(id.as_str()),
+                    "a click on a bar must select the price it stands for"
+                );
+            }
+
+            /// The whole column, not just the drawn part. A cheap price draws a stub
+            /// two rows tall, and requiring the pointer to land on those two rows
+            /// would make the prices most worth looking at the hardest to select.
+            #[test]
+            fn a_bar_is_clickable_over_its_whole_column() {
+                let mut app = on_pricing();
+                draw_wide(&mut app);
+                let (id, area) = app.price_bar_areas[0].clone();
+
+                for y in [area.y, area.y + area.height - 1] {
+                    app.prices.state_id = None;
+                    app.click_at(area.x, y);
+                    assert_eq!(app.prices.state_id.as_deref(), Some(id.as_str()), "row {y}");
+                }
+            }
+
+            /// The bug itself: the charts' own area must not be treated as the
+            /// table's.
+            #[test]
+            fn a_click_on_the_charts_does_not_reach_the_table_beside_them() {
+                let mut app = on_pricing();
+                draw_wide(&mut app);
+                let table = app.list_area;
+                let bars: Vec<Rect> = app
+                    .price_bar_areas
+                    .iter()
+                    .map(|(_, area)| *area)
+                    .collect();
+                assert!(
+                    bars.iter().all(|bar| bar.right() <= table.x),
+                    "this test only means something while the charts are left of the table"
+                );
+
+                // A column inside the charts' pane but on none of the bars: the gap
+                // between two of them. It selects nothing rather than reaching across
+                // the page into the table.
+                let gap_x = bars[0].right();
+                let y = table.y + 4;
+                app.prices.state_id = None;
+                app.prices.state.select(None);
+                app.click_at(gap_x, y);
+
+                assert!(
+                    app.prices.state_id.is_none(),
+                    "a click in the charts pane selected a table row at x={gap_x}"
+                );
+            }
         }
 
         #[test]
