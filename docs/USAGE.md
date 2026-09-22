@@ -309,11 +309,12 @@ These are the most commonly used commands for daily tasks:
   `nodo publish 1234567890abcdef`  
   `nodo publish my_service_tag`
 
-- **download `<manifest url>`**  
-  Downloads a published service from a manifest URL and imports it locally (the service id is recomputed from content on import).
+- **download `<manifest url | .celaut.bee https url>`**  
+  Downloads a published service and imports it locally (the service id is recomputed from content on import). Accepts either a manifest URL listing chunk URLs (one per line, `nodo publish`'s default output) or a direct HTTPS link to a `.celaut.bee` artifact, downloaded in a single request.
   **Examples:**  
   `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest`  
-  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`
+  `nodo download https://raw.githubusercontent.com/user/repo/main/uploads/<service_hash>/manifest -o /tmp/services`  
+  `nodo download https://example.com/path/to/service.celaut.bee`
 
 - **integrity `[<service id | service tag>] [--fix]`**  
   Verifies registry/metadata integrity for all services or a specific one.

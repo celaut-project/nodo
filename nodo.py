@@ -352,7 +352,10 @@ if __name__ == '__main__':
                 import sys
 
                 if len(sys.argv) < 3:
-                    print("Usage: nodo download <manifest url> [-o <output dir>]", flush=True)
+                    print(
+                        "Usage: nodo download <manifest url | .celaut.bee https url> [-o <output dir>]",
+                        flush=True,
+                    )
                     sys.exit(1)
 
                 manifest_url = sys.argv[2]
