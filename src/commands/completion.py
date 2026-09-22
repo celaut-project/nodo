@@ -34,6 +34,7 @@ SERVICE_COMMANDS = [
     "tag",
     "export",
     "integrity",
+    "get",
 ]
 
 # Commands whose first positional argument is an instance id.
@@ -72,6 +73,7 @@ COMMANDS = sorted(
         "import",
         "publish",
         "download",
+        "get",
         "integrity",
         "execute",
         "force_execution",
