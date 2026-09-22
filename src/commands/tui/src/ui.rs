@@ -1429,11 +1429,19 @@ fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
     // than let a short terminal clip the contracts away silently -- an empty
     // card reads as "no contract registered", the exact confusion #231 is about.
     let donation = selected.and_then(|peer| app.donations.for_peer(&peer.id));
-    let full = peer_detail_lines(&app.money, selected, detail_source, donation, false);
-    let detail = if full.len() as u16 + 2 <= available {
-        full
-    } else {
-        peer_detail_lines(&app.money, selected, detail_source, donation, true)
+    // A failed query replaces the card outright, so it also has to be what the card
+    // is *sized* from: sizing to the peer detail and then drawing the error into it
+    // clips the one line that says what went wrong.
+    let detail = match &app.peers_error {
+        Some(error) => peers_unreadable_lines(error),
+        None => {
+            let full = peer_detail_lines(&app.money, selected, detail_source, donation, false);
+            if full.len() as u16 + 2 <= available {
+                full
+            } else {
+                peer_detail_lines(&app.money, selected, detail_source, donation, true)
+            }
+        }
     };
     let detail_height = (detail.len() as u16 + 2).min(available);
     let split = Layout::vertical([
@@ -1473,15 +1481,50 @@ fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
         "Reputation proofs",
     ]))
     .block(section_block(
-        format!(" PEERS • {} connected ", app.peers.items.len()),
-        accent(),
+        match &app.peers_error {
+            // Consequence first: an operator reading this row has to learn that the
+            // page is not answering before learning what SQLite said about it.
+            Some(_) => " PEERS • CANNOT BE READ ".to_string(),
+            None => format!(" PEERS • {} connected ", app.peers.items.len()),
+        },
+        if app.peers_error.is_some() { bad() } else { accent() },
     ))
     .highlight_style(selected_style())
     .highlight_symbol("▸ ");
     app.list_area = split[0];
     frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
 
-    draw_card(frame, split[1], "SELECTED PEER", detail, accent());
+    // A query that failed takes the card, not a corner of it. `0 connected` is the
+    // screen a new node draws, so an unreadable table that merely looked empty was
+    // indistinguishable from a healthy one -- which is how a stale query survived a
+    // schema change unnoticed.
+    match &app.peers_error {
+        Some(_) => draw_card(frame, split[1], "PEERS UNREADABLE", detail, bad()),
+        None => draw_card(frame, split[1], "SELECTED PEER", detail, accent()),
+    }
+}
+
+/// What the card says instead of a peer, when the peer list could not be read.
+///
+/// Consequence first: the rows on screen are stale and the count cannot be trusted.
+/// The database's own words come second -- they are what an operator pastes into an
+/// issue, and useless without knowing they matter.
+fn peers_unreadable_lines(error: &str) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            "This node's peers cannot be listed, so the table above is stale and its \
+             count cannot be trusted.",
+            Style::default().fg(bad()).bold(),
+        )),
+        Line::from(Span::styled(
+            error.to_string(),
+            Style::default().fg(text_colour()),
+        )),
+        Line::from(Span::styled(
+            "`nodo peers` reads the same database, and reports the same failure in full.",
+            Style::default().fg(muted()),
+        )),
+    ]
 }
 
 /// The clients page: who pays us, and what they are running here.
@@ -6115,6 +6158,36 @@ mod tests {
         // The table itself stays lean -- no contract columns were added to it.
         assert!(screen.contains("Reputation proof"));
         assert!(!screen.contains("Ledger  "));
+    }
+
+    /// A query that failed must not draw the screen a new node draws.
+    ///
+    /// `PEERS • 0 connected` was what an operator with peers saw for a whole release
+    /// (issue #414), because `unwrap_or_default()` turns a rejected statement into an
+    /// empty list and an empty list into a perfectly ordinary page.
+    #[test]
+    fn a_peer_query_that_failed_does_not_render_as_a_node_with_no_peers() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Peers).unwrap();
+        app.peers.items = Vec::new();
+        app.peers_error = Some("no such column: ci.ledger_hash".to_string());
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(screen.contains("CANNOT BE READ"), "{screen}");
+        assert!(screen.contains("PEERS UNREADABLE"), "{screen}");
+        // The reason, so the operator has something to act on rather than a mood.
+        assert!(screen.contains("ci.ledger_hash"), "{screen}");
+        // And never the sentence a healthy empty node draws.
+        assert!(!screen.contains("0 connected"), "{screen}");
     }
 
     #[test]
