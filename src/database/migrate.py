@@ -128,7 +128,8 @@ TABLES = {
             service_id TEXT,
             virtualizer TEXT DEFAULT NULL,
             envs TEXT DEFAULT NULL,
-            arch TEXT DEFAULT NULL
+            arch TEXT DEFAULT NULL,
+            launched_at DATETIME DEFAULT NULL
         )
     ''',
     # A delegated instance keeps its deposit in `balance_mu`, in *our* MU, exactly as
@@ -157,7 +158,8 @@ TABLES = {
             serialized_instance TEXT,
             service_id TEXT,
             balance_mu TEXT,
-            peer_balance_mu TEXT
+            peer_balance_mu TEXT,
+            launched_at DATETIME DEFAULT NULL
         )
     ''',
     "deposit_tokens": '''
@@ -520,9 +522,29 @@ def create_tables(cursor):
     # operator has set one per arch. NULL on every row written before this column
     # existed, and NULL is charged the node's scalar memory price, so an existing
     # database needs no back-fill.
+    # When an instance started. Nothing recorded it: `local_instances` is a hot row
+    # describing what an instance *holds*, and how long it has held it was only ever
+    # answerable for a local one, by reading its VM process's start time off the host
+    # (`instances.py`'s vm_uptime) -- which a delegated instance has no process for,
+    # and which a restart of the VM resets.
+    #
+    # NULL on every row written before this column existed, and NULL means "not
+    # recorded" rather than "just now": back-filling with CURRENT_TIMESTAMP would date
+    # every instance running at upgrade time to the upgrade, which reads as a fleet
+    # that all started at once.
+    #
+    # `DEFAULT NULL` here *and* in the CREATE above, deliberately: SQLite refuses a
+    # non-constant default on `ALTER TABLE ADD COLUMN`, so a `DEFAULT CURRENT_TIMESTAMP`
+    # that worked on a fresh database would silently be NULL on a migrated one -- and
+    # the two schemas would disagree about every instance started after the upgrade.
+    # The inserts write the timestamp themselves instead, which is the same on both.
     ensure_columns(cursor, "local_instances", {
         "envs": "TEXT DEFAULT NULL",
         "arch": "TEXT DEFAULT NULL",
+        "launched_at": "DATETIME DEFAULT NULL",
+    })
+    ensure_columns(cursor, "delegated_instances", {
+        "launched_at": "DATETIME DEFAULT NULL",
     })
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",

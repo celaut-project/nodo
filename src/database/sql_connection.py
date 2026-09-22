@@ -513,9 +513,13 @@ class SQLConnection(metaclass=Singleton):
                 resolution that needs the service on disk, which an instance can
                 outlive. NULL is charged the node's scalar memory price.
         """
+        # `launched_at` is written here rather than left to a column default: SQLite
+        # refuses a non-constant default on `ALTER TABLE ADD COLUMN`, so a migrated
+        # database's column defaults to NULL however the fresh schema is declared.
+        # Writing it at the one insert is what makes the two agree.
         self._execute('''
-            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO local_instances (id, name, ip, father_id, balance_mu, mem_limit, disk_space, cpu_period, cpu_quota, serialized_instance, service_id, virtualizer, envs, arch, launched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
               disk_space, int(cpu_period or 0), int(cpu_quota or 0),
               serialized_instance, service_id, virtualizer, envs, arch))
@@ -2272,12 +2276,14 @@ class SQLConnection(metaclass=Singleton):
             peer_balance_mu (int): What the peer's own books say the instance holds,
                 in the peer's MU -- the mark the maintenance tick measures against.
         """
+        # `launched_at` written explicitly, for the same reason as the local insert:
+        # a column added by migration cannot carry CURRENT_TIMESTAMP as its default.
         self._execute('''
             INSERT INTO delegated_instances (
                 token_delegation, id, peer_id, father_id, serialized_instance, service_id,
-                balance_mu, peer_balance_mu
+                balance_mu, peer_balance_mu, launched_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ''', (external_token, encrypted_external_token, peer_id, father_id, serialized_instance, service_id,
               str(int(balance_mu)), str(int(peer_balance_mu))))
 

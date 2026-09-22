@@ -8,7 +8,7 @@ use regex::Regex;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde_yaml::Value;
 use sha1::{Digest, Sha1};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::error;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -1169,6 +1169,21 @@ pub struct Instance {
     pub location: String,
     /// Parent instance id (from `father_id`); empty when this is a root.
     pub father_id: String,
+    /// Seconds since this instance was started, from `local_instances.launched_at`.
+    ///
+    /// `None` for a row written before the column existed, which is "not recorded"
+    /// rather than "just now" -- an instance that has been up for a week must not
+    /// read as one that started this second. Measured from when *this node* recorded
+    /// the launch, so it survives the guest being rebooted underneath it, which the
+    /// VM process's own start time does not.
+    pub age_secs: Option<f64>,
+    /// Who asked for this instance: the client or parent instance in `father_id`,
+    /// resolved to what it actually is.
+    ///
+    /// `father_id` alone does not say: the same column holds a client id, another
+    /// instance's id, and a dev-client id, and they read identically. The page
+    /// grouped by it and never said whose work any of it was.
+    pub client: InstanceClient,
     /// Burn rate in MU per minute / per hour, from the `instance_consumption` running
     /// average. `None` rather than `0` before the first charge, and always `None` for
     /// delegated instances. Prices *reserved* resources at current scarcity, so it is
@@ -1198,9 +1213,82 @@ pub struct NodeEnergy {
     pub is_floor: bool,
 }
 
+/// Who an instance is running for.
+///
+/// Resolved against the lists the page already holds rather than stored: a column
+/// saying "client" would start lying the moment that client expired, and the
+/// distinction an operator needs is exactly whether the requester still exists.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum InstanceClient {
+    /// A client of this node, by id. The work is paid for by somebody outside.
+    Client(String),
+    /// Another instance running here, by id: this one is a dependency of that one,
+    /// and whoever is paying for the parent is paying for this too.
+    Instance(String),
+    /// A dev client -- `nodo execute`, `nodo pack`, the core services. The
+    /// operator's own work, exempt from the activity window and billed to nobody.
+    Dev(String),
+    /// A `father_id` naming nothing this node knows: a client that has since
+    /// expired, or a parent instance that stopped. Reported as unknown rather than
+    /// rounded to "client", which would claim somebody is paying for it.
+    Unknown(String),
+    /// No `father_id` at all.
+    #[default]
+    None,
+}
+
+impl InstanceClient {
+    /// The short form for a table cell.
+    pub fn short(&self) -> String {
+        match self {
+            Self::Client(id) => shorten(id, 16),
+            Self::Instance(id) => format!("↳ {}", shorten(id, 14)),
+            Self::Dev(_) => "dev (local)".to_string(),
+            Self::Unknown(id) => format!("? {}", shorten(id, 14)),
+            Self::None => "—".to_string(),
+        }
+    }
+
+    /// The spelled-out form for the detail card, where there is room to say what
+    /// kind of requester this is rather than only its id.
+    pub fn detail(&self) -> String {
+        match self {
+            Self::Client(id) => format!("client {id}"),
+            Self::Instance(id) => format!("instance {id} • a dependency of it"),
+            Self::Dev(id) => format!("dev client {id} • this operator's own work"),
+            Self::Unknown(id) => {
+                format!("{id} • no longer known here (expired client, or a stopped parent)")
+            }
+            Self::None => "— • nothing recorded a requester".to_string(),
+        }
+    }
+}
+
 impl Instance {
     pub fn is_local(&self) -> bool {
         self.location == "local"
+    }
+
+    /// How long this instance's balance lasts at the rate it is currently burning,
+    /// in seconds. `None` when the question has no answer rather than a large one.
+    ///
+    /// Three separate unknowns, all of which would be wrong to render as a number:
+    /// no burn rate yet (the instance has never been charged), a rate of zero (it
+    /// costs nothing, so its balance is not being spent and "remaining" is not a
+    /// duration), and a balance that is not a figure -- which is every delegated
+    /// instance, whose balance lives on the owning peer.
+    ///
+    /// A projection at the *current* rate, not a prediction: the maintenance tick
+    /// prices reserved resources at present scarcity, so this moves when prices move
+    /// or when the instance is resized. It answers "if nothing changes, how long",
+    /// which is the question an operator asks before topping a balance up.
+    pub fn remaining_secs(&self) -> Option<f64> {
+        let mu_per_hour = self.mu_per_hour.filter(|rate| rate.is_finite() && *rate > 0.0)?;
+        let balance: f64 = self.balance.trim().parse().ok()?;
+        if !balance.is_finite() || balance <= 0.0 {
+            return Some(0.0);
+        }
+        Some(balance / mu_per_hour * 3600.0)
     }
 
     /// The CPU percentage that means "saturating its whole allowance", against which
@@ -5609,8 +5697,21 @@ fn get_instances(
     // created by the node's migration on first run; guard for the case where the TUI
     // opens a database the node has never migrated, so a fresh DB still lists instances.
     let has_consumption = table_exists(&connection, "instance_consumption");
-    let base = "SELECT li.id, li.name, li.ip, li.balance_mu, li.service_id, li.mem_limit,
-                li.disk_space, li.virtualizer, li.father_id, li.cpu_period, li.cpu_quota";
+    // `launched_at` arrived after this table did, and the TUI opens whatever database
+    // is on disk -- including one the running node has not migrated yet. Selecting a
+    // column that is not there fails at `prepare` and takes the whole list with it,
+    // which is precisely how the Peers page came to show nobody.
+    let has_launched_at = column_exists(&connection, "local_instances", "launched_at");
+    let age = if has_launched_at {
+        "CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', li.launched_at) AS INTEGER)"
+    } else {
+        "NULL"
+    };
+    let base = format!(
+        "SELECT li.id, li.name, li.ip, li.balance_mu, li.service_id, li.mem_limit,
+                li.disk_space, li.virtualizer, li.father_id, li.cpu_period, li.cpu_quota,
+                {age}"
+    );
     let sql = if has_consumption {
         format!(
             "{base}, ic.mu_per_second, ic.sample_count,
@@ -5643,10 +5744,17 @@ fn get_instances(
             // Burn-rate columns are only present when the join ran; a per-second
             // average scales to per-minute / per-hour, and all four fields stay `None`
             // when the instance has no consumption row yet.
-            let mu_per_second: Option<f64> = if has_consumption { row.get(11)? } else { None };
-            let consumption_samples: Option<i64> = if has_consumption { row.get(12)? } else { None };
-            let consumption_age_secs: Option<i64> = if has_consumption { row.get(13)? } else { None };
+            let mu_per_second: Option<f64> = if has_consumption { row.get(12)? } else { None };
+            let consumption_samples: Option<i64> = if has_consumption { row.get(13)? } else { None };
+            let consumption_age_secs: Option<i64> = if has_consumption { row.get(14)? } else { None };
+            // Negative when the row's clock is ahead of ours (a database copied off
+            // another machine); dropped rather than shown, since "started in the
+            // future" is not an age.
+            let age_secs: Option<i64> = row.get::<_, Option<i64>>(11)?.filter(|secs| *secs >= 0);
             Ok(Instance {
+                age_secs: age_secs.map(|secs| secs as f64),
+                // Resolved after the query, against the lists the page already holds.
+                client: InstanceClient::None,
                 usage: read_instance_usage(&cgroup, &id),
                 vcpus,
                 id,
@@ -5686,16 +5794,82 @@ fn get_instances(
     // to the owning peer id, without any blocking network round-trip.
     let remote = get_delegated_instances(&connection, service_names)?;
     instances.extend(remote);
+    resolve_instance_clients(&connection, &mut instances);
     Ok(instances)
+}
+
+/// Fill in each instance's [`InstanceClient`] from what its `father_id` turns out
+/// to be.
+///
+/// The column holds three different things -- a client id, another instance's id,
+/// and a dev-client id -- and they are indistinguishable by eye, which is why the
+/// page could group by parentage without ever saying whose work any of it was
+/// (issue #414). Resolved on read rather than stored: the interesting case is a
+/// requester that no longer exists, and a stored label would still name it.
+///
+/// One query for the client ids, matched against the instance ids already in hand,
+/// so this costs a single extra statement for the whole page rather than one per row.
+fn resolve_instance_clients(connection: &Connection, instances: &mut [Instance]) {
+    let known_instances: HashSet<String> =
+        instances.iter().map(|instance| instance.id.clone()).collect();
+    let mut clients: HashSet<String> = HashSet::new();
+    if table_exists(connection, "clients") {
+        if let Ok(mut statement) = connection.prepare("SELECT id FROM clients") {
+            if let Ok(rows) = statement.query_map([], |row| row.get::<_, String>(0)) {
+                clients.extend(rows.filter_map(Result::ok));
+            }
+        }
+    }
+
+    for instance in instances.iter_mut() {
+        let father = instance.father_id.trim();
+        // `None` is what the Python side writes for "no parent" (see instances.py),
+        // so it is a spelling of absence rather than an id.
+        instance.client = if father.is_empty() || father == "None" {
+            InstanceClient::None
+        } else if is_dev_client_id(father) {
+            InstanceClient::Dev(father.to_string())
+        } else if known_instances.contains(father) {
+            InstanceClient::Instance(father.to_string())
+        } else if clients.contains(father) {
+            InstanceClient::Client(father.to_string())
+        } else {
+            InstanceClient::Unknown(father.to_string())
+        };
+    }
+}
+
+/// Whether an id names one of this node's own dev clients.
+///
+/// Both pools, since `dev-external-` is drawn from `dev-`. Prefix only: the Python
+/// side also checks the clients table, because there it is deciding whether to grant
+/// a privilege on the strength of an id that arrived over the wire. This decides
+/// what word to print, and a dev client that has expired out of the table is still
+/// what launched the instance -- calling it "unknown" would lose the one fact the
+/// row has.
+fn is_dev_client_id(id: &str) -> bool {
+    id.starts_with("dev-")
 }
 
 fn get_delegated_instances(
     connection: &Connection,
     service_names: &HashMap<String, String>,
 ) -> SqlResult<Vec<Instance>> {
-    let mut statement = connection.prepare(
-        "SELECT id, peer_id, service_id, father_id FROM delegated_instances",
-    )?;
+    // A database the node has not migrated may not have this table at all, and
+    // querying it then fails at `prepare` -- which would take the *local* instances
+    // down with it, since they are collected in the same call.
+    if !table_exists(connection, "delegated_instances") {
+        return Ok(Vec::new());
+    }
+    let has_launched_at = column_exists(connection, "delegated_instances", "launched_at");
+    let age = if has_launched_at {
+        "CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', launched_at) AS INTEGER)"
+    } else {
+        "NULL"
+    };
+    let mut statement = connection.prepare(&format!(
+        "SELECT id, peer_id, service_id, father_id, {age} FROM delegated_instances"
+    ))?;
     let instances = statement
         .query_map([], |row| {
             let id: String = row.get::<_, Option<String>>(0)?.unwrap_or_default();
@@ -5710,12 +5884,17 @@ fn get_delegated_instances(
             } else {
                 peer_id
             };
+            let age_secs: Option<i64> = row.get::<_, Option<i64>>(4)?.filter(|secs| *secs >= 0);
             Ok(Instance {
                 id,
                 name: String::new(),
                 ip: String::new(),
                 balance: "—".to_string(),
                 service,
+                // When *this node* delegated it, which is the fact it holds. The
+                // instance's own uptime is the owning peer's to report.
+                age_secs: age_secs.map(|secs| secs as f64),
+                client: InstanceClient::None,
                 // A delegated instance runs inside another peer: there is no local
                 // cgroup and no local tap to read, so every live figure stays unset
                 // and the UI shows "—" rather than a fabricated zero.
@@ -5800,6 +5979,25 @@ fn table_exists(connection: &Connection, name: &str) -> bool {
             |_| Ok(()),
         )
         .is_ok()
+}
+
+/// Whether `table` has a `column`, so a query can leave out one this database has
+/// not been migrated for.
+///
+/// The TUI opens whatever file is on disk, which may predate a column the node now
+/// writes. Selecting a missing column fails at `prepare` and empties the whole list;
+/// a page that silently shows nothing is the failure mode issue #414 was about.
+///
+/// `PRAGMA table_info` cannot be parameterised, so the name is interpolated -- every
+/// caller passes a literal from this file.
+fn column_exists(connection: &Connection, table: &str, column: &str) -> bool {
+    let Ok(mut statement) = connection.prepare(&format!("PRAGMA table_info({table})")) else {
+        return false;
+    };
+    statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map(|rows| rows.filter_map(Result::ok).any(|name| name == column))
+        .unwrap_or(false)
 }
 
 fn get_services(paths: &Paths) -> Result<Vec<Service>, io::Error> {
@@ -7058,6 +7256,8 @@ mod tests {
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
+                age_secs: None,
+                client: crate::app::InstanceClient::None,
             }
         }
 
@@ -8721,6 +8921,203 @@ ergo: Cold Wallet: 9cold\n";
             app.on_left();
             app.on_right();
             assert_eq!(app.page(), Page::Logs);
+        }
+    }
+
+    /// What the Instances page could not answer: how long has this been running,
+    /// how long can it keep running, and whose work is it.
+    mod instance_lifetime {
+        use super::*;
+
+        fn burning(balance: &str, mu_per_hour: Option<f64>) -> Instance {
+            Instance {
+                id: "inst-1".to_string(),
+                name: "worker".to_string(),
+                ip: String::new(),
+                service: String::new(),
+                balance: balance.to_string(),
+                virtualizer: "ch".to_string(),
+                memory_limit: 0,
+                disk_limit: 0,
+                vcpus: None,
+                usage: InstanceUsage::default(),
+                location: "local".to_string(),
+                father_id: String::new(),
+                mu_per_minute: mu_per_hour.map(|rate| rate / 60.0),
+                mu_per_hour,
+                consumption_samples: None,
+                consumption_age_secs: None,
+                energy_watts: None,
+                energy_share: None,
+                age_secs: None,
+                client: InstanceClient::None,
+            }
+        }
+
+        /// The arithmetic the operator was doing by hand: balance divided by the
+        /// rate beside it.
+        #[test]
+        fn a_balance_over_a_burn_rate_is_a_duration() {
+            // 7200 MU at 3600 MU/h is two hours.
+            let remaining = burning("7200", Some(3600.0)).remaining_secs();
+            assert_eq!(remaining, Some(7200.0));
+        }
+
+        /// Three unknowns that would each be wrong as a number.
+        #[test]
+        fn a_lifetime_that_cannot_be_projected_is_not_projected() {
+            // Never charged: there is no rate to divide by, and "forever" would be a
+            // claim about prices this instance has not been billed at yet.
+            assert_eq!(burning("7200", None).remaining_secs(), None);
+            // Costs nothing, so the balance is not being spent at all. That is not a
+            // duration; rendering it as one would put an enormous number on screen.
+            assert_eq!(burning("7200", Some(0.0)).remaining_secs(), None);
+            // A delegated instance's balance lives on the owning peer, and the column
+            // holds the em dash the page renders rather than a figure.
+            assert_eq!(burning("—", Some(3600.0)).remaining_secs(), None);
+        }
+
+        /// Zero is a reading, not an unknown: this instance's balance is already
+        /// spent and the next maintenance tick stops it.
+        #[test]
+        fn an_exhausted_balance_reads_as_no_time_left_rather_than_as_unknown() {
+            assert_eq!(burning("0", Some(3600.0)).remaining_secs(), Some(0.0));
+            assert_eq!(burning("-500", Some(3600.0)).remaining_secs(), Some(0.0));
+        }
+
+        /// A `father_id` is three different things wearing the same clothes.
+        #[test]
+        fn a_father_id_is_resolved_to_what_it_actually_is() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-instance-clients");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = dir.join("database.sqlite");
+            let connection = Connection::open(&database).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE clients (id TEXT PRIMARY KEY);
+                     INSERT INTO clients (id) VALUES ('client-abc');",
+                )
+                .unwrap();
+
+            let mut instances = vec![
+                Instance {
+                    father_id: "client-abc".to_string(),
+                    ..burning("0", None)
+                },
+                Instance {
+                    id: "child".to_string(),
+                    father_id: "inst-1".to_string(),
+                    ..burning("0", None)
+                },
+                Instance {
+                    father_id: "dev-7f3a".to_string(),
+                    ..burning("0", None)
+                },
+                Instance {
+                    father_id: "gone-forever".to_string(),
+                    ..burning("0", None)
+                },
+                Instance {
+                    // What the Python side writes for "no parent": a spelling of
+                    // absence, not an id to go looking for.
+                    father_id: "None".to_string(),
+                    ..burning("0", None)
+                },
+            ];
+
+            resolve_instance_clients(&connection, &mut instances);
+
+            assert_eq!(
+                instances[0].client,
+                InstanceClient::Client("client-abc".to_string())
+            );
+            assert_eq!(
+                instances[1].client,
+                InstanceClient::Instance("inst-1".to_string())
+            );
+            assert_eq!(instances[2].client, InstanceClient::Dev("dev-7f3a".to_string()));
+            // Not rounded to "client": claiming somebody is paying for this when the
+            // requester is gone is the one answer that would mislead.
+            assert_eq!(
+                instances[3].client,
+                InstanceClient::Unknown("gone-forever".to_string())
+            );
+            assert_eq!(instances[4].client, InstanceClient::None);
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        /// The TUI opens whatever database is on disk, including one the running
+        /// node has not migrated. A missing column must cost the column, not the
+        /// page -- which is exactly how the Peers page came to list nobody.
+        #[test]
+        fn a_database_without_launched_at_still_lists_its_instances() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-no-launched-at");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = dir.join("database.sqlite");
+            Connection::open(&database)
+                .unwrap()
+                .execute_batch(
+                    "CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, ip TEXT,
+                        father_id TEXT, balance_mu TEXT, mem_limit INTEGER,
+                        disk_space INTEGER, cpu_period INTEGER, cpu_quota INTEGER,
+                        serialized_instance TEXT, service_id TEXT, virtualizer TEXT);
+                     INSERT INTO local_instances (id, name, balance_mu) VALUES ('a', 'w', '10');",
+                )
+                .unwrap();
+            let mut paths = Paths::discover();
+            paths.database = database;
+
+            let instances = get_instances(&paths, &HashMap::new())
+                .expect("a database without the column must still list instances");
+
+            assert_eq!(instances.len(), 1);
+            // The column is missing, so the age is unknown -- not zero, which would
+            // date every instance to this second.
+            assert_eq!(instances[0].age_secs, None);
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        /// And with the column, it is read.
+        #[test]
+        fn launched_at_becomes_an_age() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-launched-at");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = dir.join("database.sqlite");
+            Connection::open(&database)
+                .unwrap()
+                .execute_batch(
+                    "CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, ip TEXT,
+                        father_id TEXT, balance_mu TEXT, mem_limit INTEGER,
+                        disk_space INTEGER, cpu_period INTEGER, cpu_quota INTEGER,
+                        serialized_instance TEXT, service_id TEXT, virtualizer TEXT,
+                        launched_at DATETIME);
+                     INSERT INTO local_instances (id, name, balance_mu, launched_at)
+                     VALUES ('a', 'w', '10', datetime('now', '-2 hours'));
+                     INSERT INTO local_instances (id, name, balance_mu, launched_at)
+                     VALUES ('b', 'x', '10', NULL);",
+                )
+                .unwrap();
+            let mut paths = Paths::discover();
+            paths.database = database;
+
+            let instances = get_instances(&paths, &HashMap::new()).unwrap();
+            let by_id = |id: &str| {
+                instances
+                    .iter()
+                    .find(|instance| instance.id == id)
+                    .unwrap()
+                    .age_secs
+            };
+
+            let two_hours = by_id("a").expect("a recorded launch has an age");
+            assert!((two_hours - 7200.0).abs() < 60.0, "{two_hours}");
+            // A row from before the column: not recorded, which is not "just now".
+            assert_eq!(by_id("b"), None);
+            let _ = fs::remove_dir_all(&dir);
         }
     }
 

@@ -824,11 +824,12 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_instances_tree(frame, app, area);
         return;
     }
-    // 14 = 12 detail lines + the block's two border rows. The card carries the figures
-    // the row has no width for: the disk allocation, the vCPU allowance the CPU% is
-    // measured against, the cumulative disk/net totals, the burn rate, and the
-    // attributed watts (issue #258).
-    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(14)]).split(area);
+    // 16 = 14 detail lines + the block's two border rows. The card carries the figures
+    // the row has no width for: the endpoint, the disk allocation, the vCPU allowance
+    // the CPU% is measured against, the cumulative disk/net totals, the burn rate, the
+    // attributed watts (issue #258), who requested the instance, and what its balance
+    // is worth in time.
+    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(16)]).split(area);
     let rows = app.instances.items.iter().map(|instance| {
         let location = if instance.is_local() {
             "local".to_string()
@@ -845,7 +846,16 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
             Cell::from(location).style(location_style),
             Cell::from(shorten(&instance.id, 18)),
             Cell::from(instance.service.clone()),
-            Cell::from(instance.ip.clone()),
+            // Whose work this is. `father_id` on its own is an opaque string that
+            // could be a client, a parent instance or a dev launch -- the page
+            // grouped by it and never said which.
+            Cell::from(instance.client.short())
+                .style(Style::default().fg(client_colour(&instance.client))),
+            Cell::from(format_duration_compact(instance.age_secs)),
+            // What the balance beside it is worth in time, which is the form the
+            // question is actually asked in: "does this need topping up today".
+            Cell::from(format_duration_compact(instance.remaining_secs()))
+                .style(Style::default().fg(remaining_colour(instance))),
             Cell::from(instance.virtualizer.clone()),
             Cell::from(format_cpu_percent(instance.usage.cpu_percent))
                 .style(Style::default().fg(cpu_load_color(instance))),
@@ -874,25 +884,33 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     let table = Table::new(
         rows,
         [
+            Constraint::Length(14),
+            Constraint::Length(12),
             Constraint::Length(16),
             Constraint::Length(14),
-            Constraint::Length(19),
-            Constraint::Length(18),
-            Constraint::Length(15),
-            Constraint::Length(7),
-            Constraint::Length(7),
-            Constraint::Length(14),
-            Constraint::Length(14),
-            Constraint::Length(14),
-            Constraint::Min(12),
+            Constraint::Length(17),
+            Constraint::Length(8),
+            Constraint::Length(9),
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Length(13),
+            Constraint::Length(13),
+            Constraint::Length(12),
+            Constraint::Min(10),
         ],
     )
+    // `IP` moved off the table and onto the card. It is the one column here nobody
+    // scans -- an endpoint is copied, not compared -- and the three columns that
+    // replaced it each answer a question the page could not answer at all: whose
+    // work this is, how long it has been running, and how long it can keep running.
     .header(header_row(vec![
         "Name",
         "Location",
         "Instance",
         "Service",
-        "IP",
+        "Client",
+        "Up",
+        "Left",
         "VM",
         "CPU%",
         "RAM now/max",
@@ -925,6 +943,11 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
                 },
             ),
             metric_line("Service", instance.service.clone()),
+            // Spelled out rather than shortened: the card is where an operator
+            // finds out *what kind* of requester this is, which the table's narrow
+            // cell can only hint at.
+            metric_line("Requested by", instance.client.detail()),
+            metric_line("Started", started_detail(instance)),
             metric_line("Endpoint", nonempty(&instance.ip, "—")),
             metric_line("CPU", cpu_detail(instance)),
             metric_line(
@@ -975,6 +998,89 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         detail,
         series(0),
     );
+}
+
+/// The `Started` line: how long the instance has been up, and what is left of its
+/// balance at the rate it is burning.
+///
+/// The two belong on one line because neither answers the operator's question
+/// alone. "Up 3 days" says nothing about whether it is about to stop, and "2h left"
+/// says nothing about whether that is normal for this instance.
+///
+/// The remaining figure is explicitly a projection at the *current* rate. The tick
+/// prices reserved resources at present scarcity, so it moves when prices move or
+/// when the instance is resized -- it answers "if nothing changes, how long", which
+/// is the question asked before topping a balance up, and not a promise.
+fn started_detail(instance: &Instance) -> String {
+    let up = match instance.age_secs {
+        Some(_) => format!("up {}", format_duration_compact(instance.age_secs)),
+        // Every instance that predates the `launched_at` column. Named, so the
+        // blank is a missing record rather than a broken field.
+        None => "up — (started before this node recorded launch times)".to_string(),
+    };
+    match instance.remaining_secs() {
+        Some(secs) => format!(
+            "{up} • {} left at the current burn rate",
+            format_duration_compact(Some(secs))
+        ),
+        None if !instance.is_local() => {
+            format!("{up} • lifetime is the owning peer's to report")
+        }
+        // No rate yet, or a rate of zero. Both mean the balance is not being spent,
+        // which is not a duration -- and "forever" would be a claim about prices
+        // that have not been charged yet.
+        None => format!("{up} • nothing charged yet, so no lifetime to project"),
+    }
+}
+
+/// A duration for a table cell, at the coarsest unit that still says something.
+///
+/// `—` for `None`, which here means the fact was never recorded (an instance from
+/// before `launched_at` existed) or has no answer (a remaining lifetime against no
+/// burn rate). Never `0`: that is a real reading -- an instance whose balance is
+/// already spent -- and it must not be what "unknown" looks like.
+fn format_duration_compact(secs: Option<f64>) -> String {
+    let Some(secs) = secs.filter(|secs| secs.is_finite() && *secs >= 0.0) else {
+        return "—".to_string();
+    };
+    // Past a month the exact figure stops being a decision an operator makes today,
+    // and a five-digit hour count is just noise in a narrow column.
+    if secs >= 86_400.0 * 30.0 {
+        return "30d+".to_string();
+    }
+    let total = secs.round() as u64;
+    match total {
+        0..=59 => format!("{total}s"),
+        60..=3599 => format!("{}m", total / 60),
+        3600..=86_399 => format!("{}h {:02}m", total / 3600, (total % 3600) / 60),
+        _ => format!("{}d {}h", total / 86_400, (total % 86_400) / 3600),
+    }
+}
+
+/// Colour for the `Left` cell: the point of the column is noticing an instance that
+/// is about to stop, so the threshold is when an operator would have to act today.
+///
+/// Muted when there is no answer, so an unknown never reads as urgent.
+fn remaining_colour(instance: &Instance) -> Color {
+    match instance.remaining_secs() {
+        None => muted(),
+        Some(secs) if secs < 3600.0 => bad(),
+        Some(secs) if secs < 86_400.0 => warn(),
+        Some(_) => good(),
+    }
+}
+
+/// Colour for the `Client` cell. A requester this node no longer knows is the one
+/// worth picking out: it is an instance still holding resources and still burning a
+/// balance for somebody who is not there to be billed or asked.
+fn client_colour(client: &crate::app::InstanceClient) -> Color {
+    match client {
+        crate::app::InstanceClient::Client(_) => good(),
+        crate::app::InstanceClient::Instance(_) => muted(),
+        crate::app::InstanceClient::Dev(_) => accent(),
+        crate::app::InstanceClient::Unknown(_) => warn(),
+        crate::app::InstanceClient::None => muted(),
+    }
 }
 
 /// A CPU reading for a table cell. `—` covers both "no cgroup to read" (delegated or
@@ -5181,6 +5287,8 @@ mod tests {
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
+                age_secs: None,
+                client: crate::app::InstanceClient::None,
             }
         }
 
@@ -5289,6 +5397,8 @@ mod tests {
             consumption_age_secs: Some(45.0),
             energy_watts: Some(12.0),
             energy_share: Some(0.3),
+            age_secs: Some(7_200.0),
+            client: crate::app::InstanceClient::Client("client-9f2".to_string()),
         }]);
         app.instances.state.select(Some(0));
         app.instances.state_id = Some("8f4e2c".to_string());
@@ -5314,7 +5424,54 @@ mod tests {
         assert!(text.contains("12 samples"), "missing the burn-rate sample count");
         assert!(text.contains("12 W"), "missing attributed watts");
         assert!(text.contains("30% of node"), "missing energy share");
+        // Who asked for it, how long it has been up, and how long its balance lasts:
+        // 1000 MU at 3.6e9 MU/h is effectively spent, so `Left` reads in seconds.
+        assert!(text.contains("Client"), "missing the client column header");
+        assert!(text.contains("client-9f2"), "missing the requesting client");
+        assert!(text.contains("Up"), "missing the uptime column header");
+        assert!(text.contains("2h 00m"), "missing the uptime reading");
+        assert!(text.contains("Left"), "missing the remaining-lifetime header");
+        assert!(text.contains("Requested by"), "missing the client detail line");
     }
+
+    /// A duration column is only useful if "nothing to say" and "nothing left" are
+    /// told apart. `0` is a real reading -- the balance is spent -- and must never be
+    /// what unknown looks like.
+    #[test]
+    fn an_unknown_duration_and_an_expired_one_do_not_render_the_same() {
+        use super::format_duration_compact;
+
+        assert_eq!(format_duration_compact(None), "—");
+        assert_eq!(format_duration_compact(Some(0.0)), "0s");
+        assert_eq!(format_duration_compact(Some(90.0)), "1m");
+        assert_eq!(format_duration_compact(Some(7_200.0)), "2h 00m");
+        assert_eq!(format_duration_compact(Some(90_000.0)), "1d 1h");
+        // Past a month the exact figure is not a decision anybody makes today, and a
+        // five-digit hour count is noise in a narrow column.
+        assert_eq!(format_duration_compact(Some(86_400.0 * 400.0)), "30d+");
+        // A NaN rate (a zero balance over a zero rate upstream) is not a duration.
+        assert_eq!(format_duration_compact(Some(f64::NAN)), "—");
+        assert_eq!(format_duration_compact(Some(-5.0)), "—");
+    }
+
+    /// An instance whose requester this node no longer knows is still holding
+    /// resources and still burning a balance, for somebody who is not there to be
+    /// billed or asked. It is picked out rather than shown as an ordinary client.
+    #[test]
+    fn a_requester_this_node_no_longer_knows_is_not_shown_as_a_paying_client() {
+        use super::{client_colour, good, warn};
+        use crate::app::InstanceClient;
+
+        let gone = InstanceClient::Unknown("gone-forever".to_string());
+        let here = InstanceClient::Client("client-abc".to_string());
+
+        assert_eq!(client_colour(&gone), warn());
+        assert_eq!(client_colour(&here), good());
+        // And the cell says as much without its colour, for a mono theme.
+        assert!(gone.short().starts_with('?'), "{}", gone.short());
+        assert!(gone.detail().contains("no longer known"), "{}", gone.detail());
+    }
+
 
     /// The EARNINGS page has to answer "is this machine worth leaving on" without
     /// either half of the answer being mistakable for the other: money is money and a
@@ -6420,6 +6577,8 @@ mod tests {
                 consumption_age_secs: None,
                 energy_watts: None,
                 energy_share: None,
+                age_secs: None,
+                client: crate::app::InstanceClient::None,
             }
         }
 
