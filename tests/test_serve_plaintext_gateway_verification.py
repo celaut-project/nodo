@@ -116,6 +116,33 @@ class VerifyPlaintextGatewayPortTests(unittest.TestCase):
         # would produce -- this port is unauthenticated plain gRPC.
         self.assertIn("192.168.200.0/24", body)
 
+    def test_a_detected_front_ends_command_travels_with_the_notice(self):
+        """So `nodo info` can show it in place instead of pointing at the notice file."""
+        from src.utils.firewall.frontend import Frontend
+
+        self.result = BLOCKED
+        with patch(
+            "src.utils.firewall.frontend.detect_scoped_frontend",
+            return_value=Frontend(
+                "ufw", "sudo ufw allow from 192.168.200.0/24 to any port 58444 proto tcp"
+            ),
+        ):
+            serve_module._verify_plaintext_gateway_port(PORT)
+
+        self.assertEqual(
+            self.env.emit_plaintext_gateway_notice.call_args.kwargs.get("command"),
+            "sudo ufw allow from 192.168.200.0/24 to any port 58444 proto tcp",
+        )
+
+    def test_no_detected_front_end_means_no_command_on_the_notice(self):
+        self.result = BLOCKED
+        with patch("src.utils.firewall.frontend.detect_scoped_frontend", return_value=None):
+            serve_module._verify_plaintext_gateway_port(PORT)
+
+        self.assertIsNone(
+            self.env.emit_plaintext_gateway_notice.call_args.kwargs.get("command")
+        )
+
 
 @unittest.skipIf(_IMPORT_ERROR is not None, f"src.serve unavailable: {_IMPORT_ERROR}")
 class VerifyGatewayPortsTests(unittest.TestCase):

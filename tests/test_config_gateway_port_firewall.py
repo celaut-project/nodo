@@ -430,6 +430,48 @@ class GatewayNoticeTests(_ManagerCase):
 
             self.assertFalse(notice.exists())
 
+    @patch("src.utils.config.os.geteuid", return_value=1000)
+    def test_a_command_is_written_beside_the_notice(self, _euid):
+        # So `nodo info` and the TUI can show the one line that fixes this in
+        # place, instead of sending the operator to open this file for it.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir)
+            manager.emit_gateway_notice(
+                "gateway port blocked", "the firewall rejects it", command="sudo ufw allow 41000/tcp"
+            )
+
+            from src.utils.config import GATEWAY_NOTICE_COMMAND_FILE
+
+            command_file = Path(tmpdir) / GATEWAY_NOTICE_COMMAND_FILE
+            self.assertEqual(command_file.read_text(encoding="utf-8"), "sudo ufw allow 41000/tcp")
+
+    @patch("src.utils.config.os.geteuid", return_value=1000)
+    def test_no_command_given_clears_any_stale_one(self, _euid):
+        # A notice that stops naming a command (or never had one) must not leave a
+        # previous run's command sitting there for `nodo info` to show as current.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir)
+            manager.emit_gateway_notice("blocked", "details", command="sudo ufw allow 41000/tcp")
+
+            manager.emit_gateway_notice("blocked again", "no command to name this time")
+
+            from src.utils.config import GATEWAY_NOTICE_COMMAND_FILE
+
+            self.assertFalse((Path(tmpdir) / GATEWAY_NOTICE_COMMAND_FILE).exists())
+
+    @patch("src.utils.config.ConfigManager._boot_id", return_value="boot-a")
+    @patch("src.utils.config.os.geteuid", return_value=1000)
+    def test_proving_the_port_clears_its_command_too(self, _euid, _boot):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir)
+            manager.emit_gateway_notice("blocked", "details", command="sudo ufw allow 41000/tcp")
+
+            manager.mark_gateway_port_passed(41000)
+
+            from src.utils.config import GATEWAY_NOTICE_COMMAND_FILE
+
+            self.assertFalse((Path(tmpdir) / GATEWAY_NOTICE_COMMAND_FILE).exists())
+
 
 @patch("src.utils.config.os.geteuid", return_value=1000)
 class PlaintextVerdictCacheTests(_ManagerCase):
@@ -533,6 +575,43 @@ class PlaintextGatewayNoticeTests(_ManagerCase):
             manager.mark_plaintext_gateway_port_passed(58444)
 
             self.assertFalse(plaintext_notice.exists())
+
+    @patch("src.utils.config.os.geteuid", return_value=1000)
+    def test_a_command_is_written_beside_its_own_notice(self, _euid):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir)
+            manager.emit_plaintext_gateway_notice(
+                "plaintext gateway unreachable",
+                "fix it",
+                command="sudo ufw allow from 192.168.200.0/24 to any port 58444 proto tcp",
+            )
+
+            from src.utils.config import GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE
+
+            command_file = Path(tmpdir) / GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE
+            self.assertEqual(
+                command_file.read_text(encoding="utf-8"),
+                "sudo ufw allow from 192.168.200.0/24 to any port 58444 proto tcp",
+            )
+            # And never the TLS port's own command file.
+            from src.utils.config import GATEWAY_NOTICE_COMMAND_FILE
+
+            self.assertFalse((Path(tmpdir) / GATEWAY_NOTICE_COMMAND_FILE).exists())
+
+    @patch("src.utils.config.ConfigManager._boot_id", return_value="boot-a")
+    @patch("src.utils.config.os.geteuid", return_value=1000)
+    def test_proving_the_port_clears_its_own_command_only(self, _euid, _boot):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir)
+            manager.emit_plaintext_gateway_notice(
+                "plaintext gateway unreachable", "fix it", command="sudo ufw allow 58444/tcp"
+            )
+
+            manager.mark_plaintext_gateway_port_passed(58444)
+
+            from src.utils.config import GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE
+
+            self.assertFalse((Path(tmpdir) / GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE).exists())
 
 
 if __name__ == "__main__":

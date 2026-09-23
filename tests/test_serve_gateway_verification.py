@@ -96,6 +96,38 @@ class VerifyGatewayPortTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
         self.env.mark_gateway_port_passed.assert_not_called()
 
+    def test_a_firewall_block_persists_a_notice_for_the_next_nodo_info(self):
+        # This is the one diagnosis `nodo serve` cannot retry on its own; without
+        # persisting it, `nodo info` afterwards could only say the node is not
+        # running and would send the operator back to the command that already
+        # failed them.
+        error = GatewayPortUnavailable(
+            "blocked",
+            "open it in ufw",
+            port=PORT,
+            blocked_by_firewall=True,
+            command="sudo ufw allow 58443/tcp",
+        )
+        with patch.object(serve_module, "_gateway_port_call", side_effect=error):
+            with self.assertRaises(SystemExit):
+                serve_module._verify_gateway_port(PORT)
+
+        self.env.emit_gateway_notice.assert_called_once_with(
+            error.summary, str(error), command="sudo ufw allow 58443/tcp"
+        )
+
+    def test_a_refusal_that_is_not_about_the_firewall_persists_nothing(self):
+        # "Needs root" and "the backend refused the rule" both fail the exact
+        # command the operator just ran -- there is nothing for a later `nodo
+        # info` to add, and persisting one would have it wrongly claim a firewall
+        # problem the next time the operator looks.
+        error = GatewayPortUnavailable("needs root", "sudo nodo serve", port=PORT)
+        with patch.object(serve_module, "_gateway_port_call", side_effect=error):
+            with self.assertRaises(SystemExit):
+                serve_module._verify_gateway_port(PORT)
+
+        self.env.emit_gateway_notice.assert_not_called()
+
     def test_the_refusal_is_held_back_to_the_end_of_the_output(self):
         # The start path has already printed a screenful by now, and in a terminal
         # the last line is the one that gets read.
