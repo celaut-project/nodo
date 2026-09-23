@@ -72,10 +72,7 @@ GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE = ".gateway_plaintext_notice.cmd"
 
 def _command_file_for(notice_file: str) -> str:
     """The companion file holding ``notice_file``'s one-line fix, if it has one."""
-    return {
-        GATEWAY_NOTICE_FILE: GATEWAY_NOTICE_COMMAND_FILE,
-        GATEWAY_PLAINTEXT_NOTICE_FILE: GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE,
-    }.get(notice_file, notice_file + ".cmd")
+    return notice_file + ".cmd"
 
 
 def coerce_gateway_port(value: Any) -> Optional[int]:
