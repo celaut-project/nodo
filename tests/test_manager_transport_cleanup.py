@@ -3,6 +3,9 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from protos import celaut_pb2 as celaut
     from src.manager import manager
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -42,6 +45,11 @@ class ManagerTransportCleanupTests(unittest.TestCase):
             manager.sc, "get_instance_balance", return_value=42
         ), patch.object(
             manager.sc, "purge_internal", return_value=None
+        ), patch.object(
+            # Crediting the father is not what this test is about, and the real
+            # path would reach `local_instances`, a table this test's throwaway
+            # database never migrates.
+            manager, "credit_father", return_value=True
         ), patch.object(
             manager, "remove_firewall_rule", return_value=True
         ) as remove_rule_mock:
