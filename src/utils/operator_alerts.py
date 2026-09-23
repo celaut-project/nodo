@@ -48,6 +48,24 @@ from typing import List, Optional
 #: alert that reads as one more fact about the node.
 ACTION_REQUIRED = "[ACTION REQUIRED]"
 
+#: Width the fix command is centered in when a firewall alert shows one in
+#: place. Matches ``NOTICE_RULE`` in ``src/utils/firewall/gateway.py``, the same
+#: 78-column convention every wrapped paragraph in these notices already uses.
+_COMMAND_WIDTH = 78
+
+
+def _command_block(command: str) -> str:
+    """``command``, set apart on its own line and centered, blank lines above and below.
+
+    The alternative -- naming the file the command lives in -- is what this
+    replaces: an operator reading `nodo info` had to go open a second file to
+    find one line, and that line was already sitting in memory the moment this
+    alert was computed. Blank lines and centering keep it from running together
+    with the sentence before and after it, the same problem ``operator_notice``
+    solves for the longer, framed messages this one is a summary of.
+    """
+    return f"\n\n{command.center(_COMMAND_WIDTH).rstrip()}\n"
+
 
 @dataclass(frozen=True)
 class OperatorAlert:
@@ -119,7 +137,12 @@ def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> O
     result of one (``is_serving()`` connects to ``127.0.0.1:<port>``), and both
     callers hold that answer before they ask.
     """
-    from src.utils.config import GATEWAY_NOTICE_FILE, ConfigManager, coerce_gateway_port
+    from src.utils.config import (
+        GATEWAY_NOTICE_COMMAND_FILE,
+        GATEWAY_NOTICE_FILE,
+        ConfigManager,
+        coerce_gateway_port,
+    )
 
     manager = config_manager or ConfigManager()
     try:
@@ -131,13 +154,13 @@ def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> O
         return None
 
     try:
-        notice_path = os.path.join(
-            os.path.dirname(os.path.realpath(manager.config_path)) or ".",
-            GATEWAY_NOTICE_FILE,
-        )
+        notice_dir = os.path.dirname(os.path.realpath(manager.config_path)) or "."
+        notice_path = os.path.join(notice_dir, GATEWAY_NOTICE_FILE)
         pending = _read_text(notice_path)
+        command = _read_text(os.path.join(notice_dir, GATEWAY_NOTICE_COMMAND_FILE))
     except Exception:
         pending = None
+        command = None
 
     if coerce_gateway_port(port) is None:
         return OperatorAlert(
@@ -150,13 +173,15 @@ def gateway_port_alert(config_manager=None, serving: Optional[bool] = None) -> O
         )
 
     if pending:
+        lead = f"{_unreachable_lead(serving)} TCP {port} is not open in the host firewall, so peers cannot reach this node."
+        summary = (
+            f"{lead} Open it:{_command_block(command)}"
+            if command
+            else f"{lead} Open it: see {notice_path} for the exact command."
+        )
         return OperatorAlert(
             key="gateway_port_firewall",
-            summary=(
-                f"{_unreachable_lead(serving)} TCP {port} is not open in the host "
-                f"firewall, so peers cannot reach this node. Open it: see "
-                f"{notice_path} for the exact command."
-            ),
+            summary=summary,
             detail=pending,
         )
 
@@ -197,7 +222,11 @@ def plaintext_gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]
     Same cheapness contract as ``gateway_port_alert``: a config read and a
     ``.gateway_plaintext_notice`` stat, nothing that touches the network.
     """
-    from src.utils.config import GATEWAY_PLAINTEXT_NOTICE_FILE, ConfigManager
+    from src.utils.config import (
+        GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE,
+        GATEWAY_PLAINTEXT_NOTICE_FILE,
+        ConfigManager,
+    )
 
     manager = config_manager or ConfigManager()
     try:
@@ -214,24 +243,29 @@ def plaintext_gateway_port_alert(config_manager=None) -> Optional[OperatorAlert]
         return None
 
     try:
-        notice_path = os.path.join(
-            os.path.dirname(os.path.realpath(manager.config_path)) or ".",
-            GATEWAY_PLAINTEXT_NOTICE_FILE,
-        )
+        notice_dir = os.path.dirname(os.path.realpath(manager.config_path)) or "."
+        notice_path = os.path.join(notice_dir, GATEWAY_PLAINTEXT_NOTICE_FILE)
         pending = _read_text(notice_path)
+        command = _read_text(os.path.join(notice_dir, GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE))
     except Exception:
         pending = None
+        command = None
 
     if not pending:
         return None
 
+    lead = (
+        f"TCP {port} (the plaintext gateway) is not reachable from the guest "
+        "subnet, so services this node launches cannot call back into it."
+    )
+    summary = (
+        f"{lead} Fix it:{_command_block(command)}"
+        if command
+        else f"{lead} Fix it: see {notice_path} for the exact command."
+    )
     return OperatorAlert(
         key="gateway_plaintext_port_unreachable",
-        summary=(
-            f"TCP {port} (the plaintext gateway) is not reachable from the guest "
-            f"subnet, so services this node launches cannot call back into it. Fix "
-            f"it: see {notice_path} for the exact command."
-        ),
+        summary=summary,
         detail=pending,
     )
 

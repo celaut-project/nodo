@@ -180,7 +180,7 @@ def _verify_plaintext_gateway_port(port: int) -> None:
     except Exception:
         pass
     lines.append("")
-    from src.utils.firewall.frontend import open_scoped_port_advice
+    from src.utils.firewall.frontend import detect_scoped_frontend, open_scoped_port_advice
 
     lines.extend(open_scoped_port_advice(port, subnet=subnet, bridge=bridge))
     lines.append("")
@@ -191,11 +191,19 @@ def _verify_plaintext_gateway_port(port: int) -> None:
         "path into the node."
     )
 
+    # Detected again rather than threaded through `open_scoped_port_advice`'s
+    # return value, same trade-off as the TLS side's `_blocked_port_error`: that
+    # function returns prose for the notice body, and the bare command is a
+    # second, cheap ask so `nodo info` and the TUI can show it in place.
+    frontend = detect_scoped_frontend(port, subnet)
+
     # emit_plaintext_gateway_notice owns the framing, the log line and the disk
     # write; logging the same block here too would put two copies of one alert in
     # app.log, which is the exact noise the framed-notice convention exists to cut.
     env_manager.emit_plaintext_gateway_notice(
-        "plaintext gateway unreachable", "\n".join(lines)
+        "plaintext gateway unreachable",
+        "\n".join(lines),
+        command=frontend.command if frontend else None,
     )
 
 
@@ -235,6 +243,14 @@ def _refuse_to_start(e: GatewayPortUnavailable) -> None:
     # is above it, and in a terminal the last line is the one that gets read. The
     # atexit hook fires on the SystemExit below.
     defer_operator_notice(notice)
+    # Only the "the firewall rejects this port" refusal is persisted: it is the
+    # one diagnosis `nodo serve` cannot retry on its own, so it is the one an
+    # operator who is not watching this run still needs `nodo info` to surface
+    # afterwards. Without this, `nodo info` cannot tell "the firewall is blocking
+    # this" from "nobody has started it yet" and keeps sending the operator back
+    # to the very command that just failed.
+    if e.blocked_by_firewall:
+        env_manager.emit_gateway_notice(e.summary, str(e), command=e.command)
     raise SystemExit(1) from e
 
 
