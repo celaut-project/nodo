@@ -1,0 +1,42 @@
+name: tests
+
+# Runs the pytest suite (tests/) on every PR and every push to dev/stable.
+#
+# Before this workflow, tests/ held ~3200 cases and nothing in CI ever ran them: a
+# regression could land on dev undetected until someone happened to run pytest by
+# hand. Two tests (test_demand_history, test_wildcard_hostname_tags) had already
+# drifted out of sync with the code they cover for exactly that reason.
+#
+# tests/conftest.py bootstraps a config.yaml from config.example.yaml, so most of
+# the suite runs without any node actually installed or configured. The exceptions
+# are test_build.py and test_start_service.py: both import tests/main.py, which
+# requires a gateway port already assigned in the host firewall -- something only
+# `sudo nodo serve` can do, and not something a CI runner should be doing. Those
+# two stay out of this workflow; everything else runs.
+
+on:
+  pull_request:
+  push:
+    branches: [dev, stable]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r bash/requirements.txt
+          pip install pytest
+
+      - name: Run test suite
+        run: |
+          python -m pytest tests/ -q \
+            --ignore=tests/test_build.py \
+            --ignore=tests/test_start_service.py
