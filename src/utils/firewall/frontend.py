@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import textwrap
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence
 
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess]
 
@@ -129,6 +129,11 @@ def _ufw_scoped(port: int, subnet: str, run: Runner) -> Optional[Frontend]:
 
 _SCOPED_DETECTORS = (_firewalld_scoped, _ufw_scoped)
 
+# Distinguishes "the caller has no `Frontend` to hand in" from "the caller
+# already detected one, and it happened to be None" -- `open_port_advice`'s own
+# `frontend` parameter needs both, and plain `None` can only mean the second.
+_UNDETECTED = object()
+
 
 def detect_scoped_frontend(
     port: int, subnet: str, *, run: Optional[Runner] = None
@@ -158,14 +163,22 @@ def open_port_advice(
     bridge: str = "",
     subnet: str = "",
     run: Optional[Runner] = None,
+    frontend: Any = _UNDETECTED,
 ) -> List[str]:
     """The shortest useful instruction for opening ``port`` inbound on this host.
 
     Either one command for the detected front-end, or -- when none is running --
     a statement of the property that has to hold, short enough to paste
     somewhere that can turn it into a command for whatever manages this ruleset.
+
+    ``frontend`` lets a caller that already ran :func:`detect_frontend` for this
+    ``port`` (``_blocked_port_error`` needs the same result again, for its bare
+    ``.command``) hand it straight in, rather than have this function shell out
+    to the (subprocess-based) detectors a second time. Left unset, detection
+    happens here as before.
     """
-    frontend = detect_frontend(port, run=run)
+    if frontend is _UNDETECTED:
+        frontend = detect_frontend(port, run=run)
     if frontend is not None:
         return [
             f"This host runs {frontend.name}. Open the port with:",
@@ -188,6 +201,7 @@ def open_scoped_port_advice(
     subnet: str,
     bridge: str = "",
     run: Optional[Runner] = None,
+    frontend: Any = _UNDETECTED,
 ) -> List[str]:
     """Like :func:`open_port_advice`, but the rule it hands over never leaves ``subnet``.
 
@@ -198,8 +212,14 @@ def open_scoped_port_advice(
     it too -- and wrong here, where reachable from *anywhere* is the failure mode,
     not the fix. So the rule this advises is scoped from the start rather than
     opened wide with a promise to narrow it later.
+
+    ``frontend`` is the same reuse escape hatch as :func:`open_port_advice`'s: a
+    caller that already ran :func:`detect_scoped_frontend` for this ``port`` and
+    ``subnet`` can hand the result straight in instead of paying for a second,
+    identical detection.
     """
-    frontend = detect_scoped_frontend(port, subnet, run=run)
+    if frontend is _UNDETECTED:
+        frontend = detect_scoped_frontend(port, subnet, run=run)
     if frontend is not None:
         return [
             f"This host runs {frontend.name}. Open the port, admitting only {subnet}, with:",

@@ -197,7 +197,12 @@ def _blocked_port_error(
     )
     lines.extend(rejectors.describe())
     lines.append("")
-    lines.extend(open_port_advice(port, bridge=bridge, subnet=subnet, run=run))
+    # Detected once, up front, so both the prose below and this exception's bare
+    # `.command` (for `nodo info` and the TUI to show in place) come from the
+    # same result -- rather than shelling out to the detectors a second time
+    # just to ask the same question again.
+    frontend = detect_frontend(port, run=run)
+    lines.extend(open_port_advice(port, bridge=bridge, subnet=subnet, run=run, frontend=frontend))
     lines.append("")
     lines.extend(
         _para(
@@ -205,14 +210,6 @@ def _blocked_port_error(
             "to a port you have already opened."
         )
     )
-
-    # Detected again rather than threaded through `open_port_advice`'s return
-    # value: that function hands back prose for the exception message, and
-    # changing its shape would ripple into every existing caller and test. This
-    # one extra (cheap, best-effort) detection is the price of also having the
-    # bare command for `nodo info` and the TUI to show in place. None when no
-    # running front-end was found -- there is no discrete command to hand over.
-    frontend = detect_frontend(port, run=run)
 
     return GatewayPortUnavailable(
         summary=f"Gateway port {port} is not reachable from the guest subnet.",

@@ -182,7 +182,11 @@ def _verify_plaintext_gateway_port(port: int) -> None:
     lines.append("")
     from src.utils.firewall.frontend import detect_scoped_frontend, open_scoped_port_advice
 
-    lines.extend(open_scoped_port_advice(port, subnet=subnet, bridge=bridge))
+    # Detected once, up front, so both the prose below and the bare command
+    # (for `nodo info` and the TUI to show in place) come from the same result,
+    # rather than shelling out to the detectors a second time for it.
+    frontend = detect_scoped_frontend(port, subnet)
+    lines.extend(open_scoped_port_advice(port, subnet=subnet, bridge=bridge, frontend=frontend))
     lines.append("")
     lines.append(
         "Keep the rule scoped to that subnet: this port speaks plain gRPC with no "
@@ -190,12 +194,6 @@ def _verify_plaintext_gateway_port(port: int) -> None:
         "hand every one of them, and anything else on this LAN, an unauthenticated "
         "path into the node."
     )
-
-    # Detected again rather than threaded through `open_scoped_port_advice`'s
-    # return value, same trade-off as the TLS side's `_blocked_port_error`: that
-    # function returns prose for the notice body, and the bare command is a
-    # second, cheap ask so `nodo info` and the TUI can show it in place.
-    frontend = detect_scoped_frontend(port, subnet)
 
     # emit_plaintext_gateway_notice owns the framing, the log line and the disk
     # write; logging the same block here too would put two copies of one alert in
@@ -239,10 +237,6 @@ def _refuse_to_start(e: GatewayPortUnavailable) -> None:
     # lands between whatever else the start path is printing.
     notice = operator_notice("refusing to start", str(e))
     log.LOGGER(notice)
-    # Deferred rather than printed: everything this start path has already written
-    # is above it, and in a terminal the last line is the one that gets read. The
-    # atexit hook fires on the SystemExit below.
-    defer_operator_notice(notice)
     # Only the "the firewall rejects this port" refusal is persisted: it is the
     # one diagnosis `nodo serve` cannot retry on its own, so it is the one an
     # operator who is not watching this run still needs `nodo info` to surface
@@ -250,7 +244,15 @@ def _refuse_to_start(e: GatewayPortUnavailable) -> None:
     # this" from "nobody has started it yet" and keeps sending the operator back
     # to the very command that just failed.
     if e.blocked_by_firewall:
+        # emit_gateway_notice defers this same body itself (as well as persisting
+        # it to disk for `nodo info`), so deferring `notice` too would print the
+        # identical framed block twice at exit.
         env_manager.emit_gateway_notice(e.summary, str(e), command=e.command)
+    else:
+        # Deferred rather than printed: everything this start path has already
+        # written is above it, and in a terminal the last line is the one that
+        # gets read. The atexit hook fires on the SystemExit below.
+        defer_operator_notice(notice)
     raise SystemExit(1) from e
 
 
