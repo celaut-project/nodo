@@ -25,6 +25,7 @@ from src.utils.arch_guard import ensure_native_arch
 # importing this worker never drags a builder into the CH-only runtime.
 from src.utils.architectures import PACKER_SUPPORTED_ARCHITECTURES
 from src.utils.buildkit_env import BUILDCTL_COMMAND, BUILDKIT_ENV
+from src.utils.container_filesystem import load_branch_filesystem
 from src.utils.filesystem_xattrs import (
     READ_MODE_KEY,
     READ_MODE_RO,
@@ -154,6 +155,11 @@ def _install_as_block(block_id: bytes, directory: str) -> bytes:
 
 class ZipContainerPacker:
     def __init__(self, path, aux_id):
+        # Every block created anywhere in the tree -- a large file, or now a
+        # directory over the same threshold (see recursive_parsing). Kept flat
+        # across the whole walk; which of these a given build_multiblock call
+        # needs to see is a narrower, per-level question -- see
+        # recursive_parsing's own return value.
         self.blocks: List[bytes] = []
         # The block the container filesystem is stored as; see parseFilesys.
         self.filesystem_block: bytes = b''
@@ -351,7 +357,12 @@ class ZipContainerPacker:
         # checked here, on the same declarations, so the operator finds out while
         # packing rather than after publishing a service that cannot start.
         try:
-            exported = [d for d in declarations_for_filesystem(root_filesystem) if d.shared]
+            exported = [
+                d for d in declarations_for_filesystem(
+                    root_filesystem, inherited=hash_types_for_packing()
+                )
+                if d.shared
+            ]
         except ValueError as e:
             raise ValueError(f"service.json: invalid shared-filesystem declaration: {e}") from e
 
@@ -376,7 +387,12 @@ class ZipContainerPacker:
         # being true the packer says so instead of shipping a service every node
         # will refuse.
         try:
-            assert_complete_filesystem_metadata(root_filesystem)
+            assert_complete_filesystem_metadata(
+                root_filesystem,
+                resolve_nested=lambda branch: load_branch_filesystem(
+                    branch, inherited=hash_types_for_packing()
+                ),
+            )
         except ValueError as e:
             raise ValueError(
                 f"service.json: '{READ_ONLY_FILESYSTEM_KEY}' is true but the packed "
@@ -403,9 +419,22 @@ class ZipContainerPacker:
         def parseFilesys() -> celaut.Metadata.HashTag:
             # File system is already exported to filesystem/ by BuildKit
             # Add filesystem data to filesystem buffer object.
-            def recursive_parsing(directory: str) -> celaut.Service.Container.Filesystem:
+            def recursive_parsing(directory: str) -> Tuple[celaut.Service.Container.Filesystem, List[bytes]]:
+                """Build one directory level, and the blocks it directly points at.
+
+                The second return value is *not* every block anywhere below this
+                directory -- only the ones a `build_multiblock` call over this
+                directory's own serialization would need to detect: per-file
+                pointers embedded here, and per-directory pointers for any
+                immediate child that became a block of its own. A block one of
+                those child directories points at, in turn, is invisible from
+                here -- it was already accounted for when that child was built --
+                so it is deliberately left out, the same way a file's bytes are
+                left out once the file itself becomes a block.
+                """
                 host_dir = CACHE + self.aux_id + "/filesystem"
                 filesystem = celaut.Service.Container.Filesystem()
+                local_blocks: List[bytes] = []
                 for b_name in os.listdir(host_dir + directory):
                     if b_name == '.wh..wh..opq':
                         # https://github.com/opencontainers/image-spec/blob/master/layer.md#opaque-whiteout
@@ -475,18 +504,48 @@ class ZipContainerPacker:
                             ).SerializeToString()
                             if block_hash not in self.blocks:
                                 self.blocks.append(block_hash)
+                            if block_hash not in local_blocks:
+                                local_blocks.append(block_hash)
                     # It's a folder.
                     elif os.path.isdir(branch_host_path):
-                        branch.filesystem.CopyFrom(
-                            recursive_parsing(directory=directory + b_name + '/')
+                        nested, nested_blocks = recursive_parsing(
+                            directory=directory + b_name + '/'
                         )
+                        nested_bytes = nested.SerializeToString()
+                        if len(nested_bytes) < MIN_BUFFER_BLOCK_SIZE:
+                            # Small enough to stay embedded: its own blocks
+                            # (if any) remain directly visible from here, so
+                            # this level still has to know about them.
+                            branch.filesystem = nested_bytes
+                            for nested_block_hash in nested_blocks:
+                                if nested_block_hash not in local_blocks:
+                                    local_blocks.append(nested_block_hash)
+                        else:
+                            # Same move as a large file above, one type up: the
+                            # subtree becomes a block of its own -- deduplicated
+                            # against every other directory that expands to the
+                            # same bytes -- and this branch keeps only a pointer
+                            # to it. See docs/PACKING.md and issue #370.
+                            block_hash, cache_dir = block_builder.build_multiblock(
+                                pf_object_with_block_pointers=nested,
+                                blocks=nested_blocks,
+                                inherited=hash_types_for_packing(),
+                            )
+                            block_hash = _install_as_block(block_hash, cache_dir)
+                            branch.filesystem = block_pointer(
+                                block_id=block_hash, omit_types=True
+                            ).SerializeToString()
+                            if block_hash not in self.blocks:
+                                self.blocks.append(block_hash)
+                            if block_hash not in local_blocks:
+                                local_blocks.append(block_hash)
                     else:
                         raise RuntimeError(
                             "Unsupported filesystem entry kind for "
                             f"'{directory + b_name}' after metadata capture."
                         )
                     filesystem.branch.append(branch)
-                return filesystem
+                return filesystem, local_blocks
             # The filesystem is stored as one block of its own rather than
             # inlined into the spec, so that reading the spec -- to answer what
             # ports it exposes, what it costs, whether it needs a parent-exported
@@ -507,13 +566,13 @@ class ZipContainerPacker:
             # -- a pointer is replaced by its block's content either way -- so the
             # filesystem block's id, and the service id above it, are the same as
             # they would be with every type spelled out.
-            root_filesystem = recursive_parsing(directory="/")
+            root_filesystem, root_blocks = recursive_parsing(directory="/")
             self._apply_read_only_filesystem(root_filesystem)
 
             self.filesystem_block = _install_as_block(
                 *block_builder.build_multiblock(
                     pf_object_with_block_pointers=root_filesystem,
-                    blocks=self.blocks,
+                    blocks=root_blocks,
                     inherited=hash_types_for_packing()
                 )
             )

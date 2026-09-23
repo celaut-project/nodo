@@ -4,7 +4,7 @@ import os
 import stat
 import tarfile
 from dataclasses import dataclass
-from typing import Any, List, Mapping, MutableMapping, Optional
+from typing import Any, Callable, List, Mapping, MutableMapping, Optional
 
 MODE_KEY = "mode"
 UID_KEY = "uid"
@@ -290,6 +290,7 @@ def missing_metadata_keys(xattrs: Mapping[str, bytes]) -> List[str]:
 def assert_complete_filesystem_metadata(
     filesystem: Any,
     parent_rel_path: str = "/",
+    resolve_nested: Optional[Callable[[Any], Any]] = None,
 ) -> None:
     """Refuse a tree that does not declare mode/uid/gid/mtime/device for every entry.
 
@@ -308,7 +309,34 @@ def assert_complete_filesystem_metadata(
 
     Recursive: the gate is about what ends up in the image, and a subdirectory's
     entries end up in it just as much as the root's.
+
+    ``ItemBranch.item.filesystem`` is a ``bytes`` field -- either the literal
+    serialized subtree or a pointer to a block holding one, the packer's own
+    choice per directory (see ``recursive_parsing`` and
+    ``src.utils.container_filesystem``). Resolving that duality means the block
+    registry, which this module stays free of on purpose so it keeps testing on
+    a bare checkout; ``resolve_nested`` is how a caller that does have it hands
+    over the resolved subtree for a directory branch. Left at its default, a
+    ``bytes`` field simply has no ``branch`` attribute and the walk stops there
+    without recursing -- correct only for a tree with no directory big enough to
+    be blocked, which is every tree in this module's own tests.
     """
+    if resolve_nested is not None:
+        resolve = resolve_nested
+    else:
+        # Dependency-light default: parses a literal inline subtree (the only
+        # shape any tree built directly, with no block registry involved, can
+        # be in), by instantiating the same message class this level's own
+        # `filesystem` already is -- the type is self-referential, so that is
+        # always the right class, with no proto import needed here to name it.
+        filesystem_cls = type(filesystem)
+
+        def resolve(branch: Any) -> Any:
+            nested = filesystem_cls()
+            if branch.filesystem:
+                nested.ParseFromString(branch.filesystem)
+            return nested
+
     for branch in getattr(filesystem, "branch", []) or []:
         name = getattr(branch, "name", "") or ""
         rel_path = (
@@ -329,11 +357,13 @@ def assert_complete_filesystem_metadata(
         nested = None
         try:
             if branch.HasField("filesystem"):
-                nested = branch.filesystem
+                nested = resolve(branch)
         except (AttributeError, ValueError):
             nested = None
         if nested is not None:
-            assert_complete_filesystem_metadata(nested, parent_rel_path=rel_path)
+            assert_complete_filesystem_metadata(
+                nested, parent_rel_path=rel_path, resolve_nested=resolve_nested
+            )
 
 
 def _parse_utf8_int(key: str, value: bytes) -> int:

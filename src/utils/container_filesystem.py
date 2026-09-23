@@ -18,6 +18,11 @@ only the one caller that genuinely needs the tree pays for it, here.
 
 Both shapes expand to exactly the same bytes, so a service's content-addressed
 id does not depend on which one it is stored in.
+
+``ItemBranch.item.filesystem`` (a subdirectory) is a ``bytes`` field with the
+same duality, one level down, once it is large enough for the packer to store
+it as a block of its own rather than embed it in its parent -- see
+``resolve_filesystem_bytes`` and ``load_branch_filesystem``.
 """
 import os
 import warnings
@@ -120,6 +125,37 @@ def filesystem_hash_types(service: celaut.Service) -> Optional[Tuple[bytes, ...]
         return hash_types_for_packing()
 
 
+def resolve_filesystem_bytes(
+        raw: bytes,
+        inherited: Optional[Sequence[bytes]] = None,
+) -> bytes:
+    """The serialized ``Filesystem`` these bytes decode to, reading its block if it is one.
+
+    The one operation both ``Container.filesystem`` (the root) and
+    ``ItemBranch.item.filesystem`` (a subdirectory, once large enough to be a
+    block of its own -- see the packer's ``recursive_parsing``) are read through:
+    both are ``bytes`` fields with the same inline-or-pointer duality, so a
+    caller walking the tree does not need to know at which depth it is standing.
+
+    ``inherited`` is ``None`` at the root, where the field is the top of the
+    stored tree and its pointer, if it is one, carries its own hash types. A
+    subdirectory's pointer omits them, the same way a per-file pointer does, and
+    relies on the context ``filesystem_hash_types`` resolves for the tree as a
+    whole -- pass that here.
+
+    Never the block's *expansion*: see ``_filesystem_block_bytes``.
+    """
+    if not raw:
+        return raw
+
+    block_id = filesystem_block_id(raw, inherited=inherited)
+    if block_id is None:
+        return raw
+
+    log.LOGGER(f"Reading filesystem block {block_id}.")
+    return _filesystem_block_bytes(block_id)
+
+
 def load_container_filesystem(service: celaut.Service) -> celaut.Service.Container.Filesystem:
     """The service's filesystem tree, fetched from its block when it is one.
 
@@ -128,17 +164,31 @@ def load_container_filesystem(service: celaut.Service) -> celaut.Service.Contain
     spec beside it.
     """
     filesystem = celaut.Service.Container.Filesystem()
-    raw = service.container.filesystem
-    if not raw:
-        return filesystem
+    resolved = resolve_filesystem_bytes(service.container.filesystem)
+    if resolved:
+        filesystem.ParseFromString(resolved)
+    return filesystem
 
-    block_id = filesystem_block_id(raw)
-    if block_id is None:
-        filesystem.ParseFromString(raw)
-        return filesystem
 
-    log.LOGGER(f"Reading filesystem block {block_id}.")
-    filesystem.ParseFromString(_filesystem_block_bytes(block_id))
+def load_branch_filesystem(
+        branch: celaut.Service.Container.Filesystem.ItemBranch,
+        inherited: Optional[Sequence[bytes]],
+) -> celaut.Service.Container.Filesystem:
+    """A directory ``ItemBranch``'s subtree, fetched from its block when it is one.
+
+    The branch-level counterpart of ``load_container_filesystem``. Call only
+    where ``branch.HasField("filesystem")`` -- it does not check, since every
+    caller already has to branch on that to tell a directory from a file or a
+    link.
+
+    ``inherited`` must be the hash-type context resolved for the tree this
+    branch sits in (``filesystem_hash_types``), not ``None``: unlike the root
+    field, a subdirectory's own pointer, when it is one, omits its type.
+    """
+    filesystem = celaut.Service.Container.Filesystem()
+    resolved = resolve_filesystem_bytes(branch.filesystem, inherited=inherited)
+    if resolved:
+        filesystem.ParseFromString(resolved)
     return filesystem
 
 

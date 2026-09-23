@@ -151,7 +151,7 @@ class ReadModeHelperTests(unittest.TestCase):
         nested = _ro_filesystem()
         branch = celaut.Service.Container.Filesystem.ItemBranch()
         branch.name = "subdir"
-        branch.filesystem.CopyFrom(nested)
+        branch.filesystem = nested.SerializeToString()
 
         root = celaut.Service.Container.Filesystem()
         root.branch.append(branch)
@@ -207,7 +207,7 @@ class MetadataCompletenessGateTests(unittest.TestCase):
 
         subdir = celaut.Service.Container.Filesystem.ItemBranch()
         subdir.name = "usr"
-        subdir.filesystem.CopyFrom(nested)
+        subdir.filesystem = nested.SerializeToString()
         encode_filesystem_metadata_xattrs(
             subdir.xattrs, _metadata(mode=stat.S_IFDIR | 0o755)
         )
