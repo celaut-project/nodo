@@ -11,6 +11,9 @@ from unittest import mock
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from google.protobuf.json_format import Parse
 
     from protos import celaut_pb2
@@ -48,6 +51,7 @@ class OnChainPeerObjectTests(unittest.TestCase):
         fake_get = self._overrides(validity)
         with mock.patch.object(tx, "SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", lambda: True), \
              mock.patch.object(tx.env_manager, "get", side_effect=fake_get), \
+             mock.patch.object(tx.env_manager, "get_gateway_port", return_value=8080), \
              mock.patch("src.utils.config.ConfigManager.get", autospec=True,
                         side_effect=lambda _self, key, default=None: fake_get(key, default)), \
              mock.patch("src.utils.network.get_local_ip", return_value=PUBLIC_IP):
@@ -55,7 +59,12 @@ class OnChainPeerObjectTests(unittest.TestCase):
 
     def _r7_owner_key(self):
         """The public key a reader would recover from the box's R7 owner."""
-        return ni.node_proposition_hex(ni.get_node_public_key_hex())[len("0008cd"):]
+        # Imported lazily: proof_attestation reaches bip_wallet_verification
+        # (an optional wallet-signature dependency), and only the tests that
+        # call this helper need it -- the rest must not skip if it is broken.
+        from src.reputation_system import proof_attestation as pa
+
+        return pa.node_proposition_hex(ni.get_node_public_key_hex())[len("0008cd"):]
 
     def _payload_for(self, peer):
         return ni.canonical_peer_payload(

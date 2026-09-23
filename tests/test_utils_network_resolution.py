@@ -3,6 +3,9 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     import src.utils.utils as utils
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc

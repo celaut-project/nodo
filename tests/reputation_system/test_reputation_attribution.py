@@ -19,6 +19,9 @@ from unittest import mock
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from protos import celaut_pb2
     from src.payment_system import payment_process
     from src.reputation_system import interface as reputation_interface
@@ -90,7 +93,7 @@ class PaymentCommunicationTests(unittest.TestCase):
             bee.client_grpc.side_effect = Exception("peer refused the payment call")
             communicated = attempt_payment_communication(
                 peer_id="peer-1",
-                amount=1000,
+                peer_amount=1000,
                 deposit_token="deposit-token-1",
                 contract_ledger=celaut_pb2.Contract(),
             )

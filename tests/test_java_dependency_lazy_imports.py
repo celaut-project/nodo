@@ -20,6 +20,14 @@ if "mnemonic" not in sys.modules:
     mnemonic_module.Mnemonic = _Mnemonic
     sys.modules["mnemonic"] = mnemonic_module
 
+# src.utils.java_dependency (and several modules it lazily reaches, e.g.
+# src.payment_system.contracts.registry) -> src.utils.logger creates its log
+# directory at import time from main.STORAGE, which resolves to the repo's
+# checked-in default (/nodo/storage) and needs root unless a config was
+# already bootstrapped.
+from tests.config_bootstrap import load_example_config
+load_example_config()
+
 from src.utils.java_dependency import JavaDependencyMissing, build_java_dependency_message
 
 
@@ -111,6 +119,10 @@ class JavaDependencyLazyImportTests(unittest.TestCase):
             raise JavaDependencyMissing(build_java_dependency_message(feature="Ergo payments or reputation"))
 
         fake_module.increase_deposit_on_peer = _raise
+        # increase_peer_deposit() imports and calls this first, ahead of
+        # increase_deposit_on_peer: it has to clear it (no refusal reason) or
+        # the real call under test is never reached.
+        fake_module.deposit_refusal_reason = lambda peer_id, amount_mu: None
         stdout = io.StringIO()
 
         with mock.patch.dict(sys.modules, {"src.payment_system.payment_process": fake_module}):

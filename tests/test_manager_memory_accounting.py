@@ -1,6 +1,12 @@
 import unittest
 from unittest.mock import patch
 
+# src.manager.manager -> src.utils.logger creates its log directory at import
+# time from main.STORAGE, which resolves to the repo's checked-in default
+# (/nodo/storage) and needs root unless a config was already bootstrapped.
+from tests.config_bootstrap import load_example_config
+load_example_config()
+
 from protos import celaut_pb2
 from src.manager.modify_resources import modify_sysreq
 from src.manager.resources import IOBigData

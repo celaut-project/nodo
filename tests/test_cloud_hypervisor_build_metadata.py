@@ -11,6 +11,9 @@ from src.utils.filesystem_xattrs import encode_filesystem_metadata_xattrs, Files
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from protos import celaut_pb2 as celaut
     ch_build = importlib.import_module("src.virtualizers.microvm.build")
     ch_limits = importlib.import_module("src.virtualizers.microvm.limits")
@@ -301,11 +304,14 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             self.assertTrue((root_dir / "app-link").is_symlink())
 
     def test_resolve_initial_rootfs_size_bytes_respects_requested_disk_space(self):
+        # A disk_space large enough to beat both MIN_ROOTFS_BYTES and
+        # total_bytes + OVERHEAD_BYTES, or it can never be the figure that wins
+        # regardless of which one gets read.
+        requested_disk_space = 200 * 1024 * 1024
         service = celaut.Service(
             container=celaut.Service.Container(
                 resources=celaut.Service.Container.Resources(
-                    at_init=celaut.Sysresources(disk_space=256),
-                    at_most=celaut.Sysresources(disk_space=4096),
+                    at_most=celaut.Sysresources(disk_space=requested_disk_space),
                 )
             )
         )
@@ -315,7 +321,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             total_bytes=1024,
         )
 
-        self.assertEqual(size_bytes, 4096)
+        self.assertEqual(size_bytes, requested_disk_space)
 
     def test_resolve_initial_rootfs_size_bytes_keeps_filesystem_overhead_floor(self):
         service = celaut.Service(
@@ -326,7 +332,9 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             )
         )
 
-        total_bytes = 10 * 1024 * 1024
+        # Large enough that total_bytes + OVERHEAD_BYTES beats MIN_ROOTFS_BYTES too,
+        # or the 128 MiB floor wins regardless of what this is meant to pin down.
+        total_bytes = 200 * 1024 * 1024
         size_bytes = ch_limits.initial_rootfs_size_bytes(
             service=service,
             total_bytes=total_bytes,
