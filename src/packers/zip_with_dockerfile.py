@@ -102,6 +102,17 @@ def _normalize_tar_member_path(name: str) -> str:
 COMPANION_HASH_IDS = (SHA3_256_ID, BLAKE2B_ID)
 
 
+def _is_inline(size: int, fast: bool) -> bool:
+    """Whether a file this size is inlined rather than stored as its own block.
+
+    ``fast`` short-circuits the size check entirely: every file inlines, so
+    ``ZipContainerPacker`` never calls ``block_builder.create_block`` and the
+    filesystem's own ``build_multiblock`` call (see ``parseFilesys``) collapses
+    to a single block with nothing to point at -- the whole point of `--fast`.
+    """
+    return fast or size < MIN_BUFFER_BLOCK_SIZE
+
+
 def packing_memory_estimate(inline_len: int, block_count: int = 0) -> int:
     """RAM to reserve for a pack, from what it will actually hold.
 
@@ -153,13 +164,16 @@ def _install_as_block(block_id: bytes, directory: str) -> bytes:
 
 
 class ZipContainerPacker:
-    def __init__(self, path, aux_id):
+    def __init__(self, path, aux_id, fast: bool = False):
         self.blocks: List[bytes] = []
         # The block the container filesystem is stored as; see parseFilesys.
         self.filesystem_block: bytes = b''
         self.buffer_len: int = 0
         self.inline_len: int = 0
         self.block_count: int = 0
+        # --fast: every file inlines into the one filesystem block, regardless
+        # of MIN_BUFFER_BLOCK_SIZE. See _is_inline and parseFilesys.
+        self.fast = fast
         self.service = pack_pb2.Service()
         self.metadata = celaut.Metadata()
         self.path = path
@@ -269,7 +283,7 @@ class ZipContainerPacker:
                     if not os.path.islink(fp):
                         size = os.path.getsize(fp)
                         total_size += size
-                        if size < MIN_BUFFER_BLOCK_SIZE:
+                        if _is_inline(size, self.fast):
                             inline_size += size
                         else:
                             block_count += 1
@@ -457,7 +471,7 @@ class ZipContainerPacker:
                         branch.file = b""
                     # It's a file.
                     elif os.path.isfile(branch_host_path):
-                        if os.path.getsize(branch_host_path) < MIN_BUFFER_BLOCK_SIZE:
+                        if _is_inline(os.path.getsize(branch_host_path), self.fast):
                             with open(branch_host_path, 'rb') as file:
                                 branch.file = file.read()
                         else:
@@ -1068,9 +1082,9 @@ class ZipContainerPacker:
             
         return service_id, self.metadata, service
 
-def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
-    spec_file = ZipContainerPacker(path=path, aux_id=aux_id)
-    
+def ok(path, aux_id, fast: bool = False) -> Tuple[str, celaut.Metadata, str]:
+    spec_file = ZipContainerPacker(path=path, aux_id=aux_id, fast=fast)
+
     # Check if there was an error during initialization
     if spec_file.error_msg:
         return "", None, spec_file.error_msg
@@ -1083,7 +1097,7 @@ def ok(path, aux_id) -> Tuple[str, celaut.Metadata, str]:
         f"Try to lock {_memory / (1024**2):.2f} MB of RAM for packing process "
         f"(inlined: {spec_file.inline_len / (1024**2):.2f} MB of "
         f"{spec_file.buffer_len / (1024**2):.2f} MB exported, in "
-        f"{spec_file.block_count} blocks). "
+        f"{spec_file.block_count} blocks{', fast mode: single block' if fast else ''}). "
         f"RAM avaliable before locking: {iobd.get_ram_avaliable() / (1024**2):.2f} MB"
     )
     try:
@@ -1255,7 +1269,7 @@ def _extract_zip(zip_path: str, dest: str) -> None:
             ) from e
 
 
-def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, str]:
+def zipfile_ok(zip: str, fast: bool = False) -> Tuple[str, celaut.Metadata, str]:
     # uuid4().hex, not str(random.random()): this names a directory under a cache
     # shared by every concurrent pack, and `random` is a Mersenne twister seeded per
     # process. Nothing parses aux_id -- it is only ever joined into paths and
@@ -1283,11 +1297,14 @@ def zipfile_ok(zip: str) -> Tuple[str, celaut.Metadata, str]:
 
     return ok(
         path=build_dir + os.sep,
-        aux_id=aux_id
+        aux_id=aux_id,
+        fast=fast
     )  # Specification file
 
 
-def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, None, None]:
+def pack_zip(
+        zip: str, saveit: bool = SAVE_ALL, fast: bool = False
+) -> Generator[buffer_pb2.Buffer, None, None]:
     log.LOGGER('Compiling zip ' + str(zip))
     IOBigData().log_snapshot(context=f"pack-daemon:before-worker zip={zip}")
     lock_file = _acquire_pack_lock()
@@ -1298,6 +1315,11 @@ def pack_zip(zip: str, saveit: bool = SAVE_ALL) -> Generator[buffer_pb2.Buffer, 
             sys.executable, "-m", "src.packers.zip_with_dockerfile",
             "--worker", zip, result_path
         ]
+        # The worker runs in its own subprocess (below), so `fast` cannot be
+        # passed as a Python argument -- it rides along as a trailing flag,
+        # parsed back out by _worker_main.
+        if fast:
+            cmd.append("--fast")
         proc = subprocess.run(cmd, cwd=main_dir)
         IOBigData().log_snapshot(
             context=f"pack-daemon:after-worker zip={zip} returncode={proc.returncode}"
@@ -1396,14 +1418,17 @@ def _worker_main() -> None:
     if not argv or argv[0] != "--worker":
         return
 
+    fast = "--fast" in argv
+    argv = [a for a in argv if a != "--fast"]
+
     if len(argv) != 3:
-        print("Usage: --worker <zip> <result_path>", file=sys.stderr)
+        print("Usage: --worker <zip> <result_path> [--fast]", file=sys.stderr)
         sys.exit(2)
 
     _, zip_path, result_path = argv
 
     try:
-        service_id, metadata, service = zipfile_ok(zip=zip_path)
+        service_id, metadata, service = zipfile_ok(zip=zip_path, fast=fast)
 
         if not service_id and not metadata and service:
             _write_pack_result(result_path, {"error": service})

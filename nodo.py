@@ -731,8 +731,25 @@ if __name__ == '__main__':
                 import os
                 import sys
 
+                # --fast: inline the whole rootfs into a single filesystem
+                # block, skipping per-large-file blocking (packer.local only).
+                # --optimize: the opposite -- force the normal per-file-block
+                # behaviour for this pack even when packer.fast defaults it on.
+                args = sys.argv[2:]
+                fast_flag = "--fast" in args
+                optimize_flag = "--optimize" in args
+                args = [a for a in args if a not in ("--fast", "--optimize")]
+
+                if fast_flag and optimize_flag:
+                    print("Error: --fast and --optimize are mutually exclusive.", flush=True)
+                    sys.exit(1)
+
+                if not args:
+                    print("Usage: nodo pack <project directory> [--fast | --optimize]", flush=True)
+                    sys.exit(1)
+
                 # Get the path provided by the user
-                user_path = sys.argv[2]
+                user_path = args[0]
 
                 if "http" not in user_path[:4]:
                     absolute_path = resolve_user_path(user_path)
@@ -745,7 +762,9 @@ if __name__ == '__main__':
                 else:
                     absolute_path = user_path  # In case it's an external git repository
 
-                pack(directory=absolute_path)
+                fast = fast_flag or (bool(env_manager.get("packer.fast", False)) and not optimize_flag)
+
+                pack(directory=absolute_path, fast=fast)
 
             case "tui":
                 # A binary built by CI for this host's target, when there was a

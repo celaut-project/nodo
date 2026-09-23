@@ -261,8 +261,18 @@ These are the most commonly used commands for daily tasks:
   The builder runs as your own user, so packing never asks for sudo. Tune it with
   `packer.buildkit.*` and `dependencies.buildkit.*` in `config.yaml`.  
 
+  With the local backend, `--fast` inlines the whole image into one filesystem
+  block instead of splitting large files into their own content-addressed
+  blocks — quicker to pack, at the cost of holding the whole image in memory
+  and losing cross-service block deduplication. `--optimize` forces the normal
+  per-file-block behaviour back on for one invocation; `packer.fast: true` in
+  `config.yaml` makes fast the node's default. `--fast`/`--optimize` are
+  ignored (with a warning) on the default packer-service backend. Both modes
+  produce the identical service id.
+
   **Example:**  
-  `nodo pack /path/to/project`
+  `nodo pack /path/to/project`  
+  `nodo pack /path/to/project --fast`   (local backend only)
   > **Before packing, read [`PACKING.md`](PACKING.md)** — it is the canonical
   > reference for the project layout, `pack_config.json`, `service.json`, and the
   > `Dockerfile` rules (notably: no `CMD` / `ENTRYPOINT` / `EXPOSE`; the entrypoint

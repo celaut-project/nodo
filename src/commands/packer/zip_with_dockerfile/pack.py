@@ -170,15 +170,26 @@ def _local_packer_enabled() -> bool:
     return bool(env_manager.get("packer.local", False))
 
 
-def pack(directory: str) -> Optional[str]:
+def pack(directory: str, fast: bool = False) -> Optional[str]:
     """Pack a project into a Celaut service.
 
     Dispatches to the local Docker packer when ``packer.local: true``, otherwise
     to the packer-service HTTP client (the default).
+
+    ``fast`` (`nodo pack --fast`) skips per-large-file blocking and inlines the
+    whole rootfs into a single filesystem block, trading pack-time memory and
+    block deduplication for pack speed. Only the local packer implements it --
+    the packer-service builds inside its own external microVM, which this repo
+    does not control -- so ``fast`` is ignored (with a warning) on that path.
     """
     if _local_packer_enabled():
         from src.commands.packer.zip_with_dockerfile.local_pack import pack_local
-        return pack_local(directory)
+        return pack_local(directory, fast=fast)
+    if fast:
+        print(
+            "--fast only affects the local packer; ignoring -- this node is not "
+            "using packer.local: true. Packing normally via the packer-service."
+        )
     return _pack_via_service(directory)
 
 
