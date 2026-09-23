@@ -275,6 +275,68 @@ class RefusalWithdrawsTheRuleTests(unittest.TestCase):
             self._open(ProbeResult(False, "connect refused"))
 
 
+@patch("src.utils.firewall.gateway.os.geteuid", return_value=0)
+class BlockedPortErrorTests(unittest.TestCase):
+    """The one ``GatewayPortUnavailable`` worth surviving into the next ``nodo info``.
+
+    ``blocked_by_firewall`` and ``command`` exist so ``serve.py``'s refusal can
+    tell this cause apart from "needs root" or "the backend rejected the rule" --
+    the two that fail the exact command the operator just typed, with nothing for
+    a later `nodo info` to add. This one is different: the fix lives in the host
+    firewall, discovered only once the node is up enough to probe it, so it is
+    the one diagnosis that must not evaporate when the process exits.
+    """
+
+    def setUp(self):
+        self.backend = _FakeBackend()
+
+    def _open(self, probe):
+        with patch(
+            "src.utils.firewall.gateway.probe_tcp_from_bridge", return_value=probe
+        ):
+            return gateway.ensure_gateway_port_open(
+                port=PORT,
+                bridge=BRIDGE,
+                gateway_ip=GATEWAY_IP,
+                subnet=SUBNET,
+                backend=self.backend,
+                verify=True,
+                strict=True,
+                log=lambda message: None,
+            )
+
+    def test_it_is_marked_as_blocked_by_the_firewall(self, _euid):
+        with self.assertRaises(GatewayPortUnavailable) as ctx:
+            self._open(ProbeResult(False, "connect refused"))
+        self.assertTrue(ctx.exception.blocked_by_firewall)
+
+    def test_the_detected_front_ends_command_travels_with_it(self, _euid):
+        with patch(
+            "src.utils.firewall.gateway.detect_frontend",
+            return_value=Frontend("ufw", "sudo ufw allow 58443/tcp"),
+        ):
+            with self.assertRaises(GatewayPortUnavailable) as ctx:
+                self._open(ProbeResult(False, "connect refused"))
+        self.assertEqual(ctx.exception.command, "sudo ufw allow 58443/tcp")
+
+    def test_no_detected_front_end_means_no_command(self, _euid):
+        with patch("src.utils.firewall.gateway.detect_frontend", return_value=None):
+            with self.assertRaises(GatewayPortUnavailable) as ctx:
+                self._open(ProbeResult(False, "connect refused"))
+        self.assertIsNone(ctx.exception.command)
+
+    def test_other_refusals_are_not_marked_as_a_firewall_block(self, _euid):
+        # "Opening the gateway port needs root" and "could not open with X" both
+        # fail the very command the operator just ran; there is nothing later for
+        # `nodo info` to add, so they must not be mistaken for the one cause that
+        # is worth persisting.
+        with patch("src.utils.firewall.gateway.os.geteuid", return_value=1000):
+            with self.assertRaises(GatewayPortUnavailable) as ctx:
+                gateway.ensure_gateway_port_open(port=PORT, backend=self.backend)
+        self.assertFalse(ctx.exception.blocked_by_firewall)
+        self.assertIsNone(ctx.exception.command)
+
+
 class DeferredNoticeTests(unittest.TestCase):
     """The alert has to be the last thing on the terminal, not the middle.
 
