@@ -39,7 +39,7 @@ from src.utils.firewall.backends import (
     Runner,
     detect_backend,
 )
-from src.utils.firewall.frontend import open_port_advice
+from src.utils.firewall.frontend import detect_frontend, open_port_advice
 from src.utils.firewall.rules import Chain
 from src.utils.firewall.reachability import ProbeResult, probe_tcp_from_bridge
 
@@ -126,12 +126,33 @@ class GatewayPortUnavailable(Exception):
 
     Raised both when no port is assigned and when an assigned port is provably
     unreachable from the guest subnet. ``instructions`` is operator-facing text.
+
+    ``blocked_by_firewall`` and ``command`` exist for exactly one cause: the port
+    is open in nodo's own ruleset and a foreign chain on the same input hook
+    rejects it anyway (``_blocked_port_error``). That is the one refusal worth
+    surviving into the next ``nodo info`` -- see ``serve.py``'s ``_refuse_to_start``
+    -- because the fix lives in the host firewall, not in anything ``nodo serve``
+    can retry on its own. The other causes (no root, a backend that would not take
+    the rule) fail the same command the operator just typed, so there is nothing
+    for a later ``nodo info`` to add. ``command`` is the single shell command
+    that opens the port, when a running front-end could be detected; it is None
+    when there was no discrete command to give (``instructions`` still holds the
+    prose telling the operator what has to hold instead).
     """
 
-    def __init__(self, summary: str, instructions: str = "", port: Optional[int] = None):
+    def __init__(
+        self,
+        summary: str,
+        instructions: str = "",
+        port: Optional[int] = None,
+        blocked_by_firewall: bool = False,
+        command: Optional[str] = None,
+    ):
         self.summary = summary
         self.instructions = instructions
         self.port = port
+        self.blocked_by_firewall = blocked_by_firewall
+        self.command = command
         super().__init__(summary if not instructions else f"{summary}\n\n{instructions}")
 
 
@@ -185,10 +206,20 @@ def _blocked_port_error(
         )
     )
 
+    # Detected again rather than threaded through `open_port_advice`'s return
+    # value: that function hands back prose for the exception message, and
+    # changing its shape would ripple into every existing caller and test. This
+    # one extra (cheap, best-effort) detection is the price of also having the
+    # bare command for `nodo info` and the TUI to show in place. None when no
+    # running front-end was found -- there is no discrete command to hand over.
+    frontend = detect_frontend(port, run=run)
+
     return GatewayPortUnavailable(
         summary=f"Gateway port {port} is not reachable from the guest subnet.",
         instructions="\n".join(lines),
         port=port,
+        blocked_by_firewall=True,
+        command=frontend.command if frontend else None,
     )
 
 

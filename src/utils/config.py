@@ -57,6 +57,26 @@ GATEWAY_NOTICE_FILE = ".gateway_notice"
 GATEWAY_PLAINTEXT_PORT_PASSED_FILE = "gateway_plaintext_port_passed"
 GATEWAY_PLAINTEXT_NOTICE_FILE = ".gateway_plaintext_notice"
 
+# The one command that fixes a pending notice, kept beside it rather than
+# extracted from its prose. The notice itself is free-form operator text --
+# wrapped paragraphs, a list of rejecting chains, wording that differs between
+# the TLS and plaintext cases -- and parsing a command back out of that would
+# break the moment either changed a word. `nodo info` and the TUI need the
+# command on its own so they can show it in place instead of pointing at this
+# file, so it gets its own file instead of a convention to match.
+# Absent whenever there is no single command to name (no detected firewall
+# front-end): callers fall back to pointing at the notice itself.
+GATEWAY_NOTICE_COMMAND_FILE = ".gateway_notice.cmd"
+GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE = ".gateway_plaintext_notice.cmd"
+
+
+def _command_file_for(notice_file: str) -> str:
+    """The companion file holding ``notice_file``'s one-line fix, if it has one."""
+    return {
+        GATEWAY_NOTICE_FILE: GATEWAY_NOTICE_COMMAND_FILE,
+        GATEWAY_PLAINTEXT_NOTICE_FILE: GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE,
+    }.get(notice_file, notice_file + ".cmd")
+
 
 def coerce_gateway_port(value: Any) -> Optional[int]:
     """The gateway port as an int, or None when it is unassigned or unusable.
@@ -398,6 +418,7 @@ class ConfigManager(metaclass=Singleton):
         for path in (
             self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE),
             os.path.join(self._config_dir(), GATEWAY_NOTICE_FILE),
+            os.path.join(self._config_dir(), GATEWAY_NOTICE_COMMAND_FILE),
         ):
             try:
                 os.unlink(path)
@@ -408,6 +429,7 @@ class ConfigManager(metaclass=Singleton):
         for path in (
             self._cache_path_unlocked(GATEWAY_PLAINTEXT_PORT_PASSED_FILE),
             os.path.join(self._config_dir(), GATEWAY_PLAINTEXT_NOTICE_FILE),
+            os.path.join(self._config_dir(), GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE),
         ):
             try:
                 os.unlink(path)
@@ -420,6 +442,10 @@ class ConfigManager(metaclass=Singleton):
     def _clear_notice_unlocked(self, notice_file: str) -> None:
         try:
             os.unlink(os.path.join(self._config_dir(), notice_file))
+        except OSError:
+            pass
+        try:
+            os.unlink(os.path.join(self._config_dir(), _command_file_for(notice_file)))
         except OSError:
             pass
 
@@ -437,7 +463,11 @@ class ConfigManager(metaclass=Singleton):
         withdraw_gateway_port(port, log=self.log)
 
     def _gateway_notice_unlocked(
-        self, title: str, body: str, notice_file: str = GATEWAY_NOTICE_FILE
+        self,
+        title: str,
+        body: str,
+        notice_file: str = GATEWAY_NOTICE_FILE,
+        command: Optional[str] = None,
     ) -> None:
         """Emit a gateway alert: to the log now, to the terminal last, to disk for later.
 
@@ -450,6 +480,14 @@ class ConfigManager(metaclass=Singleton):
         gateway writes to its own (``GATEWAY_PLAINTEXT_NOTICE_FILE``) so an
         unrelated question about one port never clears, or is cleared by, an
         answer about the other.
+
+        ``command`` is the single shell command that fixes it, when the caller has
+        one to name -- written to that notice's own companion file so ``nodo
+        info`` and the TUI can put it in front of the operator directly instead of
+        sending them to open this file just to read one line out of it. Left as
+        None clears any stale command from a previous notice about this same
+        file, so a diagnosis that stopped naming a command does not leave an old
+        one behind.
         """
         from src.utils.firewall.gateway import defer_operator_notice, operator_notice
 
@@ -460,6 +498,16 @@ class ConfigManager(metaclass=Singleton):
                 f.write(notice)
         except OSError:
             path = ""
+
+        command_path = os.path.join(self._config_dir(), _command_file_for(notice_file))
+        try:
+            if command:
+                with open(command_path, "w") as f:
+                    f.write(command)
+            else:
+                os.unlink(command_path)
+        except OSError:
+            pass
 
         # A one-liner through the log and the framed block at the end, rather than
         # the block twice: the fallback logger prints straight to stderr, so logging
@@ -473,7 +521,23 @@ class ConfigManager(metaclass=Singleton):
         )
         defer_operator_notice(notice)
 
-    def emit_plaintext_gateway_notice(self, title: str, body: str) -> None:
+    def emit_gateway_notice(self, title: str, body: str, command: Optional[str] = None) -> None:
+        """Public counterpart of ``_gateway_notice_unlocked`` for the TLS port.
+
+        Called from ``serve.py``'s refusal to start once a reachability probe
+        proves the port is blocked in the host firewall, so that diagnosis --
+        printed once, at the end of a ``nodo serve`` nobody may be watching --
+        survives into the next ``nodo info``. Without this, ``nodo info`` cannot
+        tell "blocked by the firewall" from "simply never started" and keeps
+        pointing the operator back at the command that already failed them.
+        """
+        with self._lock:
+            self.ensure_loaded()
+            self._gateway_notice_unlocked(title, body, command=command)
+
+    def emit_plaintext_gateway_notice(
+        self, title: str, body: str, command: Optional[str] = None
+    ) -> None:
         """Public counterpart of ``_gateway_notice_unlocked`` for the plaintext port.
 
         Called from ``serve.py`` after a conclusive reachability failure -- never
@@ -484,7 +548,9 @@ class ConfigManager(metaclass=Singleton):
         """
         with self._lock:
             self.ensure_loaded()
-            self._gateway_notice_unlocked(title, body, notice_file=GATEWAY_PLAINTEXT_NOTICE_FILE)
+            self._gateway_notice_unlocked(
+                title, body, notice_file=GATEWAY_PLAINTEXT_NOTICE_FILE, command=command
+            )
 
     def assign_gateway_port_if_unset(self) -> Optional[int]:
         """Assign the gateway port if there is none. Returns the port in force, or None.

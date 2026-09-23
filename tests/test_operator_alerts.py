@@ -56,8 +56,17 @@ class GatewayPortAlertTests(unittest.TestCase):
 
         return os.path.join(self._dir.name, GATEWAY_NOTICE_FILE)
 
+    def _command_path(self):
+        from src.utils.config import GATEWAY_NOTICE_COMMAND_FILE
+
+        return os.path.join(self._dir.name, GATEWAY_NOTICE_COMMAND_FILE)
+
     def _write_notice(self, text="open TCP 52285 with firewall-cmd --add-port=52285/tcp"):
         with open(self._notice_path(), "w") as handle:
+            handle.write(text)
+
+    def _write_command(self, text="sudo firewall-cmd --permanent --add-port=52285/tcp"):
+        with open(self._command_path(), "w") as handle:
             handle.write(text)
 
     def test_an_assigned_port_with_nothing_pending_is_not_an_alert(self):
@@ -137,6 +146,36 @@ class GatewayPortAlertTests(unittest.TestCase):
         self.assertIn("52285", alert.summary)
         # And the full instructions travel with it, for the places with room.
         self.assertIn("firewall-cmd", alert.detail)
+
+    def test_with_no_command_file_the_summary_still_points_at_the_notice(self):
+        """The pre-existing fallback: a notice with no companion command file.
+
+        Either because nothing detected a running front-end when the notice was
+        written, or because the notice predates this file existing at all -- a
+        node upgraded in place should not crash reading a summary a previous
+        version never wrote.
+        """
+        self._write_notice()
+        manager = _FakeConfigManager(self.config_path, 52285)
+
+        alert = operator_alerts.gateway_port_alert(manager)
+
+        self.assertIn(f"see {self._notice_path()}", alert.summary)
+
+    def test_a_command_file_puts_the_command_in_the_summary_instead_of_a_path(self):
+        """The fix in front of the operator, not a second file to go and open.
+
+        `nodo info` is already a terminal the operator is reading; sending them to
+        `cat` a path for one line is a worse answer than the line itself.
+        """
+        self._write_notice()
+        self._write_command("sudo ufw allow 52285/tcp")
+        manager = _FakeConfigManager(self.config_path, 52285)
+
+        alert = operator_alerts.gateway_port_alert(manager)
+
+        self.assertIn("sudo ufw allow 52285/tcp", alert.summary)
+        self.assertNotIn(self._notice_path(), alert.summary)
 
     def test_the_firewall_alert_leads_with_the_consequence(self):
         """What is wrong first, why second.
@@ -280,8 +319,17 @@ class PlaintextGatewayPortAlertTests(unittest.TestCase):
 
         return os.path.join(self._dir.name, GATEWAY_PLAINTEXT_NOTICE_FILE)
 
+    def _command_path(self):
+        from src.utils.config import GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE
+
+        return os.path.join(self._dir.name, GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE)
+
     def _write_notice(self, text="open TCP 52286, scoped to 192.168.200.0/24"):
         with open(self._notice_path(), "w") as handle:
+            handle.write(text)
+
+    def _write_command(self, text="sudo ufw allow from 192.168.200.0/24 to any port 52286 proto tcp"):
+        with open(self._command_path(), "w") as handle:
             handle.write(text)
 
     def test_a_reachable_port_with_nothing_pending_is_not_an_alert(self):
@@ -301,6 +349,26 @@ class PlaintextGatewayPortAlertTests(unittest.TestCase):
         # Never "peers": this port is not announced to them at all.
         self.assertNotIn("peer", alert.summary.lower())
         self.assertIn("scoped to 192.168.200.0/24", alert.detail)
+
+    def test_with_no_command_file_the_summary_still_points_at_the_notice(self):
+        self._write_notice()
+        manager = _FakePlaintextConfigManager(self.config_path, 52286)
+
+        alert = operator_alerts.plaintext_gateway_port_alert(manager)
+
+        self.assertIn(f"see {self._notice_path()}", alert.summary)
+
+    def test_a_command_file_puts_the_command_in_the_summary_instead_of_a_path(self):
+        self._write_notice()
+        self._write_command("sudo ufw allow from 192.168.200.0/24 to any port 52286 proto tcp")
+        manager = _FakePlaintextConfigManager(self.config_path, 52286)
+
+        alert = operator_alerts.plaintext_gateway_port_alert(manager)
+
+        self.assertIn(
+            "sudo ufw allow from 192.168.200.0/24 to any port 52286 proto tcp", alert.summary
+        )
+        self.assertNotIn(self._notice_path(), alert.summary)
 
     def test_the_port_turned_off_raises_nothing_even_with_a_stray_notice(self):
         """0 is the operator's own choice (services fall back to the TLS port).
