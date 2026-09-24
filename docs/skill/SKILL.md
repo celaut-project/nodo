@@ -1,6 +1,6 @@
 ---
 name: celaut-bridge-skill
-version: 1.4.0
+version: 1.5.0
 description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), develop services locally with `ggconf` and package them into content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
 author: Community Contribution
 license: MIT
@@ -75,8 +75,18 @@ Understand these before running anything. Full glossary:
 * **Ergo relationship:** Celaut is multi-ledger *by design*; Ergo is the ledger
   implemented today — "not necessarily the only ledger to be used"
   ([`../ERGO.md`](../ERGO.md)).
-* **Peers:** nodes reciprocally offer and request services from each other, so a
-  workload can run locally or on a peer.
+* **Peers (nodo's own P2P layer):** nodes reciprocally offer and request services
+  from each other, so a workload can run locally or on a peer. There is no
+  bootstrap list, DHT, or gossip: an operator adds a peer explicitly with
+  `nodo connect <ip:port>`, which dials it over TLS, verifies its identity from
+  the certificate, and pulls its signed `Peer` announcement over
+  `Gateway.GetPeerInfo`. **This is a different layer from `Service.Network`
+  below.** `Gateway.ResolveNetwork` (and `network_discovery.py`'s
+  `ask_peers`/`ask_peer`) asks a peer you are *already* connected to for the
+  addresses of **service instances** inside a named network domain (e.g. a set
+  of Bitcoin-node instances, or `pow:ergo`) — it never discovers or adds a nodo
+  peer itself. Reading "ask peers for a network" as "how nodo peers are
+  discovered" is the mistake to avoid.
 * **Service composition:** a project can declare `dependencies` in
   `pack_config.json`; with `dependencies_env` the packer injects each resolved
   dependency's content hash into the build as an env var. See
@@ -88,9 +98,12 @@ Understand these before running anything. Full glossary:
   and the match is a plain tag-set intersection — `*` is matched **literally**, so
   a parent declaring `["ipv4", "public"]` authorizes a child asking for `["*"]`
   exactly as little as a parent declaring nothing. **A parent must therefore
-  declare every network its children need, for itself.** See
-  [`../NETWORKS.md`](../NETWORKS.md), and rule 8 in §6 for why this one is worth a
-  rule of its own.
+  declare every network its children need, for itself.** `Service.Network` names
+  a domain of *service instances* (e.g. Bitcoin nodes) resolved via
+  `Gateway.ResolveNetwork` over nodo peers this node already has — it is not the
+  P2P peer layer the "Peers" bullet above describes, and resolving it never adds
+  or discovers a nodo peer. See [`../NETWORKS.md`](../NETWORKS.md), and rule 8 in
+  §6 for why this one is worth a rule of its own.
 
 ## 1. Celaut Node Installation & Management
 
