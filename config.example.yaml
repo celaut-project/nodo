@@ -1020,7 +1020,7 @@ energy:
   ENABLED: true
   SAMPLE_INTERVAL_SECONDS: 60
   PRICE_PER_KWH: 0.0          # 0 => show watts, omit currency cost. Persisted per sample.
-  CURRENCY: "EUR"             # Presentation only.
+  CURRENCY: "USD"             # Presentation only.
   PRICE_SOURCE: "fixed"       # Only "fixed" is implemented (works offline).
   # Coefficients of the model fallback, for a machine with no readable counter.
   # MEASURE THESE WITH A PLUG-IN METER -- do not estimate them. Read the wall once
