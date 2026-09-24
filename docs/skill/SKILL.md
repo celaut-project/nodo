@@ -477,7 +477,7 @@ sudo nodo update
   under the identity that answers there and removed from any other peer still holding it.
 * `nodo tui`: Operations console; its Config page edits the runtime configuration
   ([`../CONFIG.md`](../CONFIG.md)).
-* `nodo info`: Shows runtime versions, node address, and identity.
+* `nodo` (no arguments): Shows runtime versions, node address, identity, and any operator alerts.
 * `nodo logs`: Streams the application daemon logs.
 
 > **Scope note.** This skill documents the commands an agent needs to install,

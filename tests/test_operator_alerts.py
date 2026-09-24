@@ -9,7 +9,7 @@ and to the tail of a ``nodo serve`` nobody is watching:
   node advertising no payment method looks exactly like one configured without
   any.
 
-``src/utils/operator_alerts.py`` is where they are asked about, so ``nodo info``
+``src/utils/operator_alerts.py`` is where they are asked about, so bare ``nodo``
 and the TUI can say the same thing in the same words. These tests pin the three
 properties that make that worth anything: the alert appears when the condition
 holds, it *disappears* when it is fixed, and asking costs nothing (no subprocess,
@@ -540,12 +540,12 @@ class CollectTests(unittest.TestCase):
 
 
 class NodoInfoWiringTests(unittest.TestCase):
-    """`nodo info` actually asks.
+    """Bare `nodo` actually asks.
 
     Read off the source rather than by running the command, which starts a JVM,
     reads the chain and calls `os._exit`. The point is only that the call is still
-    in the `info` arm at all -- a check that exists and is never invoked is the
-    state this whole change is fixing.
+    in the no-arguments branch at all -- a check that exists and is never invoked
+    is the state this whole change is fixing.
     """
 
     def test_info_collects_operator_alerts(self):
@@ -553,7 +553,7 @@ class NodoInfoWiringTests(unittest.TestCase):
         with open(os.path.join(root, "nodo.py"), "r") as handle:
             source = handle.read()
 
-        info_arm = source.split('case "info":', 1)[1].split('case "logs":', 1)[0]
+        info_arm = source.split("if len(sys.argv) == 1:", 1)[1].split("\n    else:", 1)[0]
 
         self.assertIn("operator_alerts", info_arm)
         self.assertIn("collect_alerts(serving=serving)", info_arm)
@@ -562,15 +562,16 @@ class NodoInfoWiringTests(unittest.TestCase):
     def test_info_reuses_the_serving_check_it_already_made(self):
         """The alert says whether the node is down or up-and-unreachable.
 
-        `nodo info` prints that status on its first line, so the answer is already
-        in hand: asking `is_serving()` a second time would put another socket
-        connect on a command whose alert block is meant to cost two `stat` calls.
+        Bare `nodo` prints that status on its first line, so the answer is
+        already in hand: asking `is_serving()` a second time would put another
+        socket connect on a command whose alert block is meant to cost two
+        `stat` calls.
         """
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, "nodo.py"), "r") as handle:
             source = handle.read()
 
-        info_arm = source.split('case "info":', 1)[1].split('case "logs":', 1)[0]
+        info_arm = source.split("if len(sys.argv) == 1:", 1)[1].split("\n    else:", 1)[0]
 
         self.assertEqual(info_arm.count("is_serving()"), 1)
         self.assertLess(

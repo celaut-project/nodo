@@ -5446,13 +5446,17 @@ fn nonblank_error(stderr: &str) -> String {
 }
 
 async fn fetch_node_info() -> Result<NodeInfo, String> {
+    // `nodo info` was folded into the bare `nodo` invocation: the fields this
+    // parses are printed under the quick-start banner now, not by a separate
+    // subcommand. `parse_node_info` matches on line prefixes, so the banner
+    // lines ahead of them are simply ignored.
     let output = tokio::time::timeout(
         Duration::from_secs(20),
-        Command::new("nodo").arg("info").output(),
+        Command::new("nodo").output(),
     )
     .await
-    .map_err(|_| "nodo info timed out after 20 seconds".to_string())?
-    .map_err(|error| format!("Unable to run nodo info: {error}"))?;
+    .map_err(|_| "nodo timed out after 20 seconds".to_string())?
+    .map_err(|error| format!("Unable to run nodo: {error}"))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }

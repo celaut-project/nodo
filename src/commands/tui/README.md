@@ -75,13 +75,13 @@ price vector from `config.yaml` itself — the same three settings the node uses
 [`docs/PRICING.md`](../../../docs/PRICING.md). Formatting happens at draw time rather than at
 read time, so changing the unit takes effect on the next frame.
 
-The Ergo wallet card on Overview is the exception: it shows on-chain ERG from `nodo info`, not
+The Ergo wallet card on Overview is the exception: it shows on-chain ERG from bare `nodo`, not
 a node balance, and is never converted.
 
 Prices written from the Pricing page go through the same transaction as every other
 configuration change — see [Applying a change](#applying-a-change).
 
-Ergo information is refreshed asynchronously through `nodo info` every 60 seconds so JVM or
+Ergo information is refreshed asynchronously through bare `nodo` every 60 seconds so JVM or
 explorer latency cannot freeze the interface. Local database/system data refreshes every two
 seconds; the recursive storage scan is limited to every 30 seconds.
 

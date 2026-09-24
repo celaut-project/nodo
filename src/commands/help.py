@@ -27,7 +27,6 @@ GROUPS: List[Group] = [
         None,
         [
             ("tui", "status, peers and the config editor"),
-            ("info", "this node's address, state and balances"),
             ("doctor", "check, and fix, what stops it serving"),
             ("daemon start|status|stop|restart", "control the nodo.service systemd unit"),
             ("logs", "follow this node's log"),
