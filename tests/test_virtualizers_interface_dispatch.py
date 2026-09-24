@@ -12,6 +12,9 @@ from unittest.mock import MagicMock, patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from protos import celaut_pb2 as celaut
     from src.virtualizers import interface as vm_interface
     from src.virtualizers import registry

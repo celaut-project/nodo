@@ -5,6 +5,9 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from src import core_services
     from src.core_services import source_application as sa
     from src.commands import execute as execute_cmd
@@ -84,13 +87,13 @@ class AcquireServiceTests(unittest.TestCase):
 
     def test_returns_false_when_no_sources(self):
         with patch.object(sa, "get_core_service_id", return_value="sa-id"), patch.object(
-            sa, "lookup_sources", return_value=[]
+            sa, "__lookup_sources", return_value=[]
         ):
             self.assertFalse(sa.acquire_service("svc"))
 
     def test_downloads_first_good_source(self):
         with patch.object(sa, "get_core_service_id", return_value="sa-id"), patch.object(
-            sa, "lookup_sources", return_value=["https://h/m"]
+            sa, "__lookup_sources", return_value=["https://h/m"]
         ), patch.object(
             sa, "download_from_manifest_url", return_value={"service_id": "svc"}
         ) as mock_dl:
@@ -104,13 +107,13 @@ class AcquireServiceTests(unittest.TestCase):
             return {"service_id": "svc"}
 
         with patch.object(sa, "get_core_service_id", return_value="sa-id"), patch.object(
-            sa, "lookup_sources", return_value=["https://bad/m", "https://good/m"]
+            sa, "__lookup_sources", return_value=["https://bad/m", "https://good/m"]
         ), patch.object(sa, "download_from_manifest_url", side_effect=dl):
             self.assertTrue(sa.acquire_service("svc"))
 
     def test_returns_false_when_all_sources_fail(self):
         with patch.object(sa, "get_core_service_id", return_value="sa-id"), patch.object(
-            sa, "lookup_sources", return_value=["https://h/m"]
+            sa, "__lookup_sources", return_value=["https://h/m"]
         ), patch.object(
             sa, "download_from_manifest_url", return_value={"service_id": None}
         ):

@@ -86,7 +86,7 @@ class UnresolvableTagsDoNotFailTheLaunchTests(unittest.TestCase):
         self.assertIn("did not resolve", logger.call_args.args[0])
 
     def test_a_later_tag_is_still_tried_after_an_unresolvable_one(self):
-        def dns(tag):
+        def dns(tag, ports=None):
             if tag == "down.test":
                 raise ValueError("Cannot resolve domain: down.test")
             return [celaut.Instance.Uri(ip="203.0.113.4", port=443)]

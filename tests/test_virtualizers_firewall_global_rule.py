@@ -11,6 +11,9 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from src.utils.firewall.errors import FirewallError
     from src.utils.firewall.rules import Chain, Verdict
     from protos import celaut_pb2 as celaut

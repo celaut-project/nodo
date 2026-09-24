@@ -356,20 +356,23 @@ def requested_disk_space_bytes(service: celaut_pb2.Service) -> Optional[int]:
     except Exception:
         return None
 
-    requested_bytes = 0
+    # If disk_space is set in at_init, we use it directly as the requested size;
+    # otherwise fall through to at_most. The unconditional `return` this used to
+    # end each iteration with meant at_most was never reached at all: an unset
+    # at_init reads back as disk_space=0, not an exception, so the first pass
+    # returned None before the loop ever got to at_most.
     for scope_name in ("at_init", "at_most"):
         scope = getattr(resources, scope_name, None)
         if scope is None:
             continue
         try:
             value = int(getattr(scope, "disk_space", 0) or 0)
-            return value if value > 0 else None  # if disk_space is set in at_init, we use it directly as the requested size
         except Exception:
-            value = 0
-        if value > requested_bytes:
-            requested_bytes = value
+            continue
+        if value > 0:
+            return value
 
-    return requested_bytes if requested_bytes > 0 else None
+    return None
 
 
 def is_read_only_service(service: celaut_pb2.Service, filesystem=None) -> bool:

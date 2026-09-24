@@ -5,6 +5,9 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from protos import celaut_pb2 as celaut
     from src.commands import execute as execute_cmd
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -54,14 +57,18 @@ class ExecuteCommandTests(unittest.TestCase):
             execute_cmd.celaut_pb2_grpc, "GatewayStub"
         ) as mock_stub_cls, patch.object(
             execute_cmd, "client_grpc", return_value=iter([response])
+        ), patch.object(
+            # Otherwise reads a real service's metadata off a `__metadata__`
+            # directory this test's throwaway storage never creates.
+            execute_cmd, "inspect_service"
         ):
             mock_stub_cls.return_value.StartService = object()
             with redirect_stdout(out):
                 execute_cmd.execute("svc")
 
         rendered = out.getvalue()
-        self.assertIn("service partition ->", rendered)
-        self.assertNotIn("HTTP Service", rendered)
+        self.assertIn("No endpoints available", rendered)
+        self.assertNotIn("🌐 Endpoints available", rendered)
         mock_channel.return_value.close.assert_called_once()
 
     def test_execute_prints_http_endpoint_when_http_is_declared_in_transport(self):
@@ -74,25 +81,37 @@ class ExecuteCommandTests(unittest.TestCase):
             execute_cmd.celaut_pb2_grpc, "GatewayStub"
         ) as mock_stub_cls, patch.object(
             execute_cmd, "client_grpc", return_value=iter([response])
+        ), patch.object(
+            execute_cmd, "inspect_service"
         ):
             mock_stub_cls.return_value.StartService = object()
             with redirect_stdout(out):
                 execute_cmd.execute("svc")
 
         rendered = out.getvalue()
-        self.assertIn("HTTP Service (Port: 5000)", rendered)
+        self.assertIn("🌐 Endpoints available", rendered)
         self.assertIn("http://127.0.0.1:18080", rendered)
         mock_channel.return_value.close.assert_called_once()
 
     def test_execute_external_uses_external_execute_client(self):
         response = self._response_with_slot(transport_tags=["http"])
 
+        # get_execute_client() is only reached once something iterates the
+        # `input` generator execute() builds -- the real gRPC client drains it to
+        # stream the request; this stub must too, or the generator's body (and
+        # the call under test) never runs.
+        def _consume_input_then_respond(**kwargs):
+            list(kwargs["input"])
+            return iter([response])
+
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
             execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
             execute_cmd.celaut_pb2_grpc, "GatewayStub"
         ) as mock_stub_cls, patch.object(
-            execute_cmd, "client_grpc", return_value=iter([response])
+            execute_cmd, "client_grpc", side_effect=_consume_input_then_respond
+        ), patch.object(
+            execute_cmd, "inspect_service"
         ), patch.object(
             execute_cmd, "get_execute_client", return_value="dev-external-1"
         ) as mock_get_execute_client:

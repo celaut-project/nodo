@@ -30,6 +30,7 @@ class UrisForAllInterfacesTests(unittest.TestCase):
         }
 
         with patch.object(gateway_utils, "_public_host", return_value=None), \
+             patch.object(gateway_utils, "_gateway_port", return_value=1234), \
              patch.object(gateway_utils.ni, "interfaces", return_value=list(interfaces)), \
              patch.object(
                  gateway_utils,
