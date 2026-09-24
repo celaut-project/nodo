@@ -2051,12 +2051,15 @@ Once the Docker build produces the filesystem tar, the packer recursively parses
 |------------|-----------|
 | Regular file (small) | Embedded directly as raw bytes in the protobuf |
 | Regular file (large, ≥ `MIN_BUFFER_BLOCK_SIZE`) | Stored as a separate content-addressed block; referenced by hash |
-| Directory | Recursively parsed |
+| Directory (small serialized subtree) | Recursively parsed, embedded directly in its parent |
+| Directory (large serialized subtree, ≥ `MIN_BUFFER_BLOCK_SIZE`) | Recursively parsed, then stored as a separate content-addressed block of its own; referenced by hash |
 | Symlink | Stored with source and destination paths |
 | Device node (block/char) | Stored as a file placeholder; recovered via xattrs during build |
 | Whiteout file (`.wh..wh..opq`) | Skipped (OCI layer opaque whiteout marker) |
 
 > **Block storage:** Large files are stored as blocks identified by their content hash. This deduplicates identical large files across services and avoids embedding huge blobs directly in the protobuf. `GetService` also skips re-sending a block the requesting peer already holds: the peer tells the sender mid-transfer, over the same call, so the saving reaches the wire and not only the disk (issue #371).
+>
+> **Directory blocks:** the same content-addressing applies one level up. A directory whose *own* serialized subtree (its immediate entries, xattrs and nested pointers -- not counting what a further-blocked child directory hides behind its own pointer) reaches `MIN_BUFFER_BLOCK_SIZE` is stored as a block of its own, the same way a large file is. This is what actually deduplicates a shared base image across services: most of a container's files are individually small and would never cross the file threshold on their own, but the *directory* holding thousands of them together does, and two services built from the same base layer resolve to the same directory block (issue #370). `ItemBranch.item.filesystem` is a `bytes` field for exactly this reason -- either the literal serialized subtree, or a pointer to a block holding one -- read back by `src/utils/container_filesystem.py`.
 
 ---
 

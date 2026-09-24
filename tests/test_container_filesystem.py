@@ -21,6 +21,7 @@ from bee_rpc.utils import block_pointer, hash_types_for_packing
 from src.utils.container_filesystem import (
     filesystem_block_id,
     filesystem_hash_types,
+    load_branch_filesystem,
     load_container_filesystem,
 )
 
@@ -237,6 +238,90 @@ class CompressedPointersInTheFilesystemBlock(unittest.TestCase):
             len(spelled_out.SerializeToString()) - len(inherited.SerializeToString()),
             len(Enviroment.hash_type) + 2,          # the type, its tag and its length
         )
+
+
+class DirectoryStoredAsItsOwnBlock(unittest.TestCase):
+    """Issue #370: a subdirectory can be a block of its own, the same way a large
+    file already is. ``ItemBranch.item.filesystem`` is ``bytes`` for exactly this
+    duality -- see the module docstring above and the packer's
+    ``recursive_parsing`` (``src/packers/zip_with_dockerfile.py``), which decides
+    per directory whether to embed it or store it as a block.
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="cfs-dirblock-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.blocks = os.path.join(self.root, "blocks")
+        os.makedirs(self.blocks)
+        modify_env(cache_dir=self.root + os.sep, block_dir=self.blocks + os.sep)
+        self.addCleanup(modify_env, cache_dir=packer.CACHE, block_dir=packer.BLOCKDIR)
+        self._blockdir, packer.BLOCKDIR = packer.BLOCKDIR, self.blocks + os.sep
+        self.addCleanup(setattr, packer, "BLOCKDIR", self._blockdir)
+
+    @staticmethod
+    def _subdir_filesystem():
+        """A small subtree: two files, well under any file-level block threshold."""
+        fs = celaut.Service.Container.Filesystem()
+        for name, content in (("a.txt", b"aaaa"), ("b.txt", b"bbbb")):
+            branch = fs.branch.add()
+            branch.name = name
+            branch.file = content
+        return fs
+
+    def _root_with_dir_branch(self, as_block: bool):
+        """A root Filesystem with one directory branch -- inline, or a pointer to
+        its own block, mirroring what the packer decides per directory."""
+        nested = self._subdir_filesystem()
+        root = celaut.Service.Container.Filesystem()
+        dir_branch = root.branch.add()
+        dir_branch.name = "sub"
+        if as_block:
+            block_id = packer._install_as_block(*block_builder.build_multiblock(
+                nested, [], inherited=hash_types_for_packing()))
+            dir_branch.filesystem = block_pointer(
+                block_id=block_id, omit_types=True).SerializeToString()
+        else:
+            dir_branch.filesystem = nested.SerializeToString()
+        return root
+
+    def _service_with_root(self, root):
+        block_id = packer._install_as_block(
+            *block_builder.build_multiblock(root, [], inherited=hash_types_for_packing()))
+        service = celaut.Service()
+        service.container.filesystem = block_pointer(
+            block_id=block_id).SerializeToString()
+        return service
+
+    def test_an_inline_directory_is_read_as_is(self):
+        service = self._service_with_root(self._root_with_dir_branch(as_block=False))
+        dir_branch = load_container_filesystem(service).branch[0]
+        inherited = filesystem_hash_types(service)
+        self.assertIsNone(filesystem_block_id(dir_branch.filesystem, inherited=inherited))
+        loaded = load_branch_filesystem(dir_branch, inherited=inherited)
+        self.assertEqual([b.name for b in loaded.branch], ["a.txt", "b.txt"])
+
+    def test_a_blocked_directory_is_recognised_as_one(self):
+        service = self._service_with_root(self._root_with_dir_branch(as_block=True))
+        dir_branch = load_container_filesystem(service).branch[0]
+        inherited = filesystem_hash_types(service)
+        self.assertIsNotNone(filesystem_block_id(dir_branch.filesystem, inherited=inherited))
+
+    def test_the_blocked_directorys_content_still_comes_back(self):
+        service = self._service_with_root(self._root_with_dir_branch(as_block=True))
+        dir_branch = load_container_filesystem(service).branch[0]
+        loaded = load_branch_filesystem(dir_branch, inherited=filesystem_hash_types(service))
+        self.assertEqual([b.name for b in loaded.branch], ["a.txt", "b.txt"])
+        self.assertEqual(loaded.branch[0].file, b"aaaa")
+        self.assertEqual(loaded.branch[1].file, b"bbbb")
+
+    def test_two_identical_subtrees_share_one_block(self):
+        # The whole point of #370: two directories that expand to the same bytes
+        # are the same block, deduplicated the way a large file already is.
+        block_id_a = packer._install_as_block(*block_builder.build_multiblock(
+            self._subdir_filesystem(), [], inherited=hash_types_for_packing()))
+        block_id_b = packer._install_as_block(*block_builder.build_multiblock(
+            self._subdir_filesystem(), [], inherited=hash_types_for_packing()))
+        self.assertEqual(block_id_a, block_id_b)
 
 
 class PackingMemoryEstimateTests(unittest.TestCase):

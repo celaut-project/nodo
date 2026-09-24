@@ -18,7 +18,11 @@ from bee_rpc.utils import block_id_from_pointer
 
 from protos import celaut_pb2
 from src.utils.config import ConfigManager
-from src.utils.container_filesystem import load_container_filesystem, filesystem_hash_types
+from src.utils.container_filesystem import (
+    filesystem_hash_types,
+    load_branch_filesystem,
+    load_container_filesystem,
+)
 from src.utils.filesystem_xattrs import (
     FilesystemNodeMetadata,
     READ_MODE_RO,
@@ -678,7 +682,7 @@ def _write_item(
     if branch.HasField("filesystem"):
         target_path.mkdir(parents=True, exist_ok=True)
         _write_fs(
-            fs_element=branch.filesystem,
+            fs_element=load_branch_filesystem(branch, inherited=hash_types),
             root_dir=root_dir,
             parent_rel_path=rel_path,
             symlinks=symlinks,
@@ -1310,7 +1314,12 @@ def build(
         # nodes, and an image with no writable escape hatch cannot have any of that
         # corrected afterwards from inside the guest.
         try:
-            assert_complete_filesystem_metadata(fs)
+            assert_complete_filesystem_metadata(
+                fs,
+                resolve_nested=lambda branch: load_branch_filesystem(
+                    branch, inherited=fs_hash_types
+                ),
+            )
         except ValueError as e:
             raise RuntimeError(
                 f"Refusing to build read_mode=ro service {service_id}: {e}"

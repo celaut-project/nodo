@@ -13,9 +13,10 @@ except Exception as exc:  # pragma: no cover - environment-dependent
 
 def _dir(name, xattrs=None, children=None):
     b = celaut.Service.Container.Filesystem.ItemBranch(name=name)
-    b.filesystem.SetInParent()
+    nested = celaut.Service.Container.Filesystem()
     for c in (children or []):
-        b.filesystem.branch.append(c)
+        nested.branch.append(c)
+    b.filesystem = nested.SerializeToString()
     for k, v in (xattrs or {}).items():
         b.xattrs[k] = v
     return b

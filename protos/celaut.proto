@@ -200,8 +200,11 @@ message Service {
                     bytes file = 2;
                     // Symbolic link.
                     Link link = 3;
-                    // Nested filesystem tree.
-                    Filesystem filesystem = 4;
+                    // Nested filesystem tree: either the literal serialized
+                    // Filesystem, or a pointer to a block holding one -- the same
+                    // duality Container.filesystem (below) already has at the root.
+                    // See src/utils/container_filesystem.py.
+                    bytes filesystem = 4;
                 }
                 map<string, bytes> xattrs = 5;
             }

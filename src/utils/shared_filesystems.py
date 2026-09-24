@@ -75,10 +75,14 @@ import hashlib
 import posixpath
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Sequence
 
 from protos import celaut_pb2 as celaut
-from src.utils.container_filesystem import load_container_filesystem
+from src.utils.container_filesystem import (
+    filesystem_hash_types,
+    load_branch_filesystem,
+    load_container_filesystem,
+)
 
 # Reserved sharing xattr keys (distinct from the POSIX metadata keys in
 # src/utils/filesystem_xattrs.py).
@@ -246,6 +250,7 @@ def _walk(
     fs: celaut.Service.Container.Filesystem,
     parent_path: str,
     enclosing: Optional[SharedDir],
+    inherited: Optional[Sequence[bytes]],
 ) -> List[SharedDir]:
     out: List[SharedDir] = []
     for branch in fs.branch:
@@ -271,7 +276,8 @@ def _walk(
         if decl is not None:
             out.append(decl)
         if is_dir:
-            out.extend(_walk(branch.filesystem, path, decl or enclosing))
+            nested = load_branch_filesystem(branch, inherited=inherited)
+            out.extend(_walk(nested, path, decl or enclosing, inherited))
     return out
 
 
@@ -300,6 +306,7 @@ def _reject_duplicate_names(declarations: List[SharedDir]) -> None:
 
 def declarations_for_filesystem(
     filesystem: celaut.Service.Container.Filesystem,
+    inherited: Optional[Sequence[bytes]] = None,
 ) -> List[SharedDir]:
     """All shared/guest declarations in a container filesystem tree.
 
@@ -310,11 +317,17 @@ def declarations_for_filesystem(
     Same walk and same rules either way, so a declaration the packer refuses is
     exactly one a node would have refused later.
 
+    ``inherited`` is the hash-type context a subdirectory stored as a block of
+    its own (see the packer's ``recursive_parsing``) needs to resolve its own
+    pointer -- the packer passes ``hash_types_for_packing()``, its own default,
+    since that is what it just built the tree with; ``declarations_for_service``
+    passes what ``filesystem_hash_types`` resolves for an already-stored one.
+
     Raises ``ValueError`` on anything a spec alone can be judged on: a malformed
     xattr, a non-directory, a nested declaration, or two of them resolving to one
     share.
     """
-    declarations = _walk(filesystem, "/", None)
+    declarations = _walk(filesystem, "/", None, inherited)
     _reject_duplicate_names(declarations)
     return declarations
 
@@ -326,7 +339,10 @@ def declarations_for_service(service: celaut.Service) -> List[SharedDir]:
     xattr, a non-directory, a nested declaration, or two of them resolving to one
     share.
     """
-    return declarations_for_filesystem(load_container_filesystem(service))
+    return declarations_for_filesystem(
+        load_container_filesystem(service),
+        inherited=filesystem_hash_types(service),
+    )
 
 
 def exported_dirs(service: celaut.Service) -> List[SharedDir]:

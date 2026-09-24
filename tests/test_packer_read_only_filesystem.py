@@ -75,9 +75,18 @@ def _branch(name, *, directory=False, xattrs=None, with_metadata=True):
     for key, value in (xattrs or {}).items():
         branch.xattrs[key] = value
     if directory:
-        branch.filesystem.CopyFrom(celaut.Service.Container.Filesystem())
+        branch.filesystem = celaut.Service.Container.Filesystem().SerializeToString()
     else:
         branch.file = b"x"
+    return branch
+
+
+def _with_children(branch, *children):
+    """Give a directory branch (from `_branch(..., directory=True)`) its children."""
+    nested = celaut.Service.Container.Filesystem()
+    for child in children:
+        nested.branch.append(child)
+    branch.filesystem = nested.SerializeToString()
     return branch
 
 
@@ -86,6 +95,13 @@ def _tree(*branches):
     for branch in branches:
         filesystem.branch.append(branch)
     return filesystem
+
+
+def _nested(branch):
+    """Parse a directory branch's own `filesystem` bytes back into a Filesystem."""
+    fs = celaut.Service.Container.Filesystem()
+    fs.ParseFromString(branch.filesystem)
+    return fs
 
 
 def _packer(service_json):
@@ -118,14 +134,14 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
         # best and misleading at worst.
         inner_dir = _branch("deeper", directory=True)
         outer = _branch("bin", directory=True)
-        outer.filesystem.branch.append(inner_dir)
+        _with_children(outer, inner_dir)
         tree = _tree(outer)
 
         _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
         self.assertEqual(tree.xattrs[READ_MODE_KEY], b"ro")
-        self.assertNotIn(READ_MODE_KEY, outer.filesystem.xattrs)
-        self.assertNotIn(READ_MODE_KEY, inner_dir.filesystem.xattrs)
+        self.assertNotIn(READ_MODE_KEY, _nested(outer).xattrs)
+        self.assertNotIn(READ_MODE_KEY, _nested(inner_dir).xattrs)
 
     # -- absent / false ----------------------------------------------------- #
 
@@ -218,8 +234,8 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
     def test_a_nested_shared_export_is_also_caught(self):
         outer = _branch("srv", directory=True)
-        outer.filesystem.branch.append(
-            _branch("photos", directory=True, xattrs={"shared": b"true"})
+        _with_children(
+            outer, _branch("photos", directory=True, xattrs={"shared": b"true"})
         )
         tree = _tree(outer)
 
@@ -266,7 +282,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
     def test_metadata_incomplete_deeper_in_the_tree_is_refused(self):
         outer = _branch("bin", directory=True)
-        outer.filesystem.branch.append(_branch("run.sh", with_metadata=False))
+        _with_children(outer, _branch("run.sh", with_metadata=False))
         tree = _tree(outer)
 
         with self.assertRaises(ValueError) as caught:
