@@ -60,7 +60,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-pr
 
 Windows users should download and run the official installer:
 
-[Nodo Windows Installer (.exe)](https://github.com/celaut-project/nodo/releases/download/v1/Nodo-Setup.exe)
+[Nodo Windows Installer (.exe)](https://github.com/celaut-project/nodo/releases/download/wsl-exe/Nodo-Setup.exe)
 
 <details>
 <summary>Windows installation details</summary>
