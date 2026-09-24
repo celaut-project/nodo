@@ -922,7 +922,7 @@ communication:
   # are the opinion; the announcement is extra. A peer whose announcement carries no
   # prose is small already and is always republished whole.
   SHARE_PROSE_ON_LEDGER: false
-  SELF_ANNOUNCE_TO_CONNECTING_PEERS: false
+  SELF_ANNOUNCE_TO_CONNECTING_PEERS: true
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
 
