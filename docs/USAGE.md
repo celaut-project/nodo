@@ -275,15 +275,18 @@ These are the most commonly used commands for daily tasks:
   **Example:**  
   `nodo tui`
 
-- **info**  
-  Displays service status, version, the node's identity key, and configuration
-  details. The `Node id:` line is the node's Ed25519 public key in hex — the same
-  string the reputation system keys every opinion by, so it is what you compare
-  against when a peer says it vouched for you, and what you paste when asking one to.
-  It reads `unavailable (no identity mnemonic yet)` on a node that has not been
-  started long enough to derive one.  
+- **`nodo` (no arguments)**  
+  Prints the quick-start command list, then this node's own status: service status,
+  version, the node's identity key, address and balances, and — last, so it is the
+  last thing read — any operator alerts that need action. The
+  `Node id:` line is the node's Ed25519 public key in hex — the same string the
+  reputation system keys every opinion by, so it is what you compare against when a
+  peer says it vouched for you, and what you paste when asking one to. It reads
+  `unavailable (no identity mnemonic yet)` on a node that has not been started long
+  enough to derive one. When there are alerts, it also tells you to run
+  `sudo nodo daemon restart`.  
   **Example:**  
-  `nodo info`
+  `nodo`
 
 - **logs**  
   Shows real-time application logs for monitoring.  

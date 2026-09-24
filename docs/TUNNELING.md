@@ -365,7 +365,7 @@ they existed:
 * **A reachability check from outside.** The router guide (`nodo nat-guide`)
   exists, but nothing confirms from *outside* that the gateway port is really
   forwarded: a connection from inside the node's own network succeeds either way.
-  `nodo info` and `sudo nodo doctor` report what resolves and whether the port is
+  Bare `nodo` and `sudo nodo doctor` report what resolves and whether the port is
   listening locally, which is as far as this host can get. Confirming
   reachability needs a peer to try connecting back.
 * **IPv6** on the delegated-endpoint path.

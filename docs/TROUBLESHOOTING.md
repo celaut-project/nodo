@@ -260,7 +260,7 @@ control) — `mkdir -p /nodo/storage && touch /nodo/storage/.acceptedkya`. See
 
 ## Payment / reputation features error out
 
-**Symptom:** `nodo info` or payment/reputation actions report a Java dependency
+**Symptom:** bare `nodo` or payment/reputation actions report a Java dependency
 missing.
 
 **Why:** Java is **optional** and only required for Ergo-backed payment and

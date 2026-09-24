@@ -67,7 +67,6 @@ DAEMON_SUBCOMMANDS = ["start", "status", "stop", "restart"]
 COMMANDS = sorted(
     {
         "help",
-        "info",
         "logs",
         "export",
         "import",

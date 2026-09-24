@@ -182,7 +182,91 @@ if __name__ == '__main__':
     if len(sys.argv) == 1:
         from src.commands.help import print_quick_start
         print_quick_start()
-        warn_if_not_serving()
+
+        # Reused by the alert block below, so the firewall notice can say
+        # whether the node is down or up-and-unreachable without asking the
+        # same question a second time.
+        serving = None
+        try:
+            serving = is_serving()
+            status = "running" if serving else "not running"
+            print(f"Nodo service is currently {status}.", flush=True)
+        except Exception as e:
+            print(f"Error checking nodo.service status: {e}", flush=True)
+
+        print(f"Nodo version: {get_git_commit()}", flush=True)
+
+        # The node's identity key, printed here because this is where an
+        # operator looks for "who am I on the network". It is not cosmetic:
+        # the reputation system keys every opinion this node publishes and
+        # every opinion published *about* it by exactly this hex string
+        # (`node_id` in src/reputation_system/interface.py), so an operator
+        # asking a peer to vouch for them, or reading a proof that names
+        # them, has no other way to find the string to compare against.
+        # Wrapped like its neighbours: identity lives behind a mnemonic that
+        # may not exist yet, and bare `nodo` must still print the rest.
+        try:
+            from src.identity.node_identity import get_node_public_key_hex
+            node_id = get_node_public_key_hex()
+            # None is a real, ordinary state -- a node that has not been
+            # given an identity mnemonic yet -- and it is worth naming as
+            # such rather than printing an empty value that reads like a bug.
+            print(
+                f"Node id: {node_id}" if node_id
+                else "Node id: unavailable (no identity mnemonic yet)",
+                flush=True
+            )
+        except Exception as e:
+            log.LOGGER(f"Error getting node identity: {e}.")
+            print(f"Node id: unavailable ({e})", flush=True)
+
+        port = gateway_port()
+        if port:
+            print(f"Nodo address: {get_local_ip()}:{port}", flush=True)
+        else:
+            print(
+                "Nodo address: unavailable -- network.GATEWAY_PORT is not "
+                "assigned yet. Start the node once as root ('sudo nodo serve') "
+                "so it can pick a port and open it, then run 'nodo doctor'.",
+                flush=True
+            )
+
+        reputation_proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
+
+        try:
+            from src.payment_system.contracts.envs import print_payment_info
+            payment_info = print_payment_info()
+        except JavaDependencyMissing as e:
+            log.LOGGER(f"Payment info unavailable without Java: {e}.")
+            payment_info = str(e)
+        except Exception as e:
+            log.LOGGER(f"Error getting payment info and reputation proof {e}.")
+            payment_info = "N/A"
+
+        print(f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}", flush=True)
+
+        # What the operator has to *do*, last and separated, because in a
+        # terminal the last thing printed is the first thing read. Both of
+        # these conditions were previously announced only to app.log and to
+        # the tail of a `nodo serve` that systemd swallowed, so a node whose
+        # gateway port is shut or whose Java is missing looked, from here,
+        # exactly like a healthy one.
+        try:
+            from src.utils.operator_alerts import collect as collect_alerts
+            alerts = collect_alerts(serving=serving)
+            if alerts:
+                print(flush=True)
+                for alert in alerts:
+                    print(alert.as_line(), flush=True)
+                print(
+                    "\nRun `sudo nodo daemon restart` to restart it in the background.",
+                    flush=True
+                )
+        except Exception as e:
+            # Never the thing that breaks bare `nodo`: this block exists to
+            # add a warning, and a warning system that can take down the
+            # command it warns through is worse than no warning.
+            log.LOGGER(f"Error collecting operator alerts: {e}.")
 
     else:
         match sys.argv[1]:
@@ -191,93 +275,6 @@ if __name__ == '__main__':
                 from src.commands.help import print_help
                 print_help()
                 warn_if_not_serving()
-
-            case "info":
-                # Reused by the alert block at the end of this command, so the
-                # firewall notice can say whether the node is down or up-and-
-                # unreachable without asking the same question a second time.
-                serving = None
-                try:
-                    serving = is_serving()
-                    status = "running" if serving else "not running"
-                    print(f"Nodo service is currently {status}.", flush=True)
-                except Exception as e:
-                    print(f"Error checking nodo.service status: {e}", flush=True)
-
-                print(f"Nodo version: {get_git_commit()}", flush=True)
-
-                # The node's identity key, printed here because this is where an
-                # operator looks for "who am I on the network". It is not cosmetic:
-                # the reputation system keys every opinion this node publishes and
-                # every opinion published *about* it by exactly this hex string
-                # (`node_id` in src/reputation_system/interface.py), so an operator
-                # asking a peer to vouch for them, or reading a proof that names
-                # them, has no other way to find the string to compare against.
-                # Wrapped like its neighbours: identity lives behind a mnemonic that
-                # may not exist yet, and `nodo info` must still print the rest.
-                try:
-                    from src.identity.node_identity import get_node_public_key_hex
-                    node_id = get_node_public_key_hex()
-                    # None is a real, ordinary state -- a node that has not been
-                    # given an identity mnemonic yet -- and it is worth naming as
-                    # such rather than printing an empty value that reads like a bug.
-                    print(
-                        f"Node id: {node_id}" if node_id
-                        else "Node id: unavailable (no identity mnemonic yet)",
-                        flush=True
-                    )
-                except Exception as e:
-                    log.LOGGER(f"Error getting node identity: {e}.")
-                    print(f"Node id: unavailable ({e})", flush=True)
-
-                port = gateway_port()
-                if port:
-                    print(f"Nodo address: {get_local_ip()}:{port}", flush=True)
-                else:
-                    print(
-                        "Nodo address: unavailable -- network.GATEWAY_PORT is not "
-                        "assigned yet. Start the node once as root ('sudo nodo serve') "
-                        "so it can pick a port and open it, then run 'nodo doctor'.",
-                        flush=True
-                    )
-
-                reputation_proof_id = env_manager.get('ledgers.ergo.reputation.REPUTATION_PROOF_ID')
-                
-                try:
-                    from src.payment_system.contracts.envs import print_payment_info
-                    payment_info = print_payment_info()
-                except JavaDependencyMissing as e:
-                    log.LOGGER(f"Payment info unavailable without Java: {e}.")
-                    payment_info = str(e)
-                except Exception as e:
-                    log.LOGGER(f"Error getting payment info and reputation proof {e}.")
-                    payment_info = "N/A"
-                
-                print(f"Reputation Proof ID: {reputation_proof_id or 'N/A'} \n{payment_info}", flush=True)
-
-                # What the operator has to *do*, last and separated, because in a
-                # terminal the last thing printed is the first thing read. Both of
-                # these conditions were previously announced only to app.log and to
-                # the tail of a `nodo serve` that systemd swallowed, so a node whose
-                # gateway port is shut or whose Java is missing looked, from here,
-                # exactly like a healthy one.
-                try:
-                    from src.utils.operator_alerts import collect as collect_alerts
-                    alerts = collect_alerts(serving=serving)
-                    if alerts:
-                        print(flush=True)
-                        for alert in alerts:
-                            print(alert.as_line(), flush=True)
-                except Exception as e:
-                    # Never the thing that breaks `nodo info`: this block exists to
-                    # add a warning, and a warning system that can take down the
-                    # command it warns through is worse than no warning.
-                    log.LOGGER(f"Error collecting operator alerts: {e}.")
-
-                # dev_client = SQLConnection().get_dev_clients()[0]
-                # print(f"Dev client for dev purposes: {dev_client}")
-
-                os._exit(0)
 
             case "logs":
                 os.system(f"tail -f {MAIN_DIR}/storage/app.log")
