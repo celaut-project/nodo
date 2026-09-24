@@ -1,11 +1,11 @@
 ---
 name: celaut-bridge-skill
-version: 1.3.0
-description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), package projects into content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
+version: 1.4.0
+description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), develop services locally with `ggconf` and package them into content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
 author: Community Contribution
 license: MIT
 compatibility:
-  # Verified against celaut-project/nodo `dev` @ 68a25ac9 (2026-07-31).
+  # Verified against celaut-project/nodo `dev` @ 44f6b65d (2026-09-23).
   # Tracks the nodo CLI surface on the `stable`/`dev` branches.
   nodo: ">=1 (stable/dev)"
 system_requirements:
@@ -153,6 +153,48 @@ runtime steps), follow the **Manual Installation Guide**:
 To deploy a service you package a project into a deterministic Celaut service
 specification with `nodo pack`. **Do not guess the input format — read
 [`../PACKING.md`](../PACKING.md) before packing.** The essentials are below.
+
+### Local development loop — do not re-pack to test a code change
+
+`nodo pack` is for producing the final, distributable, content-addressed
+`.celaut.bee`. It is **not** an iteration tool: the default backend round-trips
+through an external packer-service microVM, and the opt-in `packer.local`
+backend still runs a full `buildctl build --output type=tar` filesystem export —
+either one can take on the order of an hour for a non-trivial image. Re-running
+`nodo pack` for every code change turns development into a build queue; **do not
+package a service just to test it.**
+
+To run and iterate on a service's own code directly on the host — no packaging,
+no microVM boot — while it still reaches the node for whatever it needs (peers,
+dependencies, other running services), use:
+
+```bash
+nodo ggconf /path/to/project [-e key value]...
+```
+
+`ggconf` ("generate_gateway_config_dev") only writes two files into the project
+directory; it does not build, pack, or execute the service itself:
+
+* **`__config__`** — the exact same `celaut.ConfigurationFile` a booted instance
+  would receive, including the real **`gateway`** peer address
+  (`get_config` in `src/utils/configuration_file.py`). Deserialize it from the
+  service's own entry point (`python service/main.py`, `node index.js`, run
+  under a debugger, …) to get the identical gateway endpoint a packaged instance
+  uses — the code runs as a normal host process, not inside a `ch` microVM, and
+  still talks to the network exactly as it would once packaged.
+* **`.dependencies`** — `env=<hash>` lines resolved from `pack_config.json`'s
+  `dependencies` against the **local registry only** (it raises if a dependency
+  is not already imported — pack or import that dependency once, first; see
+  [`../PACKING.md`](../PACKING.md)).
+
+`ggconf` also records the sandbox as a `rundev::<path>` local instance under an
+unmetered dev client, so it shows up like any other instance for `nodo observe`
+/ `nodo instances` without ever having been packed. A service that declares a
+`guest` shared directory additionally needs a `__shares__` JSON file beside
+`__config__` — see [`../SHARED_FILESYSTEMS.md`](../SHARED_FILESYSTEMS.md).
+
+Reach for `nodo pack` only once the implementation is verified this way — pack
+answers "what do I ship", not "does the code work".
 
 > **Note on Containerization (fixed per the two-backend reality):** Docker is used
 > **only** for the packaging phase, never for execution — running services are
@@ -426,14 +468,15 @@ sudo nodo update
 * `nodo logs`: Streams the application daemon logs.
 
 > **Scope note.** This skill documents the commands an agent needs to install,
-> pack, distribute, execute, observe, and discover. Node-operator / maintenance
-> and development commands (`serve`, `migrate`, `storage:prune_blocks`,
-> `prune_containers`, `submit_reputation`, `sync_reputation_proof`,
-> `refresh_ergo_nodes`, `refresh_clients`, `tx_history`, `increase_peer_deposit`,
-> `disconnect`, `envs`, `test`, `ggconf`, `pay`, `verify_reputation`,
-> `local_builder`, `completion`) are intentionally out of scope here. Note
-> that [`../USAGE.md`](../USAGE.md) does not document these either; consult
-> `nodo --help` for the development-command surface.
+> pack, distribute, execute, observe, and discover — plus `ggconf` (§2), which is
+> squarely agent-facing: it is the local iteration loop for a service under
+> development. Node-operator / maintenance commands (`serve`, `migrate`,
+> `storage:prune_blocks`, `prune_containers`, `submit_reputation`,
+> `sync_reputation_proof`, `refresh_ergo_nodes`, `refresh_clients`, `tx_history`,
+> `increase_peer_deposit`, `disconnect`, `envs`, `test`, `pay`,
+> `verify_reputation`, `local_builder`, `completion`) remain intentionally out of
+> scope here. Note that [`../USAGE.md`](../USAGE.md) does not document these
+> either; consult `nodo --help` for the development-command surface.
 
 ---
 
@@ -459,7 +502,15 @@ sudo nodo update
    debugging it is to widen the *child's* declaration, which can never help.
    Cross-check with `nodo observe <instance id>`, whose per-flow view shows the
    traffic that is not happening.
-9. **Disclose Irreversibility Before Funds:** Before any operation that configures a wallet, spends ERG, pays a peer, or submits reputation, disclose to the user that Nodo is **alpha** and that Ergo payments are **final and irreversible** with self-custodied keys and no recourse (see [`../KyA.md`](../KyA.md)). Do not initiate on-chain spending without explicit user consent.
+9. **Do Not Pack To Test — Use `ggconf`:** `nodo pack` can take on the order of an
+   hour per run (external packer-service round-trip, or a full local BuildKit
+   filesystem export). Never pack a service just to check whether a code change
+   works. While developing, run `nodo ggconf <path>` once per dependency change,
+   then execute the service's own entry point directly on the host; it reaches
+   the gateway and its resolved dependencies exactly as a packaged instance
+   would (§2, "Local development loop"). Only pack once that local run confirms
+   the code is correct.
+10. **Disclose Irreversibility Before Funds:** Before any operation that configures a wallet, spends ERG, pays a peer, or submits reputation, disclose to the user that Nodo is **alpha** and that Ergo payments are **final and irreversible** with self-custodied keys and no recourse (see [`../KyA.md`](../KyA.md)). Do not initiate on-chain spending without explicit user consent.
 
 ---
 
