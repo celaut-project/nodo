@@ -264,6 +264,22 @@ packer:
   #            is unprivileged, so packing never asks for sudo. See
   #            dependencies.buildkit.* and packer.buildkit.* below.
   local: false
+  # fast: default packing mode for the local packer (packer.local: true only).
+  #   false (default) -> per-file blocking: a file at or over
+  #            packer.MIN_BUFFER_BLOCK_SIZE is stored as its own
+  #            content-addressed block (see MIN_BUFFER_BLOCK_SIZE below).
+  #            Minimizes pack-time memory and deduplicates identical large
+  #            files across services, at the cost of pack time (one block
+  #            write + hash per large file).
+  #   true  -> the whole rootfs is inlined into a single filesystem block --
+  #            no other block is created for this service. Faster to pack,
+  #            but the entire image is held in memory at once and nothing is
+  #            deduplicated with other services.
+  # `nodo pack --fast` / `nodo pack --optimize` override this per invocation
+  # (mutually exclusive), whatever this default is set to. Ignored (with a
+  # warning) when packer.local is false: the packer-service builds inside its
+  # own external microVM, which does not read this setting.
+  fast: false
   # nodo no longer builds services locally *by default*. `nodo pack` sends the
   # project to a packer-service microVM (it runs Docker/buildx inside a sealed VM,
   # so Docker is never installed on this host) and imports the returned
@@ -294,7 +310,9 @@ packer:
   #
   # Inline/block threshold. A file at or over this size is stored as a
   # content-addressed block under main.BLOCKDIR and referenced by a pointer;
-  # a smaller one is inlined into the service's filesystem message.
+  # a smaller one is inlined into the service's filesystem message. Ignored
+  # entirely in fast mode (packer.fast: true, or `nodo pack --fast`), which
+  # inlines every file regardless of size -- see packer.fast above.
   #
   # It is the main lever on how much memory a service costs, because only the
   # inlined part is ever held: the build streams a pointer straight to its place

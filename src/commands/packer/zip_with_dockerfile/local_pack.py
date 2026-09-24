@@ -111,7 +111,7 @@ def __spinner(event):
     sys.stdout.flush()
 
 
-def _pack_and_register(service_zip_dir: str) -> Optional[str]:
+def _pack_and_register(service_zip_dir: str, fast: bool = False) -> Optional[str]:
     """Build the prepared service zip in process and register the result.
 
     Calls ``pack_zip()`` directly and parses its PackOutput buffer stream locally
@@ -133,7 +133,7 @@ def _pack_and_register(service_zip_dir: str) -> Optional[str]:
 
     try:
         for b in grpcbb.parse_from_buffer(
-            request_iterator=pack_zip(zip=service_zip_dir),
+            request_iterator=pack_zip(zip=service_zip_dir, fast=fast),
             indices=gateway_bee.PackOutput_indices,
             partitions_message_mode={1: True, 2: True, 3: False}
         ):
@@ -206,7 +206,7 @@ def __remove_path(path):
         print(f"Removed: '{path}'")
 
 
-def pack_local(directory: str) -> Optional[str]:
+def pack_local(directory: str, fast: bool = False) -> Optional[str]:
     """Build a project locally with nodo's rootless BuildKit toolchain.
 
     Nested dependency packs (triggered from generate_service_zip while packing a
@@ -214,6 +214,11 @@ def pack_local(directory: str) -> Optional[str]:
     operation: they reuse the top-level pack's command lock and running builder
     instead of re-acquiring the single-holder lock (which would fail and cancel
     the dependency).
+
+    ``fast``: skip per-large-file blocking and inline the whole rootfs into a
+    single filesystem block (`nodo pack --fast`). Propagated to any nested
+    dependency pack too, so a fast top-level pack does not silently block-split
+    a dependency it packs along the way.
     """
     global _pack_depth
     nested = _pack_depth > 0
@@ -245,9 +250,9 @@ def pack_local(directory: str) -> Optional[str]:
             daemon_started = True
 
         is_remote, directory = prepare_directory(directory)
-        service_zip_dir: str = generate_service_zip(project_directory=directory)
+        service_zip_dir: str = generate_service_zip(project_directory=directory, fast=fast)
 
-        _id = _pack_and_register(service_zip_dir)
+        _id = _pack_and_register(service_zip_dir, fast=fast)
 
         if not _id:
             print(f"Packing produced no service id for {directory}.")
