@@ -522,6 +522,31 @@ fn energy_summary_lines(app: &App) -> Vec<Line<'static>> {
         metric_line("Electricity", node_cost_line(energy)),
     ];
 
+    // Today's total and the window's worst hour -- what a glance at this card is
+    // for, next to the full trend on the ENERGY page itself (issue #442).
+    let series = &app.energy_series;
+    if !series.is_empty() {
+        let today = if energy.price_per_kwh > 0.0 {
+            let currency = if energy.currency.is_empty() {
+                "USD"
+            } else {
+                energy.currency.as_str()
+            };
+            format!(
+                "{:.2} kWh · {:.2} {currency}",
+                series.today_kwh(),
+                series.today_cost()
+            )
+        } else {
+            format!("{:.2} kWh", series.today_kwh())
+        };
+        lines.push(metric_line("Today", today));
+        lines.push(metric_line(
+            "Peak 48h",
+            format_watts(Some(series.peak_watts_over(48))),
+        ));
+    }
+
     // The same qualifier `node_power_line` puts on the NODE card, on its own line
     // here because there is room for it to be read rather than skimmed past.
     let source = if energy.backend.is_empty() {
@@ -1216,7 +1241,7 @@ fn node_cost_line(energy: &crate::app::NodeEnergy) -> String {
         {
             let per_hour = (watts / 1000.0) * energy.price_per_kwh;
             let currency = if energy.currency.is_empty() {
-                "EUR"
+                "USD"
             } else {
                 energy.currency.as_str()
             };
@@ -3847,8 +3872,160 @@ fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
     for (pane, (section, rows)) in panes.iter().zip(sections.iter()) {
         draw_energy_section(frame, app, *pane, *section, rows);
     }
+    // The trailing `Constraint::Min(0)` pane the sections' zip never consumes --
+    // whatever the config catalogue leaves below its three blocks is where the
+    // chart belongs, since that space already exists (issue #442).
+    if let Some(chart_area) = panes.last() {
+        draw_energy_chart(frame, app, *chart_area);
+    }
 
     draw_energy_help(frame, app, columns[1]);
+}
+
+/// The chart the config catalogue's own layout leaves room for: peaks over
+/// `app.energy_series`'s window, and what they cost, hour by hour (issue #442).
+/// Nothing here is configuration -- it reads `app.energy_series`, which
+/// `App::refresh` already filled from `energy_consumption` the same tick as
+/// everything else on screen.
+fn draw_energy_chart(frame: &mut Frame, app: &App, area: Rect) {
+    let block = section_block(" HISTORY ".to_string(), series(0));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height == 0 {
+        return;
+    }
+    let currency = if app.node_energy.currency.is_empty() {
+        "USD"
+    } else {
+        app.node_energy.currency.as_str()
+    };
+    let lines = energy_chart_lines(&app.energy_series, inner.width, currency);
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Peak watts and cost, hour by hour, most recent on the right (issue #442).
+///
+/// Character-height sparklines rather than a plotted line, the same device
+/// `demand_lines` uses on SCHEDULE: the shape against the axis is what "peaks" asks
+/// to see, and a column of numbers would not fit that many hours in one row.
+///
+/// The chart only ever draws as many of the most recent hours as the terminal is
+/// wide (`shown`, below); the medians on the last line read `history` whole, since
+/// "what does a typical hour cost this month" is a question about the month, not
+/// about however few of its hours happen to fit on screen.
+fn energy_chart_lines(
+    history: &crate::app::EnergySeries,
+    width: u16,
+    currency: &str,
+) -> Vec<Line<'static>> {
+    if history.is_empty() {
+        return vec![Line::from(Span::styled(
+            "No energy history yet — it will appear here as the node runs.",
+            Style::default().fg(muted()),
+        ))];
+    }
+
+    // Eight levels, so a busy hour and a quiet one are told apart by height rather
+    // than by reading a legend -- same alphabet `demand_lines` draws with.
+    const LEVELS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let slots = width.max(1) as usize;
+    let start = history.buckets.len().saturating_sub(slots);
+    let shown = &history.buckets[start..];
+    let shown_hours = shown.len();
+
+    let spark = |values: Vec<f64>, colour: Color| -> Line<'static> {
+        let peak = values.iter().copied().fold(0.0_f64, f64::max).max(1e-9);
+        let pad = slots.saturating_sub(values.len());
+        let mut spans = vec![Span::raw(" ".repeat(pad))];
+        for value in values {
+            let glyph = if value <= 0.0 {
+                ' '
+            } else {
+                let level = ((value / peak) * (LEVELS.len() - 1) as f64).round() as usize;
+                LEVELS[level.min(LEVELS.len() - 1)]
+            };
+            spans.push(Span::styled(glyph.to_string(), Style::default().fg(colour)));
+        }
+        Line::from(spans)
+    };
+
+    let watts: Vec<f64> = shown.iter().map(|bucket| bucket.peak_watts).collect();
+    let shown_peak = watts.iter().copied().fold(0.0_f64, f64::max);
+    // Whether *any* history has a price, not just the visible slice: a node whose
+    // tariff was only just set should not have its medians (which read the whole
+    // fetched month) hidden behind a "watts only" that only describes this week.
+    let has_cost = history.buckets.iter().any(|bucket| bucket.cost > 0.0);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "watts, peak per hour",
+            Style::default().fg(muted()),
+        )),
+        spark(watts, series(0)),
+    ];
+    if has_cost {
+        let costs: Vec<f64> = shown.iter().map(|bucket| bucket.cost).collect();
+        lines.push(Line::from(Span::styled(
+            "cost per hour",
+            Style::default().fg(muted()),
+        )));
+        lines.push(spark(costs, warn()));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "no tariff set — watts only",
+            Style::default().fg(muted()),
+        )));
+    }
+
+    // Peak and total, both scoped to exactly the window drawn above -- so the
+    // figures on this line and the "last Nh" naming it agree with each other.
+    let mut summary = vec![
+        Span::styled("peak ", Style::default().fg(muted())),
+        Span::styled(
+            format_watts(Some(shown_peak)),
+            Style::default().fg(series(0)),
+        ),
+    ];
+    if has_cost {
+        let shown_cost: f64 = shown.iter().map(|bucket| bucket.cost).sum();
+        summary.push(Span::styled(" · Σ ", Style::default().fg(muted())));
+        summary.push(Span::styled(
+            format!("{shown_cost:.2} {currency}"),
+            Style::default().fg(warn()),
+        ));
+    }
+    summary.push(Span::styled(
+        format!(" · last {shown_hours}h"),
+        Style::default().fg(muted()),
+    ));
+    lines.push(Line::from(summary));
+
+    // What a typical hour costs, at three horizons (issue #453): today, so a spike
+    // this afternoon does not read as the new normal; the trailing week and month,
+    // scoped to `history` as a whole rather than to `shown`, since the terminal's
+    // width has nothing to do with how much history is worth summarising here.
+    if has_cost {
+        lines.push(Line::from(vec![
+            Span::styled("median/h ", Style::default().fg(muted())),
+            Span::styled("today ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{:.2}", history.median_cost_today()),
+                Style::default().fg(text_colour()),
+            ),
+            Span::styled(" · 7d ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{:.2}", history.median_cost_over(7)),
+                Style::default().fg(text_colour()),
+            ),
+            Span::styled(" · 30d ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{:.2} {currency}", history.median_cost_over(30)),
+                Style::default().fg(text_colour()),
+            ),
+        ]));
+    }
+
+    lines
 }
 
 /// One band of the ENERGY page, and the rows in it.
@@ -7652,6 +7829,121 @@ mod tests {
         fn it_renders_at_the_common_sizes() {
             for (width, height) in [(80, 24), (140, 40)] {
                 draw_energy_at(width, height);
+            }
+        }
+
+        /// The chart the config catalogue's layout leaves room for below its three
+        /// sections (issue #442). Data is injected directly on `app.energy_series`,
+        /// the same way `schedule_page`'s tests inject `app.demand`, so the assertion
+        /// is about the drawing rather than about whatever this machine's own
+        /// database happens to hold.
+        mod chart {
+            use super::*;
+
+            fn series_with(hours: &[(&str, f64, f64, f64)]) -> crate::app::EnergySeries {
+                let mut series = crate::app::EnergySeries::default();
+                for (key, peak_watts, cost, joules) in hours {
+                    series.keys.push((*key).to_string());
+                    series.buckets.push(crate::app::EnergyBucket {
+                        peak_watts: *peak_watts,
+                        cost: *cost,
+                        joules: *joules,
+                    });
+                }
+                series
+            }
+
+            fn screen_with_energy(series: crate::app::EnergySeries) -> String {
+                let mut app = App::new();
+                app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Energy).unwrap();
+                app.energy_series = series;
+                // `App::new()` reads the real `node_energy` off whatever database this
+                // machine happens to have, currency included -- pinned here so the
+                // chart's currency fallback (and these tests) do not depend on it.
+                app.node_energy.currency = String::new();
+                let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+                terminal.draw(|frame| render(&mut app, frame)).unwrap();
+                let buffer = terminal.backend().buffer().clone();
+                (0..buffer.area.height)
+                    .map(|y| {
+                        (0..buffer.area.width)
+                            .map(|x| buffer.get(x, y).symbol())
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+
+            #[test]
+            fn a_node_with_no_history_says_so_rather_than_drawing_an_empty_chart() {
+                let screen = screen_with_energy(crate::app::EnergySeries::default());
+                assert!(
+                    screen.contains("No energy history yet"),
+                    "{screen}"
+                );
+            }
+
+            #[test]
+            fn the_busiest_hour_sets_the_peak_the_summary_states() {
+                let series = series_with(&[
+                    ("2026-09-20T00", 2.0, 0.0, 7_200.0),
+                    ("2026-09-20T01", 40.0, 0.0, 144_000.0),
+                    ("2026-09-20T02", 5.0, 0.0, 18_000.0),
+                ]);
+                let screen = screen_with_energy(series);
+                assert!(screen.contains("watts, peak per hour"), "{screen}");
+                assert!(screen.contains("40 W"), "the busiest hour's watts is not the stated peak:\n{screen}");
+            }
+
+            /// Zero is the honest default: a cost row over an unset tariff would show
+            /// a bar for a number nobody set.
+            #[test]
+            fn an_unset_tariff_reads_watts_only() {
+                let series = series_with(&[("2026-09-20T00", 10.0, 0.0, 36_000.0)]);
+                let screen = screen_with_energy(series);
+                assert!(screen.contains("no tariff set — watts only"), "{screen}");
+                assert!(!screen.contains("cost per hour"), "{screen}");
+            }
+
+            /// The sum the ENERGY page exists to answer: what the hours actually
+            /// cost, each at its own sample's tariff.
+            #[test]
+            fn a_priced_history_sums_its_cost() {
+                let series = series_with(&[
+                    ("2026-09-20T00", 10.0, 0.50, 36_000.0),
+                    ("2026-09-20T01", 12.0, 0.60, 43_200.0),
+                ]);
+                let screen = screen_with_energy(series);
+                assert!(screen.contains("cost per hour"), "{screen}");
+                assert!(screen.contains("1.10 USD"), "the two hours' cost was not summed:\n{screen}");
+            }
+
+            /// The three horizons the summary line adds beside the sum (issue #453):
+            /// a typical hour, at three widths, so a `Σ` a few spike hours dominate
+            /// is not the only figure on screen.
+            #[test]
+            fn the_median_line_states_all_three_horizons() {
+                let series = series_with(&[
+                    ("2026-09-20T00", 10.0, 1.0, 36_000.0),
+                    ("2026-09-20T01", 12.0, 3.0, 43_200.0),
+                ]);
+                let screen = screen_with_energy(series);
+                assert!(screen.contains("median/h"), "{screen}");
+                assert!(
+                    screen.contains("today 2.00"),
+                    "median of 1.00 and 3.00 is 2.00:\n{screen}"
+                );
+                assert!(screen.contains("7d 2.00"), "{screen}");
+                assert!(screen.contains("30d 2.00 USD"), "{screen}");
+            }
+
+            /// No tariff, no median either -- the same honesty `no tariff set —
+            /// watts only` already states for the sparklines above it.
+            #[test]
+            fn an_unset_tariff_shows_no_median_line() {
+                let series = series_with(&[("2026-09-20T00", 10.0, 0.0, 36_000.0)]);
+                let screen = screen_with_energy(series);
+                assert!(!screen.contains("median/h"), "{screen}");
             }
         }
     }

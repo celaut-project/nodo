@@ -3209,6 +3209,20 @@ class SQLConnection(metaclass=Singleton):
         else:
             self._execute("DELETE FROM instance_energy")
 
+    def prune_energy_consumption(self, keep_days: int) -> None:
+        """Drop samples older than ``keep_days``, so this table has a ceiling.
+
+        Sampled every ``energy.SAMPLE_INTERVAL_SECONDS`` (60s by default) with no
+        rollup, unlike ``demand_history``'s one row per hour: left unpruned this is
+        1,440 rows a day forever. Called from the energy tick itself (see
+        ``src/manager/energy/monitor.py``), the same way ``demand_history`` prunes
+        itself on its own rollover rather than needing a scheduler of its own.
+        """
+        self._execute(
+            "DELETE FROM energy_consumption WHERE timestamp < datetime('now', ?)",
+            (f"-{max(1, int(keep_days))} days",),
+        )
+
 def is_peer_available(peer_id: str, min_slots_open: int = 1) -> bool:
     # Slot concept here refers to the number of urls. Slot should be renamed on all the code because is incorrectly used.
     """

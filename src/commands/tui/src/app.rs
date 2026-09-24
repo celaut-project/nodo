@@ -40,6 +40,15 @@ const DONATIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(600);
 /// How much demand history the SCHEDULE page reads back. A month shows the weekly shape
 /// without letting one unusual day set the scale of the whole chart.
 const DEMAND_HISTORY_DAYS: u16 = 30;
+/// How much `energy_consumption` history the ENERGY page and the OVERVIEW card read
+/// back (issue #442). 30 days, matching `RETENTION_DAYS` in
+/// `src/manager/energy/monitor.py` -- so the ENERGY page's monthly median always
+/// covers the whole month it claims to, rather than whatever fraction of it a
+/// shorter fetch window would leave. At the default 60s sample interval this is
+/// still only 720 hourly buckets: the chart itself only ever draws as many of the
+/// most recent of them as the terminal is wide, and it is the medians underneath it
+/// that need the rest.
+const ENERGY_HISTORY_HOURS: u16 = 24 * 30;
 /// Shortest gap between two counter samples that yields a meaningful rate. The
 /// ordinary sweep is `DATA_REFRESH_INTERVAL` apart, but a forced refresh (after a
 /// kill, or an `r` keypress) can land immediately after one; dividing a counter
@@ -1284,6 +1293,133 @@ pub struct NodeEnergy {
     pub is_floor: bool,
 }
 
+/// Joules in a kilowatt-hour. Mirrors `price.JOULES_PER_KWH` on the Python side,
+/// which the `energy_consumption` table's `energy_joules` column is written in.
+const JOULES_PER_KWH: f64 = 3.6e6;
+
+/// One local hour of `energy_consumption`, folded from however many samples landed
+/// in it (issue #442).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EnergyBucket {
+    /// The peak instantaneous reading within the hour -- the number a "picos" chart
+    /// exists to show, which an average across the hour would sand off.
+    pub peak_watts: f64,
+    /// What the hour actually cost, summed from each sample's own tariff
+    /// (`energy_joules / 3.6e6 * price_per_kwh`) rather than the hour's *current*
+    /// price, so a tariff change never rewrites a bucket already drawn.
+    pub cost: f64,
+    /// Energy for the hour, in joules; kept alongside `cost` so kWh can be read back
+    /// without re-deriving it from watts and a sample interval nobody here knows.
+    pub joules: f64,
+}
+
+/// `energy_consumption` folded into local hours, oldest first (issue #442).
+///
+/// `hours[i]` is `keys[i]`'s bucket; kept as two parallel vectors rather than a map
+/// so the chart can walk them in the chronological order the query already produced,
+/// without a sort a `HashMap` would force.
+#[derive(Debug, Clone, Default)]
+pub struct EnergySeries {
+    /// Local hour keys, `YYYY-MM-DDTHH`, ascending -- oldest first, same format
+    /// `demand_history.hour_key` uses, so the two read the same at a glance.
+    pub keys: Vec<String>,
+    pub buckets: Vec<EnergyBucket>,
+}
+
+impl EnergySeries {
+    pub fn is_empty(&self) -> bool {
+        self.buckets.is_empty()
+    }
+
+    /// The worst hour in the whole series -- what "picos" asks for, not a mean.
+    pub fn peak_watts(&self) -> f64 {
+        self.buckets
+            .iter()
+            .map(|bucket| bucket.peak_watts)
+            .fold(0.0_f64, f64::max)
+    }
+
+    pub fn total_kwh(&self) -> f64 {
+        self.buckets.iter().map(|bucket| bucket.joules).sum::<f64>() / JOULES_PER_KWH
+    }
+
+    pub fn total_cost(&self) -> f64 {
+        self.buckets.iter().map(|bucket| bucket.cost).sum()
+    }
+
+    /// The buckets sharing the most recent bucket's calendar date -- "today" without
+    /// asking the host clock, since the series is already sorted and local: the last
+    /// key's own date prefix *is* today, as of the sample the series was built from.
+    fn today_buckets(&self) -> impl Iterator<Item = &EnergyBucket> {
+        let today = self.keys.last().map(|key| &key[..10]);
+        self.keys
+            .iter()
+            .zip(self.buckets.iter())
+            .filter(move |(key, _)| today == Some(&key[..10]))
+            .map(|(_, bucket)| bucket)
+    }
+
+    pub fn today_kwh(&self) -> f64 {
+        self.today_buckets().map(|bucket| bucket.joules).sum::<f64>() / JOULES_PER_KWH
+    }
+
+    pub fn today_cost(&self) -> f64 {
+        self.today_buckets().map(|bucket| bucket.cost).sum()
+    }
+
+    /// The trailing `hours` of buckets, oldest first -- clamped to what the series
+    /// actually holds rather than panicking on a window wider than the history a
+    /// freshly-started node has had time to collect.
+    fn trailing(&self, hours: usize) -> &[EnergyBucket] {
+        let start = self.buckets.len().saturating_sub(hours);
+        &self.buckets[start..]
+    }
+
+    /// The worst hour within the trailing `hours` (issue #442) -- a bounded window
+    /// for a caller that wants a stable "peak of the last N hours" (the OVERVIEW
+    /// card) independent of how far back `energy_history_hours` actually reaches.
+    pub fn peak_watts_over(&self, hours: u16) -> f64 {
+        self.trailing(hours as usize)
+            .iter()
+            .map(|bucket| bucket.peak_watts)
+            .fold(0.0_f64, f64::max)
+    }
+
+    /// The middle hour's cost among today's (issue #453). `today_cost` is a sum, and
+    /// a sum answers "what did today cost"; this answers "what does a typical hour
+    /// cost", which a handful of spike hours must not be allowed to stand in for.
+    pub fn median_cost_today(&self) -> f64 {
+        median(self.today_buckets().map(|bucket| bucket.cost).collect())
+    }
+
+    /// The middle hour's cost among the trailing `days` days -- the same "typical
+    /// hour" question as `median_cost_today`, asked over a week or a month instead.
+    pub fn median_cost_over(&self, days: u16) -> f64 {
+        median(
+            self.trailing(days as usize * 24)
+                .iter()
+                .map(|bucket| bucket.cost)
+                .collect(),
+        )
+    }
+}
+
+/// The middle value of `values`, averaging the two middle ones on an even count.
+/// Empty reads as zero, the same "nothing happened" default every other energy
+/// figure here uses rather than `Option`.
+fn median(mut values: Vec<f64>) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 0 {
+        (values[mid - 1] + values[mid]) / 2.0
+    } else {
+        values[mid]
+    }
+}
+
 /// Who an instance is running for.
 ///
 /// Resolved against the lists the page already holds rather than stored: a column
@@ -2475,6 +2611,14 @@ pub struct App {
     pub node_info: NodeInfo,
     /// Latest energy sample (issue #258). Missing until the node has written a row.
     pub node_energy: NodeEnergy,
+    /// `energy_consumption` folded into hourly buckets over `energy_history_hours`,
+    /// oldest first, for the ENERGY page's chart and the OVERVIEW card's totals
+    /// (issue #442). Chronological, not folded by hour-of-day like `demand`: the
+    /// question this answers is "when did this actually spike", which folding
+    /// identical clock hours across days would erase.
+    pub energy_series: EnergySeries,
+    /// How many hours of history `energy_series` covers.
+    pub energy_history_hours: u16,
     /// Whether [`Self::refresh`] should re-answer the operator alerts from disk.
     ///
     /// Off by default, so building an `App` does not consult the filesystem and a
@@ -2608,6 +2752,8 @@ impl Default for App {
                 ..NodeInfo::default()
             },
             node_energy: NodeEnergy::default(),
+            energy_series: EnergySeries::default(),
+            energy_history_hours: ENERGY_HISTORY_HOURS,
             poll_alerts: false,
             alerts: crate::alerts::Alerts::default(),
             peers_error: None,
@@ -5004,6 +5150,8 @@ impl App {
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
+        self.energy_series = get_energy_series(&self.paths.database, ENERGY_HISTORY_HOURS)
+            .unwrap_or_default();
         // Re-answered from disk every tick rather than remembered, so an alert
         // cannot outlive its condition. Uses the `config_document` re-read above,
         // so this costs two `stat` calls.
@@ -6332,6 +6480,53 @@ fn get_node_energy(paths: &Paths) -> NodeEnergy {
             },
         )
         .unwrap_or_default()
+}
+
+/// `energy_consumption` folded into local hours over the last `hours` (issue #442).
+///
+/// Grouped by local hour rather than read raw: at the default 60s sample interval a
+/// raw read would be a row per minute, which is both far more than a terminal's
+/// width can show and finer than "when did this spike" needs. `timestamp` is stored
+/// as SQLite's `CURRENT_TIMESTAMP` (UTC), so the bucket key and the window bound
+/// convert or compare in UTC deliberately -- comparing a UTC column against a
+/// `'localtime'`-shifted bound the way `get_demand_by_hour` compares
+/// `demand_history.hour` (already local text) would silently miss or double-count
+/// samples near a UTC offset boundary.
+fn get_energy_series(database: &Path, hours: u16) -> SqlResult<EnergySeries> {
+    let connection = Connection::open(database)?;
+    if !table_exists(&connection, "energy_consumption") {
+        return Ok(EnergySeries::default());
+    }
+    let mut statement = connection.prepare(
+        "SELECT strftime('%Y-%m-%dT%H', timestamp, 'localtime'),
+                MAX(watts),
+                SUM(energy_joules),
+                SUM(energy_joules / 3.6e6 * price_per_kwh)
+         FROM energy_consumption
+         WHERE timestamp >= datetime('now', ?1)
+         GROUP BY 1
+         ORDER BY 1 ASC",
+    )?;
+    let rows = statement.query_map([format!("-{hours} hours")], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+            row.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+            row.get::<_, Option<f64>>(3)?.unwrap_or(0.0),
+        ))
+    })?;
+
+    let mut series = EnergySeries::default();
+    for row in rows {
+        let (key, peak_watts, joules, cost) = row?;
+        series.keys.push(key);
+        series.buckets.push(EnergyBucket {
+            peak_watts,
+            joules,
+            cost,
+        });
+    }
+    Ok(series)
 }
 
 /// Whether a table exists, so a query can degrade gracefully against a database the
@@ -11444,5 +11639,214 @@ mod restart_state_regressions {
         });
         assert!(tokio::time::timeout(Duration::from_secs(2), wait_until_serving(&config)).await.unwrap());
         assign.await.unwrap();
+    }
+}
+
+/// `energy_consumption` folded into hours, and the totals the ENERGY page and the
+/// OVERVIEW card read from that fold (issue #442).
+#[cfg(test)]
+mod energy_series {
+    use super::*;
+
+    /// The real `CREATE TABLE` for `name`, from `src/database/migrate.py` -- lifted
+    /// rather than restated, for the same reason `tests::migration_table` is
+    /// (issue #414): a hand-copied schema is exactly what lets a query fall a
+    /// column behind the table it actually reads.
+    fn migration_table(name: &str) -> String {
+        let python = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../src/database/migrate.py"
+        ))
+        .expect("src/database/migrate.py ships with the repository");
+        let marker = format!("CREATE TABLE IF NOT EXISTS {name} (");
+        let start = python
+            .find(&marker)
+            .unwrap_or_else(|| panic!("migrate.py no longer creates a '{name}' table"));
+        let rest = &python[start..];
+        let end = rest
+            .find("'''")
+            .unwrap_or_else(|| panic!("the '{name}' table's SQL is unterminated"));
+        rest[..end].to_string()
+    }
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "nodo-tui-energy-series-{label}-{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A database built from the node's own `energy_consumption` schema, with one
+    /// row per `(hours_ago, watts, joules, price_per_kwh)`. `hours_ago` is applied
+    /// by SQLite itself (`datetime('now', ?)`) rather than computed here, the same
+    /// way the peer/donation fixtures elsewhere in this file seed relative
+    /// timestamps -- a test has no calendar library to disagree with SQLite's own.
+    fn energy_database(dir: &Path, rows: &[(i64, f64, f64, f64)]) -> PathBuf {
+        let path = dir.join("database.sqlite");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(&migration_table("energy_consumption"))
+            .unwrap();
+        for (hours_ago, watts, joules, price_per_kwh) in rows {
+            connection
+                .execute(
+                    "INSERT INTO energy_consumption
+                        (timestamp, energy_joules, watts, price_per_kwh, currency, backend, is_floor)
+                     VALUES (datetime('now', ?1), ?2, ?3, ?4, 'EUR', 'rapl', 0)",
+                    rusqlite::params![format!("-{hours_ago} hours"), joules, watts, price_per_kwh],
+                )
+                .unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn a_database_with_no_table_reads_as_no_history() {
+        let dir = TempDir::new("no-table");
+        let path = dir.0.join("database.sqlite");
+        Connection::open(&path).unwrap(); // empty database, no migration run
+
+        let series = get_energy_series(&path, 48).unwrap();
+        assert!(series.is_empty());
+    }
+
+    #[test]
+    fn samples_past_the_window_are_left_out() {
+        let dir = TempDir::new("window");
+        let path = energy_database(&dir.0, &[(80, 5.0, 18_000.0, 0.2), (1, 5.0, 18_000.0, 0.2)]);
+
+        let series = get_energy_series(&path, 48).unwrap();
+        assert_eq!(series.buckets.len(), 1, "the 80h-old sample is outside a 48h window");
+    }
+
+    #[test]
+    fn two_samples_in_the_same_hour_fold_into_one_bucket() {
+        let dir = TempDir::new("fold");
+        // Same hour: one sample peaks at 40W, the other at 10W; the bucket keeps
+        // the peak and sums both the energy and the cost, exactly like
+        // `get_demand_by_hour` keeps a peak rather than a mean.
+        let path = energy_database(
+            &dir.0,
+            &[(0, 40.0, 2_400.0, 0.20), (0, 10.0, 600.0, 0.20)],
+        );
+
+        let series = get_energy_series(&path, 48).unwrap();
+        assert_eq!(series.buckets.len(), 1, "two samples an hour apart, not two hours");
+        let bucket = series.buckets[0];
+        assert_eq!(bucket.peak_watts, 40.0);
+        assert_eq!(bucket.joules, 3_000.0);
+        assert!((bucket.cost - (3_000.0 / 3.6e6 * 0.20)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn peak_watts_is_the_worst_hour_not_the_last_one() {
+        let mut series = EnergySeries::default();
+        for (key, watts) in [("2026-09-20T00", 5.0), ("2026-09-20T01", 40.0), ("2026-09-20T02", 12.0)] {
+            series.keys.push(key.to_string());
+            series.buckets.push(EnergyBucket {
+                peak_watts: watts,
+                cost: 0.0,
+                joules: 0.0,
+            });
+        }
+        assert_eq!(series.peak_watts(), 40.0);
+    }
+
+    /// "Today" is read off the series' own last key rather than the host clock, so
+    /// it agrees with whatever `get_energy_series` actually returned instead of
+    /// racing the wall clock at a day boundary.
+    #[test]
+    fn today_is_the_most_recent_buckets_own_date() {
+        let mut series = EnergySeries::default();
+        for (key, joules, cost) in [
+            ("2026-09-19T23", 3_600_000.0, 1.0),
+            ("2026-09-20T00", 3_600_000.0, 2.0),
+            ("2026-09-20T01", 3_600_000.0, 3.0),
+        ] {
+            series.keys.push(key.to_string());
+            series.buckets.push(EnergyBucket {
+                peak_watts: 0.0,
+                cost,
+                joules,
+            });
+        }
+        assert_eq!(series.today_kwh(), 2.0, "only the two 09-20 hours count");
+        assert_eq!(series.today_cost(), 5.0);
+        assert_eq!(series.total_kwh(), 3.0, "the total covers all three hours");
+        assert_eq!(series.total_cost(), 6.0);
+    }
+
+    /// A synthetic month: `days` days of 24 hourly buckets each, day `d`'s buckets
+    /// all carrying `cost(d)` and `peak_watts(d)` -- day-granular values are enough
+    /// to test the trailing-hours window without needing 720 distinct numbers.
+    fn synthetic_days(days: u32, cost: impl Fn(u32) -> f64, watts: impl Fn(u32) -> f64) -> EnergySeries {
+        let mut series = EnergySeries::default();
+        for day in 1..=days {
+            for hour in 0..24 {
+                series.keys.push(format!("2026-01-{day:02}T{hour:02}"));
+                series.buckets.push(EnergyBucket {
+                    peak_watts: watts(day),
+                    cost: cost(day),
+                    joules: 0.0,
+                });
+            }
+        }
+        series
+    }
+
+    /// The trailing window excludes what fell off the front (issue #453): a spike
+    /// ten days ago must not still set "peak" once ten days have actually passed.
+    #[test]
+    fn peak_watts_over_drops_buckets_older_than_the_window() {
+        // Day 1 spikes to 100 W; every later day sits at a quiet 5 W.
+        let series = synthetic_days(10, |_| 0.0, |day| if day == 1 { 100.0 } else { 5.0 });
+
+        assert_eq!(series.peak_watts(), 100.0, "the whole series still has the spike");
+        assert_eq!(
+            series.peak_watts_over(7 * 24),
+            5.0,
+            "day 1 is 9 days back, outside a 7-day window"
+        );
+    }
+
+    /// `median_cost_today` reads only the most recent calendar day, same as
+    /// `today_kwh`/`today_cost` -- a cheap day is not averaged into an expensive one.
+    #[test]
+    fn median_cost_today_ignores_earlier_days() {
+        let series = synthetic_days(3, |day| if day == 3 { 9.0 } else { 1.0 }, |_| 0.0);
+        assert_eq!(series.median_cost_today(), 9.0);
+    }
+
+    /// The trailing-week and trailing-month medians read different amounts of the
+    /// same series (issue #453): a window of ten distinct days' costs has a
+    /// different middle value depending on how many of the ten it is asked to cover.
+    #[test]
+    fn median_cost_over_widens_with_the_window() {
+        let series = synthetic_days(10, |day| day as f64, |_| 0.0);
+
+        // Trailing 7 days are 4..=10; their median is the middle of that run, 7.
+        assert_eq!(series.median_cost_over(7), 7.0);
+        // 30 days asked for, but only 10 exist: the median of 1..=10, 5.5.
+        assert_eq!(series.median_cost_over(30), 5.5);
+    }
+
+    #[test]
+    fn median_of_an_empty_series_reads_as_zero_not_a_panic() {
+        let series = EnergySeries::default();
+        assert_eq!(series.median_cost_today(), 0.0);
+        assert_eq!(series.median_cost_over(7), 0.0);
     }
 }

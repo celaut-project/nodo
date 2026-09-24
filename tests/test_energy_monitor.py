@@ -293,6 +293,53 @@ class PriceSourceRegistryTests(unittest.TestCase):
     MONITOR_IMPORT_ERROR is not None,
     f"Missing runtime dependencies: {MONITOR_IMPORT_ERROR}",
 )
+class MaybePruneTests(unittest.TestCase):
+    """Gating only -- the DELETE itself is `SQLConnection.prune_energy_consumption`,
+    tested against a real database in `tests/test_energy_history.py`."""
+
+    def setUp(self):
+        self.addCleanup(
+            setattr, energy_monitor, "_last_prune_monotonic", energy_monitor._last_prune_monotonic
+        )
+        energy_monitor._last_prune_monotonic = None
+        self.calls = []
+
+    def _sc(self):
+        calls = self.calls
+
+        class _FakeSQLConnection:
+            def prune_energy_consumption(self, keep_days):
+                calls.append(keep_days)
+
+        return _FakeSQLConnection()
+
+    def test_the_first_call_prunes(self):
+        energy_monitor._maybe_prune(self._sc())
+        self.assertEqual(self.calls, [energy_monitor.RETENTION_DAYS])
+
+    def test_a_call_soon_after_is_a_no_op(self):
+        energy_monitor._maybe_prune(self._sc())
+        energy_monitor._maybe_prune(self._sc())
+        self.assertEqual(len(self.calls), 1, "once a day, not once a tick")
+
+    def test_a_call_a_day_later_prunes_again(self):
+        energy_monitor._maybe_prune(self._sc())
+        energy_monitor._last_prune_monotonic -= energy_monitor.PRUNE_INTERVAL_SECONDS
+        energy_monitor._maybe_prune(self._sc())
+        self.assertEqual(len(self.calls), 2)
+
+    def test_a_failing_prune_does_not_raise(self):
+        class _Raising:
+            def prune_energy_consumption(self, keep_days):
+                raise RuntimeError("locked")
+
+        energy_monitor._maybe_prune(_Raising())  # must not raise
+
+
+@unittest.skipIf(
+    MONITOR_IMPORT_ERROR is not None,
+    f"Missing runtime dependencies: {MONITOR_IMPORT_ERROR}",
+)
 class BusyCoresTests(unittest.TestCase):
     def test_host_percentage_becomes_core_time(self):
         cores = os.cpu_count() or 1
@@ -587,7 +634,7 @@ class PriceTests(unittest.TestCase):
     def test_fixed_source_clamps_and_defaults(self):
         tariff = FixedPriceSource(price_per_kwh=-1, currency="").current()
         self.assertEqual(tariff.price_per_kwh, 0.0)
-        self.assertEqual(tariff.currency, "EUR")
+        self.assertEqual(tariff.currency, "USD")
         self.assertEqual(tariff.source, "fixed")
 
 
