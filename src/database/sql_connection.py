@@ -2338,23 +2338,6 @@ class SQLConnection(metaclass=Singleton):
             )
         ''', (peer_id, peer_id, max(0, int(keep_per_peer))))
 
-    def get_last_received_chat_ts(self, peer_id: str) -> Optional[int]:
-        """The highest ``ts`` this node has accepted from ``peer_id``, or None.
-
-        The anti-replay watermark for Chat, on the same principle as
-        ``_passes_anti_replay`` guards a Peer announcement: a signed message is
-        safe to accept from anyone who relays it, but only once, so a verifier
-        rejects one that does not move this peer's own clock strictly forward.
-        Read off the stored messages themselves rather than a column of its own,
-        since the newest accepted ``from_us = 0`` row already says the same thing.
-        """
-        result = self._execute('''
-            SELECT MAX(ts) AS last_ts FROM peer_chat_messages
-            WHERE peer_id = ? AND from_us = 0
-        ''', (peer_id,))
-        row = result.fetchone()
-        return int(row['last_ts']) if row and row['last_ts'] is not None else None
-
     def get_chat_messages(self, peer_id: str, limit: int = 100) -> List[dict]:
         """The stored conversation with ``peer_id``, oldest first, capped at ``limit``."""
         result = self._execute('''

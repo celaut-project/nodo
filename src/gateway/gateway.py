@@ -199,6 +199,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
                     client_id=request.client_id if request else "",
                     challenge=request.challenge if request else "",
                     solution=request.pow_solution if request else "",
+                    peer_id=request.peer_id if request and request.HasField("peer_id") else "",
+                    signature=request.signature if request and request.HasField("signature") else "",
                 ),
                 # A copy: bee-rpc adds its own `0: bytes` entry to whatever it is
                 # handed, and this one is a module-level constant shared with the

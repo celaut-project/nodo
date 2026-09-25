@@ -1,35 +1,55 @@
-"""Chat (issue: peer chat): a signed, size-capped message channel between peers.
+"""Chat (issue: peer chat): a client-authenticated, size-capped message channel.
 
-Pins the properties the RPC's own authentication depends on -- the transport gives
-a server no verified caller identity of its own (see grpc_transport's module
-docstring), so everything here rests on the signature: a message from a peer this
-node has actually introduced itself with is accepted and stored; one that is
-forged, replayed, oversize, or from a stranger is not. Also pins the schema
-upgrade path (a node that only restarts must still get the new table and column,
-see test_schema_upgrade_without_reinstall.py) and the client_id association a
-Chat message may carry (peer.local_client_id).
+Chat itself authenticates exactly like every other client-facing RPC on this
+gateway: `client_id` is a bearer credential (like `TokenMessage.token`), not a
+fresh signature scheme. The interesting property to pin is therefore *where* a
+client_id gets tied to a peer -- at `GenerateClient` time
+(`manager._created_client`), the one moment a freshly minted id and a verifiable
+peer identity exist together -- and that Chat refuses a client_id it never tied
+to anyone, rather than guessing. Also pins the schema upgrade path (a node that
+only restarts must still get the new table and column, see
+test_schema_upgrade_without_reinstall.py).
 """
 import os
 import sqlite3
 import tempfile
 import unittest
+from uuid import uuid4
 
 IMPORT_ERROR = None
 try:
     from mnemonic import Mnemonic
 
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+
     from protos import celaut_pb2
-    celaut_pb2.ChatMessage  # noqa: B018 -- absent until `bash/generate_protos.sh` regenerates it
     from src.database import migrate
     from src.database.sql_connection import SQLConnection, TRACEABILITY_COLUMNS, TRACEABILITY_TABLES
     from src.identity import node_identity as ni
     import src.manager.chat as chat
+    import src.manager.manager as manager
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
 
+# `ChatMessage`, and `Client`'s new `peer_id`/`signature` fields, only exist once
+# `bash/generate_protos.sh` has regenerated `protos/celaut_pb2.py` for this RPC.
+# `generate_client_or_pow_required` itself takes plain strings, not a protobuf
+# `Client`, so `ClientPeerBindingTests` below needs none of this and can run for
+# real before that regeneration; only `PeerChatTests` (which constructs a
+# `ChatMessage`) is gated on it.
+CHAT_PROTO_ERROR = IMPORT_ERROR
+if CHAT_PROTO_ERROR is None:
+    try:
+        celaut_pb2.ChatMessage
+    except AttributeError as chat_proto_exc:
+        CHAT_PROTO_ERROR = chat_proto_exc
+
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
-class PeerChatTests(unittest.TestCase):
+class ClientPeerBindingTests(unittest.TestCase):
+    """Where `peer.local_client_id` actually gets set: GenerateClient, not Chat."""
+
     def setUp(self):
         handle, self.db_path = tempfile.mkstemp(suffix=".sqlite")
         os.close(handle)
@@ -50,69 +70,114 @@ class PeerChatTests(unittest.TestCase):
         self.conn.close()
         os.unlink(self.db_path)
 
-    def _signed(self, body: str, ts: int, client_id: str = "") -> "celaut_pb2.ChatMessage":
-        payload = ni.chat_message_payload(self.peer_id, ts, body)
-        signature = self._peer_key.sign(payload.encode("utf-8")).hex()
-        kwargs = dict(peer_id=self.peer_id, ts=ts, body=body, signature=signature)
-        if client_id:
-            kwargs["client_id"] = client_id
-        return celaut_pb2.ChatMessage(**kwargs)
+    def _binding(self, client_id: str, peer_id: str = None, key=None) -> dict:
+        peer_id = peer_id if peer_id is not None else self.peer_id
+        key = key or self._peer_key
+        payload = ni.client_binding_payload(peer_id, client_id)
+        return {"peer_id": peer_id, "signature": key.sign(payload.encode("utf-8")).hex()}
 
-    def test_a_signed_message_from_a_known_peer_is_stored(self):
-        chat.receive_chat_message(self._signed("hi, is your instance ok?", ts=100))
+    def test_a_verified_binding_associates_the_new_client_with_the_peer(self):
+        client_id = uuid4().hex
+        result = manager.generate_client_or_pow_required(
+            client_id=client_id, **self._binding(client_id)
+        )
+        self.assertEqual(result.client_id, client_id)
+        self.assertTrue(self.sc.client_exists(client_id=client_id))
+        self.assertEqual(self.sc.get_peer_local_client_id(peer_id=self.peer_id), client_id)
 
-        history = self.sc.get_chat_messages(peer_id=self.peer_id)
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[0]["body"], "hi, is your instance ok?")
-        self.assertFalse(history[0]["from_us"])
+    def test_no_binding_data_creates_an_unassociated_client(self):
+        client_id = uuid4().hex
+        result = manager.generate_client_or_pow_required(client_id=client_id)
+        self.assertEqual(result.client_id, client_id)
+        self.assertTrue(self.sc.client_exists(client_id=client_id))
+        self.assertIsNone(self.sc.get_peer_local_client_id(peer_id=self.peer_id))
 
-    def test_a_replayed_message_is_rejected(self):
-        message = self._signed("hello", ts=100)
-        chat.receive_chat_message(message)
-        with self.assertRaises(chat.ChatError):
-            chat.receive_chat_message(message)
-        self.assertEqual(len(self.sc.get_chat_messages(peer_id=self.peer_id)), 1)
+    def test_a_bad_signature_still_creates_the_client_but_does_not_associate_it(self):
+        client_id = uuid4().hex
+        result = manager.generate_client_or_pow_required(
+            client_id=client_id, peer_id=self.peer_id, signature="not-a-real-signature",
+        )
+        self.assertEqual(result.client_id, client_id)
+        self.assertIsNone(self.sc.get_peer_local_client_id(peer_id=self.peer_id))
 
-    def test_a_forged_message_is_rejected(self):
-        message = self._signed("original", ts=100)
-        message.body = "not what was signed"
-        with self.assertRaises(chat.ChatError):
-            chat.receive_chat_message(message)
-        self.assertEqual(self.sc.get_chat_messages(peer_id=self.peer_id), [])
+    def test_a_signature_for_a_different_client_id_does_not_associate(self):
+        client_id = uuid4().hex
+        other_id = uuid4().hex
+        binding = self._binding(other_id)  # signed over the WRONG client_id
+        result = manager.generate_client_or_pow_required(client_id=client_id, **binding)
+        self.assertEqual(result.client_id, client_id)
+        self.assertIsNone(self.sc.get_peer_local_client_id(peer_id=self.peer_id))
 
-    def test_a_stranger_is_rejected_even_with_a_valid_signature(self):
+    def test_binding_to_an_unknown_peer_does_not_associate(self):
         stranger_mnemonic = Mnemonic("english").generate(strength=128)
         stranger_id, stranger_key = ni._cached_keypair(stranger_mnemonic)
-        ts = 100
-        payload = ni.chat_message_payload(stranger_id, ts, "hi")
-        message = celaut_pb2.ChatMessage(
-            peer_id=stranger_id, ts=ts, body="hi",
-            signature=stranger_key.sign(payload.encode("utf-8")).hex(),
+        client_id = uuid4().hex
+        result = manager.generate_client_or_pow_required(
+            client_id=client_id, **self._binding(client_id, peer_id=stranger_id, key=stranger_key)
         )
-        self.assertFalse(self.sc.peer_exists(peer_id=stranger_id))
+        self.assertEqual(result.client_id, client_id)
+        self.assertIsNone(self.sc.get_peer_local_client_id(peer_id=stranger_id))
+
+
+@unittest.skipIf(CHAT_PROTO_ERROR is not None, f"Missing runtime dependencies: {CHAT_PROTO_ERROR}")
+class PeerChatTests(unittest.TestCase):
+    def setUp(self):
+        handle, self.db_path = tempfile.mkstemp(suffix=".sqlite")
+        os.close(handle)
+        self.conn = sqlite3.connect(self.db_path)
+        self.conn.row_factory = sqlite3.Row
+        migrate.create_tables(self.conn.cursor())
+        self.conn.commit()
+        self._orig_conn = SQLConnection._connection
+        SQLConnection._connection = self.conn
+        self.sc = SQLConnection()
+
+        self.peer_id = "a" * 66
+        self.sc.add_peer(peer_id=self.peer_id, advertisement=b"")
+        self.client_id = uuid4().hex
+        self.sc.add_client(client_id=self.client_id, balance_mu=0, last_usage=None)
+        self.sc.set_peer_local_client(peer_id=self.peer_id, client_id=self.client_id)
+
+    def tearDown(self):
+        SQLConnection._connection = self._orig_conn
+        self.conn.close()
+        os.unlink(self.db_path)
+
+    def test_a_message_from_an_associated_client_is_stored_under_its_peer(self):
+        message = celaut_pb2.ChatMessage(client_id=self.client_id, body="is your instance ok?")
+        got_peer_id = chat.receive_chat_message(message)
+
+        self.assertEqual(got_peer_id, self.peer_id)
+        history = self.sc.get_chat_messages(peer_id=self.peer_id)
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["body"], "is your instance ok?")
+        self.assertFalse(history[0]["from_us"])
+
+    def test_an_unknown_client_id_is_rejected(self):
+        message = celaut_pb2.ChatMessage(client_id=uuid4().hex, body="hi")
         with self.assertRaises(chat.ChatError):
             chat.receive_chat_message(message)
 
-    def test_an_oversize_message_is_rejected(self):
-        oversize = "x" * (chat.MAX_MESSAGE_BYTES + 1)
+    def test_a_client_id_never_associated_with_a_peer_is_rejected(self):
+        lonely_client_id = uuid4().hex
+        self.sc.add_client(client_id=lonely_client_id, balance_mu=0, last_usage=None)
+        message = celaut_pb2.ChatMessage(client_id=lonely_client_id, body="hi")
         with self.assertRaises(chat.ChatError):
-            chat.receive_chat_message(self._signed(oversize, ts=100))
+            chat.receive_chat_message(message)
+
+    def test_an_empty_message_is_rejected(self):
+        message = celaut_pb2.ChatMessage(client_id=self.client_id, body="")
+        with self.assertRaises(chat.ChatError):
+            chat.receive_chat_message(message)
         self.assertEqual(self.sc.get_chat_messages(peer_id=self.peer_id), [])
 
-    def test_a_message_carrying_a_known_client_id_associates_it_with_the_peer(self):
-        client_id = "11111111111111111111111111111111"
-        self.sc.add_client(client_id=client_id, balance_mu=0, last_usage=None)
-
-        chat.receive_chat_message(self._signed("this is my client_id", ts=100, client_id=client_id))
-
-        self.assertEqual(self.sc.get_peer_local_client_id(peer_id=self.peer_id), client_id)
-        self.assertEqual(self.sc.get_peer_id_by_local_client(client_id=client_id), self.peer_id)
-
-    def test_an_unknown_client_id_is_not_associated(self):
-        chat.receive_chat_message(
-            self._signed("bogus client_id", ts=100, client_id="deadbeef" * 4)
+    def test_an_oversize_message_is_rejected(self):
+        message = celaut_pb2.ChatMessage(
+            client_id=self.client_id, body="x" * (chat.MAX_MESSAGE_BYTES + 1)
         )
-        self.assertIsNone(self.sc.get_peer_local_client_id(peer_id=self.peer_id))
+        with self.assertRaises(chat.ChatError):
+            chat.receive_chat_message(message)
+        self.assertEqual(self.sc.get_chat_messages(peer_id=self.peer_id), [])
 
     def test_add_chat_message_prunes_each_peer_to_its_own_ceiling(self):
         for i in range(5):

@@ -61,11 +61,12 @@ _SEED_PERSONALISATION: Final[bytes] = b"celaut-id"
 # (an IOU note, a reputation payload) and the other way round.
 _ATTESTATION_PREFIX: Final[str] = "celaut-ledger-attestation:"
 
-# Domain separation for a Chat message, for the same reason: this node's identity key
-# also signs a Peer announcement (canonical_peer_payload) and, for a ledger wallet,
-# an attestation -- without a distinct prefix a signed chat body could be replayed as
-# either of those, or one of those replayed as a chat message.
-_CHAT_MESSAGE_PREFIX: Final[str] = "celaut-chat-message:"
+# Domain separation for binding a client_id to the peer requesting it
+# (GenerateClient, see gateway.GenerateClient / manager.generate_client_or_pow_required),
+# for the same reason: this node's identity key also signs a Peer announcement
+# (canonical_peer_payload) and, for a ledger wallet, an attestation -- without a
+# distinct prefix a signature made for one could be replayed as another.
+_CLIENT_BINDING_PREFIX: Final[str] = "celaut-client-binding:"
 
 
 def component_formal(pairs: Dict[str, str]) -> bytes:
@@ -645,15 +646,15 @@ def attestation_payload(peer_id: str) -> str:
     return _ATTESTATION_PREFIX + peer_id
 
 
-def chat_message_payload(peer_id: str, ts: int, body: str) -> str:
-    """The exact string a Chat message's signature covers.
+def client_binding_payload(peer_id: str, client_id: str) -> str:
+    """The exact string a peer signs to claim ``client_id`` as its own on ``GenerateClient``.
 
-    Binds sender, time and body together: swapping any one of them onto a
-    signature made for another combination fails verification. ``peer_id`` is
-    included even though the recipient already reads it off the same message,
-    so a signature cannot be lifted from a chat with one peer and replayed,
-    unchanged, as though addressed to -- or claimed by -- another.
+    Both are bound together so the signature cannot be lifted onto a different
+    client_id this peer did not just request, nor claimed by a different peer for
+    this one. No timestamp: ``client_id`` is single-use by construction
+    (``sc.client_exists`` already refuses to mint the same one twice), so there is
+    nothing here a replay could achieve that requesting it fresh could not.
     """
-    return f"{_CHAT_MESSAGE_PREFIX}{peer_id}|{ts}|{body}"
+    return f"{_CLIENT_BINDING_PREFIX}{peer_id}|{client_id}"
 
 
