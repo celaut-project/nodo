@@ -30,12 +30,26 @@ def connect_to_database(db_file):
 # carrying what a peer declares node-wide (payment contracts and rates). Its
 # addresses live in the `uri` table, one row each, since they are queried by
 # ip/port rather than read back as a whole.
+#
+# `remote_client_id` and `local_client_id` are the two ends of the *same* client
+# relationship, read from opposite sides. `remote_client_id` is the client_id THIS
+# node was handed when it registered as a client of that peer's own gateway
+# (get_client_id_on_other_peer) -- this node is the caller there. `local_client_id`
+# is the reverse: the client_id THIS node handed out, on some earlier
+# `GenerateClient`, to whichever caller that peer turned out to be -- this node is
+# the callee there, and until something ties the two together there is no way to
+# tell a peer's client_id here apart from any other client's. Chat is the first
+# thing that ties them (a peer's signed Chat message may carry the client_id it
+# holds with us; see gateway.Chat), so it stays unset for a peer that has never
+# chatted, exactly like `remote_client_id` stays unset for a peer this node has
+# never needed to call.
 TABLES = {
     "peer": '''
         CREATE TABLE IF NOT EXISTS peer (
             id TEXT PRIMARY KEY,
             advertisement BLOB,
             remote_client_id TEXT,
+            local_client_id TEXT,
             balance_mu TEXT,
             balance_last_update DATETIME DEFAULT NULL,
             reputation_score INTEGER,
@@ -457,6 +471,25 @@ TABLES = {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (ledger, subject_id, proof_id)
         )
+    ''',
+    # One row per Chat message, either side (`from_us` tells which). `body` is
+    # capped in code before this ever runs (chat.MAX_MESSAGE_BYTES), and
+    # `add_chat_message` prunes a peer's own oldest rows past
+    # chat.MAX_STORED_MESSAGES_PER_PEER on every insert -- both bounds exist
+    # because a message here came from a peer this node did not choose, same as
+    # `guest_env`'s MAX_VALUE_BYTES caps a value the guest did not choose. Without
+    # them, either a single long message or a peer that never stops sending would
+    # grow this table without limit.
+    "peer_chat_messages": '''
+        CREATE TABLE IF NOT EXISTS peer_chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            peer_id TEXT NOT NULL,
+            from_us INTEGER NOT NULL,
+            body TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (peer_id) REFERENCES peer (id)
+        )
     '''
 }
 
@@ -478,6 +511,10 @@ INDEXES = (
     # and the indexer replaces one subject's rows at a time.
     "CREATE INDEX IF NOT EXISTS idx_onchain_opinions_subject "
     "ON onchain_opinions (ledger, subject_id)",
+    # A conversation is always read for one peer, newest last (get_chat_messages);
+    # the prune on insert is the same query with the direction reversed.
+    "CREATE INDEX IF NOT EXISTS idx_peer_chat_messages_peer "
+    "ON peer_chat_messages (peer_id, id)",
 )
 
 
@@ -549,6 +586,7 @@ def create_tables(cursor):
     ensure_columns(cursor, "peer", {
         "last_ts": "INTEGER DEFAULT NULL",
         "advertisement": "BLOB DEFAULT NULL",
+        "local_client_id": "TEXT DEFAULT NULL",
     })
     # What a payment was *for*, as opposed to how far it got. A donation this node
     # paid out of its own earnings is not a payment to a peer, and `status` cannot say

@@ -887,6 +887,23 @@ if __name__ == '__main__':
                     os._exit(1)
                 os._exit(0 if ok else 1)
 
+            case "chat":
+                # `nodo chat <peer_id> <message...>` sends; `nodo chat <peer_id>`
+                # with no message prints the stored conversation instead, so
+                # reading and sending share the one positional shape.
+                chat_args = sys.argv[2:]
+                if not chat_args:
+                    print("Usage: nodo chat <peer_id> [message...]", flush=True)
+                    os._exit(1)
+                chat_peer_id, chat_words = chat_args[0], chat_args[1:]
+                if chat_words:
+                    from src.commands.chat import send_chat
+                    ok = send_chat(peer_id=chat_peer_id, body=" ".join(chat_words))
+                else:
+                    from src.commands.chat import show_chat
+                    ok = show_chat(peer_id=chat_peer_id)
+                os._exit(0 if ok else 1)
+
             case "local_builder":
                 # Run buildctl against nodo's rootless builder (the optional local
                 # packer's toolchain). Import lazily so this never loads on CH-only

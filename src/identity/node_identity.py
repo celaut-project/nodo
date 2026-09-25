@@ -61,6 +61,12 @@ _SEED_PERSONALISATION: Final[bytes] = b"celaut-id"
 # (an IOU note, a reputation payload) and the other way round.
 _ATTESTATION_PREFIX: Final[str] = "celaut-ledger-attestation:"
 
+# Domain separation for a Chat message, for the same reason: this node's identity key
+# also signs a Peer announcement (canonical_peer_payload) and, for a ledger wallet,
+# an attestation -- without a distinct prefix a signed chat body could be replayed as
+# either of those, or one of those replayed as a chat message.
+_CHAT_MESSAGE_PREFIX: Final[str] = "celaut-chat-message:"
+
 
 def component_formal(pairs: Dict[str, str]) -> bytes:
     """``key=value`` lines, sorted by key, UTF-8: the canonical body of a ``formal``.
@@ -637,5 +643,17 @@ def attestation_payload(peer_id: str) -> str:
     other things an Ergo key is asked to sign.
     """
     return _ATTESTATION_PREFIX + peer_id
+
+
+def chat_message_payload(peer_id: str, ts: int, body: str) -> str:
+    """The exact string a Chat message's signature covers.
+
+    Binds sender, time and body together: swapping any one of them onto a
+    signature made for another combination fails verification. ``peer_id`` is
+    included even though the recipient already reads it off the same message,
+    so a signature cannot be lifted from a chat with one peer and replayed,
+    unchanged, as though addressed to -- or claimed by -- another.
+    """
+    return f"{_CHAT_MESSAGE_PREFIX}{peer_id}|{ts}|{body}"
 
 

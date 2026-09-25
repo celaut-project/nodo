@@ -13,6 +13,7 @@ from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_full_node_peer_info
 from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources
+from src.manager.chat import ChatError, receive_chat_message
 from src.manager.metrics import get_metrics
 from src.manager.networks import NetworkRequestRejected, resolve_network_for_peer
 from src.payment_system.payment_process import generate_deposit_token, validate_payment_process
@@ -340,3 +341,19 @@ class Gateway(celaut_pb2_grpc.Gateway):
 
     def Observe(self, request_iterator, context, **kwargs):
         yield from ObserveIterable(request_iterator, context)
+
+    def Chat(self, request_iterator, context, **kwargs):
+        message = next(bee.parse_from_buffer(
+            request_iterator=request_iterator,
+            indices=celaut_pb2.ChatMessage,
+            partitions_message_mode=True
+        ), None)
+        if message is None:
+            raise Exception("Chat needs a ChatMessage.")
+        try:
+            peer_id = receive_chat_message(message)
+        except ChatError as e:
+            log.LOGGER(f"Chat message from {context.peer()} refused: {e}")
+            raise Exception(str(e))
+        log.LOGGER(f"Chat message accepted from peer {peer_id}.")
+        for b in bee.serialize_to_buffer(): yield b
