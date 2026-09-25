@@ -69,6 +69,9 @@ TRACEABILITY_TABLES = (
     # direction, but silently: the node would route as though nobody had ever vouched
     # for anybody.
     "onchain_opinions",
+    # A peer's chat history with this node. Without it, Chat would still answer, but
+    # every message would vanish on the next restart with no error to say so.
+    "peer_chat_messages",
 )
 
 # Columns on an existing table that a database created before them will not have.
@@ -77,6 +80,11 @@ TRACEABILITY_TABLES = (
 # this an in-place upgrade would fail to record every donation it pays.
 TRACEABILITY_COLUMNS = {
     "payments": {"purpose": "TEXT DEFAULT NULL"},
+    # `peer` is a base table every install already has, so unlike a wholly new table
+    # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
+    # upgraded in place would raise "no such column: local_client_id" on the first
+    # Chat message a peer sends that names its client_id (see gateway.Chat).
+    "peer": {"local_client_id": "TEXT DEFAULT NULL"},
 }
 
 
@@ -2258,6 +2266,113 @@ class SQLConnection(metaclass=Singleton):
         except sqlite3.Error as e:
             logger.LOGGER(f'Failed to delete external client associated with peer {peer_id}: {e}')
             pass
+
+    def set_peer_local_client(self, peer_id: str, client_id: str) -> bool:
+        """Record that ``client_id`` (one of THIS node's own clients) belongs to ``peer_id``.
+
+        The mirror of :meth:`add_external_client`: that one remembers a client_id
+        this node holds on a peer, this one remembers a client_id a peer holds on
+        this node. ``client_id`` must already exist in ``clients`` -- this only
+        attaches a peer identity to a client relationship that some earlier
+        ``GenerateClient`` already created, never invents one.
+        """
+        if not self.peer_exists(peer_id=peer_id):
+            logger.LOGGER(f'Cannot associate local client {client_id}: peer {peer_id} does not exist')
+            return False
+        if not self.client_exists(client_id=client_id):
+            logger.LOGGER(f'Cannot associate local client {client_id} with peer {peer_id}: no such client')
+            return False
+        try:
+            self._execute('''
+                UPDATE peer SET local_client_id = ? WHERE id = ?
+            ''', (client_id, peer_id))
+            logger.LOGGER(f'Associated local client {client_id} with peer {peer_id}')
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to associate local client {client_id} with peer {peer_id}: {e}')
+            return False
+
+    def get_peer_local_client_id(self, peer_id: str) -> Optional[str]:
+        """The client_id ``peer_id`` holds on this node, or None if unset/unknown."""
+        result = self._execute('''
+            SELECT local_client_id FROM peer WHERE id = ?
+        ''', (peer_id,))
+        row = result.fetchone()
+        return row['local_client_id'] if row else None
+
+    def get_peer_id_by_local_client(self, client_id: str) -> Optional[str]:
+        """Which peer ``client_id`` belongs to, or None if it belongs to none.
+
+        The reverse of :meth:`get_peer_local_client_id` -- for attributing a call
+        that already identified itself by client_id (e.g. a metered RPC) back to
+        the peer operating it, when that association happens to be known.
+        """
+        result = self._execute('''
+            SELECT id FROM peer WHERE local_client_id = ?
+        ''', (client_id,))
+        row = result.fetchone()
+        return row['id'] if row else None
+
+    def add_chat_message(self, peer_id: str, from_us: bool, body: str, ts: int,
+                         keep_per_peer: int) -> None:
+        """Store one Chat message and prune ``peer_id``'s history down to ``keep_per_peer``.
+
+        The prune runs on every insert rather than on a schedule of its own, the
+        same reasoning as :meth:`prune_demand_history`: on insert is the one moment
+        this node is certainly touching the row, and a peer that never chats again
+        after flooding this node would otherwise never trigger a cleanup at all.
+        Scoped to one peer at a time, so one abusive peer's history cannot crowd
+        another's out of its own share of the ceiling.
+        """
+        self._execute('''
+            INSERT INTO peer_chat_messages (peer_id, from_us, body, ts)
+            VALUES (?, ?, ?, ?)
+        ''', (peer_id, int(bool(from_us)), body, int(ts)))
+        self._execute('''
+            DELETE FROM peer_chat_messages
+            WHERE peer_id = ? AND id NOT IN (
+                SELECT id FROM peer_chat_messages
+                WHERE peer_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+            )
+        ''', (peer_id, peer_id, max(0, int(keep_per_peer))))
+
+    def get_last_received_chat_ts(self, peer_id: str) -> Optional[int]:
+        """The highest ``ts`` this node has accepted from ``peer_id``, or None.
+
+        The anti-replay watermark for Chat, on the same principle as
+        ``_passes_anti_replay`` guards a Peer announcement: a signed message is
+        safe to accept from anyone who relays it, but only once, so a verifier
+        rejects one that does not move this peer's own clock strictly forward.
+        Read off the stored messages themselves rather than a column of its own,
+        since the newest accepted ``from_us = 0`` row already says the same thing.
+        """
+        result = self._execute('''
+            SELECT MAX(ts) AS last_ts FROM peer_chat_messages
+            WHERE peer_id = ? AND from_us = 0
+        ''', (peer_id,))
+        row = result.fetchone()
+        return int(row['last_ts']) if row and row['last_ts'] is not None else None
+
+    def get_chat_messages(self, peer_id: str, limit: int = 100) -> List[dict]:
+        """The stored conversation with ``peer_id``, oldest first, capped at ``limit``."""
+        result = self._execute('''
+            SELECT from_us, body, ts, received_at
+            FROM peer_chat_messages
+            WHERE peer_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        ''', (peer_id, max(0, int(limit))))
+        return [
+            {
+                'from_us': bool(row['from_us']),
+                'body': row['body'],
+                'ts': int(row['ts']),
+                'received_at': row['received_at'],
+            }
+            for row in reversed(result.fetchall())
+        ]
 
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str,
                                peer_id: str, serialized_instance: str, service_id: str,

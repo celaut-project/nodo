@@ -939,6 +939,17 @@ client:
   # top-ups from existing clients) without touching anyone's current balance.
   ACCEPT_NEW_DEPOSITS: true
 
+chat:
+  # A Chat message body over this many UTF-8 bytes is refused outright rather than
+  # truncated -- silently cutting a peer's message would leave both operators
+  # thinking they'd said something they hadn't.
+  MAX_MESSAGE_BYTES: 4096
+  # How many of a single peer's messages (either direction) this node keeps on
+  # disk. Bounds storage against a peer that never stops chatting; a bound per
+  # peer rather than on the whole table so one abusive peer cannot crowd out the
+  # history this node keeps with every other one.
+  MAX_STORED_MESSAGES_PER_PEER: 200
+
 misc:
   MEMSWAP_FACTOR: 0
   USE_PRINT: false

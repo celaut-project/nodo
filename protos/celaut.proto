@@ -613,6 +613,30 @@ message PoWRequired {
     int32 difficulty = 5;
 }
 
+// A free-text message exchanged directly between two peers' operators (issue: peer
+// chat), for coordinating when something is wrong outside any service execution --
+// there is otherwise no channel between two node operators at all.
+//
+// Authenticated the same way a `Peer` announces itself, because the transport gives
+// a server no verified caller identity (see grpc_transport's module docstring): a
+// signature alone is what makes `peer_id` more than a claim. `signature` covers
+// `peer_id`, `ts` and `body` together (identity.node_identity.chat_message_payload),
+// so neither can be swapped onto the other without invalidating it.
+//
+// `client_id` is optional and is not the sender's authentication -- the signature
+// already is that. When set, it is the client_id this node itself handed out to the
+// sender on some earlier `GenerateClient` call, offered so the recipient can learn
+// which of its own clients that peer is (`peer.local_client_id`); a chat from a peer
+// that never called `GenerateClient`, or that chooses not to say, simply leaves that
+// association unmade.
+message ChatMessage {
+    string peer_id = 1;
+    int64 ts = 2;
+    string body = 3;
+    string signature = 4;
+    optional string client_id = 5;
+}
+
 message RecursionGuard {
     string token = 1;
 }
@@ -757,4 +781,5 @@ service Gateway {
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage | bytes -> bytes
     rpc Observe(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ObserveRequest(instance_id/token) -> stream ObserveEvent
+    rpc Chat(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ChatMessage ->
 }

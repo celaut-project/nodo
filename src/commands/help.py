@@ -76,6 +76,7 @@ GROUPS: List[Group] = [
             ("peers", "list the peers this node knows"),
             ("connect <ip:port>", "introduce this node to a peer"),
             ("disconnect <peer>", "forget a peer"),
+            ("chat <peer> [message...]", "read a peer's chat history, or send it a message"),
             ("clients", "list the clients that use this node"),
             ("reputation [<peer>]", "what the network stakes on us (--json)"),
             ("verify_reputation <peer>", "validate a peer's reputation proof and ownership"),
