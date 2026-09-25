@@ -786,8 +786,41 @@ def max_work_free_clients_per_difficulty() -> int:
     return value if value > 0 else DEFAULT_MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY
 
 
+def _created_client(client_id: str, peer_id: str = "", signature: str = "") -> celaut_pb2.Client:
+    """Create ``client_id`` and, when the request proved it, bind it to a peer.
+
+    The one moment a client_id and a verified peer identity can be tied together
+    without ambiguity: the id is minted right here, so there is no window where it
+    exists unbound. A ``peer_id``/``signature`` that does not verify, or that names
+    a peer this node does not know, is not an error -- the client is still created,
+    just as it always was, simply left unassociated (see ``ChatMessage`` in
+    celaut.proto: a client is the common case, a peer is the exception).
+    """
+    created = generate_client(client_id=client_id)
+    if peer_id and signature:
+        from src.identity.node_identity import (
+            client_binding_payload,
+            normalize_public_key_hex,
+            verify_peer_payload,
+        )
+
+        normalized = normalize_public_key_hex(peer_id)
+        if normalized and sc.peer_exists(peer_id=normalized) and verify_peer_payload(
+            normalized, client_binding_payload(normalized, client_id), signature
+        ):
+            sc.set_peer_local_client(peer_id=normalized, client_id=client_id)
+            log.LOGGER(f'Bound new client {client_id} to peer {normalized}.')
+        else:
+            log.LOGGER(
+                f'GenerateClient: peer binding for {client_id} did not verify; '
+                'leaving it unassociated.'
+            )
+    return created
+
+
 def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
-                                    solution: str = ""):
+                                    solution: str = "", peer_id: str = "",
+                                    signature: str = ""):
     """Answer a ``GenerateClient`` with either the new client or the work it costs.
 
     The order of the checks is the point (issue #361 §8), and it is deliberately the
@@ -795,6 +828,11 @@ def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
     says the id is still free, and only then is a hash computed. Validating the proof of
     work first would mean an attacker could make this node hash for a ``client_id`` that
     was never going to be created.
+
+    ``peer_id``/``signature`` are the caller proving it is also a known peer, over
+    whichever ``client_id`` this call actually creates (see ``_created_client``). Both
+    are optional and ignored (not merely unverified -- never even read) on the
+    ``PoWRequired`` branch: nothing is created there yet to bind.
 
     Returns a ``celaut_pb2.Client`` when a client was created, or a
     ``celaut_pb2.PoWRequired`` carrying the challenge to solve. Raises on a request that
@@ -816,7 +854,7 @@ def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
             challenge=challenge, solution=solution, difficulty=authenticated_difficulty
         ):
             raise PoWError("Invalid proof of work solution.")
-        return generate_client(client_id=authenticated_id)
+        return _created_client(authenticated_id, peer_id=peer_id, signature=signature)
 
     difficulty = current_difficulty(
         existing_clients=sc.count_clients(),
@@ -825,14 +863,15 @@ def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
 
     if difficulty == 0:
         # Free, and a caller that sent no id at all still gets one -- which is every
-        # caller written before this existed.
+        # caller written before this existed. There is nothing to bind a peer_id to in
+        # that case: the id did not exist yet for the caller to have signed over it.
         if not client_id:
             return generate_client()
         if not is_uuid4_hex(client_id):
             raise PoWError("client_id must be the 32 hex characters of a UUID4.")
         if sc.client_exists(client_id=client_id):
             raise PoWError("Client already exists.")
-        return generate_client(client_id=client_id)
+        return _created_client(client_id, peer_id=peer_id, signature=signature)
 
     # Not free. The id has to be the caller's, because it is what the challenge binds to
     # and what stops a solution being spent twice.
@@ -895,6 +934,19 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
     # would not match the challenge and the work would be wasted.
     proposed_id = uuid4().hex
 
+    # Prove our own peer identity over that same id, so the peer we are becoming a
+    # client of can bind it to us (its `peer.local_client_id`) the moment it creates
+    # it -- see `_created_client`. Best-effort and left off the message entirely when
+    # unavailable: a node with no identity key configured simply becomes a client
+    # unassociated, exactly as before this existed.
+    from src.identity.node_identity import client_binding_payload, get_node_public_key_hex, sign_peer_payload
+    binding: dict = {}
+    candidate_id = get_node_public_key_hex()
+    if candidate_id:
+        candidate_signature = sign_peer_payload(client_binding_payload(candidate_id, proposed_id))
+        if candidate_signature:
+            binding = {"peer_id": candidate_id, "signature": candidate_signature}
+
     def _ask(message) -> Optional[object]:
         return next(bee.client_grpc(
             method=celaut_pb2_grpc.GatewayStub(
@@ -906,7 +958,7 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
             partitions_message_mode_parser=True
         ), None)
 
-    client_msg = _ask(celaut_pb2.Client(client_id=proposed_id))
+    client_msg = _ask(celaut_pb2.Client(client_id=proposed_id, **binding))
 
     if isinstance(client_msg, celaut_pb2.PoWRequired):
         # The peer has given away its free clients. Its `difficulty` field only says what
@@ -922,6 +974,7 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
             pow_solution=solve_pow(
                 challenge=client_msg.challenge, difficulty=client_msg.difficulty
             ),
+            **binding,
         ))
 
     if not client_msg or not isinstance(client_msg, celaut_pb2.Client):

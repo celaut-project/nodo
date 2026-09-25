@@ -4,19 +4,24 @@ A free-text channel between two node operators, outside any service execution --
 there is otherwise no way for one operator to reach the other at all when
 something about a shared instance or payment goes wrong.
 
-Authenticated the same way a ``Peer`` announces itself, because the gRPC server
-gives no verified caller identity of its own (``grpc_transport``'s module
-docstring): the sender signs ``peer_id|ts|body`` with its identity key
-(``node_identity.chat_message_payload``), and only a peer this node has already
-introduced itself with (``sc.peer_exists``) is accepted -- chat is a channel
-between known peers, not an open inbox for strangers.
+Authenticated the same way every other client-facing RPC on this gateway is:
+``client_id`` is a bearer credential, exactly like ``TokenMessage.token`` or
+``ModifyDepositInput.service_token``, not a fresh signature scheme of its own.
+This node attributes a Chat message to whichever peer it already knows that
+client_id as (``peer.local_client_id``) -- a peer this node has never introduced
+itself with cannot chat, because it can never have gotten a bound client_id in
+the first place (see below).
 
-``ChatMessage.client_id`` is how the two ends of a peer's client relationship get
-tied together (see the ``peer`` table's ``local_client_id`` comment in
-``migrate.py``): when this node calls ``send_chat_message`` on a peer it already
-holds a client_id on (``sc.get_peer_client``), it rides along on the message, and
-the recipient -- if that client_id is one of its own -- records the association
-via ``sc.set_peer_local_client``.
+The association itself is made once, at ``GenerateClient`` time
+(``manager._created_client``), not here: a client_id is single-use and minted
+right there, so a peer that wants to be recognised later signs over it -- with
+its identity key, the same one a ``Peer`` announcement is signed with -- in the
+very request that creates it (``Client.peer_id``/``Client.signature``,
+``node_identity.client_binding_payload``). Putting that signature on Chat
+itself, instead, was the first cut of this design and was wrong: it would have
+meant broadcasting an internal client_id UUID inside a message this node also
+lets its neighbours relay -- exactly the bearer secret Chat depends on to
+authenticate, handed to anyone in earshot of the gossip.
 """
 # Deferred: `celaut_pb2.ChatMessage` only exists once `bash/generate_protos.sh` has
 # been rerun against the new RPC (see that script's docstring); this keeps a plain
@@ -24,20 +29,14 @@ via ``sc.set_peer_local_client``.
 from __future__ import annotations
 
 import time
-from typing import List, Optional
+from typing import List
 
 from bee_rpc import client as bee
 
 from protos import celaut_pb2, celaut_pb2_grpc
 from src.database.sql_connection import SQLConnection
 from src.identity.grpc_transport import peer_channel
-from src.identity.node_identity import (
-    chat_message_payload,
-    get_node_public_key_hex,
-    normalize_public_key_hex,
-    sign_peer_payload,
-    verify_peer_payload,
-)
+from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 
@@ -51,7 +50,7 @@ MAX_STORED_MESSAGES_PER_PEER = int(
 
 
 class ChatError(Exception):
-    """A Chat message was refused: bad identity, unknown peer, oversize or stale."""
+    """A Chat message was refused: unknown or unassociated client_id, or oversize."""
 
 
 def _validated_body(body: str) -> str:
@@ -67,63 +66,55 @@ def _validated_body(body: str) -> str:
 def receive_chat_message(message: celaut_pb2.ChatMessage) -> str:
     """Verify, store and return the peer_id of an incoming Chat message.
 
-    Raises :class:`ChatError` on anything that keeps the message from being
-    accepted: an unverifiable signature, a peer this node has never introduced
-    itself with, an oversize body, or a ``ts`` that does not move this peer's
-    chat history strictly forward (replay).
+    Raises :class:`ChatError` when ``client_id`` is not a client of this node, or
+    is one this node never associated with a peer (see the module docstring for
+    where that association is made), or the body is empty/oversize.
     """
-    peer_id = normalize_public_key_hex(message.peer_id)
+    client_id = message.client_id
+    if not client_id or not sc.client_exists(client_id=client_id):
+        raise ChatError("Unknown client_id.")
+
+    peer_id = sc.get_peer_id_by_local_client(client_id=client_id)
     if not peer_id:
-        raise ChatError("peer_id is not a canonical public key.")
-
-    if not verify_peer_payload(
-        peer_id,
-        chat_message_payload(peer_id, message.ts, message.body),
-        message.signature,
-    ):
-        raise ChatError(f"Signature does not verify for claimed peer_id {peer_id}.")
-
-    if not sc.peer_exists(peer_id=peer_id):
-        raise ChatError(f"{peer_id} is not a known peer; IntroducePeer before chatting.")
-
-    last_ts = sc.get_last_received_chat_ts(peer_id=peer_id)
-    if last_ts is not None and message.ts <= last_ts:
-        raise ChatError("Stale or replayed message (ts did not move forward).")
+        raise ChatError(
+            f"client_id {client_id} is not associated with any peer; call "
+            "GenerateClient asserting your peer identity first."
+        )
 
     body = _validated_body(message.body)
 
-    client_id = message.client_id if message.HasField("client_id") else ""
-    if client_id and sc.client_exists(client_id=client_id):
-        sc.set_peer_local_client(peer_id=peer_id, client_id=client_id)
-
     sc.add_chat_message(
-        peer_id=peer_id, from_us=False, body=body, ts=message.ts,
+        peer_id=peer_id, from_us=False, body=body, ts=int(time.time()),
         keep_per_peer=MAX_STORED_MESSAGES_PER_PEER,
     )
-    log.LOGGER(f"Chat message stored from peer {peer_id}.")
+    log.LOGGER(f"Chat message stored from peer {peer_id} (client {client_id}).")
     return peer_id
 
 
 def send_chat_message(peer_id: str, body: str) -> None:
-    """Sign, send and locally record a Chat message to ``peer_id``."""
+    """Send and locally record a Chat message to ``peer_id``.
+
+    Sent under whichever client_id this node already holds on ``peer_id``
+    (``sc.get_peer_client`` -- the existing, unrelated ``remote_client_id``); when
+    there is none yet, this node becomes a client of that peer first
+    (``get_client_id_on_other_peer``), which is also the call that lets the
+    recipient bind that new client_id back to *this* node's own peer_id.
+    """
     body = _validated_body(body)
 
     if not sc.peer_exists(peer_id=peer_id):
         raise ChatError(f"{peer_id} is not a known peer.")
 
-    our_id = get_node_public_key_hex()
-    if not our_id:
-        raise ChatError("This node has no identity key configured; cannot sign a chat message.")
+    client_id = sc.get_peer_client(peer_id=peer_id)
+    if not client_id:
+        try:
+            client_id = get_client_id_on_other_peer(peer_id=peer_id)
+        except Exception as e:
+            raise ChatError(f"Could not become a client of {peer_id}: {e}") from e
+    if not client_id:
+        raise ChatError(f"Could not become a client of {peer_id}.")
 
-    ts = int(time.time())
-    signature = sign_peer_payload(chat_message_payload(our_id, ts, body))
-    if not signature:
-        raise ChatError("Could not sign the chat message: no identity key.")
-
-    chat_message = celaut_pb2.ChatMessage(peer_id=our_id, ts=ts, body=body, signature=signature)
-    client_id_on_recipient = sc.get_peer_client(peer_id=peer_id)
-    if client_id_on_recipient:
-        chat_message.client_id = client_id_on_recipient
+    chat_message = celaut_pb2.ChatMessage(client_id=client_id, body=body)
 
     next(bee.client_grpc(
         method=celaut_pb2_grpc.GatewayStub(peer_channel(peer_id=peer_id)).Chat,
@@ -132,7 +123,7 @@ def send_chat_message(peer_id: str, body: str) -> None:
     ), None)
 
     sc.add_chat_message(
-        peer_id=peer_id, from_us=True, body=body, ts=ts,
+        peer_id=peer_id, from_us=True, body=body, ts=int(time.time()),
         keep_per_peer=MAX_STORED_MESSAGES_PER_PEER,
     )
     log.LOGGER(f"Chat message sent to peer {peer_id}.")

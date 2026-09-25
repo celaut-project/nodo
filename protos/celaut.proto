@@ -598,6 +598,18 @@ message Client {
     // and a node whose difficulty is still 0 -- keeps working unchanged.
     optional string challenge = 2;
     optional string pow_solution = 3;
+
+    // Optional: the caller proving it is also a known peer, so this node can learn
+    // which of its own clients that peer is (`peer.local_client_id`) at the one
+    // moment the association can be made without ambiguity -- client_id is minted
+    // right here, so there is no window where it exists but is not yet bound.
+    // `signature` covers `peer_id` and `client_id` together
+    // (identity.node_identity.client_binding_payload), signed with the peer's
+    // identity key. Left unset, a client is created exactly as before, tied to no
+    // peer -- most callers are not peers at all (docs/CONCEPTS.md's "Peers and
+    // clients"), so this is the exception, not the rule.
+    optional string peer_id = 4;
+    optional string signature = 5;
 }
 
 // What GenerateClient answers with instead of a Client once this node has handed out
@@ -617,24 +629,15 @@ message PoWRequired {
 // chat), for coordinating when something is wrong outside any service execution --
 // there is otherwise no channel between two node operators at all.
 //
-// Authenticated the same way a `Peer` announces itself, because the transport gives
-// a server no verified caller identity (see grpc_transport's module docstring): a
-// signature alone is what makes `peer_id` more than a claim. `signature` covers
-// `peer_id`, `ts` and `body` together (identity.node_identity.chat_message_payload),
-// so neither can be swapped onto the other without invalidating it.
-//
-// `client_id` is optional and is not the sender's authentication -- the signature
-// already is that. When set, it is the client_id this node itself handed out to the
-// sender on some earlier `GenerateClient` call, offered so the recipient can learn
-// which of its own clients that peer is (`peer.local_client_id`); a chat from a peer
-// that never called `GenerateClient`, or that chooses not to say, simply leaves that
-// association unmade.
+// Authenticated the same way every other client-facing RPC on this gateway is --
+// `client_id` is a bearer credential, exactly like `TokenMessage.token` or
+// `ModifyDepositInput.service_token`, not a fresh signature scheme of its own. The
+// sender is whichever peer this node already knows that client_id as
+// (`peer.local_client_id`, set once at `GenerateClient` time); a `client_id` this
+// node never associated with a peer is refused, not attributed to a stranger.
 message ChatMessage {
-    string peer_id = 1;
-    int64 ts = 2;
-    string body = 3;
-    string signature = 4;
-    optional string client_id = 5;
+    string client_id = 1;
+    string body = 2;
 }
 
 message RecursionGuard {

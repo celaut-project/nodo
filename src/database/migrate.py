@@ -37,12 +37,16 @@ def connect_to_database(db_file):
 # (get_client_id_on_other_peer) -- this node is the caller there. `local_client_id`
 # is the reverse: the client_id THIS node handed out, on some earlier
 # `GenerateClient`, to whichever caller that peer turned out to be -- this node is
-# the callee there, and until something ties the two together there is no way to
-# tell a peer's client_id here apart from any other client's. Chat is the first
-# thing that ties them (a peer's signed Chat message may carry the client_id it
-# holds with us; see gateway.Chat), so it stays unset for a peer that has never
-# chatted, exactly like `remote_client_id` stays unset for a peer this node has
-# never needed to call.
+# the callee there. `local_client_id` is set at that exact moment, not discovered
+# later: a peer that wants to be recognised signs its own identity over the
+# client_id it is requesting (`Client.peer_id`/`signature`,
+# `node_identity.client_binding_payload`, verified in `manager._created_client`)
+# in the very call that mints it, since that is the one place the id and a
+# verifiable claimant exist together and nothing has to be taken on trust
+# afterwards. A peer that never asserts its identity there -- most callers never
+# do; see docs/CONCEPTS.md's "Peers and clients" -- simply stays unassociated,
+# same as `remote_client_id` stays unset for a peer this node has never needed to
+# call.
 TABLES = {
     "peer": '''
         CREATE TABLE IF NOT EXISTS peer (
