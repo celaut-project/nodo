@@ -540,13 +540,22 @@ class ResolvePowNetworkTests(unittest.TestCase):
         """
         self.assertEqual(self._resolve(qualifying=()), [])
 
-    def test_the_declared_protocol_stack_is_carried_onto_the_peer(self):
+    def test_the_p2p_slot_carries_its_own_tag_never_the_askers(self):
+        """Unlike the DNS path, the P2P slot is not the requester's own
+        `protocol_stack` echoed back: that describes what the *asker* wants,
+        identically for every candidate of one resolution, never what a specific
+        peer's port speaks (see the proposal document). What `network.protocol_stack`
+        declares does not change which slot this node's own `pow:ergo` answer names
+        its P2P one."""
         network = _network()
         network.protocol_stack.append(celaut.Service.Api.Protocol(tags=["http"]))
 
         peers = self._resolve(network=network)
 
-        self.assertEqual(list(peers[0].api.slot[0].protocol_stack[0].tags), ["http"])
+        self.assertEqual(
+            list(peers[0].api.slot[0].protocol_stack[0].tags),
+            [pow_networks.P2P_SLOT_TAG],
+        )
         self.assertEqual(list(peers[0].api.slot[0].transport.tags), ["tcp"])
 
     def test_a_malformed_formal_stops_the_resolution_rather_than_returning_peers(self):
@@ -702,30 +711,45 @@ class CandidateSourceTests(unittest.TestCase):
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class PeerSuggestedEndpointTests(unittest.TestCase):
-    """A peer's `ResolveNetwork` answer for `pow:ergo` names a **P2P** address.
-
-    Dialling that port over HTTP would be speaking REST to Ergo's P2P protocol, which
-    never answers -- every such candidate would fail verification and this source
-    would be silently empty. So the peer-given port is never reused for the REST
-    guess; only the host is, on Ergo mainnet's conventional REST port.
+    """A peer's `ResolveNetwork` answer for `pow:ergo` may tag one of its addresses
+    as its REST slot (see `ResolvePowNetworkTests` -- `resolve_pow_network` builds
+    exactly that tag onto its own answers). That port is used directly when it is
+    there; only an ip nobody tagged that way falls back to Ergo mainnet's
+    conventional REST port.
     """
 
-    def test_the_peer_given_port_is_never_dialled_as_rest(self):
+    def test_a_tagged_rest_address_is_used_directly(self):
         with patch(
             "src.manager.network_discovery.ask_peers",
-            return_value=[("203.0.113.5", 9030)],
+            return_value=[("203.0.113.5", 9099, (pow_networks.REST_SLOT_TAG,))],
+        ):
+            self.assertEqual(
+                pow_networks._peer_suggested_endpoints(_network()),
+                ["http://203.0.113.5:9099"],
+            )
+
+    def test_an_untagged_address_falls_back_to_the_default_rest_port(self):
+        """A peer that never built a REST slot (an older nodo, or another celaut
+        implementation) only ever offers the P2P port -- which is never reused for
+        the REST guess, since it was never a REST port to begin with."""
+        with patch(
+            "src.manager.network_discovery.ask_peers",
+            return_value=[("203.0.113.5", 9030, ())],
         ):
             self.assertEqual(
                 pow_networks._peer_suggested_endpoints(_network()),
                 [f"http://203.0.113.5:{pow_networks.MAINNET_REST_PORT}"],
             )
 
-    def test_every_suggestion_is_guessed_the_same_way_whatever_port_it_named(self):
-        """Different peers may report different (wrong, for REST) ports; none of them
-        change the guess, because none of them were ever a REST port to begin with."""
+    def test_each_ip_is_guessed_or_confirmed_independently(self):
+        """Two peers, two ips, one tagged REST and one not: neither guess leaks into
+        the other's candidate."""
         with patch(
             "src.manager.network_discovery.ask_peers",
-            return_value=[("203.0.113.5", 9030), ("203.0.113.6", 9031)],
+            return_value=[
+                ("203.0.113.5", 9030, (pow_networks.P2P_SLOT_TAG,)),
+                ("203.0.113.6", 9031, ()),
+            ],
         ):
             self.assertEqual(
                 pow_networks._peer_suggested_endpoints(_network()),
@@ -733,6 +757,22 @@ class PeerSuggestedEndpointTests(unittest.TestCase):
                     f"http://203.0.113.5:{pow_networks.MAINNET_REST_PORT}",
                     f"http://203.0.113.6:{pow_networks.MAINNET_REST_PORT}",
                 ],
+            )
+
+    def test_the_rest_tagged_address_for_an_ip_wins_over_its_untagged_one(self):
+        """The same peer answering with both its P2P and its REST slot -- two
+        separate (ip, port, tags) triples for one ip -- must not cost two guesses
+        or, worse, guess over the one address that was already confirmed."""
+        with patch(
+            "src.manager.network_discovery.ask_peers",
+            return_value=[
+                ("203.0.113.5", 9030, (pow_networks.P2P_SLOT_TAG,)),
+                ("203.0.113.5", 9099, (pow_networks.REST_SLOT_TAG,)),
+            ],
+        ):
+            self.assertEqual(
+                pow_networks._peer_suggested_endpoints(_network()),
+                ["http://203.0.113.5:9099"],
             )
 
     def test_an_unavailable_peer_discovery_module_yields_nothing_rather_than_raising(self):
@@ -867,13 +907,15 @@ class P2PEndpointTests(unittest.TestCase):
         # Verification went to the REST urls, unchanged.
         self.assertEqual(asked, ["https://crawled.test", "https://configured.test:9053"])
 
-    def test_the_rest_uri_is_not_also_emitted(self):
-        """One uri per peer, and it is the P2P one.
-
-        An `Instance.Uri` carries an ip and a port and no role, so a second uri would
-        be indistinguishable from the first to the guest, while the firewall would
-        open both. The guest asked for chain peers; a REST API is a different ask and
-        would be a different network descriptor.
+    def test_the_rest_uri_is_also_emitted_as_its_own_tagged_slot(self):
+        """Two uris per peer now, apart by more than which one comes first: each
+        carries its own `Api.Slot`, tagged P2P or REST, never the other's tag and
+        never the requester's own `protocol_stack` (see
+        `test_the_p2p_slot_carries_its_own_tag_never_the_askers`). That a guest asking
+        plain `pow:ergo` never gets to *use* the REST one is
+        `narrow_instances_for_local_grant`'s job, exercised in
+        `NarrowInstancesForLocalGrantTests` -- this only pins what
+        `resolve_pow_network` itself builds.
         """
         with patch.object(
             pow_networks, "candidate_urls", return_value=["https://only.test:9053"]
@@ -885,15 +927,29 @@ class P2PEndpointTests(unittest.TestCase):
             peers = pow_networks.resolve_pow_network(_network(), tag="pow:ergo")
 
         self.assertEqual(len(peers), 1)
-        self.assertEqual(len(peers[0].uri_slot), 1)
-        self.assertEqual(len(peers[0].uri_slot[0].uri), 1)
-        self.assertEqual(peers[0].uri_slot[0].uri[0].port, 9030)
-        self.assertNotIn(9053, [u.port for u in peers[0].uri_slot[0].uri])
+        peer = peers[0]
+        self.assertEqual(len(peer.api.slot), 2)
+        self.assertEqual(len(peer.uri_slot), 2)
+
+        by_tag = {
+            slot.protocol_stack[0].tags[0]: slot for slot in peer.api.slot
+        }
+        self.assertEqual(set(by_tag), {pow_networks.P2P_SLOT_TAG, pow_networks.REST_SLOT_TAG})
+        p2p_slot, rest_slot = by_tag[pow_networks.P2P_SLOT_TAG], by_tag[pow_networks.REST_SLOT_TAG]
+        self.assertEqual(p2p_slot.port, 9030)
+        self.assertEqual(rest_slot.port, 9053)
+
+        uris_by_port = {
+            uri_slot.internal_port: uri_slot.uri[0].port for uri_slot in peer.uri_slot
+        }
+        self.assertEqual(uris_by_port, {9030: 9030, 9053: 9053})
 
     def test_the_instance_is_otherwise_byte_identical(self):
-        """Only the port moved. Slot numbering, transport and protocol_stack did not."""
+        """Slot numbering follows the real port now, not an arbitrary index -- and
+        the P2P slot's protocol_stack is this module's own tag, not whatever the
+        requester's network declared."""
         network = _network()
-        network.protocol_stack.append(celaut.Service.Api.Protocol(tags=["ergo-p2p"]))
+        network.protocol_stack.append(celaut.Service.Api.Protocol(tags=["something-else"]))
 
         with patch.object(
             pow_networks, "candidate_urls", return_value=["https://only.test:9053"]
@@ -904,11 +960,112 @@ class P2PEndpointTests(unittest.TestCase):
         ), self._numeric():
             peer = pow_networks.resolve_pow_network(network, tag="pow:ergo")[0]
 
-        self.assertEqual(peer.api.slot[0].port, 1)
-        self.assertEqual(list(peer.api.slot[0].transport.tags), ["tcp"])
-        self.assertEqual(list(peer.api.slot[0].protocol_stack[0].tags), ["ergo-p2p"])
-        self.assertEqual(peer.uri_slot[0].internal_port, 1)
+        p2p_slot = next(
+            slot for slot in peer.api.slot
+            if pow_networks.P2P_SLOT_TAG in slot.protocol_stack[0].tags
+        )
+        self.assertEqual(p2p_slot.port, 9030)
+        self.assertEqual(list(p2p_slot.transport.tags), ["tcp"])
         self.assertEqual(list(peer.api.payment_contracts), [])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class NarrowInstancesForLocalGrantTests(unittest.TestCase):
+    """What a local guest's own `NetworkResolution` -- and its firewall grant --
+    gets to see, out of an Instance `resolve_pow_network` built with both slots.
+
+    Called from `networks.resolve_network_for_peer` (the deferred `ResolveNetwork`
+    path) and from `rootfs.build_network_resolution` (the eager, launch-time one) --
+    both, or a `pow:ergo` guest resolved either way would end up with a REST hole
+    opened next to its chain peer (#78, #404).
+    """
+
+    def _instance(self):
+        return celaut.Instance(
+            api=celaut.Service.Api(
+                slot=[
+                    celaut.Service.Api.Slot(
+                        port=9030,
+                        transport=celaut.Service.Api.Protocol(tags=["tcp"]),
+                        protocol_stack=[
+                            celaut.Service.Api.Protocol(tags=[pow_networks.P2P_SLOT_TAG])
+                        ],
+                    ),
+                    celaut.Service.Api.Slot(
+                        port=9053,
+                        transport=celaut.Service.Api.Protocol(tags=["tcp"]),
+                        protocol_stack=[
+                            celaut.Service.Api.Protocol(tags=[pow_networks.REST_SLOT_TAG])
+                        ],
+                    ),
+                ],
+                payment_contracts=[],
+            ),
+            uri_slot=[
+                celaut.Instance.Uri_Slot(
+                    internal_port=9030,
+                    uri=[celaut.Instance.Uri(ip="203.0.113.5", port=9030)],
+                ),
+                celaut.Instance.Uri_Slot(
+                    internal_port=9053,
+                    uri=[celaut.Instance.Uri(ip="203.0.113.5", port=9053)],
+                ),
+            ],
+        )
+
+    def test_a_bare_pow_ergo_ask_keeps_only_the_p2p_slot(self):
+        """The overwhelming majority of real declarations: no protocol_stack at
+        all. Must read exactly as it did before this feature existed."""
+        narrowed = pow_networks.narrow_instances_for_local_grant(
+            [self._instance()], _network()
+        )
+
+        self.assertEqual(len(narrowed), 1)
+        self.assertEqual(len(narrowed[0].api.slot), 1)
+        self.assertEqual(
+            list(narrowed[0].api.slot[0].protocol_stack[0].tags),
+            [pow_networks.P2P_SLOT_TAG],
+        )
+        self.assertEqual(len(narrowed[0].uri_slot), 1)
+        self.assertEqual(narrowed[0].uri_slot[0].internal_port, 9030)
+
+    def test_an_ask_that_explicitly_names_the_rest_tag_keeps_both(self):
+        network = _network()
+        network.protocol_stack.append(
+            celaut.Service.Api.Protocol(tags=[pow_networks.REST_SLOT_TAG])
+        )
+
+        narrowed = pow_networks.narrow_instances_for_local_grant(
+            [self._instance()], network
+        )
+
+        self.assertEqual(len(narrowed[0].api.slot), 2)
+        self.assertEqual(len(narrowed[0].uri_slot), 2)
+
+    def test_an_unrelated_protocol_stack_still_keeps_only_p2p(self):
+        """Naming some other protocol is not the same as asking for REST."""
+        network = _network()
+        network.protocol_stack.append(celaut.Service.Api.Protocol(tags=["something-else"]))
+
+        narrowed = pow_networks.narrow_instances_for_local_grant(
+            [self._instance()], network
+        )
+
+        self.assertEqual(len(narrowed[0].api.slot), 1)
+        self.assertEqual(
+            list(narrowed[0].api.slot[0].protocol_stack[0].tags),
+            [pow_networks.P2P_SLOT_TAG],
+        )
+
+    def test_narrowing_never_touches_the_original_instances(self):
+        """A caller narrowing for one requester must not mutate what a differently
+        -scoped caller (a peer, or another guest) still holds a reference to."""
+        instances = [self._instance()]
+
+        pow_networks.narrow_instances_for_local_grant(instances, _network())
+
+        self.assertEqual(len(instances[0].api.slot), 2)
+        self.assertEqual(len(instances[0].uri_slot), 2)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")

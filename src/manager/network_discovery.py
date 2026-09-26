@@ -14,7 +14,12 @@ a hundred useless addresses has bought a hundred wasted HTTP requests and no fir
 rule. That is the property that makes it safe to ask strangers at all, and it is why
 this module returns bare addresses rather than the ``Instance`` messages the peers
 sent -- an ``Instance`` is the shape a *resolution* has, and calling a peer's
-suggestion one would be recording the guess as an answer.
+suggestion one would be recording the guess as an answer. What survives per address
+is only the tags of the one slot it belonged to (e.g. ``pow_networks.REST_SLOT_TAG``)
+-- which protocol that single port speaks, still verified by the caller and trusted no
+more than the address itself -- never which other addresses the peer grouped it
+with, since that grouping is the peer's belief about a third party and this node is
+about to check each address on its own anyway.
 
 Read-only and best-effort throughout. Every failure -- an unreachable peer, a
 refusal, a malformed reply -- is one fewer source, never an exception: a launch that
@@ -48,6 +53,11 @@ DEFAULT_ASK_PEERS = 4
 #: outbound requests, so its length is this node's decision, not the answering peer's.
 MAX_ADDRESSES_PER_PEER = 32
 
+#: One suggested address: its ip, its port, and the protocol tags of the one slot it
+#: belonged to (empty if the answering slot declared none). A caller that does not
+#: care about the tags can still unpack the first two and ignore the third.
+SuggestedAddress = Tuple[str, int, Tuple[str, ...]]
+
 
 def _ask_limit() -> int:
     """How many peers to ask, from config. Zero or less switches the source off."""
@@ -57,13 +67,21 @@ def _ask_limit() -> int:
         return DEFAULT_ASK_PEERS
 
 
-def ask_peer(peer_id: str, network: celaut_pb2.Service.Network) -> List[Tuple[str, int]]:
-    """One peer's answer for ``network``, as ``(ip, port)`` pairs. ``[]`` on any failure.
+def ask_peer(peer_id: str, network: celaut_pb2.Service.Network) -> List[SuggestedAddress]:
+    """One peer's answer for ``network``, as ``(ip, port, tags)`` triples. ``[]`` on failure.
 
-    Every uri of every instance is read, and the instances are flattened: which of a
+    Every uri of every instance is read, and the *instances* are flattened: which of a
     peer's addresses belong to the same remote node is the answering peer's belief
     about a third party, and this node is about to verify each address on its own
-    anyway. Keeping the grouping would mean carrying a claim nothing here checks.
+    anyway. Keeping that grouping would mean carrying a claim nothing here checks.
+
+    The tags are not that kind of claim -- they name what a single, already-isolated
+    port speaks (e.g. a ``pow:ergo`` peer tagging its REST slot apart from its P2P
+    one, see ``pow_networks.resolve_pow_network``), the same fact a caller would
+    otherwise have to guess at for that exact address. Read from the ``Api.Slot``
+    whose ``port`` matches the uri's own ``Uri_Slot.internal_port``; a slot with no
+    matching ``Api.Slot`` (or no ``protocol_stack`` at all) contributes no tags rather
+    than failing the address.
     """
     try:
         resolution = next(bee.client_grpc(
@@ -83,10 +101,17 @@ def ask_peer(peer_id: str, network: celaut_pb2.Service.Network) -> List[Tuple[st
     if resolution is None:
         return []
 
-    addresses: List[Tuple[str, int]] = []
+    addresses: List[SuggestedAddress] = []
     for instance in resolution.peer_instances:
-        for slot in instance.uri_slot:
-            for uri in slot.uri:
+        tags_by_port = {
+            slot.port: tuple(
+                tag for protocol in slot.protocol_stack for tag in protocol.tags
+            )
+            for slot in instance.api.slot
+        }
+        for uri_slot in instance.uri_slot:
+            tags = tags_by_port.get(uri_slot.internal_port, ())
+            for uri in uri_slot.uri:
                 if len(addresses) >= MAX_ADDRESSES_PER_PEER:
                     logger(
                         f"[NETWORK-DISCOVERY] {peer_id} offered more than "
@@ -95,14 +120,14 @@ def ask_peer(peer_id: str, network: celaut_pb2.Service.Network) -> List[Tuple[st
                     )
                     return addresses
                 if uri.ip and uri.port:
-                    addresses.append((str(uri.ip), int(uri.port)))
+                    addresses.append((str(uri.ip), int(uri.port), tags))
     return addresses
 
 
 def ask_peers(
     network: celaut_pb2.Service.Network,
     limit: Optional[int] = None,
-) -> List[Tuple[str, int]]:
+) -> List[SuggestedAddress]:
     """What the peers this node knows say about ``network``, de-duplicated, in ask order.
 
     Ask order and nothing more: the answers are pooled rather than voted on, because
@@ -110,6 +135,10 @@ def ask_peers(
     read it off the same list -- and treating agreement as evidence would be the one
     reading of this that *is* a trust decision. What decides is the verification the
     caller runs afterwards.
+
+    De-duplicated by ``(ip, port)`` alone, keeping the tags of whichever peer named it
+    first: the address is the same address whatever a later peer tags it, and ask
+    order is the only ranking this function has an opinion about.
     """
     budget = _ask_limit() if limit is None else limit
     if budget <= 0:
@@ -122,13 +151,13 @@ def ask_peers(
         return []
 
     seen: Set[Tuple[str, int]] = set()
-    found: List[Tuple[str, int]] = []
+    found: List[SuggestedAddress] = []
     for peer_id in peer_ids[:budget]:
-        for address in ask_peer(peer_id, network):
-            if address in seen:
+        for ip, port, tags in ask_peer(peer_id, network):
+            if (ip, port) in seen:
                 continue
-            seen.add(address)
-            found.append(address)
+            seen.add((ip, port))
+            found.append((ip, port, tags))
 
     if found:
         logger(

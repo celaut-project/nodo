@@ -120,6 +120,53 @@ class EagerResolutionTests(unittest.TestCase):
         self.assertEqual(resolution, [])
         resolve.assert_not_called()
 
+    def test_a_pow_ergo_instance_is_narrowed_to_the_slot_this_guest_asked_for(self):
+        """The eager, launch-time path -- the common one, unlike the deferred
+        Gateway.ResolveNetwork RPC -- must narrow too: `resolve_pow_network` builds
+        both a P2P and a REST slot on every Instance (issue #78), and this guest's
+        firewall (`configure_guest_firewall_policy`) opens a rule per uri it is
+        handed. A bare pow:ergo declaration asked for a chain peer, not a REST hole
+        granted next to it (#404)."""
+        from src.manager.pow_networks import P2P_SLOT_TAG, REST_SLOT_TAG
+
+        two_slot_instance = celaut.Instance(
+            api=celaut.Service.Api(slot=[
+                celaut.Service.Api.Slot(
+                    port=9030,
+                    protocol_stack=[celaut.Service.Api.Protocol(tags=[P2P_SLOT_TAG])],
+                ),
+                celaut.Service.Api.Slot(
+                    port=9053,
+                    protocol_stack=[celaut.Service.Api.Protocol(tags=[REST_SLOT_TAG])],
+                ),
+            ]),
+            uri_slot=[
+                celaut.Instance.Uri_Slot(internal_port=9030, uri=[
+                    celaut.Instance.Uri(ip="203.0.113.5", port=9030)
+                ]),
+                celaut.Instance.Uri_Slot(internal_port=9053, uri=[
+                    celaut.Instance.Uri(ip="203.0.113.5", port=9053)
+                ]),
+            ],
+        )
+        service = _service((["pow:ergo"], component_formal(CONCRETE)))
+
+        with patch.object(
+            microvm_rootfs.sc, "internal_instance_exists", return_value=False
+        ), patch.object(
+            microvm_rootfs, "resolve_network", return_value=[two_slot_instance]
+        ):
+            resolution = microvm_rootfs.build_network_resolution(
+                service=service, father_id="", config=_config()
+            )
+
+        self.assertEqual(len(resolution[0].peer_instances[0].api.slot), 1)
+        self.assertEqual(len(resolution[0].peer_instances[0].uri_slot), 1)
+        self.assertEqual(
+            list(resolution[0].peer_instances[0].api.slot[0].protocol_stack[0].tags),
+            [P2P_SLOT_TAG],
+        )
+
 
 @unittest.skipIf(IMPORT_ERROR, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class TemplateCompletionTests(unittest.TestCase):
