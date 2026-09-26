@@ -59,6 +59,7 @@ from src.identity.node_identity import (
     component_formal,
     parse_component_formal,
 )
+from src.manager.ergo import MAINNET_P2P_PORT
 from src.manager.network_defaults import configured_endpoints
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
@@ -92,16 +93,6 @@ KNOWN_CHAINS = ("ergo", "bitcoin")
 
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_MAX_PEERS = 8
-
-#: Fallback P2P port for a candidate whose P2P endpoint was never observed. It is a
-#: *default*, overridable at ``pow_networks.ERGO_P2P_PORT``, and nothing downstream
-#: knows it exists: the resolver puts a concrete port in every ``Instance.Uri`` it
-#: emits, so the firewall and the guest read an address rather than re-deriving one.
-#: 9030 is what the reference node ships with, and observation bears that out without
-#: making it a rule -- of 58 peers on one mainnet node's ``/peers/connected``, 53 were
-#: on 9030 and five were not (9020, 9029, 9031, 1540). Those five are exactly why an
-#: observed port is preferred over this one wherever there is one.
-ERGO_DEFAULT_P2P_PORT = 9030
 
 
 class PowFormalError(ValueError):
@@ -390,22 +381,6 @@ def _max_peers() -> int:
     return value if value > 0 else DEFAULT_MAX_PEERS
 
 
-def _default_p2p_port() -> int:
-    """The P2P port to assume for a candidate whose own was never observed.
-
-    Configurable because assuming one is the weak half of this: a node on a
-    non-default port is reachable, and the operator who knows that can say so once
-    instead of losing every such peer. Out of range or unreadable falls back rather
-    than raising -- a typo in one key is not worth failing a launch over, and the
-    fallback is the same value the key defaults to.
-    """
-    try:
-        value = int(env_manager.get(f"{CONFIG_BLOCK}.ERGO_P2P_PORT", ERGO_DEFAULT_P2P_PORT))
-    except (TypeError, ValueError):
-        return ERGO_DEFAULT_P2P_PORT
-    return value if 0 < value < 65536 else ERGO_DEFAULT_P2P_PORT
-
-
 def _configured_endpoints(tag: str) -> List[str]:
     """Use the same operator defaults as every other communication domain."""
     return configured_endpoints(tag, config=env_manager)
@@ -544,8 +519,8 @@ def _p2p_uri_for(url: str, p2p_address: Optional[str] = None) -> Optional[Tuple[
       the case where a peer on a non-conventional port is still reached correctly.
     * ``p2p_address`` absent -- ``ledgers.ergo.NODE_URL``, ``default_instances``, a peer's
       ``ResolveNetwork`` answer, or a crawl entry an older nodo wrote. The REST host is
-      reused with :func:`_default_p2p_port`, and **the assumption is logged**, because
-      the port is the one thing here nobody checked.
+      reused with :data:`src.manager.ergo.MAINNET_P2P_PORT`, and **the assumption is
+      logged**, because the port is the one thing here nobody checked.
 
     Reusing the REST *host* is not an assumption of the same kind: it is where the node
     that answered ``/info`` lives. Only the port is being guessed.
@@ -569,10 +544,10 @@ def _p2p_uri_for(url: str, p2p_address: Optional[str] = None) -> Optional[Tuple[
     host = parsed.hostname
     if not host:
         return None
-    port = _default_p2p_port()
+    port = MAINNET_P2P_PORT
     logger(
         f"[POW] {url}: no observed P2P address; assuming {host}:{port} "
-        f"(pow_networks.ERGO_P2P_PORT)"
+        f"(Ergo mainnet's conventional P2P port)"
     )
     return _resolve_host(host, port)
 
@@ -739,8 +714,9 @@ def resolve_pow_network(
     network: the crawl observes each peer's P2P address (``/peers/connected.address``)
     and that is what is emitted, so a peer on 9031 is reached on 9031. Only a candidate
     whose P2P endpoint nobody ever saw -- ``NODE_URL``, ``default_instances``, a peer's
-    ``ResolveNetwork`` answer -- falls back to ``pow_networks.ERGO_P2P_PORT`` (9030), and
-    that fallback is logged where it happens.
+    ``ResolveNetwork`` answer -- falls back to Ergo mainnet's conventional P2P port
+    (:data:`src.manager.ergo.MAINNET_P2P_PORT`, 9030), and that fallback is logged
+    where it happens.
 
     That this is safe took a fix at the other end: ``configure_guest_firewall_policy``
     stopped at the first peer instance it could write a rule for, so N instances would

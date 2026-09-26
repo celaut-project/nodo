@@ -9,6 +9,20 @@ from src.utils.network import internet_available
 
 env_manager = ConfigManager()
 
+#: Ergo mainnet's conventional P2P port. Not a setting: a node's own P2P address is
+#: never reported by anything this node can ask directly (see ``_p2p_address``
+#: below, fed from the ``/peers/connected`` crawl -- the only place it is genuinely
+#: *observed*), so this is the last-resort guess ``pow_networks._p2p_uri_for`` makes
+#: for a candidate nobody's crawl ever saw on the wire: ``ledgers.ergo.NODE_URL``,
+#: ``service_networks.default_instances``, or a peer's own ``ResolveNetwork``
+#: answer. 9030 is what the reference node ships with, and observation bears that
+#: out without making it a rule -- of 58 peers on one live mainnet node, 53 were on
+#: 9030 and five were not (9020, 9029, 9031, 1540). Those five are exactly why an
+#: observed port always wins over this one, and why guessing wrong for them is an
+#: accepted cost rather than something an operator is asked to tune away: nothing
+#: here can tell which five nodes exist to bias the guess towards.
+MAINNET_P2P_PORT = 9030
+
 
 def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
     ergo_node_url = env_manager.get("ledgers.ergo.NODE_URL") if not url else url

@@ -664,11 +664,17 @@ and five were not (9020, 9029, 9031, 1540).
 
 A candidate whose P2P endpoint nobody observed — `ledgers.ergo.NODE_URL`,
 `service_networks.default_instances`, a peer's `ResolveNetwork` answer, or a crawl entry
-from before this field existed — reuses the REST **host** with
-`pow_networks.ERGO_P2P_PORT` (default 9030), and the assumption is logged with the
-address it was made for. Reusing the host is not an assumption of the same kind: that is
-where the node which answered `/info` lives. Only the port is a guess, which is why it
-is the part the operator can override.
+from before this field existed — reuses the REST **host** with Ergo mainnet's
+conventional P2P port (`src/manager/ergo.py::MAINNET_P2P_PORT`, 9030), and the
+assumption is logged with the address it was made for. Reusing the host is not an
+assumption of the same kind: that is where the node which answered `/info` lives. Only
+the port is a guess.
+
+(This was briefly a config key, `pow_networks.ERGO_P2P_PORT`, overridable per the
+reasoning above. It became a plain constant instead: nothing here can tell which peers
+run on a non-conventional port to bias an operator's override towards, so the setting
+could only ever be guessed at exactly as blindly as the default it replaced — one more
+key to read past for no decision anybody was actually in a position to make.)
 
 *Checked: Ergo has no way to ask a node for its own P2P address.* `/info` reports
 `restApiUrl` and nothing else addressable — verified live against a mainnet node, whose

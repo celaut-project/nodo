@@ -754,25 +754,6 @@ class P2PEndpointTests(unittest.TestCase):
                 pow_networks._p2p_uri_for("203.0.113.8"), ("203.0.113.8", 9030)
             )
 
-    def test_the_defaulted_port_is_configurable(self):
-        with self._numeric(), patch.object(pow_networks, "env_manager") as env:
-            env.get.side_effect = lambda key, default=None: (
-                9099 if key == "pow_networks.ERGO_P2P_PORT" else default
-            )
-            self.assertEqual(
-                pow_networks._p2p_uri_for("https://203.0.113.8:9053"),
-                ("203.0.113.8", 9099),
-            )
-
-    def test_an_out_of_range_or_unreadable_override_falls_back(self):
-        """A typo in one config key is not worth failing a launch over."""
-        for value in ("not-a-port", 0, 70000, None):
-            with self.subTest(value=value), patch.object(pow_networks, "env_manager") as env:
-                env.get.side_effect = lambda key, default=None: (
-                    value if key == "pow_networks.ERGO_P2P_PORT" else default
-                )
-                self.assertEqual(pow_networks._default_p2p_port(), 9030)
-
     def test_an_unusable_observed_address_falls_back_rather_than_dropping_the_peer(self):
         with self._numeric():
             self.assertEqual(
