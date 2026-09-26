@@ -356,6 +356,15 @@ pub enum InputMode {
     /// of them is written. A posture is a dozen keys, and writing them without
     /// showing them is the failure this page exists to prevent.
     ConfirmWrites,
+    /// Naming a new `ui.DISPLAY_UNIT`, reached by picking `custom…` off its picker.
+    ///
+    /// A display unit outside the built-in ones is only real once it has a rate
+    /// (`src/utils/monetary.py::display_unit` refuses one with none), so this does
+    /// not just set `ui.DISPLAY_UNIT` -- it takes a name and a MU-per-unit ratio
+    /// together and writes both `ui.DISPLAY_UNIT` and `ui.UNITS.<name>.MU_PER_UNIT`
+    /// in the one transaction, the same way a CELL profile writes a dozen keys
+    /// rather than leaving the node to run on a partial edit.
+    AddCustomUnit,
 }
 
 /// How the `EditConfig` popup should let the user set a value, chosen from the
@@ -392,6 +401,79 @@ pub fn known_enum_values(path: &str) -> Option<&'static [&'static str]> {
         "ui.THEME" => Some(&crate::theme::NAMES),
         _ => None,
     }
+}
+
+/// Picking this off the `ui.DISPLAY_UNIT` picker does not set the unit to a value
+/// literally named "custom" -- it opens [`InputMode::AddCustomUnit`], which asks for
+/// a real name and a rate instead. Not a valid YAML scalar on its own (the ellipsis),
+/// so it can never be saved by mistake as if it were an ordinary option.
+pub const CUSTOM_UNIT_OPTION: &str = "custom…";
+
+/// What `ui.DISPLAY_UNIT` can be set to right now: `mu`, `erg`, `btc` once
+/// `ledgers.bitcoin.payments.MU_PER_SATOSHI` is a positive rate, and whatever the
+/// operator already declared under `ui.UNITS`, in that order, with
+/// [`CUSTOM_UNIT_OPTION`] last.
+///
+/// Unlike `known_enum_values`, this reads `document`: which units exist depends on
+/// what is configured, not on a fixed list the binary ships with. A name already on
+/// this list will not be offered twice.
+fn display_unit_options(document: Option<&Value>) -> Vec<String> {
+    let mut options = vec!["mu".to_string(), "erg".to_string()];
+    let bitcoin_configured = yaml_scalar(
+        document,
+        &["ledgers", "bitcoin", "payments", "MU_PER_SATOSHI"],
+    )
+    .and_then(|value| value.parse::<f64>().ok())
+    .is_some_and(|value| value > 0.0);
+    if bitcoin_configured {
+        options.push("btc".to_string());
+    }
+    let declared = document
+        .and_then(|document| document.get("ui"))
+        .and_then(|ui| ui.get("UNITS"))
+        .and_then(|units| units.as_mapping());
+    if let Some(declared) = declared {
+        for key in declared.keys() {
+            if let Some(name) = key.as_str() {
+                if !options.iter().any(|existing| existing == name) {
+                    options.push(name.to_string());
+                }
+            }
+        }
+    }
+    options.push(CUSTOM_UNIT_OPTION.to_string());
+    options
+}
+
+/// Parse and validate `"<name> <rate>"`, typed into [`InputMode::AddCustomUnit`],
+/// against `existing` (a [`display_unit_options`] list, so the sentinel and every
+/// unit already on offer are covered by the same check). `Ok` gives the two writes
+/// `save_custom_unit` applies together: the unit's own name, lower-cased, and its
+/// `MU_PER_UNIT` rate exactly as typed (a decimal literal, kept as a string so it
+/// reaches `yq` unrounded).
+fn parse_custom_unit(input: &str, existing: &[String]) -> Result<(String, String), String> {
+    let Some((name, rate)) = input.trim().split_once(char::is_whitespace) else {
+        return Err("Type a name and a MU-per-unit rate, separated by a space".to_string());
+    };
+    let name = name.trim().to_lowercase();
+    let rate = rate.trim();
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err("Unit name must be letters, digits or underscore".to_string());
+    }
+    if existing.iter().any(|option| option == &name) || name == "custom" {
+        return Err(format!("\"{name}\" is already a unit; pick another name"));
+    }
+    let Ok(rate_value) = rate.parse::<f64>() else {
+        return Err("MU per unit must be a positive number".to_string());
+    };
+    if !(rate_value.is_finite() && rate_value > 0.0) {
+        return Err("MU per unit must be a positive number".to_string());
+    }
+    Ok((name, rate.to_string()))
 }
 
 /// A destructive action awaiting user confirmation.
@@ -1777,6 +1859,28 @@ impl Money {
                     mu_per_unit_pow10: exact_pow10(mu_per_unit),
                     mu_per_unit,
                     decimals: 9,
+                    mu_per_nanoerg,
+                }
+            }
+            // Bitcoin's own rate key, the same way `MU_PER_NANOERG` is Ergo's --
+            // never `ui.UNITS.btc`, which is for units nobody's ledger contributes.
+            // Mirrors `src/payment_system/contracts/bitcoin/rate.py`: `UNIT_SYMBOL`,
+            // `UNIT_DECIMALS`, and one whole BTC being `SATOSHI_PER_BTC` (1e8) satoshi.
+            "btc" => {
+                let mu_per_satoshi = yaml_scalar(
+                    document.as_ref(),
+                    &["ledgers", "bitcoin", "payments", "MU_PER_SATOSHI"],
+                )
+                .and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| *value > 0.0)
+                .unwrap_or(1.0);
+                let mu_per_unit = mu_per_satoshi * 1e8;
+                Self {
+                    unit_name: name,
+                    symbol: "BTC".to_string(),
+                    mu_per_unit_pow10: exact_pow10(mu_per_unit),
+                    mu_per_unit,
+                    decimals: 8,
                     mu_per_nanoerg,
                 }
             }
@@ -3569,6 +3673,10 @@ impl App {
             // `self.input` above); a checkbox/stepper/picker would have nothing to
             // show without briefly displaying the value it exists to hide.
             EditKind::Text
+        } else if entry.path == "ui.DISPLAY_UNIT" {
+            // Which units exist depends on what is configured, so this cannot be one
+            // of `known_enum_values`'s fixed lists -- it is computed instead.
+            EditKind::Enum(display_unit_options(self.config_document.as_ref()))
         } else {
             infer_edit_kind(&entry.path, &entry.value_type)
         };
@@ -3694,6 +3802,7 @@ impl App {
             }
             InputMode::PickProfile => self.submit_profile_selection(),
             InputMode::PickLeverKey => self.submit_lever_key_selection(),
+            InputMode::AddCustomUnit => self.save_custom_unit(),
             // The writes confirmation answers y/n, never Enter: Enter on a
             // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
             // gate answers y/n for the same reason and one stronger: Enter is the
@@ -3804,12 +3913,16 @@ impl App {
             self.close_input();
             return;
         }
+        let label_path = config_path_display(&path);
+        if label_path == "ui.DISPLAY_UNIT" && self.input.trim() == CUSTOM_UNIT_OPTION {
+            self.open_custom_unit_prompt();
+            return;
+        }
         if let Err(error) = serde_yaml::from_str::<Value>(&self.input) {
             self.status = format!("Invalid YAML value: {error}");
             return;
         }
 
-        let label_path = config_path_display(&path);
         if label_path.ends_with("MU_PER_NANOERG") || label_path.ends_with("MU_PER_SATOSHI") {
             let value = self.input.trim().parse::<f64>().unwrap_or(f64::NAN);
             let scale = if label_path.ends_with("MU_PER_NANOERG") { 1e9 } else { 1e8 };
@@ -3822,6 +3935,41 @@ impl App {
         let label = format!("Set {}", config_path_display(&path));
         self.close_input();
         self.write_config_value(label, &path, &value, ConfigFollowUp::None);
+    }
+
+    /// Reached by picking [`CUSTOM_UNIT_OPTION`] off the `ui.DISPLAY_UNIT` picker:
+    /// name the unit and give it a rate, since neither means anything alone.
+    fn open_custom_unit_prompt(&mut self) {
+        self.input_mode = InputMode::AddCustomUnit;
+        self.input.clear();
+        self.input_title = "New display unit: name and MU per unit".to_string();
+        self.edit_config_secret = false;
+        self.edit_kind = EditKind::Text;
+        self.status = "e.g. \"usd 500000000\" -- work the rate out against your own market, \
+                        as for a ledger (see docs/PRICING.md)"
+            .to_string();
+    }
+
+    /// Declare a new `ui.DISPLAY_UNIT` and its `ui.UNITS.<name>.MU_PER_UNIT` rate
+    /// together, in the one transaction: a name with no rate is exactly the state
+    /// `src/utils/monetary.py::display_unit` refuses to start against, so the two are
+    /// never written apart.
+    fn save_custom_unit(&mut self) {
+        let existing = display_unit_options(self.config_document.as_ref());
+        match parse_custom_unit(&self.input, &existing) {
+            Ok((name, rate)) => {
+                self.close_input();
+                self.write_config_values(
+                    format!("Set ui.DISPLAY_UNIT to {name}"),
+                    &[
+                        (format!("ui.UNITS.{name}.MU_PER_UNIT"), rate),
+                        ("ui.DISPLAY_UNIT".to_string(), name),
+                    ],
+                    ConfigFollowUp::None,
+                );
+            }
+            Err(message) => self.status = message,
+        }
     }
 
     /// Write one value into config.yaml through `yq`, keeping a timestamped backup.
@@ -4145,6 +4293,8 @@ impl App {
         self.edit_config_secret = lever.secret;
         self.edit_kind = if lever.secret {
             EditKind::Text
+        } else if path == "ui.DISPLAY_UNIT" {
+            EditKind::Enum(display_unit_options(document.as_ref()))
         } else {
             let value_type = document
                 .as_ref()
@@ -8343,6 +8493,7 @@ mod tests {
     /// operator sees a different number in the TUI than in the CLI.
     mod money {
         use super::super::Money;
+        use std::fs;
 
         fn erg(mu_per_nanoerg: f64) -> Money {
             let mu_per_unit = mu_per_nanoerg * 1e9;
@@ -8411,6 +8562,74 @@ mod tests {
         fn negative_balances_keep_their_sign() {
             // Reachable: costs.ALLOW_DEBT lets an instance run past zero.
             assert_eq!(erg(1.0).format_raw("-2500000000"), "-2.5 ERG");
+        }
+
+        fn btc(mu_per_satoshi: f64) -> Money {
+            let mu_per_unit = mu_per_satoshi * 1e8;
+            Money {
+                unit_name: "btc".to_string(),
+                symbol: "BTC".to_string(),
+                mu_per_unit_pow10: super::super::exact_pow10(mu_per_unit),
+                mu_per_unit,
+                decimals: 8,
+                mu_per_nanoerg: 1.0,
+            }
+        }
+
+        /// One BTC is `SATOSHI_PER_BTC` (1e8) satoshi, not `nanoERG`'s 1e9 -- the
+        /// exact digit shift `bitcoin/rate.py::UNIT_DECIMALS` documents.
+        #[test]
+        fn btc_shifts_by_satoshi_not_by_nanoerg() {
+            let money = btc(1.0);
+            assert_eq!(money.format_raw("100000000"), "1 BTC");
+            assert_eq!(money.format_raw("1"), "0.00000001 BTC");
+        }
+
+        #[test]
+        fn the_satoshi_rate_rescales_what_an_mu_is_worth_in_btc() {
+            assert_eq!(btc(0.001).format_raw("100000"), "1 BTC");
+        }
+
+        /// `Money::load` reading `ui.DISPLAY_UNIT: btc` off a real file -- the
+        /// resolution this feature adds, not just the arithmetic `btc()` covers above.
+        #[test]
+        fn load_resolves_btc_through_its_own_ledger_rate() {
+            let dir = std::env::temp_dir()
+                .join(format!("nodo-tui-money-btc-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            let config = dir.join("config.yaml");
+            fs::write(
+                &config,
+                "ui:\n  DISPLAY_UNIT: btc\nledgers:\n  bitcoin:\n    payments:\n      MU_PER_SATOSHI: 2000000\n",
+            )
+            .unwrap();
+
+            let money = super::super::Money::load(&config);
+            let _ = fs::remove_dir_all(&dir);
+
+            assert_eq!(money.unit_name, "btc");
+            assert_eq!(money.symbol, "BTC");
+            assert_eq!(money.decimals, 8);
+            assert_eq!(money.mu_per_unit, 2000000.0 * 1e8);
+        }
+
+        /// An unset `MU_PER_SATOSHI` falls back rather than dividing by zero -- the
+        /// same leniency `erg`'s branch has always had for `MU_PER_NANOERG`. The
+        /// picker keeps `btc` off the menu until the rate is real (see
+        /// `display_unit_picker::bitcoin_is_offered_only_once_its_rate_is_set`); this
+        /// is what happens if the file is edited by hand around that anyway.
+        #[test]
+        fn load_falls_back_rather_than_dividing_by_zero() {
+            let dir = std::env::temp_dir()
+                .join(format!("nodo-tui-money-btc-unset-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            let config = dir.join("config.yaml");
+            fs::write(&config, "ui:\n  DISPLAY_UNIT: btc\n").unwrap();
+
+            let money = super::super::Money::load(&config);
+            let _ = fs::remove_dir_all(&dir);
+
+            assert_eq!(money.mu_per_unit, 1e8);
         }
     }
 
@@ -9214,6 +9433,160 @@ ergo: Cold Wallet: 9cold\n";
         app.open_config_editor();
         assert_eq!(app.edit_kind, EditKind::Text);
         assert!(app.input.is_empty());
+    }
+
+    /// The change this feature is about: `ui.DISPLAY_UNIT` used to be freeform text
+    /// (any string was a "valid" YAML value, whether or not the node could resolve
+    /// it) and is a picker now, same as `ui.THEME`.
+    mod display_unit_picker {
+        use super::*;
+
+        #[test]
+        fn with_nothing_configured_only_the_built_ins_and_custom_are_offered() {
+            assert_eq!(
+                display_unit_options(None),
+                vec!["mu", "erg", CUSTOM_UNIT_OPTION]
+            );
+        }
+
+        /// `btc` mirrors the node's own rule (`bitcoin/rate.py::display_units`):
+        /// nothing at all until the ledger's rate is a positive number, because an
+        /// invented rate would misprice every balance shown in it.
+        #[test]
+        fn bitcoin_is_offered_only_once_its_rate_is_set() {
+            let unset = serde_yaml::from_str("ledgers:\n  bitcoin: {}\n").unwrap();
+            assert_eq!(
+                display_unit_options(Some(&unset)),
+                vec!["mu", "erg", CUSTOM_UNIT_OPTION]
+            );
+
+            let zero = serde_yaml::from_str(
+                "ledgers:\n  bitcoin:\n    payments:\n      MU_PER_SATOSHI: 0\n",
+            )
+            .unwrap();
+            assert_eq!(
+                display_unit_options(Some(&zero)),
+                vec!["mu", "erg", CUSTOM_UNIT_OPTION]
+            );
+
+            let set = serde_yaml::from_str(
+                "ledgers:\n  bitcoin:\n    payments:\n      MU_PER_SATOSHI: 2000000\n",
+            )
+            .unwrap();
+            assert_eq!(
+                display_unit_options(Some(&set)),
+                vec!["mu", "erg", "btc", CUSTOM_UNIT_OPTION]
+            );
+        }
+
+        #[test]
+        fn units_already_declared_under_ui_units_are_offered_without_duplicates() {
+            let document = serde_yaml::from_str(
+                "ui:\n  UNITS:\n    usd: { MU_PER_UNIT: 500000000 }\n    mu: { MU_PER_UNIT: 1 }\n",
+            )
+            .unwrap();
+            // `mu` is already built in, so it is not repeated even though it is also
+            // (redundantly) declared under `ui.UNITS`.
+            assert_eq!(
+                display_unit_options(Some(&document)),
+                vec!["mu", "erg", "usd", CUSTOM_UNIT_OPTION]
+            );
+        }
+
+        #[test]
+        fn the_config_page_offers_it_as_a_picker() {
+            let mut app = App::default();
+            select_config_entry(
+                &mut app,
+                config_entry("ui.DISPLAY_UNIT", "erg", "erg", "string", false),
+            );
+            app.open_config_editor();
+            assert_eq!(
+                app.edit_kind,
+                EditKind::Enum(vec!["mu".to_string(), "erg".to_string(), CUSTOM_UNIT_OPTION.to_string()])
+            );
+        }
+
+        /// Picking `custom…` must not write a unit literally named "custom" -- it has
+        /// no rate, so `monetary.py::display_unit` would refuse the node on it.
+        #[test]
+        fn picking_custom_opens_the_new_unit_prompt_instead_of_writing_it() {
+            let mut app = App::default();
+            select_config_entry(
+                &mut app,
+                config_entry("ui.DISPLAY_UNIT", "erg", "erg", "string", false),
+            );
+            app.open_config_editor();
+            app.input = CUSTOM_UNIT_OPTION.to_string();
+
+            app.save_config_edit();
+
+            assert_eq!(app.input_mode, InputMode::AddCustomUnit);
+            assert!(app.input.is_empty(), "the name/rate prompt starts blank");
+        }
+
+        #[test]
+        fn a_name_with_no_rate_is_rejected() {
+            let existing = vec!["mu".to_string(), "erg".to_string()];
+            assert!(parse_custom_unit("usd", &existing).is_err());
+            assert!(parse_custom_unit("   ", &existing).is_err());
+        }
+
+        #[test]
+        fn a_name_outside_letters_digits_and_underscore_is_rejected() {
+            let existing = vec!["mu".to_string(), "erg".to_string()];
+            assert!(parse_custom_unit("us-d 500000000", &existing).is_err());
+            assert!(parse_custom_unit("$ 500000000", &existing).is_err());
+        }
+
+        #[test]
+        fn a_zero_or_negative_or_unparseable_rate_is_rejected() {
+            let existing = vec!["mu".to_string(), "erg".to_string()];
+            assert!(parse_custom_unit("usd 0", &existing).is_err());
+            assert!(parse_custom_unit("usd -5", &existing).is_err());
+            assert!(parse_custom_unit("usd not-a-number", &existing).is_err());
+        }
+
+        /// Reusing a name already on offer -- built in, ledger-contributed or already
+        /// declared -- would silently repoint an existing unit at a different rate.
+        #[test]
+        fn a_name_already_on_offer_is_rejected() {
+            let existing = vec![
+                "mu".to_string(),
+                "erg".to_string(),
+                "btc".to_string(),
+                "usd".to_string(),
+                CUSTOM_UNIT_OPTION.to_string(),
+            ];
+            assert!(parse_custom_unit("erg 500000000", &existing).is_err());
+            assert!(parse_custom_unit("usd 500000000", &existing).is_err());
+            assert!(parse_custom_unit("custom 500000000", &existing).is_err());
+        }
+
+        /// The happy path: a new name, lower-cased, with its rate carried through
+        /// untouched -- `save_custom_unit` writes it exactly as typed, in MU.
+        #[test]
+        fn a_fresh_name_and_a_positive_rate_are_accepted() {
+            let existing = vec!["mu".to_string(), "erg".to_string(), CUSTOM_UNIT_OPTION.to_string()];
+            assert_eq!(
+                parse_custom_unit("  USD   500000000  ", &existing),
+                Ok(("usd".to_string(), "500000000".to_string()))
+            );
+        }
+
+        /// An invalid submission leaves the prompt open with a reason, rather than
+        /// silently discarding what was typed or closing on a value that was refused.
+        #[test]
+        fn an_invalid_submission_leaves_the_prompt_open() {
+            let mut app = App::default();
+            app.open_custom_unit_prompt();
+            app.input = "not valid at all".to_string();
+
+            app.save_custom_unit();
+
+            assert_eq!(app.input_mode, InputMode::AddCustomUnit);
+            assert!(!app.status.is_empty());
+        }
     }
 
     #[test]

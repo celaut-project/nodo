@@ -141,7 +141,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         | InputMode::EditConfig
         | InputMode::AddConfigItem
         | InputMode::FilterConfig
-        | InputMode::CreditClient => draw_input_popup(frame, app),
+        | InputMode::CreditClient
+        | InputMode::AddCustomUnit => draw_input_popup(frame, app),
     }
 }
 

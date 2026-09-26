@@ -638,12 +638,18 @@ free_tier:
 # What the operator reads and types. Purely presentational: changing it never changes
 # what anybody is charged.
 ui:
-  # "erg" (default) or "mu". "erg" derives its rate from the ledger, so it stays correct
-  # if you change MU_PER_NANOERG.
+  # "erg" (default), "mu", or "btc" once ledgers.bitcoin.payments.MU_PER_SATOSHI is set.
+  # "erg" and "btc" derive their rate from their own ledger, so they stay correct if you
+  # change MU_PER_NANOERG / MU_PER_SATOSHI.
   #
   # Any other name must be declared under ui.UNITS below. That is the hook for showing,
   # say, a fiat figure -- but note the rate would be a static number nothing refreshes,
   # so it goes stale. It never affects what is charged, only what is printed.
+  #
+  # Edited from the TUI's Config page (or the CELL page's "display unit" lever) as a
+  # picker over exactly the units above; picking "custom..." there asks for a new name
+  # and its MU_PER_UNIT together, since one without the other is a display unit the node
+  # refuses to start against.
   DISPLAY_UNIT: erg
   # UNITS:
   #   usd:
