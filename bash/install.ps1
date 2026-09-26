@@ -26,67 +26,74 @@ $InformationPreference = "SilentlyContinue"
     Requirements: Windows 11, Administrator privileges
 
 .COMPILE
-    Invoke-ps2exe "C:\Users\josem\Desktop\project\install.ps1" "C:\Users\josem\Desktop\Nodo-Setup.exe" `
+    Invoke-ps2exe ".\bash\install.ps1" ".\Nodo-Setup.exe" `
         -requireAdmin `
         -noConsole `
-        -iconFile "C:\Users\josem\Desktop\project\favicon.ico" `
-        -title "Nodo Installer" `
+        -iconFile ".\bash\favicon.ico" `
+        -title "Celaut Nodo Installer" `
         -version "1.0.0" `
         -company "Celaut Project"
 
 .RUN
-    powershell -ExecutionPolicy Bypass -File "C:\Users\josem\Desktop\project\install.ps1" -VerboseMode
+    powershell -ExecutionPolicy Bypass -File ".\bash\install.ps1" -VerboseMode
 #>
 
+# ====================== DIAGNOSTIC LOG FILE ======================
+# The installer window is intentionally calm and non-technical (see the UI section
+# below) -- it never shows a log. Everything Write-Info/Write-Success/Write-Warning/
+# Write-Err used to print to an on-screen log box now goes here instead, so a failed
+# install is still diagnosable.
+$LogDir = "C:\ProgramData\Nodo"
+New-Item -Path $LogDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+$LogFilePath = Join-Path $LogDir "install.log"
+
+function Write-InstallLog {
+    param([string]$Level, [string]$Message)
+    try {
+        $line = "[{0}] [{1}] {2}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Level, $Message
+        Add-Content -LiteralPath $LogFilePath -Value $line -ErrorAction SilentlyContinue
+    }
+    catch {
+        # A log write must never be the reason the install fails.
+    }
+}
 
 # ====================== UI: LOADING SCREEN ======================
+# Trustworthy, professional dark-mode installer: a floating rounded card, muted navy
+# background, a shield mark by the title, an emerald progress bar, a plain-language
+# status line, a "Step X of Y" indicator, and a reassuring line with a lock mark.
+# No terminal logs, no technical text -- that all goes to $LogFilePath instead.
 [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null
 [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") | Out-Null
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-$form = New-Object System.Windows.Forms.Form
-$form.Text = "Nodo WSL Installer"
-$form.Size = New-Object System.Drawing.Size(520, 320)
-$form.StartPosition = "CenterScreen"
-$form.FormBorderStyle = "FixedSingle"
-$form.MaximizeBox = $false
-$form.MinimizeBox = $false
-$form.ControlBox = $false
-$form.BackColor = [System.Drawing.Color]::FromArgb(18, 18, 18)
-$form.ShowInTaskbar = $true
-$form.TopMost       = $false
+# Celaut's own brand palette (celaut-project.github.io, src/app.css dark theme --
+# the site's default and only one nodo needs one of), not an arbitrary dark theme:
+# deep teal-green surfaces, warm cream text, coral as a DECORATIVE-only accent
+# (never text -- coral-on-cream is ~1.9:1, see that file's own comment on it).
+$ColorBg          = [System.Drawing.Color]::FromArgb(10, 31, 30)    # --surface-deep #0a1f1e
+$ColorBorder      = [System.Drawing.Color]::FromArgb(42, 60, 58)    # --border, blended over --surface-deep
+$ColorTrack       = [System.Drawing.Color]::FromArgb(28, 68, 66)    # --surface-raised #1c4442
+$ColorAccent      = [System.Drawing.Color]::FromArgb(239, 156, 130) # --accent #ef9c82 (decorative only)
+$ColorTextPrimary = [System.Drawing.Color]::FromArgb(242, 236, 230) # --on-surface #f2ece6
+$ColorTextMuted   = [System.Drawing.Color]::FromArgb(186, 202, 199) # --on-surface-muted #bacac7
 
-$titleLabel = New-Object System.Windows.Forms.Label
-$titleLabel.Text = "Nodo WSL Installer"
-$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 16, [System.Drawing.FontStyle]::Bold)
-$titleLabel.ForeColor = [System.Drawing.Color]::White
-$titleLabel.Size = New-Object System.Drawing.Size(480, 36)
-$titleLabel.Location = New-Object System.Drawing.Point(20, 24)
+$CardWidth = 480
+$CardHeight = 340
+$CardRadius = 22
 
-$statusLabel = New-Object System.Windows.Forms.Label
-$statusLabel.Text = "Starting..."
-$statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-$statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(180, 180, 180)
-$statusLabel.Size = New-Object System.Drawing.Size(480, 24)
-$statusLabel.Location = New-Object System.Drawing.Point(20, 80)
+function New-RoundedRectPath {
+    param([single]$X, [single]$Y, [single]$Width, [single]$Height, [single]$Radius)
 
-$progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Minimum = 0
-$progressBar.Maximum = 100
-$progressBar.Value = 0
-$progressBar.Size = New-Object System.Drawing.Size(472, 18)
-$progressBar.Location = New-Object System.Drawing.Point(20, 116)
-$progressBar.Style = "Continuous"
-
-$logBox = New-Object System.Windows.Forms.RichTextBox
-$logBox.Size = New-Object System.Drawing.Size(472, 110)
-$logBox.Location = New-Object System.Drawing.Point(20, 150)
-$logBox.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-$logBox.ForeColor = [System.Drawing.Color]::FromArgb(140, 140, 140)
-$logBox.Font = New-Object System.Drawing.Font("Consolas", 8)
-$logBox.ReadOnly = $true
-$logBox.BorderStyle = "None"
-$logBox.ScrollBars = "Vertical"
+    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $d = $Radius * 2
+    $path.AddArc($X, $Y, $d, $d, 180, 90)
+    $path.AddArc($X + $Width - $d, $Y, $d, $d, 270, 90)
+    $path.AddArc($X + $Width - $d, $Y + $Height - $d, $d, $d, 0, 90)
+    $path.AddArc($X, $Y + $Height - $d, $d, $d, 90, 90)
+    $path.CloseFigure()
+    return $path
+}
 
 Add-Type @"
 using System;
@@ -96,8 +103,108 @@ public class WinAPI {
     public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
     [DllImport("user32.dll")]
     public static extern bool ReleaseCapture();
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    public static extern int SetWindowTheme(IntPtr hWnd, string pszSubAppName, string pszSubIdList);
 }
 "@
+
+# PBM_SETBARCOLOR / PBM_SETBKCOLOR only take effect once the progress bar's visual
+# theme is stripped -- otherwise Windows keeps painting its own themed blue/green.
+function Set-ProgressBarColors {
+    param($Bar)
+    [WinAPI]::SetWindowTheme($Bar.Handle, "", "") | Out-Null
+    $barColor = [System.Drawing.ColorTranslator]::ToWin32($ColorAccent)
+    $bkColor = [System.Drawing.ColorTranslator]::ToWin32($ColorTrack)
+    [WinAPI]::SendMessage($Bar.Handle, 0x409, 0, $barColor) | Out-Null   # PBM_SETBARCOLOR
+    [WinAPI]::SendMessage($Bar.Handle, 0x2001, 0, $bkColor) | Out-Null  # PBM_SETBKCOLOR
+}
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Celaut Nodo Installer"
+$form.Size = New-Object System.Drawing.Size($CardWidth, $CardHeight)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "None"
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.ControlBox = $false
+$form.BackColor = $ColorBg
+$form.ShowInTaskbar = $true
+$form.TopMost = $false
+$form.Region = New-Object System.Drawing.Region((New-RoundedRectPath 0 0 $CardWidth $CardHeight $CardRadius))
+
+$form.Add_Paint({
+    param($sender, $e)
+    $e.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $borderPen = New-Object System.Drawing.Pen($ColorBorder, 1)
+    $borderPath = New-RoundedRectPath 0 0 ($CardWidth - 1) ($CardHeight - 1) $CardRadius
+    $e.Graphics.DrawPath($borderPen, $borderPath)
+    $borderPen.Dispose()
+    $borderPath.Dispose()
+})
+
+# No mark beside the title -- a plain, centred title reads more serious than a
+# badge next to it.
+$titleLabel = New-Object System.Windows.Forms.Label
+$titleLabel.Text = "Celaut Nodo Installer"
+$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 15, [System.Drawing.FontStyle]::Bold)
+$titleLabel.ForeColor = $ColorTextPrimary
+$titleLabel.BackColor = [System.Drawing.Color]::Transparent
+$titleLabel.TextAlign = "MiddleCenter"
+$titleLabel.Size = New-Object System.Drawing.Size(420, 34)
+$titleLabel.Location = New-Object System.Drawing.Point(30, 32)
+
+$stepLabel = New-Object System.Windows.Forms.Label
+$stepLabel.Text = "Step 1 of 8"
+$stepLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$stepLabel.ForeColor = $ColorTextMuted
+$stepLabel.BackColor = [System.Drawing.Color]::Transparent
+$stepLabel.TextAlign = "MiddleCenter"
+$stepLabel.Size = New-Object System.Drawing.Size(420, 18)
+$stepLabel.Location = New-Object System.Drawing.Point(30, 82)
+
+$statusLabel = New-Object System.Windows.Forms.Label
+$statusLabel.Text = "Starting…"
+$statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 12)
+$statusLabel.ForeColor = $ColorTextPrimary
+$statusLabel.BackColor = [System.Drawing.Color]::Transparent
+$statusLabel.TextAlign = "MiddleCenter"
+$statusLabel.Size = New-Object System.Drawing.Size(420, 50)
+$statusLabel.Location = New-Object System.Drawing.Point(30, 112)
+
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Minimum = 0
+$progressBar.Maximum = 100
+$progressBar.Value = 0
+$progressBar.Size = New-Object System.Drawing.Size(420, 8)
+$progressBar.Location = New-Object System.Drawing.Point(30, 178)
+$progressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+
+$lockIcon = New-Object System.Windows.Forms.PictureBox
+$lockIcon.Size = New-Object System.Drawing.Size(14, 14)
+$lockIcon.Location = New-Object System.Drawing.Point([int](($CardWidth - 14) / 2), 226)
+$lockIcon.BackColor = [System.Drawing.Color]::Transparent
+$lockIcon.Add_Paint({
+    param($sender, $e)
+    $g = $e.Graphics
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $shacklePen = New-Object System.Drawing.Pen($ColorTextMuted, 1.6)
+    $g.DrawArc($shacklePen, 2, 0, 9, 9, 180, 180)
+    $shacklePen.Dispose()
+    $bodyBrush = New-Object System.Drawing.SolidBrush($ColorTextMuted)
+    $bodyPath = New-RoundedRectPath 1 6 12 8 2
+    $g.FillPath($bodyBrush, $bodyPath)
+    $bodyBrush.Dispose()
+    $bodyPath.Dispose()
+})
+
+$reassureLabel = New-Object System.Windows.Forms.Label
+$reassureLabel.Text = "This is a secure, local installation.`nFeel free to leave this window open."
+$reassureLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Italic)
+$reassureLabel.ForeColor = $ColorTextMuted
+$reassureLabel.BackColor = [System.Drawing.Color]::Transparent
+$reassureLabel.TextAlign = "TopCenter"
+$reassureLabel.Size = New-Object System.Drawing.Size(420, 40)
+$reassureLabel.Location = New-Object System.Drawing.Point(30, 244)
 
 $form.Add_MouseDown({
     if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
@@ -113,56 +220,61 @@ $titleLabel.Add_MouseDown({
     }
 })
 
-$form.Controls.AddRange(@($titleLabel, $statusLabel, $progressBar, $logBox))
+$form.Controls.AddRange(@($titleLabel, $stepLabel, $statusLabel, $progressBar, $lockIcon, $reassureLabel))
 $form.Show()
+Set-ProgressBarColors -Bar $progressBar
 [System.Windows.Forms.Application]::DoEvents()
 
 # ====================== LOG FUNCTIONS ======================
+$script:currentStep = 0
+$script:totalSteps = 8
+
 function Update-UI {
     param(
         [string]$Status,
         [int]$Progress,
-        [string]$Log = "",
-        [System.Drawing.Color]$Color = [System.Drawing.Color]::FromArgb(180, 180, 180)
+        [int]$Step
     )
+
+    if ($PSBoundParameters.ContainsKey('Step')) {
+        $script:currentStep = $Step
+        $stepLabel.Text = "Step $($script:currentStep) of $($script:totalSteps)"
+    }
 
     if ($Status) {
         $statusLabel.Text = $Status
     }
 
     if ($PSBoundParameters.ContainsKey('Progress')) {
-        $progressBar.Value = [Math]::Min([Math]::Max($Progress, 0), 100)
-    }
-
-    if ($Log) {
-        $logBox.SelectionStart = $logBox.TextLength
-        $logBox.SelectionLength = 0
-        $logBox.SelectionColor = $Color
-        $logBox.AppendText("$Log`r`n")
-        $logBox.ScrollToCaret()
+        if ($progressBar.Style -eq [System.Windows.Forms.ProgressBarStyle]::Continuous) {
+            $progressBar.Value = [Math]::Min([Math]::Max($Progress, 0), 100)
+        }
     }
 
     [System.Windows.Forms.Application]::DoEvents()
 }
 
+# The window stays calm and non-technical; these go to $LogFilePath instead (see
+# the DIAGNOSTIC LOG FILE section above). Same names/signatures as before so none
+# of the ~80 existing call sites below need to change.
 function Write-Info {
     param($msg)
-    Update-UI -Log $msg
+    Write-InstallLog -Level "INFO" -Message $msg
 }
 
 function Write-Success {
     param($msg)
-    Update-UI -Log $msg -Color ([System.Drawing.Color]::FromArgb(80, 200, 80))
+    Write-InstallLog -Level "OK" -Message $msg
 }
 
 function Write-Warning {
     param($msg)
-    Update-UI -Log "[!] $msg" -Color ([System.Drawing.Color]::FromArgb(255, 200, 0))
+    Write-InstallLog -Level "WARN" -Message $msg
 }
 
 function Write-Err {
     param($msg)
-    Update-UI -Log "[ERROR] $msg" -Color ([System.Drawing.Color]::FromArgb(255, 80, 80))
+    Write-InstallLog -Level "ERROR" -Message $msg
 }
 
 # ====================== BACKGROUND DOWNLOADS ======================
@@ -599,10 +711,12 @@ function Invoke-BackgroundDownload {
         if ($update.Status -ne $lastStatus -or $update.Percent -ne $lastPercent -or $update.Log -ne $lastLog) {
             if ($update.Indeterminate) {
                 $progressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
+                Set-ProgressBarColors -Bar $progressBar
                 Update-UI -Status $update.Status
             } else {
                 if ($progressBar.Style -ne [System.Windows.Forms.ProgressBarStyle]::Continuous) {
                     $progressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+                    Set-ProgressBarColors -Bar $progressBar
                 }
                 Update-UI -Status $update.Status -Progress $update.Percent
             }
@@ -623,6 +737,7 @@ function Invoke-BackgroundDownload {
     $update = $operation.Progress
     if ($update.Indeterminate) {
         $progressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+        Set-ProgressBarColors -Bar $progressBar
     } else {
         Update-UI -Status $update.Status -Progress $update.Percent
     }
@@ -652,7 +767,7 @@ try {
         $form.Close()
         [System.Windows.Forms.MessageBox]::Show(
             "Nodo installer is already running.`nPlease wait for the current installation to finish.",
-            "Nodo WSL Installer",
+            "Celaut Nodo Installer",
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Warning
         ) | Out-Null
@@ -665,6 +780,11 @@ catch {
 
 $ErrorActionPreference = "Stop"
 $Verbose = $VerboseMode.IsPresent
+
+# The window shows no technical text, so an uncaught exception must never just close
+# it silently (which is what -noConsole would do with nothing catching this). Every
+# failure from here on is caught once, logged in full, and reported calmly.
+try {
 
 # ======================== CONSTANTS ================================
 
@@ -854,7 +974,7 @@ Write-Info "  WSL2 + Windows 11 + Nodo Setup - Automated Installation Script"
 Write-Info "======================================================================="
 Write-Info ""
 
-Update-UI -Status "Checking system requirements..." -Progress 10
+Update-UI -Status "Checking your system…" -Progress 10 -Step 1
 Write-Info "[STEP 1/8] Checking system requirements..."
 
 $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem
@@ -895,7 +1015,7 @@ wsl --status *>&1 | Out-Null
 Write-Info "[OK] WSL status queried"
 
 Write-Info ""
-Update-UI -Status "Downloading custom kernel..." -Progress 25
+Update-UI -Status "Downloading secure custom kernel…" -Progress 25 -Step 2
 Write-Info "[STEP 2/8] Downloading and installing custom kernel..."
 
 if (-not (Test-Path $KernelDir)) {
@@ -940,7 +1060,7 @@ catch {
 }
 
 Write-Info ""
-Update-UI -Status "Configuring WSL2..." -Progress 35
+Update-UI -Status "Preparing your virtual environment…" -Progress 35 -Step 3
 Write-Info "[STEP 3/8] Configuring WSL2 settings..."
 
 $wslConfigPath = Join-Path $env:USERPROFILE ".wslconfig"
@@ -984,7 +1104,7 @@ Start-Sleep -Seconds 3
 Write-Success "[OK] Configuration applied"
 
 Write-Info ""
-Update-UI -Status "Creating Nodo distribution..." -Progress 50
+Update-UI -Status "Setting up Nodo…" -Progress 50 -Step 4
 Write-Info "[STEP 4/8] Creating the $DistroName distribution from the published Debian image..."
 
 Remove-DistroIfExists -Name $DistroName
@@ -1015,7 +1135,7 @@ wsl --import $DistroName $NodoBaseDir $NodoRootfsPath --version 2 *>&1 | Out-Nul
 Write-Success "[OK] Distribution $DistroName created from the published Debian image"
 
 Write-Info ""
-Update-UI -Status "Configuring internal environment..." -Progress 65
+Update-UI -Status "Installing Nodo and its components…" -Progress 65 -Step 5
 Write-Info "[STEP 5/8] Configuring user, password, and internal environment..."
 
 $wslSetupScript = @'
@@ -1098,6 +1218,19 @@ echo -e "\n${CYAN}[STEP 5.4] Installing Nodo system...${NC}"
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash
 echo -e "${GREEN}[OK] Nodo system installed${NC}"
 
+# On Linux, a missing Java-backed feature (Ergo/reputation) tells the operator to run
+# this by hand from a shell (src/utils/java_dependency.py: build_java_dependency_message).
+# A Windows user has no shell -- only the desktop shortcut into `nodo tui` -- so nothing
+# would ever be able to follow that instruction. Installed here, once, so the feature
+# just works. Non-fatal: a node without Java still runs, and the TUI/CLI keep telling
+# the operator how to install it by hand if this step is skipped.
+echo -e "\n${CYAN}[STEP 5.4a] Installing Java runtime (for Ergo/reputation features)...${NC}"
+if bash /nodo/bash/install_java.sh /nodo; then
+    echo -e "${GREEN}[OK] Java runtime installed${NC}"
+else
+    echo -e "${YELLOW}Java runtime install failed; Ergo/reputation features will report how to install it manually${NC}"
+fi
+
 echo -e "\n${CYAN}[STEP 5.4b] Building the operations console...${NC}"
 # Built here, once, because the desktop shortcut opens it. `nodo tui` otherwise
 # falls back to `cargo run`, which on a cold cache compiles ~17k lines of Rust --
@@ -1143,11 +1276,16 @@ YQ="/nodo/bin/yq"
 WSL_IFACE=$(ip route | awk '/^default/{print $5; exit}')
 echo "Detected WSL2 outbound interface: $WSL_IFACE"
 
-# Patch config.yaml so Nodo exposes services on the WSL2 interface
+# Patch config.yaml so Nodo exposes services on the WSL2 interface. `ui.THEME` is
+# overridden from its "ubuntu" default too: that default assumes the console it draws
+# in is GNOME Terminal on an Ubuntu server (config.example.yaml's own comment on
+# THEME), which does not hold here -- the only console a Windows user opens is the
+# desktop shortcut into `nodo tui` inside Windows Terminal/conhost, not GNOME Terminal.
 $YQ -i "
   .network.EXTERNAL_INTERFACE = \"$WSL_IFACE\" |
   .network.ISOLATE_INTERNAL_CHILDREN = true |
-  .network.DEFAULT_EXECUTE_REMOTE = true
+  .network.DEFAULT_EXECUTE_REMOTE = true |
+  .ui.THEME = \"dark\"
 " "$NODO_CONFIG"
 echo -e "${GREEN}[OK] Nodo will expose services on $WSL_IFACE (reachable from Windows)${NC}"
 
@@ -1199,7 +1337,7 @@ Invoke-Wsl "echo $setupScriptBase64 | base64 -d > /tmp/setup.sh && chmod +x /tmp
 Write-Success "[OK] Internal configuration completed"
 
 Write-Info ""
-Update-UI -Status "Configuring network..." -Progress 80
+Update-UI -Status "Connecting Nodo to your network…" -Progress 80 -Step 6
 Write-Info "[STEP 6/8] Configuring Windows-to-WSL network routing..."
 
 Write-Info "Configuring the Hyper-V firewall so WSL services are reachable from the LAN..."
@@ -1231,7 +1369,7 @@ catch {
 }
 
 Write-Info ""
-Update-UI -Status "Finalizing installation..." -Progress 95
+Update-UI -Status "Finishing up…" -Progress 95 -Step 7
 Write-Info "[STEP 7/8] Shutting down WSL to apply the default user and systemd..."
 wsl --shutdown *>&1 | Out-Null
 Write-Success "[OK] WSL shut down"
@@ -1242,37 +1380,49 @@ Write-Info ""
 Write-Info "[FINAL] Creating desktop shortcut..."
 
 $DesktopPath = [Environment]::GetFolderPath("Desktop")
-$ShortcutPath = Join-Path $DesktopPath "Nodo Terminal.lnk"
+$ShortcutPath = Join-Path $DesktopPath "Celaut Nodo.lnk"
 
 try {
     $WScriptShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WScriptShell.CreateShortcut($ShortcutPath)
 
-    # Straight into the console rather than a shell prompt. The first launch asks the
-    # KyA and the donation share (src/commands/onboarding.py) before drawing, which is
-    # where a Windows user gets asked at all -- the install is a pipe and cannot ask.
-    $Shortcut.TargetPath      = "wsl.exe"
-    $Shortcut.Arguments       = "-d Nodo --cd ~ -- nodo tui"
+    # Straight into the console rather than a shell prompt. The first launch asks
+    # the KyA and the donation share (src/commands/onboarding.py) before drawing,
+    # which is where a Windows user gets asked at all -- the install is a pipe and
+    # cannot ask.
+    #
+    # `wt.exe -w -1` always opens a brand new Windows Terminal window, never a tab
+    # folded into whatever the person already has open (their own PowerShell tabs,
+    # another WSL distro): https://learn.microsoft.com/windows/terminal/command-line-arguments
+    $wt = Get-Command "wt.exe" -ErrorAction SilentlyContinue
+    if ($wt) {
+        $Shortcut.TargetPath = $wt.Source
+        $Shortcut.Arguments  = "-w -1 new-tab --title `"Celaut Nodo`" -- wsl.exe -d Nodo --cd ~ -- nodo tui"
+    }
+    else {
+        $Shortcut.TargetPath = "wsl.exe"
+        $Shortcut.Arguments  = "-d Nodo --cd ~ -- nodo tui"
+    }
     $Shortcut.WorkingDirectory = "%USERPROFILE%"
-    $Shortcut.Description     = "Open the Nodo console (WSL2)"
+    $Shortcut.Description     = "Celaut Nodo"
     $Shortcut.IconLocation    = "C:\Windows\System32\wsl.exe,0"
     $Shortcut.Save()
 
-    Write-Success "Desktop shortcut created: Nodo Terminal.lnk"
+    Write-Success "Desktop shortcut created: Celaut Nodo.lnk"
 }
 catch {
     Write-Warning "Could not create the desktop shortcut."
 }
 
 # ====================== FINAL MESSAGE ======================
-Update-UI -Status "Installation completed" -Progress 100
+Update-UI -Status "All set — Celaut Nodo is ready" -Progress 100 -Step 8
 Write-Success "[OK] Installation completed successfully"
 Start-Sleep -Seconds 1
 $form.Close()
 
 [System.Windows.Forms.MessageBox]::Show(
-    "Nodo installation completed successfully.`n`nDesktop shortcut created.",
-    "Nodo WSL Installer - Success",
+    "Celaut Nodo installation completed successfully.`n`nDesktop shortcut created.",
+    "Celaut Nodo Installer - Success",
     [System.Windows.Forms.MessageBoxButtons]::OK,
     [System.Windows.Forms.MessageBoxIcon]::Information
 ) | Out-Null
@@ -1280,5 +1430,24 @@ $form.Close()
 # Launch Nodo terminal  TODO Se abre, pero al presionar q se cierra ¿?
 #Start-Process "wsl.exe" -ArgumentList "-d Nodo --cd ~ -- nodo"
 
-# Release mutex
-if ($mutex) { $mutex.ReleaseMutex() }
+}
+catch {
+    Write-Err $_.Exception.Message
+    Write-InstallLog -Level "ERROR" -Message ($_ | Out-String)
+
+    if ($form -and -not $form.IsDisposed) {
+        $form.Close()
+    }
+
+    [System.Windows.Forms.MessageBox]::Show(
+        "Something went wrong during installation.`n`nDetails were saved to:`n$LogFilePath`n`nPlease share that file when asking for help.",
+        "Celaut Nodo Installer",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Error
+    ) | Out-Null
+
+    exit 1
+}
+finally {
+    if ($mutex) { $mutex.ReleaseMutex() }
+}
