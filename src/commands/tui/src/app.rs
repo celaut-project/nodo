@@ -4765,6 +4765,7 @@ impl App {
 
     fn reload_after_config_write(&mut self) {
         self.config_document = read_yaml(&self.paths.config).ok();
+        crate::theme::refresh_from_document(self.config_document.as_ref());
         self.reload_money();
         self.config_all = get_config_entries(&self.paths.config).unwrap_or_default();
         self.apply_config_filter();

@@ -185,6 +185,31 @@ impl Theme {
     }
 }
 
+/// Re-resolve the theme after `document` was reloaded from a fresh `config.yaml`.
+///
+/// A `ui.THEME` edit lands in the file, restarts the node, and reloads the TUI's
+/// own copy of the document -- but until something calls this, the process-global
+/// theme is stuck at whatever `main.rs` resolved before the first frame, so the
+/// picker's change was invisible without quitting and relaunching the TUI. `--theme`
+/// and `NODO_TUI_THEME` still win, using `std::env::args` directly rather than a
+/// stored `argv`: neither one can have changed since the process started.
+pub fn refresh_from_document(document: Option<&serde_yaml::Value>) {
+    // Under test this runs on every `App::refresh_local`, on whichever thread
+    // `cargo test` gave that test -- which would otherwise race the theme that
+    // `ui::themes` pins for the length of a render. Production is single-threaded,
+    // so the lock costs a wait that never happens outside a test binary.
+    #[cfg(test)]
+    let _guard = TEST_SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    set_current(Theme::resolve(document, &argv));
+}
+
+/// Serialises every test that reads or writes the process-global [`current`] theme,
+/// in this module and in `ui::themes`, so two such tests on two `cargo test` threads
+/// cannot see each other's palette mid-render.
+#[cfg(test)]
+pub(crate) static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// `--theme <name>` or `--theme=<name>` from `argv`, whichever spelling was used.
 ///
 /// Parsed by hand, like `--version` in `main.rs`: this binary takes three options,
@@ -219,7 +244,8 @@ pub fn current() -> Theme {
     CURRENT.read().map(|theme| *theme).unwrap_or(UBUNTU)
 }
 
-/// Install the theme for this process. Called once from `main.rs`.
+/// Install the theme for this process. Called from `main.rs` at startup and again,
+/// via [`refresh_from_document`], whenever a config write reloads the document.
 pub fn set_current(theme: Theme) {
     if let Ok(mut current) = CURRENT.write() {
         *current = theme;

@@ -8671,13 +8671,10 @@ mod two_level_tab_bar_preview {
 mod themes {
     use super::render;
     use crate::app::{App, Page};
-    use crate::theme::{self, Theme, DARK, LIGHT, MONO, UBUNTU};
+    use crate::theme::{self, Theme, DARK, LIGHT, MONO, UBUNTU, TEST_SERIAL as SERIAL};
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
     use ratatui::Terminal;
-    use std::sync::Mutex;
-
-    static SERIAL: Mutex<()> = Mutex::new(());
 
     /// Every foreground colour actually painted on a full render of `page`.
     fn colours_drawn(theme: Theme, page: Page) -> Vec<Color> {
