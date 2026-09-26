@@ -72,6 +72,11 @@ pub enum Page {
     Peers,
     /// Clients that talk to us, and what they have paid.
     Clients,
+    /// Free-text conversations with peer operators (issue #431). Both directions
+    /// live on this one page, told apart by a toggle rather than a tab of their
+    /// own: threads this node opened, and threads opened by one of its clients
+    /// reaching out to it.
+    Chat,
     /// What this node has been paid, and what the network stakes on it — the two
     /// things it earns by being up.
     Earnings,
@@ -179,7 +184,7 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 12] = [
+    pub const ALL: [Page; 13] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
@@ -188,6 +193,9 @@ impl Page {
         Page::Peers,
         Page::Services,
         Page::Clients,
+        // Beside Clients: both are "who is on the other end", and Chat is often
+        // reached from noticing something worth telling that operator about.
+        Page::Chat,
         // After the pages that name who we deal with, because it is the sum of
         // what dealing with them came to.
         Page::Earnings,
@@ -211,6 +219,7 @@ impl Page {
             Page::Services => "SERVICES",
             Page::Peers => "PEERS",
             Page::Clients => "CLIENTS",
+            Page::Chat => "CHAT",
             Page::Earnings => "EARNINGS",
             Page::Cell => "CELL",
             Page::Pricing => "PRICING",
@@ -227,7 +236,7 @@ impl Page {
     pub fn group(self) -> PageGroup {
         match self {
             Page::Overview => PageGroup::Status,
-            Page::Instances | Page::Peers | Page::Services | Page::Clients => {
+            Page::Instances | Page::Peers | Page::Services | Page::Clients | Page::Chat => {
                 PageGroup::Activity
             }
             Page::Earnings => PageGroup::Money,
@@ -356,6 +365,12 @@ pub enum InputMode {
     /// of them is written. A posture is a dozen keys, and writing them without
     /// showing them is the failure this page exists to prevent.
     ConfirmWrites,
+    /// CHAT page (issue #431): `<peer_id> <topic...>`, split on the first space --
+    /// `nodo chat_open` mints the conversation and sends `topic` as its opening
+    /// message in one call.
+    NewConversation,
+    /// CHAT page: a reply in the selected, already-open conversation.
+    ReplyConversation,
 }
 
 /// How the `EditConfig` popup should let the user set a value, chosen from the
@@ -880,6 +895,72 @@ impl Identifiable for Client {
     fn id(&self) -> &str {
         &self.id
     }
+}
+
+/// Which half of `peer_chat_conversations` the CHAT page shows (issue #431):
+/// threads this node opened, or threads a peer opened with it (reaching this
+/// node as one of *its* clients) -- the same "us / them" split PEERS/CLIENTS
+/// already draws as separate pages, here a toggle on one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatDirection {
+    Ours,
+    Theirs,
+}
+
+impl ChatDirection {
+    pub fn opened_by_us(self) -> bool {
+        matches!(self, ChatDirection::Ours)
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            ChatDirection::Ours => "opened by us",
+            ChatDirection::Theirs => "opened by our clients",
+        }
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            ChatDirection::Ours => ChatDirection::Theirs,
+            ChatDirection::Theirs => ChatDirection::Ours,
+        }
+    }
+}
+
+impl Default for ChatDirection {
+    fn default() -> Self {
+        ChatDirection::Ours
+    }
+}
+
+/// One `peer_chat_conversations` row, as the CHAT table shows it.
+#[derive(Debug, Clone)]
+pub struct ConversationSummary {
+    pub id: String,
+    pub peer_id: String,
+    pub topic: String,
+    pub opened_at: String,
+    /// `None` while open. Closing is local bookkeeping only (see
+    /// `src/manager/chat.py::close_conversation`) -- nothing here means the peer
+    /// agreed, or was even told.
+    pub closed_at: Option<String>,
+}
+
+impl Identifiable for ConversationSummary {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+/// One `peer_chat_messages` row within a single thread, as the CHAT detail card
+/// shows it. `ts` arrives already formatted -- the message's own clock, not when
+/// this node happened to receive it -- so the card does no date arithmetic of its
+/// own for what is, on this page, the only thing worth drawing per line.
+#[derive(Debug, Clone)]
+pub struct ChatMessageRow {
+    pub from_us: bool,
+    pub body: String,
+    pub ts: String,
 }
 
 /// One `payments` row, as the detail cards show it. The amount stays in raw MU and is
@@ -2488,6 +2569,12 @@ pub struct App {
     pub running: bool,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
+    /// The CHAT page's threads (issue #431), for whichever `chat_direction` is
+    /// current. Re-read (not merged) on every toggle: `direction` picks the query,
+    /// not a filter over one cached list.
+    pub conversations: StatefulList<ConversationSummary>,
+    pub chat_direction: ChatDirection,
+    pub conversations_error: Option<String>,
     pub instances: StatefulList<Instance>,
     pub services: StatefulList<Service>,
     pub config_all: Vec<ConfigEntry>,
@@ -2604,6 +2691,8 @@ pub struct App {
     pub peer_detail: Option<PeerDetail>,
     pub client_detail: Option<ClientDetail>,
     pub service_detail: Option<ServiceDetail>,
+    /// The selected CHAT conversation's own messages, oldest first.
+    pub conversation_messages: Vec<ChatMessageRow>,
     pub instances_grouped: bool,
     pub app_logs: Vec<String>,
     pub node_logs: Vec<String>,
@@ -2653,6 +2742,8 @@ pub struct App {
     /// Client id and direction (true = debit) for the open `CreditClient` amount modal.
     pub credit_client_id: Option<String>,
     pub credit_client_decrement: bool,
+    /// Which conversation the open `ReplyConversation` prompt sends into.
+    pub chat_reply_conversation_id: Option<String>,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
@@ -2701,6 +2792,11 @@ impl Default for App {
             running: true,
             peers: StatefulList::with_items(get_peers(&paths.database).unwrap_or_default()),
             clients: StatefulList::with_items(get_clients(&paths.database).unwrap_or_default()),
+            conversations: StatefulList::with_items(
+                get_conversations(&paths.database, ChatDirection::default()).unwrap_or_default(),
+            ),
+            chat_direction: ChatDirection::default(),
+            conversations_error: None,
             instances: StatefulList::with_items(Vec::new()),
             services: StatefulList::with_items(Vec::new()),
             config_all,
@@ -2743,6 +2839,7 @@ impl Default for App {
             peer_detail: None,
             client_detail: None,
             service_detail: None,
+            conversation_messages: Vec::new(),
             instances_grouped: false,
             app_logs: vec!["TUI ready".to_string()],
             node_logs: read_last_lines(&paths.log, 250).unwrap_or_default(),
@@ -2767,6 +2864,7 @@ impl Default for App {
             pending_action: None,
             credit_client_id: None,
             credit_client_decrement: false,
+            chat_reply_conversation_id: None,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             tabs_area: Rect::ZERO,
@@ -2952,6 +3050,9 @@ impl App {
                 let next = (self.cell.organelle + 1) % Organelle::ALL.len();
                 self.cell.go_to_organelle(next);
             }
+            // Ours/theirs is a toggle, not a cursor, so either arrow flips it --
+            // there is no "next direction" beyond the one it is not currently on.
+            Page::Chat => self.toggle_chat_direction(),
             _ => {}
         }
     }
@@ -2969,6 +3070,7 @@ impl App {
                 let previous = (self.cell.organelle + count - 1) % count;
                 self.cell.go_to_organelle(previous);
             }
+            Page::Chat => self.toggle_chat_direction(),
             _ => {}
         }
     }
@@ -2990,6 +3092,10 @@ impl App {
             }
             Page::Clients => {
                 self.clients.previous();
+                self.load_selection_details();
+            }
+            Page::Chat => {
+                self.conversations.previous();
                 self.load_selection_details();
             }
             Page::Earnings => self.opinions.previous(),
@@ -3022,6 +3128,10 @@ impl App {
             }
             Page::Clients => {
                 self.clients.next();
+                self.load_selection_details();
+            }
+            Page::Chat => {
+                self.conversations.next();
                 self.load_selection_details();
             }
             Page::Earnings => self.opinions.next(),
@@ -3259,6 +3369,10 @@ impl App {
                 self.clients.select_visible(visible);
                 self.load_selection_details();
             }
+            Page::Chat => {
+                self.conversations.select_visible(visible);
+                self.load_selection_details();
+            }
             Page::Earnings => self.opinions.select_visible(visible),
             Page::Pricing => self.prices.select_visible(visible),
             _ => {}
@@ -3279,6 +3393,18 @@ impl App {
                 self.peers.refresh(peers);
             }
             Err(error) => self.peers_error = Some(error.to_string()),
+        }
+    }
+
+    /// Reload the CHAT page's thread list for whichever `chat_direction` is
+    /// current -- the counterpart of `refresh_peers`, same reasoning throughout.
+    fn refresh_conversations(&mut self) {
+        match get_conversations(&self.paths.database, self.chat_direction) {
+            Ok(conversations) => {
+                self.conversations_error = None;
+                self.conversations.refresh(conversations);
+            }
+            Err(error) => self.conversations_error = Some(error.to_string()),
         }
     }
 
@@ -3303,6 +3429,12 @@ impl App {
             .selected()
             .map(|service| service.id.clone())
             .and_then(|service_id| get_service_detail(&database, &service_id).ok());
+        self.conversation_messages = self
+            .conversations
+            .selected()
+            .map(|conversation| conversation.id.clone())
+            .and_then(|conversation_id| get_conversation_messages(&database, &conversation_id).ok())
+            .unwrap_or_default();
     }
 
     /// Expand or collapse the selected configuration section (Enter/Space on the
@@ -3362,6 +3494,7 @@ impl App {
         self.edit_kind = EditKind::Text;
         self.pending_action = None;
         self.credit_client_id = None;
+        self.chat_reply_conversation_id = None;
         self.lever_keys.clear();
         self.lever_key_index = 0;
     }
@@ -3694,6 +3827,8 @@ impl App {
             }
             InputMode::PickProfile => self.submit_profile_selection(),
             InputMode::PickLeverKey => self.submit_lever_key_selection(),
+            InputMode::NewConversation => self.submit_new_conversation(),
+            InputMode::ReplyConversation => self.submit_reply_conversation(),
             // The writes confirmation answers y/n, never Enter: Enter on a
             // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
             // gate answers y/n for the same reason and one stronger: Enter is the
@@ -3790,6 +3925,150 @@ impl App {
             CommandKind::Generic,
             label,
             vec![command.to_string(), client_id, amount],
+        );
+    }
+
+    // --- Chat (issue #431) --------------------------------------------------
+
+    /// Flip which half of `peer_chat_conversations` the table shows: threads this
+    /// node opened, or threads opened by one of its clients reaching out to it.
+    pub fn toggle_chat_direction(&mut self) {
+        if self.page() != Page::Chat {
+            return;
+        }
+        self.chat_direction = self.chat_direction.toggled();
+        self.refresh_conversations();
+        self.load_selection_details();
+    }
+
+    /// Start a new conversation: `<peer_id> <topic...>`, split on the first space.
+    /// `nodo chat_open` mints the id and sends `topic` as the opening message in
+    /// one call, so there is nothing to open here without also sending something --
+    /// an empty thread is not a thing this page has a row for.
+    pub fn open_new_conversation_prompt(&mut self) {
+        if self.page() != Page::Chat {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        self.input_mode = InputMode::NewConversation;
+        self.input.clear();
+        self.input_title = "New conversation: <peer_id> <topic...>".to_string();
+        self.edit_kind = EditKind::Text;
+    }
+
+    fn submit_new_conversation(&mut self) {
+        let input = self.input.clone();
+        let Some((peer_id, topic)) = input.trim().split_once(char::is_whitespace) else {
+            self.status = "Type a peer id and a topic, separated by a space".to_string();
+            return;
+        };
+        let peer_id = peer_id.trim().to_string();
+        let topic = topic.trim().to_string();
+        if peer_id.is_empty() || topic.is_empty() {
+            self.status = "Type a peer id and a topic, separated by a space".to_string();
+            return;
+        }
+        self.close_input();
+        let label = format!("Open conversation with {}", shorten(&peer_id, 18));
+        self.spawn_command(
+            CommandKind::Generic,
+            label,
+            vec!["chat_open".to_string(), peer_id, topic],
+        );
+    }
+
+    /// Reply in the selected, open conversation.
+    pub fn open_reply_prompt(&mut self) {
+        if self.page() != Page::Chat {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(conversation) = self.conversations.selected().cloned() else {
+            self.status = "Select a conversation first".to_string();
+            return;
+        };
+        if conversation.closed_at.is_some() {
+            self.status = "Closed; press R to reopen before replying".to_string();
+            return;
+        }
+        self.input_mode = InputMode::ReplyConversation;
+        self.input.clear();
+        self.input_title = format!("Reply to {}", shorten(&conversation.peer_id, 18));
+        self.chat_reply_conversation_id = Some(conversation.id);
+        self.edit_kind = EditKind::Text;
+    }
+
+    fn submit_reply_conversation(&mut self) {
+        let Some(conversation_id) = self.chat_reply_conversation_id.clone() else {
+            self.close_input();
+            return;
+        };
+        let body = self.input.trim().to_string();
+        if body.is_empty() {
+            self.status = "Type a message first".to_string();
+            return;
+        }
+        self.close_input();
+        self.spawn_command(
+            CommandKind::Generic,
+            "Reply".to_string(),
+            vec!["chat_reply".to_string(), conversation_id, body],
+        );
+    }
+
+    /// Close the selected conversation. Local bookkeeping only -- the peer is
+    /// never told, and nothing here waits on a reply, so it is a direct action
+    /// rather than a confirmation: reversible with `R`, unlike forgetting a peer.
+    pub fn close_selected_conversation(&mut self) {
+        if self.page() != Page::Chat {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(conversation) = self.conversations.selected().cloned() else {
+            self.status = "Select a conversation first".to_string();
+            return;
+        };
+        if conversation.closed_at.is_some() {
+            self.status = format!("{} is already closed", shorten(&conversation.id, 18));
+            return;
+        }
+        self.spawn_command(
+            CommandKind::Generic,
+            "Close conversation".to_string(),
+            vec!["chat_close".to_string(), conversation.id],
+        );
+    }
+
+    /// Reopen the selected, closed conversation.
+    pub fn reopen_selected_conversation(&mut self) {
+        if self.page() != Page::Chat {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        let Some(conversation) = self.conversations.selected().cloned() else {
+            self.status = "Select a conversation first".to_string();
+            return;
+        };
+        if conversation.closed_at.is_none() {
+            self.status = format!("{} is already open", shorten(&conversation.id, 18));
+            return;
+        }
+        self.spawn_command(
+            CommandKind::Generic,
+            "Reopen conversation".to_string(),
+            vec!["chat_reopen".to_string(), conversation.id],
         );
     }
 
@@ -5148,6 +5427,7 @@ impl App {
         self.refresh_peers();
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        self.refresh_conversations();
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
         self.energy_series = get_energy_series(&self.paths.database, ENERGY_HISTORY_HOURS)
@@ -6020,6 +6300,67 @@ fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<P
         })?
         .collect();
     contracts
+}
+
+/// Threads on the CHAT page, most recently opened first (issue #431). `direction`
+/// picks which half of the table: `opened_by_us` true for this node's own
+/// conversations, false for ones a peer opened by reaching this node as one of
+/// its clients. Mirrors `src/database/sql_connection.py::list_conversations`.
+fn get_conversations(database: &Path, direction: ChatDirection) -> SqlResult<Vec<ConversationSummary>> {
+    if !database.exists() {
+        return Ok(Vec::new());
+    }
+    let connection = Connection::open(database)?;
+    if !table_exists(&connection, "peer_chat_conversations") {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection.prepare(
+        "SELECT id, peer_id, COALESCE(topic, ''), opened_at, closed_at
+         FROM peer_chat_conversations
+         WHERE opened_by_us = ?1
+         ORDER BY opened_at DESC",
+    )?;
+    let conversations = statement
+        .query_map([direction.opened_by_us() as i64], |row| {
+            Ok(ConversationSummary {
+                id: row.get(0)?,
+                peer_id: row.get(1)?,
+                topic: row.get(2)?,
+                opened_at: row.get(3)?,
+                closed_at: row.get(4)?,
+            })
+        })?
+        .collect();
+    conversations
+}
+
+/// One thread's messages, oldest first (issue #431). Mirrors
+/// `src/database/sql_connection.py::get_conversation_messages`.
+fn get_conversation_messages(database: &Path, conversation_id: &str) -> SqlResult<Vec<ChatMessageRow>> {
+    if !database.exists() {
+        return Ok(Vec::new());
+    }
+    let connection = Connection::open(database)?;
+    if !table_exists(&connection, "peer_chat_messages") {
+        return Ok(Vec::new());
+    }
+    let mut statement = connection.prepare(
+        "SELECT from_us, body, ts
+         FROM peer_chat_messages
+         WHERE conversation_id = ?1
+         ORDER BY id ASC",
+    )?;
+    let messages = statement
+        .query_map([conversation_id], |row| {
+            let ts: i64 = row.get(2)?;
+            Ok(ChatMessageRow {
+                from_us: row.get(0)?,
+                body: row.get(1)?,
+                ts: format_unix_timestamp(ts),
+            })
+        })?
+        .collect();
+    messages
 }
 
 /// Adjust a peer's local reputation score by `delta`, mirroring
@@ -7191,6 +7532,23 @@ fn utc_stamp(time: SystemTime) -> String {
     )
 }
 
+/// Format a Chat message's stored `ts` (Unix seconds) as `YYYY-MM-DD HH:MM:SS` UTC --
+/// readable, unlike `utc_stamp`'s compact filename shape. A negative or otherwise
+/// unreadable value (never written by this node, but this reads whatever a peer's
+/// clock produced) falls back to the epoch rather than panicking.
+fn format_unix_timestamp(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    let days = seconds.div_euclid(86_400);
+    let tod = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
+        tod / 3_600,
+        (tod % 3_600) / 60,
+        tod % 60,
+    )
+}
+
 /// Days-since-epoch to (year, month, day), UTC. Howard Hinnant's `civil_from_days`
 /// -- the same arithmetic every date library uses, small enough to inline rather
 /// than take a dependency for six filename characters.
@@ -7313,6 +7671,7 @@ mod tests {
                     Page::Peers,
                     Page::Services,
                     Page::Clients,
+                    Page::Chat,
                     Page::Earnings,
                     Page::Logs,
                     Page::Cell,
@@ -8785,6 +9144,232 @@ mod tests {
             "a failed peer query must say so rather than render as zero peers"
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Threads on the CHAT page (issue #431), against the schema the node
+    /// actually creates -- the same discipline `peer_database` follows for PEERS,
+    /// for the reason `migration_table`'s own comment gives.
+    mod chat_page {
+        use super::*;
+
+        fn chat_database(dir: &Path) -> PathBuf {
+            let path = dir.join("database.sqlite");
+            let connection = Connection::open(&path).unwrap();
+            for table in ["peer", "peer_chat_conversations", "peer_chat_messages"] {
+                connection.execute_batch(&migration_table(table)).unwrap();
+            }
+            connection
+                .execute_batch(
+                    "INSERT INTO peer (id, advertisement, remote_client_id, balance_mu,
+                                       reputation_score)
+                     VALUES ('peer-1', NULL, NULL, '0', 0);",
+                )
+                .unwrap();
+            path
+        }
+
+        #[test]
+        fn conversations_are_listed_against_the_schema_the_node_actually_creates() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-chat-schema");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = chat_database(&dir);
+            Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us, topic)
+                     VALUES ('conv-1', 'peer-1', 1, 'ping')",
+                    [],
+                )
+                .unwrap();
+
+            let ours = get_conversations(&database, ChatDirection::Ours)
+                .expect("the query must survive the real schema");
+            assert_eq!(ours.len(), 1);
+            assert_eq!(ours[0].id, "conv-1");
+            assert_eq!(ours[0].peer_id, "peer-1");
+            assert_eq!(ours[0].topic, "ping");
+            assert!(ours[0].closed_at.is_none());
+
+            // opened_by_us=1 is not offered on the reverse page.
+            let theirs = get_conversations(&database, ChatDirection::Theirs).unwrap();
+            assert!(theirs.is_empty());
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_closed_conversation_carries_its_closed_at() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-chat-closed");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = chat_database(&dir);
+            Connection::open(&database)
+                .unwrap()
+                .execute_batch(
+                    "INSERT INTO peer_chat_conversations
+                        (id, peer_id, opened_by_us, topic, closed_at)
+                     VALUES ('conv-1', 'peer-1', 0, '', '2026-01-01 00:00:00');",
+                )
+                .unwrap();
+
+            let theirs = get_conversations(&database, ChatDirection::Theirs).unwrap();
+            assert_eq!(theirs.len(), 1);
+            assert!(theirs[0].closed_at.is_some());
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn conversation_messages_are_read_oldest_first() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-chat-messages");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = chat_database(&dir);
+            let connection = Connection::open(&database).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us)
+                     VALUES ('conv-1', 'peer-1', 1)",
+                    [],
+                )
+                .unwrap();
+            for (from_us, body, ts) in [(1, "hi", 1_700_000_000), (0, "hi back", 1_700_000_060)] {
+                connection
+                    .execute(
+                        "INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
+                         VALUES ('peer-1', ?1, ?2, ?3, 'conv-1')",
+                        rusqlite::params![from_us, body, ts],
+                    )
+                    .unwrap();
+            }
+
+            let messages = get_conversation_messages(&database, "conv-1")
+                .expect("the query must survive the real schema");
+            assert_eq!(messages.len(), 2);
+            assert!(messages[0].from_us);
+            assert_eq!(messages[0].body, "hi");
+            assert!(!messages[1].from_us);
+            assert_eq!(messages[1].body, "hi back");
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn toggling_direction_reloads_the_list_and_clears_the_stale_selection() {
+            let dir = std::env::temp_dir().join("nodo-tui-test-chat-toggle");
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            let database = chat_database(&dir);
+            Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us)
+                     VALUES ('conv-1', 'peer-1', 0)",
+                    [],
+                )
+                .unwrap();
+
+            let mut app = App::default();
+            app.paths.database = database;
+            app.tabs.select_page(Page::Chat);
+            app.refresh_conversations();
+            assert!(app.conversations.items.is_empty(), "nothing opened by us yet");
+
+            app.toggle_chat_direction();
+            assert_eq!(app.chat_direction, ChatDirection::Theirs);
+            assert_eq!(app.conversations.items.len(), 1);
+            let _ = fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_new_conversation_needs_both_a_peer_and_a_topic() {
+            let mut app = App::default();
+            app.tabs.select_page(Page::Chat);
+            app.open_new_conversation_prompt();
+            assert_eq!(app.input_mode, InputMode::NewConversation);
+
+            app.input = "just-a-peer-id".to_string();
+            app.submit_new_conversation();
+            assert_eq!(app.input_mode, InputMode::NewConversation, "still open: no topic");
+            assert!(app.status.contains("peer id and a topic"), "{}", app.status);
+        }
+
+        #[test]
+        fn replying_to_a_closed_conversation_is_refused() {
+            let mut app = App::default();
+            app.tabs.select_page(Page::Chat);
+            app.conversations = StatefulList::with_items(vec![ConversationSummary {
+                id: "conv-1".to_string(),
+                peer_id: "peer-1".to_string(),
+                topic: "ping".to_string(),
+                opened_at: "2026-01-01 00:00:00".to_string(),
+                closed_at: Some("2026-01-02 00:00:00".to_string()),
+            }]);
+            app.conversations.next();
+
+            app.open_reply_prompt();
+
+            assert_eq!(app.input_mode, InputMode::Normal, "no prompt opened");
+            assert!(app.status.contains("reopen"), "{}", app.status);
+        }
+
+        #[test]
+        fn an_empty_reply_is_rejected_before_anything_is_sent() {
+            let mut app = App::default();
+            app.tabs.select_page(Page::Chat);
+            app.conversations = StatefulList::with_items(vec![ConversationSummary {
+                id: "conv-1".to_string(),
+                peer_id: "peer-1".to_string(),
+                topic: "ping".to_string(),
+                opened_at: "2026-01-01 00:00:00".to_string(),
+                closed_at: None,
+            }]);
+            app.conversations.next();
+
+            app.open_reply_prompt();
+            assert_eq!(app.input_mode, InputMode::ReplyConversation);
+            app.input = "   ".to_string();
+            app.submit_reply_conversation();
+
+            assert_eq!(app.input_mode, InputMode::ReplyConversation, "still open: empty body");
+            assert!(app.status.contains("Type a message"), "{}", app.status);
+        }
+
+        #[test]
+        fn closing_an_already_closed_conversation_is_a_no_op_not_a_command() {
+            let mut app = App::default();
+            app.tabs.select_page(Page::Chat);
+            app.conversations = StatefulList::with_items(vec![ConversationSummary {
+                id: "conv-1".to_string(),
+                peer_id: "peer-1".to_string(),
+                topic: String::new(),
+                opened_at: "2026-01-01 00:00:00".to_string(),
+                closed_at: Some("2026-01-02 00:00:00".to_string()),
+            }]);
+            app.conversations.next();
+
+            app.close_selected_conversation();
+
+            assert!(app.command_task.is_none(), "nothing spawned");
+            assert!(app.status.contains("already closed"), "{}", app.status);
+        }
+
+        #[test]
+        fn reopening_an_already_open_conversation_is_a_no_op_not_a_command() {
+            let mut app = App::default();
+            app.tabs.select_page(Page::Chat);
+            app.conversations = StatefulList::with_items(vec![ConversationSummary {
+                id: "conv-1".to_string(),
+                peer_id: "peer-1".to_string(),
+                topic: String::new(),
+                opened_at: "2026-01-01 00:00:00".to_string(),
+                closed_at: None,
+            }]);
+            app.conversations.next();
+
+            app.reopen_selected_conversation();
+
+            assert!(app.command_task.is_none(), "nothing spawned");
+            assert!(app.status.contains("already open"), "{}", app.status);
+        }
     }
 
     #[test]

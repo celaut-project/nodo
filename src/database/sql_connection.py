@@ -72,6 +72,11 @@ TRACEABILITY_TABLES = (
     # A peer's chat history with this node. Without it, Chat would still answer, but
     # every message would vanish on the next restart with no error to say so.
     "peer_chat_messages",
+    # One row per conversation a chat message groups into (issue #431). Without it,
+    # a message naming a fresh conversation_id would still be stored -- the FK is
+    # not enforced by default -- but `chat.list_conversations` would have nothing
+    # to read, and neither TUI page (ours / our clients') could show it.
+    "peer_chat_conversations",
 )
 
 # Columns on an existing table that a database created before them will not have.
@@ -85,6 +90,10 @@ TRACEABILITY_COLUMNS = {
     # upgraded in place would raise "no such column: local_client_id" on the first
     # Chat message a peer sends that names its client_id (see gateway.Chat).
     "peer": {"local_client_id": "TEXT DEFAULT NULL"},
+    # A node that already deployed peer_chat_messages before conversations existed
+    # has the table but not this column -- an ADD COLUMN, not ensure_tables, for the
+    # same reason as `peer.local_client_id` above.
+    "peer_chat_messages": {"conversation_id": "TEXT DEFAULT NULL"},
 }
 
 
@@ -2314,7 +2323,7 @@ class SQLConnection(metaclass=Singleton):
         return row['id'] if row else None
 
     def add_chat_message(self, peer_id: str, from_us: bool, body: str, ts: int,
-                         keep_per_peer: int) -> None:
+                         keep_per_peer: int, conversation_id: Optional[str] = None) -> None:
         """Store one Chat message and prune ``peer_id``'s history down to ``keep_per_peer``.
 
         The prune runs on every insert rather than on a schedule of its own, the
@@ -2323,11 +2332,17 @@ class SQLConnection(metaclass=Singleton):
         after flooding this node would otherwise never trigger a cleanup at all.
         Scoped to one peer at a time, so one abusive peer's history cannot crowd
         another's out of its own share of the ceiling.
+
+        ``conversation_id`` is deliberately **not** its own scope for the prune: a
+        peer's ceiling is on its whole history, not per thread, or an operator
+        opening many small conversations would buy itself a much larger effective
+        allowance than one who does not -- the ceiling exists to bound one peer's
+        total footprint, not to be multiplied by however many threads it opens.
         """
         self._execute('''
-            INSERT INTO peer_chat_messages (peer_id, from_us, body, ts)
-            VALUES (?, ?, ?, ?)
-        ''', (peer_id, int(bool(from_us)), body, int(ts)))
+            INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (peer_id, int(bool(from_us)), body, int(ts), conversation_id))
         self._execute('''
             DELETE FROM peer_chat_messages
             WHERE peer_id = ? AND id NOT IN (
@@ -2339,9 +2354,13 @@ class SQLConnection(metaclass=Singleton):
         ''', (peer_id, peer_id, max(0, int(keep_per_peer))))
 
     def get_chat_messages(self, peer_id: str, limit: int = 100) -> List[dict]:
-        """The stored conversation with ``peer_id``, oldest first, capped at ``limit``."""
+        """The stored conversation with ``peer_id``, oldest first, capped at ``limit``.
+
+        Every message with this peer, threaded or not -- the flat view. See
+        :meth:`get_conversation_messages` for one thread alone.
+        """
         result = self._execute('''
-            SELECT from_us, body, ts, received_at
+            SELECT from_us, body, ts, received_at, conversation_id
             FROM peer_chat_messages
             WHERE peer_id = ?
             ORDER BY id DESC
@@ -2353,8 +2372,141 @@ class SQLConnection(metaclass=Singleton):
                 'body': row['body'],
                 'ts': int(row['ts']),
                 'received_at': row['received_at'],
+                'conversation_id': row['conversation_id'],
             }
             for row in reversed(result.fetchall())
+        ]
+
+    def get_conversation_messages(self, conversation_id: str, limit: int = 200) -> List[dict]:
+        """Every message in one thread, oldest first, capped at ``limit``."""
+        result = self._execute('''
+            SELECT from_us, body, ts, received_at
+            FROM peer_chat_messages
+            WHERE conversation_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        ''', (conversation_id, max(0, int(limit))))
+        return [
+            {
+                'from_us': bool(row['from_us']),
+                'body': row['body'],
+                'ts': int(row['ts']),
+                'received_at': row['received_at'],
+            }
+            for row in reversed(result.fetchall())
+        ]
+
+    def create_conversation(self, conversation_id: str, peer_id: str, opened_by_us: bool,
+                            topic: str = "") -> bool:
+        """Open a new thread, or silently do nothing if ``conversation_id`` exists.
+
+        The silent no-op (``INSERT OR IGNORE``) is what lets
+        :func:`chat.receive_chat_message` call this unconditionally on every
+        message: the first message of a peer-opened thread creates the row, and
+        every one after it is the same statement finding nothing to do.
+        """
+        if not self.peer_exists(peer_id=peer_id):
+            logger.LOGGER(f'Cannot open a conversation: peer {peer_id} does not exist')
+            return False
+        try:
+            self._execute('''
+                INSERT OR IGNORE INTO peer_chat_conversations
+                    (id, peer_id, opened_by_us, topic)
+                VALUES (?, ?, ?, ?)
+            ''', (conversation_id, peer_id, int(bool(opened_by_us)), topic or None))
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to open conversation {conversation_id}: {e}')
+            return False
+
+    def close_conversation(self, conversation_id: str) -> bool:
+        """Mark a thread closed. Local bookkeeping only -- nothing travels to the peer."""
+        try:
+            self._execute('''
+                UPDATE peer_chat_conversations
+                SET closed_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND closed_at IS NULL
+            ''', (conversation_id,))
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to close conversation {conversation_id}: {e}')
+            return False
+
+    def reopen_conversation(self, conversation_id: str) -> bool:
+        """Undo :meth:`close_conversation`. Also local-only, same as closing."""
+        try:
+            self._execute('''
+                UPDATE peer_chat_conversations
+                SET closed_at = NULL
+                WHERE id = ?
+            ''', (conversation_id,))
+            return True
+        except sqlite3.Error as e:
+            logger.LOGGER(f'Failed to reopen conversation {conversation_id}: {e}')
+            return False
+
+    def conversation_exists(self, conversation_id: str) -> bool:
+        result = self._execute('''
+            SELECT 1 FROM peer_chat_conversations WHERE id = ?
+        ''', (conversation_id,))
+        return result.fetchone() is not None
+
+    def get_conversation(self, conversation_id: str) -> Optional[dict]:
+        """One thread's own row (who opened it, its topic, when it opened/closed)."""
+        result = self._execute('''
+            SELECT id, peer_id, opened_by_us, topic, opened_at, closed_at
+            FROM peer_chat_conversations
+            WHERE id = ?
+        ''', (conversation_id,))
+        row = result.fetchone()
+        if row is None:
+            return None
+        return {
+            'id': row['id'],
+            'peer_id': row['peer_id'],
+            'opened_by_us': bool(row['opened_by_us']),
+            'topic': row['topic'],
+            'opened_at': row['opened_at'],
+            'closed_at': row['closed_at'],
+        }
+
+    def list_conversations(self, peer_id: Optional[str] = None,
+                           opened_by_us: Optional[bool] = None,
+                           include_closed: bool = True) -> List[dict]:
+        """Threads, most recently opened first -- the two TUI pages read this.
+
+        ``opened_by_us=True`` is "what's open, per peer" (issue #431); ``False`` is
+        the reverse page, conversations opened *by our clients* -- peers who
+        reached out to us. ``peer_id`` narrows to one peer's threads on either page;
+        left unset, every peer's.
+        """
+        clauses = []
+        params: list = []
+        if peer_id is not None:
+            clauses.append('peer_id = ?')
+            params.append(peer_id)
+        if opened_by_us is not None:
+            clauses.append('opened_by_us = ?')
+            params.append(int(bool(opened_by_us)))
+        if not include_closed:
+            clauses.append('closed_at IS NULL')
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ''
+        result = self._execute(f'''
+            SELECT id, peer_id, opened_by_us, topic, opened_at, closed_at
+            FROM peer_chat_conversations
+            {where}
+            ORDER BY opened_at DESC
+        ''', tuple(params))
+        return [
+            {
+                'id': row['id'],
+                'peer_id': row['peer_id'],
+                'opened_by_us': bool(row['opened_by_us']),
+                'topic': row['topic'],
+                'opened_at': row['opened_at'],
+                'closed_at': row['closed_at'],
+            }
+            for row in result.fetchall()
         ]
 
     def add_delegated_instance(self, father_id: str, encrypted_external_token: str, external_token: str,
