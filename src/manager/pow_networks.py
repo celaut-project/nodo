@@ -94,6 +94,17 @@ KNOWN_CHAINS = ("ergo", "bitcoin")
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_MAX_PEERS = 8
 
+#: What ``resolve_pow_network`` names its own two slots in each ``Instance`` it
+#: builds, in ``Api.Slot.protocol_stack`` -- never echoed from ``network.protocol_stack``
+#: (which is the *requester's* ask, identical across every candidate of one
+#: resolution, and not observed of the peer at all; see the proposal document). These
+#: two are this node's own, peer-specific statement of which port speaks which half:
+#: the P2P port a chain guest actually wants, and the REST one this node itself just
+#: verified the candidate at. ``narrow_instances_for_local_grant`` reads them back to
+#: decide what a local guest's firewall grant may keep.
+P2P_SLOT_TAG = "ergo-p2p"
+REST_SLOT_TAG = "ergo-rest"
+
 
 class PowFormalError(ValueError):
     """``Network.formal`` could not be read as a PoW requirement.
@@ -392,27 +403,38 @@ def _peer_suggested_endpoints(network: celaut.Service.Network) -> List[str]:
     Imported where it is used: it pulls in the database and the gRPC transport, which a
     node resolving a DNS network has no reason to be loading here.
 
-    ``ask_peers`` gives ``(ip, port)`` pairs read off the ``Instance.Uri`` of a peer's
-    ``ResolveNetwork`` answer -- and for ``pow:ergo`` that port is always the **P2P**
-    one: this node (and any other following the same convention) never emits a REST
-    uri for this domain, to a peer or to a guest alike (see
-    :func:`resolve_pow_network`). Dialling it as ``http://{ip}:{port}`` would be
-    speaking HTTP to Ergo's P2P protocol, which does not answer -- every such candidate
-    would fail :func:`ergo_peer_satisfies` and be dropped, silently emptying this
-    source. So the peer-given port is not used for the REST guess at all; the host is
-    tried on :data:`src.manager.ergo.MAINNET_REST_PORT` instead, exactly as
-    unverified and exactly as disposable as every other guess here -- wrong for this
-    host, and the candidate is dropped by the same verification every other one goes
-    through. (The scheme is guessed too, and for the same reason: ``Instance.Uri``
-    carries no scheme, so an https-only peer is one more candidate this costs a single
-    failed request, not a guest.)
+    ``ask_peers`` gives ``(ip, port, tags)`` triples read off the ``Instance.Uri`` of a
+    peer's ``ResolveNetwork`` answer. A peer following this same module's convention
+    (:func:`resolve_pow_network`) tags its REST slot with :data:`REST_SLOT_TAG`, and
+    that port -- looked up first, per ip -- is used directly: it is exactly the
+    address that peer says answers REST, no better or worse trusted than any other
+    address here, and dropped by the same verification below if it is wrong. Only an
+    ip nobody tagged that way (an older nodo, or another celaut implementation that
+    never built a REST slot) falls back to :data:`src.manager.ergo.MAINNET_REST_PORT`
+    -- the same guess this module always made, now the last resort instead of the
+    only option. (The scheme is guessed too, and for the same reason:
+    ``Instance.Uri`` carries no scheme, so an https-only peer is one more candidate
+    this costs a single failed request, not a guest.)
     """
     try:
         from src.manager.network_discovery import ask_peers
     except Exception as e:  # pragma: no cover - environment-dependent
         logger(f"[POW] peer endpoint source unavailable: {type(e).__name__}: {e}")
         return []
-    return [f"http://{ip}:{MAINNET_REST_PORT}" for ip, _p2p_port in ask_peers(network)]
+
+    suggested = ask_peers(network)
+    rest_port_by_ip = {
+        ip: port for ip, port, tags in suggested if REST_SLOT_TAG in tags
+    }
+
+    urls: List[str] = []
+    seen_ips = set()
+    for ip, _port, _tags in suggested:
+        if ip in seen_ips:
+            continue
+        seen_ips.add(ip)
+        urls.append(f"http://{ip}:{rest_port_by_ip.get(ip, MAINNET_REST_PORT)}")
+    return urls
 
 
 def candidate_urls(
@@ -576,6 +598,24 @@ def _resolve_host(host: str, port: int) -> Optional[Tuple[str, int]]:
     return None
 
 
+def _rest_uri_for(url: str) -> Optional[Tuple[str, int]]:
+    """``(ip, port)`` of a verified candidate's own **REST** endpoint.
+
+    Unlike the P2P port, this one is never guessed: ``url`` is exactly the address
+    ``ergo_peer_satisfies`` just verified the candidate at, in the loop this is
+    called from, so its host and port are already known -- only pinning to an
+    address (as the P2P uri also does) is left to do. No port in ``url`` falls back
+    to the scheme's own default (80/443), which is what ``requests`` -- and
+    therefore the verification that just ran -- used too.
+    """
+    parsed = urlparse(url if "//" in url else f"//{url}")
+    host = parsed.hostname
+    if not host:
+        return None
+    port = parsed.port or {"http": 80, "https": 443}.get(parsed.scheme, MAINNET_REST_PORT)
+    return _resolve_host(host, port)
+
+
 # -------------------------------------------------------------------- verification
 
 def _get_json(url: str, path: str, timeout: int) -> Optional[Any]:
@@ -705,26 +745,39 @@ def resolve_pow_network(
     records of a single name -- and it would leave the guest unable to tell the peers
     apart in its own ``__config__``.
 
-    **The uri is the peer's P2P endpoint, not its REST one.** A service declaring
-    ``pow:ergo`` is asking for chain peers -- something to sync a chain against -- and
-    the REST API is not that: it is the interface this node used to *check* the peer, on
-    a port no chain protocol is spoken on. Emitting the REST address was therefore
-    granting egress that could not be used for what it was granted for, which is the
-    worst shape a firewall rule can have: it is both useless and open. The two roles are
-    not interchangeable and they are not both wanted, so the REST uri is **not** also
-    emitted in the slot. A guest that wanted a REST API would be asking for one, and
-    that ask is a different network descriptor -- not a second uri smuggled into this
-    one, which the guest could not tell apart from the first anyway, since an
-    ``Instance.Uri`` carries no scheme and no role. Deciding for it by widening the hole
-    is not a service to it.
+    **Each Instance carries two slots, tagged apart: its P2P endpoint and its REST
+    one.** A service declaring ``pow:ergo`` is asking for chain peers -- something to
+    sync a chain against -- and the REST API is not that: it is the interface this node
+    used to *check* the peer, on a port no chain protocol is spoken on. The two are not
+    interchangeable, so each is its own slot (:data:`P2P_SLOT_TAG` /
+    :data:`REST_SLOT_TAG` in ``Api.Slot.protocol_stack``, never the requester's own
+    ``network.protocol_stack`` echoed onto either one -- that describes what the
+    *asker* wants, identically for every candidate, not what a specific peer's port
+    speaks). Building both, always, is what lets this node's own peer discovery
+    (``network_discovery.ask_peer``) verify a suggestion by its REST port when another
+    node names one, instead of guessing at Ergo mainnet's conventional REST port
+    every time (:data:`src.manager.ergo.MAINNET_REST_PORT`, see
+    ``pow_networks._peer_suggested_endpoints``).
 
-    Where the port comes from is the other half. This node does not assume a port for a
-    network: the crawl observes each peer's P2P address (``/peers/connected.address``)
-    and that is what is emitted, so a peer on 9031 is reached on 9031. Only a candidate
-    whose P2P endpoint nobody ever saw -- ``NODE_URL``, ``default_instances``, a peer's
-    ``ResolveNetwork`` answer -- falls back to Ergo mainnet's conventional P2P port
+    **A local guest's firewall grant is not the same view.** Emitting the REST address
+    to a *guest* that only asked for a chain peer would be granting egress that could
+    not be used for what it was granted for -- both useless and open, the one thing a
+    firewall rule must not be. So the Instance handed back here always carries both
+    slots, and :func:`narrow_instances_for_local_grant` is what
+    ``networks.resolve_network_for_peer`` calls to strip the REST one back out before
+    a local caller's ``NetworkResolution`` is built and its firewall opened -- a remote
+    node asking as a peer opens nothing on the strength of any answer, so it keeps the
+    full picture.
+
+    Where the P2P port comes from: this node does not assume one for a network wherever
+    it can observe it. The crawl observes each peer's P2P address
+    (``/peers/connected.address``) and that is what is emitted, so a peer on 9031 is
+    reached on 9031. Only a candidate whose P2P endpoint nobody ever saw --
+    ``NODE_URL``, ``default_instances``, a peer's ``ResolveNetwork`` answer -- falls
+    back to Ergo mainnet's conventional P2P port
     (:data:`src.manager.ergo.MAINNET_P2P_PORT`, 9030), and that fallback is logged
-    where it happens.
+    where it happens. The REST port is never guessed here: it is the very address
+    ``ergo_peer_satisfies`` just verified the candidate at, a line above.
 
     That this is safe took a fix at the other end: ``configure_guest_firewall_policy``
     stopped at the first peer instance it could write a rule for, so N instances would
@@ -757,7 +810,6 @@ def resolve_pow_network(
 
     timeout = _timeout()
     limit = _max_peers()
-    i_slot = 1  # Internal port usage is irrelevant for an externally-reached peer.
     peers: List[celaut.Instance] = []
     seen_addresses = set()
     p2p_addresses = crawled_p2p_addresses()
@@ -773,22 +825,39 @@ def resolve_pow_network(
         if address in seen_addresses:
             continue
         seen_addresses.add(address)
+
+        # `internal_port` is the port a consumer of this slot would actually dial,
+        # exactly as everywhere else in this node it names a real port rather than an
+        # arbitrary index -- see `src/gateway/utils.py`'s own gateway-port slot.
+        slots = [celaut.Service.Api.Slot(
+            port=address[1],
+            transport=celaut.Service.Api.Protocol(tags=["tcp"]),
+            protocol_stack=[celaut.Service.Api.Protocol(tags=[P2P_SLOT_TAG])],
+        )]
+        uri_slots = [celaut.Instance.Uri_Slot(
+            internal_port=address[1],
+            uri=[celaut.Instance.Uri(ip=address[0], port=address[1])],
+        )]
+
+        rest_address = _rest_uri_for(url)
+        # Distinct ports only: two slots sharing one internal_port would be two
+        # Uri_Slot entries claiming the same key, which is not a shape anything here
+        # (or a guest reading its own __config__) has a rule for resolving.
+        if rest_address is not None and rest_address[1] != address[1]:
+            slots.append(celaut.Service.Api.Slot(
+                port=rest_address[1],
+                transport=celaut.Service.Api.Protocol(tags=["tcp"]),
+                protocol_stack=[celaut.Service.Api.Protocol(tags=[REST_SLOT_TAG])],
+            ))
+            uri_slots.append(celaut.Instance.Uri_Slot(
+                internal_port=rest_address[1],
+                uri=[celaut.Instance.Uri(ip=rest_address[0], port=rest_address[1])],
+            ))
+
         peers.append(
             celaut.Instance(
-                api=celaut.Service.Api(
-                    slot=[celaut.Service.Api.Slot(
-                        port=i_slot,
-                        transport=celaut.Service.Api.Protocol(tags=["tcp"]),
-                        # Echoed from the requester's declaration, exactly as the DNS
-                        # path does: nothing here observed the peer's protocol stack.
-                        protocol_stack=network.protocol_stack,
-                    )],
-                    payment_contracts=[],
-                ),
-                uri_slot=[celaut.Instance.Uri_Slot(
-                    internal_port=i_slot,
-                    uri=[celaut.Instance.Uri(ip=address[0], port=address[1])],
-                )],
+                api=celaut.Service.Api(slot=slots, payment_contracts=[]),
+                uri_slot=uri_slots,
             )
         )
 
@@ -802,3 +871,54 @@ def resolve_pow_network(
         return []
 
     return peers
+
+
+def narrow_instances_for_local_grant(
+    instances: List[celaut.Instance],
+    network: celaut.Service.Network,
+) -> List[celaut.Instance]:
+    """What a *local guest's* own resolution -- and its firewall grant -- gets to see.
+
+    ``resolve_pow_network`` always builds both the P2P and the REST slot: a peer
+    asking over ``Gateway.ResolveNetwork`` opens nothing on the strength of the
+    answer, so it gets the full picture, and this node's own peer discovery
+    (``network_discovery.ask_peer``) reads the REST one to verify a suggestion it
+    would otherwise have to guess at. A **local guest** is different -- whatever
+    Instance ends up in its ``NetworkResolution`` is also what
+    ``networks.grant_resolved_network`` opens a firewall rule for (#404), and a guest
+    that declared plain ``pow:ergo`` asked for a chain peer, not a REST hole next to
+    it: exactly the "useless and open" shape the original design rejected (#78).
+
+    So here the REST slot is kept only when the guest's *own* declared
+    ``network.protocol_stack`` explicitly names it. A bare ``pow:ergo`` tag with no
+    ``protocol_stack`` -- the overwhelming majority of real declarations -- gets
+    exactly the P2P-only shape this returned before this feature existed. This is a
+    narrower rule than ``networks._slot_exposes``'s (which treats an unstated
+    ``protocol_stack`` as satisfied by any slot): that rule fits asking "is this
+    instance a member of the network at all", where nothing declared is the loosest
+    possible ask; here an unstated ``protocol_stack`` must keep meaning exactly what
+    it always meant for this domain, not silently widen the moment a second slot
+    exists to widen into.
+    """
+    wants_rest = any(REST_SLOT_TAG in protocol.tags for protocol in network.protocol_stack)
+    if wants_rest:
+        return instances
+
+    narrowed = []
+    for instance in instances:
+        kept_slots = [
+            slot for slot in instance.api.slot
+            if not any(REST_SLOT_TAG in protocol.tags for protocol in slot.protocol_stack)
+        ]
+        kept_ports = {slot.port for slot in kept_slots}
+        narrowed.append(celaut.Instance(
+            api=celaut.Service.Api(
+                slot=kept_slots,
+                payment_contracts=instance.api.payment_contracts,
+            ),
+            uri_slot=[
+                uri_slot for uri_slot in instance.uri_slot
+                if uri_slot.internal_port in kept_ports
+            ],
+        ))
+    return narrowed

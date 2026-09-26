@@ -676,6 +676,28 @@ run on a non-conventional port to bias an operator's override towards, so the se
 could only ever be guessed at exactly as blindly as the default it replaced — one more
 key to read past for no decision anybody was actually in a position to make.)
 
+**Update: the REST uri is emitted after all — just never to a guest that did not ask
+for it.** The paragraph above ("the REST uri is therefore not also emitted") described
+the *guest-facing* grant correctly but conflated it with what `resolve_pow_network`
+itself builds. The two turned out to need different answers once this node's own peer
+discovery (`network_discovery.ask_peer`) needed a way to verify a *peer-suggested*
+candidate's REST endpoint instead of guessing at Ergo mainnet's conventional REST port
+(`src/manager/ergo.py::MAINNET_REST_PORT`, 9053) every time: guessing wrong meant every
+`ask_peers`-sourced candidate failed verification silently, emptying that source.
+
+So `resolve_pow_network` now builds **both** slots on every `Instance`, tagged apart
+(`pow_networks.P2P_SLOT_TAG` / `REST_SLOT_TAG` in `Api.Slot.protocol_stack` — never the
+requester's own `protocol_stack` echoed onto either, which is a different, identical-
+for-every-candidate fact). A remote node asking as a peer gets the full picture, since
+nothing it does opens a firewall on the strength of the answer; it is only what reaches
+a **local guest's** own `NetworkResolution`, and therefore its firewall grant, that
+still needs narrowing to preserve the original guarantee. `narrow_instances_for_local_
+grant` does that narrowing, called from both `resolve_network_for_peer` (the deferred
+RPC path this section is about) and `rootfs.build_network_resolution` (the eager,
+launch-time one, which is where most guests actually go through this): the REST slot
+is kept only when the guest's own declared `protocol_stack` explicitly names it, so a
+bare `pow:ergo` tag reads exactly as before this existed.
+
 *Checked: Ergo has no way to ask a node for its own P2P address.* `/info` reports
 `restApiUrl` and nothing else addressable — verified live against a mainnet node, whose
 28 `/info` keys include no P2P address, port or bind field. `/peers/all` carries the
@@ -731,7 +753,7 @@ once.
 | `src/manager/pow_networks.py` (new) | `PowRequirement`; `parse_pow_formal(formal, tag)` (`pow.`-prefixed keys validated, other keys carried as extensions and enforced by nothing, tag/chain agreement enforced, values parsed as exact `int`); `canonical_formal`; `candidate_urls` (the §2.5 sources); `ergo_peer_satisfies` (the §2.6 ladder); `resolve_pow_network`. Bitcoin parses and raises `NotImplementedError` with the §2.6 reason. |
 | `src/identity/node_identity.py` | `parse_component_formal`, the inverse of `component_formal`, beside it because the two have to agree — the field is authored by hand as often as it is built. `_same_component` → `same_component`, made public for `match_networks` (§2.8). |
 | `src/manager/networks.py` | One branch at the top of `resolve_network`'s tag loop (`if tag.startswith("pow:")`); `match_networks` now `same_component` (§2.8); `resolve_network_for_peer`, the decisions behind `Gateway.ResolveNetwork` kept out of its gRPC plumbing so they can be tested as decisions. |
-| `src/manager/network_discovery.py` (new) | The client half of `Gateway.ResolveNetwork` (§2.5.1): `ask_peer`, `ask_peers`. Bare addresses out, never the sender's `Instance` grouping. |
+| `src/manager/network_discovery.py` (new) | The client half of `Gateway.ResolveNetwork` (§2.5.1): `ask_peer`, `ask_peers`. Bare addresses out, never the sender's `Instance` grouping -- though each address keeps the protocol tags of the one slot it belonged to (e.g. `pow_networks.REST_SLOT_TAG`), which is a fact about that single, already-isolated address, not a claim about the sender's grouping. |
 | `src/gateway/gateway.py`, `protos/celaut.proto`, `protos/celaut_pb2_grpc.py` | The `ResolveNetwork` RPC. **The gencode is hand-edited**, in the 1.56-era style the file is already in (it carries a hand-applied `from bee_rpc import buffer_pb2` fix): `bash/generate_protos.sh` needs `grpcio-tools==1.56.0` for the pinned protobuf 4.x, which has no wheel for current Pythons and does not build from source there. `celaut_pb2.py`'s embedded service descriptor is therefore one method out of date until someone regenerates it — nothing reads it (the grpc stub never imports `celaut_pb2`), and `tests/test_network_discovery.py` pins all four wiring points so a missed one fails in a test rather than in a handshake. |
 | `src/virtualizers/microvm/network.py` | `configure_guest_firewall_policy` writes a rule for **every** peer instance, not the first that works (§2.8). |
 | `config.example.yaml` | `pow_networks.TIMEOUT_SECONDS`, `.MAX_PEERS`, `.ASK_PEERS`; `service_networks.default_instances` (any tag → uris). **Not `networks:`** — that would sit one letter from the `network:` block, the same trap `service_networks` is named around. |

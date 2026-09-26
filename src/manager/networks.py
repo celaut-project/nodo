@@ -15,7 +15,11 @@ from src.manager.network_templates import find_placeholders
 from src.utils.logger import LOGGER
 from src.utils.network_policy import enforce_network_policy
 from src.manager.network_defaults import configured_endpoints, endpoint_addresses
-from src.manager.pow_networks import POW_TAG_PREFIX, resolve_pow_network
+from src.manager.pow_networks import (
+    POW_TAG_PREFIX,
+    narrow_instances_for_local_grant,
+    resolve_pow_network,
+)
 from src.virtualizers.firewall import allow_all_egress, allow_connection_to_instance
 
 env_manager = ConfigManager()
@@ -691,13 +695,25 @@ def resolve_network_for_peer(
     # possibly exposing its protocols, would qualify as its own peer (#387).
     requester_id = sc.get_local_instance_id_by_uri(uri=caller_ip) if caller_ip else None
 
+    peer_instances = resolve_network(
+        network,
+        ask_peers=False,
+        requester_id=requester_id,
+    )
+
+    # A resolution answered to -- and about to be granted for -- a local guest is
+    # narrowed to the slots its own declared network actually asked for (harmless,
+    # a no-op scan, for any domain whose slots never carry a tag this checks): a
+    # pow:ergo peer's Instance carries both its P2P and its REST slot (see
+    # resolve_pow_network) because a remote node asking as a peer opens nothing on
+    # the strength of either, but a guest that only declared pow:ergo asked for a
+    # chain peer, not a REST hole granted next to it (#78, #404).
+    if declared is not None and requester_id is not None:
+        peer_instances = narrow_instances_for_local_grant(peer_instances, network)
+
     resolution = celaut.ConfigurationFile.NetworkResolution(
         tags=list(network.tags),
-        peer_instances=resolve_network(
-            network,
-            ask_peers=False,
-            requester_id=requester_id,
-        ),
+        peer_instances=peer_instances,
     )
 
     # #404: a request that reached here having been checked against a declaration

@@ -74,13 +74,21 @@ def _load_discovery_module():
                 sys.modules[name] = previous
 
 
-def _instance(*addresses):
-    """One peer instance, at however many addresses."""
+def _instance(*addresses, tags=None):
+    """One peer instance, at however many addresses, all in one untagged slot.
+
+    ``tags``, when given, is the ``Api.Slot.protocol_stack`` tags of that one slot --
+    what a caller reads back per address as the third element of the triple.
+    """
+    slot = [celaut.Service.Api.Slot(port=1, protocol_stack=[
+        celaut.Service.Api.Protocol(tags=list(tags))
+    ])] if tags else []
     return celaut.Instance(
+        api=celaut.Service.Api(slot=slot),
         uri_slot=[celaut.Instance.Uri_Slot(
             internal_port=1,
             uri=[celaut.Instance.Uri(ip=ip, port=port) for ip, port in addresses],
-        )]
+        )],
     )
 
 
@@ -143,7 +151,11 @@ class AskPeerTests(unittest.TestCase):
 
         self.assertEqual(
             self._ask(answer),
-            [("203.0.113.10", 9053), ("203.0.113.11", 9053), ("203.0.113.12", 9053)],
+            [
+                ("203.0.113.10", 9053, ()),
+                ("203.0.113.11", 9053, ()),
+                ("203.0.113.12", 9053, ()),
+            ],
         )
 
     def test_an_answer_is_capped_at_what_this_node_is_willing_to_try(self):
@@ -154,7 +166,23 @@ class AskPeerTests(unittest.TestCase):
     def test_an_address_with_no_ip_or_no_port_is_dropped(self):
         answer = _resolution(_instance(("", 9053), ("203.0.113.10", 0), ("203.0.113.11", 9053)))
 
-        self.assertEqual(self._ask(answer), [("203.0.113.11", 9053)])
+        self.assertEqual(self._ask(answer), [("203.0.113.11", 9053, ())])
+
+    def test_the_tags_of_the_addresss_own_slot_are_read_back(self):
+        """What lets a caller tell a peer's REST slot from its P2P one (issue #78):
+        the tag travels with the one address it actually describes, read off the
+        `Api.Slot` whose `port` matches that address's own `Uri_Slot.internal_port` --
+        never the whole instance's, and never guessed at by the caller."""
+        answer = _resolution(_instance(("203.0.113.10", 9053), tags=["ergo-rest"]))
+
+        self.assertEqual(self._ask(answer), [("203.0.113.10", 9053, ("ergo-rest",))])
+
+    def test_a_slot_with_no_matching_api_slot_contributes_no_tags(self):
+        """A peer that never built one (an older nodo) is not failed for it -- the
+        address is still offered, just as untagged as it always was."""
+        answer = _resolution(_instance(("203.0.113.10", 9053)))
+
+        self.assertEqual(self._ask(answer), [("203.0.113.10", 9053, ())])
 
     def test_a_peer_that_answers_nothing_is_not_an_error(self):
         self.assertEqual(self._ask(None), [])
@@ -192,23 +220,33 @@ class AskPeersTests(unittest.TestCase):
 
     def test_answers_are_pooled_in_ask_order(self):
         found = self._ask_peers({
-            "p1": [("203.0.113.10", 9053)],
-            "p2": [("203.0.113.11", 9053)],
+            "p1": [("203.0.113.10", 9053, ())],
+            "p2": [("203.0.113.11", 9053, ())],
         })
 
-        self.assertEqual(found, [("203.0.113.10", 9053), ("203.0.113.11", 9053)])
+        self.assertEqual(found, [("203.0.113.10", 9053, ()), ("203.0.113.11", 9053, ())])
 
     def test_two_peers_naming_the_same_address_have_confirmed_nothing(self):
         """It is asked once, and agreement buys it no better place: they may well
         have read it off the same list, and treating that as evidence would be a
         trust decision this has no business making."""
         found = self._ask_peers({
-            "p1": [("203.0.113.10", 9053), ("203.0.113.11", 9053)],
-            "p2": [("203.0.113.11", 9053)],
-            "p3": [("203.0.113.11", 9053)],
+            "p1": [("203.0.113.10", 9053, ()), ("203.0.113.11", 9053, ())],
+            "p2": [("203.0.113.11", 9053, ())],
+            "p3": [("203.0.113.11", 9053, ())],
         })
 
-        self.assertEqual(found, [("203.0.113.10", 9053), ("203.0.113.11", 9053)])
+        self.assertEqual(found, [("203.0.113.10", 9053, ()), ("203.0.113.11", 9053, ())])
+
+    def test_the_first_peer_to_name_an_address_decides_its_tags(self):
+        """Ask order is a ranking; the address is the same address whatever a later
+        peer tags it, so a second, differently-tagged sighting changes nothing."""
+        found = self._ask_peers({
+            "p1": [("203.0.113.10", 9053, ("ergo-rest",))],
+            "p2": [("203.0.113.10", 9053, ())],
+        })
+
+        self.assertEqual(found, [("203.0.113.10", 9053, ("ergo-rest",))])
 
     def test_only_as_many_peers_as_the_budget_allows_are_asked(self):
         asked = []
