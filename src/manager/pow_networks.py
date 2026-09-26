@@ -59,7 +59,7 @@ from src.identity.node_identity import (
     component_formal,
     parse_component_formal,
 )
-from src.manager.ergo import MAINNET_P2P_PORT
+from src.manager.ergo import MAINNET_P2P_PORT, MAINNET_REST_PORT
 from src.manager.network_defaults import configured_endpoints
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
@@ -387,24 +387,32 @@ def _configured_endpoints(tag: str) -> List[str]:
 
 
 def _peer_suggested_endpoints(network: celaut.Service.Network) -> List[str]:
-    """What other celaut nodes answer for this domain, as URLs to try.
+    """What other celaut nodes answer for this domain, as REST URLs to *try*.
 
     Imported where it is used: it pulls in the database and the gRPC transport, which a
     node resolving a DNS network has no reason to be loading here.
 
-    ``Instance.Uri`` carries an address and a port and no scheme, so what comes back is
-    tried over ``http``. That is a real loss of fidelity -- a peer that found an
-    https-only endpoint has just handed us one we will fail to read -- and the honest
-    place to fix it is the peer's ``protocol_stack``, not a guess here. It costs one
-    failed request per such endpoint and nothing else: the candidate is dropped by the
-    same verification every other candidate goes through.
+    ``ask_peers`` gives ``(ip, port)`` pairs read off the ``Instance.Uri`` of a peer's
+    ``ResolveNetwork`` answer -- and for ``pow:ergo`` that port is always the **P2P**
+    one: this node (and any other following the same convention) never emits a REST
+    uri for this domain, to a peer or to a guest alike (see
+    :func:`resolve_pow_network`). Dialling it as ``http://{ip}:{port}`` would be
+    speaking HTTP to Ergo's P2P protocol, which does not answer -- every such candidate
+    would fail :func:`ergo_peer_satisfies` and be dropped, silently emptying this
+    source. So the peer-given port is not used for the REST guess at all; the host is
+    tried on :data:`src.manager.ergo.MAINNET_REST_PORT` instead, exactly as
+    unverified and exactly as disposable as every other guess here -- wrong for this
+    host, and the candidate is dropped by the same verification every other one goes
+    through. (The scheme is guessed too, and for the same reason: ``Instance.Uri``
+    carries no scheme, so an https-only peer is one more candidate this costs a single
+    failed request, not a guest.)
     """
     try:
         from src.manager.network_discovery import ask_peers
     except Exception as e:  # pragma: no cover - environment-dependent
         logger(f"[POW] peer endpoint source unavailable: {type(e).__name__}: {e}")
         return []
-    return [f"http://{ip}:{port}" for ip, port in ask_peers(network)]
+    return [f"http://{ip}:{MAINNET_REST_PORT}" for ip, _p2p_port in ask_peers(network)]
 
 
 def candidate_urls(

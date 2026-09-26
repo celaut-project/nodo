@@ -701,6 +701,46 @@ class CandidateSourceTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class PeerSuggestedEndpointTests(unittest.TestCase):
+    """A peer's `ResolveNetwork` answer for `pow:ergo` names a **P2P** address.
+
+    Dialling that port over HTTP would be speaking REST to Ergo's P2P protocol, which
+    never answers -- every such candidate would fail verification and this source
+    would be silently empty. So the peer-given port is never reused for the REST
+    guess; only the host is, on Ergo mainnet's conventional REST port.
+    """
+
+    def test_the_peer_given_port_is_never_dialled_as_rest(self):
+        with patch(
+            "src.manager.network_discovery.ask_peers",
+            return_value=[("203.0.113.5", 9030)],
+        ):
+            self.assertEqual(
+                pow_networks._peer_suggested_endpoints(_network()),
+                [f"http://203.0.113.5:{pow_networks.MAINNET_REST_PORT}"],
+            )
+
+    def test_every_suggestion_is_guessed_the_same_way_whatever_port_it_named(self):
+        """Different peers may report different (wrong, for REST) ports; none of them
+        change the guess, because none of them were ever a REST port to begin with."""
+        with patch(
+            "src.manager.network_discovery.ask_peers",
+            return_value=[("203.0.113.5", 9030), ("203.0.113.6", 9031)],
+        ):
+            self.assertEqual(
+                pow_networks._peer_suggested_endpoints(_network()),
+                [
+                    f"http://203.0.113.5:{pow_networks.MAINNET_REST_PORT}",
+                    f"http://203.0.113.6:{pow_networks.MAINNET_REST_PORT}",
+                ],
+            )
+
+    def test_an_unavailable_peer_discovery_module_yields_nothing_rather_than_raising(self):
+        with patch.dict(sys.modules, {"src.manager.network_discovery": None}):
+            self.assertEqual(pow_networks._peer_suggested_endpoints(_network()), [])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class P2PEndpointTests(unittest.TestCase):
     """A `pow:ergo` peer is emitted at its **P2P** address, not its REST one.
 

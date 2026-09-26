@@ -23,6 +23,17 @@ env_manager = ConfigManager()
 #: here can tell which five nodes exist to bias the guess towards.
 MAINNET_P2P_PORT = 9030
 
+#: Ergo mainnet's conventional REST API port. Used the same way as
+#: :data:`MAINNET_P2P_PORT`: a peer suggested over ``Gateway.ResolveNetwork``
+#: (``pow_networks._peer_suggested_endpoints``) is only ever known by its **P2P**
+#: address -- that is the only uri this node (or any other following the same
+#: convention) ever emits for a ``pow:ergo`` candidate, to a peer or to a guest alike
+#: (see :data:`MAINNET_P2P_PORT`'s own docstring). Verifying a PoW requirement needs
+#: the REST API, which that suggestion never carries, so the same host is tried on
+#: this default instead -- one more guess, no better founded than the P2P one, and
+#: dropped by the same verification like any other candidate if it is wrong.
+MAINNET_REST_PORT = 9053
+
 
 def __available_ergo_node(url: Optional[str]) -> Optional[Dict]:
     ergo_node_url = env_manager.get("ledgers.ergo.NODE_URL") if not url else url
