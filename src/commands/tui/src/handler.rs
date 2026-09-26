@@ -303,6 +303,20 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Clients => {
             app.open_credit_client(true)
         }
+        // CHAT (issue #431): `o` opens a new thread, Enter replies in the selected
+        // one, `c`/`R` close and reopen it. Mirrors Peers' `d`/Clients' `+`/`-` in
+        // being a direct action, not a confirmation -- closing is reversible and
+        // nothing here waits on the peer.
+        (KeyModifiers::NONE, KeyCode::Char('o')) if app.page() == Page::Chat => {
+            app.open_new_conversation_prompt()
+        }
+        (_, KeyCode::Enter) if app.page() == Page::Chat => app.open_reply_prompt(),
+        (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Chat => {
+            app.close_selected_conversation()
+        }
+        (_, KeyCode::Char('R')) if app.page() == Page::Chat => {
+            app.reopen_selected_conversation()
+        }
         (KeyModifiers::NONE, KeyCode::Char('e')) if app.page() == Page::Config => {
             app.open_config_editor()
         }

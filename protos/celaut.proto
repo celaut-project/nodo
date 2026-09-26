@@ -638,6 +638,25 @@ message PoWRequired {
 message ChatMessage {
     string client_id = 1;
     string body = 2;
+
+    // Groups this message into a conversation (issue #431). Optional: absent means
+    // exactly the flat, un-threaded history this had before conversations existed.
+    // Minted by whichever side opens a new topic -- a UUID4, the same shape a
+    // client_id already has -- and carried on every message in it by both sides
+    // afterward. Not a live connection: the RPC stays the one-message-at-a-time
+    // call it always was, so a conversation exists whether or not either operator
+    // is watching their node at that moment, which is the case this feature is
+    // for ("tell the other operator something is wrong") in the first place.
+    optional string conversation_id = 3;
+}
+
+// Chat's reply, once storage is confirmed (or refused) instead of nothing. `stored`
+// is false for exactly the reasons `ChatMessage` can be refused -- unknown or
+// unassociated client_id, empty or oversize body -- and `reason` says which; it is
+// never a transport failure, which surfaces as an ordinary RPC error instead.
+message ChatAck {
+    bool stored = 1;
+    string reason = 2;
 }
 
 message RecursionGuard {
@@ -784,5 +803,5 @@ service Gateway {
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage | bytes -> bytes
     rpc Observe(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ObserveRequest(instance_id/token) -> stream ObserveEvent
-    rpc Chat(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ChatMessage ->
+    rpc Chat(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ChatMessage -> ChatAck
 }

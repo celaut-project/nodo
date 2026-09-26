@@ -119,6 +119,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Services => draw_services(frame, app, layout[2]),
         Page::Peers => draw_peers(frame, app, layout[2]),
         Page::Clients => draw_clients(frame, app, layout[2]),
+        Page::Chat => draw_chat(frame, app, layout[2]),
         Page::Earnings => draw_earnings(frame, app, layout[2]),
         Page::Cell => draw_cell(frame, app, layout[2]),
         Page::Pricing => draw_pricing(frame, app, layout[2]),
@@ -141,7 +142,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         | InputMode::EditConfig
         | InputMode::AddConfigItem
         | InputMode::FilterConfig
-        | InputMode::CreditClient => draw_input_popup(frame, app),
+        | InputMode::CreditClient
+        | InputMode::NewConversation
+        | InputMode::ReplyConversation => draw_input_popup(frame, app),
     }
 }
 
@@ -1781,6 +1784,100 @@ fn draw_clients(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(client_table, split[0], &mut app.clients.state);
 
     draw_card(frame, split[1], "SELECTED CLIENT", detail, accent());
+}
+
+/// Free-text conversations with peer operators (issue #431).
+///
+/// One table, not two: `app.chat_direction` picks which half of `peer_chat_
+/// conversations` it shows -- threads this node opened, or threads opened by one
+/// of its clients reaching out to it -- so the duality PEERS/CLIENTS already
+/// draws as separate pages is a toggle here instead. A dozen top-level tabs is
+/// already a lot to scan; this is the same "us / them" fact, on one page.
+fn draw_chat(frame: &mut Frame, app: &mut App, area: Rect) {
+    const MIN_TABLE_HEIGHT: u16 = 6;
+    let available = area.height.saturating_sub(MIN_TABLE_HEIGHT);
+    let detail = chat_detail_lines(app);
+    let detail_height = (detail.len() as u16 + 2).min(available.max(3));
+    let split = Layout::vertical([
+        Constraint::Min(MIN_TABLE_HEIGHT),
+        Constraint::Length(detail_height),
+    ])
+    .split(area);
+
+    let rows = app.conversations.items.iter().map(|conversation| {
+        Row::new(vec![
+            Cell::from(shorten(&conversation.peer_id, 20)),
+            Cell::from(if conversation.topic.is_empty() {
+                "(no topic)".to_string()
+            } else {
+                conversation.topic.clone()
+            }),
+            if conversation.closed_at.is_some() {
+                Cell::from("closed").style(Style::default().fg(muted()))
+            } else {
+                Cell::from("open").style(Style::default().fg(good()))
+            },
+            Cell::from(conversation.opened_at.clone()),
+        ])
+    });
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(22),
+            Constraint::Min(20),
+            Constraint::Length(8),
+            Constraint::Length(20),
+        ],
+    )
+    .header(header_row(vec!["Peer", "Topic", "Status", "Opened"]))
+    .block(section_block(
+        match &app.conversations_error {
+            Some(_) => " CHAT • CANNOT BE READ ".to_string(),
+            None => format!(
+                " CHAT • {} • {} ",
+                app.chat_direction.title(),
+                app.conversations.items.len(),
+            ),
+        },
+        if app.conversations_error.is_some() { bad() } else { accent() },
+    ))
+    .highlight_style(selected_style())
+    .highlight_symbol("▸ ");
+    app.list_area = split[0];
+    frame.render_stateful_widget(table, split[0], &mut app.conversations.state);
+
+    draw_card(frame, split[1], "CONVERSATION", detail, accent());
+}
+
+/// What the detail card under the CHAT table says: an error, an empty selection,
+/// or the selected thread's own messages, oldest first.
+fn chat_detail_lines(app: &App) -> Vec<Line<'static>> {
+    if let Some(error) = &app.conversations_error {
+        return vec![Line::from(Span::styled(error.clone(), Style::default().fg(bad())))];
+    }
+    let Some(conversation) = app.conversations.selected() else {
+        return vec![Line::from(Span::styled(
+            "Select a conversation to read it",
+            Style::default().fg(muted()),
+        ))];
+    };
+    if app.conversation_messages.is_empty() {
+        return vec![Line::from(Span::styled(
+            "No messages yet",
+            Style::default().fg(muted()),
+        ))];
+    }
+    app.conversation_messages
+        .iter()
+        .map(|message| {
+            let who = if message.from_us { "us" } else { &conversation.peer_id };
+            Line::from(vec![
+                Span::styled(format!("[{}] ", message.ts), Style::default().fg(muted())),
+                Span::styled(format!("{who}: "), Style::default().fg(accent()).bold()),
+                Span::raw(message.body.clone()),
+            ])
+        })
+        .collect()
 }
 
 /// The two things a node earns by being up: money, and the network's opinion of it.
@@ -4370,6 +4467,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         }
         Page::Clients => {
             "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  r refresh  \u{2022}  q quit"
+        }
+        Page::Chat => {
+            "\u{2191}/\u{2193} select  \u{2022}  \u{2190}/\u{2192} ours/theirs  \u{2022}  o new  \u{2022}  \u{23ce} reply  \u{2022}  c close  \u{2022}  R reopen  \u{2022}  q quit"
         }
         Page::Earnings => "\u{2191}/\u{2193} select an opinion  \u{2022}  r re-read the chain  \u{2022}  q quit",
         Page::Cell => {

@@ -355,7 +355,15 @@ class Gateway(celaut_pb2_grpc.Gateway):
         try:
             peer_id = receive_chat_message(message)
         except ChatError as e:
+            # Refused, not raised: the sender learns *why* it was not stored --
+            # unknown/unassociated client_id, empty or oversize body -- the same
+            # way it would by reading its own sent history, only immediately.
+            # An exception here is reserved for what ChatAck cannot explain: a
+            # malformed request, not a message this RPC understood and rejected.
             log.LOGGER(f"Chat message from {context.peer()} refused: {e}")
-            raise Exception(str(e))
+            yield from bee.serialize_to_buffer(
+                celaut_pb2.ChatAck(stored=False, reason=str(e))
+            )
+            return
         log.LOGGER(f"Chat message accepted from peer {peer_id}.")
-        for b in bee.serialize_to_buffer(): yield b
+        yield from bee.serialize_to_buffer(celaut_pb2.ChatAck(stored=True))

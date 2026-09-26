@@ -492,6 +492,29 @@ TABLES = {
             body TEXT NOT NULL,
             ts INTEGER NOT NULL,
             received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            conversation_id TEXT DEFAULT NULL,
+            FOREIGN KEY (peer_id) REFERENCES peer (id),
+            FOREIGN KEY (conversation_id) REFERENCES peer_chat_conversations (id)
+        )
+    ''',
+    # One row per conversation (issue #431), keyed by the `conversation_id` its
+    # messages carry. `opened_by_us` is what tells the two TUI pages apart: this
+    # node picked the id (a thread we started) versus a peer picked it and this
+    # node only learned of it on the first message that named it (a thread one of
+    # our clients started with us) -- `receive_chat_message` creates the row in the
+    # latter case, `chat.open_conversation` in the former. `topic` is free text set
+    # once, at open, purely a label for the TUI's conversation list; it is never
+    # compared or enforced. Closing is a local bookkeeping act with no message of
+    # its own on the wire: nothing here requires the other side's agreement to stop
+    # showing a thread as open, the same way archiving an email thread does not.
+    "peer_chat_conversations": '''
+        CREATE TABLE IF NOT EXISTS peer_chat_conversations (
+            id TEXT PRIMARY KEY,
+            peer_id TEXT NOT NULL,
+            opened_by_us INTEGER NOT NULL,
+            topic TEXT,
+            opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            closed_at DATETIME DEFAULT NULL,
             FOREIGN KEY (peer_id) REFERENCES peer (id)
         )
     '''
@@ -519,6 +542,13 @@ INDEXES = (
     # the prune on insert is the same query with the direction reversed.
     "CREATE INDEX IF NOT EXISTS idx_peer_chat_messages_peer "
     "ON peer_chat_messages (peer_id, id)",
+    # get_conversation_messages reads one conversation_id, oldest first.
+    "CREATE INDEX IF NOT EXISTS idx_peer_chat_messages_conversation "
+    "ON peer_chat_messages (conversation_id, id)",
+    # list_conversations reads one peer's threads, and filters by who opened them
+    # (the two TUI pages: ours, and our clients').
+    "CREATE INDEX IF NOT EXISTS idx_peer_chat_conversations_peer "
+    "ON peer_chat_conversations (peer_id, opened_by_us, opened_at)",
 )
 
 
@@ -591,6 +621,9 @@ def create_tables(cursor):
         "last_ts": "INTEGER DEFAULT NULL",
         "advertisement": "BLOB DEFAULT NULL",
         "local_client_id": "TEXT DEFAULT NULL",
+    })
+    ensure_columns(cursor, "peer_chat_messages", {
+        "conversation_id": "TEXT DEFAULT NULL",
     })
     # What a payment was *for*, as opposed to how far it got. A donation this node
     # paid out of its own earnings is not a payment to a peer, and `status` cannot say

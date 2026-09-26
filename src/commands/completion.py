@@ -49,6 +49,8 @@ PEER_COMMANDS = [
     "pay",
     "force_execution",
     "chat",
+    "chat_open",
+    "chat_threads",
 ]
 
 # Commands whose first positional argument is a client id.
@@ -123,6 +125,12 @@ COMMANDS = sorted(
         "doctor",
         "completion",
         "chat",
+        "chat_open",
+        "chat_reply",
+        "chat_threads",
+        "chat_thread",
+        "chat_close",
+        "chat_reopen",
     }
 )
 
