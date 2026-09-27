@@ -890,7 +890,9 @@ if __name__ == '__main__':
             case "chat":
                 # `nodo chat <peer_id> <message...>` sends; `nodo chat <peer_id>`
                 # with no message prints the stored conversation instead, so
-                # reading and sending share the one positional shape.
+                # reading and sending share the one positional shape. Flat,
+                # un-threaded history -- see chat_open/chat_reply/chat_threads
+                # for conversations (issue #431).
                 chat_args = sys.argv[2:]
                 if not chat_args:
                     print("Usage: nodo chat <peer_id> [message...]", flush=True)
@@ -902,6 +904,61 @@ if __name__ == '__main__':
                 else:
                     from src.commands.chat import show_chat
                     ok = show_chat(peer_id=chat_peer_id)
+                os._exit(0 if ok else 1)
+
+            case "chat_open":
+                chat_open_args = sys.argv[2:]
+                if len(chat_open_args) < 2:
+                    print("Usage: nodo chat_open <peer_id> <topic...>", flush=True)
+                    os._exit(1)
+                from src.commands.chat import open_thread
+                ok = open_thread(
+                    peer_id=chat_open_args[0], topic=" ".join(chat_open_args[1:])
+                )
+                os._exit(0 if ok else 1)
+
+            case "chat_reply":
+                chat_reply_args = sys.argv[2:]
+                if len(chat_reply_args) < 2:
+                    print("Usage: nodo chat_reply <conversation_id> <message...>", flush=True)
+                    os._exit(1)
+                from src.commands.chat import reply_in_thread
+                ok = reply_in_thread(
+                    conversation_id=chat_reply_args[0], body=" ".join(chat_reply_args[1:])
+                )
+                os._exit(0 if ok else 1)
+
+            case "chat_threads":
+                # `nodo chat_threads` lists every conversation; `nodo chat_threads
+                # <peer_id>` narrows to one peer's.
+                chat_threads_args = sys.argv[2:]
+                from src.commands.chat import list_threads
+                ok = list_threads(peer_id=chat_threads_args[0] if chat_threads_args else None)
+                os._exit(0 if ok else 1)
+
+            case "chat_thread":
+                # Singular: one conversation's own messages, not the list.
+                if len(sys.argv) < 3:
+                    print("Usage: nodo chat_thread <conversation_id>", flush=True)
+                    os._exit(1)
+                from src.commands.chat import show_thread
+                ok = show_thread(conversation_id=sys.argv[2])
+                os._exit(0 if ok else 1)
+
+            case "chat_close":
+                if len(sys.argv) < 3:
+                    print("Usage: nodo chat_close <conversation_id>", flush=True)
+                    os._exit(1)
+                from src.commands.chat import close_thread
+                ok = close_thread(conversation_id=sys.argv[2])
+                os._exit(0 if ok else 1)
+
+            case "chat_reopen":
+                if len(sys.argv) < 3:
+                    print("Usage: nodo chat_reopen <conversation_id>", flush=True)
+                    os._exit(1)
+                from src.commands.chat import reopen_thread
+                ok = reopen_thread(conversation_id=sys.argv[2])
                 os._exit(0 if ok else 1)
 
             case "local_builder":
