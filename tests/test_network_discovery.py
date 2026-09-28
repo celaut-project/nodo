@@ -41,14 +41,23 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
 
 def _load_discovery_module():
     """``src/manager/network_discovery.py`` with its outbound seams replaced."""
-    stubbed = ("bee_rpc", "bee_rpc.client", "src.database.sql_connection",
-               "src.identity.grpc_transport")
+    stubbed = ("bee_rpc", "bee_rpc.client", "bee_rpc.buffer_pb2", "bee_rpc.control",
+               "src.database.sql_connection", "src.identity.grpc_transport")
     saved = {name: sys.modules.get(name) for name in stubbed}
 
     bee_pkg = types.ModuleType("bee_rpc")
     bee_client = types.ModuleType("bee_rpc.client")
     bee_client.client_grpc = lambda **kwargs: iter(())
+    # BeeClient (src/utils/bee_client.py), which network_discovery.py now goes
+    # through instead of bee_rpc directly, reads these off the package at import
+    # time regardless of whether this test ever calls them -- a bare Dir/Buffer/
+    # StreamControl stand-in is enough for the module to import.
+    bee_client.Dir = type("Dir", (), {})
     bee_pkg.client = bee_client
+    buffer_pb2_stub = types.ModuleType("bee_rpc.buffer_pb2")
+    buffer_pb2_stub.Buffer = type("Buffer", (), {})
+    control_stub = types.ModuleType("bee_rpc.control")
+    control_stub.StreamControl = type("StreamControl", (), {})
     sql_stub = types.ModuleType("src.database.sql_connection")
     sql_stub.SQLConnection = type("SQLConnection", (), {"get_peers_id": lambda self: []})
     transport_stub = types.ModuleType("src.identity.grpc_transport")
@@ -56,6 +65,8 @@ def _load_discovery_module():
 
     sys.modules["bee_rpc"] = bee_pkg
     sys.modules["bee_rpc.client"] = bee_client
+    sys.modules["bee_rpc.buffer_pb2"] = buffer_pb2_stub
+    sys.modules["bee_rpc.control"] = control_stub
     sys.modules["src.database.sql_connection"] = sql_stub
     sys.modules["src.identity.grpc_transport"] = transport_stub
     try:
@@ -136,9 +147,8 @@ class AskPeerTests(unittest.TestCase):
         self.network = celaut.Service.Network(tags=["pow:ergo"], formal=b"chain=ergo")
 
     def _ask(self, answer):
-        with patch.object(self.nd.bee, "client_grpc", return_value=iter([answer] if answer else [])), \
-             patch.object(self.nd, "celaut_pb2_grpc", MagicMock()), \
-             patch.object(self.nd, "peer_channel", return_value=None):
+        with patch.object(self.nd.BeeClient, "call_one", return_value=answer), \
+             patch.object(self.nd, "peer_channel", return_value=MagicMock()):
             return self.nd.ask_peer("peer-1", self.network)
 
     def test_every_address_of_every_instance_is_taken_and_flattened(self):
@@ -188,9 +198,8 @@ class AskPeerTests(unittest.TestCase):
         self.assertEqual(self._ask(None), [])
 
     def test_peer_requests_have_a_finite_deadline(self):
-        with patch.object(self.nd.bee, "client_grpc", return_value=iter(())) as rpc, \
-             patch.object(self.nd, "celaut_pb2_grpc", MagicMock()), \
-             patch.object(self.nd, "peer_channel", return_value=None):
+        with patch.object(self.nd.BeeClient, "call_one", return_value=None) as rpc, \
+             patch.object(self.nd, "peer_channel", return_value=MagicMock()):
             self.assertEqual(self.nd.ask_peer("peer-1", self.network), [])
         self.assertEqual(rpc.call_args.kwargs["timeout"], 10)
 
@@ -198,9 +207,8 @@ class AskPeerTests(unittest.TestCase):
         def _raise(**kwargs):
             raise RuntimeError("unreachable")
 
-        with patch.object(self.nd.bee, "client_grpc", side_effect=_raise), \
-             patch.object(self.nd, "celaut_pb2_grpc", MagicMock()), \
-             patch.object(self.nd, "peer_channel", return_value=None):
+        with patch.object(self.nd.BeeClient, "call_one", side_effect=_raise), \
+             patch.object(self.nd, "peer_channel", return_value=MagicMock()):
             self.assertEqual(self.nd.ask_peer("peer-1", self.network), [])
 
 

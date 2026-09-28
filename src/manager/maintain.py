@@ -3,14 +3,12 @@ import os
 import time
 import traceback
 
-from bee_rpc import client as beerpc
-
-from protos import celaut_pb2 as celaut, celaut_pb2_grpc, celaut_pb2
-from protos.gateway_bee import StartService_input_indices, StartService_input_message_mode
+from protos import celaut_pb2 as celaut, celaut_pb2
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
 from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
+from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
 from src.reputation_system.onchain_indexer import tick as onchain_reputation_tick
 from src.database.sql_connection import SQLConnection, is_peer_available
@@ -140,29 +138,16 @@ def check_wanted_service(wanted: str):
         """
         log.LOGGER(f"Taking the service {wanted} using peer {peer}")
         try:
-            for b in beerpc.client_grpc(
-                    method=celaut_pb2_grpc.GatewayStub(
-                        peer_channel(peer)
-                    ).GetService,  # TODO An timeout should be implemented when requesting a service.
-                    indices_serializer=celaut_pb2.Metadata.HashTag.Hash,
-                    input=_hash,
-                    indices_parser=StartService_input_indices,  #  Not used all the indices, but still are the same.
-                    partitions_message_mode_parser=StartService_input_message_mode,
-                    # Tell the peer which blocks of what it sends we already hold,
-                    # so it stops mid-block instead of us draining and discarding
-                    # bytes it did not need to send (issue #371). Ignored by a peer
-                    # that does not honour it, in which case the response arrives
-                    # in full exactly as before.
-                    block_skip=True,
-            ):
-                if  type(b) == beerpc.Dir:
+            # TODO A timeout should be implemented when requesting a service.
+            for b in BeeClient.get_service(peer_channel(peer), _hash):
+                if  type(b) == Dir:
                     log.LOGGER(f"    type of dir {b.type}")
-                    
+
                 if type(b) == celaut_pb2.Metadata:
                     log.LOGGER("Store the metadata.")
                     with open(f"{METADATA_REGISTRY}{wanted}", "wb") as f:
                         f.write(b.SerializeToString())
-                elif type(b) == beerpc.Dir and b.type == celaut_pb2.Service:
+                elif type(b) == Dir and b.type == celaut_pb2.Service:
                     log.LOGGER(f"Store the service {b.dir}")
                     os.system(f"mv {b.dir} {REGISTRY}{wanted}")
                     
@@ -557,13 +542,7 @@ def peer_deposits(debug_mode: bool = False):
             if debug_mode: log.LOGGER(f"Peer {peer_id} needs a refresh. Attempting to fetch info.")
 
             try:
-                peer = next(beerpc.client_grpc(
-                    method=celaut_pb2_grpc.GatewayStub(
-                        peer_channel(peer_id=peer_id)
-                    ).GetPeerInfo,
-                    indices_parser=celaut_pb2.Peer,
-                    partitions_message_mode_parser=True
-                ), None)
+                peer = BeeClient.get_peer_info(peer_channel(peer_id=peer_id))
                 _peer_is_reachable_again(peer_id)
                 if debug_mode: log.LOGGER(f"Successfully fetched info for peer {peer_id}.")
             except Exception as fetch_exception:

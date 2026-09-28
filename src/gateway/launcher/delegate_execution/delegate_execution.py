@@ -1,12 +1,10 @@
 from hashlib import sha256
 from typing import Callable, List
 
-from bee_rpc import client as bee
-
+from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 
-from protos import celaut_pb2, celaut_pb2_grpc
-from protos.gateway_bee import StartService_input_indices
+from protos import celaut_pb2
 from src.manager.manager import get_client_id_on_other_peer
 from src.manager.metrics import balance_on_other_peer
 from src.database.sql_connection import SQLConnection
@@ -105,23 +103,18 @@ def delegate_execution(
             )
 
         log.LOGGER('Go to launch the service on ' + str(peer))
-        service_instance = next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                peer_channel(peer)
-            ).StartService,
-            timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
-            partitions_message_mode_parser=True,
-            indices_serializer=StartService_input_indices,
-            indices_parser=celaut_pb2.ServiceInstance,
-            input=utils.service_extended(
+        service_instance = BeeClient.start_service(
+            peer_channel(peer),
+            utils.service_extended(
                 metadata=metadata,
                 config=peer_config,
                 # TODO: Could pass only the previously selected configuration with the estimate cost
                 #  request, now is allowing to select another (that could be reasonable).
                 client_id=get_client_id_on_other_peer(peer_id=peer),
                 recursion_guard_token=recursion_guard_token
-            )
-        ))
+            ),
+            timeout=START_SERVICE_ON_PEER_TIMEOUT if START_SERVICE_ON_PEER_TIMEOUT > 0 else None,
+        )
         external_token: str = service_instance.token
         encrypted_external_token: str = sha256(external_token.encode('utf-8')).hexdigest()
 

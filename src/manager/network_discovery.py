@@ -30,11 +30,10 @@ from __future__ import annotations
 
 from typing import List, Optional, Set, Tuple
 
-from bee_rpc import client as bee
-
-from protos import celaut_pb2, celaut_pb2_grpc
+from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.identity.grpc_transport import peer_channel
+from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 from src.utils.logger import LOGGER as logger
 
@@ -84,15 +83,11 @@ def ask_peer(peer_id: str, network: celaut_pb2.Service.Network) -> List[Suggeste
     than failing the address.
     """
     try:
-        resolution = next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                peer_channel(peer_id=peer_id)
-            ).ResolveNetwork,
-            input=network,
+        resolution = BeeClient.resolve_network(
+            peer_channel(peer_id=peer_id),
+            network,
             timeout=10,  # A non-answering peer must not hang service launch.
-            indices_parser=celaut_pb2.ConfigurationFile.NetworkResolution,
-            partitions_message_mode_parser=True
-        ), None)
+        )
     except Exception as e:
         logger(f"[NETWORK-DISCOVERY] {peer_id} did not answer for {list(network.tags)}: "
                f"{type(e).__name__}: {e}")

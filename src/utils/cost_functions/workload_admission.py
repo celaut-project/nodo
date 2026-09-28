@@ -136,20 +136,15 @@ def check_resource_availability_on_peer(
     # peer, and keeping the rest importable without bee_rpc/grpc installed is
     # what lets evaluate_possible_environment_workloads' own logic be unit
     # tested on a host that has neither (see tests/test_workload_admission.py).
-    from bee_rpc import client as bee
-    from protos import celaut_pb2_grpc
+    # BeeClient itself imports bee_rpc at module scope, so it has to stay out of
+    # this file's own top-level imports for the same reason.
     from src.identity.grpc_transport import peer_channel
+    from src.utils.bee_client import BeeClient
 
     try:
-        response = next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                peer_channel(peer_id=peer_id)
-            ).GetResourceAvailability,
-            timeout=_timeout(),
-            partitions_message_mode_parser=True,
-            indices_parser=celaut.ResourceAvailability,
-            input=resources,
-        ))
+        response = BeeClient.get_resource_availability(
+            peer_channel(peer_id=peer_id), resources, timeout=_timeout()
+        )
         return response.can_execute
     except Exception as e:
         log.LOGGER(f"Could not check resource availability on peer {peer_id}: {e}")

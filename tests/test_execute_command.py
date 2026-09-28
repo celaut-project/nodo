@@ -51,11 +51,8 @@ class ExecuteCommandTests(unittest.TestCase):
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
             execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
-            execute_cmd.celaut_pb2_grpc, "GatewayStub"
-        ) as mock_stub_cls, patch.object(
-            execute_cmd, "client_grpc", return_value=iter([response])
+            execute_cmd.BeeClient, "start_service", return_value=response
         ):
-            mock_stub_cls.return_value.StartService = object()
             with redirect_stdout(out):
                 execute_cmd.execute("svc")
 
@@ -71,11 +68,8 @@ class ExecuteCommandTests(unittest.TestCase):
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
             execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
-            execute_cmd.celaut_pb2_grpc, "GatewayStub"
-        ) as mock_stub_cls, patch.object(
-            execute_cmd, "client_grpc", return_value=iter([response])
+            execute_cmd.BeeClient, "start_service", return_value=response
         ):
-            mock_stub_cls.return_value.StartService = object()
             with redirect_stdout(out):
                 execute_cmd.execute("svc")
 
@@ -90,13 +84,10 @@ class ExecuteCommandTests(unittest.TestCase):
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
             execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
-            execute_cmd.celaut_pb2_grpc, "GatewayStub"
-        ) as mock_stub_cls, patch.object(
-            execute_cmd, "client_grpc", return_value=iter([response])
+            execute_cmd.BeeClient, "start_service", return_value=response
         ), patch.object(
             execute_cmd, "get_execute_client", return_value="dev-external-1"
         ) as mock_get_execute_client:
-            mock_stub_cls.return_value.StartService = object()
             execute_cmd.execute("svc", external=True)
 
         mock_get_execute_client.assert_called_once_with(
@@ -112,20 +103,17 @@ class ExecuteCommandTests(unittest.TestCase):
         def fake_inspect(service):
             events.append(("inspect", service))
 
-        def fake_client_grpc(*args, **kwargs):
+        def fake_start_service(*args, **kwargs):
             events.append(("start_service", None))
-            return iter([response])
+            return response
 
         with patch.object(execute_cmd, "resolve_service_hash", return_value="svc"), patch.object(
             execute_cmd, "inspect_service", side_effect=fake_inspect
         ), patch.object(
             execute_cmd, "local_channel"
         ) as mock_channel, patch.object(
-            execute_cmd.celaut_pb2_grpc, "GatewayStub"
-        ) as mock_stub_cls, patch.object(
-            execute_cmd, "client_grpc", side_effect=fake_client_grpc
+            execute_cmd.BeeClient, "start_service", side_effect=fake_start_service
         ):
-            mock_stub_cls.return_value.StartService = object()
             execute_cmd.execute("svc")
 
         self.assertEqual(

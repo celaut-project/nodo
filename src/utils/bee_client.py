@@ -1,0 +1,353 @@
+"""Every gRPC-framing call this node makes through bee_rpc, in one place.
+
+bee_rpc is the wire format every Gateway RPC actually speaks: each one is declared as
+``stream buffer.Buffer -> stream buffer.Buffer`` in celaut.proto, and bee_rpc is what
+turns that raw byte stream into the typed messages (``Peer``, ``Client``, ...) the
+rest of this codebase works with.
+
+Two layers:
+
+- The **named, per-RPC methods** (``introduce_peer``, ``start_service``, ...) are what
+  every outbound caller should reach for. Each one already knows that RPC's own wire
+  shape -- which stub method, which envelope, which response type -- so a call site
+  needs nothing but the channel and the Python values that RPC actually cares about, no
+  ``celaut_pb2_grpc``/indices boilerplate repeated at every call site that happens to
+  ask a peer the same question.
+- The **generic primitives** (``parse``/``parse_one``/``respond``/``call``/``call_one``)
+  are what those methods are built from, and what a *server* handler (a gateway.py
+  method, an iterable) still uses directly -- an inbound request's own shape is
+  intrinsic to the handler answering it, not something reused across call sites the way
+  an outbound RPC is.
+
+Not included: ``bee_rpc``'s content-addressed block storage/packing API
+(``block_builder``, ``Dir`` as a *packing* concept, ``Enviroment``/``modify_env``,
+hashing helpers). That is a different concern -- reading and writing packed service
+blobs on disk -- from framing a gRPC call, and the files that do it keep importing
+``bee_rpc`` directly.
+"""
+from typing import Any, Optional, Union
+
+from bee_rpc import client as bee
+from bee_rpc import buffer_pb2
+from bee_rpc.control import StreamControl
+
+from protos import celaut_pb2, celaut_pb2_grpc
+from protos.gateway_bee import (
+    GenerateClient_output_indices,
+    StartService_input_indices,
+    StartService_input_message_mode,
+)
+
+# Re-exported so a caller that only talks to BeeClient never needs a second import
+# for the couple of bee_rpc names that are types/utilities rather than calls.
+Buffer = buffer_pb2.Buffer
+Dir = bee.Dir
+
+# The index a Client message travels at, in an envelope that did not already reserve
+# one of its own. Distinct from the payload index every RPC below uses (they all stay
+# at 1), and from StartService's own envelope, which already carries a Client at index
+# 1 (protos/gateway_bee.py).
+CLIENT_INDEX = 90
+
+
+class BeeClient:
+    """Stateless: every method is a thin wrapper around one bee_rpc shape."""
+
+    # ------------------------------------------------------------------
+    # Generic primitives. Server handlers use these directly; the named
+    # methods below are built out of ``call``/``call_one``.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def parse(request_iterator, indices, partitions_message_mode: Any = True, control: Optional[StreamControl] = None):
+        """The raw, possibly-multi-message parse -- iterate this (``for r in ...``)
+        when a request's envelope can carry more than one kind of message (a
+        pattern-matching loop over the result), or when its response needs
+        block-skip (``control``, issue #371).
+        """
+        return bee.parse_from_buffer(
+            request_iterator=request_iterator,
+            indices=indices,
+            partitions_message_mode=partitions_message_mode,
+            control=control,
+        )
+
+    @staticmethod
+    def parse_one(request_iterator, indices, partitions_message_mode: Any = True, default=None):
+        """The common case: exactly one message is expected out of the request, or
+        ``default`` when the caller sent nothing (or the wrong type)."""
+        return next(
+            BeeClient.parse(request_iterator, indices, partitions_message_mode),
+            default,
+        )
+
+    @staticmethod
+    def respond(message_iterator=None, indices=None, control: Optional[StreamControl] = None):
+        """Serialize a handler's response -- ``yield from`` this."""
+        return bee.serialize_to_buffer(
+            message_iterator=message_iterator,
+            indices=indices,
+            control=control,
+        )
+
+    @staticmethod
+    def call(
+            method,
+            input=None,
+            indices_parser=None,
+            indices_serializer=None,
+            partitions_message_mode_parser: Any = True,
+            timeout: Optional[float] = None,
+            block_skip: bool = False,
+    ):
+        """The raw response generator -- iterate this for a streamed response
+        (``GetService``'s blocks) or hand it straight back to a caller that relays it
+        itself (``ServiceTunnel``'s two-way bridge). ``block_skip`` opts into
+        bee_rpc's reverse-direction block skipping; see ``client_grpc``'s own
+        docstring for what that changes about the request generator's lifetime.
+        """
+        return bee.client_grpc(
+            method=method,
+            input=input,
+            indices_parser=indices_parser,
+            indices_serializer=indices_serializer,
+            partitions_message_mode_parser=partitions_message_mode_parser,
+            timeout=timeout,
+            block_skip=block_skip,
+        )
+
+    @staticmethod
+    def call_one(
+            method,
+            input=None,
+            indices_parser=None,
+            indices_serializer=None,
+            partitions_message_mode_parser: Any = True,
+            timeout: Optional[float] = None,
+            default=None,
+    ):
+        """The common case: exactly one response message is expected, or
+        ``default`` (a closed port, a peer that never answers, ...)."""
+        return next(
+            BeeClient.call(
+                method, input, indices_parser, indices_serializer,
+                partitions_message_mode_parser, timeout,
+            ),
+            default,
+        )
+
+    # ------------------------------------------------------------------
+    # Named, per-RPC outbound calls -- one per Gateway RPC this node calls on a
+    # peer. Every ``client_id``/``peer_id``/``signature`` parameter is optional
+    # and, left as "", is simply not attached -- the same "absent, not empty"
+    # convention client_gate.require_caller and generate_client_or_pow_required
+    # already use.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_peer_info(channel, client_id: str = "") -> Optional[celaut_pb2.Peer]:
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).GetPeerInfo,
+            input=celaut_pb2.Client(client_id=client_id) if client_id else None,
+            indices_serializer=celaut_pb2.Client,
+            indices_parser=celaut_pb2.Peer,
+        )
+
+    @staticmethod
+    def introduce_peer(
+            channel, peer: celaut_pb2.Peer, client_id: str = ""
+    ) -> Optional[celaut_pb2.RecursionGuard]:
+        if client_id:
+            indices_serializer = {1: celaut_pb2.Peer, CLIENT_INDEX: celaut_pb2.Client}
+            input_messages = [peer, celaut_pb2.Client(client_id=client_id)]
+        else:
+            indices_serializer = celaut_pb2.Peer
+            input_messages = peer
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).IntroducePeer,
+            input=input_messages,
+            indices_serializer=indices_serializer,
+            indices_parser=celaut_pb2.RecursionGuard,
+        )
+
+    @staticmethod
+    def generate_client(
+            channel,
+            client_id: str = "",
+            challenge: str = "",
+            pow_solution: str = "",
+            peer_id: str = "",
+            signature: str = "",
+    ) -> Optional[Union[celaut_pb2.Client, celaut_pb2.PoWRequired]]:
+        """``client_id`` is the caller's proposed UUID4 (or "" for "mint me one");
+        ``challenge``/``pow_solution`` are only set on the retry that answers a
+        ``PoWRequired`` (issue #361); ``peer_id``/``signature`` optionally prove the
+        caller is also a known peer, over that same ``client_id``, so this node can
+        bind the two the moment it creates it (or, once known, via
+        ``associate_client``).
+        """
+        message = celaut_pb2.Client(client_id=client_id)
+        if challenge:
+            message.challenge = challenge
+        if pow_solution:
+            message.pow_solution = pow_solution
+        if peer_id:
+            message.peer_id = peer_id
+        if signature:
+            message.signature = signature
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).GenerateClient,
+            input=message,
+            indices_parser=dict(GenerateClient_output_indices),
+            indices_serializer=celaut_pb2.Client,
+        )
+
+    @staticmethod
+    def associate_client(
+            channel, client_id: str, peer_id: str = "", signature: str = ""
+    ) -> Optional[celaut_pb2.AssociateClientOutput]:
+        message = celaut_pb2.Client(client_id=client_id)
+        if peer_id:
+            message.peer_id = peer_id
+        if signature:
+            message.signature = signature
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).AssociateClient,
+            input=message,
+            indices_parser=celaut_pb2.AssociateClientOutput,
+            indices_serializer=celaut_pb2.Client,
+        )
+
+    @staticmethod
+    def resolve_network(
+            channel, network: celaut_pb2.Service.Network, timeout: Optional[float] = None
+    ) -> Optional[celaut_pb2.ConfigurationFile.NetworkResolution]:
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).ResolveNetwork,
+            input=network,
+            indices_parser=celaut_pb2.ConfigurationFile.NetworkResolution,
+            timeout=timeout,
+        )
+
+    @staticmethod
+    def chat(channel, message: celaut_pb2.ChatMessage) -> Optional[celaut_pb2.ChatAck]:
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).Chat,
+            input=message,
+            indices_parser=celaut_pb2.ChatAck,
+        )
+
+    @staticmethod
+    def get_metrics(channel, token: str) -> celaut_pb2.Metrics:
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).GetMetrics,
+            input=celaut_pb2.TokenMessage(token=token),
+            indices_parser=celaut_pb2.Metrics,
+        )
+
+    @staticmethod
+    def generate_deposit_token(channel, client_id: str) -> Optional[celaut_pb2.TokenMessage]:
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).GenerateDepositToken,
+            input=celaut_pb2.Client(client_id=client_id),
+            indices_parser=celaut_pb2.TokenMessage,
+        )
+
+    @staticmethod
+    def payable(channel, payment: celaut_pb2.Payment) -> None:
+        BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).Payable,
+            input=payment,
+        )
+
+    @staticmethod
+    def get_resource_availability(
+            channel,
+            resources: celaut_pb2.Service.Container.Resources,
+            timeout: Optional[float] = None,
+    ) -> Optional[celaut_pb2.ResourceAvailability]:
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).GetResourceAvailability,
+            input=resources,
+            indices_parser=celaut_pb2.ResourceAvailability,
+            timeout=timeout,
+        )
+
+    @staticmethod
+    def get_service_estimated_cost(
+            channel, message_iterator, timeout: Optional[float] = None
+    ) -> Optional[celaut_pb2.EstimatedCost]:
+        """``message_iterator`` is a ``StartService_input_indices``-shaped envelope
+        (``src.utils.utils.service_extended``'s output) -- the same one used to
+        quote and to actually launch, so a quote and the launch it precedes are
+        always priced off the same declaration.
+        """
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).GetServiceEstimatedCost,
+            input=message_iterator,
+            indices_parser=celaut_pb2.EstimatedCost,
+            indices_serializer=StartService_input_indices,
+            timeout=timeout,
+        )
+
+    @staticmethod
+    def start_service(channel, message_iterator, timeout: Optional[float] = None) -> celaut_pb2.ServiceInstance:
+        """No default: a peer that sends nothing back is this call's failure to
+        report, not a "no instance" this node can quietly treat as one.
+        """
+        return next(BeeClient.call(
+            method=celaut_pb2_grpc.GatewayStub(channel).StartService,
+            input=message_iterator,
+            indices_parser=celaut_pb2.ServiceInstance,
+            indices_serializer=StartService_input_indices,
+            timeout=timeout,
+        ))
+
+    @staticmethod
+    def stop_service(channel, token: str) -> Optional[celaut_pb2.Refund]:
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).StopService,
+            input=celaut_pb2.TokenMessage(token=token),
+            indices_parser=celaut_pb2.Refund,
+        )
+
+    @staticmethod
+    def modify_deposit(
+            channel, difference: celaut_pb2.Amount, service_token: str
+    ) -> Optional[celaut_pb2.ModifyDepositOutput]:
+        return BeeClient.call_one(
+            method=celaut_pb2_grpc.GatewayStub(channel).ModifyDeposit,
+            input=celaut_pb2.ModifyDepositInput(difference=difference, service_token=service_token),
+            indices_parser=celaut_pb2.ModifyDepositOutput,
+        )
+
+    @staticmethod
+    def get_service(channel, hash_message: celaut_pb2.Metadata.HashTag.Hash):
+        """Streamed, and the response can be large (a whole packed service), so this
+        returns the raw generator -- iterate it -- rather than collapsing it into one
+        message the way ``call_one`` does for everything else here.
+        """
+        return BeeClient.call(
+            method=celaut_pb2_grpc.GatewayStub(channel).GetService,
+            input=hash_message,
+            indices_serializer=celaut_pb2.Metadata.HashTag.Hash,
+            indices_parser=StartService_input_indices,  # Not all indices are used, but still the same shape.
+            partitions_message_mode_parser=StartService_input_message_mode,
+            # Tell the peer which blocks of what it sends we already hold, so it
+            # stops mid-block instead of us draining and discarding bytes it did
+            # not need to send (issue #371). Ignored by a peer that does not
+            # honour it, in which case the response arrives in full as before.
+            block_skip=True,
+        )
+
+    @staticmethod
+    def service_tunnel(channel, outbound):
+        """A two-way byte pipe, not a request/response -- returns the raw generator
+        for the caller to relay itself in both directions.
+        """
+        return BeeClient.call(
+            method=celaut_pb2_grpc.GatewayStub(channel).ServiceTunnel,
+            input=outbound,
+            indices_parser={0: bytes},
+            indices_serializer={1: celaut_pb2.TokenMessage},
+        )

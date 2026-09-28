@@ -1,9 +1,8 @@
 from typing import Any, Dict, Generator
 
-from bee_rpc import client as bee, buffer_pb2
-
 from protos import celaut_pb2
 from src.commands.observe import observe_event_stream, ObserveInstanceError
+from src.utils.bee_client import BeeClient, Buffer
 from src.utils.logger import LOGGER as logger
 
 
@@ -115,11 +114,7 @@ class ObserveIterable:
         return False
 
     def _events(self) -> Generator[celaut_pb2.ObserveEvent, None, None]:
-        request = next(bee.parse_from_buffer(
-            request_iterator=self.request_iterator,
-            indices=celaut_pb2.ObserveRequest,
-            partitions_message_mode=True
-        ), None)
+        request = BeeClient.parse_one(self.request_iterator, indices=celaut_pb2.ObserveRequest)
 
         if request is None or not request.instance_id:
             raise Exception("Observe: missing instance_id in ObserveRequest.")
@@ -148,8 +143,8 @@ class ObserveIterable:
         finally:
             logger(f'Observe stream for {instance_id} finished.')
 
-    def __iter__(self) -> Generator[buffer_pb2.Buffer, None, None]:
-        yield from bee.serialize_to_buffer(
+    def __iter__(self) -> Generator[Buffer, None, None]:
+        yield from BeeClient.respond(
             message_iterator=self._events(),
             indices=celaut_pb2.ObserveEvent,
         )

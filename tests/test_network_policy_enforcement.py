@@ -167,7 +167,7 @@ class CostQuoteTests(unittest.TestCase):
             cost_mod, "default_initial_balance", return_value=1
         ), patch.object(
             cost_mod, "generate_estimated_cost", return_value=celaut.EstimatedCost()
-        ) as quote, patch.object(cost_mod.bee, "serialize_to_buffer", return_value=iter([])):
+        ) as quote, patch.object(cost_mod.BeeClient, "respond", return_value=iter([])):
             list(self._iterable("tok-cost-2").generate())
 
         quote.assert_called_once()

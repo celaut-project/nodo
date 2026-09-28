@@ -6,13 +6,13 @@ from threading import Lock
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from contextlib import nullcontext
-from bee_rpc import client as bee
 from src.payment_system.exceptions import DoubleSpendingAttempt
 from src.payment_system.ledger_balancer import ledger_balancer
 
-from protos import celaut_pb2_grpc, celaut_pb2
+from protos import celaut_pb2
 
 from src.database.sql_connection import SQLConnection
+from src.utils.bee_client import BeeClient
 
 from src.utils import logger as _l
 from src.identity.grpc_transport import peer_channel
@@ -168,14 +168,14 @@ def generate_deposit_token(client_id: str) -> str:
     return deposit_token
 
 
-# Helper function to create the gRPC stub and get URIs
-def __get_grpc_stub(peer_id):
+# Helper function to obtain a verified channel to a peer
+def __get_channel(peer_id):
     try:
-        return celaut_pb2_grpc.GatewayStub(peer_channel(peer_id=peer_id))
+        return peer_channel(peer_id=peer_id)
     except (ConnectionError, CertificateError) as e:
         # Same contract as before -- callers treat None as "cannot reach this peer" --
-        # but a certificate that does not prove `peer_id` now lands here too: this stub
-        # is what `pay` sends money over, so an unverified answer is not a peer.
+        # but a certificate that does not prove `peer_id` now lands here too: this
+        # channel is what `pay` sends money over, so an unverified answer is not a peer.
         _l.LOGGER(f"No verified channel to peer {peer_id}: {e}")
         return None
 
@@ -188,19 +188,13 @@ def __obtain_deposit_token(peer_id) -> Optional[str]:
 
     _l.LOGGER(f"Generate deposit token on the peer {peer_id} with client {client_id}")
 
-    # Generate the deposit token
-    grpc_stub = __get_grpc_stub(peer_id)
-    if not grpc_stub:
+    channel = __get_channel(peer_id)
+    if not channel:
         _l.LOGGER("Failed to generate gRPC stub.")
         return
 
     try:
-        return next(bee.client_grpc(
-            method=grpc_stub.GenerateDepositToken,
-            partitions_message_mode_parser=True,
-            input=celaut_pb2.Client(client_id=client_id),  # type: ignore
-            indices_parser=celaut_pb2.TokenMessage  # type: ignore
-        ), None).token  # type: ignore
+        return BeeClient.generate_deposit_token(channel, client_id=client_id).token  # type: ignore
     except Exception as e:
         _l.LOGGER(f"Error generating deposit token: {str(e)}")
         return
@@ -392,20 +386,16 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
     attempt = 0
     while attempt < COMMUNICATION_ATTEMPTS:
         try:
-            grpc_stub = __get_grpc_stub(peer_id)
-            if not grpc_stub:
+            channel = __get_channel(peer_id)
+            if not channel:
                 _l.LOGGER(f"Failed to get gRPC stub for peer {peer_id}")
                 return False
 
-            next(bee.client_grpc(
-                method=grpc_stub.Payable,
-                partitions_message_mode_parser=True,
-                input=celaut_pb2.Payment(
-                    amount=to_amount(peer_amount),
-                    deposit_token=deposit_token,
-                    contract=contract_ledger,
-                )
-            ), None)
+            BeeClient.payable(channel, celaut_pb2.Payment(
+                amount=to_amount(peer_amount),
+                deposit_token=deposit_token,
+                contract=contract_ledger,
+            ))
 
             _l.LOGGER(f"Payment of {peer_amount} (peer MU) to {peer_id} communicated successfully.")
             return True

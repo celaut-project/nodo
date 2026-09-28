@@ -3,17 +3,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional, Generator, Tuple
 import secrets
 
-from bee_rpc import client as bee
-
 from src.manager.resources import IOBigData
-from protos import celaut_pb2, celaut_pb2, celaut_pb2_grpc
-from protos.gateway_bee import GenerateClient_output_indices
+from protos import celaut_pb2
 
 from src.database.sql_connection import SQLConnection, is_peer_available
 from src.tunneling import delegated_endpoints
 
 from src.utils import logger as log
 from src.utils import utils
+from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 from src.utils.instance_names import normalize_instance_name, random_instance_name
 from src.identity.grpc_transport import node_channel, peer_channel
@@ -581,13 +579,7 @@ def refresh_peer_instance(peer_id: str) -> bool:
         log.LOGGER(f"No known URI for peer {peer_id}; cannot refresh.")
         return False
     try:
-        peer = next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                node_channel(uri, expected_peer_id=peer_id)
-            ).GetPeerInfo,
-            indices_parser=celaut_pb2.Peer,
-            partitions_message_mode_parser=True
-        ), None)
+        peer = BeeClient.get_peer_info(node_channel(uri, expected_peer_id=peer_id))
     except Exception as e:
         log.LOGGER(f"Could not fetch info for peer {peer_id}: {e}")
         return False
@@ -966,16 +958,7 @@ def _mint_client_over_channel(
     """
     binding = binding or {}
 
-    def _ask(message) -> Optional[object]:
-        return next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(channel).GenerateClient,
-            input=message,
-            indices_parser=dict(GenerateClient_output_indices),
-            indices_serializer=celaut_pb2.Client,
-            partitions_message_mode_parser=True
-        ), None)
-
-    client_msg = _ask(celaut_pb2.Client(client_id=proposed_id, **binding))
+    client_msg = BeeClient.generate_client(channel, client_id=proposed_id, **binding)
 
     if isinstance(client_msg, celaut_pb2.PoWRequired):
         # The peer has given away its free clients. Its `difficulty` field only says what
@@ -985,14 +968,15 @@ def _mint_client_over_channel(
             f'Peer requires a proof of work of difficulty '
             f'{client_msg.difficulty} for a new client.'
         )
-        client_msg = _ask(celaut_pb2.Client(
+        client_msg = BeeClient.generate_client(
+            channel,
             client_id=proposed_id,
             challenge=client_msg.challenge,
             pow_solution=solve_pow(
                 challenge=client_msg.challenge, difficulty=client_msg.difficulty
             ),
             **binding,
-        ))
+        )
 
     if not client_msg or not isinstance(client_msg, celaut_pb2.Client):
         return None
@@ -1031,13 +1015,7 @@ def associate_client_id_on_channel(channel, client_id: str) -> bool:
     binding = _peer_identity_binding(client_id)
     if not binding:
         return False
-    response = next(bee.client_grpc(
-        method=celaut_pb2_grpc.GatewayStub(channel).AssociateClient,
-        input=celaut_pb2.Client(client_id=client_id, **binding),
-        indices_parser=celaut_pb2.AssociateClientOutput,
-        indices_serializer=celaut_pb2.Client,
-        partitions_message_mode_parser=True,
-    ), None)
+    response = BeeClient.associate_client(channel, client_id=client_id, **binding)
     return bool(response and response.bound)
 
 
@@ -1303,17 +1281,9 @@ def stop_instance(token: str, credit: bool = True) -> Optional[int]:  # TODO Sho
                 return None
             
             peer_refund = utils.from_amount(
-                next(bee.client_grpc(
-                    method=celaut_pb2_grpc.GatewayStub(
-                        node_channel(peer_uri, expected_peer_id=peer_id)
-                    ).StopService,
-                        partitions_message_mode_parser=True,
-                        # StopService answers with a Refund, whose field is `amount`.
-                        # This parsed it as a deposit-modification output, which has no
-                        # such field -- pre-existing, surfaced by the rename.
-                        indices_parser=celaut_pb2.Refund,
-                        input=celaut_pb2.TokenMessage(token=external_token)
-                )).amount
+                BeeClient.stop_service(
+                    node_channel(peer_uri, expected_peer_id=peer_id), token=external_token
+                ).amount
             )
             # The peer's figure, in the peer's MU, and it settles on the peer: it is
             # credited to the client row this node holds there, which is this node's
@@ -1474,19 +1444,13 @@ def modify_deposit(amount_mu: int, service_token: str) -> Tuple[bool, str]:
                 to_mu_per_unit=payment_system.peer_mu_per_unit,
                 round_up=amount_mu < 0,
             )
-            _output = next(bee.client_grpc(
-                method=celaut_pb2_grpc.GatewayStub(
-                    peer_channel(peer_id)
-                ).ModifyDeposit,
-                partitions_message_mode_parser=True,
-                indices_parser=celaut_pb2.ModifyDepositOutput,
-                input=celaut_pb2.ModifyDepositInput(
-                    difference=utils.to_amount(
-                        -peer_amount if amount_mu < 0 else peer_amount
-                    ),
-                    service_token=external_token
-                )
-            ))
+            _output = BeeClient.modify_deposit(
+                peer_channel(peer_id),
+                difference=utils.to_amount(
+                    -peer_amount if amount_mu < 0 else peer_amount
+                ),
+                service_token=external_token,
+            )
             # Only once the peer has actually moved its side. A local row raised for
             # a top-up the peer never received would refund the father at the stop
             # for runtime that was never bought, out of this node's own pocket.

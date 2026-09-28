@@ -43,11 +43,10 @@ import time
 from typing import List, Optional
 from uuid import uuid4
 
-from bee_rpc import client as bee
-
-from protos import celaut_pb2, celaut_pb2_grpc
+from protos import celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.identity.grpc_transport import peer_channel
+from src.utils.bee_client import BeeClient
 from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.config import ConfigManager
@@ -151,12 +150,7 @@ def send_chat_message(peer_id: str, body: str, conversation_id: Optional[str] = 
     if conversation_id:
         chat_message.conversation_id = conversation_id
 
-    ack = next(bee.client_grpc(
-        method=celaut_pb2_grpc.GatewayStub(peer_channel(peer_id=peer_id)).Chat,
-        input=chat_message,
-        indices_parser=celaut_pb2.ChatAck,
-        partitions_message_mode_parser=True,
-    ), None)
+    ack = BeeClient.chat(peer_channel(peer_id=peer_id), chat_message)
     if ack is not None and not ack.stored:
         # The peer's own reason (unknown/unassociated client_id there, an empty or
         # oversize body) travels back verbatim rather than being reworded: it is

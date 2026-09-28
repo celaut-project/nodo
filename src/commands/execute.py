@@ -8,10 +8,10 @@ import io
 
 import grpc
 
-from bee_rpc.client import client_grpc
-from protos import celaut_pb2, celaut_pb2_grpc, gateway_bee
+from protos import celaut_pb2
 
 from src.commands.inspect_service import inspect as inspect_service
+from src.utils.bee_client import BeeClient
 from src.commands.__by_tag import get_id
 from src.core_services.source_application import acquire_service
 from src.manager.manager import get_execute_client
@@ -147,7 +147,6 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
     )
     try:
         channel = local_channel()
-        g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
         try:
             inspect_service(service)
@@ -159,13 +158,7 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
     
         animation_thread.start()
 
-        response = next(client_grpc(
-            method=g_stub.StartService,
-            input=input_generator,
-            indices_parser=celaut_pb2.ServiceInstance,
-            partitions_message_mode_parser=True,
-            indices_serializer=gateway_bee.StartService_input_indices
-        ))
+        response = BeeClient.start_service(channel, input_generator)
         stop_event.set()
         animation_thread.join()
         print(success_message)

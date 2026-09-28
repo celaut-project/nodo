@@ -49,11 +49,9 @@ class EstimateCostOnPeerTests(unittest.TestCase):
         expected.cost.n = "42"
 
         with patch.object(balancer_mod, "peer_channel"), patch.object(
-            balancer_mod.celaut_pb2_grpc, "GatewayStub"
-        ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
         ), patch.object(
-            balancer_mod.bee, "client_grpc", return_value=iter([expected])
+            balancer_mod.BeeClient, "call_one", return_value=expected
         ):
             result = balancer_mod.estimate_cost_on_peer(
                 peer_id="peer-a",
@@ -72,11 +70,9 @@ class EstimateCostOnPeerTests(unittest.TestCase):
 
     def test_returns_none_instead_of_raising_when_the_peer_is_unreachable(self):
         with patch.object(balancer_mod, "peer_channel"), patch.object(
-            balancer_mod.celaut_pb2_grpc, "GatewayStub"
-        ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
         ), patch.object(
-            balancer_mod.bee, "client_grpc", side_effect=RuntimeError("unreachable")
+            balancer_mod.BeeClient, "call_one", side_effect=RuntimeError("unreachable")
         ):
             result = balancer_mod.estimate_cost_on_peer(
                 peer_id="peer-a",
@@ -91,11 +87,9 @@ class EstimateCostOnPeerTests(unittest.TestCase):
         with patch.object(balancer_mod, "SEND_ONLY_HASHES_ASKING_COST", False), patch.object(
             balancer_mod, "START_SERVICE_ON_PEER_TIMEOUT", 120
         ), patch.object(balancer_mod, "peer_channel"), patch.object(
-            balancer_mod.celaut_pb2_grpc, "GatewayStub"
-        ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
         ), patch.object(
-            balancer_mod.bee, "client_grpc", side_effect=RuntimeError("stop after kwargs")
+            balancer_mod.BeeClient, "call_one", side_effect=RuntimeError("stop after kwargs")
         ) as mock_client:
             result = balancer_mod.estimate_cost_on_peer(
                 peer_id="peer-a",
@@ -111,11 +105,9 @@ class EstimateCostOnPeerTests(unittest.TestCase):
         with patch.object(balancer_mod, "SEND_ONLY_HASHES_ASKING_COST", True), patch.object(
             balancer_mod, "EXTERNAL_COST_TIMEOUT", 10
         ), patch.object(balancer_mod, "peer_channel"), patch.object(
-            balancer_mod.celaut_pb2_grpc, "GatewayStub"
-        ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
         ), patch.object(
-            balancer_mod.bee, "client_grpc", side_effect=RuntimeError("stop after kwargs")
+            balancer_mod.BeeClient, "call_one", side_effect=RuntimeError("stop after kwargs")
         ) as mock_client:
             result = balancer_mod.estimate_cost_on_peer(
                 peer_id="peer-a",
@@ -133,11 +125,9 @@ class EstimateCostOnPeerTests(unittest.TestCase):
                 return grpc.StatusCode.DEADLINE_EXCEEDED
 
         with patch.object(balancer_mod, "peer_channel"), patch.object(
-            balancer_mod.celaut_pb2_grpc, "GatewayStub"
-        ), patch.object(
             balancer_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
         ), patch.object(
-            balancer_mod.bee, "client_grpc", side_effect=DeadlineExceeded("deadline")
+            balancer_mod.BeeClient, "call_one", side_effect=DeadlineExceeded("deadline")
         ), patch.object(balancer_mod.log, "LOGGER") as mock_log:
             result = balancer_mod.estimate_cost_on_peer(
                 peer_id="peer-a",

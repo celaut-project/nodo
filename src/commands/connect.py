@@ -1,10 +1,7 @@
-from protos import celaut_pb2_grpc, celaut_pb2
-from bee_rpc.client import client_grpc as client
-
-from src.gateway.client_gate import CLIENT_INDEX
 from src.manager.manager import add_peer_instance, verified_peer_public_key, \
     associate_client_id_on_channel, get_client_id_on_other_peer, mint_client_id_on_channel
 from src.database.sql_connection import SQLConnection
+from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 from src.identity.grpc_transport import channel_and_peer_id, node_channel
 
@@ -35,13 +32,7 @@ def connect(peer: str):
             client_id = mint_client_id_on_channel(channel)
             if not client_id:
                 print(f"Could not mint a client_id at {peer}; it may refuse this node.")
-            peer_info = next(client(
-                    method=celaut_pb2_grpc.GatewayStub(channel).GetPeerInfo,
-                    indices_serializer=celaut_pb2.Client,
-                    input=celaut_pb2.Client(client_id=client_id) if client_id else None,
-                    indices_parser=celaut_pb2.Peer,
-                    partitions_message_mode_parser=True
-                ))
+            peer_info = BeeClient.get_peer_info(channel, client_id=client_id)
         finally:
             channel.close()
 
@@ -114,23 +105,17 @@ def connect(peer: str):
                         get_client_id_on_other_peer(peer_id=peer_id) if peer_id
                         else mint_client_id_on_channel(channel)
                     )
-                    if announce_client_id:
-                        indices_serializer = {1: celaut_pb2.Peer, CLIENT_INDEX: celaut_pb2.Client}
-                        input_messages = [
-                            gateway_instance,
-                            celaut_pb2.Client(client_id=announce_client_id),
-                        ]
-                    else:
+                    if not announce_client_id:
                         print(f"Could not obtain a client_id at {peer}; announcing without one.")
-                        indices_serializer = celaut_pb2.Peer
-                        input_messages = gateway_instance
-                    _result = next(client(
-                        method=celaut_pb2_grpc.GatewayStub(channel).IntroducePeer,
-                        indices_serializer=indices_serializer,
-                        input=input_messages,
-                        indices_parser=celaut_pb2.RecursionGuard,  # Recursion guard shouldn't be used here, another message should be used. TODO
-                        partitions_message_mode_parser=True
-                    ))
+                    _result = BeeClient.introduce_peer(
+                        channel, gateway_instance, client_id=announce_client_id or ""
+                    )  # Recursion guard shouldn't be used here, another message should be used. TODO
+                    if _result is None:
+                        # No answer at all -- not the same as a well-formed refusal
+                        # ("REFUSED"), which is why this isn't just left to default
+                        # into an empty RecursionGuard: an empty token would read as
+                        # accepted below.
+                        raise Exception(f"Peer {peer} sent no answer to IntroducePeer.")
 
                     if _result.token != "REFUSED" and announce_client_id:
                         # Only reachable now that IntroducePeer just registered this

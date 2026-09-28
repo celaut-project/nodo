@@ -1,6 +1,4 @@
 from typing import Generator
-from bee_rpc import client as bee, buffer_pb2
-from bee_rpc.control import StreamControl
 from bee_rpc.utils import get_expanded_block_length
 
 from protos import celaut_pb2
@@ -8,6 +6,7 @@ from protos.gateway_bee import StartService_input_indices
 from src.gateway.client_gate import CLIENT_INDEX, require_caller
 from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
 from src.virtualizers.architecture import UnsupportedArchitectureException
+from src.utils.bee_client import BeeClient, Buffer, StreamControl
 from src.utils.logger import LOGGER as logger
 from src.utils.utils import service_extended, read_metadata_from_disk
 
@@ -20,15 +19,14 @@ class GetServiceIterable:
         # already hold, and the serialize side is what actually stops sending
         # one -- see bee_rpc.control.StreamControl and issue #371.
         self.control = StreamControl()
-        self.parser_iterator = bee.parse_from_buffer(
-            request_iterator=request_iterator,
+        self.parser_iterator = BeeClient.parse(
+            request_iterator,
             indices={1: celaut_pb2.Metadata.HashTag.Hash, CLIENT_INDEX: celaut_pb2.Client},
-            partitions_message_mode=True,
             control=self.control,
         )
         self.context = context
 
-    def __iter__(self) -> Generator[buffer_pb2.Buffer, None, None]:
+    def __iter__(self) -> Generator[Buffer, None, None]:
         logger('Request for a service.')
         service_hash = None
         client_id = ""
@@ -64,7 +62,7 @@ class GetServiceIterable:
         self.control.watch()
 
         try:
-            yield from bee.serialize_to_buffer(
+            yield from BeeClient.respond(
                 message_iterator=service_extended(
                     metadata=read_metadata_from_disk(service_hash=service_hash),
                     recursion_guard_token=None  # TODO: Needed if executing the same RPC to peers as well, in case the service is not available locally.
