@@ -34,7 +34,6 @@ import time
 from collections import OrderedDict, deque
 from typing import Deque, Optional, Type, Union
 
-from bee_rpc import client as bee
 from google.protobuf.message import Message
 
 from protos import celaut_pb2
@@ -42,17 +41,12 @@ from src.database.sql_connection import SQLConnection
 from src.gateway.client_pow import is_uuid4_hex
 from src.manager.manager import get_internal_service_id_by_uri
 from src.utils import logger as log
+from src.utils.bee_client import CLIENT_INDEX, BeeClient
 from src.utils.config import ConfigManager
 from src.utils.utils import get_only_the_ip_from_context
 
 env_manager = ConfigManager()
 sc = SQLConnection()
-
-# The index a Client message travels at, in an envelope that did not already reserve
-# one of its own. Distinct from every payload index used elsewhere in this file's
-# callers (they all stay at 1), and from StartService's own envelope, which already
-# carries a Client at index 1 (protos/gateway_bee.py) and is gated separately.
-CLIENT_INDEX = 90
 
 # Bounds how many distinct client_ids the sliding window remembers at once. A caller
 # cannot dodge the window by discarding a client_id for a fresh one -- minting one is
@@ -199,10 +193,9 @@ def parse_with_client(
     """
     payload = None
     client_id = ""
-    for r in bee.parse_from_buffer(
-            request_iterator=request_iterator,
+    for r in BeeClient.parse(
+            request_iterator,
             indices={payload_index: payload_type, CLIENT_INDEX: celaut_pb2.Client},
-            partitions_message_mode=True,
     ):
         if isinstance(r, celaut_pb2.Client):
             client_id = r.client_id

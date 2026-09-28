@@ -1,10 +1,9 @@
 from typing import Generator
 
-from bee_rpc import client as bee, buffer_pb2
-
 from protos import celaut_pb2
 from src.gateway.client_gate import parse_with_client, require_caller
 from src.utils import activity_window
+from src.utils.bee_client import BeeClient, Buffer
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.logger import LOGGER as logger
 
@@ -27,7 +26,7 @@ class GetResourceAvailabilityIterable:
         self.request_iterator = request_iterator
         self.context = context
 
-    def __iter__(self) -> Generator[buffer_pb2.Buffer, None, None]:
+    def __iter__(self) -> Generator[Buffer, None, None]:
         logger('Request for resource availability.')
         try:
             # An empty request is a well-formed question with a trivial answer ("can
@@ -62,7 +61,7 @@ class GetResourceAvailabilityIterable:
             # No `indices`: the response is a single flat message, the same shape
             # StopService's Refund is serialized with. The caller pairs it with
             # `indices_parser=ResourceAvailability` + `partitions_message_mode_parser`.
-            yield from bee.serialize_to_buffer(
+            yield from BeeClient.respond(
                 message_iterator=celaut_pb2.ResourceAvailability(
                     can_execute=availability["can_execute"],
                     reason=availability.get("reason", ""),

@@ -76,9 +76,7 @@ class DelegationOpensTheChildsLocalAccountTests(unittest.TestCase):
         ), patch.object(
             delegate_mod, "get_client_id_on_other_peer", return_value="client-on-peer"
         ), patch.object(delegate_mod, "peer_channel"), patch.object(
-            delegate_mod.celaut_pb2_grpc, "GatewayStub"
-        ), patch.object(
-            delegate_mod.bee, "client_grpc", return_value=iter([instance])
+            delegate_mod.BeeClient, "start_service", return_value=instance
         ), patch.object(
             delegate_mod.delegated_endpoints, "should_tunnel", return_value=False
         ), patch.object(delegate_mod, "SQLConnection") as sql_connection:
@@ -334,7 +332,7 @@ class _StopHarness:
         self.calls.append(("stop_service_on_peer", PEER_TOKEN))
         if self.peer_raises:
             raise RuntimeError("peer is unreachable")
-        return iter([self.peer_refund])
+        return self.peer_refund
 
     def run(self, credit=True):
         with patch.object(manager, "sc", self.sc), \
@@ -343,8 +341,7 @@ class _StopHarness:
                 patch.object(manager.utils, "generate_uris_by_peer_id",
                              return_value=iter(["peer:5000"])), \
                 patch.object(manager, "node_channel"), \
-                patch.object(manager.celaut_pb2_grpc, "GatewayStub"), \
-                patch.object(manager.bee, "client_grpc", side_effect=self._stop_service), \
+                patch.object(manager.BeeClient, "call_one", side_effect=self._stop_service), \
                 patch.object(manager.delegated_endpoints, "close") as close:
             self.close = close
             return manager.stop_instance(token=OUR_ALIAS, credit=credit)
@@ -456,17 +453,16 @@ class DelegatedDepositModificationTests(unittest.TestCase):
 
         def client_grpc(**kwargs):
             sent.append(kwargs["input"])
-            return iter([celaut.ModifyDepositOutput(
+            return celaut.ModifyDepositOutput(
                 success=peer_accepts, message="ok" if peer_accepts else "refused"
-            )])
+            )
 
         with patch.object(manager, "sc", sc), \
                 patch.object(manager, "resolve_instance_token", return_value=None), \
                 patch.object(manager, "format_mu", str), \
                 patch.object(manager, "matching_payment_system", return_value=payment_system), \
                 patch.object(manager, "peer_channel"), \
-                patch.object(manager.celaut_pb2_grpc, "GatewayStub"), \
-                patch.object(manager.bee, "client_grpc", side_effect=client_grpc):
+                patch.object(manager.BeeClient, "call_one", side_effect=client_grpc):
             ok, message = manager.modify_deposit(
                 amount_mu=amount_mu, service_token=OUR_ALIAS
             )

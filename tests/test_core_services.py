@@ -141,13 +141,10 @@ class ExecuteFallbackTests(unittest.TestCase):
         ) as mock_acquire, patch.object(
             execute_cmd, "local_channel"
         ), patch.object(
-            execute_cmd.celaut_pb2_grpc, "GatewayStub"
-        ) as mock_stub_cls, patch.object(
             execute_cmd, "inspect_service"
         ), patch.object(
-            execute_cmd, "client_grpc", return_value=iter([response])
+            execute_cmd.BeeClient, "start_service", return_value=response
         ):
-            mock_stub_cls.return_value.StartService = object()
             execute_cmd.execute("svc")
 
         mock_acquire.assert_called_once_with("svc")
@@ -171,13 +168,10 @@ class ExecuteFallbackTests(unittest.TestCase):
         ) as mock_acquire, patch.object(
             execute_cmd, "local_channel"
         ), patch.object(
-            execute_cmd.celaut_pb2_grpc, "GatewayStub"
-        ) as mock_stub_cls, patch.object(
             execute_cmd, "inspect_service"
         ), patch.object(
-            execute_cmd, "client_grpc", return_value=iter([response])
+            execute_cmd.BeeClient, "start_service", return_value=response
         ):
-            mock_stub_cls.return_value.StartService = object()
             execute_cmd.execute("svc")
 
         mock_acquire.assert_not_called()

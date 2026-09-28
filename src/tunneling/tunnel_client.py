@@ -23,9 +23,9 @@ from typing import Callable, Dict, Generator, Optional, Tuple
 
 import grpc
 
-from bee_rpc.client import client_grpc
-from protos import celaut_pb2, celaut_pb2_grpc
+from protos import celaut_pb2
 from src.identity.grpc_transport import verified_channel
+from src.utils.bee_client import BeeClient
 
 # Read size for the local socket -> node direction, matching the relay's own
 # buffer and staying well under bee_rpc's 1 MiB chunk threshold.
@@ -55,15 +55,8 @@ def open_stream(
         yield celaut_pb2.TokenMessage(token=token, slot=str(slot))
         yield from outbound
 
-    stub = celaut_pb2_grpc.GatewayStub(
-        channel or verified_channel(gateway, expected_peer_id)
-    )
-    return client_grpc(
-        method=stub.ServiceTunnel,
-        input=with_handshake(),
-        indices_parser={0: bytes},
-        partitions_message_mode_parser=True,
-        indices_serializer={1: celaut_pb2.TokenMessage},
+    return BeeClient.service_tunnel(
+        channel or verified_channel(gateway, expected_peer_id), with_handshake()
     )
 
 

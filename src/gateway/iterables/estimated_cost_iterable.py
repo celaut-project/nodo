@@ -1,13 +1,12 @@
 from src.utils.utils import read_service_from_disk
 from typing import Optional, Generator
 
-from bee_rpc import client as bee, buffer_pb2
-
 from protos import celaut_pb2
 from src.utils.tools.recursion_guard import RecursionGuard
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
 from src.manager.manager import default_initial_balance
+from src.utils.bee_client import BeeClient, Buffer
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.utils import activity_window
 from src.utils.network_policy import enforce_network_policy
@@ -27,7 +26,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
         logger('Request for the cost of a service.')
         return super().start()
 
-    def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
+    def generate(self) -> Generator[Buffer, None, None]:
         with RecursionGuard(
                 token=self.recursion_guard_token,
                 generate=True
@@ -94,7 +93,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                         ))
                     )
 
-                yield from bee.serialize_to_buffer(
+                yield from BeeClient.respond(
                     message_iterator=generate_estimated_cost(
                         metadata=self.metadata,
                         config=self.configuration,
@@ -110,7 +109,7 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             
             finally:
                 # raise BreakIteration
-                yield buffer_pb2.Buffer(signal=True)
+                yield Buffer(signal=True)
 
     def final(self):
         logger('End request for the cost of a service.')

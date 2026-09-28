@@ -1,8 +1,6 @@
 import os
 from typing import Optional, Generator, Set, Tuple
 
-from bee_rpc import client as bee, buffer_pb2
-
 from protos import celaut_pb2 as celaut
 from protos import celaut_pb2
 from protos.gateway_bee import StartService_input_indices, \
@@ -10,6 +8,7 @@ from protos.gateway_bee import StartService_input_indices, \
 from src.gateway.client_gate import ClientRequired, require_caller
 from src.gateway.utils import save_service
 from src.utils import logger as log
+from src.utils.bee_client import BeeClient, Buffer, Dir
 from src.utils.hashing import get_configured_hash_id
 from src.manager.maintain import add_wanted
 from src.utils.config import ConfigManager
@@ -56,8 +55,8 @@ class Hash:
 class AbstractInputServiceIterable:
 
     def __init__(self, request_iterator, context):
-        self.parser_iterator = bee.parse_from_buffer(
-            request_iterator=request_iterator,
+        self.parser_iterator = BeeClient.parse(
+            request_iterator,
             indices=StartService_input_indices,
             partitions_message_mode=StartService_input_message_mode
         )
@@ -77,7 +76,7 @@ class AbstractInputServiceIterable:
         self.hashes: Set[Hash] = set()
         self.metadata: Optional[celaut.Metadata] = None
 
-    def __pattern_matching(self, r) -> Generator[buffer_pb2.Buffer, None, None]:
+    def __pattern_matching(self, r) -> Generator[Buffer, None, None]:
 
         match type(r):
             case celaut_pb2.Client:
@@ -120,7 +119,7 @@ class AbstractInputServiceIterable:
                 
                 # Service specification format could be great to be checked.
 
-            case bee.Dir:
+            case Dir:
                 if r.type != celaut.Service:
                     raise Exception('Incorrect service message.')
 
@@ -165,7 +164,7 @@ class AbstractInputServiceIterable:
                     return
                 self._caller_checked = True
 
-            yield buffer_pb2.Buffer(signal=True)
+            yield Buffer(signal=True)
 
             if not self.metadata:
                 with open(METADATA_REGISTRY + self.service_hash, 'rb') as f:
@@ -185,7 +184,7 @@ class AbstractInputServiceIterable:
     def start(self):
         pass
 
-    def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
+    def generate(self) -> Generator[Buffer, None, None]:
         pass
 
     def final(self):

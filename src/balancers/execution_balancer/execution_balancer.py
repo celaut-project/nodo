@@ -1,12 +1,11 @@
 from typing import Dict, Generator, Optional
 
 import grpc
-from bee_rpc import client as bee
 
 import protos.celaut_pb2 as celaut
-from protos import celaut_pb2, celaut_pb2_grpc
-from protos.gateway_bee import StartService_input_indices
+from protos import celaut_pb2
 from src.balancers.estimated_cost_sorter.estimated_cost_sorter import estimated_cost_sorter
+from src.utils.bee_client import BeeClient
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
@@ -98,22 +97,17 @@ def estimate_cost_on_peer(
         peer_configuration = configuration_for_peer(
             configuration, payment_system=payment_system
         )
-        peer_cost = next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                peer_channel(peer_id)
-            ).GetServiceEstimatedCost,
-            indices_parser=celaut_pb2.EstimatedCost,
-            timeout=_timeout_for_cost_request(),
-            partitions_message_mode_parser=True,
-            indices_serializer=StartService_input_indices,
-            input=service_extended(
+        peer_cost = BeeClient.get_service_estimated_cost(
+            peer_channel(peer_id),
+            service_extended(
                 config=peer_configuration,  # MUlocal -> MUpeer
                 metadata=metadata,
                 send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,
                 client_id=get_client_id_on_other_peer(peer_id=peer_id),
                 recursion_guard_token=recursion_guard_token
             ),
-        ))
+            timeout=_timeout_for_cost_request(),
+        )
         return estimated_cost_for_local(peer_cost, payment_system=payment_system)  # MUpeer -> MUlocal
     except Exception as e:
         _log_cost_request_exception(peer_id=peer_id, exc=e)

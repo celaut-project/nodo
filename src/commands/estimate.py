@@ -1,10 +1,8 @@
-from bee_rpc import client as bee
-
-from protos import celaut_pb2, celaut_pb2_grpc
-from protos.gateway_bee import StartService_input_indices
+from protos import celaut_pb2
 
 from src.commands.execute import resolve_service_hash
 from src.manager.manager import get_dev_clients
+from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 from src.identity.grpc_transport import local_channel
 from src.utils.monetary import format_mu
@@ -46,24 +44,20 @@ def estimate(service: str) -> None:
     )
 
     channel = local_channel()
-    g_stub = celaut_pb2_grpc.GatewayStub(channel)
 
     print(f"Estimate {service}")
     print("Querying gateway for estimated cost (uses real-time locked RAM)...")
 
     try:
-        estimated_cost = next(bee.client_grpc(
-            method=g_stub.GetServiceEstimatedCost,
-            input=service_extended(
+        estimated_cost = BeeClient.get_service_estimated_cost(
+            channel,
+            service_extended(
                 metadata=metadata,
                 config=configuration,
                 send_only_hashes=True,   # service is local, only hash needed
                 client_id=client_id,
             ),
-            indices_parser=celaut_pb2.EstimatedCost,
-            partitions_message_mode_parser=True,
-            indices_serializer=StartService_input_indices,
-        ), None)
+        )
     except Exception as e:
         print("Execution feasibility: NO")
         print(f"Reason: gateway error — {str(e)}")

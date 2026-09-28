@@ -1,11 +1,10 @@
 import os
 from typing import Generator
 
-from bee_rpc import client as bee, buffer_pb2
-
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
 from src.gateway.launcher.launch_service import launch_service
 from src.utils import logger as log
+from src.utils.bee_client import BeeClient, Buffer
 from src.utils.config import ConfigManager
 from src.utils.utils import get_only_the_ip_from_context, read_metadata_from_disk, read_service_from_disk
 from src.utils.config import ConfigManager
@@ -23,7 +22,7 @@ class StartServiceIterable(AbstractInputServiceIterable):
     def start(self):
         log.LOGGER('Starting service by ' + str(self.context.peer()) + ' ...')
 
-    def generate(self) -> Generator[buffer_pb2.Buffer, None, None]:
+    def generate(self) -> Generator[Buffer, None, None]:
         if CONFIGURATION_REQUIRED and not self.configuration:
             raise Exception("Client or configuration ")
         
@@ -44,7 +43,7 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 log.LOGGER(f"-  {hash.type.hex()}: {hash.value.hex()}")
             raise Exception(f"Corrupt metadata for the service {self.service_hash}")
 
-        yield from bee.serialize_to_buffer(
+        yield from BeeClient.respond(
             indices={},  # Why indices are not set?  Because StartService returns only one element, an instance.
             message_iterator=launch_service(
                 service_id=self.service_hash,
