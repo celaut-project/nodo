@@ -5,6 +5,7 @@ from bee_rpc.utils import get_expanded_block_length
 
 from protos import celaut_pb2
 from protos.gateway_bee import StartService_input_indices
+from src.gateway.client_gate import CLIENT_INDEX, require_caller
 from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.utils.logger import LOGGER as logger
@@ -21,7 +22,7 @@ class GetServiceIterable:
         self.control = StreamControl()
         self.parser_iterator = bee.parse_from_buffer(
             request_iterator=request_iterator,
-            indices=celaut_pb2.Metadata.HashTag.Hash,
+            indices={1: celaut_pb2.Metadata.HashTag.Hash, CLIENT_INDEX: celaut_pb2.Client},
             partitions_message_mode=True,
             control=self.control,
         )
@@ -30,14 +31,26 @@ class GetServiceIterable:
     def __iter__(self) -> Generator[buffer_pb2.Buffer, None, None]:
         logger('Request for a service.')
         service_hash = None
-        for hash in self.parser_iterator:
-            if type(hash) is not celaut_pb2.Metadata.HashTag.Hash:
-                logger(f'The hash provided has wrong type. {type(hash)}')
+        client_id = ""
+        # Stops at the first matching hash, same as before this envelope carried a
+        # Client too: the request direction has to be abandoned here, not drained, in
+        # block-skip mode -- it stays open for the peer's later skip requests
+        # (control.watch() below), so fully draining it would block forever waiting
+        # for a message that was never coming. A Client is therefore only seen if the
+        # caller puts it before the hash that resolves the request.
+        for r in self.parser_iterator:
+            if type(r) is celaut_pb2.Client:
+                client_id = r.client_id
                 continue
-            _hash, _ = find_service_hash(hash)
+            if type(r) is not celaut_pb2.Metadata.HashTag.Hash:
+                logger(f'The hash provided has wrong type. {type(r)}')
+                continue
+            _hash, _ = find_service_hash(r)
             if _hash:
                 service_hash = _hash
                 break
+
+        require_caller(self.context, client_id)
 
         if not service_hash:
             logger("Any service hash on the request input.")

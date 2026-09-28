@@ -18,6 +18,7 @@ import shutil
 import tempfile
 import unittest
 from concurrent import futures
+from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
@@ -100,6 +101,16 @@ class GetServiceBlockSkipEndToEndTests(unittest.TestCase):
             module.METADATA_REGISTRY = self.metadata_registry
 
         self.hash_id = get_configured_hash_id()
+
+        # GetService now requires a client_id unless the caller is a local instance
+        # (issue #428); this test dials its own server, i.e. is that instance, but the
+        # fixture carries no `local_instances` row to prove it with a real lookup, so
+        # the lookup itself is stood in for instead.
+        local_instance_patcher = patch(
+            "src.gateway.client_gate.get_internal_service_id_by_uri", return_value="self"
+        )
+        local_instance_patcher.start()
+        self.addCleanup(local_instance_patcher.stop)
 
         self.grpc_server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
         celaut_pb2_grpc.add_GatewayServicer_to_server(Gateway(), self.grpc_server)

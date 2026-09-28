@@ -98,6 +98,11 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.AssociateClient = channel.stream_stream(
+                '/celaut.Gateway/AssociateClient',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
 
 
 class GatewayServicer(object):
@@ -216,6 +221,12 @@ class GatewayServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AssociateClient(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_GatewayServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -296,6 +307,11 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'Observe': grpc.stream_stream_rpc_method_handler(
                     servicer.Observe,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
+            'AssociateClient': grpc.stream_stream_rpc_method_handler(
+                    servicer.AssociateClient,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -580,6 +596,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/Observe',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def AssociateClient(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/AssociateClient',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

@@ -1,7 +1,9 @@
 from protos import celaut_pb2_grpc, celaut_pb2
 from bee_rpc.client import client_grpc as client
 
-from src.manager.manager import add_peer_instance, verified_peer_public_key
+from src.gateway.client_gate import CLIENT_INDEX
+from src.manager.manager import add_peer_instance, verified_peer_public_key, \
+    associate_client_id_on_channel, get_client_id_on_other_peer, mint_client_id_on_channel
 from src.database.sql_connection import SQLConnection
 from src.utils.config import ConfigManager
 from src.identity.grpc_transport import channel_and_peer_id, node_channel
@@ -25,8 +27,18 @@ def connect(peer: str):
         # who holds the address in one step, with no trust-on-first-use.
         channel, certificate_peer_id = channel_and_peer_id(peer)
         try:
+            # GetPeerInfo now requires a client_id like every other RPC but
+            # GenerateClient (issue #428), and this is the first RPC ever called on a
+            # peer -- nothing about it is stored yet, so get_client_id_on_other_peer
+            # (which needs a stored address to open its own channel from) cannot be
+            # used here; mint straight over the channel already open for this call.
+            client_id = mint_client_id_on_channel(channel)
+            if not client_id:
+                print(f"Could not mint a client_id at {peer}; it may refuse this node.")
             peer_info = next(client(
                     method=celaut_pb2_grpc.GatewayStub(channel).GetPeerInfo,
+                    indices_serializer=celaut_pb2.Client,
+                    input=celaut_pb2.Client(client_id=client_id) if client_id else None,
                     indices_parser=celaut_pb2.Peer,
                     partitions_message_mode_parser=True
                 ))
@@ -92,16 +104,46 @@ def connect(peer: str):
             try:
                 channel = node_channel(peer, expected_peer_id=certificate_peer_id)
                 try:
+                    # IntroducePeer requires a client_id too (issue #428). By this
+                    # point add_peer_instance above may already have registered this
+                    # peer's address, so get_client_id_on_other_peer's cache/PoW path
+                    # can be used when we have a peer_id for it; otherwise mint fresh
+                    # on this channel, the same as the pre-registration GetPeerInfo
+                    # call above.
+                    announce_client_id = (
+                        get_client_id_on_other_peer(peer_id=peer_id) if peer_id
+                        else mint_client_id_on_channel(channel)
+                    )
+                    if announce_client_id:
+                        indices_serializer = {1: celaut_pb2.Peer, CLIENT_INDEX: celaut_pb2.Client}
+                        input_messages = [
+                            gateway_instance,
+                            celaut_pb2.Client(client_id=announce_client_id),
+                        ]
+                    else:
+                        print(f"Could not obtain a client_id at {peer}; announcing without one.")
+                        indices_serializer = celaut_pb2.Peer
+                        input_messages = gateway_instance
                     _result = next(client(
                         method=celaut_pb2_grpc.GatewayStub(channel).IntroducePeer,
-                        indices_serializer=celaut_pb2.Peer,
-                        input=gateway_instance,
+                        indices_serializer=indices_serializer,
+                        input=input_messages,
                         indices_parser=celaut_pb2.RecursionGuard,  # Recursion guard shouldn't be used here, another message should be used. TODO
                         partitions_message_mode_parser=True
                     ))
+
+                    if _result.token != "REFUSED" and announce_client_id:
+                        # Only reachable now that IntroducePeer just registered this
+                        # node as a peer there -- the earlier mint's own binding
+                        # attempt (inside get_client_id_on_other_peer /
+                        # mint_client_id_on_channel) could not have succeeded yet,
+                        # since this node was not a known peer there at that point.
+                        # AssociateClient is the deferred half that can (issue #428).
+                        if associate_client_id_on_channel(channel, announce_client_id):
+                            print(f"Bound this node's client_id at peer {peer} to its identity.")
                 finally:
                     channel.close()
-                
+
                 if _result.token == "REFUSED":
                     # The peer stored nothing: it could not verify this node's identity
                     # signature. Worth saying out loud -- the announcement is what makes

@@ -67,6 +67,10 @@ class ResourceAvailabilityRoundTripTests(unittest.TestCase):
 
         # The iterable under test, wired to a stand-in for the local admission gate so
         # the test controls the answer without depending on the host's real memory.
+        # client_gate.require_caller's local-instance lookup is also stood in for --
+        # the peer being asked is this node itself (see the module docstring), which
+        # is exactly the caller client_gate exempts, and doing it for real would need
+        # a `local_instances` row this fixture has no reason to carry.
         class _Servicer(celaut_pb2_grpc.Gateway):
             def GetResourceAvailability(self, request_iterator, context, **kwargs):
                 with patch(
@@ -74,6 +78,9 @@ class ResourceAvailabilityRoundTripTests(unittest.TestCase):
                     side_effect=lambda resources: (
                         received.append(resources) or answers
                     ),
+                ), patch(
+                    "src.gateway.client_gate.get_internal_service_id_by_uri",
+                    return_value="self",
                 ):
                     yield from GetResourceAvailabilityIterable(request_iterator, context)
 
