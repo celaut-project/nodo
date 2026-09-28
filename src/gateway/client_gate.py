@@ -167,7 +167,7 @@ def require_caller(context, client_id: str = "") -> str:
     # no way to tell a minted id from a guessed one without it.
     if not is_uuid4_hex(client_id) or not sc.client_exists(client_id=client_id):
         raise ClientRequired(
-            "This RPC requires a client_id minted by GenerateClient first."
+            "This RPC requires a client_id minted by GenerateClient first. Wrong or missing client_id: {client_id!r}"
         )
 
     if not _window.allow(client_id):
