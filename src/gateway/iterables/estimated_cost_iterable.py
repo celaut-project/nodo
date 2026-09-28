@@ -85,13 +85,17 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 # Needs the requested resources to price, so it happens here rather than
                 # before the service is read.
                 if not self.configuration.HasField('initial_mu') or not self.configuration.initial_mu:
-                    self.configuration.initial_mu.CopyFrom(
-                        to_amount(default_initial_balance(
-                            system_resources=resources.at_init,
-                            service_hash=self.service_hash,
-                            arch=service_arch,
-                        ))
-                    )
+                    try:
+                        self.configuration.initial_mu.CopyFrom(
+                            to_amount(default_initial_balance(
+                                system_resources=resources.at_init,
+                                service_hash=self.service_hash,
+                                arch=service_arch,
+                            ))
+                        )
+                    except Exception as e:
+                        logger(f"Failed to set initial_mu: {e}")
+                        raise Exception(f"Failed to set initial_mu: {e}")
 
                 yield from BeeClient.respond(
                     message_iterator=generate_estimated_cost(
