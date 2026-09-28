@@ -689,7 +689,7 @@ deposits:
   # cold-wallet sweep below -- that moves this node's funds between its own wallets and
   # pays nobody. Delegation keeps working with this off; the peer just has to be funded
   # by hand, which is the point.
-  AUTOMATIC_REFILL: true
+  AUTOMATIC_REFILL: false
   # Largest share of a peer deposit that may be lost to the transaction fee. 0.02 caps
   # the fee at 2 % of the deposit. Lower it for cheaper transfers, at the cost of
   # locking up more per peer.
