@@ -7,6 +7,7 @@ from protos import celaut_pb2 as celaut
 from protos import celaut_pb2
 from protos.gateway_bee import StartService_input_indices, \
     StartService_input_message_mode
+from src.gateway.client_gate import ClientRequired, require_caller
 from src.gateway.utils import save_service
 from src.utils import logger as log
 from src.utils.hashing import get_configured_hash_id
@@ -67,6 +68,7 @@ class AbstractInputServiceIterable:
 
         self.client_id = None
         self.recursion_guard_token = None
+        self._caller_checked = False
 
         self.service_hash: Optional[str] = None
         self.service_saved = False
@@ -142,6 +144,27 @@ class AbstractInputServiceIterable:
                 )
 
         if self.service_saved and not self.generated:
+            # DDOS protection (issue #428): checked here rather than in start(),
+            # because a Client can arrive anywhere in this stream (order is the
+            # caller's choice, like every field of this envelope) and is not
+            # necessarily parsed yet the moment the service looks ready.
+            #
+            # A client_id already seen (right or wrong) is a real, final answer --
+            # refuse now. But *no* client_id yet is not the same as "will never send
+            # one": it may simply not have arrived on the wire yet, so this defers
+            # instead of refusing, and retries on every later message until either a
+            # client_id shows up or the stream ends (final(), below, makes the
+            # refusal definitive in the latter case). Nothing has been yielded yet at
+            # this point either way, so deferring never leaves a half-sent response.
+            if not self._caller_checked:
+                try:
+                    require_caller(self.context, self.client_id or "")
+                except ClientRequired:
+                    if self.client_id:
+                        raise
+                    return
+                self._caller_checked = True
+
             yield buffer_pb2.Buffer(signal=True)
 
             if not self.metadata:
@@ -168,3 +191,10 @@ class AbstractInputServiceIterable:
     def final(self):
         if self.service_hash and not self.service_saved:
             add_wanted(self.service_hash)
+        elif self.service_saved and not self.generated:
+            # The stream ended with the service ready to serve but no client_id ever
+            # arrived to confirm a caller -- what looked like "might still be coming"
+            # above never came. Nothing was sent for this request (the check above
+            # runs before the first byte of the response), so it is safe to refuse
+            # now instead of silently answering nothing.
+            require_caller(self.context, self.client_id or "")

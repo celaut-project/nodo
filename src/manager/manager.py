@@ -787,34 +787,25 @@ def max_work_free_clients_per_difficulty() -> int:
 
 
 def _created_client(client_id: str, peer_id: str = "", signature: str = "") -> celaut_pb2.Client:
-    """Create ``client_id`` and, when the request proved it, bind it to a peer.
+    """Create ``client_id`` and, when the request proved it, opportunistically bind it
+    to a peer.
 
-    The one moment a client_id and a verified peer identity can be tied together
-    without ambiguity: the id is minted right here, so there is no window where it
-    exists unbound. A ``peer_id``/``signature`` that does not verify, or that names
-    a peer this node does not know, is not an error -- the client is still created,
-    just as it always was, simply left unassociated (see ``ChatMessage`` in
-    celaut.proto: a client is the common case, a peer is the exception).
+    An attempt, not the only chance: a ``peer_id``/``signature`` that does not verify,
+    or that names a peer this node does not know *yet*, is not an error -- the client
+    is still created, just as it always was, simply left for ``AssociateClient`` to
+    bind later instead (issue #428) -- which is the common case now that
+    ``IntroducePeer`` itself requires a client_id, so a peer introducing itself for the
+    first time mints before it is known here, not after (see ``ChatMessage`` in
+    celaut.proto for the other reason binding can be legitimately absent: a client is
+    the common case, a peer is the exception).
     """
     created = generate_client(client_id=client_id)
     if peer_id and signature:
-        from src.identity.node_identity import (
-            client_binding_payload,
-            normalize_public_key_hex,
-            verify_peer_payload,
-        )
-
-        normalized = normalize_public_key_hex(peer_id)
-        if normalized and sc.peer_exists(peer_id=normalized) and verify_peer_payload(
-            normalized, client_binding_payload(normalized, client_id), signature
-        ):
-            sc.set_peer_local_client(peer_id=normalized, client_id=client_id)
-            log.LOGGER(f'Bound new client {client_id} to peer {normalized}.')
+        bound, reason = associate_client_with_peer(client_id, peer_id, signature)
+        if bound:
+            log.LOGGER(f'Bound new client {client_id} to peer {peer_id}.')
         else:
-            log.LOGGER(
-                f'GenerateClient: peer binding for {client_id} did not verify; '
-                'leaving it unassociated.'
-            )
+            log.LOGGER(f'GenerateClient: peer binding for {client_id} did not bind: {reason}')
     return created
 
 
@@ -895,6 +886,161 @@ def generate_client_or_pow_required(client_id: str = "", challenge: str = "",
     )
 
 
+def _peer_identity_binding(client_id: str) -> dict:
+    """Our own (peer_id, signature) proving we hold ``client_id``, or ``{}``.
+
+    Signs over ``client_id`` with this node's own identity key, the same key a
+    ``Peer`` announcement is signed with -- so whoever receives it can bind
+    ``client_id`` to us the way ``associate_client_with_peer`` does. Empty when this
+    node has no identity key configured yet, exactly as before this was its own
+    function: a client minted or associated with no binding at all, unassociated.
+    """
+    from src.identity.node_identity import client_binding_payload, get_node_public_key_hex, sign_peer_payload
+    candidate_id = get_node_public_key_hex()
+    if not candidate_id:
+        return {}
+    signature = sign_peer_payload(client_binding_payload(candidate_id, client_id))
+    if not signature:
+        return {}
+    return {"peer_id": candidate_id, "signature": signature}
+
+
+def associate_client_with_peer(client_id: str, peer_id: str, signature: str) -> Tuple[bool, str]:
+    """Bind ``client_id`` (already minted) to ``peer_id``, once its identity verifies.
+
+    Shared by ``_created_client`` (an opportunistic attempt at ``GenerateClient``
+    time, which can only succeed if ``peer_id`` was already a known peer then) and
+    the ``AssociateClient`` RPC (issue #428's deferred half: called explicitly, once
+    ``IntroducePeer`` has actually registered the caller -- which it could not have
+    been yet at mint time, since ``IntroducePeer`` itself now requires a client_id,
+    so a peer announcing itself for the first time has to mint before it can
+    introduce itself, not after).
+
+    Returns ``(True, "")`` once bound, or ``(False, reason)`` -- never raises: an
+    unverifiable or not-yet-known peer_id is a normal outcome here, the same as it
+    always was at ``_created_client`` time, not a caller error.
+    """
+    if not client_id or not sc.client_exists(client_id=client_id):
+        return False, "no such client_id"
+    if not peer_id or not signature:
+        return False, "peer_id and signature are both required"
+
+    from src.identity.node_identity import (
+        client_binding_payload,
+        normalize_public_key_hex,
+        verify_peer_payload,
+    )
+
+    normalized = normalize_public_key_hex(peer_id)
+    if not normalized:
+        return False, "peer_id is not a valid public key"
+    # Cheap check before the signature verification, same ordering GenerateClient's
+    # own proof of work uses (issue #361 Sec8): no reason to verify a signature for a
+    # peer that could not be bound anyway.
+    if not sc.peer_exists(peer_id=normalized):
+        return False, "this node does not know that peer yet"
+    if not verify_peer_payload(normalized, client_binding_payload(normalized, client_id), signature):
+        return False, "signature did not verify"
+    if not sc.set_peer_local_client(peer_id=normalized, client_id=client_id):
+        return False, "failed to store the association"
+    return True, ""
+
+
+def _mint_client_over_channel(
+        channel, proposed_id: str, binding: Optional[dict] = None
+) -> Optional[str]:
+    """Mint a client_id at whatever peer ``channel`` reaches, solving PoW if asked.
+
+    ``proposed_id`` is the caller's to choose (a UUID4) precisely because a caller
+    that also wants to sign a peer-identity binding over it (`get_client_id_on_other_peer`)
+    has to know it before asking -- the signature covers this exact id, so it cannot be
+    computed after the fact. It is reused across the PoW retry -- a second UUID4 on the
+    retry would not match the challenge and the work would be wasted.
+
+    The shared machinery behind both ``get_client_id_on_other_peer`` (a peer already
+    known well enough to have its own address in `sc`, and so its own channel) and
+    ``mint_client_id_on_channel`` (issue #428: a peer this node is dialling for the
+    very first time, before anything about it is stored, which is exactly the case
+    ``get_client_id_on_other_peer`` cannot handle -- `peer_channel` needs a stored
+    address to open its channel from).
+    """
+    binding = binding or {}
+
+    def _ask(message) -> Optional[object]:
+        return next(bee.client_grpc(
+            method=celaut_pb2_grpc.GatewayStub(channel).GenerateClient,
+            input=message,
+            indices_parser=dict(GenerateClient_output_indices),
+            indices_serializer=celaut_pb2.Client,
+            partitions_message_mode_parser=True
+        ), None)
+
+    client_msg = _ask(celaut_pb2.Client(client_id=proposed_id, **binding))
+
+    if isinstance(client_msg, celaut_pb2.PoWRequired):
+        # The peer has given away its free clients. Its `difficulty` field only says what
+        # to solve for; what it will actually check is sealed inside the challenge, so
+        # there is nothing to gain by disbelieving it.
+        log.LOGGER(
+            f'Peer requires a proof of work of difficulty '
+            f'{client_msg.difficulty} for a new client.'
+        )
+        client_msg = _ask(celaut_pb2.Client(
+            client_id=proposed_id,
+            challenge=client_msg.challenge,
+            pow_solution=solve_pow(
+                challenge=client_msg.challenge, difficulty=client_msg.difficulty
+            ),
+            **binding,
+        ))
+
+    if not client_msg or not isinstance(client_msg, celaut_pb2.Client):
+        return None
+    return str(client_msg.client_id)
+
+
+def mint_client_id_on_channel(channel) -> Optional[str]:
+    """Mint a client_id at whatever peer ``channel`` reaches, for a peer this node has
+    not registered yet (issue #428).
+
+    Every gateway RPC but ``GenerateClient`` now requires a client_id
+    (``src/gateway/client_gate.py``), including ``GetPeerInfo`` -- which is exactly the
+    first RPC ``connect()`` calls on a peer it is dialling for the first time, before
+    that peer's identity or address is stored anywhere. `get_client_id_on_other_peer`
+    cannot help there (it opens its own channel from a stored address via
+    `peer_channel`); this mints straight over the channel the caller already has open,
+    with no peer_id binding attempted -- nothing is confirmed about who is on the other
+    end until `GetPeerInfo`'s answer is verified, a step later.
+    """
+    return _mint_client_over_channel(channel, proposed_id=uuid4().hex)
+
+
+def associate_client_id_on_channel(channel, client_id: str) -> bool:
+    """Ask whatever peer ``channel`` reaches to bind ``client_id`` to our identity.
+
+    The outbound half of ``AssociateClient`` (issue #428): unlike minting, this is a
+    single RPC with no proof of work, so it is cheap enough to call defensively --
+    right after a successful ``IntroducePeer``, say -- even when the caller cannot
+    tell whether an earlier bind attempt (``Client.peer_id``/``signature`` at the
+    ``GenerateClient`` that minted ``client_id``) already succeeded. Reapplying the
+    same binding is harmless (``associate_client_with_peer`` just re-verifies it).
+
+    Returns whether the peer confirmed the bind; ``False`` (never raises) covers "no
+    identity key configured to sign with" the same as any refusal the peer sends back.
+    """
+    binding = _peer_identity_binding(client_id)
+    if not binding:
+        return False
+    response = next(bee.client_grpc(
+        method=celaut_pb2_grpc.GatewayStub(channel).AssociateClient,
+        input=celaut_pb2.Client(client_id=client_id, **binding),
+        indices_parser=celaut_pb2.AssociateClientOutput,
+        indices_serializer=celaut_pb2.Client,
+        partitions_message_mode_parser=True,
+    ), None)
+    return bool(response and response.bound)
+
+
 def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
     """
     Retrieves or generates a client ID for a given peer. If the peer already has an associated client ID for our client,
@@ -909,18 +1055,6 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
 
     Raises:
         Exception: If the peer is not available (i.e., it does not have the minimum required open slots).
-
-    Detailed Steps:
-        1. Check if the peer already has an associated client ID for our client using `sc.get_peer_client`.
-        2. If a client ID is found, return it.
-        3. If no client ID is found, check if the peer is available using `is_peer_available`.
-        4. If the peer is not available, log the unavailability and raise an exception.
-        5. If the peer is available, propose a UUID4 and ask the peer to create it.
-        6. If the peer answers with a PoWRequired, solve it and ask again (issue #361).
-        7. Log the generation of the new client ID.
-        8. Attempt to associate the new client ID with the peer using `sc.add_external_client`.
-        9. If the association is successful, return the new client ID.
-        10. If the association fails, return None.
     """
     client_id = sc.get_peer_client(peer_id=peer_id)
     if client_id: return client_id
@@ -929,59 +1063,22 @@ def get_client_id_on_other_peer(peer_id: str) -> Optional[str]:
 
     log.LOGGER('Generate new client for peer ' + peer_id)
 
-    # The id is ours to choose now, and it is what the peer's challenge binds to, so it
-    # is minted once here and reused across the retry -- a second UUID4 on the retry
-    # would not match the challenge and the work would be wasted.
     proposed_id = uuid4().hex
 
-    # Prove our own peer identity over that same id, so the peer we are becoming a
-    # client of can bind it to us (its `peer.local_client_id`) the moment it creates
-    # it -- see `_created_client`. Best-effort and left off the message entirely when
-    # unavailable: a node with no identity key configured simply becomes a client
-    # unassociated, exactly as before this existed.
-    from src.identity.node_identity import client_binding_payload, get_node_public_key_hex, sign_peer_payload
-    binding: dict = {}
-    candidate_id = get_node_public_key_hex()
-    if candidate_id:
-        candidate_signature = sign_peer_payload(client_binding_payload(candidate_id, proposed_id))
-        if candidate_signature:
-            binding = {"peer_id": candidate_id, "signature": candidate_signature}
-
-    def _ask(message) -> Optional[object]:
-        return next(bee.client_grpc(
-            method=celaut_pb2_grpc.GatewayStub(
-                peer_channel(peer_id=peer_id)
-            ).GenerateClient,
-            input=message,
-            indices_parser=dict(GenerateClient_output_indices),
-            indices_serializer=celaut_pb2.Client,
-            partitions_message_mode_parser=True
-        ), None)
-
-    client_msg = _ask(celaut_pb2.Client(client_id=proposed_id, **binding))
-
-    if isinstance(client_msg, celaut_pb2.PoWRequired):
-        # The peer has given away its free clients. Its `difficulty` field only says what
-        # to solve for; what it will actually check is sealed inside the challenge, so
-        # there is nothing to gain by disbelieving it.
-        log.LOGGER(
-            f'Peer {peer_id} requires a proof of work of difficulty '
-            f'{client_msg.difficulty} for a new client.'
-        )
-        client_msg = _ask(celaut_pb2.Client(
-            client_id=proposed_id,
-            challenge=client_msg.challenge,
-            pow_solution=solve_pow(
-                challenge=client_msg.challenge, difficulty=client_msg.difficulty
-            ),
-            **binding,
-        ))
-
-    if not client_msg or not isinstance(client_msg, celaut_pb2.Client):
+    new_client_id = _mint_client_over_channel(
+        peer_channel(peer_id=peer_id),
+        proposed_id=proposed_id,
+        binding=_peer_identity_binding(proposed_id),
+    )
+    if not new_client_id:
+        # Preserved from before this shared the minting code with
+        # mint_client_id_on_channel: existing callers of this function (delegate
+        # execution, the balancer, chat, metrics) treat this as a hard failure, not a
+        # None to check for -- unlike mint_client_id_on_channel, a new call site added
+        # for issue #428 that always does check.
         raise Exception("No client msg returned.")
-    new_client_id = str(client_msg.client_id)
     if not sc.add_external_client(peer_id=peer_id, client_id=new_client_id):
-        return  # If fails return None.
+        return None  # If fails return None.
 
     return new_client_id
 

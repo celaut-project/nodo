@@ -512,6 +512,32 @@ class GenerateClientTests(unittest.TestCase):
 
 @unittest.skipIf(MANAGER_IMPORT_ERROR is not None,
                  f"Missing runtime dependencies: {MANAGER_IMPORT_ERROR}")
+class AssociateClientIdOnChannelTests(unittest.TestCase):
+    """associate_client_id_on_channel (issue #428): the outbound half of
+    AssociateClient. Cheap enough to call defensively, so the one thing worth
+    pinning here is that it never reaches the network with nothing to sign."""
+
+    def test_no_identity_configured_short_circuits_before_touching_the_channel(self):
+        from src.identity import node_identity as ni
+
+        channel_touched = []
+
+        class _ChannelThatMustNotBeUsed:
+            def __getattr__(self, name):
+                channel_touched.append(name)
+                raise AssertionError("channel should not have been touched")
+
+        with patch.object(ni, "get_node_public_key_hex", return_value=None):
+            result = manager.associate_client_id_on_channel(
+                _ChannelThatMustNotBeUsed(), uuid4().hex
+            )
+
+        self.assertFalse(result)
+        self.assertEqual(channel_touched, [])
+
+
+@unittest.skipIf(MANAGER_IMPORT_ERROR is not None,
+                 f"Missing runtime dependencies: {MANAGER_IMPORT_ERROR}")
 class ConfiguredLimitTests(unittest.TestCase):
     def test_the_shipped_default_is_the_one_the_issue_specifies(self):
         self.assertEqual(manager.max_work_free_clients_per_difficulty(), 500)

@@ -932,6 +932,16 @@ communication:
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
 
+  # DDOS protection for every gateway RPC but GenerateClient (issue #428): a shared
+  # sliding window of the last CLIENT_RATE_LIMIT_MAX_CALLS calls in
+  # CLIENT_RATE_LIMIT_WINDOW_SECONDS, per client_id, across all of them together. A
+  # client_id going over it is quarantined -- every such RPC refused outright -- for
+  # CLIENT_RATE_LIMIT_QUARANTINE_SECONDS. In-memory only, so a restart clears it.
+  # See src/gateway/client_gate.py.
+  CLIENT_RATE_LIMIT_WINDOW_SECONDS: 60
+  CLIENT_RATE_LIMIT_MAX_CALLS: 120
+  CLIENT_RATE_LIMIT_QUARANTINE_SECONDS: 300
+
 client:
   MIN_SLOTS_OPEN_PER_PEER: 1
   # A client whose balance is at least this many MU has its expiration pushed back

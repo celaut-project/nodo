@@ -3,6 +3,7 @@ from typing import Generator
 from bee_rpc import client as bee, buffer_pb2
 
 from protos import celaut_pb2
+from src.gateway.client_gate import parse_with_client, require_caller
 from src.utils import activity_window
 from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils.logger import LOGGER as logger
@@ -23,11 +24,7 @@ class GetResourceAvailabilityIterable:
     """
 
     def __init__(self, request_iterator, context):
-        self.parser_iterator = bee.parse_from_buffer(
-            request_iterator=request_iterator,
-            indices=celaut_pb2.Service.Container.Resources,
-            partitions_message_mode=True
-        )
+        self.request_iterator = request_iterator
         self.context = context
 
     def __iter__(self) -> Generator[buffer_pb2.Buffer, None, None]:
@@ -37,9 +34,11 @@ class GetResourceAvailabilityIterable:
             # you run something with no declared limits?"), so it is answered rather
             # than refused -- the same shape get_resource_availability itself gives an
             # unset `at_most`.
-            resources = next(self.parser_iterator, celaut_pb2.Service.Container.Resources())
-            if type(resources) is not celaut_pb2.Service.Container.Resources:
-                logger(f'Resource availability asked with the wrong type: {type(resources)}.')
+            resources, client_id = parse_with_client(
+                self.request_iterator, payload_type=celaut_pb2.Service.Container.Resources
+            )
+            require_caller(self.context, client_id)
+            if resources is None:
                 resources = celaut_pb2.Service.Container.Resources()
 
             availability = get_resource_availability(resources)
