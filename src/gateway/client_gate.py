@@ -165,7 +165,7 @@ def require_caller(context, client_id: str = "") -> str:
     # A client_id that does look like a UUID4 still costs one indexed read -- the
     # same one ModifyServiceSystemResources already pays per call -- because there is
     # no way to tell a minted id from a guessed one without it.
-    if not is_uuid4_hex(client_id) or not sc.client_exists(client_id=client_id):
+    if not sc.client_exists(client_id=client_id):
         raise ClientRequired(
             f"This RPC requires a client_id minted by GenerateClient first. Wrong or missing client_id: {client_id!r}"
         )
