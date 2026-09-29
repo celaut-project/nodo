@@ -273,13 +273,13 @@ authenticated against this node's identity key, and the only port announced to p
 for the services this node runs and for external callers that do not want TLS — `0`
 disables it, and then a service must speak TLS too; see [The plaintext
 gateway](#the-plaintext-gateway) below),
-`PUBLIC_IP` / `EXTERNAL_INTERFACE` (what `nodo execute --remote` advertises),
+`PUBLIC_IP` / `EXTERNAL_INTERFACE` (the address this node advertises),
 `PUBLIC_TCP_PORT` / `PUBLIC_UDP_PORT` (the external port a router forwards, when it
 differs from the internal one — empty means "same as internal"; only
 `PUBLIC_TCP_PORT` is used today, since the gateway is TCP-only),
 `FREE_PORTS_RANGE` (ports used to expose services — match your router forwarding),
-`DISABLE_EXPOSE_OUTSIDE`, `ISOLATE_INTERNAL_CHILDREN`, and `DEFAULT_EXECUTE_REMOTE`
-(default remote for NAT/WSL2 nodes). See also [`NETWORKS.md`](NETWORKS.md).
+`DISABLE_EXPOSE_OUTSIDE` and `ISOLATE_INTERNAL_CHILDREN`. See also
+[`NETWORKS.md`](NETWORKS.md).
 
 Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) and
 `TUNNEL_UDP_IDLE_TIMEOUT_S` — see [`TUNNELING.md`](TUNNELING.md).

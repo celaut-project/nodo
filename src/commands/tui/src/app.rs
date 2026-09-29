@@ -6443,7 +6443,7 @@ fn resolve_instance_clients(connection: &Connection, instances: &mut [Instance])
 
 /// Whether an id names one of this node's own dev clients.
 ///
-/// Both pools, since `dev-external-` is drawn from `dev-`. Prefix only: the Python
+/// Prefix only: the Python
 /// side also checks the clients table, because there it is deciding whether to grant
 /// a privilege on the strength of an id that arrived over the wire. This decides
 /// what word to print, and a dev client that has expired out of the table is still

@@ -19,8 +19,8 @@
 
 EXTRAS
 
-Remote run:
-   nodo execute --remote <service>
+Reach a running instance from another machine:
+   nodo tunnel <instance> <slot> --peer <node address>:<gateway port>
 
 Export package (importable .celaut.bee — share this, feed it to `nodo import`):
    nodo export <service> <dir>

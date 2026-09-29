@@ -329,12 +329,13 @@ output is in [`../WALKTHROUGH.md`](../WALKTHROUGH.md).
 
 2. **Launching Instances (`nodo execute`):**
  Execute by service id, tag, or a `.celaut.bee` path (the path form imports the
- package first, then executes it). Pass declared env vars with `-e <key> <value>`;
- use `--remote` to advertise the host-facing IP.
+ package first, then executes it). Pass declared env vars with `-e <key> <value>`.
+ The address it hands back is reachable from this host only; use `nodo tunnel` to
+ reach the instance from elsewhere.
  ```bash
  nodo execute 1234567890abcdef
- nodo execute --remote -e workers 8 -e timeout 20 my_service_tag
- # signature: execute [--remote] [--name <instance-name>] [-e key value]... <service id | tag | '.celaut.bee' path>
+ nodo execute -e workers 8 -e timeout 20 my_service_tag
+ # signature: execute [--name <instance-name>] [-e key value]... <service id | tag | '.celaut.bee' path>
  ```
  `execute` launches the instance; read its id (which is also its token) and API
  address from `nodo instances` — `execute` itself prints the `nodo inspect` dump

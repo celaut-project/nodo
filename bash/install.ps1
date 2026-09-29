@@ -1276,7 +1276,7 @@ YQ="/nodo/bin/yq"
 WSL_IFACE=$(ip route | awk '/^default/{print $5; exit}')
 echo "Detected WSL2 outbound interface: $WSL_IFACE"
 
-# Patch config.yaml so Nodo exposes services on the WSL2 interface. `ui.THEME` is
+# Patch config.yaml with the WSL2 outbound interface. `ui.THEME` is
 # overridden from its "ubuntu" default too: that default assumes the console it draws
 # in is GNOME Terminal on an Ubuntu server (config.example.yaml's own comment on
 # THEME), which does not hold here -- the only console a Windows user opens is the
@@ -1284,10 +1284,9 @@ echo "Detected WSL2 outbound interface: $WSL_IFACE"
 $YQ -i "
   .network.EXTERNAL_INTERFACE = \"$WSL_IFACE\" |
   .network.ISOLATE_INTERNAL_CHILDREN = true |
-  .network.DEFAULT_EXECUTE_REMOTE = true |
   .ui.THEME = \"dark\"
 " "$NODO_CONFIG"
-echo -e "${GREEN}[OK] Nodo will expose services on $WSL_IFACE (reachable from Windows)${NC}"
+echo -e "${GREEN}[OK] Nodo network configured for $WSL_IFACE${NC}"
 
 echo -e "\n${CYAN}[STEP 5.6] Configuring iptables forwarding for microVMs...${NC}"
 
