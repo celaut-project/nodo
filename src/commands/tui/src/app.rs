@@ -7277,6 +7277,9 @@ pub fn percent(used: u64, total: u64) -> u64 {
     }
 }
 
+/// A byte count in binary units, one decimal. `format_bytes` in
+/// src/commands/services.py is the same function, so `nodo services` and the
+/// SERVICES table say the same size the same way (issue #438).
 pub fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -10369,6 +10372,23 @@ ergo: Cold Wallet: 9cold\n";
             let service = registry.service("svc", &[10], &["present", "pruned-away"]);
 
             assert_eq!(service_total_size(&service, &registry.blocks), None);
+        }
+
+        /// Issue #438: the same cases as tests/test_services_sizes.py, so the CLI's
+        /// `format_bytes` and this one cannot come to say one size two ways again.
+        #[test]
+        fn sizes_read_as_nodo_services_prints_them() {
+            for (bytes, text) in [
+                (0, "0 B"),
+                (394, "394 B"),
+                (1023, "1023 B"),
+                (1024, "1.0 KiB"),
+                (1536, "1.5 KiB"),
+                (41_628_467, "39.7 MiB"),
+                (5 * 1024 * 1024 * 1024, "5.0 GiB"),
+            ] {
+                assert_eq!(format_bytes(bytes), text, "{bytes} bytes");
+            }
         }
 
         #[test]

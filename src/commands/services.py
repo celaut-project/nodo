@@ -8,6 +8,23 @@ env_manager = ConfigManager()
 REGISTRY = env_manager.get("REGISTRY")
 METADATA = env_manager.get("METADATA_REGISTRY")
 
+def format_bytes(size: int) -> str:
+    """A byte count as ``nodo tui`` prints it: binary units, one decimal.
+
+    The same function as ``format_bytes`` in src/commands/tui/src/app.rs, so the
+    two views of one service read identically (issue #438). They used to disagree
+    in how they said it: this printed MiB labelled "MB", always in MB, so a 394-byte
+    directory read "0.00 MB" here and "394 B" in the TUI.
+    """
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    value = float(size)
+    unit = 0
+    while value >= 1024 and unit < len(units) - 1:
+        value /= 1024
+        unit += 1
+    return f"{size} B" if unit == 0 else f"{value:.1f} {units[unit]}"
+
+
 def list_services():
     # List available services in the specified registry path
     services = os.listdir(REGISTRY)
@@ -43,7 +60,8 @@ def list_services():
                 for dirpath, _, names in os.walk(os.path.join(REGISTRY, service))
                 for name in names
             )
-            size = f"{total / (1024 * 1024):.2f} MB ({stored / (1024 * 1024):.2f} MB stored here)"
+            # Worded as the TUI's two columns are ("With blocks", "Stored here").
+            size = f"{format_bytes(total)} with blocks ({format_bytes(stored)} stored here)"
         except Exception as e:
             size = f"0 - {e}"
             
