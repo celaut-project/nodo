@@ -721,20 +721,9 @@ async fn apply_config_change(
         Err(error) => return fail(format!("Could not run {}: {error}", yq.display())),
     }
 
-    let port_after = read_gateway_port(&config);
-    if port_after != port_before {
-        let _ = fs::remove_file(cache.join("gateway_port_passed"));
-        // GATEWAY_PLAINTEXT_PORT's `auto` resolves as GATEWAY_PORT + 1 (see
-        // ConfigManager.get_plaintext_gateway_port), so a changed TLS port changes
-        // what the plaintext one *is* even when GATEWAY_PLAINTEXT_PORT itself was
-        // never touched by this write.
-        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
-    }
-
-    let plaintext_after = read_gateway_plaintext_port_raw(&config);
-    if plaintext_after != plaintext_before {
-        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
-    }
+    let tls_moved = read_gateway_port(&config) != port_before;
+    let plaintext_moved = read_gateway_plaintext_port_raw(&config) != plaintext_before;
+    forget_gateway_verdicts(&config, &cache, tls_moved, plaintext_moved);
 
     if !was_serving {
         return ConfigTransaction {
@@ -772,6 +761,35 @@ async fn apply_config_change(
     ConfigTransaction {
         label,
         result: Ok(Applied::Restarted),
+    }
+}
+
+/// Drop what is known about a gateway port an edit just moved: the "proven
+/// reachable" marker the node would skip its probe on, and the pending notice --
+/// with its command and port companions -- that `nodo` and the TUI report from.
+///
+/// Both halves, as `ConfigManager.set` does on the Python side. Dropping only the
+/// marker (issue #438) left the notice about the old port on disk: the alert then
+/// named the new port and the old port's firewall command, the operator opened the
+/// old one, restarted, and only then heard about the port the node actually used.
+///
+/// A moved TLS port moves the plaintext one too: `auto` is GATEWAY_PORT + 1 (see
+/// ConfigManager.get_plaintext_gateway_port), even when GATEWAY_PLAINTEXT_PORT
+/// itself was never touched by this write.
+fn forget_gateway_verdicts(config: &Path, cache: &Path, tls_moved: bool, plaintext_moved: bool) {
+    if tls_moved {
+        let _ = fs::remove_file(cache.join("gateway_port_passed"));
+        for path in crate::alerts::notice_files(config, crate::alerts::GATEWAY_NOTICE_FILE) {
+            let _ = fs::remove_file(path);
+        }
+    }
+    if tls_moved || plaintext_moved {
+        let _ = fs::remove_file(cache.join("gateway_plaintext_port_passed"));
+        for path in
+            crate::alerts::notice_files(config, crate::alerts::GATEWAY_PLAINTEXT_NOTICE_FILE)
+        {
+            let _ = fs::remove_file(path);
+        }
     }
 }
 
@@ -8056,6 +8074,59 @@ mod tests {
             fs::write(&config, "network:\n  GATEWAY_PORT: 52285\n").unwrap();
 
             assert_eq!(super::super::read_gateway_plaintext_port_raw(&config), None);
+        }
+
+        /// Issue #438. Moving the TLS port through this editor used to drop only
+        /// the `*_passed` markers, so `.gateway_plaintext_notice` and its command,
+        /// written about the old `auto` port, survived the restart and were read
+        /// back under the new one.
+        #[test]
+        fn moving_the_tls_port_forgets_both_ports_notices_and_markers() {
+            use crate::alerts::{GATEWAY_NOTICE_FILE, GATEWAY_PLAINTEXT_NOTICE_FILE};
+
+            let dir = TempDir::new("forget-verdicts");
+            let config = dir.file("config.yaml");
+            let cache = dir.file("cache");
+            fs::create_dir_all(&cache).unwrap();
+            let mut files = vec![
+                cache.join("gateway_port_passed"),
+                cache.join("gateway_plaintext_port_passed"),
+            ];
+            files.extend(crate::alerts::notice_files(&config, GATEWAY_NOTICE_FILE));
+            files.extend(crate::alerts::notice_files(&config, GATEWAY_PLAINTEXT_NOTICE_FILE));
+            for file in &files {
+                fs::write(file, "52286").unwrap();
+            }
+
+            super::super::forget_gateway_verdicts(&config, &cache, true, false);
+
+            for file in &files {
+                assert!(!file.exists(), "{} survived the port change", file.display());
+            }
+        }
+
+        /// The plaintext key alone moving says nothing about the TLS port.
+        #[test]
+        fn moving_only_the_plaintext_port_keeps_the_tls_ports_verdict() {
+            use crate::alerts::{GATEWAY_NOTICE_FILE, GATEWAY_PLAINTEXT_NOTICE_FILE};
+
+            let dir = TempDir::new("forget-plaintext");
+            let config = dir.file("config.yaml");
+            let cache = dir.file("cache");
+            fs::create_dir_all(&cache).unwrap();
+            let tls_marker = cache.join("gateway_port_passed");
+            let tls_notice = crate::alerts::notice_files(&config, GATEWAY_NOTICE_FILE)[0].clone();
+            let plaintext_notice =
+                crate::alerts::notice_files(&config, GATEWAY_PLAINTEXT_NOTICE_FILE)[0].clone();
+            for file in [&tls_marker, &tls_notice, &plaintext_notice] {
+                fs::write(file, "x").unwrap();
+            }
+
+            super::super::forget_gateway_verdicts(&config, &cache, false, true);
+
+            assert!(tls_marker.exists());
+            assert!(tls_notice.exists());
+            assert!(!plaintext_notice.exists());
         }
     }
 

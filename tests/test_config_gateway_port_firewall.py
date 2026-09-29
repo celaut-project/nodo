@@ -613,6 +613,45 @@ class PlaintextGatewayNoticeTests(_ManagerCase):
 
             self.assertFalse((Path(tmpdir) / GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE).exists())
 
+    @patch("src.utils.config.ConfigManager._boot_id", return_value="boot-a")
+    @patch("src.utils.config.os.geteuid", return_value=1000)
+    def test_the_notice_records_the_port_it_is_about_until_it_is_answered(self, _euid, _boot):
+        """What lets a reader tell this notice from one about a port `auto` left (#438)."""
+        from src.utils.config import GATEWAY_PLAINTEXT_NOTICE_PORT_FILE
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir)
+            port_file = Path(tmpdir) / GATEWAY_PLAINTEXT_NOTICE_PORT_FILE
+            manager.emit_plaintext_gateway_notice("unreachable", "fix it", port=58444)
+            self.assertEqual(port_file.read_text(encoding="utf-8"), "58444")
+
+            manager.mark_plaintext_gateway_port_passed(58444)
+
+            self.assertFalse(port_file.exists())
+
+    @patch("src.utils.config.os.geteuid", return_value=1000)
+    def test_moving_the_tls_port_withdraws_the_plaintext_notice_with_its_port(self, _euid):
+        """`auto` is GATEWAY_PORT + 1, so the notice was about a port that is gone."""
+        from src.utils.config import (
+            GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE,
+            GATEWAY_PLAINTEXT_NOTICE_PORT_FILE,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager, _ = self._manager(tmpdir, gateway_port="58443")
+            manager.emit_plaintext_gateway_notice(
+                "unreachable", "fix it", command="sudo ufw allow 58444/tcp", port=58444
+            )
+
+            manager.set("network.GATEWAY_PORT", 60000)
+
+            for name in (
+                GATEWAY_PLAINTEXT_NOTICE_FILE,
+                GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE,
+                GATEWAY_PLAINTEXT_NOTICE_PORT_FILE,
+            ):
+                self.assertFalse((Path(tmpdir) / name).exists(), name)
+
 
 if __name__ == "__main__":
     unittest.main()

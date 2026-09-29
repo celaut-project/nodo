@@ -93,6 +93,10 @@ pub const GATEWAY_NOTICE_FILE: &str = ".gateway_notice";
 /// port and an unreachable plaintext port never answer for each other.
 pub const GATEWAY_PLAINTEXT_NOTICE_FILE: &str = ".gateway_plaintext_notice";
 
+/// The port a pending plaintext notice is about, matching
+/// `GATEWAY_PLAINTEXT_NOTICE_PORT_FILE` in `src/utils/config.py` (issue #438).
+pub const GATEWAY_PLAINTEXT_NOTICE_PORT_FILE: &str = ".gateway_plaintext_notice.port";
+
 fn gateway_notice_path(config: &Path) -> PathBuf {
     config
         .parent()
@@ -105,6 +109,19 @@ fn gateway_plaintext_notice_path(config: &Path) -> PathBuf {
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(GATEWAY_PLAINTEXT_NOTICE_FILE)
+}
+
+/// A notice file and every companion `src/utils/config.py` writes beside it: its
+/// one-line command (`.cmd`) and the port it is about (`.port`). What
+/// `ConfigManager._clear_notice_unlocked` removes, so what a TUI edit that moves a
+/// port has to remove too.
+pub(crate) fn notice_files(config: &Path, notice: &str) -> [PathBuf; 3] {
+    let dir = config.parent().unwrap_or_else(|| Path::new("."));
+    [
+        dir.join(notice),
+        dir.join(format!("{notice}.cmd")),
+        dir.join(format!("{notice}.port")),
+    ]
 }
 
 /// `network.GATEWAY_PORT` as a real port, or `None` for `auto`, empty or out of
@@ -253,6 +270,20 @@ fn plaintext_gateway_port_alert(
         .ok()
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())?;
+
+    // A notice about another port is not a question about this one (issue #438):
+    // `auto` moves with GATEWAY_PORT, and the old notice read under the new number
+    // sent the operator to open the port the node had just left. Mirrors
+    // `plaintext_gateway_port_alert` in `src/utils/operator_alerts.py`.
+    let about = config
+        .parent()
+        .map(|dir| dir.join(GATEWAY_PLAINTEXT_NOTICE_PORT_FILE))
+        .and_then(|path| fs::read_to_string(path).ok());
+    if let Some(about) = about.map(|text| text.trim().to_string()) {
+        if !about.is_empty() && about != port.to_string() {
+            return None;
+        }
+    }
 
     Some(OperatorAlert {
         key: "gateway_plaintext_port_unreachable",
@@ -731,6 +762,38 @@ mod tests {
         let document = document("network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: 0\n");
 
         assert_eq!(plaintext_gateway_port_alert(&config, Some(&document)), None);
+    }
+
+    /// Issue #438: GATEWAY_PORT moved 52285 -> 60000, so `auto` is now 60001, and
+    /// the notice on disk was written about 52286. Reported under 60001 it sent the
+    /// operator to open 52286; after that and a restart, came a second alert for
+    /// 60001 -- the port in use all along.
+    #[test]
+    fn a_notice_about_the_port_auto_used_to_be_is_not_reported() {
+        let dir = scratch("plaintext-stale-port");
+        let config = dir.join("config.yaml");
+        fs::write(dir.join(GATEWAY_PLAINTEXT_NOTICE_FILE), "open TCP 52286").unwrap();
+        fs::write(dir.join(GATEWAY_PLAINTEXT_NOTICE_PORT_FILE), "52286").unwrap();
+        let moved = document("network:\n  GATEWAY_PORT: 60000\n  GATEWAY_PLAINTEXT_PORT: auto\n");
+        let unmoved = document("network:\n  GATEWAY_PORT: 52285\n  GATEWAY_PLAINTEXT_PORT: auto\n");
+
+        assert_eq!(plaintext_gateway_port_alert(&config, Some(&moved)), None);
+        assert!(plaintext_gateway_port_alert(&config, Some(&unmoved)).is_some());
+    }
+
+    #[test]
+    fn the_notice_port_file_is_the_one_python_writes() {
+        let python = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../src/utils/config.py"
+        ))
+        .expect("src/utils/config.py ships with the repository");
+        assert!(
+            python.contains(&format!(
+                "GATEWAY_PLAINTEXT_NOTICE_PORT_FILE = \"{GATEWAY_PLAINTEXT_NOTICE_PORT_FILE}\""
+            )),
+            "src/utils/config.py no longer writes {GATEWAY_PLAINTEXT_NOTICE_PORT_FILE}"
+        );
     }
 
     #[test]

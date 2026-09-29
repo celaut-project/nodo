@@ -69,10 +69,24 @@ GATEWAY_PLAINTEXT_NOTICE_FILE = ".gateway_plaintext_notice"
 GATEWAY_NOTICE_COMMAND_FILE = ".gateway_notice.cmd"
 GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE = ".gateway_plaintext_notice.cmd"
 
+# The port a pending plaintext notice is *about* (issue #438). `auto` makes that
+# port GATEWAY_PORT + 1, so changing the TLS port moves it without the plaintext
+# key changing at all -- and a notice written about the old one, read against the
+# new, is a firewall rule for a port the node no longer uses. Only a notice whose
+# port is the one config.yaml resolves to now is reported; the next start
+# re-probes the right one. Absent on a notice written before this file existed,
+# which is reported as before.
+GATEWAY_PLAINTEXT_NOTICE_PORT_FILE = ".gateway_plaintext_notice.port"
+
 
 def _command_file_for(notice_file: str) -> str:
     """The companion file holding ``notice_file``'s one-line fix, if it has one."""
     return notice_file + ".cmd"
+
+
+def _port_file_for(notice_file: str) -> str:
+    """The companion file holding the port ``notice_file`` is about, if it names one."""
+    return notice_file + ".port"
 
 
 def coerce_gateway_port(value: Any) -> Optional[int]:
@@ -412,39 +426,28 @@ class ConfigManager(metaclass=Singleton):
     def _clear_gateway_port_passed_unlocked(self) -> None:
         # The pending alert goes with it: it names the old port, so whatever it asked
         # the operator to do is no longer the thing to do.
-        for path in (
-            self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE),
-            os.path.join(self._config_dir(), GATEWAY_NOTICE_FILE),
-            os.path.join(self._config_dir(), GATEWAY_NOTICE_COMMAND_FILE),
-        ):
-            try:
-                os.unlink(path)
-            except OSError:
-                continue
+        try:
+            os.unlink(self._cache_path_unlocked(GATEWAY_PORT_PASSED_FILE))
+        except OSError:
+            pass
+        self._clear_notice_unlocked(GATEWAY_NOTICE_FILE)
 
     def _clear_plaintext_gateway_port_passed_unlocked(self) -> None:
-        for path in (
-            self._cache_path_unlocked(GATEWAY_PLAINTEXT_PORT_PASSED_FILE),
-            os.path.join(self._config_dir(), GATEWAY_PLAINTEXT_NOTICE_FILE),
-            os.path.join(self._config_dir(), GATEWAY_PLAINTEXT_NOTICE_COMMAND_FILE),
-        ):
-            try:
-                os.unlink(path)
-            except OSError:
-                continue
+        try:
+            os.unlink(self._cache_path_unlocked(GATEWAY_PLAINTEXT_PORT_PASSED_FILE))
+        except OSError:
+            pass
+        self._clear_notice_unlocked(GATEWAY_PLAINTEXT_NOTICE_FILE)
 
     def _clear_gateway_notice_unlocked(self) -> None:
         self._clear_notice_unlocked(GATEWAY_NOTICE_FILE)
 
     def _clear_notice_unlocked(self, notice_file: str) -> None:
-        try:
-            os.unlink(os.path.join(self._config_dir(), notice_file))
-        except OSError:
-            pass
-        try:
-            os.unlink(os.path.join(self._config_dir(), _command_file_for(notice_file)))
-        except OSError:
-            pass
+        for name in (notice_file, _command_file_for(notice_file), _port_file_for(notice_file)):
+            try:
+                os.unlink(os.path.join(self._config_dir(), name))
+            except OSError:
+                pass
 
     def _withdraw_unsaved_gateway_port(self) -> None:
         """Take back the rule for a port that was opened but never persisted."""
@@ -465,6 +468,7 @@ class ConfigManager(metaclass=Singleton):
         body: str,
         notice_file: str = GATEWAY_NOTICE_FILE,
         command: Optional[str] = None,
+        port: Optional[int] = None,
     ) -> None:
         """Emit a gateway alert: to the log now, to the terminal last, to disk for later.
 
@@ -485,6 +489,11 @@ class ConfigManager(metaclass=Singleton):
         None clears any stale command from a previous notice about this same
         file, so a diagnosis that stopped naming a command does not leave an old
         one behind.
+
+        ``port`` is the port the notice is about, written to its ``.port``
+        companion the same way (see ``GATEWAY_PLAINTEXT_NOTICE_PORT_FILE``), so a
+        reader can tell a notice about the port in force from one about a port
+        config.yaml has since moved off.
         """
         from src.utils.firewall.gateway import defer_operator_notice, operator_notice
 
@@ -496,15 +505,19 @@ class ConfigManager(metaclass=Singleton):
         except OSError:
             path = ""
 
-        command_path = os.path.join(self._config_dir(), _command_file_for(notice_file))
-        try:
-            if command:
-                with open(command_path, "w") as f:
-                    f.write(command)
-            else:
-                os.unlink(command_path)
-        except OSError:
-            pass
+        for companion, value in (
+            (_command_file_for(notice_file), command),
+            (_port_file_for(notice_file), str(port) if port else None),
+        ):
+            companion_path = os.path.join(self._config_dir(), companion)
+            try:
+                if value:
+                    with open(companion_path, "w") as f:
+                        f.write(value)
+                else:
+                    os.unlink(companion_path)
+            except OSError:
+                pass
 
         # A one-liner through the log and the framed block at the end, rather than
         # the block twice: the fallback logger prints straight to stderr, so logging
@@ -533,7 +546,7 @@ class ConfigManager(metaclass=Singleton):
             self._gateway_notice_unlocked(title, body, command=command)
 
     def emit_plaintext_gateway_notice(
-        self, title: str, body: str, command: Optional[str] = None
+        self, title: str, body: str, command: Optional[str] = None, port: Optional[int] = None
     ) -> None:
         """Public counterpart of ``_gateway_notice_unlocked`` for the plaintext port.
 
@@ -542,11 +555,18 @@ class ConfigManager(metaclass=Singleton):
         this method's. Writes to ``GATEWAY_PLAINTEXT_NOTICE_FILE`` and is cleared
         by ``mark_plaintext_gateway_port_passed`` the moment the port is proven,
         the same lifecycle ``.gateway_notice`` has for the TLS port.
+
+        ``port`` is the port that was probed, recorded beside the notice so it is
+        only ever reported against that port (``GATEWAY_PLAINTEXT_NOTICE_PORT_FILE``).
         """
         with self._lock:
             self.ensure_loaded()
             self._gateway_notice_unlocked(
-                title, body, notice_file=GATEWAY_PLAINTEXT_NOTICE_FILE, command=command
+                title,
+                body,
+                notice_file=GATEWAY_PLAINTEXT_NOTICE_FILE,
+                command=command,
+                port=port,
             )
 
     def assign_gateway_port_if_unset(self) -> Optional[int]:
