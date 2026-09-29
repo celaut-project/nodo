@@ -19,7 +19,9 @@
 //!   `<peer_id> <topic...>` line sent `topic` itself as the opening message; now the
 //!   three are separate steps, and the message is real prose, not a label.
 
-use crate::app::{shorten, App, CommandKind, EditKind, Identifiable, InputMode, Page};
+use crate::app::{
+    get_service_command, shorten, App, CommandKind, EditKind, Identifiable, InputMode, Page,
+};
 use crate::peers::Peer;
 use crate::ui::{
     accent, bad, centered_rect, good, header_row, muted, popup_background, section_block,
@@ -57,6 +59,56 @@ pub struct ChatMessageRow {
     pub from_us: bool,
     pub body: String,
     pub ts: String,
+    /// A service shared in this message, drawn as a card under its text.
+    pub service: Option<ChatService>,
+}
+
+/// A service shared in a chat message (issue #438): `ChatMessage.service`, as
+/// `peer_chat_messages.service_id`/`service_tags` store it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatService {
+    pub id: String,
+    pub tags: Vec<String>,
+}
+
+impl ChatService {
+    /// What the card and a confirmation call it: its first tag, or its id.
+    pub fn label(&self) -> String {
+        self.tags
+            .iter()
+            .find(|tag| !tag.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| shorten(&self.id, 18))
+    }
+}
+
+/// One of a service card's buttons.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatCardAction {
+    /// `nodo get <id>`, exactly as `g` on SERVICES runs it.
+    Get(ChatService),
+    /// `nodo execute <id>`, behind the same spend confirmation as `e` on SERVICES.
+    Execute(ChatService),
+}
+
+/// The service-card columns, or two NULLs on a database the node has not added
+/// them to yet -- see `column_exists` for why a missing column must not empty the
+/// whole conversation.
+fn service_columns(connection: &Connection) -> &'static str {
+    if crate::app::column_exists(connection, "peer_chat_messages", "service_id") {
+        "service_id, service_tags"
+    } else {
+        "NULL, NULL"
+    }
+}
+
+/// A stored card, from its id and its JSON list of tags. No id, no card.
+fn row_service(id: Option<String>, tags: Option<String>) -> Option<ChatService> {
+    let id = id.filter(|id| !id.trim().is_empty())?;
+    let tags = tags
+        .and_then(|tags| serde_json::from_str::<Vec<String>>(&tags).ok())
+        .unwrap_or_default();
+    Some(ChatService { id, tags })
 }
 
 /// A peer's topic-less message history, as one row: `peer_chat_messages` rows with no
@@ -164,12 +216,13 @@ pub fn get_conversation_messages(database: &Path, conversation_id: &str) -> SqlR
     if !crate::app::table_exists(&connection, "peer_chat_messages") {
         return Ok(Vec::new());
     }
-    let mut statement = connection.prepare(
-        "SELECT from_us, body, ts
+    let mut statement = connection.prepare(&format!(
+        "SELECT from_us, body, ts, {}
          FROM peer_chat_messages
          WHERE conversation_id = ?1
          ORDER BY id ASC",
-    )?;
+        service_columns(&connection)
+    ))?;
     let messages = statement
         .query_map([conversation_id], |row| {
             let ts: i64 = row.get(2)?;
@@ -177,6 +230,7 @@ pub fn get_conversation_messages(database: &Path, conversation_id: &str) -> SqlR
                 from_us: row.get(0)?,
                 body: row.get(1)?,
                 ts: crate::app::format_unix_timestamp(ts),
+                service: row_service(row.get(3)?, row.get(4)?),
             })
         })?
         .collect();
@@ -222,12 +276,13 @@ pub fn get_untopiced_messages(database: &Path, peer_id: &str) -> SqlResult<Vec<C
     if !crate::app::table_exists(&connection, "peer_chat_messages") {
         return Ok(Vec::new());
     }
-    let mut statement = connection.prepare(
-        "SELECT from_us, body, ts
+    let mut statement = connection.prepare(&format!(
+        "SELECT from_us, body, ts, {}
          FROM peer_chat_messages
          WHERE peer_id = ?1 AND conversation_id IS NULL
          ORDER BY id ASC",
-    )?;
+        service_columns(&connection)
+    ))?;
     let messages = statement
         .query_map([peer_id], |row| {
             let ts: i64 = row.get(2)?;
@@ -235,6 +290,7 @@ pub fn get_untopiced_messages(database: &Path, peer_id: &str) -> SqlResult<Vec<C
                 from_us: row.get(0)?,
                 body: row.get(1)?,
                 ts: crate::app::format_unix_timestamp(ts),
+                service: row_service(row.get(3)?, row.get(4)?),
             })
         })?
         .collect();
@@ -437,9 +493,9 @@ impl App {
         };
         self.chat_compose = Some(target);
         self.input.clear();
-        self.input_mode = InputMode::ComposeChatMessage;
+        self.chat_attachment = None;
         self.edit_kind = EditKind::Text;
-        self.status = "Enter: newline • Ctrl+Enter: send • Esc: cancel".to_string();
+        self.back_to_compose();
     }
 
     /// Reply in the selected entry: an open thread, or a topic-less peer's flat
@@ -486,39 +542,78 @@ impl App {
         // A trailing newline is just where the cursor was, not part of the message;
         // interior ones are the point of a multi-line compose box and stay.
         let body = self.input.trim_end_matches('\n').to_string();
-        if body.trim().is_empty() {
+        // An attached service is a message on its own (issue #438).
+        let attachment = self.chat_attachment.clone();
+        if body.trim().is_empty() && attachment.is_none() {
             self.status = "Type a message first".to_string();
             return;
         }
         self.close_input();
-        match target {
-            ChatCompose::NewConversation { peer_id, topic } => {
-                let label = format!("Open conversation with {}", shorten(&peer_id, 18));
-                self.spawn_command(
-                    CommandKind::Generic,
-                    label,
-                    vec![
-                        "chat_open".to_string(),
-                        peer_id,
-                        topic,
-                        "--message".to_string(),
-                        body,
-                    ],
-                );
-            }
-            ChatCompose::Reply { conversation_id, .. } => {
-                self.spawn_command(
-                    CommandKind::Generic,
-                    "Reply".to_string(),
-                    vec!["chat_reply".to_string(), conversation_id, body],
-                );
-            }
-            ChatCompose::ReplyUntopiced { peer_id } => {
-                self.spawn_command(
-                    CommandKind::Generic,
-                    "Message".to_string(),
-                    vec!["chat".to_string(), peer_id, body],
-                );
+        let (label, args) = chat_compose_command(target, body, attachment.as_ref());
+        self.spawn_command(CommandKind::Generic, label, args);
+    }
+
+    /// `Ctrl+A` or the Attach button: pick one of this node's services to share.
+    pub fn open_chat_service_picker(&mut self) {
+        if self.input_mode != InputMode::ComposeChatMessage {
+            return;
+        }
+        // Row 0 is "no attachment"; start on whatever is attached now.
+        self.chat_service_index = self
+            .chat_attachment
+            .as_ref()
+            .and_then(|attached| {
+                self.services.items.iter().position(|service| service.id == attached.id)
+            })
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        self.input_mode = InputMode::PickChatService;
+        self.status = "↑/↓ choose • Enter attach • Esc back to the message".to_string();
+    }
+
+    pub fn move_chat_service_selection(&mut self, delta: i32) {
+        let count = self.services.items.len() as i32 + 1;
+        self.chat_service_index =
+            (self.chat_service_index as i32 + delta).rem_euclid(count) as usize;
+    }
+
+    /// Attach the picked service (or none) and go back to the message, which is
+    /// kept exactly as typed.
+    pub(crate) fn submit_chat_service_pick(&mut self) {
+        self.chat_attachment = self
+            .chat_service_index
+            .checked_sub(1)
+            .and_then(|index| self.services.items.get(index))
+            .map(|service| ChatService {
+                id: service.id.clone(),
+                // `—` is how the services table spells "no tag".
+                tags: Some(service.tag.clone())
+                    .filter(|tag| !tag.trim().is_empty() && tag != "—")
+                    .into_iter()
+                    .collect(),
+            });
+        self.back_to_compose();
+    }
+
+    pub fn back_to_compose(&mut self) {
+        self.input_mode = InputMode::ComposeChatMessage;
+        self.status = "Enter: newline • Ctrl+Enter: send • Ctrl+A: attach • Esc: cancel".to_string();
+    }
+
+    /// A card's Get or Execute button.
+    pub fn run_chat_card_action(&mut self, action: ChatCardAction) {
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        match action {
+            ChatCardAction::Get(service) => match get_service_command(&service.id) {
+                Ok((label, args)) => self.spawn_command(CommandKind::Report, label, args),
+                Err(message) => self.status = message,
+            },
+            ChatCardAction::Execute(service) => {
+                let label = service.label();
+                self.confirm_execute_service(service.id, label)
             }
         }
     }
@@ -592,6 +687,38 @@ impl App {
             vec!["chat_reopen".to_string(), conversation_id],
         );
     }
+}
+
+/// The `nodo` invocation a sent compose box turns into: which of the three chat
+/// subcommands, the text if there is any, and `--service` for an attached card.
+pub(crate) fn chat_compose_command(
+    target: ChatCompose,
+    body: String,
+    attachment: Option<&ChatService>,
+) -> (String, Vec<String>) {
+    let text = (!body.trim().is_empty()).then_some(body);
+    let (label, mut args) = match target {
+        ChatCompose::NewConversation { peer_id, topic } => {
+            let label = format!("Open conversation with {}", shorten(&peer_id, 18));
+            let mut args = vec!["chat_open".to_string(), peer_id, topic];
+            if let Some(text) = text {
+                args.extend(["--message".to_string(), text]);
+            }
+            (label, args)
+        }
+        ChatCompose::Reply { conversation_id, .. } => (
+            "Reply".to_string(),
+            ["chat_reply".to_string(), conversation_id].into_iter().chain(text).collect(),
+        ),
+        ChatCompose::ReplyUntopiced { peer_id } => (
+            "Message".to_string(),
+            ["chat".to_string(), peer_id].into_iter().chain(text).collect(),
+        ),
+    };
+    if let Some(service) = attachment {
+        args.extend(["--service".to_string(), service.id.clone()]);
+    }
+    (label, args)
 }
 
 /// The clickable id column's `[start, end)` column range on the CHAT sidebar --
@@ -719,9 +846,14 @@ fn draw_conversation(frame: &mut Frame, app: &mut App, area: Rect) {
         Rect { x: area.x, y: area.y, width: area.width, height: 1 },
     ));
 
-    let composing = app.input_mode == InputMode::ComposeChatMessage;
+    // The picker for an attachment is a step *of* composing: the box stays docked
+    // behind it, holding the message typed so far.
+    let composing = matches!(
+        app.input_mode,
+        InputMode::ComposeChatMessage | InputMode::PickChatService
+    );
     let compose_height = if composing {
-        compose_box_height(&app.input, inner.width)
+        compose_box_height(app, inner.width)
     } else {
         0
     };
@@ -737,74 +869,271 @@ fn draw_conversation(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// The selected chat's messages, oldest first, each split on its own embedded `\n`
-/// (the old renderer never did, so a multi-line message was invisible past its first
-/// line) and left to `Paragraph::wrap` for the rest -- a read-only transcript, so
-/// nothing here is a value an operator is mid-typing (contrast `wrapped`, used for
-/// the config editors specifically because reflowing an edited value would change it).
-fn message_lines(app: &App, entry: &ChatEntry) -> Vec<Line<'static>> {
-    if app.conversation_messages.is_empty() {
-        return vec![Line::from(Span::styled(
-            "No messages yet",
-            Style::default().fg(muted()),
-        ))];
-    }
-    let mut lines = Vec::new();
-    for message in &app.conversation_messages {
-        let who = if message.from_us {
-            "us".to_string()
-        } else {
-            short_peer_name(&entry.peer_id)
-        };
-        let mut body_lines = message.body.split('\n');
-        let first = body_lines.next().unwrap_or("");
-        lines.push(Line::from(vec![
-            Span::styled(format!("[{}] ", message.ts), Style::default().fg(muted())),
-            Span::styled(format!("{who}: "), Style::default().fg(accent()).bold()),
-            Span::raw(first.to_string()),
-        ]));
-        for continuation in body_lines {
-            lines.push(Line::from(Span::raw(continuation.to_string())));
-        }
-    }
+/// One message's text: its header line, then each further line of its body, split
+/// on its own embedded `\n` (the old renderer never did, so a multi-line message was
+/// invisible past its first line) and left to `Paragraph::wrap` for the rest -- a
+/// read-only transcript, so nothing here is a value an operator is mid-typing
+/// (contrast `wrapped`, used for the config editors specifically because reflowing
+/// an edited value would change it).
+fn message_lines(message: &ChatMessageRow, entry: &ChatEntry) -> Vec<Line<'static>> {
+    let who = if message.from_us {
+        "us".to_string()
+    } else {
+        short_peer_name(&entry.peer_id)
+    };
+    let mut body_lines = message.body.split('\n');
+    let first = body_lines.next().unwrap_or("");
+    let mut lines = vec![Line::from(vec![
+        Span::styled(format!("[{}] ", message.ts), Style::default().fg(muted())),
+        Span::styled(format!("{who}: "), Style::default().fg(accent()).bold()),
+        Span::raw(first.to_string()),
+    ])];
+    lines.extend(body_lines.map(|continuation| Line::from(Span::raw(continuation.to_string()))));
     lines
 }
 
-fn draw_messages(frame: &mut Frame, app: &App, area: Rect, entry: &ChatEntry) {
-    let lines = message_lines(app, entry);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .style(Style::default().fg(text_colour())),
-        area,
-    );
+/// A service card's height: border, tags, id, buttons, border.
+const CARD_HEIGHT: u16 = 5;
+const CARD_MAX_WIDTH: u16 = 72;
+const GET_BUTTON: &str = "[ Get ]";
+const EXECUTE_BUTTON: &str = "[ Execute ]";
+
+/// What the conversation pane stacks: a message's (wrapped) text, or the card
+/// under it.
+enum Segment {
+    Text(Vec<Line<'static>>),
+    Card(ChatService),
 }
 
-/// How tall the docked compose box should be: every input line's own wrapped height,
-/// clamped so one long paste cannot swallow the whole conversation pane.
-fn compose_box_height(input: &str, width: u16) -> u16 {
-    let usable = width.saturating_sub(2).max(1) as usize; // block borders
-    let wrapped_lines: u16 = input
+/// The selected chat, oldest first, pinned to the bottom of the pane like any
+/// chat: when it does not fit, what is cut is the oldest, not the newest -- the
+/// newest is where a card that was just shared, and its buttons, are.
+///
+/// Stacked segment by segment rather than one `Paragraph`, because a card is a
+/// widget with buttons, and a click can only find a button whose row is known.
+fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect, entry: &ChatEntry) {
+    if app.conversation_messages.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "No messages yet",
+                Style::default().fg(muted()),
+            ))),
+            area,
+        );
+        return;
+    }
+    let mut segments = Vec::new();
+    for message in &app.conversation_messages {
+        segments.push(Segment::Text(message_lines(message, entry)));
+        if let Some(service) = &message.service {
+            segments.push(Segment::Card(service.clone()));
+        }
+    }
+    let text = |lines: Vec<Line<'static>>| {
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(text_colour()))
+    };
+    let heights: Vec<u16> = segments
+        .iter()
+        .map(|segment| match segment {
+            Segment::Text(lines) => text(lines.clone()).line_count(area.width) as u16,
+            Segment::Card(_) => CARD_HEIGHT,
+        })
+        .collect();
+
+    let total: u16 = heights.iter().fold(0u16, |sum, height| sum.saturating_add(*height));
+    let mut skip = total.saturating_sub(area.height);
+    let mut y = area.y;
+    for (segment, height) in segments.into_iter().zip(heights) {
+        if skip >= height {
+            skip -= height;
+            continue;
+        }
+        let visible = height - skip;
+        let rect = Rect { x: area.x, y, width: area.width, height: visible };
+        match segment {
+            Segment::Text(lines) => frame.render_widget(text(lines).scroll((skip, 0)), rect),
+            // A card is whole or not at all: half a card is a button with no label.
+            Segment::Card(service) if skip == 0 => draw_card(frame, app, rect, service),
+            Segment::Card(_) => {}
+        }
+        skip = 0;
+        y += visible;
+    }
+}
+
+/// A shared service as a card, with the buttons that act on it.
+fn draw_card(frame: &mut Frame, app: &mut App, area: Rect, service: ChatService) {
+    let area = Rect { width: area.width.min(CARD_MAX_WIDTH), ..area };
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent()))
+        .title(Span::styled(" SERVICE ", Style::default().fg(accent()).bold()));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let tags = if service.tags.is_empty() {
+        Span::styled("(untagged)", Style::default().fg(muted()))
+    } else {
+        Span::styled(service.tags.join(" · "), Style::default().fg(text_colour()).bold())
+    };
+    let button = Style::default().fg(accent()).add_modifier(Modifier::BOLD);
+    let lines = vec![
+        Line::from(tags),
+        Line::from(Span::styled(
+            shorten(&service.id, inner.width as usize),
+            Style::default().fg(muted()),
+        )),
+        Line::from(vec![
+            Span::styled(GET_BUTTON, button),
+            Span::raw("  "),
+            Span::styled(EXECUTE_BUTTON, button),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
+
+    // The buttons' own cells, clipped to the card, so a click beside one is not a
+    // click on it.
+    let row = inner.y + 2;
+    if row < inner.y + inner.height {
+        let get = Rect::new(inner.x, row, GET_BUTTON.len() as u16, 1).intersection(inner);
+        let execute = Rect::new(
+            inner.x + GET_BUTTON.len() as u16 + 2,
+            row,
+            EXECUTE_BUTTON.len() as u16,
+            1,
+        )
+        .intersection(inner);
+        app.chat_card_buttons.push((ChatCardAction::Get(service.clone()), get));
+        app.chat_card_buttons.push((ChatCardAction::Execute(service), execute));
+    }
+}
+
+/// Width of the button column right of the compose box.
+const COMPOSE_BUTTONS_WIDTH: u16 = 12;
+const ATTACH_BUTTON: &str = "[ Attach ]";
+
+/// The compose box's own lines: the attached service first, if any, then the text.
+fn compose_lines(app: &App) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if let Some(service) = &app.chat_attachment {
+        lines.push(Line::from(vec![
+            Span::styled("+ service ", Style::default().fg(muted())),
+            Span::styled(service.label(), Style::default().fg(accent()).bold()),
+            Span::styled(format!("  {}", shorten(&service.id, 18)), Style::default().fg(muted())),
+        ]));
+    }
+    lines.extend(app.input.split('\n').map(|line| Line::from(line.to_string())));
+    lines
+}
+
+/// How tall the docked compose box should be: every input line's own wrapped height
+/// (and the attachment's line), clamped so one long paste cannot swallow the whole
+/// conversation pane.
+fn compose_box_height(app: &App, width: u16) -> u16 {
+    let usable = width.saturating_sub(2 + COMPOSE_BUTTONS_WIDTH).max(1) as usize; // borders
+    let wrapped_lines: u16 = app
+        .input
         .split('\n')
         .map(|line| wrapped(line, usable).len().max(1) as u16)
         .sum();
-    (wrapped_lines + 2).clamp(3, 10)
+    let attachment = app.chat_attachment.is_some() as u16;
+    (wrapped_lines + attachment + 2).clamp(3, 10)
 }
 
-fn draw_compose_box(frame: &mut Frame, app: &App, area: Rect) {
-    let lines: Vec<Line> = app.input.split('\n').map(|line| Line::from(line.to_string())).collect();
+fn draw_compose_box(frame: &mut Frame, app: &mut App, area: Rect) {
+    let split = Layout::horizontal([
+        Constraint::Min(10),
+        Constraint::Length(COMPOSE_BUTTONS_WIDTH),
+    ])
+    .split(area);
     let block = Block::bordered()
         .border_style(Style::default().fg(accent()))
         .title(Span::styled(
-            " COMPOSE · Enter: newline · Ctrl+Enter: send · Esc: cancel ",
+            " COMPOSE · Enter: newline · Ctrl+Enter: send · Ctrl+A: attach · Esc: cancel ",
             Style::default().fg(accent()).bold(),
         ));
     frame.render_widget(
-        Paragraph::new(lines)
+        Paragraph::new(compose_lines(app))
             .wrap(Wrap { trim: false })
             .block(block)
             .style(Style::default().fg(text_colour())),
-        area,
+        split[0],
+    );
+
+    // Buttons to the right of the input, aligned with its first row of text.
+    let buttons = split[1];
+    let button = Style::default().fg(accent()).add_modifier(Modifier::BOLD);
+    app.chat_attach_area = Rect::new(
+        buttons.x + 1,
+        buttons.y + 1,
+        ATTACH_BUTTON.len() as u16,
+        1,
+    )
+    .intersection(buttons);
+    frame.render_widget(Paragraph::new(Span::styled(ATTACH_BUTTON, button)), app.chat_attach_area);
+}
+
+/// The attach picker: this node's own services -- the only ones a card can name --
+/// with "no attachment" leading them.
+pub fn draw_service_picker(frame: &mut Frame, app: &App) {
+    const MAX_VISIBLE: usize = 12;
+    let services = &app.services.items;
+    let area = centered_rect(
+        70,
+        (services.len().min(MAX_VISIBLE) as u16 + 6).max(8),
+        frame.size(),
+    );
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent()))
+        .style(Style::default().fg(text_colour()).bg(popup_background()))
+        .title(Span::styled(
+            " ATTACH A SERVICE ",
+            Style::default().fg(accent()).bold(),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let row = |index: usize, text: String, colour: Color| {
+        let selected = index == app.chat_service_index;
+        Line::from(vec![
+            Span::styled(if selected { "▸ " } else { "  " }, Style::default().fg(accent()).bold()),
+            Span::styled(
+                text,
+                if selected {
+                    Style::default().fg(colour).bold()
+                } else {
+                    Style::default().fg(muted())
+                },
+            ),
+        ])
+    };
+    let mut lines = vec![row(0, "No attachment".to_string(), text_colour())];
+    // Scrolled so the pick is always on screen, for a registry longer than the popup.
+    let first = app.chat_service_index.saturating_sub(MAX_VISIBLE);
+    for (index, service) in services.iter().enumerate().skip(first).take(MAX_VISIBLE) {
+        lines.push(row(
+            index + 1,
+            format!("{:<24} {}", shorten(&service.tag, 24), shorten(&service.id, 32)),
+            text_colour(),
+        ));
+    }
+    if services.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "This node holds no services to share.",
+            Style::default().fg(muted()),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "↑/↓ choose  ·  ⏎ attach  ·  Esc back",
+        Style::default().fg(warn()),
+    )));
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().fg(text_colour()).bg(popup_background())),
+        inner,
     );
 }
 
@@ -1419,6 +1748,7 @@ mod tests {
             from_us: true,
             body: "line one\nline two, which is long enough on its own to need wrapping across more than one terminal column".to_string(),
             ts: "2026-01-01 00:00:00".to_string(),
+            service: None,
         }];
         app.tabs.index = crate::app::Page::ALL
             .iter()
@@ -1444,5 +1774,242 @@ mod tests {
         assert!(screen.contains("line two"), "{screen}");
         // Wrapped, not clipped: the tail of the long line reached the screen too.
         assert!(screen.contains("wrapping"), "long message was clipped: {screen}");
+    }
+
+    // --- Service cards (issue #438) ------------------------------------------
+
+    const SERVICE_ID: &str = "abababababababababababababababababababababababababababababababab";
+
+    fn card() -> ChatService {
+        ChatService { id: SERVICE_ID.to_string(), tags: vec!["hello-world".to_string()] }
+    }
+
+    fn one_conversation(app: &mut App) {
+        app.conversations = StatefulList::with_items(vec![ChatEntry {
+            key: "conv-1".to_string(),
+            peer_id: "peer-1".to_string(),
+            topic: "ping".to_string(),
+            last_ts: 0,
+            kind: ChatEntryKind::Conversation {
+                conversation_id: "conv-1".to_string(),
+                opened_by_us: true,
+                closed_at: None,
+            },
+        }]);
+        app.conversations.next();
+    }
+
+    fn render(app: &mut App, width: u16, height: u16) -> String {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| crate::ui::render(app, frame)).unwrap();
+        terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect()
+    }
+
+    #[test]
+    fn a_stored_card_is_read_back_with_its_tags() {
+        let dir = temp_dir("card");
+        let database = chat_database(&dir);
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "INSERT INTO peer_chat_messages
+                     (peer_id, from_us, body, ts, conversation_id, service_id, service_tags)
+                 VALUES ('peer-1', 0, 'try this', 1, NULL, ?1, '[\"hello-world\",\"demo\"]')",
+                [SERVICE_ID],
+            )
+            .unwrap();
+
+        let messages = get_untopiced_messages(&database, "peer-1").unwrap();
+
+        let service = messages[0].service.clone().expect("a card");
+        assert_eq!(service.id, SERVICE_ID);
+        assert_eq!(service.tags, vec!["hello-world".to_string(), "demo".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A database the node has not added the card columns to yet still reads --
+    /// as plain messages -- rather than failing the whole conversation.
+    #[test]
+    fn a_database_without_the_card_columns_still_reads() {
+        let dir = temp_dir("card-old-schema");
+        let database = dir.join("database.sqlite");
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE peer_chat_messages (id INTEGER PRIMARY KEY, peer_id TEXT,
+                     from_us INTEGER, body TEXT, ts INTEGER, conversation_id TEXT);
+                 INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
+                 VALUES ('peer-1', 1, 'hi', 1, 'conv-1');",
+            )
+            .unwrap();
+
+        let messages = get_conversation_messages(&database, "conv-1").unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].service.is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_card_is_drawn_with_get_and_execute_buttons() {
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.conversation_messages = vec![ChatMessageRow {
+            from_us: false,
+            body: "try this".to_string(),
+            ts: "2026-01-01 00:00:00".to_string(),
+            service: Some(card()),
+        }];
+
+        let screen = render(&mut app, 120, 30);
+
+        assert!(screen.contains("try this"), "{screen}");
+        assert!(screen.contains("SERVICE"), "{screen}");
+        assert!(screen.contains("hello-world"), "{screen}");
+        assert!(screen.contains("[ Get ]"), "{screen}");
+        assert!(screen.contains("[ Execute ]"), "{screen}");
+        let actions: Vec<_> = app.chat_card_buttons.iter().map(|(action, _)| action.clone()).collect();
+        assert_eq!(actions, vec![ChatCardAction::Get(card()), ChatCardAction::Execute(card())]);
+    }
+
+    /// Execute spends, so the button asks exactly as `e` on SERVICES does.
+    #[test]
+    fn clicking_execute_asks_before_it_spends() {
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.conversation_messages = vec![ChatMessageRow {
+            from_us: false,
+            body: String::new(),
+            ts: "2026-01-01 00:00:00".to_string(),
+            service: Some(card()),
+        }];
+        render(&mut app, 120, 30);
+        let (_, execute) = app
+            .chat_card_buttons
+            .iter()
+            .find(|(action, _)| matches!(action, ChatCardAction::Execute(_)))
+            .cloned()
+            .unwrap();
+
+        app.click_at(execute.x, execute.y);
+
+        assert_eq!(app.input_mode, InputMode::Confirm);
+        assert!(matches!(
+            app.pending_action,
+            Some(crate::app::PendingAction::ExecuteService { ref id, ref label })
+                if id == SERVICE_ID && label == "hello-world"
+        ));
+        assert!(app.command_task.is_none(), "nothing may run before the answer");
+    }
+
+    /// The newest message is the one kept when the pane overflows, since that is
+    /// where a card someone just shared -- and its buttons -- are.
+    #[test]
+    fn an_overflowing_conversation_keeps_its_newest_messages_on_screen() {
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.conversation_messages = (0..60)
+            .map(|index| ChatMessageRow {
+                from_us: true,
+                body: format!("message number {index}"),
+                ts: "2026-01-01 00:00:00".to_string(),
+                service: (index == 59).then(card),
+            })
+            .collect();
+
+        let screen = render(&mut app, 120, 30);
+
+        assert!(screen.contains("message number 59"), "{screen}");
+        assert!(!screen.contains("message number 0 "), "{screen}");
+        assert_eq!(app.chat_card_buttons.len(), 2, "the newest card is drawn whole");
+    }
+
+    #[test]
+    fn a_message_with_only_an_attachment_sends_the_service_alone() {
+        let target = ChatCompose::Reply {
+            conversation_id: "conv-1".to_string(),
+            peer_id: "peer-1".to_string(),
+        };
+        let (_, args) = chat_compose_command(target, String::new(), Some(&card()));
+        assert_eq!(args, vec!["chat_reply", "conv-1", "--service", SERVICE_ID]);
+
+        let target = ChatCompose::NewConversation {
+            peer_id: "peer-1".to_string(),
+            topic: "try this".to_string(),
+        };
+        let (_, args) = chat_compose_command(target, "look".to_string(), Some(&card()));
+        assert_eq!(
+            args,
+            vec!["chat_open", "peer-1", "try this", "--message", "look", "--service", SERVICE_ID]
+        );
+
+        let target = ChatCompose::ReplyUntopiced { peer_id: "peer-1".to_string() };
+        let (_, args) = chat_compose_command(target, "hi".to_string(), None);
+        assert_eq!(args, vec!["chat", "peer-1", "hi"], "no attachment, no flag");
+    }
+
+    /// Ctrl+A picks one of this node's services; Esc or Enter both return to the
+    /// message exactly as it was typed.
+    #[test]
+    fn attaching_keeps_the_message_being_typed() {
+        use crate::app::Service;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.services = StatefulList::with_items(vec![Service {
+            id: SERVICE_ID.to_string(),
+            tag: "hello-world".to_string(),
+            size_bytes: 0,
+            total_size_bytes: None,
+        }]);
+        app.open_reply_prompt();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            for key in [
+                KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),
+                KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            ] {
+                crate::handler::handle_key_events(key, &mut app).await.unwrap();
+            }
+            assert_eq!(app.input_mode, InputMode::PickChatService);
+            for key in [
+                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            ] {
+                crate::handler::handle_key_events(key, &mut app).await.unwrap();
+            }
+        });
+
+        assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
+        assert_eq!(app.input, "h");
+        assert_eq!(app.chat_attachment, Some(card()));
+        let screen = render(&mut app, 120, 30);
+        assert!(screen.contains("+ service hello-world"), "{screen}");
+    }
+
+    #[test]
+    fn the_attach_button_opens_the_picker() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.open_reply_prompt();
+        let screen = render(&mut app, 120, 30);
+        assert!(screen.contains("[ Attach ]"), "{screen}");
+        let area = app.chat_attach_area;
+
+        crate::handler::handle_mouse_events(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: area.x,
+                row: area.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            &mut app,
+        );
+
+        assert_eq!(app.input_mode, InputMode::PickChatService);
     }
 }

@@ -112,6 +112,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     // (issue: click-to-copy full IDs); every other page leaves both empty.
     app.id_column_x = None;
     app.id_copy_areas.clear();
+    app.chat_card_buttons.clear();
+    app.chat_attach_area = Rect::ZERO;
 
     draw_tabs(frame, app, layout[0]);
     if page_row > 0 {
@@ -144,6 +146,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         InputMode::PickLeverKey => draw_lever_key_popup(frame, app),
         InputMode::PickChatPeer => crate::chat::draw_peer_picker(frame, app),
         InputMode::PickChatTopic => crate::chat::draw_topic_picker(frame, app),
+        InputMode::PickChatService => crate::chat::draw_service_picker(frame, app),
         // Drawn inline by `chat::draw` as part of the conversation pane, not as a
         // centered popup -- the docked compose box is the whole point (issue: TUI
         // chat/peers/clients redesign).
