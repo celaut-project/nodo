@@ -31,6 +31,10 @@ libc = "0.2"
 # catalogue column. Not a security use — but hand-rolling the digest would risk
 # silently producing a wrong name, which reads as "no traffic".
 sha1 = "0.10"
+# OSC 52 clipboard escape sequences (click-to-copy on the Peers/Clients/Chat
+# pages) need their payload base64-encoded; no clipboard crate is used, since
+# OSC 52 reaches the operator's terminal clipboard the same way over SSH.
+base64 = "0.22"
 
 [build-dependencies]
 prost-build = "0.11"

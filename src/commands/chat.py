@@ -40,9 +40,18 @@ def show_chat(peer_id: str, limit: int = 100) -> bool:
     return True
 
 
-def open_thread(peer_id: str, topic: str) -> bool:
-    """Open a new conversation with ``peer_id``, sending ``topic`` as its first message."""
+def open_thread(peer_id: str, topic: str, body: str = None) -> bool:
+    """Open a new conversation with ``peer_id``, sending ``body`` as its first message.
+
+    ``body`` defaults to ``topic`` itself when not given, which is the whole of
+    what this did before the TUI grew a peer/topic/body wizard: ``topic`` is
+    still just the label, but a caller that wants a real opening message
+    distinct from that label may now pass one.
+    """
     from src.manager.chat import ChatError, close_conversation, open_conversation, send_chat_message
+
+    if body is None:
+        body = topic
 
     try:
         conversation_id = open_conversation(peer_id=peer_id, topic=topic)
@@ -50,7 +59,7 @@ def open_thread(peer_id: str, topic: str) -> bool:
         print(f"STOP: {e}", flush=True)
         return False
     try:
-        send_chat_message(peer_id=peer_id, body=topic, conversation_id=conversation_id)
+        send_chat_message(peer_id=peer_id, body=body, conversation_id=conversation_id)
     except ChatError as e:
         # The thread exists locally either way -- opening is not the send -- but a
         # thread whose first message never went anywhere is confusing left open.

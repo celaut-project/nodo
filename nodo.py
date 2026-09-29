@@ -930,13 +930,18 @@ if __name__ == '__main__':
                 os._exit(0 if ok else 1)
 
             case "chat_open":
-                chat_open_args = sys.argv[2:]
+                # `--message` sends a real first message distinct from the topic
+                # label (TUI peer/topic/body wizard); omitting it keeps sending
+                # `topic` itself, exactly as before that wizard existed.
+                chat_open_args, chat_open_opts = take_options(sys.argv[2:], "--message")
                 if len(chat_open_args) < 2:
-                    print("Usage: nodo chat_open <peer_id> <topic...>", flush=True)
+                    print("Usage: nodo chat_open <peer_id> <topic...> [--message body]", flush=True)
                     os._exit(1)
                 from src.commands.chat import open_thread
                 ok = open_thread(
-                    peer_id=chat_open_args[0], topic=" ".join(chat_open_args[1:])
+                    peer_id=chat_open_args[0],
+                    topic=" ".join(chat_open_args[1:]),
+                    body=chat_open_opts.get("--message"),
                 )
                 os._exit(0 if ok else 1)
 

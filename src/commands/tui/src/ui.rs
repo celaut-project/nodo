@@ -1,8 +1,8 @@
 use crate::app::{
     format_bytes, format_bytes_compact, format_rate_compact, memory_breakdown, percent,
     segment_token, shorten, unix_now, App, DashboardStats, DemandByHour,
-    Client, ClientDetail, ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
-    LedgerEarnings, PageGroup, PaymentRow, Peer, PeerDetail, PriceEntry, ReputationEvent, ReputationTotals, Service,
+    ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
+    LedgerEarnings, PageGroup, PaymentRow, PriceEntry, ReputationEvent, ReputationTotals, Service,
     ServiceDetail,
 };
 use crate::cell::{self, Lever, LeverStatus, Organelle};
@@ -18,38 +18,38 @@ use tui_tree_widget::{Tree, TreeItem};
 
 /// Selected tabs, focused borders, the node's own identity.
 #[inline]
-fn accent() -> Color {
+pub(crate) fn accent() -> Color {
     crate::theme::current().accent
 }
 
 /// Labels, dividers and help text: there to be read past rather than read.
 #[inline]
-fn muted() -> Color {
+pub(crate) fn muted() -> Color {
     crate::theme::current().muted
 }
 
 /// Working, healthy, running, local.
 #[inline]
-fn good() -> Color {
+pub(crate) fn good() -> Color {
     crate::theme::current().good
 }
 
 /// Worth a look, not yet a problem.
 #[inline]
-fn warn() -> Color {
+pub(crate) fn warn() -> Color {
     crate::theme::current().warn
 }
 
 /// For the things that cost the operator something: a payment nobody acknowledged,
 /// a deposit that was refused, a penalty. `warn` already means "look at this later".
 #[inline]
-fn bad() -> Color {
+pub(crate) fn bad() -> Color {
     crate::theme::current().bad
 }
 
 /// Ordinary text: a value, as opposed to the label beside it.
 #[inline]
-fn text_colour() -> Color {
+pub(crate) fn text_colour() -> Color {
     crate::theme::current().text
 }
 
@@ -62,7 +62,7 @@ fn inverse_text() -> Color {
 
 /// The background a popup paints over whatever it covers.
 #[inline]
-fn popup_background() -> Color {
+pub(crate) fn popup_background() -> Color {
     crate::theme::current().popup_background
 }
 
@@ -108,6 +108,10 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.tabs_area = layout[0];
     app.page_tabs_area = if page_row > 0 { layout[1] } else { Rect::ZERO };
     app.list_area = Rect::ZERO;
+    // Recomputed by whichever page draws a copyable id column/id line this frame
+    // (issue: click-to-copy full IDs); every other page leaves both empty.
+    app.id_column_x = None;
+    app.id_copy_areas.clear();
 
     draw_tabs(frame, app, layout[0]);
     if page_row > 0 {
@@ -117,9 +121,9 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Overview => draw_overview(frame, app, layout[2]),
         Page::Instances => draw_instances(frame, app, layout[2]),
         Page::Services => draw_services(frame, app, layout[2]),
-        Page::Peers => draw_peers(frame, app, layout[2]),
-        Page::Clients => draw_clients(frame, app, layout[2]),
-        Page::Chat => draw_chat(frame, app, layout[2]),
+        Page::Peers => crate::peers::draw(frame, app, layout[2]),
+        Page::Clients => crate::clients::draw(frame, app, layout[2]),
+        Page::Chat => crate::chat::draw(frame, app, layout[2]),
         Page::Earnings => draw_earnings(frame, app, layout[2]),
         Page::Cell => draw_cell(frame, app, layout[2]),
         Page::Pricing => draw_pricing(frame, app, layout[2]),
@@ -138,14 +142,19 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         }
         InputMode::PickProfile => draw_profile_popup(frame, app),
         InputMode::PickLeverKey => draw_lever_key_popup(frame, app),
+        InputMode::PickChatPeer => crate::chat::draw_peer_picker(frame, app),
+        InputMode::PickChatTopic => crate::chat::draw_topic_picker(frame, app),
+        // Drawn inline by `chat::draw` as part of the conversation pane, not as a
+        // centered popup -- the docked compose box is the whole point (issue: TUI
+        // chat/peers/clients redesign).
+        InputMode::ComposeChatMessage => {}
         InputMode::Connect
         | InputMode::EditConfig
         | InputMode::AddConfigItem
         | InputMode::FilterConfig
         | InputMode::CreditClient
         | InputMode::AddCustomUnit
-        | InputMode::NewConversation
-        | InputMode::ReplyConversation => draw_input_popup(frame, app),
+        | InputMode::NewChatTopic => draw_input_popup(frame, app),
     }
 }
 
@@ -698,7 +707,7 @@ fn draw_alert_banner(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'a>>, color: Color) {
+pub(crate) fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'a>>, color: Color) {
     let block = Block::bordered()
         .title(Span::styled(
             format!(" {title} "),
@@ -708,7 +717,7 @@ fn draw_card<'a>(frame: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'a>
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
-fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
+pub(crate) fn metric_line(label: &str, value: impl Into<String>) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("{label:<12}"), Style::default().fg(muted())),
         Span::styled(value.into(), Style::default().fg(text_colour()).bold()),
@@ -1783,269 +1792,6 @@ fn service_detail_lines(
     lines
 }
 
-/// The peers page: who we talk to, and everything we have paid them.
-///
-/// Separate from clients: a peer is someone we pay, a client someone who pays us.
-fn draw_peers(frame: &mut Frame, app: &mut App, area: Rect) {
-    // The card sizes itself to what the selected peer actually has: contracts, the
-    // payments made to it, the events behind its score. It yields first when the
-    // terminal is short -- a card that squeezed the table off-screen would leave no
-    // way to pick the peer it is describing.
-    const MIN_TABLE_HEIGHT: u16 = 7;
-    let available = area.height.saturating_sub(MIN_TABLE_HEIGHT);
-    let selected = app.peers.selected();
-    let detail_source = app.peer_detail.as_ref();
-    // Prefer the roomy breakdown, but fall back to one line per contract rather
-    // than let a short terminal clip the contracts away silently -- an empty
-    // card reads as "no contract registered", the exact confusion #231 is about.
-    let donation = selected.and_then(|peer| app.donations.for_peer(&peer.id));
-    // A failed query replaces the card outright, so it also has to be what the card
-    // is *sized* from: sizing to the peer detail and then drawing the error into it
-    // clips the one line that says what went wrong.
-    let detail = match &app.peers_error {
-        Some(error) => peers_unreadable_lines(error),
-        None => {
-            let full = peer_detail_lines(&app.money, selected, detail_source, donation, false);
-            if full.len() as u16 + 2 <= available {
-                full
-            } else {
-                peer_detail_lines(&app.money, selected, detail_source, donation, true)
-            }
-        }
-    };
-    let detail_height = (detail.len() as u16 + 2).min(available);
-    let split = Layout::vertical([
-        Constraint::Min(MIN_TABLE_HEIGHT),
-        Constraint::Length(detail_height),
-    ])
-    .split(area);
-
-    let peers = app.peers.items.iter().map(|peer| {
-        Row::new(vec![
-            Cell::from(peer.id.clone()),
-            Cell::from(peer.uris.clone()),
-            Cell::from(app.money.format_raw(&peer.balance)),
-            Cell::from(peer.reputation_score.clone()).style(Style::default().fg(good()).bold()),
-            Cell::from(match peer.proof_ids.len() {
-                0 => "none".to_string(),
-                1 => shorten(&peer.proof_ids[0], 18),
-                n => format!("{n} announced"),
-            }),
-        ])
-    });
-    let peer_table = Table::new(
-        peers,
-        [
-            Constraint::Length(30),
-            Constraint::Length(24),
-            Constraint::Length(13),
-            Constraint::Length(7),
-            Constraint::Min(20),
-        ],
-    )
-    .header(header_row(vec![
-        "Peer ID",
-        "Endpoints",
-        "Our balance",
-        "Rep",
-        "Reputation proofs",
-    ]))
-    .block(section_block(
-        match &app.peers_error {
-            // Consequence first: an operator reading this row has to learn that the
-            // page is not answering before learning what SQLite said about it.
-            Some(_) => " PEERS • CANNOT BE READ ".to_string(),
-            None => format!(" PEERS • {} connected ", app.peers.items.len()),
-        },
-        if app.peers_error.is_some() { bad() } else { accent() },
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
-    app.list_area = split[0];
-    frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
-
-    // A query that failed takes the card, not a corner of it. `0 connected` is the
-    // screen a new node draws, so an unreadable table that merely looked empty was
-    // indistinguishable from a healthy one -- which is how a stale query survived a
-    // schema change unnoticed.
-    match &app.peers_error {
-        Some(_) => draw_card(frame, split[1], "PEERS UNREADABLE", detail, bad()),
-        None => draw_card(frame, split[1], "SELECTED PEER", detail, accent()),
-    }
-}
-
-/// What the card says instead of a peer, when the peer list could not be read.
-///
-/// Consequence first: the rows on screen are stale and the count cannot be trusted.
-/// The database's own words come second -- they are what an operator pastes into an
-/// issue, and useless without knowing they matter.
-fn peers_unreadable_lines(error: &str) -> Vec<Line<'static>> {
-    vec![
-        Line::from(Span::styled(
-            "This node's peers cannot be listed, so the table above is stale and its \
-             count cannot be trusted.",
-            Style::default().fg(bad()).bold(),
-        )),
-        Line::from(Span::styled(
-            error.to_string(),
-            Style::default().fg(text_colour()),
-        )),
-        Line::from(Span::styled(
-            "`nodo peers` reads the same database, and reports the same failure in full.",
-            Style::default().fg(muted()),
-        )),
-    ]
-}
-
-/// The clients page: who pays us, and what they are running here.
-fn draw_clients(frame: &mut Frame, app: &mut App, area: Rect) {
-    const MIN_TABLE_HEIGHT: u16 = 6;
-    let available = area.height.saturating_sub(MIN_TABLE_HEIGHT);
-    let selected = app.clients.selected();
-    let detail_source = app.client_detail.as_ref();
-    let full = client_detail_lines(&app.money, selected, detail_source, false);
-    let detail = if full.len() as u16 + 2 <= available {
-        full
-    } else {
-        client_detail_lines(&app.money, selected, detail_source, true)
-    };
-    let detail_height = (detail.len() as u16 + 2).min(available);
-    let split = Layout::vertical([
-        Constraint::Min(MIN_TABLE_HEIGHT),
-        Constraint::Length(detail_height),
-    ])
-    .split(area);
-
-    let clients = app.clients.items.iter().map(|client| {
-        Row::new(vec![
-            Cell::from(client.id.clone()),
-            Cell::from(app.money.format_raw(&client.balance)),
-            Cell::from(client.last_usage.clone()),
-            // A balance that never moves is the flag doing its job, not a bug.
-            Cell::from(if client.unmetered { "never charged" } else { "" })
-                .style(Style::default().fg(muted())),
-        ])
-    });
-    let client_table = Table::new(
-        clients,
-        [
-            Constraint::Min(38),
-            Constraint::Length(24),
-            Constraint::Length(20),
-            Constraint::Length(14),
-        ],
-    )
-    .header(header_row(vec![
-        "Client ID",
-        "Balance",
-        "Last usage",
-        "Metering",
-    ]))
-    .block(section_block(
-        format!(" CLIENTS • {} known ", app.clients.items.len()),
-        accent(),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
-    app.list_area = split[0];
-    frame.render_stateful_widget(client_table, split[0], &mut app.clients.state);
-
-    draw_card(frame, split[1], "SELECTED CLIENT", detail, accent());
-}
-
-/// Free-text conversations with peer operators (issue #431).
-///
-/// One table, not two: `app.chat_direction` picks which half of `peer_chat_
-/// conversations` it shows -- threads this node opened, or threads opened by one
-/// of its clients reaching out to it -- so the duality PEERS/CLIENTS already
-/// draws as separate pages is a toggle here instead. A dozen top-level tabs is
-/// already a lot to scan; this is the same "us / them" fact, on one page.
-fn draw_chat(frame: &mut Frame, app: &mut App, area: Rect) {
-    const MIN_TABLE_HEIGHT: u16 = 6;
-    let available = area.height.saturating_sub(MIN_TABLE_HEIGHT);
-    let detail = chat_detail_lines(app);
-    let detail_height = (detail.len() as u16 + 2).min(available.max(3));
-    let split = Layout::vertical([
-        Constraint::Min(MIN_TABLE_HEIGHT),
-        Constraint::Length(detail_height),
-    ])
-    .split(area);
-
-    let rows = app.conversations.items.iter().map(|conversation| {
-        Row::new(vec![
-            Cell::from(shorten(&conversation.peer_id, 20)),
-            Cell::from(if conversation.topic.is_empty() {
-                "(no topic)".to_string()
-            } else {
-                conversation.topic.clone()
-            }),
-            if conversation.closed_at.is_some() {
-                Cell::from("closed").style(Style::default().fg(muted()))
-            } else {
-                Cell::from("open").style(Style::default().fg(good()))
-            },
-            Cell::from(conversation.opened_at.clone()),
-        ])
-    });
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(22),
-            Constraint::Min(20),
-            Constraint::Length(8),
-            Constraint::Length(20),
-        ],
-    )
-    .header(header_row(vec!["Peer", "Topic", "Status", "Opened"]))
-    .block(section_block(
-        match &app.conversations_error {
-            Some(_) => " CHAT • CANNOT BE READ ".to_string(),
-            None => format!(
-                " CHAT • {} • {} ",
-                app.chat_direction.title(),
-                app.conversations.items.len(),
-            ),
-        },
-        if app.conversations_error.is_some() { bad() } else { accent() },
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
-    app.list_area = split[0];
-    frame.render_stateful_widget(table, split[0], &mut app.conversations.state);
-
-    draw_card(frame, split[1], "CONVERSATION", detail, accent());
-}
-
-/// What the detail card under the CHAT table says: an error, an empty selection,
-/// or the selected thread's own messages, oldest first.
-fn chat_detail_lines(app: &App) -> Vec<Line<'static>> {
-    if let Some(error) = &app.conversations_error {
-        return vec![Line::from(Span::styled(error.clone(), Style::default().fg(bad())))];
-    }
-    let Some(conversation) = app.conversations.selected() else {
-        return vec![Line::from(Span::styled(
-            "Select a conversation to read it",
-            Style::default().fg(muted()),
-        ))];
-    };
-    if app.conversation_messages.is_empty() {
-        return vec![Line::from(Span::styled(
-            "No messages yet",
-            Style::default().fg(muted()),
-        ))];
-    }
-    app.conversation_messages
-        .iter()
-        .map(|message| {
-            let who = if message.from_us { "us" } else { &conversation.peer_id };
-            Line::from(vec![
-                Span::styled(format!("[{}] ", message.ts), Style::default().fg(muted())),
-                Span::styled(format!("{who}: "), Style::default().fg(accent()).bold()),
-                Span::raw(message.body.clone()),
-            ])
-        })
-        .collect()
-}
 
 /// The two things a node earns by being up: money, and the network's opinion of it.
 ///
@@ -2545,111 +2291,9 @@ fn format_age(published_at: Option<i64>, now: i64) -> String {
     }
 }
 
-/// Everything the Clients page knows about the selected client.
-///
-/// Deliberately nothing about *who* they are: a client id has no link back to a peer
-/// (`peer.remote_client_id` is our id inside a remote peer, issue #178), so the card
-/// shows what this client did here and nothing inferred.
-fn client_detail_lines(
-    money: &Money,
-    client: Option<&Client>,
-    detail: Option<&ClientDetail>,
-    compact: bool,
-) -> Vec<Line<'static>> {
-    let Some(client) = client else {
-        return vec![Line::from(Span::styled(
-            "Select a client to inspect its deposits, instances and payments.",
-            Style::default().fg(muted()),
-        ))];
-    };
-
-    let mut lines = vec![metric_line("Client", client.id.clone())];
-    if !compact {
-        lines.push(metric_line("Balance", money.format_raw(&client.balance)));
-        lines.push(metric_line(
-            "Last usage",
-            nonempty(&client.last_usage, "—").to_string(),
-        ));
-        if client.unmetered {
-            lines.push(Line::from(Span::styled(
-                "Never charged (unmetered): one of this node's own dev clients.",
-                Style::default().fg(muted()),
-            )));
-        }
-    }
-
-    // A stale card is worse than none: the selection can move between the load and
-    // the frame, and a payment shown under the wrong client is a lie about money.
-    let Some(detail) = detail.filter(|detail| detail.client_id == client.id) else {
-        return lines;
-    };
-
-    if compact {
-        lines.push(metric_line(
-            "History",
-            format!(
-                "{} deposit token(s) • {} instance(s) • {} payment(s)",
-                detail.deposits.len(),
-                detail.instances.len(),
-                detail.payments.len()
-            ),
-        ));
-        return lines;
-    }
-
-    lines.push(Line::from(""));
-    lines.extend(payment_lines(
-        money,
-        &detail.payments,
-        "Payments received",
-        "Nothing received from this client yet.",
-    ));
-
-    if !detail.deposits.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("Deposit tokens ({})", detail.deposits.len()),
-            Style::default().fg(accent()).bold(),
-        )));
-        for deposit in &detail.deposits {
-            lines.push(Line::from(vec![
-                Span::styled("  ● ", Style::default().fg(status_color(&deposit.status))),
-                Span::styled(
-                    format!("{:<10}", deposit.status.clone()),
-                    Style::default().fg(status_color(&deposit.status)),
-                ),
-                Span::styled(
-                    format!("{}  {}", deposit.created_at.clone(), shorten(&deposit.id, 20)),
-                    Style::default().fg(text_colour()),
-                ),
-            ]));
-        }
-    }
-
-    if !detail.instances.is_empty() {
-        lines.push(Line::from(Span::styled(
-            format!("Instances started here ({})", detail.instances.len()),
-            Style::default().fg(accent()).bold(),
-        )));
-        for instance in &detail.instances {
-            lines.push(Line::from(vec![
-                Span::styled("  ● ", Style::default().fg(good())),
-                Span::styled(
-                    nonempty(&instance.name, "unnamed").to_string(),
-                    Style::default().fg(text_colour()).bold(),
-                ),
-                Span::styled(
-                    format!("  {}", shorten(&instance.id, 24)),
-                    Style::default().fg(muted()),
-                ),
-            ]));
-        }
-    }
-
-    lines
-}
 
 /// A payment history as card lines, shared by the peer and client cards.
-fn payment_lines(
+pub(crate) fn payment_lines(
     money: &Money,
     payments: &[PaymentRow],
     title: &str,
@@ -2696,7 +2340,7 @@ fn payment_lines(
 }
 
 /// Reputation history as card lines: what moved the score, and why.
-fn reputation_event_lines(events: &[ReputationEvent]) -> Vec<Line<'static>> {
+pub(crate) fn reputation_event_lines(events: &[ReputationEvent]) -> Vec<Line<'static>> {
     if events.is_empty() {
         return vec![Line::from(Span::styled(
             "No reputation event recorded yet.".to_string(),
@@ -2739,7 +2383,7 @@ fn reputation_event_lines(events: &[ReputationEvent]) -> Vec<Line<'static>> {
 
 /// Colour for a payment or deposit status: the ones that mean "money moved and
 /// nothing came of it" have to stand out from the ones that worked.
-fn status_color(status: &str) -> Color {
+pub(crate) fn status_color(status: &str) -> Color {
     match status {
         "communicated" | "accepted" | "payed" => good(),
         "unacknowledged" | "rejected" => bad(),
@@ -2747,166 +2391,6 @@ fn status_color(status: &str) -> Color {
     }
 }
 
-/// Full breakdown of the peer highlighted in the peers table: identity, balance,
-/// reputation, and every payment contract it has registered. Previously reachable
-/// only through a raw sqlite query (issue #231).
-///
-/// `compact` collapses each contract onto one line for terminals too short for the
-/// full card.
-fn peer_detail_lines(
-    money: &Money,
-    peer: Option<&Peer>,
-    detail: Option<&PeerDetail>,
-    donation: Option<(f64, f64)>,
-    compact: bool,
-) -> Vec<Line<'static>> {
-    let Some(peer) = peer else {
-        return vec![Line::from(Span::styled(
-            "Select a peer to inspect its endpoints, reputation and payment contracts.",
-            Style::default().fg(muted()),
-        ))];
-    };
-
-    // The full id is worth repeating even in compact mode: the table truncates it.
-    let mut lines = vec![metric_line("Peer", peer.id.clone())];
-    if !compact {
-        lines.push(metric_line(
-            "Endpoints",
-            nonempty(&peer.uris, "—").to_string(),
-        ));
-        lines.push(metric_line("Our balance", money.format_raw(&peer.balance)));
-        // Our id inside *their* node, which is what an operator needs when reading
-        // the other side's logs. Not a client of ours -- see the doc on the field.
-        lines.push(metric_line(
-            "Our client id there",
-            nonempty(&peer.remote_client_id, "not registered").to_string(),
-        ));
-        // The score is ours, first-hand, keyed by this peer's public key. The proofs
-        // below are the peer's own published opinions about other nodes, as it
-        // announced them -- unverified here (issue #281).
-        lines.push(metric_line(
-            "Reputation",
-            format!(
-                "{}  •  {}",
-                peer.reputation_score,
-                match peer.proof_ids.len() {
-                    0 => "no proof announced".to_string(),
-                    n => format!("{n} proof(s) announced"),
-                }
-            ),
-        ));
-        for proof_id in &peer.proof_ids {
-            lines.push(Line::from(vec![
-                Span::styled("      proof  ", Style::default().fg(muted())),
-                Span::styled(shorten(proof_id, 46), Style::default().fg(text_colour())),
-            ]));
-        }
-        // What this peer's on-chain donations earn it here, and only here: the credit
-        // is computed with *this* node's list of whose contributions it recognises, so
-        // it is this node's opinion and not a property of the peer. A peer with none
-        // is not being penalised -- the term is a bonus only.
-        lines.push(metric_line(
-            "Donation credit",
-            match donation {
-                Some((bonus, term)) => format!(
-                    "{bonus:.4}  •  +{term:.4} to its score (beats a price up to {:.0}% higher)",
-                    (term.exp() - 1.0) * 100.0
-                ),
-                None => "none counted by this node".to_string(),
-            },
-        ));
-        lines.push(Line::from(""));
-    }
-
-    // Same guard as the client card: the selection can move between the load and the
-    // frame, and payments shown under the wrong peer would be a lie about money.
-    let history = detail.filter(|detail| detail.peer_id == peer.id);
-    if let Some(history) = history {
-        if compact {
-            lines.push(metric_line(
-                "History",
-                format!(
-                    "{} payment(s) • {} reputation event(s)",
-                    history.payments.len(),
-                    history.events.len()
-                ),
-            ));
-        } else {
-            lines.extend(payment_lines(
-                money,
-                &history.payments,
-                "Payments made to this peer",
-                "Nothing paid to this peer yet.",
-            ));
-            lines.push(Line::from(""));
-            lines.extend(reputation_event_lines(&history.events));
-            lines.push(Line::from(""));
-        }
-    }
-
-    if peer.contracts.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No payment method registered for this peer.",
-            Style::default().fg(warn()),
-        )));
-        return lines;
-    }
-
-    lines.push(Line::from(Span::styled(
-        format!("Payment methods ({})", peer.contracts.len()),
-        Style::default().fg(accent()).bold(),
-    )));
-    for contract in &peer.contracts {
-        // The asset names the money: on Ergo one contract is paid in ERG and in every
-        // token at the same address, so the ledger alone would label two different
-        // rates identically. A 64-hex token id is shortened; a symbol is not.
-        let asset = shorten(nonempty(&contract.asset, &contract.ledger.to_uppercase()), 12);
-        if compact {
-            lines.push(Line::from(vec![
-                Span::styled("  ● ", Style::default().fg(good())),
-                Span::styled(contract.ledger.clone(), Style::default().fg(good()).bold()),
-                Span::styled(
-                    format!(
-                        "  {}  {}  {}  1 {} = {} MU",
-                        asset,
-                        shorten(&contract.contract_hash, 14),
-                        shorten(nonempty(&contract.address, "—"), 14),
-                        asset,
-                        nonempty(&contract.mu_per_unit, "—")
-                    ),
-                    Style::default().fg(text_colour()),
-                ),
-            ]));
-            continue;
-        }
-        lines.push(Line::from(vec![
-            Span::styled("  ● ", Style::default().fg(good())),
-            Span::styled(contract.ledger.clone(), Style::default().fg(good()).bold()),
-            Span::styled(
-                format!("  {}  contract {}", asset, shorten(&contract.contract_hash, 24)),
-                Style::default().fg(text_colour()),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("      address  ", Style::default().fg(muted())),
-            Span::styled(
-                shorten(nonempty(&contract.address, "—"), 46),
-                Style::default().fg(text_colour()),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("      rate     ", Style::default().fg(muted())),
-            Span::styled(
-                // What this peer says one unit of its ledger buys in ITS MU. This is
-                // what makes a price it quotes convertible into money we understand,
-                // so it is stated as an equation rather than as a bare number.
-                format!("1 {} = {} MU", asset, nonempty(&contract.mu_per_unit, "—")),
-                Style::default().fg(text_colour()),
-            ),
-        ]));
-    }
-    lines
-}
 
 /// The pricing page: what this node charges, as bars you can nudge.
 ///
@@ -4636,7 +4120,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             "\u{2191}/\u{2193} select  \u{2022}  + credit  \u{2022}  - debit  \u{2022}  r refresh  \u{2022}  q quit"
         }
         Page::Chat => {
-            "\u{2191}/\u{2193} select  \u{2022}  \u{2190}/\u{2192} ours/theirs  \u{2022}  o new  \u{2022}  \u{23ce} reply  \u{2022}  c close  \u{2022}  R reopen  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  o new chat  \u{2022}  \u{23ce} reply  \u{2022}  c close  \u{2022}  R reopen  \u{2022}  q quit"
         }
         Page::Earnings => "\u{2191}/\u{2193} select an opinion  \u{2022}  r re-read the chain  \u{2022}  q quit",
         Page::Cell => {
@@ -4756,7 +4240,7 @@ fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
 /// Characters, not bytes: splitting a multi-byte one produces a replacement glyph.
 /// An over-long word is left ragged rather than cut mid-token, because a truncated
 /// path is one the operator might paste.
-fn wrapped(text: &str, width: usize) -> Vec<String> {
+pub(crate) fn wrapped(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![text.to_string()];
     }
@@ -4907,7 +4391,7 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
     frame.render_widget(popup, area);
 }
 
-fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
+pub(crate) fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     let vertical = Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(height.min(area.height)),
@@ -4922,7 +4406,7 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     .split(vertical[1])[1]
 }
 
-fn header_row(labels: Vec<&str>) -> Row<'static> {
+pub(crate) fn header_row(labels: Vec<&str>) -> Row<'static> {
     Row::new(
         labels
             .into_iter()
@@ -4933,7 +4417,7 @@ fn header_row(labels: Vec<&str>) -> Row<'static> {
     .bottom_margin(1)
 }
 
-fn section_block(title: impl Into<String>, color: Color) -> Block<'static> {
+pub(crate) fn section_block(title: impl Into<String>, color: Color) -> Block<'static> {
     Block::bordered()
         .title(Span::styled(
             title.into(),
@@ -4942,11 +4426,11 @@ fn section_block(title: impl Into<String>, color: Color) -> Block<'static> {
         .border_style(Style::default().fg(color))
 }
 
-fn selected_style() -> Style {
+pub(crate) fn selected_style() -> Style {
     Style::default().fg(inverse_text()).bg(accent()).bold()
 }
 
-fn nonempty<'a>(value: &'a str, fallback: &'a str) -> &'a str {
+pub(crate) fn nonempty<'a>(value: &'a str, fallback: &'a str) -> &'a str {
     if value.trim().is_empty() {
         fallback
     } else {
@@ -6620,41 +6104,6 @@ mod tests {
         }
     }
 
-    fn peer_with(contracts: Vec<crate::app::PeerContract>) -> Peer {
-        Peer {
-            id: "f3b61c2e-aaaa-bbbb-cccc-ddddeeeeffff".to_string(),
-            uris: "10.0.0.4:8080".to_string(),
-            // Raw MU, as the catalogue stores it; formatting happens at draw time.
-            balance: "1000".to_string(),
-            remote_client_id: "cli-9f2a".to_string(),
-            proof_ids: Vec::new(),
-            reputation_score: "7".to_string(),
-            contracts,
-        }
-    }
-
-    fn ergo_contract() -> crate::app::PeerContract {
-        crate::app::PeerContract {
-            ledger: "ergo".to_string(),
-            contract_hash: "1c691f72deadbeef".to_string(),
-            asset: "ERG".to_string(),
-            address: "0008cd0392aabbcc".to_string(),
-            mu_per_unit: "1000000000".to_string(),
-        }
-    }
-
-    /// A second method on the SAME contract, differing only in its asset. This is what
-    /// an Ergo token is: one script, one address, another currency and another rate.
-    fn token_contract() -> crate::app::PeerContract {
-        crate::app::PeerContract {
-            ledger: "ergo".to_string(),
-            contract_hash: "1c691f72deadbeef".to_string(),
-            asset: "ab".repeat(32),
-            address: "0008cd0392aabbcc".to_string(),
-            mu_per_unit: "20000000".to_string(),
-        }
-    }
-
     mod wallets_card {
         use super::super::draw_ergo;
         use crate::app::{App, LedgerWallet};
@@ -6890,107 +6339,6 @@ mod tests {
             .join("\n")
     }
 
-    #[test]
-    fn peer_detail_prompts_when_nothing_is_selected() {
-        let text = rendered(peer_detail_lines(&Money::default(), None, None, None, false));
-        assert!(text.contains("Select a peer"));
-    }
-
-    #[test]
-    fn peer_detail_shows_ledger_contract_address_and_price() {
-        // The whole point of issue #231: these four facts were only reachable
-        // through a raw sqlite query before.
-        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![ergo_contract()])), None, None, false));
-        assert!(text.contains("Payment methods (1)"));
-        assert!(text.contains("ergo"));
-        assert!(text.contains("1c691f72deadbeef"));
-        assert!(text.contains("0008cd0392aabbcc"));
-        // The rate reads as an equation: what one unit of that ledger buys in MU.
-        assert!(text.contains("1 ERG = 1000000000 MU"));
-    }
-
-    #[test]
-    fn peer_detail_lists_every_contract_instance() {
-        // A peer with several instances used to get silently truncated to one.
-        let second = crate::app::PeerContract {
-            ledger: "simulator".to_string(),
-            contract_hash: "abc123".to_string(),
-            asset: "SIM".to_string(),
-            address: "sim-address".to_string(),
-            mu_per_unit: "500".to_string(),
-        };
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer_with(vec![ergo_contract(), second])),
-            None,
-            None,
-            false,
-        ));
-        assert!(text.contains("Payment methods (2)"));
-        assert!(text.contains("ergo"));
-        assert!(text.contains("simulator"));
-        assert!(text.contains("sim-address"));
-    }
-
-    #[test]
-    fn peer_detail_tells_two_assets_of_one_contract_apart() {
-        // Keyed by the contract alone these two rows are the same row twice, at two
-        // different rates -- and an operator reading "1 ERG = 20000000 MU" would see
-        // this node's ERG rate as the token's.
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer_with(vec![ergo_contract(), token_contract()])),
-            None,
-            None,
-            false,
-        ));
-        assert!(text.contains("Payment methods (2)"));
-        assert!(text.contains("1 ERG = 1000000000 MU"));
-        // The id is shortened for the width, so match its head rather than all 64.
-        assert!(text.contains("ababab"));
-        assert!(text.contains("= 20000000 MU"));
-    }
-
-    #[test]
-    fn peer_detail_says_so_when_no_contract_is_registered() {
-        // Must stay distinguishable from "peer charges through something we
-        // don't render", which is exactly what the old hardcoded lookup did.
-        let text = rendered(peer_detail_lines(&Money::default(), Some(&peer_with(vec![])), None, None, false));
-        assert!(text.contains("No payment method registered"));
-    }
-
-    fn payment(status: &str, tx_id: &str, amount: &str) -> PaymentRow {
-        PaymentRow {
-            created_at: "2026-01-02 10:00:00".to_string(),
-            amount: amount.to_string(),
-            status: status.to_string(),
-            tx_id: tx_id.to_string(),
-            deposit_token: "token-1".to_string(),
-        }
-    }
-
-    fn peer_history(peer_id: &str) -> PeerDetail {
-        PeerDetail {
-            peer_id: peer_id.to_string(),
-            payments: vec![payment("unacknowledged", "abcdef0123456789", "2000")],
-            events: vec![ReputationEvent {
-                created_at: "2026-01-02 10:00:01".to_string(),
-                amount: -100,
-                reason: "payment_unacknowledged".to_string(),
-                score_after: Some(-93),
-            }],
-        }
-    }
-
-    fn a_client() -> Client {
-        Client {
-            id: "client-1".to_string(),
-            balance: "500".to_string(),
-            last_usage: "1700000000".to_string(),
-            unmetered: true,
-        }
-    }
-
     /// A service's blocks are shared, so what it stores and what it weighs are two
     /// different numbers -- and for a service whose bulk is one large layer they
     /// differ by orders of magnitude. The page showed only the first.
@@ -7090,213 +6438,6 @@ mod tests {
         let text = rendered(service_detail_lines(Some(&service), Some(&detail)));
 
         assert!(text.contains("not scored yet"), "{text}");
-    }
-
-    #[test]
-    fn peer_detail_shows_what_we_paid_and_why_the_score_moved() {
-        let peer = peer_with(vec![ergo_contract()]);
-        let history = peer_history(&peer.id);
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer),
-            Some(&history),
-            None,
-            false,
-        ));
-
-        assert!(text.contains("Payments made to this peer (1)"), "{text}");
-        assert!(text.contains("unacknowledged"), "{text}");
-        // The reason is stored with underscores and read as words.
-        assert!(text.contains("payment unacknowledged"), "{text}");
-        assert!(text.contains("-100"), "{text}");
-        assert!(text.contains("→ -93"), "{text}");
-    }
-
-    #[test]
-    fn a_peer_with_no_history_says_so_rather_than_showing_an_empty_card() {
-        let peer = peer_with(vec![ergo_contract()]);
-        let history = PeerDetail {
-            peer_id: peer.id.clone(),
-            payments: Vec::new(),
-            events: Vec::new(),
-        };
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer),
-            Some(&history),
-            None,
-            false,
-        ));
-
-        assert!(text.contains("Nothing paid to this peer yet."), "{text}");
-        assert!(text.contains("No reputation event recorded yet."), "{text}");
-    }
-
-    #[test]
-    fn history_loaded_for_another_peer_is_never_shown_under_this_one() {
-        // The selection can move between the load and the frame. A payment rendered
-        // under the wrong peer is a lie about money, so the id has to match.
-        let peer = peer_with(vec![ergo_contract()]);
-        let history = peer_history("some-other-peer");
-        let text = rendered(peer_detail_lines(
-            &Money::default(),
-            Some(&peer),
-            Some(&history),
-            None,
-            false,
-        ));
-
-        assert!(!text.contains("Payments made to this peer"), "{text}");
-        assert!(!text.contains("payment unacknowledged"), "{text}");
-    }
-
-    #[test]
-    fn client_detail_shows_deposits_instances_and_payments() {
-        let client = a_client();
-        let detail = ClientDetail {
-            client_id: client.id.clone(),
-            deposits: vec![crate::app::DepositToken {
-                id: "token-1".to_string(),
-                status: "payed".to_string(),
-                created_at: "2026-01-03 09:59:00".to_string(),
-            }],
-            instances: vec![crate::app::ClientInstance {
-                id: "instance-1".to_string(),
-                name: "demo".to_string(),
-            }],
-            payments: vec![payment("accepted", "", "750")],
-        };
-
-        let text = rendered(client_detail_lines(
-            &Money::default(),
-            Some(&client),
-            Some(&detail),
-            false,
-        ));
-
-        assert!(text.contains("Payments received (1)"), "{text}");
-        assert!(text.contains("Deposit tokens (1)"), "{text}");
-        assert!(text.contains("Instances started here (1)"), "{text}");
-        assert!(text.contains("demo"), "{text}");
-        // An incoming payment has no transaction id; the token identifies it.
-        assert!(text.contains("token token-1"), "{text}");
-        // And the reason its balance never moves.
-        assert!(text.contains("Never charged"), "{text}");
-    }
-
-    #[test]
-    fn clients_page_renders_the_client_detail_card() {
-        let backend = TestBackend::new(140, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut app = App::new();
-        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Clients).unwrap();
-        app.clients.items = vec![a_client()];
-        app.clients.state.select(Some(0));
-        app.client_detail = Some(ClientDetail {
-            client_id: "client-1".to_string(),
-            deposits: Vec::new(),
-            instances: Vec::new(),
-            payments: vec![payment("accepted", "", "750")],
-        });
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(screen.contains("CLIENTS • 1 known"), "{screen}");
-        assert!(screen.contains("SELECTED CLIENT"), "{screen}");
-        assert!(screen.contains("Payments received (1)"), "{screen}");
-        // Peers are a page of their own now, not a pane on this one.
-        assert!(!screen.contains("Reputation proof"), "{screen}");
-    }
-
-    #[test]
-    fn peers_page_renders_the_peer_detail_card() {
-        let backend = TestBackend::new(140, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut app = App::new();
-        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Peers).unwrap();
-        app.peers.items = vec![peer_with(vec![ergo_contract()])];
-        app.peers.state.select(Some(0));
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(screen.contains("SELECTED PEER"));
-        assert!(screen.contains("Payment methods (1)"));
-        // The table itself stays lean -- no contract columns were added to it.
-        assert!(screen.contains("Reputation proof"));
-        assert!(!screen.contains("Ledger  "));
-    }
-
-    /// A query that failed must not draw the screen a new node draws.
-    ///
-    /// `PEERS • 0 connected` was what an operator with peers saw for a whole release
-    /// (issue #414), because `unwrap_or_default()` turns a rejected statement into an
-    /// empty list and an empty list into a perfectly ordinary page.
-    #[test]
-    fn a_peer_query_that_failed_does_not_render_as_a_node_with_no_peers() {
-        let backend = TestBackend::new(140, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut app = App::new();
-        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Peers).unwrap();
-        app.peers.items = Vec::new();
-        app.peers_error = Some("no such column: ci.ledger_hash".to_string());
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(screen.contains("CANNOT BE READ"), "{screen}");
-        assert!(screen.contains("PEERS UNREADABLE"), "{screen}");
-        // The reason, so the operator has something to act on rather than a mood.
-        assert!(screen.contains("ci.ledger_hash"), "{screen}");
-        // And never the sentence a healthy empty node draws.
-        assert!(!screen.contains("0 connected"), "{screen}");
-    }
-
-    #[test]
-    fn a_short_terminal_keeps_both_the_peers_table_and_the_contracts() {
-        // Regression: a fixed-height detail card pushed the peers table off an
-        // 80x24 screen entirely, and clipped the contracts out of the card --
-        // leaving it looking exactly like a peer with nothing registered.
-        let backend = TestBackend::new(80, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let mut app = App::new();
-        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Peers).unwrap();
-        let second = crate::app::PeerContract {
-            ledger: "simulator".to_string(),
-            contract_hash: "abc123def456".to_string(),
-            asset: "SIM".to_string(),
-            address: "sim-address".to_string(),
-            mu_per_unit: "500".to_string(),
-        };
-        app.peers.items = vec![peer_with(vec![ergo_contract(), second])];
-        app.peers.state.select(Some(0));
-        terminal.draw(|frame| render(&mut app, frame)).unwrap();
-        let screen = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(screen.contains("PEERS • 1 connected"));
-        assert!(screen.contains("Payment methods (2)"));
-        assert!(screen.contains("ergo"));
-        assert!(screen.contains("simulator"));
     }
 
     #[test]
@@ -7501,7 +6642,8 @@ mod tests {
     /// nests instance-under-instance already; a client parent had nowhere to show, so
     /// an instance a client started read as one with no parent at all (issue #277).
     mod external_parents {
-        use crate::app::{App, Client, Instance, InstanceUsage};
+        use crate::app::{App, Instance, InstanceUsage};
+        use crate::clients::Client;
         use ratatui::{backend::TestBackend, Terminal};
 
         fn instance(id: &str, father: &str) -> Instance {
@@ -7583,34 +6725,12 @@ mod tests {
         }
     }
 
-    /// Our id inside a remote peer, which is what the other side's logs call us. The
-    /// CLI has always printed it; the TUI never carried the column at all (issue #277).
-    #[test]
-    fn the_peer_card_shows_our_client_id_on_that_peer() {
-        let peer = peer_with(vec![]);
-        let lines = peer_detail_lines(&Money::default(), Some(&peer), None, None, false);
-        let text: String = lines
-            .iter()
-            .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
-            .collect();
-        assert!(text.contains("cli-9f2a"), "{text}");
-
-        let unregistered = Peer {
-            remote_client_id: String::new(),
-            ..peer
-        };
-        let text: String = peer_detail_lines(&Money::default(), Some(&unregistered), None, None, false)
-            .iter()
-            .flat_map(|line| line.spans.iter().map(|span| span.content.to_string()))
-            .collect();
-        assert!(text.contains("not registered"), "{text}");
-    }
-
     /// The mouse hit tests read off a *real* frame: the row arithmetic in `app.rs`
     /// retraces widget internals (border, header, the header's bottom margin, the tab
     /// padding and dividers), and nothing but a render can confirm it still matches.
     mod mouse_clicks {
         use super::*;
+        use crate::peers::Peer;
 
         fn app_with_peers() -> App {
             let mut app = App::new();
@@ -7623,6 +6743,7 @@ mod tests {
                         uris: "10.0.0.4:8080".to_string(),
                         balance: "1000".to_string(),
                         remote_client_id: String::new(),
+                        local_client_id: String::new(),
                         proof_ids: Vec::new(),
                         reputation_score: "0".to_string(),
                         contracts: Vec::new(),

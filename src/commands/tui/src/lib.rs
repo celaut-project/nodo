@@ -17,6 +17,15 @@ pub mod schedule;
 /// from (issue #395).
 pub mod energy;
 
+/// The PEERS page: other nodes this one has introduced itself to or heard from.
+pub mod peers;
+
+/// The CLIENTS page: who this node's own gateway has issued a client_id to.
+pub mod clients;
+
+/// The CHAT page: free-text conversations with peer operators (issue #431).
+pub mod chat;
+
 /// Application.
 pub mod app;
 

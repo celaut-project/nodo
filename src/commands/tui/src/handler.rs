@@ -122,6 +122,64 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             }
             return Ok(());
         }
+        // New-chat wizard step 1: type to filter the peer list, ↑/↓ move the pick.
+        InputMode::PickChatPeer => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (_, KeyCode::Up) => app.move_chat_peer_selection(-1),
+                (_, KeyCode::Down) => app.move_chat_peer_selection(1),
+                (_, KeyCode::Enter) => app.submit_input().await,
+                (_, KeyCode::Esc) => app.close_input(),
+                (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+                    app.chat_wizard_peer_filter.clear();
+                    app.chat_peer_filter_changed();
+                }
+                (_, KeyCode::Backspace) => {
+                    app.chat_wizard_peer_filter.pop();
+                    app.chat_peer_filter_changed();
+                }
+                (_, KeyCode::Char(character)) => {
+                    app.chat_wizard_peer_filter.push(character);
+                    app.chat_peer_filter_changed();
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+        // New-chat wizard step 2: pick an existing topic, or "+ New topic…".
+        InputMode::PickChatTopic => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (_, KeyCode::Up) => app.move_chat_topic_selection(-1),
+                (_, KeyCode::Down) => app.move_chat_topic_selection(1),
+                (_, KeyCode::Enter) => app.submit_input().await,
+                (_, KeyCode::Esc) => app.close_input(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        // The docked, multi-line compose box: the one text entry in this interface
+        // where Enter does NOT submit -- it inserts a newline, since a real message
+        // (not a label) is the whole point of this step. Ctrl+Enter/Alt+Enter send,
+        // matching both how crossterm can report the chord depending on the
+        // terminal's protocol support.
+        InputMode::ComposeChatMessage => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (KeyModifiers::CONTROL, KeyCode::Enter) | (KeyModifiers::ALT, KeyCode::Enter) => {
+                    app.submit_input().await
+                }
+                (_, KeyCode::Enter) => app.input.push('\n'),
+                (_, KeyCode::Esc) => app.close_input(),
+                (KeyModifiers::CONTROL, KeyCode::Char('u')) => app.input.clear(),
+                (_, KeyCode::Backspace) => {
+                    app.input.pop();
+                }
+                (_, KeyCode::Char(character)) => app.input.push(character),
+                _ => {}
+            }
+            return Ok(());
+        }
         // Read-only, scrollable overlay (service details).
         InputMode::Details => {
             match (key.modifiers, key.code) {
@@ -303,12 +361,12 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (_, KeyCode::Char('-') | KeyCode::Char('_')) if app.page() == Page::Clients => {
             app.open_credit_client(true)
         }
-        // CHAT (issue #431): `o` opens a new thread, Enter replies in the selected
-        // one, `c`/`R` close and reopen it. Mirrors Peers' `d`/Clients' `+`/`-` in
-        // being a direct action, not a confirmation -- closing is reversible and
-        // nothing here waits on the peer.
+        // CHAT (issue #431): `o` starts the peer/topic/message wizard, Enter replies
+        // in the selected chat, `c`/`R` close and reopen it. Mirrors Peers' `d`/
+        // Clients' `+`/`-` in being a direct action, not a confirmation -- closing is
+        // reversible and nothing here waits on the peer.
         (KeyModifiers::NONE, KeyCode::Char('o')) if app.page() == Page::Chat => {
-            app.open_new_conversation_prompt()
+            app.open_new_chat_wizard()
         }
         (_, KeyCode::Enter) if app.page() == Page::Chat => app.open_reply_prompt(),
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Chat => {

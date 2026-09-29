@@ -1,17 +1,23 @@
 use crate::cell::{self, Lever, LeverKind, LeverStatus, Organelle};
+use crate::chat::{
+    get_conversation_messages, get_untopiced_messages, ChatCompose, ChatEntry, ChatEntryKind,
+    ChatMessageRow,
+};
+use crate::clients::{get_client_detail, get_clients, Client, ClientDetail};
 use crate::energy::{self, EnergyEntry};
+use crate::peers::{get_peer_detail, get_peers, Peer, PeerDetail};
 use crate::schedule::{self};
+use base64::Engine;
 use prost::Message;
 use ratatui::layout::{Position, Rect};
 use ratatui::widgets::TableState;
-use regex::Regex;
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use serde_yaml::Value;
 use sha1::{Digest, Sha1};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::error;
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -72,10 +78,9 @@ pub enum Page {
     Peers,
     /// Clients that talk to us, and what they have paid.
     Clients,
-    /// Free-text conversations with peer operators (issue #431). Both directions
-    /// live on this one page, told apart by a toggle rather than a tab of their
-    /// own: threads this node opened, and threads opened by one of its clients
-    /// reaching out to it.
+    /// Free-text conversations with peer operators (issue #431): every thread this
+    /// node opened or one of its clients opened with it, plus each peer's topic-less
+    /// history, merged into one sidebar sorted by recency.
     Chat,
     /// What this node has been paid, and what the network stakes on it — the two
     /// things it earns by being up.
@@ -374,12 +379,19 @@ pub enum InputMode {
     /// in the one transaction, the same way a CELL profile writes a dozen keys
     /// rather than leaving the node to run on a partial edit.
     AddCustomUnit,
-    /// CHAT page (issue #431): `<peer_id> <topic...>`, split on the first space --
-    /// `nodo chat_open` mints the conversation and sends `topic` as its opening
-    /// message in one call.
-    NewConversation,
-    /// CHAT page: a reply in the selected, already-open conversation.
-    ReplyConversation,
+    /// CHAT page, new-chat wizard step 1: pick which peer to start a chat with,
+    /// narrowed by typing (issue: TUI chat/peers/clients redesign).
+    PickChatPeer,
+    /// CHAT page, new-chat wizard step 2: pick one of that peer's existing topics, or
+    /// "+ New topic…" to type one (`NewChatTopic`).
+    PickChatTopic,
+    /// CHAT page, new-chat wizard step 2b: typing a topic that was not already
+    /// offered by `PickChatTopic`.
+    NewChatTopic,
+    /// CHAT page, the final step either wizard leads to: a real, possibly multi-line
+    /// message, docked in the conversation pane rather than a centered popup --
+    /// `Enter` inserts a newline here instead of submitting (see `handler.rs`).
+    ComposeChatMessage,
 }
 
 /// How the `EditConfig` popup should let the user set a value, chosen from the
@@ -521,7 +533,7 @@ pub enum PendingAction {
 ///
 /// `None` where there is no equivalent: no `nodo` subcommand edits a single config
 /// key, which is why the config editor writes through `yq`.
-fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
+pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<String>)> {
     match action {
         PendingAction::DeleteService { id, label } => Some((
             format!("Delete service {label}"),
@@ -886,7 +898,7 @@ fn failure_reason(output: &std::process::Output) -> String {
 
 /// What to do with a background command's output once it finishes.
 #[derive(Debug, Clone)]
-enum CommandKind {
+pub(crate) enum CommandKind {
     /// Append output to the action log and report status.
     Generic,
     /// Render stdout in the Details overlay (carries the service id for the title).
@@ -895,7 +907,7 @@ enum CommandKind {
 
 /// Result of a background `nodo` invocation.
 #[derive(Debug)]
-struct CommandOutcome {
+pub(crate) struct CommandOutcome {
     kind: CommandKind,
     label: String,
     stdout: String,
@@ -909,140 +921,6 @@ pub struct DetailsView {
     pub title: String,
     pub lines: Vec<String>,
     pub scroll: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct Peer {
-    pub id: String,
-    pub uris: String,
-    /// Our balance on this peer, in raw MU as stored. Rendered in the operator's
-    /// display unit at draw time (see `Money`), never at read time, so changing the
-    /// unit does not need a data refresh. Source of truth is the `balance_mu` column on the
-    /// `peer` table itself — NOT the local `clients` table. `peer.remote_client_id`
-    /// identifies our client *inside the remote peer*, so it can never be joined
-    /// against our local `clients` table (see issue #178).
-    pub balance: String,
-    /// Our client id *inside this peer*, as it assigned it to us — what `nodo peers`
-    /// prints as "Remote Client ID". Empty when we have never registered there.
-    /// Never a key into our own `clients` table (see the balance note above).
-    pub remote_client_id: String,
-    /// Every reputation proof this peer announced. These are the peer's *own*
-    /// opinions about other nodes, published on-chain — not a credential we hold on
-    /// it, and not one value: a single identity key can hold several proofs, so the
-    /// list comes from its signed advertisement rather than a column (issue #281).
-    pub proof_ids: Vec<String>,
-    /// Local reputation score (nodo-managed, independent of the on-chain proof).
-    pub reputation_score: String,
-    /// Every payment contract this peer has registered. Rendered in the peer
-    /// detail card rather than the table: a peer can hold several instances,
-    /// and each carries more than a row can show (see issue #231).
-    pub contracts: Vec<PeerContract>,
-}
-
-/// One `contract_instance` row: the ledger a peer settles on, the contract it
-/// charges through, the address it gets paid at, and what one of its units is worth.
-#[derive(Debug, Clone)]
-pub struct PeerContract {
-    /// Ledger tag (e.g. "ergo"), falling back to the raw stored hash when the
-    /// ledger row can't be resolved or carries no tag.
-    pub ledger: String,
-    pub contract_hash: String,
-    /// The asset this method settles in: a reserved native symbol ("ERG", "BTC") or a
-    /// token's 64-hex id. Part of the identity, not decoration -- on Ergo one contract
-    /// is paid in ERG and in every token at the same address, so two rows can differ in
-    /// nothing else, and each carries its own `mu_per_unit`.
-    pub asset: String,
-    pub address: String,
-    pub mu_per_unit: String,
-}
-
-impl Identifiable for Peer {
-    fn id(&self) -> &str {
-        &self.id
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Client {
-    pub id: String,
-    pub balance: String,
-    pub last_usage: String,
-    /// A client this node never charges — its own dev clients. Stored on the row
-    /// since before this page existed, and shown nowhere until it did: an operator
-    /// wondering why a balance never moves is owed this word.
-    pub unmetered: bool,
-}
-
-impl Identifiable for Client {
-    fn id(&self) -> &str {
-        &self.id
-    }
-}
-
-/// Which half of `peer_chat_conversations` the CHAT page shows (issue #431):
-/// threads this node opened, or threads a peer opened with it (reaching this
-/// node as one of *its* clients) -- the same "us / them" split PEERS/CLIENTS
-/// already draws as separate pages, here a toggle on one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChatDirection {
-    Ours,
-    Theirs,
-}
-
-impl ChatDirection {
-    pub fn opened_by_us(self) -> bool {
-        matches!(self, ChatDirection::Ours)
-    }
-
-    pub fn title(self) -> &'static str {
-        match self {
-            ChatDirection::Ours => "opened by us",
-            ChatDirection::Theirs => "opened by our clients",
-        }
-    }
-
-    pub fn toggled(self) -> Self {
-        match self {
-            ChatDirection::Ours => ChatDirection::Theirs,
-            ChatDirection::Theirs => ChatDirection::Ours,
-        }
-    }
-}
-
-impl Default for ChatDirection {
-    fn default() -> Self {
-        ChatDirection::Ours
-    }
-}
-
-/// One `peer_chat_conversations` row, as the CHAT table shows it.
-#[derive(Debug, Clone)]
-pub struct ConversationSummary {
-    pub id: String,
-    pub peer_id: String,
-    pub topic: String,
-    pub opened_at: String,
-    /// `None` while open. Closing is local bookkeeping only (see
-    /// `src/manager/chat.py::close_conversation`) -- nothing here means the peer
-    /// agreed, or was even told.
-    pub closed_at: Option<String>,
-}
-
-impl Identifiable for ConversationSummary {
-    fn id(&self) -> &str {
-        &self.id
-    }
-}
-
-/// One `peer_chat_messages` row within a single thread, as the CHAT detail card
-/// shows it. `ts` arrives already formatted -- the message's own clock, not when
-/// this node happened to receive it -- so the card does no date arithmetic of its
-/// own for what is, on this page, the only thing worth drawing per line.
-#[derive(Debug, Clone)]
-pub struct ChatMessageRow {
-    pub from_us: bool,
-    pub body: String,
-    pub ts: String,
 }
 
 /// One `payments` row, as the detail cards show it. The amount stays in raw MU and is
@@ -1068,32 +946,6 @@ pub struct ReputationEvent {
     pub score_after: Option<i64>,
 }
 
-/// A deposit token issued to a client, with what became of it.
-#[derive(Debug, Clone)]
-pub struct DepositToken {
-    pub id: String,
-    pub status: String,
-    pub created_at: String,
-}
-
-/// An instance a client started on this node (`local_instances.father_id`).
-#[derive(Debug, Clone)]
-pub struct ClientInstance {
-    pub id: String,
-    pub name: String,
-}
-
-/// Everything the Peers page shows about the selected peer beyond its table row.
-///
-/// Loaded for the selection rather than for every peer: this is three queries, and
-/// the list refreshes every couple of seconds whether or not anyone is reading it.
-#[derive(Debug, Clone, Default)]
-pub struct PeerDetail {
-    pub peer_id: String,
-    pub payments: Vec<PaymentRow>,
-    pub events: Vec<ReputationEvent>,
-}
-
 /// A service's reputation: the score every instance of it contributed to, and the
 /// events that got it there.
 #[derive(Debug, Clone, Default)]
@@ -1103,19 +955,6 @@ pub struct ServiceDetail {
     /// which is a service that earned and lost in equal measure.
     pub score: Option<i64>,
     pub events: Vec<ReputationEvent>,
-}
-
-/// Everything the Clients page shows about the selected client beyond its table row.
-///
-/// A client is not a peer and cannot be resolved to one: `peer.remote_client_id` is
-/// our client id *inside* a remote peer, not a key into our `clients` table (#178).
-/// So this shows what the client itself did here — nothing is inferred about who it is.
-#[derive(Debug, Clone, Default)]
-pub struct ClientDetail {
-    pub client_id: String,
-    pub deposits: Vec<DepositToken>,
-    pub instances: Vec<ClientInstance>,
-    pub payments: Vec<PaymentRow>,
 }
 
 /// One wallet of a donation list, as `nodo donations --json` reports it.
@@ -2790,11 +2629,9 @@ pub struct App {
     pub running: bool,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
-    /// The CHAT page's threads (issue #431), for whichever `chat_direction` is
-    /// current. Re-read (not merged) on every toggle: `direction` picks the query,
-    /// not a filter over one cached list.
-    pub conversations: StatefulList<ConversationSummary>,
-    pub chat_direction: ChatDirection,
+    /// The CHAT sidebar (issue #431): every conversation, both directions, plus each
+    /// peer's topic-less bucket, merged and sorted by recency -- see `chat::ChatEntry`.
+    pub conversations: StatefulList<ChatEntry>,
     pub conversations_error: Option<String>,
     pub instances: StatefulList<Instance>,
     pub services: StatefulList<Service>,
@@ -2963,8 +2800,18 @@ pub struct App {
     /// Client id and direction (true = debit) for the open `CreditClient` amount modal.
     pub credit_client_id: Option<String>,
     pub credit_client_decrement: bool,
-    /// Which conversation the open `ReplyConversation` prompt sends into.
-    pub chat_reply_conversation_id: Option<String>,
+    /// The new-chat wizard's state (issue: TUI chat/peers/clients redesign): typed
+    /// filter and highlighted index for `PickChatPeer`, the peer it settled on, the
+    /// topics offered by `PickChatTopic`, and its own highlighted index.
+    pub chat_wizard_peer_filter: String,
+    pub chat_wizard_peer_index: usize,
+    pub chat_wizard_peer_id: Option<String>,
+    pub chat_wizard_topics: Vec<String>,
+    pub chat_wizard_topic_index: usize,
+    /// What the open `ComposeChatMessage` box will do with its body once sent --
+    /// which `nodo` subcommand, and with what -- set by whichever of the new-chat
+    /// wizard or `open_reply_prompt` opened it.
+    pub chat_compose: Option<ChatCompose>,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
@@ -2978,6 +2825,15 @@ pub struct App {
     /// one page, which draws no second row at all.
     pub page_tabs_area: Rect,
     pub list_area: Rect,
+    /// The clickable id column's `[start, end)` on whichever table `list_area` names
+    /// this frame (Peers/Clients/Chat all have one; every other page leaves this
+    /// `None`) -- a click inside it copies that row's id instead of only selecting
+    /// the row (issue: click-to-copy full IDs).
+    pub id_column_x: Option<(u16, u16)>,
+    /// Every precise "clicking here copies this id" hotspot drawn this frame --
+    /// detail-card headers, mostly, where the id is already shown in full. Cleared
+    /// and repopulated every draw, the same lifecycle as `list_area`.
+    pub id_copy_areas: Vec<(String, Rect)>,
     pub sys: System,
     /// Previous sweep's per-instance counters, keyed by instance id, so CPU and
     /// network *rates* can be derived across refresh ticks. Rebuilt every sweep, so
@@ -2992,7 +2848,7 @@ pub struct App {
     last_donations_refresh: Instant,
     donations_task: Option<JoinHandle<Result<NodeDonations, String>>>,
     /// In-flight background `nodo` command, if any (keeps the UI responsive).
-    command_task: Option<JoinHandle<CommandOutcome>>,
+    pub(crate) command_task: Option<JoinHandle<CommandOutcome>>,
     /// In-flight configuration transaction: write, restart, and revert on failure.
     /// Separate from `command_task` because it holds config.yaml's backup for its
     /// whole duration, and only one may do that at a time.
@@ -3014,9 +2870,8 @@ impl Default for App {
             peers: StatefulList::with_items(get_peers(&paths.database).unwrap_or_default()),
             clients: StatefulList::with_items(get_clients(&paths.database).unwrap_or_default()),
             conversations: StatefulList::with_items(
-                get_conversations(&paths.database, ChatDirection::default()).unwrap_or_default(),
+                crate::chat::load_entries(&paths.database).unwrap_or_default(),
             ),
-            chat_direction: ChatDirection::default(),
             conversations_error: None,
             instances: StatefulList::with_items(Vec::new()),
             services: StatefulList::with_items(Vec::new()),
@@ -3085,12 +2940,19 @@ impl Default for App {
             pending_action: None,
             credit_client_id: None,
             credit_client_decrement: false,
-            chat_reply_conversation_id: None,
+            chat_wizard_peer_filter: String::new(),
+            chat_wizard_peer_index: 0,
+            chat_wizard_peer_id: None,
+            chat_wizard_topics: Vec::new(),
+            chat_wizard_topic_index: 0,
+            chat_compose: None,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             tabs_area: Rect::ZERO,
             page_tabs_area: Rect::ZERO,
             list_area: Rect::ZERO,
+            id_column_x: None,
+            id_copy_areas: Vec::new(),
             sys: System::new_all(),
             instance_counters: HashMap::new(),
             last_data_refresh: now.checked_sub(DATA_REFRESH_INTERVAL).unwrap_or(now),
@@ -3271,9 +3133,6 @@ impl App {
                 let next = (self.cell.organelle + 1) % Organelle::ALL.len();
                 self.cell.go_to_organelle(next);
             }
-            // Ours/theirs is a toggle, not a cursor, so either arrow flips it --
-            // there is no "next direction" beyond the one it is not currently on.
-            Page::Chat => self.toggle_chat_direction(),
             _ => {}
         }
     }
@@ -3291,7 +3150,6 @@ impl App {
                 let previous = (self.cell.organelle + count - 1) % count;
                 self.cell.go_to_organelle(previous);
             }
-            Page::Chat => self.toggle_chat_direction(),
             _ => {}
         }
     }
@@ -3391,6 +3249,18 @@ impl App {
             }
             return;
         }
+        // A precise "this id, right here" hotspot -- a detail card's own id line,
+        // mostly -- takes priority over every page's own click handling below, the
+        // same way the tab rows above do (issue: click-to-copy full IDs).
+        if let Some((id, _)) = self
+            .id_copy_areas
+            .iter()
+            .find(|(_, area)| area.contains(position))
+            .cloned()
+        {
+            self.copy_to_clipboard(&id);
+            return;
+        }
         // The config tree remembers where it drew each node, so it can resolve the
         // click itself — including collapsing a section that was already selected.
         if self.page() == Page::Config {
@@ -3414,8 +3284,43 @@ impl App {
             return;
         }
         if let Some(visible) = visible_row_at(position, self.list_area) {
+            // A click landing in the table's own id column copies that row's id in
+            // addition to selecting it, since that column is exactly where an
+            // operator would click to read an id the table truncated.
+            let in_id_column = self
+                .id_column_x
+                .map(|(start, end)| column >= start && column < end)
+                .unwrap_or(false);
             self.select_visible_row(visible);
+            if in_id_column {
+                if let Some(id) = self.selected_row_id() {
+                    self.copy_to_clipboard(&id);
+                }
+            }
         }
+    }
+
+    /// The id of whatever `select_visible_row` just selected, for the pages whose
+    /// table has an id column worth click-to-copying.
+    fn selected_row_id(&self) -> Option<String> {
+        match self.page() {
+            Page::Peers => self.peers.selected().map(|peer| peer.id.clone()),
+            Page::Clients => self.clients.selected().map(|client| client.id.clone()),
+            Page::Chat => self.conversations.selected().map(|entry| entry.peer_id.clone()),
+            _ => None,
+        }
+    }
+
+    /// Copy `text` to the operator's terminal clipboard via OSC 52, which reaches a
+    /// real clipboard even over SSH/mosh and needs no platform clipboard crate --
+    /// unlike a native one, it only requires the terminal itself to support it (most
+    /// modern ones do). Written straight to stdout: harmless alongside ratatui's own
+    /// buffered backend, since the escape sequence has no visible effect of its own.
+    pub fn copy_to_clipboard(&mut self, text: &str) {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+        let _ = write!(io::stdout(), "\x1b]52;c;{encoded}\x07");
+        let _ = io::stdout().flush();
+        self.status = format!("Copied {} to clipboard", shorten(text, 32));
     }
 
     /// Route a click on the PRICING page: a bar, or a row of the table beside it.
@@ -3600,35 +3505,6 @@ impl App {
         }
     }
 
-    /// Reload the peer list, keeping the reason when there is nothing to show.
-    ///
-    /// The one place `get_peers` reaches the page, so a query that fails cannot be
-    /// swallowed at one call site and reported at another. A failure leaves the last
-    /// good list on screen rather than blanking it: a peer this node knew a second
-    /// ago is still a peer, and replacing the table with nothing would hide the very
-    /// rows the error is about.
-    fn refresh_peers(&mut self) {
-        match get_peers(&self.paths.database) {
-            Ok(peers) => {
-                self.peers_error = None;
-                self.peers.refresh(peers);
-            }
-            Err(error) => self.peers_error = Some(error.to_string()),
-        }
-    }
-
-    /// Reload the CHAT page's thread list for whichever `chat_direction` is
-    /// current -- the counterpart of `refresh_peers`, same reasoning throughout.
-    fn refresh_conversations(&mut self) {
-        match get_conversations(&self.paths.database, self.chat_direction) {
-            Ok(conversations) => {
-                self.conversations_error = None;
-                self.conversations.refresh(conversations);
-            }
-            Err(error) => self.conversations_error = Some(error.to_string()),
-        }
-    }
-
     /// Reload the payment and reputation history behind the selected peer and client.
     ///
     /// Called when the selection moves and after each data refresh, never from the
@@ -3653,8 +3529,15 @@ impl App {
         self.conversation_messages = self
             .conversations
             .selected()
-            .map(|conversation| conversation.id.clone())
-            .and_then(|conversation_id| get_conversation_messages(&database, &conversation_id).ok())
+            .map(|entry| entry.kind.clone())
+            .map(|kind| match kind {
+                ChatEntryKind::Conversation { conversation_id, .. } => {
+                    get_conversation_messages(&database, &conversation_id).unwrap_or_default()
+                }
+                ChatEntryKind::Untopiced { peer_id } => {
+                    get_untopiced_messages(&database, &peer_id).unwrap_or_default()
+                }
+            })
             .unwrap_or_default();
     }
 
@@ -3677,31 +3560,6 @@ impl App {
         }
     }
 
-    /// Increase or decrease the selected peer's local reputation score.
-    pub fn adjust_selected_peer_reputation(&mut self, delta: i64) {
-        if self.page() != Page::Peers {
-            return;
-        }
-        let Some(peer) = self.peers.selected().cloned() else {
-            self.status = "Select a peer first".to_string();
-            return;
-        };
-        match adjust_peer_reputation(&self.paths.database, &peer.id, delta) {
-            Ok(()) => {
-                self.status = format!(
-                    "Reputation {:+} on peer {}",
-                    delta,
-                    shorten(&peer.id, 16)
-                );
-                self.refresh_peers();
-                // The adjustment is an event like any other; show it without waiting
-                // for the next refresh.
-                self.load_selection_details();
-            }
-            Err(error) => self.status = format!("Reputation update failed: {error}"),
-        }
-    }
-
     pub fn quit(&mut self) {
         self.running = false;
     }
@@ -3715,21 +3573,19 @@ impl App {
         self.edit_kind = EditKind::Text;
         self.pending_action = None;
         self.credit_client_id = None;
-        self.chat_reply_conversation_id = None;
         self.lever_keys.clear();
         self.lever_key_index = 0;
+        self.chat_wizard_peer_filter.clear();
+        self.chat_wizard_peer_index = 0;
+        self.chat_wizard_peer_id = None;
+        self.chat_wizard_topics.clear();
+        self.chat_wizard_topic_index = 0;
+        self.chat_compose = None;
     }
 
     /// True while a background `nodo` command is still running.
     pub fn command_running(&self) -> bool {
         self.command_task.is_some()
-    }
-
-    pub fn open_connect(&mut self) {
-        self.input_mode = InputMode::Connect;
-        self.input.clear();
-        self.input_title = "Connect peer (host:port)".to_string();
-        self.edit_kind = EditKind::Text;
     }
 
     pub fn open_config_filter(&mut self) {
@@ -4053,8 +3909,10 @@ impl App {
             InputMode::PickProfile => self.submit_profile_selection(),
             InputMode::PickLeverKey => self.submit_lever_key_selection(),
             InputMode::AddCustomUnit => self.save_custom_unit(),
-            InputMode::NewConversation => self.submit_new_conversation(),
-            InputMode::ReplyConversation => self.submit_reply_conversation(),
+            InputMode::PickChatPeer => self.submit_chat_peer_pick(),
+            InputMode::PickChatTopic => self.submit_chat_topic_pick(),
+            InputMode::NewChatTopic => self.submit_new_chat_topic(),
+            InputMode::ComposeChatMessage => self.submit_chat_compose(),
             // The writes confirmation answers y/n, never Enter: Enter on a
             // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
             // gate answers y/n for the same reason and one stronger: Enter is the
@@ -4066,236 +3924,6 @@ impl App {
             | InputMode::ConfirmWrites
             | InputMode::Details => {}
         }
-    }
-
-    fn connect(&mut self) {
-        let target = self.input.trim().to_string();
-        let valid_shape = Regex::new(r"^(\[[0-9a-fA-F:]+\]|[^:\s]+):\d{1,5}$")
-            .expect("valid peer regex")
-            .is_match(&target);
-        let valid_port = target
-            .rsplit_once(':')
-            .and_then(|(_, port)| port.parse::<u16>().ok())
-            .map(|port| port > 0)
-            .unwrap_or(false);
-        let valid = valid_shape && valid_port;
-        if !valid {
-            self.status = "Peer must be host:port (IPv6 may use [address]:port)".to_string();
-            return;
-        }
-        self.close_input();
-        self.spawn_command(
-            CommandKind::Generic,
-            "Connect peer".to_string(),
-            vec!["connect".to_string(), target],
-        );
-    }
-
-    // --- Clients ------------------------------------------------------------
-
-    /// Open an amount-entry modal to credit or debit the selected client's balance.
-    ///
-    /// The amount is typed in `ui.DISPLAY_UNIT` -- the same unit the balance column
-    /// already shows -- and, on submit, handed to `nodo credit_client`/`debit_client`
-    /// (see `src/commands/credit_client.py`). Delegating to the CLI rather than
-    /// writing `balance_mu` directly means the same MU conversion and client-existence
-    /// check the operator gets from a shell apply here too, with one code path to keep
-    /// correct instead of two.
-    pub fn open_credit_client(&mut self, decrement: bool) {
-        if self.page() != Page::Clients {
-            return;
-        }
-        if self.command_running() {
-            self.status = "Busy: a command is already running".to_string();
-            return;
-        }
-        let Some(client) = self.clients.selected().cloned() else {
-            self.status = "Select a client first".to_string();
-            return;
-        };
-        self.input_mode = InputMode::CreditClient;
-        self.input.clear();
-        self.input_title = format!(
-            "{} client {} (amount, {})",
-            if decrement { "Debit" } else { "Credit" },
-            shorten(&client.id, 18),
-            self.money.symbol
-        );
-        self.credit_client_id = Some(client.id);
-        self.credit_client_decrement = decrement;
-        self.edit_kind = EditKind::Text;
-    }
-
-    /// Validate the typed amount and run the credit/debit as a background `nodo`
-    /// command, the same way a confirmed [`PendingAction`] does.
-    fn submit_credit_client(&mut self) {
-        let Some(client_id) = self.credit_client_id.clone() else {
-            self.close_input();
-            return;
-        };
-        let decrement = self.credit_client_decrement;
-        let amount = self.input.trim().to_string();
-        let valid = amount.parse::<f64>().map(|value| value > 0.0).unwrap_or(false);
-        if !valid {
-            self.status = "Amount must be a positive number".to_string();
-            return;
-        }
-        self.close_input();
-        let label = format!(
-            "{} client {}",
-            if decrement { "Debit" } else { "Credit" },
-            shorten(&client_id, 18)
-        );
-        let command = if decrement { "debit_client" } else { "credit_client" };
-        self.spawn_command(
-            CommandKind::Generic,
-            label,
-            vec![command.to_string(), client_id, amount],
-        );
-    }
-
-    // --- Chat (issue #431) --------------------------------------------------
-
-    /// Flip which half of `peer_chat_conversations` the table shows: threads this
-    /// node opened, or threads opened by one of its clients reaching out to it.
-    pub fn toggle_chat_direction(&mut self) {
-        if self.page() != Page::Chat {
-            return;
-        }
-        self.chat_direction = self.chat_direction.toggled();
-        self.refresh_conversations();
-        self.load_selection_details();
-    }
-
-    /// Start a new conversation: `<peer_id> <topic...>`, split on the first space.
-    /// `nodo chat_open` mints the id and sends `topic` as the opening message in
-    /// one call, so there is nothing to open here without also sending something --
-    /// an empty thread is not a thing this page has a row for.
-    pub fn open_new_conversation_prompt(&mut self) {
-        if self.page() != Page::Chat {
-            return;
-        }
-        if self.command_running() {
-            self.status = "Busy: a command is already running".to_string();
-            return;
-        }
-        self.input_mode = InputMode::NewConversation;
-        self.input.clear();
-        self.input_title = "New conversation: <peer_id> <topic...>".to_string();
-        self.edit_kind = EditKind::Text;
-    }
-
-    fn submit_new_conversation(&mut self) {
-        let input = self.input.clone();
-        let Some((peer_id, topic)) = input.trim().split_once(char::is_whitespace) else {
-            self.status = "Type a peer id and a topic, separated by a space".to_string();
-            return;
-        };
-        let peer_id = peer_id.trim().to_string();
-        let topic = topic.trim().to_string();
-        if peer_id.is_empty() || topic.is_empty() {
-            self.status = "Type a peer id and a topic, separated by a space".to_string();
-            return;
-        }
-        self.close_input();
-        let label = format!("Open conversation with {}", shorten(&peer_id, 18));
-        self.spawn_command(
-            CommandKind::Generic,
-            label,
-            vec!["chat_open".to_string(), peer_id, topic],
-        );
-    }
-
-    /// Reply in the selected, open conversation.
-    pub fn open_reply_prompt(&mut self) {
-        if self.page() != Page::Chat {
-            return;
-        }
-        if self.command_running() {
-            self.status = "Busy: a command is already running".to_string();
-            return;
-        }
-        let Some(conversation) = self.conversations.selected().cloned() else {
-            self.status = "Select a conversation first".to_string();
-            return;
-        };
-        if conversation.closed_at.is_some() {
-            self.status = "Closed; press R to reopen before replying".to_string();
-            return;
-        }
-        self.input_mode = InputMode::ReplyConversation;
-        self.input.clear();
-        self.input_title = format!("Reply to {}", shorten(&conversation.peer_id, 18));
-        self.chat_reply_conversation_id = Some(conversation.id);
-        self.edit_kind = EditKind::Text;
-    }
-
-    fn submit_reply_conversation(&mut self) {
-        let Some(conversation_id) = self.chat_reply_conversation_id.clone() else {
-            self.close_input();
-            return;
-        };
-        let body = self.input.trim().to_string();
-        if body.is_empty() {
-            self.status = "Type a message first".to_string();
-            return;
-        }
-        self.close_input();
-        self.spawn_command(
-            CommandKind::Generic,
-            "Reply".to_string(),
-            vec!["chat_reply".to_string(), conversation_id, body],
-        );
-    }
-
-    /// Close the selected conversation. Local bookkeeping only -- the peer is
-    /// never told, and nothing here waits on a reply, so it is a direct action
-    /// rather than a confirmation: reversible with `R`, unlike forgetting a peer.
-    pub fn close_selected_conversation(&mut self) {
-        if self.page() != Page::Chat {
-            return;
-        }
-        if self.command_running() {
-            self.status = "Busy: a command is already running".to_string();
-            return;
-        }
-        let Some(conversation) = self.conversations.selected().cloned() else {
-            self.status = "Select a conversation first".to_string();
-            return;
-        };
-        if conversation.closed_at.is_some() {
-            self.status = format!("{} is already closed", shorten(&conversation.id, 18));
-            return;
-        }
-        self.spawn_command(
-            CommandKind::Generic,
-            "Close conversation".to_string(),
-            vec!["chat_close".to_string(), conversation.id],
-        );
-    }
-
-    /// Reopen the selected, closed conversation.
-    pub fn reopen_selected_conversation(&mut self) {
-        if self.page() != Page::Chat {
-            return;
-        }
-        if self.command_running() {
-            self.status = "Busy: a command is already running".to_string();
-            return;
-        }
-        let Some(conversation) = self.conversations.selected().cloned() else {
-            self.status = "Select a conversation first".to_string();
-            return;
-        };
-        if conversation.closed_at.is_none() {
-            self.status = format!("{} is already open", shorten(&conversation.id, 18));
-            return;
-        }
-        self.spawn_command(
-            CommandKind::Generic,
-            "Reopen conversation".to_string(),
-            vec!["chat_reopen".to_string(), conversation.id],
-        );
     }
 
     fn save_config_edit(&mut self) {
@@ -5474,37 +5102,6 @@ impl App {
         });
     }
 
-    /// Ask for confirmation before dropping the selected peer.
-    ///
-    /// `nodo disconnect` does the work, which deletes the peer row along with its
-    /// addresses and contract instances — the same thing the operator would type. The
-    /// peer is *forgotten*, not banned: it can re-introduce itself, or be reconnected
-    /// with `c`. That is exactly what makes this useful — a peer whose addresses went
-    /// stale (say another node claimed one, see `claim_uri`) is cleared out here.
-    pub fn open_disconnect_peer_confirm(&mut self) {
-        // Peers only. A client is not forgotten by hand -- it is ours, and expires on
-        // its own -- and since the two now have a page each, `d` on Clients is simply
-        // not bound rather than answered with an explanation.
-        if self.page() != Page::Peers {
-            return;
-        }
-        if self.command_running() {
-            self.status = "Busy: a command is already running".to_string();
-            return;
-        }
-        let Some(peer) = self.peers.selected().cloned() else {
-            self.status = "Select a peer first".to_string();
-            return;
-        };
-        let label = shorten(&peer.id, 18);
-        self.input_mode = InputMode::Confirm;
-        self.input_title = format!("Forget peer {label}? (y/N)");
-        self.pending_action = Some(PendingAction::DisconnectPeer {
-            id: peer.id.clone(),
-            label,
-        });
-    }
-
     /// Run the pending destructive action (called on `y` in a Confirm modal).
     pub async fn confirm_pending(&mut self) {
         let Some(action) = self.pending_action.take() else {
@@ -5551,7 +5148,7 @@ impl App {
 
     /// Spawn a `nodo` command in the background so the UI stays responsive.
     /// Only one command runs at a time; new requests are rejected while busy.
-    fn spawn_command(&mut self, kind: CommandKind, label: String, args: Vec<String>) {
+    pub(crate) fn spawn_command(&mut self, kind: CommandKind, label: String, args: Vec<String>) {
         if self.command_task.is_some() {
             self.status = "Busy: a command is already running".to_string();
             return;
@@ -5695,7 +5292,7 @@ impl App {
         self.refresh_peers();
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
-        self.refresh_conversations();
+        self.refresh_chat();
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
         self.energy_series = get_energy_series(&self.paths.database, ENERGY_HISTORY_HOURS)
@@ -6460,244 +6057,9 @@ fn json_u128(value: Option<&serde_json::Value>) -> u128 {
         .unwrap_or(0)
 }
 
-fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
-    // A node that has never been migrated has no database, or one with no `peer`
-    // table in it, and neither is a failure to report -- it is a node with no peers
-    // yet, which is exactly what an empty list says. `list_peers()` draws the same
-    // line ("the 'peer' table does not exist"). Anything past this point is a query
-    // that disagrees with a schema that *is* there, which is the case worth raising.
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !table_exists(&connection, "peer") {
-        return Ok(Vec::new());
-    }
-    // Our balance on a peer lives on the `peer` table's own `balance_mu` column. The old
-    // `LEFT JOIN clients c ON p.client_id = c.id` was wrong: `peer.remote_client_id`
-    // is our client id *inside the remote peer*, never a key into our local
-    // `clients` table, so that join surfaced a bogus balance (issue #178).
-    let mut statement = connection.prepare(
-        "SELECT p.id,
-                COALESCE(GROUP_CONCAT(u.ip || ':' || u.port, ', '), ''),
-                p.balance_mu,
-                p.advertisement,
-                p.reputation_score,
-                COALESCE(p.remote_client_id, '')
-         FROM peer p
-         LEFT JOIN uri u ON p.id = u.peer_id
-         GROUP BY p.id",
-    )?;
-    let peers = statement
-        .query_map([], |row| {
-            let reputation_score = row
-                .get::<_, Option<i64>>(4)?
-                .map(|score| score.to_string())
-                .unwrap_or_else(|| "0".to_string());
-            // Straight out of the advertisement the peer signed, which we store
-            // verbatim: it carries every proof the peer holds, where a column of our
-            // own could only ever keep the last one announced (issue #281).
-            let proof_ids = row
-                .get::<_, Option<Vec<u8>>>(3)?
-                .and_then(|bytes| protos::Peer::decode(&*bytes).ok())
-                .map(|announced| {
-                    announced
-                        .reputation_proofs
-                        .into_iter()
-                        .filter_map(|contract| {
-                            contract
-                                .xattrs
-                                .get("token_id")
-                                .and_then(|value| String::from_utf8(value.clone()).ok())
-                        })
-                        .filter(|token_id| !token_id.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
-            let id: String = row.get(0)?;
-            Ok(Peer {
-                uris: row.get(1)?,
-                balance: row.get::<_, String>(2)?,
-                proof_ids,
-                reputation_score,
-                remote_client_id: row.get(5)?,
-                // `contract_instance` isn't touched by the join above (it isn't
-                // keyed by uri), so its rows are fetched per peer below.
-                contracts: Vec::new(),
-                id,
-            })
-        })?
-        .collect::<SqlResult<Vec<_>>>()?;
-
-    peers
-        .into_iter()
-        .map(|mut peer| {
-            peer.contracts = get_peer_contracts(&connection, &peer.id)?;
-            Ok(peer)
-        })
-        .collect()
-}
-
-/// Every payment *method* a peer has registered. A peer's `contract_instance` rows
-/// aren't reachable from the uri join `get_peers` already runs, and before this the TUI
-/// surfaced none of it at all (issue #231). A method is ledger + contract + asset, so
-/// `token_id` comes back with the rest: without it two methods of one Ergo contract
-/// render as the same row twice, at two different rates.
-///
-/// `contract_instance.ledger` **is** the chain's tag. It used to be `ledger_hash`, a
-/// sha3 of a serialized description joined against `ledger(hash, content)` to get the
-/// tag back; `refactor(db): a ledger is its tag, so stop storing one` dropped both the
-/// column and the table's content, and this query kept asking for them. SQLite rejects
-/// the statement at `prepare`, so every peer on the page disappeared rather than every
-/// peer's contracts -- see `get_peers`.
-fn get_peer_contracts(connection: &Connection, peer_id: &str) -> SqlResult<Vec<PeerContract>> {
-    let mut statement = connection.prepare(
-        "SELECT ci.contract_hash, ci.ledger, ci.address, ci.mu_per_unit, ci.token_id
-         FROM contract_instance ci
-         WHERE ci.peer_id = ?1",
-    )?;
-    let contracts = statement
-        .query_map([peer_id], |row| {
-            Ok(PeerContract {
-                ledger: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                contract_hash: row.get(0)?,
-                asset: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                address: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                // Not ERG-formatted: this is a rate (MU per unit of the contract),
-                // not a balance. For ERG the rate is the peg itself, 1e9.
-                mu_per_unit: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            })
-        })?
-        .collect();
-    contracts
-}
-
-/// Threads on the CHAT page, most recently opened first (issue #431). `direction`
-/// picks which half of the table: `opened_by_us` true for this node's own
-/// conversations, false for ones a peer opened by reaching this node as one of
-/// its clients. Mirrors `src/database/sql_connection.py::list_conversations`.
-fn get_conversations(database: &Path, direction: ChatDirection) -> SqlResult<Vec<ConversationSummary>> {
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !table_exists(&connection, "peer_chat_conversations") {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection.prepare(
-        "SELECT id, peer_id, COALESCE(topic, ''), opened_at, closed_at
-         FROM peer_chat_conversations
-         WHERE opened_by_us = ?1
-         ORDER BY opened_at DESC",
-    )?;
-    let conversations = statement
-        .query_map([direction.opened_by_us() as i64], |row| {
-            Ok(ConversationSummary {
-                id: row.get(0)?,
-                peer_id: row.get(1)?,
-                topic: row.get(2)?,
-                opened_at: row.get(3)?,
-                closed_at: row.get(4)?,
-            })
-        })?
-        .collect();
-    conversations
-}
-
-/// One thread's messages, oldest first (issue #431). Mirrors
-/// `src/database/sql_connection.py::get_conversation_messages`.
-fn get_conversation_messages(database: &Path, conversation_id: &str) -> SqlResult<Vec<ChatMessageRow>> {
-    if !database.exists() {
-        return Ok(Vec::new());
-    }
-    let connection = Connection::open(database)?;
-    if !table_exists(&connection, "peer_chat_messages") {
-        return Ok(Vec::new());
-    }
-    let mut statement = connection.prepare(
-        "SELECT from_us, body, ts
-         FROM peer_chat_messages
-         WHERE conversation_id = ?1
-         ORDER BY id ASC",
-    )?;
-    let messages = statement
-        .query_map([conversation_id], |row| {
-            let ts: i64 = row.get(2)?;
-            Ok(ChatMessageRow {
-                from_us: row.get(0)?,
-                body: row.get(1)?,
-                ts: format_unix_timestamp(ts),
-            })
-        })?
-        .collect();
-    messages
-}
-
-/// Adjust a peer's local reputation score by `delta`, mirroring
-/// `sql_connection.update_reputation_peer`: add `delta` to the score, increment the
-/// index, and record the event that explains it. Works when `reputation_proof_id` is
-/// NULL (score-only), so no on-chain proof is required.
-///
-/// The event matters as much as the score here. Every other mover of a score writes
-/// one, so a hand adjustment that did not would be the single unexplained step in a
-/// peer's history — and the one an operator is most likely to have to justify later.
-fn adjust_peer_reputation(database: &Path, peer_id: &str, delta: i64) -> SqlResult<()> {
-    let mut connection = Connection::open(database)?;
-    let transaction = connection.transaction()?;
-    let (score, index): (i64, i64) = transaction.query_row(
-        "SELECT COALESCE(reputation_score, 0), COALESCE(reputation_index, 0)
-         FROM peer WHERE id = ?1",
-        [peer_id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    transaction.execute(
-        "UPDATE peer SET reputation_score = ?1, reputation_index = ?2 WHERE id = ?3",
-        rusqlite::params![score + delta, index + 1, peer_id],
-    )?;
-    // Same string as `reasons.Reason.OPERATOR_ADJUSTMENT` on the Python side.
-    transaction.execute(
-        "INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after)
-         VALUES ('peer', ?1, ?2, 'operator_adjustment', ?3)",
-        rusqlite::params![peer_id, delta, score + delta],
-    )?;
-    transaction.commit()?;
-    Ok(())
-}
-
-fn get_clients(database: &Path) -> SqlResult<Vec<Client>> {
-    let connection = Connection::open(database)?;
-    let mut statement =
-        connection.prepare("SELECT id, balance_mu, last_usage, unmetered FROM clients")?;
-    let clients = statement
-        .query_map([], |row| {
-            let last_usage = row
-                .get::<_, Option<f64>>(2)?
-                .map(|value| format!("{value:.0}"))
-                .unwrap_or_else(|| "—".to_string());
-            Ok(Client {
-                id: row.get(0)?,
-                balance: row.get::<_, String>(1)?,
-                last_usage,
-                unmetered: row.get::<_, Option<i64>>(3)?.unwrap_or(0) != 0,
-            })
-        })?
-        .collect();
-    clients
-}
-
 /// How many rows of history a detail card asks for. Enough to read a pattern, few
 /// enough that the card cannot push the table it belongs to off a short terminal.
-const DETAIL_ROWS: usize = 8;
-
-/// What we paid a peer and why its score is where it is.
-fn get_peer_detail(database: &Path, peer_id: &str) -> SqlResult<PeerDetail> {
-    let connection = Connection::open(database)?;
-    Ok(PeerDetail {
-        peer_id: peer_id.to_string(),
-        payments: get_payments(&connection, "peer_id", peer_id)?,
-        events: get_reputation_events(&connection, "peer", peer_id)?,
-    })
-}
+pub(crate) const DETAIL_ROWS: usize = 8;
 
 /// A service's score and the events behind it. Scored by `service_id`, so this is the
 /// history of every instance of it that ever ran here, not of the one running now.
@@ -6717,22 +6079,11 @@ fn get_service_detail(database: &Path, service_id: &str) -> SqlResult<ServiceDet
     })
 }
 
-/// What a client paid us, what it was given a token for, and what it is running here.
-fn get_client_detail(database: &Path, client_id: &str) -> SqlResult<ClientDetail> {
-    let connection = Connection::open(database)?;
-    Ok(ClientDetail {
-        client_id: client_id.to_string(),
-        deposits: get_deposit_tokens(&connection, client_id)?,
-        instances: get_client_instances(&connection, client_id)?,
-        payments: get_payments(&connection, "client_id", client_id)?,
-    })
-}
-
 /// Payment rows for one counterparty, newest first.
 ///
 /// `column` is the caller's choice of `peer_id` or `client_id` and is interpolated,
 /// which is safe only because both are literals in this file — the *value* is bound.
-fn get_payments(connection: &Connection, column: &str, id: &str) -> SqlResult<Vec<PaymentRow>> {
+pub(crate) fn get_payments(connection: &Connection, column: &str, id: &str) -> SqlResult<Vec<PaymentRow>> {
     let mut statement = connection.prepare(&format!(
         "SELECT created_at, amount_mu, status, COALESCE(tx_id, ''), COALESCE(deposit_token, '')
          FROM payments WHERE {column} = ?1 ORDER BY created_at DESC, id DESC LIMIT {DETAIL_ROWS}"
@@ -6752,7 +6103,7 @@ fn get_payments(connection: &Connection, column: &str, id: &str) -> SqlResult<Ve
 }
 
 /// Reputation events for one subject, newest first.
-fn get_reputation_events(
+pub(crate) fn get_reputation_events(
     connection: &Connection,
     kind: &str,
     id: &str,
@@ -6774,45 +6125,6 @@ fn get_reputation_events(
         })?
         .collect();
     events
-}
-
-fn get_deposit_tokens(connection: &Connection, client_id: &str) -> SqlResult<Vec<DepositToken>> {
-    let mut statement = connection.prepare(
-        "SELECT id, status, created_at FROM deposit_tokens
-         WHERE client_id = ?1 ORDER BY created_at DESC LIMIT ?2",
-    )?;
-    let tokens = statement
-        .query_map(rusqlite::params![client_id, DETAIL_ROWS as i64], |row| {
-            Ok(DepositToken {
-                id: row.get(0)?,
-                status: row.get(1)?,
-                created_at: row.get(2)?,
-            })
-        })?
-        .collect();
-    tokens
-}
-
-/// The instances a client started here. `local_instances.father_id` holds the client
-/// id for a top-level instance (see `start_service_iterable`), which is the only link
-/// between a client and anything it runs.
-fn get_client_instances(
-    connection: &Connection,
-    client_id: &str,
-) -> SqlResult<Vec<ClientInstance>> {
-    let mut statement = connection.prepare(
-        "SELECT id, COALESCE(name, '') FROM local_instances
-         WHERE father_id = ?1 ORDER BY name LIMIT ?2",
-    )?;
-    let instances = statement
-        .query_map(rusqlite::params![client_id, DETAIL_ROWS as i64], |row| {
-            Ok(ClientInstance {
-                id: row.get(0)?,
-                name: row.get(1)?,
-            })
-        })?
-        .collect();
-    instances
 }
 
 fn get_instances(
@@ -7146,7 +6458,7 @@ fn get_energy_series(database: &Path, hours: u16) -> SqlResult<EnergySeries> {
 
 /// Whether a table exists, so a query can degrade gracefully against a database the
 /// node has not migrated yet (e.g. a brand-new install the TUI opens first).
-fn table_exists(connection: &Connection, name: &str) -> bool {
+pub(crate) fn table_exists(connection: &Connection, name: &str) -> bool {
     connection
         .query_row(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -7165,7 +6477,7 @@ fn table_exists(connection: &Connection, name: &str) -> bool {
 ///
 /// `PRAGMA table_info` cannot be parameterised, so the name is interpolated -- every
 /// caller passes a literal from this file.
-fn column_exists(connection: &Connection, table: &str, column: &str) -> bool {
+pub(crate) fn column_exists(connection: &Connection, table: &str, column: &str) -> bool {
     let Ok(mut statement) = connection.prepare(&format!("PRAGMA table_info({table})")) else {
         return false;
     };
@@ -7814,7 +7126,7 @@ fn utc_stamp(time: SystemTime) -> String {
 /// readable, unlike `utc_stamp`'s compact filename shape. A negative or otherwise
 /// unreadable value (never written by this node, but this reads whatever a peer's
 /// clock produced) falls back to the epoch rather than panicking.
-fn format_unix_timestamp(seconds: i64) -> String {
+pub(crate) fn format_unix_timestamp(seconds: i64) -> String {
     let seconds = seconds.max(0);
     let days = seconds.div_euclid(86_400);
     let tod = seconds.rem_euclid(86_400);
@@ -9329,395 +8641,6 @@ mod tests {
     }
 
     use super::*;
-
-    /// The `CREATE TABLE` the node's own migration would run for `name`.
-    ///
-    /// Lifted out of `src/database/migrate.py` rather than restated, because a
-    /// hand-written copy of a schema is exactly what let this query fall a rename
-    /// behind the node and render every peer away (issue #414). A test database that
-    /// does not fail when the real one would is a test that proves nothing.
-    fn migration_table(name: &str) -> String {
-        let python = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../src/database/migrate.py"
-        ))
-        .expect("src/database/migrate.py ships with the repository");
-        let marker = format!("CREATE TABLE IF NOT EXISTS {name} (");
-        let start = python
-            .find(&marker)
-            .unwrap_or_else(|| panic!("migrate.py no longer creates a '{name}' table"));
-        let rest = &python[start..];
-        let end = rest
-            .find("'''")
-            .unwrap_or_else(|| panic!("the '{name}' table's SQL is unterminated"));
-        rest[..end].to_string()
-    }
-
-    /// A database built from the node's *own* schema, holding one peer and whatever
-    /// contract instances the caller asks for.
-    fn peer_database(dir: &Path, instances: &[(&str, &str, &str)]) -> PathBuf {
-        let path = dir.join("database.sqlite");
-        let connection = Connection::open(&path).unwrap();
-        for table in ["peer", "uri", "ledger", "contract_instance"] {
-            connection.execute_batch(&migration_table(table)).unwrap();
-        }
-        connection
-            .execute_batch(
-                "INSERT INTO peer (id, advertisement, remote_client_id, balance_mu,
-                                   reputation_score)
-                 VALUES ('peer-1', NULL, 'cli-7f3a', '1000', 7);",
-            )
-            .unwrap();
-        for (contract_hash, ledger, address) in instances {
-            connection
-                .execute(
-                    "INSERT INTO contract_instance (address, ledger, contract_hash,
-                                                    token_id, peer_id, mu_per_unit)
-                     VALUES (?1, ?2, ?3, 'ERG', 'peer-1', '500')",
-                    rusqlite::params![address, ledger, contract_hash],
-                )
-                .unwrap();
-        }
-        path
-    }
-
-    /// The regression: against the schema the node actually creates, the page lists
-    /// the peers that are in it.
-    ///
-    /// `get_peers` was reaching for `contract_instance.ledger_hash` and a
-    /// `ledger(hash, content)` join, both of which `refactor(db): a ledger is its tag`
-    /// removed. SQLite rejects that at `prepare`, the whole call returns `Err`, and
-    /// `unwrap_or_default()` turned it into an empty list -- so the page said "0
-    /// connected" about a node with peers, which is what `nodo peers` was listing all
-    /// along (issue #414).
-    #[test]
-    fn peers_are_listed_against_the_schema_the_node_actually_creates() {
-        let dir = std::env::temp_dir().join("nodo-tui-test-real-schema");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let database = peer_database(&dir, &[("contract-hash-1", "ergo", "addr-1")]);
-
-        let peers = get_peers(&database).expect("the query must survive the real schema");
-
-        assert_eq!(peers.len(), 1, "a peer in the database is a peer on the page");
-        assert_eq!(peers[0].id, "peer-1");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn peer_contracts_name_the_ledger_by_its_tag() {
-        // Peers only ever name a ledger by tag, and the column now *is* the tag --
-        // there is no hash left to resolve it from.
-        let dir = std::env::temp_dir().join("nodo-tui-test-ledger-tag");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let database = peer_database(&dir, &[("contract-hash-1", "ergo", "addr-1")]);
-
-        let peers = get_peers(&database).unwrap();
-        assert_eq!(peers.len(), 1);
-        assert_eq!(peers[0].contracts.len(), 1);
-        let contract = &peers[0].contracts[0];
-        assert_eq!(contract.ledger, "ergo");
-        assert_eq!(contract.contract_hash, "contract-hash-1");
-        assert_eq!(contract.address, "addr-1");
-        assert_eq!(contract.mu_per_unit, "500");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn every_contract_instance_of_a_peer_is_returned() {
-        // The pre-#231 lookup could only ever surface a single instance.
-        let dir = std::env::temp_dir().join("nodo-tui-test-multi-contract");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let database = peer_database(
-            &dir,
-            &[
-                ("contract-a", "ergo", "addr-a"),
-                ("contract-b", "bitcoin", "addr-b"),
-            ],
-        );
-
-        let peers = get_peers(&database).unwrap();
-        let hashes: Vec<&str> = peers[0]
-            .contracts
-            .iter()
-            .map(|contract| contract.contract_hash.as_str())
-            .collect();
-        assert_eq!(hashes, vec!["contract-a", "contract-b"]);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_peer_without_contracts_still_loads() {
-        let dir = std::env::temp_dir().join("nodo-tui-test-no-contract");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        let database = peer_database(&dir, &[]);
-
-        let peers = get_peers(&database).unwrap();
-        assert_eq!(peers.len(), 1);
-        assert!(peers[0].contracts.is_empty());
-        // Read off the `peer` row itself, never joined against our own `clients`
-        // table -- that join is the bug #178 fixed.
-        assert_eq!(peers[0].remote_client_id, "cli-7f3a");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// A failure must leave a reason behind, or the page is back to claiming a node
-    /// with peers has none.
-    #[test]
-    fn a_query_that_fails_is_recorded_rather_than_rendered_as_an_empty_network() {
-        let dir = std::env::temp_dir().join("nodo-tui-test-peers-error");
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        // A `peer` table with none of the columns the query reads: the same shape of
-        // failure a schema change produces.
-        let database = dir.join("database.sqlite");
-        Connection::open(&database)
-            .unwrap()
-            .execute_batch("CREATE TABLE peer (id TEXT PRIMARY KEY);")
-            .unwrap();
-
-        let mut app = App {
-            peers_error: None,
-            ..Default::default()
-        };
-        app.paths.database = database;
-        app.refresh_peers();
-
-        assert!(
-            app.peers_error.is_some(),
-            "a failed peer query must say so rather than render as zero peers"
-        );
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    /// Threads on the CHAT page (issue #431), against the schema the node
-    /// actually creates -- the same discipline `peer_database` follows for PEERS,
-    /// for the reason `migration_table`'s own comment gives.
-    mod chat_page {
-        use super::*;
-
-        fn chat_database(dir: &Path) -> PathBuf {
-            let path = dir.join("database.sqlite");
-            let connection = Connection::open(&path).unwrap();
-            for table in ["peer", "peer_chat_conversations", "peer_chat_messages"] {
-                connection.execute_batch(&migration_table(table)).unwrap();
-            }
-            connection
-                .execute_batch(
-                    "INSERT INTO peer (id, advertisement, remote_client_id, balance_mu,
-                                       reputation_score)
-                     VALUES ('peer-1', NULL, NULL, '0', 0);",
-                )
-                .unwrap();
-            path
-        }
-
-        #[test]
-        fn conversations_are_listed_against_the_schema_the_node_actually_creates() {
-            let dir = std::env::temp_dir().join("nodo-tui-test-chat-schema");
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).unwrap();
-            let database = chat_database(&dir);
-            Connection::open(&database)
-                .unwrap()
-                .execute(
-                    "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us, topic)
-                     VALUES ('conv-1', 'peer-1', 1, 'ping')",
-                    [],
-                )
-                .unwrap();
-
-            let ours = get_conversations(&database, ChatDirection::Ours)
-                .expect("the query must survive the real schema");
-            assert_eq!(ours.len(), 1);
-            assert_eq!(ours[0].id, "conv-1");
-            assert_eq!(ours[0].peer_id, "peer-1");
-            assert_eq!(ours[0].topic, "ping");
-            assert!(ours[0].closed_at.is_none());
-
-            // opened_by_us=1 is not offered on the reverse page.
-            let theirs = get_conversations(&database, ChatDirection::Theirs).unwrap();
-            assert!(theirs.is_empty());
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_closed_conversation_carries_its_closed_at() {
-            let dir = std::env::temp_dir().join("nodo-tui-test-chat-closed");
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).unwrap();
-            let database = chat_database(&dir);
-            Connection::open(&database)
-                .unwrap()
-                .execute_batch(
-                    "INSERT INTO peer_chat_conversations
-                        (id, peer_id, opened_by_us, topic, closed_at)
-                     VALUES ('conv-1', 'peer-1', 0, '', '2026-01-01 00:00:00');",
-                )
-                .unwrap();
-
-            let theirs = get_conversations(&database, ChatDirection::Theirs).unwrap();
-            assert_eq!(theirs.len(), 1);
-            assert!(theirs[0].closed_at.is_some());
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn conversation_messages_are_read_oldest_first() {
-            let dir = std::env::temp_dir().join("nodo-tui-test-chat-messages");
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).unwrap();
-            let database = chat_database(&dir);
-            let connection = Connection::open(&database).unwrap();
-            connection
-                .execute(
-                    "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us)
-                     VALUES ('conv-1', 'peer-1', 1)",
-                    [],
-                )
-                .unwrap();
-            for (from_us, body, ts) in [(1, "hi", 1_700_000_000), (0, "hi back", 1_700_000_060)] {
-                connection
-                    .execute(
-                        "INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
-                         VALUES ('peer-1', ?1, ?2, ?3, 'conv-1')",
-                        rusqlite::params![from_us, body, ts],
-                    )
-                    .unwrap();
-            }
-
-            let messages = get_conversation_messages(&database, "conv-1")
-                .expect("the query must survive the real schema");
-            assert_eq!(messages.len(), 2);
-            assert!(messages[0].from_us);
-            assert_eq!(messages[0].body, "hi");
-            assert!(!messages[1].from_us);
-            assert_eq!(messages[1].body, "hi back");
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn toggling_direction_reloads_the_list_and_clears_the_stale_selection() {
-            let dir = std::env::temp_dir().join("nodo-tui-test-chat-toggle");
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).unwrap();
-            let database = chat_database(&dir);
-            Connection::open(&database)
-                .unwrap()
-                .execute(
-                    "INSERT INTO peer_chat_conversations (id, peer_id, opened_by_us)
-                     VALUES ('conv-1', 'peer-1', 0)",
-                    [],
-                )
-                .unwrap();
-
-            let mut app = App::default();
-            app.paths.database = database;
-            app.tabs.select_page(Page::Chat);
-            app.refresh_conversations();
-            assert!(app.conversations.items.is_empty(), "nothing opened by us yet");
-
-            app.toggle_chat_direction();
-            assert_eq!(app.chat_direction, ChatDirection::Theirs);
-            assert_eq!(app.conversations.items.len(), 1);
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_new_conversation_needs_both_a_peer_and_a_topic() {
-            let mut app = App::default();
-            app.tabs.select_page(Page::Chat);
-            app.open_new_conversation_prompt();
-            assert_eq!(app.input_mode, InputMode::NewConversation);
-
-            app.input = "just-a-peer-id".to_string();
-            app.submit_new_conversation();
-            assert_eq!(app.input_mode, InputMode::NewConversation, "still open: no topic");
-            assert!(app.status.contains("peer id and a topic"), "{}", app.status);
-        }
-
-        #[test]
-        fn replying_to_a_closed_conversation_is_refused() {
-            let mut app = App::default();
-            app.tabs.select_page(Page::Chat);
-            app.conversations = StatefulList::with_items(vec![ConversationSummary {
-                id: "conv-1".to_string(),
-                peer_id: "peer-1".to_string(),
-                topic: "ping".to_string(),
-                opened_at: "2026-01-01 00:00:00".to_string(),
-                closed_at: Some("2026-01-02 00:00:00".to_string()),
-            }]);
-            app.conversations.next();
-
-            app.open_reply_prompt();
-
-            assert_eq!(app.input_mode, InputMode::Normal, "no prompt opened");
-            assert!(app.status.contains("reopen"), "{}", app.status);
-        }
-
-        #[test]
-        fn an_empty_reply_is_rejected_before_anything_is_sent() {
-            let mut app = App::default();
-            app.tabs.select_page(Page::Chat);
-            app.conversations = StatefulList::with_items(vec![ConversationSummary {
-                id: "conv-1".to_string(),
-                peer_id: "peer-1".to_string(),
-                topic: "ping".to_string(),
-                opened_at: "2026-01-01 00:00:00".to_string(),
-                closed_at: None,
-            }]);
-            app.conversations.next();
-
-            app.open_reply_prompt();
-            assert_eq!(app.input_mode, InputMode::ReplyConversation);
-            app.input = "   ".to_string();
-            app.submit_reply_conversation();
-
-            assert_eq!(app.input_mode, InputMode::ReplyConversation, "still open: empty body");
-            assert!(app.status.contains("Type a message"), "{}", app.status);
-        }
-
-        #[test]
-        fn closing_an_already_closed_conversation_is_a_no_op_not_a_command() {
-            let mut app = App::default();
-            app.tabs.select_page(Page::Chat);
-            app.conversations = StatefulList::with_items(vec![ConversationSummary {
-                id: "conv-1".to_string(),
-                peer_id: "peer-1".to_string(),
-                topic: String::new(),
-                opened_at: "2026-01-01 00:00:00".to_string(),
-                closed_at: Some("2026-01-02 00:00:00".to_string()),
-            }]);
-            app.conversations.next();
-
-            app.close_selected_conversation();
-
-            assert!(app.command_task.is_none(), "nothing spawned");
-            assert!(app.status.contains("already closed"), "{}", app.status);
-        }
-
-        #[test]
-        fn reopening_an_already_open_conversation_is_a_no_op_not_a_command() {
-            let mut app = App::default();
-            app.tabs.select_page(Page::Chat);
-            app.conversations = StatefulList::with_items(vec![ConversationSummary {
-                id: "conv-1".to_string(),
-                peer_id: "peer-1".to_string(),
-                topic: String::new(),
-                opened_at: "2026-01-01 00:00:00".to_string(),
-                closed_at: None,
-            }]);
-            app.conversations.next();
-
-            app.reopen_selected_conversation();
-
-            assert!(app.command_task.is_none(), "nothing spawned");
-            assert!(app.status.contains("already open"), "{}", app.status);
-        }
-    }
 
     #[test]
     fn parses_the_older_single_wallet_output() {
@@ -11421,542 +10344,6 @@ ergo: Cold Wallet: 9cold\n";
         }
     }
 
-    mod forgetting_a_peer {
-        use super::*;
-
-        fn peer(id: &str) -> Peer {
-            Peer {
-                id: id.to_string(),
-                uris: "10.0.0.1:8080".to_string(),
-                balance: "0".to_string(),
-                remote_client_id: String::new(),
-                proof_ids: Vec::new(),
-                reputation_score: "0".to_string(),
-                contracts: Vec::new(),
-            }
-        }
-
-        fn on_peers_page(peers: Vec<Peer>) -> App {
-            let mut app = App::default();
-            app.tabs.index = Page::ALL
-                .iter()
-                .position(|page| *page == Page::Peers)
-                .unwrap();
-            app.peers = StatefulList::with_items(peers);
-            app.peers.next();
-            app
-        }
-
-        #[test]
-        fn it_asks_before_doing_anything() {
-            let mut app = on_peers_page(vec![peer("peer-abc")]);
-            app.open_disconnect_peer_confirm();
-
-            assert_eq!(app.input_mode, InputMode::Confirm);
-            assert!(app.input_title.contains("peer-abc"), "{}", app.input_title);
-            assert!(matches!(
-                app.pending_action,
-                Some(PendingAction::DisconnectPeer { ref id, .. }) if id == "peer-abc"
-            ));
-        }
-
-        #[test]
-        fn confirming_runs_nodo_disconnect_on_the_selected_peer() {
-            // The whole point: the same command the operator would type, so the peer
-            // row, its addresses and its contract instances all go together.
-            let (label, args) = pending_command(PendingAction::DisconnectPeer {
-                id: "peer-abc".to_string(),
-                label: "peer-abc".to_string(),
-            })
-            .expect("a peer disconnect is a `nodo` invocation");
-            assert_eq!(args, vec!["disconnect".to_string(), "peer-abc".to_string()]);
-            assert_eq!(label, "Forget peer peer-abc");
-        }
-
-        #[test]
-        fn with_nothing_selected_it_says_so_instead_of_asking() {
-            let mut app = on_peers_page(Vec::new());
-            app.open_disconnect_peer_confirm();
-            assert_eq!(app.input_mode, InputMode::Normal);
-            assert!(app.pending_action.is_none());
-            assert!(app.status.contains("Select a peer"), "{}", app.status);
-        }
-
-        #[test]
-        fn clients_have_no_such_action() {
-            // A client is ours and expires on its own; there is nothing to forget.
-            // The page split is what enforces it now -- `d` is not bound on Clients --
-            // so the guard here is the second line of defence, not the first.
-            let mut app = on_peers_page(vec![peer("peer-abc")]);
-            app.tabs.index = Page::ALL
-                .iter()
-                .position(|page| *page == Page::Clients)
-                .unwrap();
-            app.open_disconnect_peer_confirm();
-            assert_eq!(app.input_mode, InputMode::Normal);
-            assert!(app.pending_action.is_none());
-        }
-    }
-
-    /// The history behind a peer and a client, read straight out of SQLite.
-    ///
-    /// A card that silently renders nothing looks exactly like a peer with no
-    /// history -- the confusion issue #231 was about, one table over -- so these are
-    /// exercised against a real database rather than through the widgets.
-    /// What the EARNINGS page reads: money out of the catalogue, reputation out of
-    /// `nodo reputation --json`. The tests are about the ways a figure can be wrong.
-    mod earnings {
-        use super::*;
-
-        fn temp_dir(name: &str) -> PathBuf {
-            let dir = std::env::temp_dir()
-                .join(format!("nodo-tui-earnings-{name}-{}", std::process::id()));
-            fs::create_dir_all(&dir).unwrap();
-            dir
-        }
-
-        /// A catalogue with one payment per window, plus the rows that must not count.
-        ///
-        /// Dated relative to `now` by SQLite itself, because that is what
-        /// `get_earnings` compares against: a fixture with literal dates would start
-        /// failing the day it aged out of the year.
-        fn paid_database(dir: &Path) -> PathBuf {
-            let path = dir.join("earnings.sqlite");
-            let connection = Connection::open(&path).unwrap();
-            connection
-                .execute_batch(
-                    "CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_id TEXT,
-                                        direction TEXT, status TEXT, peer_id TEXT, client_id TEXT,
-                                        deposit_token TEXT, ledger TEXT, contract_hash TEXT,
-                                        address TEXT, amount_mu TEXT NOT NULL,
-                                        created_at DATETIME);
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '1', datetime('now', '-1 hour'));
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '10', datetime('now', '-3 days'));
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '100', datetime('now', '-20 days'));
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '1000', datetime('now', '-200 days'));
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '10000', datetime('now', '-800 days'));
-                     -- A deposit we could not validate: no balance was credited for it.
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'rejected', 'ergo', '7', datetime('now', '-1 hour'));
-                     -- Money we paid out. Not earnings, whatever its status.
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('out', 'communicated', 'ergo', '5000', datetime('now', '-1 hour'));
-                     -- Taken over a network the row does not name.
-                     INSERT INTO payments (direction, status, amount_mu, created_at)
-                        VALUES ('in', 'accepted', '3', datetime('now', '-1 hour'));
-                     -- Undated: in no window, but still money this node took.
-                     INSERT INTO payments (direction, status, ledger, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'ergo', '100000', NULL);",
-                )
-                .unwrap();
-            path
-        }
-
-        #[test]
-        fn each_window_holds_what_came_in_inside_it() {
-            let dir = temp_dir("windows");
-            let earnings = get_earnings(&paid_database(&dir)).unwrap();
-
-            let ergo = earnings.iter().find(|entry| entry.ledger == "ergo").unwrap();
-            assert_eq!(ergo.day, 1);
-            assert_eq!(ergo.week, 11);
-            assert_eq!(ergo.month, 111);
-            assert_eq!(ergo.year, 1111);
-            // All time reaches past the year, which is the point of having the column
-            // — and holds the undated payment, which is in no window at all.
-            assert_eq!(ergo.total, 111_111);
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_refused_deposit_is_counted_apart_from_what_was_earned() {
-            // It never became balance, so adding it to the earnings would report
-            // income that did not arrive — and dropping it would hide a client whose
-            // payments keep failing.
-            let dir = temp_dir("refused");
-            let earnings = get_earnings(&paid_database(&dir)).unwrap();
-
-            let ergo = earnings.iter().find(|entry| entry.ledger == "ergo").unwrap();
-            assert_eq!(ergo.refused, 7);
-            assert_eq!(ergo.day, 1, "the refused deposit leaked into the day");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn what_we_paid_out_is_not_earnings() {
-            let dir = temp_dir("outgoing");
-            let earnings = get_earnings(&paid_database(&dir)).unwrap();
-
-            // Everything accepted and incoming, and nothing else: the 5000 we sent
-            // and the 7 we refused are both outside this sum.
-            let taken: u128 = earnings.iter().map(|entry| entry.total).sum();
-            assert_eq!(taken, 111_114, "{earnings:?}");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_payment_over_an_unnamed_network_is_still_money() {
-            // `ledger` is nullable on the row, and a payment with no tag is money the
-            // node took: silently discarding it would understate what it earned.
-            let dir = temp_dir("unnamed");
-            let earnings = get_earnings(&paid_database(&dir)).unwrap();
-
-            let unknown = earnings
-                .iter()
-                .find(|entry| entry.ledger == "unknown")
-                .expect("the untagged payment vanished");
-            assert_eq!(unknown.day, 3);
-            // Biggest earner first, so the rows do not reorder between refreshes.
-            assert_eq!(earnings[0].ledger, "ergo");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_node_with_no_payments_table_reads_as_no_earnings() {
-            let dir = temp_dir("empty");
-            let path = dir.join("empty.sqlite");
-            Connection::open(&path).unwrap();
-
-            assert!(get_earnings(&path).unwrap().is_empty());
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        const REPORT: &str = r#"{
-            "node_id": "ed6d", "own_proof_ids": ["aa11"], "read_at": 1800000000,
-            "errors": {},
-            "standing": {"positive": 0.5, "negative": 0.125, "net": 0.375,
-                         "positive_proofs": 1, "negative_proofs": 1},
-            "opinions": [{"ledger": "ergo", "proof_id": "f3b6", "owner": "0008cd",
-                          "amount": 1, "assigned_amount": 95,
-                          "weight": 0.010526315789473684, "positive": true,
-                          "published_at": 1799000000, "box_id": "box-1",
-                          "burned_nanoerg": 96000000, "backed_nanoerg": 1010526.3}],
-            "own": [{"ledger": "ergo", "proof_id": "aa11", "owner": "0008cd",
-                     "amount": 1, "assigned_amount": 1,
-                     "weight": 1.0, "positive": true,
-                     "published_at": 1798000000, "box_id": "box-own",
-                     "burned_nanoerg": 1000000, "backed_nanoerg": 1000000}]
-        }"#;
-
-        #[test]
-        fn a_report_is_read_whole() {
-            let reputation = parse_node_reputation(REPORT).unwrap();
-
-            assert_eq!(reputation.node_id, "ed6d");
-            assert_eq!(reputation.own_proof_ids, vec!["aa11".to_string()]);
-            assert_eq!(reputation.standing.positive, 0.5);
-            assert_eq!(reputation.standing.negative, 0.125);
-            assert_eq!(reputation.standing.proofs(), 2);
-            assert_eq!(reputation.read_at, Some(1_800_000_000));
-            assert!(reputation.is_read());
-            assert!(reputation.error.is_empty());
-
-            assert_eq!(reputation.opinions.len(), 1);
-            let opinion = &reputation.opinions[0];
-            assert_eq!(opinion.box_id, "box-1");
-            assert_eq!(opinion.proof_id, "f3b6");
-            // One token out of the ninety-five that proof has assigned: ~1.05%, not
-            // the 0.000001% the minted supply would have made of it.
-            assert_eq!((opinion.amount, opinion.assigned_amount), (1, 95));
-            assert!((opinion.weight - 0.010_526_3).abs() < 1e-6);
-            assert_eq!(opinion.burned_nanoerg, 96_000_000.0);
-            assert!(opinion.positive);
-            assert_eq!(opinion.published_at, Some(1_799_000_000));
-
-            // Our own proof's stake arrives separately, so it can be shown without
-            // being counted.
-            assert_eq!(reputation.own.len(), 1);
-            assert_eq!(reputation.own[0].proof_id, "aa11");
-        }
-
-        #[test]
-        fn a_report_carries_no_windows_to_read_reputation_over() {
-            // Deliberately absent rather than missed: the chain cannot date what it
-            // holds (a proof re-dates every opinion when it republishes), so a window
-            // would report the publisher's submission cadence. Only money is windowed,
-            // and that comes from the catalogue.
-            let reputation = parse_node_reputation(REPORT).unwrap();
-            assert_eq!(reputation.standing.positive, 0.5);
-            assert!(!REPORT.contains("periods"), "the report grew windows again");
-        }
-
-        #[test]
-        fn a_ledger_that_could_not_be_read_is_named_beside_the_figures() {
-            let reputation = parse_node_reputation(
-                r#"{"node_id": "ed6d", "own_proof_ids": [], "read_at": 1,
-                     "errors": {"ergo": "explorer unreachable"},
-                     "standing": {"positive": 0.0, "negative": 0.0,
-                                  "positive_proofs": 0, "negative_proofs": 0},
-                     "opinions": [], "own": []}"#,
-            )
-            .unwrap();
-            assert_eq!(reputation.error, "ergo: explorer unreachable");
-        }
-
-        #[test]
-        fn a_line_printed_ahead_of_the_report_does_not_swallow_it() {
-            // A node loading a fresh config generates its identity and says so on
-            // stdout. Parsing the whole stream would fail, and the page would report
-            // an unreadable chain on a node whose chain is perfectly readable.
-            // One line, as `nodo reputation --json` prints it.
-            let report = r#"{"node_id": "ed6d", "read_at": 1, "own_proof_ids": [], "standing": {}, "opinions": [], "own": []}"#;
-            let noisy = format!("Generated new node identity mnemonic\n{report}\n");
-            let reputation = parse_node_reputation(report_line(&noisy).unwrap()).unwrap();
-            assert_eq!(reputation.node_id, "ed6d");
-            assert_eq!(report_line("nothing json here\n"), None);
-        }
-
-        #[test]
-        fn a_failed_command_is_an_error_and_never_an_empty_verdict() {
-            // `{"error": …}` is what the command prints when it could not read the
-            // chain at all. Read as a report it would say "nobody stakes anything on
-            // this node", which is a claim about the network.
-            let error = parse_node_reputation(r#"{"error": "no node identity", "read_at": 1}"#)
-                .unwrap_err();
-            assert_eq!(error, "no node identity");
-            assert!(parse_node_reputation("not json at all").is_err());
-        }
-    }
-
-    mod donation_report {
-        use super::*;
-
-        const REPORT: &str = r#"{
-            "read_at": 1800000000, "donation_weight": 0.3,
-            "ledgers": [{"ledger": "ergo", "percentage": "0.02",
-                         "min_transfer": "0.1", "min_confirmations": 10,
-                         "owed_native": {"ERG": "1200000.5"},
-                         "paid_mu": 41000000, "paid_count": 2, "scan_tip": 1500,
-                         "pay_wallets": [{"address": "9gGZ", "weight": "70",
-                                          "normalised": "0.7", "in_other_list": true},
-                                         {"address": "9fXX", "weight": "30",
-                                          "normalised": "0.3", "in_other_list": false}],
-                         "credit_wallets": [{"address": "9gGZ", "weight": "1",
-                                             "normalised": "1", "in_other_list": true}]}],
-            "peers": [{"peer_id": "peer-a", "bonus": 0.5, "score_term": 0.15}],
-            "unattributed_donors": ["9zzz"],
-            "warnings": ["ledgers.ergo: you fund 9fXX but do not count it."]
-        }"#;
-
-        #[test]
-        fn a_report_is_read_whole() {
-            let donations = parse_node_donations(REPORT).unwrap();
-
-            assert_eq!(donations.donation_weight, 0.3);
-            assert_eq!(donations.read_at, Some(1_800_000_000));
-            assert!(donations.is_read());
-            assert!(donations.error.is_empty());
-
-            let ergo = &donations.ledgers[0];
-            assert_eq!(ergo.ledger, "ergo");
-            assert_eq!(ergo.percentage, "0.02");
-            assert_eq!(ergo.paid_mu, 41_000_000);
-            assert_eq!(ergo.paid_count, 2);
-            // The fraction survives the round trip: it is a real part of the debt, and
-            // it is the difference between donating the configured share and slightly
-            // less than it.
-            assert_eq!(ergo.owed, vec![("ERG".to_string(), "1200000.5".to_string())]);
-            assert_eq!(ergo.pay_wallets.len(), 2);
-            // The weight as written and the share it actually pays are both carried:
-            // 70 and 30 pay what 0.7 and 0.3 pay, and only the share says so.
-            assert_eq!(ergo.pay_wallets[0].weight, "70");
-            assert_eq!(ergo.pay_wallets[0].share, "0.7");
-            assert!(ergo.pay_wallets[0].in_other_list);
-            assert!(!ergo.pay_wallets[1].in_other_list);
-        }
-
-        #[test]
-        fn a_peer_bonus_is_found_by_id_and_missing_means_none() {
-            let donations = parse_node_donations(REPORT).unwrap();
-
-            assert_eq!(donations.for_peer("peer-a"), Some((0.5, 0.15)));
-            // Not zero-with-credit: a peer nobody counted has no entry, and the card
-            // says "none counted" rather than drawing a bonus of 0.0000.
-            assert_eq!(donations.for_peer("peer-b"), None);
-        }
-
-        #[test]
-        fn a_failed_command_is_an_error_and_never_an_empty_verdict() {
-            // Read as a report, `{"error": …}` would say this node donates nothing and
-            // counts nobody -- a claim about the operator's configuration.
-            let error = parse_node_donations(r#"{"error": "no database", "read_at": 1}"#)
-                .unwrap_err();
-            assert_eq!(error, "no database");
-            assert!(parse_node_donations("not json at all").is_err());
-        }
-
-        #[test]
-        fn an_unread_report_is_not_a_node_that_donates_nothing() {
-            let pending = NodeDonations::default();
-            assert!(!pending.is_read());
-
-            let read = parse_node_donations(
-                r#"{"read_at": 1, "donation_weight": 0.0, "ledgers": [], "peers": []}"#,
-            )
-            .unwrap();
-            assert!(read.is_read(), "a report that came back empty has still come back");
-        }
-    }
-
-    mod payment_and_reputation_history {
-        use super::*;
-
-        fn history_database(dir: &Path) -> PathBuf {
-            let path = dir.join("history.sqlite");
-            let connection = Connection::open(&path).unwrap();
-            connection
-                .execute_batch(
-                    "CREATE TABLE peer (id TEXT PRIMARY KEY, balance_mu TEXT,
-                                        advertisement BLOB, reputation_score INTEGER,
-                                        reputation_index INTEGER);
-                     CREATE TABLE clients (id TEXT PRIMARY KEY, balance_mu TEXT,
-                                        last_usage FLOAT, unmetered INTEGER NOT NULL DEFAULT 0);
-                     CREATE TABLE payments (id INTEGER PRIMARY KEY AUTOINCREMENT, tx_id TEXT,
-                                        direction TEXT, status TEXT, peer_id TEXT, client_id TEXT,
-                                        deposit_token TEXT, ledger TEXT, contract_hash TEXT,
-                                        address TEXT, amount_mu TEXT NOT NULL,
-                                        created_at DATETIME);
-                     CREATE TABLE reputation_events (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                        subject_kind TEXT, subject_id TEXT, amount INTEGER,
-                                        reason TEXT, score_after INTEGER, created_at DATETIME);
-                     CREATE TABLE deposit_tokens (id TEXT PRIMARY KEY, client_id TEXT,
-                                        status TEXT, created_at DATETIME);
-                     CREATE TABLE local_instances (id TEXT PRIMARY KEY, name TEXT, father_id TEXT);
-                     INSERT INTO peer VALUES ('peer-1', '1000', NULL, 7, 3);
-                     INSERT INTO clients VALUES ('client-1', '500', NULL, 1);
-                     INSERT INTO payments (tx_id, direction, status, peer_id, amount_mu, created_at)
-                        VALUES ('tx-old', 'out', 'communicated', 'peer-1', '1000', '2026-01-01 10:00:00');
-                     INSERT INTO payments (tx_id, direction, status, peer_id, amount_mu, created_at)
-                        VALUES ('tx-new', 'out', 'unacknowledged', 'peer-1', '2000', '2026-01-02 10:00:00');
-                     INSERT INTO payments (direction, status, client_id, deposit_token, amount_mu, created_at)
-                        VALUES ('in', 'accepted', 'client-1', 'token-1', '750', '2026-01-03 10:00:00');
-                     INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
-                        VALUES ('peer', 'peer-1', -100, 'payment_unacknowledged', -93, '2026-01-02 10:00:01');
-                     INSERT INTO reputation_events (subject_kind, subject_id, amount, reason, score_after, created_at)
-                        VALUES ('service', 'peer-1', -100, 'instance_lost', -100, '2026-01-02 10:00:02');
-                     INSERT INTO deposit_tokens VALUES ('token-1', 'client-1', 'payed', '2026-01-03 09:59:00');
-                     INSERT INTO local_instances VALUES ('instance-1', 'demo', 'client-1');
-                     INSERT INTO local_instances VALUES ('instance-2', 'other', 'someone-else');",
-                )
-                .unwrap();
-            path
-        }
-
-        fn temp_dir(name: &str) -> PathBuf {
-            let dir = std::env::temp_dir()
-                .join(format!("nodo-tui-history-{name}-{}", std::process::id()));
-            fs::create_dir_all(&dir).unwrap();
-            dir
-        }
-
-        #[test]
-        fn a_peer_carries_its_payments_and_the_events_behind_its_score() {
-            let dir = temp_dir("peer");
-            let database = history_database(&dir);
-
-            let detail = get_peer_detail(&database, "peer-1").unwrap();
-
-            // Newest first: the payment an operator is looking for is the last one.
-            assert_eq!(detail.payments.len(), 2);
-            assert_eq!(detail.payments[0].tx_id, "tx-new");
-            assert_eq!(detail.payments[0].status, "unacknowledged");
-            assert_eq!(detail.payments[0].amount, "2000");
-            // A service event that happens to share the id is not this peer's history.
-            assert_eq!(detail.events.len(), 1);
-            assert_eq!(detail.events[0].reason, "payment_unacknowledged");
-            assert_eq!(detail.events[0].score_after, Some(-93));
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_client_carries_what_it_paid_what_it_was_given_and_what_it_runs() {
-            let dir = temp_dir("client");
-            let database = history_database(&dir);
-
-            let detail = get_client_detail(&database, "client-1").unwrap();
-
-            assert_eq!(detail.payments.len(), 1);
-            assert_eq!(detail.payments[0].deposit_token, "token-1");
-            assert_eq!(detail.deposits.len(), 1);
-            assert_eq!(detail.deposits[0].status, "payed");
-            // Only its own instances: father_id is the client that started them.
-            assert_eq!(detail.instances.len(), 1);
-            assert_eq!(detail.instances[0].name, "demo");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn the_unmetered_flag_reaches_the_table() {
-            let dir = temp_dir("unmetered");
-            let database = history_database(&dir);
-
-            let clients = get_clients(&database).unwrap();
-
-            assert_eq!(clients.len(), 1);
-            assert!(clients[0].unmetered, "a dev client is never charged");
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn adjusting_a_score_by_hand_records_why() {
-            // Every other mover of a score writes an event. One that did not would be
-            // the single unexplained step in a peer's history.
-            let dir = temp_dir("adjust");
-            let database = history_database(&dir);
-
-            adjust_peer_reputation(&database, "peer-1", -3).unwrap();
-
-            let connection = Connection::open(&database).unwrap();
-            let (score, index): (i64, i64) = connection
-                .query_row(
-                    "SELECT reputation_score, reputation_index FROM peer WHERE id = 'peer-1'",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
-            assert_eq!((score, index), (4, 4));
-
-            let (amount, reason, after): (i64, String, i64) = connection
-                .query_row(
-                    "SELECT amount, reason, score_after FROM reputation_events
-                     WHERE subject_id = 'peer-1' ORDER BY id DESC LIMIT 1",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .unwrap();
-            assert_eq!(amount, -3);
-            assert_eq!(reason, "operator_adjustment");
-            assert_eq!(after, 4);
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-
-        #[test]
-        fn a_peer_that_has_done_nothing_yet_has_an_empty_history_not_an_error() {
-            let dir = temp_dir("empty");
-            let database = history_database(&dir);
-
-            let detail = get_peer_detail(&database, "peer-unknown").unwrap();
-
-            assert!(detail.payments.is_empty());
-            assert!(detail.events.is_empty());
-
-            let _ = fs::remove_dir_all(&dir);
-        }
-    }
     /// The KyA gate (issue #395).
     ///
     /// The two ways this fails *silently*: a gate that never comes up on a node that
