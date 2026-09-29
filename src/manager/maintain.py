@@ -33,6 +33,7 @@ from src.virtualizers.interface import (
 )
 from src.core_services.low_demand import scheduler_tick
 from src.manager.network_change import network_change_tick
+from src.manager.gossip import gossip_pull_tick, gossip_push_tick
 
 env_manager = ConfigManager()
 
@@ -775,6 +776,10 @@ def _manager_pass(short_interval_count: int) -> int:
     # promise: self-gates to its own hourly interval, never raises, and is the only
     # place the reputation contract is read from a network -- the balancer reads rows.
     onchain_reputation_tick()
+
+    # Bounded third-party peer discovery; each tick gates itself on live config.
+    gossip_pull_tick()
+    gossip_push_tick()
 
     # Tell known peers when this node's own address changes (moving off a LAN, a
     # renewed dynamic public IP), rather than waiting for one of them to notice it

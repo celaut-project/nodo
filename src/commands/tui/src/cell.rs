@@ -554,6 +554,44 @@ static LEVERS: &[Lever] = &[
         secret: false,
     },
     Lever {
+        id: "share-peers",
+        organelle: Organelle::Vesicles,
+        label: "share known peers",
+        question: "Do I share public peer announcements with other nodes?",
+        consequence: "On, this node answers peer-list requests and periodically introduces known peers. Private addresses are never relayed.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "off",
+                writes: &[("communication.SHARE_KNOWN_PEERS", "false")],
+            },
+            LeverState {
+                label: "on",
+                writes: &[("communication.SHARE_KNOWN_PEERS", "true")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "discover-peers",
+        organelle: Organelle::Vesicles,
+        label: "discover peers",
+        question: "Do I learn about peers from the nodes I already know?",
+        consequence: "On, this node periodically asks one known peer for signed announcements and verifies each before registering it.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "off",
+                writes: &[("communication.DISCOVER_PEERS_VIA_GOSSIP", "false")],
+            },
+            LeverState {
+                label: "on",
+                writes: &[("communication.DISCOVER_PEERS_VIA_GOSSIP", "true")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    Lever {
         id: "announcements",
         organelle: Organelle::Vesicles,
         label: "announcements",
@@ -1268,6 +1306,8 @@ static PROFILES: &[Profile] = &[
             ("deposits.AUTOMATIC_REFILL", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+            ("communication.SHARE_KNOWN_PEERS", "false"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
@@ -1307,6 +1347,8 @@ static PROFILES: &[Profile] = &[
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
             ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+            ("communication.SHARE_KNOWN_PEERS", "false"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             // Steep, because scarcity is the only automatic brake this node has on
@@ -1348,6 +1390,8 @@ static PROFILES: &[Profile] = &[
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
             ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
+            ("communication.SHARE_KNOWN_PEERS", "true"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "true"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             ("pricing.SCARCITY_MAX_MULTIPLIER", "10"),
@@ -1385,6 +1429,8 @@ static PROFILES: &[Profile] = &[
             ("deposits.AUTOMATIC_REFILL", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
+            ("communication.SHARE_KNOWN_PEERS", "true"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "true"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
@@ -1419,6 +1465,8 @@ static PROFILES: &[Profile] = &[
             ("deposits.AUTOMATIC_REFILL", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+            ("communication.SHARE_KNOWN_PEERS", "false"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
@@ -2062,6 +2110,23 @@ mod tests {
                     );
                 }
                 document = example_config();
+            }
+        }
+
+        #[test]
+        fn gossip_follows_each_profiles_self_announcement_posture() {
+            for profile in profiles() {
+                let value = |key: &str| {
+                    profile.writes.iter().find(|(path, _)| *path == key).map(|(_, v)| *v)
+                };
+                let expected = match profile.id {
+                    "just-me" | "cautious" | "workbench" => Some("false"),
+                    "open-renter" | "lan-lab" => Some("true"),
+                    other => panic!("gossip posture not specified for {other}"),
+                };
+                assert_eq!(value("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS"), expected);
+                assert_eq!(value("communication.SHARE_KNOWN_PEERS"), expected);
+                assert_eq!(value("communication.DISCOVER_PEERS_VIA_GOSSIP"), expected);
             }
         }
 

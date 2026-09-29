@@ -196,6 +196,37 @@ installs no binfmt handler, so cross-arch *packing* genuinely cannot work.
 `DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH` (read by `src/commands/connect.py` and
 the execution balancer), plus `MAX_SIGNATURE_SCHEME_COMPONENTS`.
 
+### Transitive peer discovery (gossip)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `communication.SHARE_KNOWN_PEERS` | `true` | Answer `Gateway.ListPeers` with known peers and periodically push their announcements with `IntroducePeer`. Off returns an empty list and disables push. |
+| `communication.DISCOVER_PEERS_VIA_GOSSIP` | `true` | Periodically pull advertisements from one randomly selected known peer. Each is registered through normal signature verification and anti-replay checks. |
+| `communication.MAX_PEERS_PER_GOSSIP_RESPONSE` | `100` | Maximum advertisements served per list request; also the local cap on messages consumed from a remote list, including rejected ones. Zero disables list/pull work. |
+| `communication.MAX_PEERS_PER_GOSSIP_PUSH` | `20` | Maximum other peers introduced to one random target per tick. Zero disables push work. |
+| `communication.GOSSIP_INTERVAL_SECONDS` | `300` | Independent pull/push intervals, measured with a monotonic clock. Invalid or nonpositive values use 300 seconds. |
+
+The two switches are independent of self-announcement and are read live. CELL exposes
+both as individual levers. Profiles mirror self-announcement: `just-me`, `cautious`,
+and `workbench` disable both; `open-renter` and `lan-lab` enable both. A first peer
+still needs `nodo connect`; there is no bootstrap list or DHT.
+
+**Relay intact or not at all.** A peer's signature covers every address and expiry.
+Neither push nor list may redact a private address and invalidate that signature.
+Instead, an advertisement containing **any** private, loopback, link-local, multicast,
+reserved, or otherwise non-global IP is withheld in its entirety, even if that address
+has expired. DNS names are also withheld: a third party's name may resolve privately
+or through split-horizon DNS. This is deliberately stricter than self-announcement;
+DNS-only and mixed public/private peers remain reachable by direct connect but are
+not transitively discovered. No setting overrides this disclosure rule.
+
+An advertisement with no addresses or with every address expired is withheld; expiry
+zero means no declared expiry. Individual expired public addresses in an otherwise
+usable signed advertisement cannot be removed. Receivers verify the original signature
+and apply normal registration rules. Gossip uses the same client-id/rate-limit gate
+as other gateway calls, and does not relay queries recursively. See
+[the peer gossip proposal](proposals/427-peer-gossip.md) for bounds and tradeoffs.
+
 ### Where the prose travels
 
 An announcement declares what it means — its signature scheme, and the protocol stack of

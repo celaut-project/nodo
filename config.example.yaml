@@ -939,6 +939,14 @@ communication:
   # prose is small already and is always republished whole.
   SHARE_PROSE_ON_LEDGER: false
   SELF_ANNOUNCE_TO_CONNECTING_PEERS: true
+
+  # Relay only intact signed advertisements whose addresses are all public IPs.
+  # Mixed public/private, DNS-only, and fully expired advertisements are not relayed.
+  SHARE_KNOWN_PEERS: true
+  DISCOVER_PEERS_VIA_GOSSIP: true
+  MAX_PEERS_PER_GOSSIP_RESPONSE: 100  # Also bounds how many replies a pull consumes.
+  MAX_PEERS_PER_GOSSIP_PUSH: 20
+  GOSSIP_INTERVAL_SECONDS: 300
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
 
