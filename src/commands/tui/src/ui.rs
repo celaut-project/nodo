@@ -1822,7 +1822,7 @@ fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
             Constraint::Length(14),
         ],
     )
-    // "Stored" is what this service adds to the disk; "With blocks" is what it
+    // "Stored here" is what this service adds to the disk; "With blocks" is what it
     // weighs. The two differ by every byte it shares with another service, which
     // for a service whose bulk is one large layer is nearly all of it -- so a
     // single figure was answering one of two quite different questions without
@@ -1830,7 +1830,7 @@ fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
     .header(header_row(vec![
         "Tag",
         "Content ID",
-        "Stored",
+        "Stored here",
         "With blocks",
     ]))
     .block(section_block(
