@@ -26,6 +26,9 @@ pub mod clients;
 /// The CHAT page: free-text conversations with peer operators (issue #431).
 pub mod chat;
 
+/// Right-click menus: an element's actions, as the keys that already do them.
+pub mod context_menu;
+
 /// Application.
 pub mod app;
 

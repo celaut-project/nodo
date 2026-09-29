@@ -148,6 +148,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         InputMode::PickChatPeer => crate::chat::draw_peer_picker(frame, app),
         InputMode::PickChatTopic => crate::chat::draw_topic_picker(frame, app),
         InputMode::PickChatService => crate::chat::draw_service_picker(frame, app),
+        InputMode::ContextMenu => crate::context_menu::draw(frame, app),
         // Drawn inline by `chat::draw` as part of the conversation pane, not as a
         // centered popup -- the docked compose box is the whole point (issue: TUI
         // chat/peers/clients redesign).
@@ -4237,29 +4238,15 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
-    // The KyA gate owns the footer too: the keys that matter while it is up are its
-    // own, and a page's shortcuts printed underneath an unanswered question would be
-    // advertising keys that deliberately do nothing (issue #395).
-    if app.awaiting_kya() {
-        let lines = vec![
-            Line::from(Span::styled(
-                "Accepting is required to run this node.",
-                Style::default().fg(warn()),
-            )),
-            Line::from(Span::styled(
-                "y accept · n decline · ↑↓ scroll",
-                Style::default().fg(muted()),
-            )),
-        ];
-        frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
-        return;
-    }
-    // Page-local keys only. The navigation keys are the same everywhere and are
-    // printed on their own line below, rather than repeated twelve times with
-    // twelve chances to fall out of step -- which is what "tab/shift+tab cycle" did
-    // on every one of these strings before the groups existed.
-    let controls = match app.page() {
+/// The footer's page-local keys. The navigation keys are the same everywhere and
+/// are printed on their own line below, rather than repeated twelve times with
+/// twelve chances to fall out of step -- which is what "tab/shift+tab cycle" did
+/// on every one of these strings before the groups existed.
+///
+/// Also what the right-click menus (`context_menu.rs`) are held to: every key a
+/// menu presses is one this line documents.
+pub(crate) fn page_controls(page: Page) -> &'static str {
+    match page {
         Page::Overview => "r refresh  \u{2022}  q quit",
         Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  r refresh  \u{2022}  q quit",
         Page::Services => {
@@ -4291,7 +4278,28 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  / filter  \u{2022}  q quit"
         }
         Page::Logs => "r refresh  \u{2022}  q quit",
-    };
+    }
+}
+
+fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
+    // The KyA gate owns the footer too: the keys that matter while it is up are its
+    // own, and a page's shortcuts printed underneath an unanswered question would be
+    // advertising keys that deliberately do nothing (issue #395).
+    if app.awaiting_kya() {
+        let lines = vec![
+            Line::from(Span::styled(
+                "Accepting is required to run this node.",
+                Style::default().fg(warn()),
+            )),
+            Line::from(Span::styled(
+                "y accept · n decline · ↑↓ scroll",
+                Style::default().fg(muted()),
+            )),
+        ];
+        frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
+        return;
+    }
+    let controls = page_controls(app.page());
     // How to get anywhere, said once. SCHEDULE is the exception that has to be named
     // where it applies: a footer advertising `[/] group` on the one page where those
     // keys do something else would be advertising the wrong thing.

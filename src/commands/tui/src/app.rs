@@ -400,6 +400,9 @@ pub enum InputMode {
     /// attach to the message as a card (issue #438). Esc goes back to the message
     /// rather than dropping it.
     PickChatService,
+    /// A right-click menu of the clicked row's actions (issue #438). Choosing an
+    /// entry presses its key, in Normal mode, as if it had been typed.
+    ContextMenu,
 }
 
 /// How the `EditConfig` popup should let the user set a value, chosen from the
@@ -2977,6 +2980,8 @@ pub struct App {
     pub chat_card_buttons: Vec<(ChatCardAction, Rect)>,
     pub chat_attach_area: Rect,
     pub chat_send_area: Rect,
+    /// The open right-click menu, while `input_mode` is `ContextMenu`.
+    pub context_menu: Option<crate::context_menu::ContextMenu>,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
@@ -3121,6 +3126,7 @@ impl Default for App {
             chat_card_buttons: Vec::new(),
             chat_attach_area: Rect::ZERO,
             chat_send_area: Rect::ZERO,
+            context_menu: None,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             tabs_area: Rect::ZERO,
@@ -3469,21 +3475,28 @@ impl App {
             self.run_chat_card_action(action);
             return;
         }
-        if let Some(visible) = visible_row_at(position, self.list_area) {
-            // A click landing in the table's own id column copies that row's id in
-            // addition to selecting it, since that column is exactly where an
-            // operator would click to read an id the table truncated.
-            let in_id_column = self
-                .id_column_x
-                .map(|(start, end)| column >= start && column < end)
-                .unwrap_or(false);
-            self.select_visible_row(visible);
-            if in_id_column {
-                if let Some(id) = self.selected_row_id() {
-                    self.copy_to_clipboard(&id);
-                }
+        // A click landing in the table's own id column copies that row's id in
+        // addition to selecting it, since that column is exactly where an
+        // operator would click to read an id the table truncated.
+        let in_id_column = self
+            .id_column_x
+            .map(|(start, end)| column >= start && column < end)
+            .unwrap_or(false);
+        if self.select_row_at(position) && in_id_column {
+            if let Some(id) = self.selected_row_id() {
+                self.copy_to_clipboard(&id);
             }
         }
+    }
+
+    /// Select the table row drawn at `position`, if there is one there. What a left
+    /// click and a right click (`open_context_menu`) have in common.
+    pub(crate) fn select_row_at(&mut self, position: Position) -> bool {
+        let Some(visible) = visible_row_at(position, self.list_area) else {
+            return false;
+        };
+        self.select_visible_row(visible);
+        true
     }
 
     /// The id of whatever `select_visible_row` just selected, for the pages whose
@@ -4112,7 +4125,8 @@ impl App {
             | InputMode::AcceptKya
             | InputMode::Confirm
             | InputMode::ConfirmWrites
-            | InputMode::Details => {}
+            | InputMode::Details
+            | InputMode::ContextMenu => {}
         }
     }
 
@@ -10972,12 +10986,14 @@ ergo: Cold Wallet: 9cold\n";
             let mut app = install.app();
             let page = app.page();
 
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             for kind in [
                 MouseEventKind::ScrollUp,
                 MouseEventKind::ScrollDown,
                 MouseEventKind::Down(MouseButton::Left),
+                MouseEventKind::Down(MouseButton::Right),
             ] {
-                handle_mouse_events(
+                rt.block_on(handle_mouse_events(
                     MouseEvent {
                         kind,
                         column: 4,
@@ -10985,7 +11001,8 @@ ergo: Cold Wallet: 9cold\n";
                         modifiers: KeyModifiers::NONE,
                     },
                     &mut app,
-                );
+                ))
+                .unwrap();
             }
 
             assert!(app.awaiting_kya());

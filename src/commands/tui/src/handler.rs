@@ -7,7 +7,7 @@ use ratatui::layout::Position;
 ///
 /// Only the Normal and Details modes react. While a modal owns the screen, a click on
 /// the page behind it would act on something the user cannot see.
-pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
+pub async fn handle_mouse_events(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
     match app.input_mode {
         // The KyA gate is a decision, and a decision is not something a stray wheel
         // event or a click on the page behind it should be able to make. Scrolling is
@@ -19,6 +19,10 @@ pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
             MouseEventKind::ScrollUp => app.on_up(),
             MouseEventKind::ScrollDown => app.on_down(),
             MouseEventKind::Down(MouseButton::Left) => app.click_at(mouse.column, mouse.row),
+            // The clicked element's actions, as a menu (issue #438).
+            MouseEventKind::Down(MouseButton::Right) => {
+                app.open_context_menu(mouse.column, mouse.row)
+            }
             // Dragging a schedule window's edge along the day bar (issue #414). Only
             // SCHEDULE has anything to drag; `drag_schedule` is a no-op elsewhere and
             // while nothing is held.
@@ -49,7 +53,31 @@ pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
             MouseEventKind::ScrollDown => app.scroll_details(1),
             _ => {}
         },
+        // A click on an entry chooses it; a click anywhere else dismisses the menu
+        // without acting on what was under it.
+        InputMode::ContextMenu => match mouse.kind {
+            MouseEventKind::Down(_) => {
+                if app.context_item_at(mouse.column, mouse.row).is_some() {
+                    run_context_choice(app).await?;
+                } else {
+                    app.close_context_menu();
+                }
+            }
+            MouseEventKind::ScrollUp => app.move_context_selection(-1),
+            MouseEventKind::ScrollDown => app.move_context_selection(1),
+            _ => {}
+        },
         _ => {}
+    }
+    Ok(())
+}
+
+/// Press the key the menu's chosen entry stands for, in Normal mode, exactly as if
+/// it had been typed -- the menu has no actions of its own to drift from the keys.
+async fn run_context_choice(app: &mut App) -> AppResult<()> {
+    match app.take_context_choice() {
+        Some(key) => Box::pin(handle_key_events(key, app)).await,
+        None => Ok(()),
     }
 }
 
@@ -155,6 +183,18 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
                     app.chat_wizard_peer_filter.push(character);
                     app.chat_peer_filter_changed();
                 }
+                _ => {}
+            }
+            return Ok(());
+        }
+        // A right-click menu (issue #438): ↑/↓ and Enter, like every picker here.
+        InputMode::ContextMenu => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (_, KeyCode::Up) => app.move_context_selection(-1),
+                (_, KeyCode::Down) => app.move_context_selection(1),
+                (_, KeyCode::Enter) => Box::pin(run_context_choice(app)).await?,
+                (_, KeyCode::Esc | KeyCode::Char('q')) => app.close_context_menu(),
                 _ => {}
             }
             return Ok(());
