@@ -116,6 +116,22 @@ def _public_host() -> Optional[str]:
     )
 
 
+def _public_port(internal_port: int) -> int:
+    """The port to advertise alongside ``_public_host()``: ``network.PUBLIC_TCP_PORT``,
+    else ``internal_port``.
+
+    A router forwarding a different external port than the one this node listens on
+    internally needs that external port announced, or a remote peer is told to
+    connect to a port nothing is actually listening on there.
+    """
+    from src.utils.network import resolve_public_port
+
+    return resolve_public_port(
+        configured=str(env_manager.get("network.PUBLIC_TCP_PORT", "") or ""),
+        internal_port=internal_port,
+    )
+
+
 def _is_loopback(ip: str) -> bool:
     """True for the whole loopback range, not just 127.0.0.1 / ::1."""
     try:
@@ -160,9 +176,9 @@ def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:
     public_host = _public_host()
     if public_host:
         seen_ips.add(public_host)
-        gateway_port = _gateway_port()
-        uris.append(celaut.Instance.Uri(ip=public_host, port=gateway_port))
-        log.LOGGER(f'Announcing public host {public_host}:{gateway_port}')
+        public_port = _public_port(_gateway_port())
+        uris.append(celaut.Instance.Uri(ip=public_host, port=public_port))
+        log.LOGGER(f'Announcing public host {public_host}:{public_port}')
     else:
         log.LOGGER('No public address to announce (set network.PUBLIC_IP if behind NAT).')
 

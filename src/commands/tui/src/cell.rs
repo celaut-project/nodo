@@ -331,6 +331,19 @@ static LEVERS: &[Lever] = &[
         warning: None,
         secret: false,
     },
+    Lever {
+        id: "public-nat-port",
+        organelle: Organelle::Channels,
+        label: "public port",
+        question: "Does the router forward a different port than the one this node listens on?",
+        consequence: "Empty advertises the internal gateway port itself, right when the router forwards the same number. Set it only when the router's forwarded (NAT) port differs.",
+        kind: LeverKind::Scalar {
+            path: "network.PUBLIC_TCP_PORT",
+            unit: "",
+        },
+        warning: None,
+        secret: false,
+    },
     // --- RIBOSOMES · work --------------------------------------------------
     Lever {
         id: "outside-work",

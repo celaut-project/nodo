@@ -6,7 +6,7 @@ from src.utils import logger as log
 import src.manager.resources as iobd
 from src.utils.config import ConfigManager
 from src.utils.java_dependency import JavaDependencyMissing
-from src.utils.network import get_local_ip
+from src.utils.network import get_local_ip, resolve_public_host, resolve_public_port
 
 env_manager = ConfigManager(log=log.LOGGER)
 
@@ -222,7 +222,30 @@ if __name__ == '__main__':
 
         port = gateway_port()
         if port:
-            print(f"Nodo address: {get_local_ip()}:{port}", flush=True)
+            # The same address GetPeerInfo/IntroducePeer actually announce to peers
+            # (src/gateway/utils.py:_uris_for_all_interfaces): the configured public
+            # IP/DNS name with its NAT port when set, or the outbound-interface IP
+            # with the internal port when this node has no public address to give.
+            # Printing anything else here would tell the operator a different
+            # address than the one the network actually uses to reach them.
+            try:
+                outbound_ip = get_local_ip()
+            except Exception as e:
+                log.LOGGER(f"Error getting local IP: {e}.")
+                outbound_ip = None
+            public_host = resolve_public_host(
+                configured=str(env_manager.get("network.PUBLIC_IP", "") or ""),
+                outbound_ip=outbound_ip,
+            )
+            if public_host:
+                public_port = resolve_public_port(
+                    env_manager.get("network.PUBLIC_TCP_PORT", ""), port
+                )
+                print(f"Nodo address: {public_host}:{public_port} (public)", flush=True)
+            elif outbound_ip:
+                print(f"Nodo address: {outbound_ip}:{port} (local network)", flush=True)
+            else:
+                print("Nodo address: unavailable -- could not determine an address.", flush=True)
         else:
             print(
                 "Nodo address: unavailable -- network.GATEWAY_PORT is not "
