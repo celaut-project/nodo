@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import math
 import uuid
@@ -93,8 +94,24 @@ TRACEABILITY_COLUMNS = {
     # A node that already deployed peer_chat_messages before conversations existed
     # has the table but not this column -- an ADD COLUMN, not ensure_tables, for the
     # same reason as `peer.local_client_id` above.
-    "peer_chat_messages": {"conversation_id": "TEXT DEFAULT NULL"},
+    "peer_chat_messages": {
+        "conversation_id": "TEXT DEFAULT NULL",
+        # A service shared in chat (issue #438): same upgrade path again.
+        "service_id": "TEXT DEFAULT NULL",
+        "service_tags": "TEXT DEFAULT NULL",
+    },
 }
+
+
+def _chat_service(row) -> Optional[dict]:
+    """A chat row's service card (issue #438), or None for an ordinary message."""
+    if not row['service_id']:
+        return None
+    try:
+        tags = json.loads(row['service_tags'] or "[]")
+    except ValueError:
+        tags = []
+    return {'id': row['service_id'], 'tags': [str(tag) for tag in tags if isinstance(tag, str)]}
 
 
 def _as_int(value) -> int:
@@ -2323,7 +2340,9 @@ class SQLConnection(metaclass=Singleton):
         return row['id'] if row else None
 
     def add_chat_message(self, peer_id: str, from_us: bool, body: str, ts: int,
-                         keep_per_peer: int, conversation_id: Optional[str] = None) -> None:
+                         keep_per_peer: int, conversation_id: Optional[str] = None,
+                         service_id: Optional[str] = None,
+                         service_tags: Optional[List[str]] = None) -> None:
         """Store one Chat message and prune ``peer_id``'s history down to ``keep_per_peer``.
 
         The prune runs on every insert rather than on a schedule of its own, the
@@ -2338,11 +2357,18 @@ class SQLConnection(metaclass=Singleton):
         opening many small conversations would buy itself a much larger effective
         allowance than one who does not -- the ceiling exists to bound one peer's
         total footprint, not to be multiplied by however many threads it opens.
+
+        ``service_id``/``service_tags`` are a service card shared in the message
+        (issue #438); the tags are stored as a JSON list, which the TUI reads back.
         """
         self._execute('''
-            INSERT INTO peer_chat_messages (peer_id, from_us, body, ts, conversation_id)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (peer_id, int(bool(from_us)), body, int(ts), conversation_id))
+            INSERT INTO peer_chat_messages
+                (peer_id, from_us, body, ts, conversation_id, service_id, service_tags)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            peer_id, int(bool(from_us)), body, int(ts), conversation_id, service_id,
+            json.dumps(list(service_tags or [])) if service_id else None,
+        ))
         self._execute('''
             DELETE FROM peer_chat_messages
             WHERE peer_id = ? AND id NOT IN (
@@ -2360,7 +2386,7 @@ class SQLConnection(metaclass=Singleton):
         :meth:`get_conversation_messages` for one thread alone.
         """
         result = self._execute('''
-            SELECT from_us, body, ts, received_at, conversation_id
+            SELECT from_us, body, ts, received_at, conversation_id, service_id, service_tags
             FROM peer_chat_messages
             WHERE peer_id = ?
             ORDER BY id DESC
@@ -2373,6 +2399,7 @@ class SQLConnection(metaclass=Singleton):
                 'ts': int(row['ts']),
                 'received_at': row['received_at'],
                 'conversation_id': row['conversation_id'],
+                'service': _chat_service(row),
             }
             for row in reversed(result.fetchall())
         ]
@@ -2380,7 +2407,7 @@ class SQLConnection(metaclass=Singleton):
     def get_conversation_messages(self, conversation_id: str, limit: int = 200) -> List[dict]:
         """Every message in one thread, oldest first, capped at ``limit``."""
         result = self._execute('''
-            SELECT from_us, body, ts, received_at
+            SELECT from_us, body, ts, received_at, service_id, service_tags
             FROM peer_chat_messages
             WHERE conversation_id = ?
             ORDER BY id DESC
@@ -2392,6 +2419,7 @@ class SQLConnection(metaclass=Singleton):
                 'body': row['body'],
                 'ts': int(row['ts']),
                 'received_at': row['received_at'],
+                'service': _chat_service(row),
             }
             for row in reversed(result.fetchall())
         ]

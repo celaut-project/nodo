@@ -8,12 +8,24 @@ below are unchanged from before they existed.
 from datetime import datetime, timezone
 
 
-def send_chat(peer_id: str, body: str) -> bool:
-    """Send ``body`` to ``peer_id``. Returns whether it was sent."""
+def _service_suffix(entry: dict) -> str:
+    """How a stored service card (issue #438) reads in a plain-text transcript."""
+    service = entry.get("service")
+    if not service:
+        return ""
+    tags = f" ({', '.join(service['tags'])})" if service["tags"] else ""
+    return f" [service {service['id']}{tags}]"
+
+
+def send_chat(peer_id: str, body: str, service: str = None) -> bool:
+    """Send ``body`` to ``peer_id``, with ``service`` attached as a card if given.
+
+    Returns whether it was sent.
+    """
     from src.manager.chat import ChatError, send_chat_message
 
     try:
-        send_chat_message(peer_id=peer_id, body=body)
+        send_chat_message(peer_id=peer_id, body=body, service=service)
     except ChatError as e:
         print(f"STOP: {e}", flush=True)
         return False
@@ -36,11 +48,11 @@ def show_chat(peer_id: str, limit: int = 100) -> bool:
         when = datetime.fromtimestamp(entry["ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         who = "us" if entry["from_us"] else peer_id
         thread = f" (thread {entry['conversation_id']})" if entry.get("conversation_id") else ""
-        print(f"[{when}] {who}{thread}: {entry['body']}", flush=True)
+        print(f"[{when}] {who}{thread}: {entry['body']}{_service_suffix(entry)}", flush=True)
     return True
 
 
-def open_thread(peer_id: str, topic: str, body: str = None) -> bool:
+def open_thread(peer_id: str, topic: str, body: str = None, service: str = None) -> bool:
     """Open a new conversation with ``peer_id``, sending ``body`` as its first message.
 
     ``body`` defaults to ``topic`` itself when not given, which is the whole of
@@ -59,7 +71,9 @@ def open_thread(peer_id: str, topic: str, body: str = None) -> bool:
         print(f"STOP: {e}", flush=True)
         return False
     try:
-        send_chat_message(peer_id=peer_id, body=body, conversation_id=conversation_id)
+        send_chat_message(
+            peer_id=peer_id, body=body, conversation_id=conversation_id, service=service,
+        )
     except ChatError as e:
         # The thread exists locally either way -- opening is not the send -- but a
         # thread whose first message never went anywhere is confusing left open.
@@ -74,12 +88,12 @@ def open_thread(peer_id: str, topic: str, body: str = None) -> bool:
     return True
 
 
-def reply_in_thread(conversation_id: str, body: str) -> bool:
+def reply_in_thread(conversation_id: str, body: str, service: str = None) -> bool:
     """Send ``body`` in the existing conversation ``conversation_id``."""
     from src.manager.chat import ChatError, reply_to_conversation
 
     try:
-        reply_to_conversation(conversation_id=conversation_id, body=body)
+        reply_to_conversation(conversation_id=conversation_id, body=body, service=service)
     except ChatError as e:
         print(f"STOP: {e}", flush=True)
         return False
@@ -121,7 +135,7 @@ def show_thread(conversation_id: str, limit: int = 200) -> bool:
     for entry in history:
         when = datetime.fromtimestamp(entry["ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         who = "us" if entry["from_us"] else "them"
-        print(f"[{when}] {who}: {entry['body']}", flush=True)
+        print(f"[{when}] {who}: {entry['body']}{_service_suffix(entry)}", flush=True)
     return True
 
 
