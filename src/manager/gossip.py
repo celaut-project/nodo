@@ -49,11 +49,13 @@ def gossip_pull_tick():
         if not ids:
             return
         source = random.choice(ids)
+        from src.identity.node_identity import get_node_public_key_hex
         from src.manager.manager import add_peer_instance, get_client_id_on_other_peer
 
         client_id = get_client_id_on_other_peer(peer_id=source)
         if not client_id:
             return
+        own_key = (get_node_public_key_hex() or "").lower()
         channel = peer_channel(peer_id=source)
         try:
             replies = BeeClient.list_peers(
@@ -66,7 +68,11 @@ def gossip_pull_tick():
                     try:
                         if not relayable_peer(peer, getattr(peer, "public_key", "")):
                             continue
-                        accepted = add_peer_instance(peer=peer)
+                        # Our own claim, relayed back by a peer we announced ourselves
+                        # to. add_peer_instance refuses it too; this skips the verify.
+                        if peer.public_key.lower() == own_key:
+                            continue
+                        accepted = add_peer_instance(peer=peer, learned_via_gossip=True)
                         LOGGER(f"[gossip] source={source} subject={peer.public_key} "
                                f"registration={'accepted' if accepted else 'refused'}")
                     except Exception as exc:

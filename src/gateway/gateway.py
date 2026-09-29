@@ -179,10 +179,12 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # write. A client_id is what makes that expensive to repeat -- see
         # client_gate.require_caller.
         peer, client_id = parse_with_client(request_iterator, payload_type=celaut_pb2.Peer)
-        require_caller(context, client_id)
+        caller = require_caller(context, client_id)
 
         log.LOGGER('Introduce peer method.')
-        peer_id = add_peer_instance(peer=peer)
+        # The caller is passed on so a known peer introducing somebody else is filed as
+        # relayed gossip rather than a self-announcement (issue #427).
+        peer_id = add_peer_instance(peer=peer, introducer_client_id=caller)
 
         # Answer with the id the peer was stored under, or REFUSED when it was not.
         # Refusal is a normal outcome now that an unverifiable announcement is turned

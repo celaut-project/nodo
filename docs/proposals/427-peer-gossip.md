@@ -81,8 +81,40 @@ traceability, and must never use `accept_peer_refresh` (which would require C's 
 to have B's identity).
 
 Repeated pushes to mutual peers are bounded steady-state waste, not unbounded
-amplification. A per-(target, subject, timestamp) sent cache or randomized candidate
-ordering is a possible future optimization; v1 bounds sends without adding state.
+amplification. Candidates are walked in a fresh random order on every list and push,
+so a table larger than the cap still propagates in full over successive ticks rather
+than relaying the same first 100/20 forever. A per-(target, subject, timestamp) sent
+cache is a possible future optimization; v1 bounds sends without adding state.
+
+A node never registers its own identity. Once B learns A, B's list contains A's own
+advertisement; `add_peer_instance` refuses a claim carrying this node's key (so an
+`IntroducePeer` of it is answered `REFUSED`), and pull skips it before verifying.
+
+## Gossip does not choose whom to pay
+
+Minting an Ed25519 keypair, a public address and a payment contract is free. With
+`network.DELEGATE_EXECUTION` and `deposits.AUTOMATIC_REFILL` both on (`open-renter`),
+`maintain.peer_deposits` sends a full deposit to every reachable peer below its refill
+threshold. That was already reachable by direct `IntroducePeer`, but gossip turns one
+Sybil introduction into a network-wide one: every honest node relays it onward, and
+every refill-enabled node that learns it pays it.
+
+So provenance is recorded. `peer.learned_via_gossip` (an `INTEGER NOT NULL DEFAULT 0`
+column, added by the usual `ensure_columns` migration; existing rows are 0) is set when
+a peer is *first* registered through gossip pull, or through `IntroducePeer` from a
+caller whose client id is associated with a different known peer, i.e. a push relay.
+It never demotes a peer already known. The automatic refill skips a flagged peer. The
+flag clears when the operator dials it (`nodo connect`) or any deposit to it settles
+(`nodo pay`, `nodo increase_peer_deposit`), so a deliberately chosen peer is funded as
+before.
+
+Tradeoffs. An unassociated `IntroducePeer` caller cannot be told apart from a
+self-announcement and is treated as one; that is the pre-existing direct path and is
+not made worse. A flagged peer is still refreshed, listed and relayed; it is only
+unfunded, so delegating to it needs a deposit made by hand first. Being *used* for
+delegation does not by itself clear the flag, because delegation to a peer already
+depends on a deposit. A per-peer spend cap or reputation-weighted refill would be a
+broader policy change and is left out of this PR.
 Caps bound transmitted/consumed peer counts, not database scanning or arbitrary
 protobuf message size; the existing transport and receiver validation remain relevant.
 
@@ -93,7 +125,9 @@ expiry, independent live flags/clocks, caps (including hostile replies), per-ite
 failures, client-id attachment, total push deadline, channel cleanup, four-way RPC
 wiring, and a real localhost gRPC stream through the actual Gateway handler. A real
 SQLite/signature test checks A learning C from B, refusal of a forged C, and retention
-of a newer C announcement against replay. CELL tests pin all five profile postures.
+of a newer C announcement against replay, that A never registers its own relayed
+advertisement, and that a gossip-learned peer is not auto-funded while a connected one
+is. CELL tests pin all five profile postures.
 
 Full daemon smoke recipe: seed A↔B and B↔C only, lower the interval for the test, and
 watch A register C when C announces only public addresses. Repeat with C announcing

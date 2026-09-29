@@ -66,6 +66,9 @@ def connect(peer: str):
                 print("Failed to add a peer.")
         else:
             print(f'Added peer {peer} with id {peer_id}')
+            # Dialled by hand, so chosen: if gossip had already filed this peer, it is
+            # now eligible for the automatic refill (issue #427).
+            sc.mark_peer_chosen(peer_id=peer_id)
             # We dialled this address and it answered with an identity we verified, so
             # it is this peer's and nobody else's. Any other peer still holding it is
             # stale (the usual cause: the same host regenerated its mnemonic, so its

@@ -470,7 +470,8 @@ def _passes_anti_replay(peer_id: str, ts: int) -> bool:
 
 
 # Insert the instance if it does not exist, refresh it otherwise.
-def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
+def add_peer_instance(peer: celaut_pb2.Peer, learned_via_gossip: bool = False,
+                      introducer_client_id: Optional[str] = None) -> Optional[str]:
     """Register or refresh a peer, identified by the key it signed its announcement with.
 
     An identity is mandatory: a ``Peer`` that carries no public key, or whose signature
@@ -481,6 +482,14 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
     publish it). Every node derives an identity key from its wallet mnemonic, which
     ConfigManager generates on first load, so signing is not an extra requirement on
     anyone -- it is what every current node already does.
+
+    ``learned_via_gossip`` marks a *new* peer as a third party's claim (issue #427),
+    which the automatic refill will not fund until this node chooses it. It never
+    touches a peer already known: a relay cannot demote one the operator connected.
+    ``introducer_client_id`` is the ``IntroducePeer`` caller: when that client belongs
+    to a *different* known peer, the introduction is a gossip push and is marked the
+    same way. An unassociated caller cannot be told apart from a self-announcement,
+    and is taken as one.
     """
     peer_id = verified_peer_public_key(peer)
     if not peer_id:
@@ -488,6 +497,15 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
             "Refusing a peer announcement with no verifiable identity: a peer is "
             "identified by the key that signed it."
         )
+        return None
+
+    from src.identity.node_identity import get_node_public_key_hex
+
+    # Our own signed advertisement comes straight back from any peer we announced
+    # ourselves to, once gossip relays what it knows (issue #427). A row for this node
+    # in its own peer table would have it delegating to, and paying, itself.
+    if peer_id.lower() == (get_node_public_key_hex() or '').lower():
+        log.LOGGER("Refusing a peer announcement carrying this node's own identity.")
         return None
 
     if sc.peer_exists(peer_id=peer_id):
@@ -501,7 +519,12 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
         sc.set_peer_last_ts(peer_id=peer_id, ts=peer.ts)
         return peer_id
 
-    if not sc.add_peer(peer_id=peer_id, advertisement=_peer_advertisement(peer)):
+    if not learned_via_gossip and introducer_client_id:
+        introducer = sc.get_peer_id_by_local_client(introducer_client_id)
+        learned_via_gossip = bool(introducer) and introducer != peer_id
+
+    if not sc.add_peer(peer_id=peer_id, advertisement=_peer_advertisement(peer),
+                       learned_via_gossip=learned_via_gossip):
         return None
 
     sc.set_peer_last_ts(peer_id=peer_id, ts=peer.ts)

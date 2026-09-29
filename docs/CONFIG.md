@@ -227,6 +227,15 @@ and apply normal registration rules. Gossip uses the same client-id/rate-limit g
 as other gateway calls, and does not relay queries recursively. See
 [the peer gossip proposal](proposals/427-peer-gossip.md) for bounds and tradeoffs.
 
+**Learned is not funded.** A peer registered from somebody else's gossip — pulled
+through `ListPeers`, or introduced by a *different* known peer's `IntroducePeer` — is
+marked as learned via gossip, and `deposits.AUTOMATIC_REFILL` never tops it up.
+Keypairs and payment contracts are free to mint, so without this an `open-renter` node
+would send a full deposit to every reachable identity the network relayed to it.
+`nodo connect` to it, or paying it by hand (`nodo pay` / `nodo increase_peer_deposit`),
+marks it chosen, after which the automatic refill treats it like any other peer. A
+node also refuses its own identity when a relay hands its advertisement back.
+
 ### Where the prose travels
 
 An announcement declares what it means — its signature scheme, and the protocol stack of
@@ -476,7 +485,7 @@ set by `ui.DISPLAY_UNIT`. Full model and worked examples: [`PRICING.md`](PRICING
 | `free_tier.MAX_WORK_FREE_CLIENTS_PER_DIFFICULTY` | `500` | How many clients `GenerateClient` hands out per proof-of-work difficulty level. The first 500 are free; the next 500 cost one Blake2b zero each, and so on — each step is 16x the work. Must be positive: it is the size of a step, so `0` has no meaning. See [`CONCEPTS.md`](CONCEPTS.md#creating-a-client). |
 | `ui.DISPLAY_UNIT` | `erg` | What you read and type. `erg`, `mu`, `btc` once `ledgers.bitcoin.payments.MU_PER_SATOSHI` is set, or a name declared under `ui.UNITS`. Purely presentational. Edited from the TUI's Config page (or the CELL page's `display unit` lever) as a picker over exactly these; picking `custom…` there asks for a new name and its `ui.UNITS.<name>.MU_PER_UNIT` rate together, since one without the other is a display unit the node refuses to start against. |
 | `ui.THEME` | `ubuntu` | Colour scheme for `nodo tui`. `ubuntu` (the Ubuntu terminal palette, and the default — `default` is an accepted spelling), `dark` (the palette before themes existed), `light` (for a pale terminal), `mono` (no hue at all). Edited from the TUI's Config page as a picker. An unrecognised name falls back to the default rather than refusing to start. `nodo tui --theme <name>` and `NODO_TUI_THEME` override it for one run, so two themes can be compared without a config write and the restart that carries. |
-| `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
+| `deposits.AUTOMATIC_REFILL` | `true` | Whether the manager may pay a peer on its own. It never pays one only learned via gossip ([see above](#transitive-peer-discovery-gossip)). Set `false` and no tick ever broadcasts a refill: a peer's deposit runs down and stays down until you run `nodo pay` or `nodo increase_peer_deposit`. Delegation, peer refreshes and the cold-wallet sweep are unaffected — the sweep moves this node's funds between its own wallets and pays nobody. |
 | `deposits.MAX_FEE_OVERHEAD` | `0.02` | Largest share of a peer deposit that may go to the transaction fee. Sizes the deposit. |
 | `deposits.REFILL_BELOW` | `0.2` | Refill a peer once its balance drops below this share of a full deposit. |
 | `deposits.INITIAL_RUNTIME_HOURS` | `1.0` | How long a new instance is funded for when the client asks for no specific balance. |

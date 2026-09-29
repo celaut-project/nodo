@@ -40,6 +40,7 @@ class PeerDepositRefillTests(unittest.TestCase):
         with patch.object(maintain.SQLConnection, "get_peers_id", return_value=["peer-1"]), \
              patch.object(maintain, "is_peer_available", return_value=True), \
              patch.object(maintain.SQLConnection, "get_peer_expiry_unix_timestamp", return_value=0), \
+             patch.object(maintain.SQLConnection, "peer_learned_via_gossip", return_value=False), \
              patch.object(maintain, "balance_on_other_peer", return_value=0), \
              patch.object(maintain, "matching_payment_system", return_value=system), \
              patch.object(deposits, "_floors_for", return_value=(1_000, 300)), \

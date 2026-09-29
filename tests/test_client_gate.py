@@ -271,7 +271,7 @@ class IntroducePeerGateTests(unittest.TestCase):
         self.add_peer_calls = []
         self.add_peer_patcher = patch.object(
             gateway_module, "add_peer_instance",
-            side_effect=lambda peer: self.add_peer_calls.append(peer) or "a-peer-id",
+            side_effect=lambda peer, **kw: self.add_peer_calls.append(peer) or "a-peer-id",
         )
         self.add_peer_patcher.start()
         self.addCleanup(self.add_peer_patcher.stop)

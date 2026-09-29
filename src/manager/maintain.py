@@ -597,6 +597,18 @@ def peer_deposits(debug_mode: bool = False):
                 )
             continue
 
+        # A peer some third party's gossip told us about is not one anybody here chose
+        # (issue #427). Keypairs are free, so funding every relayed claim is a way to
+        # drain this wallet a full deposit at a time. `nodo connect` or paying it by
+        # hand is what makes it eligible; until then it is known, not funded.
+        if SQLConnection().peer_learned_via_gossip(peer_id=peer_id):
+            if debug_mode:
+                log.LOGGER(
+                    f"Peer {peer_id} was learned via gossip; not funding it until it "
+                    "is connected or paid by hand."
+                )
+            continue
+
         peer_balance = balance_on_other_peer(peer_id=peer_id)
         if debug_mode:
             log.LOGGER(f"Peer {peer_id} balance: {format_mu(peer_balance)}")

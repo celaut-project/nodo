@@ -81,6 +81,27 @@ def test_expiry_is_filtered_without_editing_signed_fields():
     assert not relayable_peer(live, live.public_key, now=100)
 
 
+def test_candidates_are_walked_in_a_fresh_random_order(monkeypatch):
+    peers = [signed_peer(identity_index=i) for i in range(4)]
+    sc, _ = database(*peers)
+    orders = iter([[3, 2, 1, 0], [1, 0, 3, 2]])
+    monkeypatch.setattr("src.utils.peer_gossip.random.sample",
+                        lambda ids, k: [ids[i] for i in next(orders)])
+    first = [p.public_key for p in iter_gossip_peers(sc, 2)]
+    second = [p.public_key for p in iter_gossip_peers(sc, 2)]
+    assert first == [peers[3].public_key, peers[2].public_key]
+    assert second == [peers[1].public_key, peers[0].public_key]
+
+
+def test_every_peer_past_the_cap_is_eventually_relayed():
+    peers = [signed_peer(identity_index=i) for i in range(6)]
+    sc, _ = database(*peers)
+    seen = set()
+    for _ in range(50):
+        seen.update(p.public_key for p in iter_gossip_peers(sc, 2))
+    assert seen == {p.public_key for p in peers}
+
+
 def test_bad_rows_and_mismatched_identity_do_not_spoil_response():
     peer = signed_peer()
     sc, rows = database(peer)
@@ -115,6 +136,7 @@ def tick(monkeypatch):
     monkeypatch.setattr(gossip, "SQLConnection", lambda: sc)
     monkeypatch.setattr(gossip.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(gossip.random, "choice", lambda ids: ids[0])
+    monkeypatch.setattr(gossip.random, "sample", lambda ids, k: list(ids))
     monkeypatch.setattr(gossip, "peer_channel", MagicMock(return_value=channel))
     register = MagicMock(return_value="accepted")
     monkeypatch.setattr(manager, "add_peer_instance", register)
@@ -155,7 +177,7 @@ def test_pull_registers_third_parties_and_caps_even_bad_messages(tick):
     tick.settings["communication.MAX_PEERS_PER_GOSSIP_RESPONSE"] = 2
     tick.pull.side_effect = lambda *a, **kw: iter([object(), tick.peers[1], tick.peers[2]])
     gossip.gossip_pull_tick()
-    tick.register.assert_called_once_with(peer=tick.peers[1])
+    tick.register.assert_called_once_with(peer=tick.peers[1], learned_via_gossip=True)
     manager.accept_peer_refresh.assert_not_called()
     tick.pull.assert_called_once_with(tick.channel, client_id="test-client", timeout=10)
     tick.channel.close.assert_called_once()
@@ -183,6 +205,13 @@ def test_pull_rejects_private_claims_before_registration(tick):
     tick.pull.side_effect = lambda *a, **kw: iter([signed_peer("10.0.0.1")])
     gossip.gossip_pull_tick()
     tick.register.assert_not_called()
+
+
+def test_pull_skips_our_own_relayed_advertisement(tick, monkeypatch):
+    # B learned us from our own announcement and hands it straight back.
+    monkeypatch.setattr(identity, "get_node_public_key_hex", lambda: tick.peers[1].public_key.upper())
+    gossip.gossip_pull_tick()
+    assert [c.kwargs["peer"] for c in tick.register.call_args_list] == tick.peers[2:]
 
 
 def test_pull_closes_capped_generator(tick):
@@ -273,6 +302,7 @@ def test_live_grpc_multiple_messages_cap_empty_policy_and_auth(monkeypatch):
     peers = [signed_peer(identity_index=i) for i in range(3)]
     sc, rows = database(*peers)
     settings = {"communication.MAX_PEERS_PER_GOSSIP_RESPONSE": 2}
+    monkeypatch.setattr("src.utils.peer_gossip.random.sample", lambda ids, k: list(ids))
     monkeypatch.setattr(server, "SQLConnection", lambda: sc)
     monkeypatch.setattr(server, "ConfigManager", lambda: SimpleNamespace(get=lambda k, d=None: settings.get(k, d)))
     def require(context, client):
@@ -331,6 +361,87 @@ class TestTransitiveRegistration(_PeerFixture):
         monkeypatch.setattr(gossip, "_last_pull", None)
         gossip.gossip_pull_tick()
         assert self._uris(c.public_key) == ["1.1.1.1"]
+
+    def _pull_from_b(self, monkeypatch, *claims):
+        monkeypatch.setattr(gossip, "_last_pull", None)
+        monkeypatch.setattr(gossip, "ConfigManager", lambda: SimpleNamespace(get=lambda k, d=None: d))
+        monkeypatch.setattr(gossip, "SQLConnection", lambda: manager.sc)
+        monkeypatch.setattr(manager, "get_client_id_on_other_peer", lambda **kw: "a-at-b")
+        monkeypatch.setattr(gossip, "peer_channel", lambda **kw: MagicMock())
+        monkeypatch.setattr(BeeClient, "list_peers", lambda *a, **kw: iter(claims))
+        gossip.gossip_pull_tick()
+
+    def test_a_never_registers_itself_from_b_s_list(self, monkeypatch):
+        a = signed_peer(identity_index=4)
+        b = signed_peer(identity_index=1)
+        assert manager.add_peer_instance(b) == b.public_key
+        monkeypatch.setattr(identity, "get_node_public_key_hex", lambda: a.public_key.upper())
+        # Bypass pull's own early skip: registration itself must refuse it too.
+        monkeypatch.setattr(gossip, "relayable_peer", lambda *a: True)
+        self._pull_from_b(monkeypatch, a)
+        assert manager.sc.get_peers_id() == [b.public_key]
+        # Direct IntroducePeer of our own key is refused (answered REFUSED) as well.
+        assert manager.add_peer_instance(a) is None
+        assert not manager.sc.peer_exists(peer_id=a.public_key)
+
+    def test_gossip_learned_peer_is_flagged_and_connect_or_payment_clears_it(self, monkeypatch):
+        b = signed_peer(identity_index=1)
+        c = signed_peer(identity_index=2)
+        assert manager.add_peer_instance(b) == b.public_key
+        self._pull_from_b(monkeypatch, b, c)
+        assert not manager.sc.peer_learned_via_gossip(peer_id=b.public_key)
+        assert manager.sc.peer_learned_via_gossip(peer_id=c.public_key)
+        # A relayed claim about an already-connected peer never demotes it.
+        fresher_b = signed_peer(identity_index=1, ts=300)
+        self._pull_from_b(monkeypatch, fresher_b)
+        assert not manager.sc.peer_learned_via_gossip(peer_id=b.public_key)
+        manager.sc.mark_peer_chosen(peer_id=c.public_key)
+        assert not manager.sc.peer_learned_via_gossip(peer_id=c.public_key)
+
+    def test_automatic_refill_funds_connected_peer_but_not_gossip_learned_one(self, monkeypatch):
+        from src.manager import maintain
+        b = signed_peer(identity_index=1)
+        c = signed_peer(identity_index=2)
+        assert manager.add_peer_instance(b) == b.public_key
+        self._pull_from_b(monkeypatch, c)
+        settings = {"network.DELEGATE_EXECUTION": True, "deposits.AUTOMATIC_REFILL": True}
+        monkeypatch.setattr(maintain.env_manager, "get", lambda k, d=None: settings.get(k, d))
+        monkeypatch.setattr(maintain, "is_peer_available", lambda **kw: True)
+        monkeypatch.setattr(maintain, "balance_on_other_peer", lambda **kw: 0)
+        monkeypatch.setattr(maintain, "matching_payment_system", lambda peer_id: MagicMock())
+        monkeypatch.setattr(maintain, "refill_threshold_mu", lambda system: 200)
+        monkeypatch.setattr(maintain, "full_deposit_mu", lambda system: 1000)
+        payments = MagicMock()
+        payments.increase_deposit_on_peer.return_value = True
+        monkeypatch.setattr(maintain, "_payment_process_module", lambda: payments)
+        maintain.peer_deposits()
+        payments.increase_deposit_on_peer.assert_called_once_with(
+            peer_id=b.public_key, amount=1000, floor=True)
+        # Once chosen (nodo connect / a manual payment), C is refilled like B.
+        manager.sc.mark_peer_chosen(peer_id=c.public_key)
+        payments.reset_mock()
+        maintain.peer_deposits()
+        assert {call.kwargs["peer_id"] for call in payments.increase_deposit_on_peer.call_args_list} \
+            == {b.public_key, c.public_key}
+
+    def test_introduce_peer_from_another_known_peer_is_a_relay(self, monkeypatch):
+        import src.gateway.gateway as gateway_module
+        b = signed_peer(identity_index=1)
+        c = signed_peer(identity_index=2)
+        d = signed_peer(identity_index=3)
+        assert manager.add_peer_instance(b) == b.public_key
+        self.conn.execute("INSERT INTO clients (id, balance_mu) VALUES ('b-client', '0')")
+        self.conn.execute("INSERT INTO clients (id, balance_mu) VALUES ('d-client', '0')")
+        self.conn.execute("UPDATE peer SET local_client_id = 'b-client' WHERE id = ?", (b.public_key,))
+        self.conn.commit()
+        monkeypatch.setattr(gateway_module, "require_caller", lambda context, client_id: client_id)
+        for claim, client in ((c, "b-client"), (d, "d-client")):
+            monkeypatch.setattr(gateway_module, "parse_with_client",
+                                lambda *a, claim=claim, client=client, **kw: (claim, client))
+            list(Gateway().IntroducePeer(iter(()), MagicMock()))
+        # B introducing C is a relay; an unassociated caller introducing D reads as D itself.
+        assert manager.sc.peer_learned_via_gossip(peer_id=c.public_key)
+        assert not manager.sc.peer_learned_via_gossip(peer_id=d.public_key)
 
 
 def test_config_defaults():

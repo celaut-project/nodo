@@ -5,6 +5,7 @@ keeping the signature would produce a forgery; stripping the signature would
 produce an announcement registration must refuse. Relay the intact claim or
 nothing. In particular, even an expired private URI must not leave this node.
 """
+import random
 import time
 
 from protos import celaut_pb2
@@ -38,12 +39,16 @@ def iter_gossip_peers(sc, limit: int, exclude_peer_id=None):
     Bad rows cost one candidate, not the entire response. A mismatched row identity
     is skipped, not downgraded to an unsigned claim. Receivers still verify the
     signature and timestamp through add_peer_instance, just like IntroducePeer.
+
+    Walked in a fresh random order each call: a fixed order would relay the same
+    first ``limit`` peers every time, and nobody past the cap would ever propagate.
     """
     if limit <= 0:
         return
     emitted = 0
     now = time.time()
-    for peer_id in sc.get_peers_id():
+    ids = list(sc.get_peers_id())
+    for peer_id in random.sample(ids, len(ids)):
         if peer_id == exclude_peer_id:
             continue
         try:
