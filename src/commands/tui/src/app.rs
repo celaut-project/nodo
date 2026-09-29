@@ -7009,14 +7009,6 @@ fn read_last_lines(path: &Path, count: usize) -> io::Result<Vec<String>> {
     Ok(lines.into_iter().collect())
 }
 
-/// The 36-byte pointer header every block file carries, which is not content.
-///
-/// Mirrors `BLOCK_LENGTH` in `bee_rpc.utils`, whose `get_pruned_block_length`
-/// subtracts it for exactly this figure. Restated rather than shelled out to: the
-/// TUI would otherwise spawn a Python interpreter per service per refresh, and this
-/// page can hold dozens of them.
-const BLOCK_POINTER_LENGTH: u64 = 36;
-
 /// The name of the manifest inside a service's registry directory.
 /// `METADATA_FILE_NAME` in `bee_rpc.utils`.
 const SERVICE_MANIFEST: &str = "_.json";
@@ -7034,20 +7026,35 @@ const SERVICE_MANIFEST: &str = "_.json";
 /// figure it shows. A Python helper would mean an interpreter spawn per service on
 /// every refresh, four times a second, to re-read files the TUI has open anyway.
 ///
-/// Mirrors `bee_rpc.utils.getsize`: an integer entry is a local part, a list entry
-/// is `[block_id, ...]` and contributes the block file's size less its pointer
-/// header. `None` rather than a partial total when the manifest is unreadable or a
-/// block it names is missing -- a total quietly short by a 2 GiB layer is worse than
-/// no total, because it reads as a real measurement.
+/// Mirrors `bee_rpc.utils.getsize` as pinned (bee-rpc-over-grpc-py v0.0.1), which is
+/// what `nodo services` prints (issue #438): an integer entry is a local part, a
+/// list entry is `[block_id, ...]` and contributes the block's whole expansion
+/// (`get_expanded_block_length`) -- a block file's full length, or for a multiblock
+/// *directory* its own manifest measured the same way, to any depth. This used to
+/// mirror an older `getsize` instead: it took 36 bytes of pointer off every block,
+/// and read a directory block as the size of its directory entry, a few hundred
+/// bytes standing in for however much the block holds.
+///
+/// `None` rather than a partial total when the manifest is unreadable, a block it
+/// names is missing or a block contains itself -- a total quietly short by a 2 GiB
+/// layer is worse than no total, because it reads as a real measurement.
 fn service_total_size(service_dir: &Path, blocks: &Path) -> Option<u64> {
-    let manifest = fs::read_to_string(service_dir.join(SERVICE_MANIFEST)).ok()?;
+    manifest_size(service_dir, blocks, &mut Vec::new())
+}
+
+/// The expansion of the object whose `_.json` is in `dir`. `stack` is the chain of
+/// directory blocks being measured, so one that names itself is a loop, not a hang;
+/// a block referenced twice from one object is not a loop, and counts twice, as
+/// `getsize` counts it.
+fn manifest_size(dir: &Path, blocks: &Path, stack: &mut Vec<String>) -> Option<u64> {
+    let manifest = fs::read_to_string(dir.join(SERVICE_MANIFEST)).ok()?;
     let entries: Vec<serde_json::Value> = serde_json::from_str(&manifest).ok()?;
     let mut total: u64 = 0;
     for entry in entries {
         match entry {
             // A local part, named by its index in this directory.
             serde_json::Value::Number(index) => {
-                let part = service_dir.join(index.to_string());
+                let part = dir.join(index.to_string());
                 total = total.checked_add(fs::metadata(part).ok()?.len())?;
             }
             // `[block_id, ...]`: content that lives in the shared block store.
@@ -7059,8 +7066,19 @@ fn service_total_size(service_dir: &Path, blocks: &Path) -> Option<u64> {
                 if block_id.is_empty() || block_id.contains('/') || block_id.contains('\\') {
                     return None;
                 }
-                let length = fs::metadata(blocks.join(block_id)).ok()?.len();
-                total = total.checked_add(length.saturating_sub(BLOCK_POINTER_LENGTH))?;
+                let block = blocks.join(block_id);
+                let length = if fs::metadata(&block).ok()?.is_dir() {
+                    if stack.iter().any(|seen| seen == block_id) {
+                        return None;
+                    }
+                    stack.push(block_id.to_string());
+                    let length = manifest_size(&block, blocks, stack);
+                    stack.pop();
+                    length?
+                } else {
+                    fs::metadata(&block).ok()?.len()
+                };
+                total = total.checked_add(length)?;
             }
             _ => return None,
         }
@@ -10310,11 +10328,26 @@ ergo: Cold Wallet: 9cold\n";
                 dir
             }
 
-            /// A block file of `content` bytes, plus the pointer header every one
-            /// carries on disk.
+            /// A block file of `content` bytes.
             fn block(&self, id: &str, content: usize) {
-                let bytes = vec![0u8; content + BLOCK_POINTER_LENGTH as usize];
-                fs::write(self.blocks.join(id), bytes).unwrap();
+                fs::write(self.blocks.join(id), vec![0u8; content]).unwrap();
+            }
+
+            /// A multiblock directory: `parts` of its own and sub-`blocks`, in the
+            /// same `_.json` shape as a service.
+            fn directory_block(&self, id: &str, parts: &[usize], blocks: &[&str]) {
+                let dir = self.blocks.join(id);
+                fs::create_dir_all(&dir).unwrap();
+                let mut manifest = Vec::new();
+                for (index, size) in parts.iter().enumerate() {
+                    fs::write(dir.join(index.to_string()), vec![0u8; *size]).unwrap();
+                    manifest.push(serde_json::json!(index));
+                }
+                for block in blocks {
+                    manifest.push(serde_json::json!([block, 0]));
+                }
+                fs::write(dir.join(SERVICE_MANIFEST), serde_json::to_string(&manifest).unwrap())
+                    .unwrap();
             }
         }
 
@@ -10336,16 +10369,43 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(total, Some(100 + 200 + 4096 + 1024));
         }
 
-        /// The pointer header is not content. `bee_rpc`'s own
-        /// `get_pruned_block_length` subtracts it for exactly this figure, and
-        /// counting it would inflate every total by 36 bytes per block.
+        /// Issue #438: a block counts its whole length, as the pinned `getsize` --
+        /// and so `nodo services` -- counts it. This used to take a 36-byte pointer
+        /// header off each one, after an older `getsize`.
         #[test]
-        fn a_blocks_pointer_header_is_not_counted_as_content() {
-            let registry = Registry::new("header");
-            registry.block("block-a", 0);
+        fn a_block_counts_its_whole_length_as_nodo_services_does() {
+            let registry = Registry::new("whole-block");
+            registry.block("block-a", 100);
             let service = registry.service("svc", &[], &["block-a"]);
 
-            assert_eq!(service_total_size(&service, &registry.blocks), Some(0));
+            assert_eq!(service_total_size(&service, &registry.blocks), Some(100));
+        }
+
+        /// A multiblock directory is measured by its own manifest, to any depth --
+        /// not as the size of its directory entry.
+        #[test]
+        fn a_directory_block_is_its_expansion_not_its_dirent() {
+            let registry = Registry::new("directory-block");
+            registry.block("leaf", 3000);
+            registry.directory_block("inner", &[200], &["leaf"]);
+            registry.directory_block("outer", &[10], &["inner", "leaf"]);
+            let service = registry.service("svc", &[1], &["outer"]);
+
+            assert_eq!(
+                service_total_size(&service, &registry.blocks),
+                Some(1 + 10 + (200 + 3000) + 3000)
+            );
+        }
+
+        /// A block that names itself is refused, as `getsize` refuses it, rather than
+        /// measured forever.
+        #[test]
+        fn a_block_that_contains_itself_has_no_total() {
+            let registry = Registry::new("loop");
+            registry.directory_block("ouroboros", &[1], &["ouroboros"]);
+            let service = registry.service("svc", &[], &["ouroboros"]);
+
+            assert_eq!(service_total_size(&service, &registry.blocks), None);
         }
 
         /// The case the column exists for: a service that stores almost nothing of
@@ -10410,12 +10470,12 @@ ergo: Cold Wallet: 9cold\n";
             assert_eq!(service_total_size(&service, &registry.blocks), None);
         }
 
-        /// The two constants are `bee_rpc`'s, restated here so the TUI need not
+        /// The manifest name is `bee_rpc`'s, restated here so the TUI need not
         /// spawn an interpreter per service per refresh. Read rather than run: a
         /// Rust test suite has no interpreter to hand, and the two drifting apart
         /// would show as every total being quietly wrong.
         #[test]
-        fn the_block_constants_match_bee_rpc() {
+        fn the_manifest_name_matches_bee_rpc() {
             let Ok(utils) = std::fs::read_to_string(
                 "/opt/homebrew/lib/python3.11/site-packages/bee_rpc/utils.py",
             )
@@ -10428,11 +10488,6 @@ ergo: Cold Wallet: 9cold\n";
                 return;
             };
 
-            assert!(
-                utils.contains(&format!("BLOCK_LENGTH = {BLOCK_POINTER_LENGTH}")),
-                "bee_rpc's BLOCK_LENGTH is no longer {BLOCK_POINTER_LENGTH}, so every \
-                 service total this page shows is off by it per block"
-            );
             assert!(
                 utils.contains(&format!("METADATA_FILE_NAME = '{SERVICE_MANIFEST}'")),
                 "bee_rpc no longer names its manifest {SERVICE_MANIFEST}"
