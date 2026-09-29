@@ -1,5 +1,4 @@
 import datetime
-import json
 import os
 import math
 import uuid
@@ -98,20 +97,25 @@ TRACEABILITY_COLUMNS = {
         "conversation_id": "TEXT DEFAULT NULL",
         # A service shared in chat (issue #438): same upgrade path again.
         "service_id": "TEXT DEFAULT NULL",
-        "service_tags": "TEXT DEFAULT NULL",
+        "service_metadata": "BLOB DEFAULT NULL",
     },
 }
 
 
 def _chat_service(row) -> Optional[dict]:
-    """A chat row's service card (issue #438), or None for an ordinary message."""
-    if not row['service_id']:
+    """A chat row's shared service (issue #438), or None for an ordinary message.
+
+    ``id`` is the registry id stored with it (None when its Metadata had no hash of
+    this node's type), ``tags`` its Metadata's tags.
+    """
+    if row['service_metadata'] is None:
         return None
+    metadata = celaut_pb2.Metadata()
     try:
-        tags = json.loads(row['service_tags'] or "[]")
-    except ValueError:
-        tags = []
-    return {'id': row['service_id'], 'tags': [str(tag) for tag in tags if isinstance(tag, str)]}
+        metadata.ParseFromString(row['service_metadata'])
+    except Exception:
+        pass
+    return {'id': row['service_id'], 'tags': list(metadata.hashtag.tag)}
 
 
 def _as_int(value) -> int:
@@ -2341,8 +2345,7 @@ class SQLConnection(metaclass=Singleton):
 
     def add_chat_message(self, peer_id: str, from_us: bool, body: str, ts: int,
                          keep_per_peer: int, conversation_id: Optional[str] = None,
-                         service_id: Optional[str] = None,
-                         service_tags: Optional[List[str]] = None) -> None:
+                         service: Optional[celaut_pb2.Metadata] = None) -> None:
         """Store one Chat message and prune ``peer_id``'s history down to ``keep_per_peer``.
 
         The prune runs on every insert rather than on a schedule of its own, the
@@ -2358,16 +2361,20 @@ class SQLConnection(metaclass=Singleton):
         allowance than one who does not -- the ceiling exists to bound one peer's
         total footprint, not to be multiplied by however many threads it opens.
 
-        ``service_id``/``service_tags`` are a service card shared in the message
-        (issue #438); the tags are stored as a JSON list, which the TUI reads back.
+        ``service`` is the Metadata of a service shared in the message (issue #438),
+        stored serialized for the TUI to render, next to the registry id this node
+        derives from it (``registry_service_id``) -- the id its Get/Execute take.
         """
+        from src.utils.verify import registry_service_id
+
         self._execute('''
             INSERT INTO peer_chat_messages
-                (peer_id, from_us, body, ts, conversation_id, service_id, service_tags)
+                (peer_id, from_us, body, ts, conversation_id, service_id, service_metadata)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (
-            peer_id, int(bool(from_us)), body, int(ts), conversation_id, service_id,
-            json.dumps(list(service_tags or [])) if service_id else None,
+            peer_id, int(bool(from_us)), body, int(ts), conversation_id,
+            registry_service_id(service) if service is not None else None,
+            service.SerializeToString() if service is not None else None,
         ))
         self._execute('''
             DELETE FROM peer_chat_messages
@@ -2386,7 +2393,7 @@ class SQLConnection(metaclass=Singleton):
         :meth:`get_conversation_messages` for one thread alone.
         """
         result = self._execute('''
-            SELECT from_us, body, ts, received_at, conversation_id, service_id, service_tags
+            SELECT from_us, body, ts, received_at, conversation_id, service_id, service_metadata
             FROM peer_chat_messages
             WHERE peer_id = ?
             ORDER BY id DESC
@@ -2407,7 +2414,7 @@ class SQLConnection(metaclass=Singleton):
     def get_conversation_messages(self, conversation_id: str, limit: int = 200) -> List[dict]:
         """Every message in one thread, oldest first, capped at ``limit``."""
         result = self._execute('''
-            SELECT from_us, body, ts, received_at, service_id, service_tags
+            SELECT from_us, body, ts, received_at, service_id, service_metadata
             FROM peer_chat_messages
             WHERE conversation_id = ?
             ORDER BY id DESC

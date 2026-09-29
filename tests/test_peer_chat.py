@@ -263,32 +263,70 @@ class ServiceCardTests(unittest.TestCase):
         self.conn.close()
         os.unlink(self.db_path)
 
-    def _card(self, service_id=None, tags=("hello-world",)):
-        return celaut_pb2.ChatServiceCard(service_id=service_id or self.SERVICE_ID, tags=list(tags))
+    def _metadata(self, service_id=None, tags=("hello-world",), hash_type=None):
+        from src.utils.hashing import SHA3_256_ID, SHAKE_256_ID
+        metadata = celaut_pb2.Metadata()
+        metadata.hashtag.hash.add(
+            type=hash_type or SHA3_256_ID, value=bytes.fromhex(service_id or self.SERVICE_ID),
+        )
+        metadata.hashtag.hash.add(type=SHAKE_256_ID, value=bytes.fromhex("cd" * 32))
+        metadata.hashtag.tag.extend(tags)
+        return metadata
 
-    def _incoming(self, text, card):
-        line = chat.service_fallback_line(card.service_id, list(card.tags))
+    def _incoming(self, text, metadata):
+        line = chat.service_fallback_line(metadata)
         message = celaut_pb2.ChatMessage(
             client_id=self.client_id, body=f"{text}\n{line}" if text else line,
         )
-        message.service.CopyFrom(card)
+        message.service.CopyFrom(metadata)
         return message
 
-    def test_a_shared_service_is_stored_as_a_card_and_not_twice_as_text(self):
-        chat.receive_chat_message(self._incoming("have a look", self._card()))
+    def _stored_metadata(self):
+        blob = self.conn.execute("SELECT service_metadata FROM peer_chat_messages").fetchone()[0]
+        return celaut_pb2.Metadata.FromString(blob)
+
+    def test_a_shared_service_is_stored_as_its_metadata_and_not_twice_as_text(self):
+        metadata = self._metadata()
+        chat.receive_chat_message(self._incoming("have a look", metadata))
 
         history = self.sc.get_chat_messages(peer_id=self.peer_id)
         self.assertEqual(history[0]["body"], "have a look")
         self.assertEqual(
             history[0]["service"], {"id": self.SERVICE_ID, "tags": ["hello-world"]}
         )
+        self.assertEqual(self._stored_metadata(), metadata, "the Metadata is kept whole")
 
     def test_a_card_on_its_own_is_a_message(self):
-        chat.receive_chat_message(self._incoming("", self._card(tags=())))
+        chat.receive_chat_message(self._incoming("", self._metadata(tags=())))
 
         history = self.sc.get_chat_messages(peer_id=self.peer_id)
         self.assertEqual(history[0]["body"], "")
         self.assertEqual(history[0]["service"], {"id": self.SERVICE_ID, "tags": []})
+
+    def test_the_id_is_the_hash_of_this_nodes_registry_type_or_none(self):
+        """No hash of the configured type: stored, but with no id to get it by."""
+        from src.utils.hashing import BLAKE2B_ID
+        metadata = self._metadata(hash_type=BLAKE2B_ID)
+        metadata.hashtag.hash.pop(-1)  # leave only the BLAKE2B one
+        message = celaut_pb2.ChatMessage(client_id=self.client_id, body="look")
+        message.service.CopyFrom(metadata)
+
+        chat.receive_chat_message(message)
+
+        history = self.sc.get_chat_messages(peer_id=self.peer_id)
+        self.assertEqual(history[0]["service"], {"id": None, "tags": ["hello-world"]})
+
+    def test_the_fallback_is_stripped_whichever_hash_the_sender_named_it_by(self):
+        from src.utils.hashing import SHAKE_256_ID
+        metadata = self._metadata()
+        line = f"[service {'cd' * 32} (hello-world) -- get it with: nodo get {'cd' * 32}]"
+        self.assertEqual(metadata.hashtag.hash[1].type, SHAKE_256_ID)
+        message = celaut_pb2.ChatMessage(client_id=self.client_id, body=f"look\n{line}")
+        message.service.CopyFrom(metadata)
+
+        chat.receive_chat_message(message)
+
+        self.assertEqual(self.sc.get_chat_messages(peer_id=self.peer_id)[0]["body"], "look")
 
     def test_an_ordinary_message_has_no_card(self):
         chat.receive_chat_message(celaut_pb2.ChatMessage(client_id=self.client_id, body="hi"))
@@ -296,27 +334,43 @@ class ServiceCardTests(unittest.TestCase):
         self.assertIsNone(self.sc.get_chat_messages(peer_id=self.peer_id)[0]["service"])
 
     def test_the_fallback_names_the_service_for_a_node_without_cards(self):
-        line = chat.service_fallback_line(self.SERVICE_ID, ["hello-world"])
+        line = chat.service_fallback_line(self._metadata())
         self.assertIn(self.SERVICE_ID, line)
         self.assertIn("hello-world", line)
         self.assertIn(f"nodo get {self.SERVICE_ID}", line)
 
-    def test_a_malformed_card_refuses_the_whole_message(self):
-        for card in (
-            self._card(service_id="not-hex"),
-            self._card(tags=["x"] * (chat.MAX_CARD_TAGS + 1)),
-            self._card(tags=["two\nlines"]),
-            self._card(tags=["y" * (chat.MAX_CARD_TAG_CHARS + 1)]),
+    def test_malformed_metadata_refuses_the_whole_message(self):
+        no_hashes = self._metadata()
+        del no_hashes.hashtag.hash[:]
+        empty_value = self._metadata()
+        empty_value.hashtag.hash[0].value = b""
+        too_many_hashes = self._metadata()
+        for _ in range(chat.MAX_SERVICE_HASHES):
+            too_many_hashes.hashtag.hash.add(type=b"t", value=b"v")
+        long_hash = self._metadata()
+        long_hash.hashtag.hash[0].value = b"x" * (chat.MAX_SERVICE_HASH_BYTES + 1)
+        oversize = self._metadata()
+        oversize.format.prose = "p" * chat.MAX_SERVICE_METADATA_BYTES
+        for metadata in (
+            no_hashes,
+            empty_value,
+            too_many_hashes,
+            long_hash,
+            oversize,
+            self._metadata(tags=["x"] * (chat.MAX_SERVICE_TAGS + 1)),
+            self._metadata(tags=["two\nlines"]),
+            self._metadata(tags=["y" * (chat.MAX_SERVICE_TAG_CHARS + 1)]),
         ):
             message = celaut_pb2.ChatMessage(client_id=self.client_id, body="look")
-            message.service.CopyFrom(card)
+            message.service.CopyFrom(metadata)
             with self.assertRaises(chat.ChatError):
                 chat.receive_chat_message(message)
         self.assertEqual(self.sc.get_chat_messages(peer_id=self.peer_id), [])
 
-    def test_sending_puts_the_card_on_the_wire_and_the_fallback_in_the_body(self):
+    def test_sending_puts_the_metadata_on_the_wire_and_the_fallback_in_the_body(self):
         sent = []
-        with patch.object(chat, "local_service_card", return_value=self._card()), \
+        metadata = self._metadata()
+        with patch.object(chat, "local_service_metadata", return_value=metadata), \
              patch.object(chat.sc, "get_peer_client", return_value=uuid4().hex), \
              patch.object(chat, "peer_channel", return_value=None), \
              patch.object(chat.BeeClient, "chat",
@@ -324,7 +378,7 @@ class ServiceCardTests(unittest.TestCase):
                           or celaut_pb2.ChatAck(stored=True)):
             chat.send_chat_message(peer_id=self.peer_id, body="look", service="hello-world")
 
-        self.assertEqual(sent[0].service.service_id, self.SERVICE_ID)
+        self.assertEqual(sent[0].service, metadata)
         self.assertTrue(sent[0].body.startswith("look\n"), sent[0].body)
         self.assertIn(self.SERVICE_ID, sent[0].body)
         stored = self.sc.get_chat_messages(peer_id=self.peer_id)[0]
@@ -332,22 +386,52 @@ class ServiceCardTests(unittest.TestCase):
         self.assertEqual(stored["service"]["id"], self.SERVICE_ID)
 
     def test_only_a_service_in_the_local_registry_can_be_shared(self):
+        import src.utils.utils as utils
         with tempfile.TemporaryDirectory() as tmp:
             registry = os.path.join(tmp, "registry")
-            metadata = os.path.join(tmp, "metadata")
+            metadata_dir = os.path.join(tmp, "metadata")
             os.makedirs(os.path.join(registry, self.SERVICE_ID))
-            os.makedirs(metadata)
-            meta = celaut_pb2.Metadata()
-            meta.hashtag.tag.extend(["hello-world", "demo"])
-            with open(os.path.join(metadata, self.SERVICE_ID), "wb") as f:
+            os.makedirs(os.path.join(registry, "ef" * 32))
+            os.makedirs(metadata_dir)
+            meta = self._metadata(tags=("hello-world", "demo"))
+            meta.format.tags.append("linux/amd64")
+            with open(os.path.join(metadata_dir, self.SERVICE_ID), "wb") as f:
                 f.write(meta.SerializeToString())
-            paths = {"REGISTRY": registry, "METADATA_REGISTRY": metadata}
+            # Held, but its Metadata names it by another id: not shareable.
+            with open(os.path.join(metadata_dir, "ef" * 32), "wb") as f:
+                f.write(meta.SerializeToString())
+            paths = {"REGISTRY": registry, "METADATA_REGISTRY": metadata_dir}
             with patch.object(chat.env_manager, "get", side_effect=lambda key, default=None: paths.get(key, default)), \
-                 patch("src.commands.__by_tag.METADATA", metadata):
-                card = chat.local_service_card(self.SERVICE_ID)
-                self.assertEqual(list(card.tags), ["hello-world", "demo"])
+                 patch.object(utils, "METADATA_REGISTRY", metadata_dir), \
+                 patch("src.commands.__by_tag.METADATA", metadata_dir):
+                self.assertEqual(chat.local_service_metadata(self.SERVICE_ID), meta)
                 with self.assertRaises(chat.ChatError):
-                    chat.local_service_card("cd" * 32)
+                    chat.local_service_metadata("cd" * 32)
+                with self.assertRaises(chat.ChatError):
+                    chat.local_service_metadata("ef" * 32)
+
+    def test_a_node_without_cards_reads_the_text_and_skips_the_metadata(self):
+        """Field 4 is additive: a pre-#438 ChatMessage parses a new one to its body."""
+        from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
+
+        old = descriptor_pb2.FileDescriptorProto(name="old_chat.proto", package="old", syntax="proto3")
+        chat_message = old.message_type.add(name="ChatMessage")
+        for number, name in ((1, "client_id"), (2, "body"), (3, "conversation_id")):
+            chat_message.field.add(
+                name=name, number=number,
+                type=descriptor_pb2.FieldDescriptorProto.TYPE_STRING,
+                label=descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL,
+            )
+        pool = descriptor_pool.DescriptorPool()
+        pool.Add(old)
+        OldChatMessage = message_factory.GetMessageClass(pool.FindMessageTypeByName("old.ChatMessage"))
+
+        new = self._incoming("have a look", self._metadata())
+        parsed = OldChatMessage.FromString(new.SerializeToString())
+
+        self.assertEqual(parsed.client_id, self.client_id)
+        self.assertEqual(parsed.body, new.body)
+        self.assertIn(f"nodo get {self.SERVICE_ID}", parsed.body)
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
@@ -511,7 +595,7 @@ class ChatSchemaUpgradeTests(unittest.TestCase):
         self.assertIn("conversation_id", TRACEABILITY_COLUMNS["peer_chat_messages"])
 
     def test_the_service_card_columns_are_additive_message_columns(self):
-        for column in ("service_id", "service_tags"):
+        for column in ("service_id", "service_metadata"):
             self.assertIn(column, TRACEABILITY_COLUMNS["peer_chat_messages"])
 
     def test_a_pre_existing_messages_table_gets_the_conversation_column(self):

@@ -14,7 +14,10 @@ def _service_suffix(entry: dict) -> str:
     if not service:
         return ""
     tags = f" ({', '.join(service['tags'])})" if service["tags"] else ""
-    return f" [service {service['id']}{tags}]"
+    # No id: its Metadata has no hash of this node's registry type (see
+    # registry_service_id), so there is nothing here to `nodo get` it by.
+    service_id = service["id"] or "(no id of this node's hash type)"
+    return f" [service {service_id}{tags}]"
 
 
 def send_chat(peer_id: str, body: str, service: str = None) -> bool:
