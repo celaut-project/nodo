@@ -114,6 +114,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.id_copy_areas.clear();
     app.chat_card_buttons.clear();
     app.chat_attach_area = Rect::ZERO;
+    app.chat_send_area = Rect::ZERO;
 
     draw_tabs(frame, app, layout[0]);
     if page_row > 0 {
