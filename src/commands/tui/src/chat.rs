@@ -1853,7 +1853,9 @@ mod tests {
                     modifiers: crossterm::event::KeyModifiers::NONE,
                 },
                 &mut app,
-            );
+            )
+            .await
+            .unwrap();
         });
 
         assert_eq!(app.input_mode, InputMode::Normal, "sent and closed");
@@ -1869,7 +1871,8 @@ mod tests {
         render(&mut app, 120, 30);
         let send = app.chat_send_area;
 
-        crate::handler::handle_mouse_events(
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(crate::handler::handle_mouse_events(
             crossterm::event::MouseEvent {
                 kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
                 column: send.x,
@@ -1877,7 +1880,8 @@ mod tests {
                 modifiers: crossterm::event::KeyModifiers::NONE,
             },
             &mut app,
-        );
+        ))
+        .unwrap();
 
         assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
         assert!(app.status.contains("Type a message"), "{}", app.status);
@@ -2107,7 +2111,8 @@ mod tests {
         assert!(screen.contains("[ Attach ]"), "{screen}");
         let area = app.chat_attach_area;
 
-        crate::handler::handle_mouse_events(
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(crate::handler::handle_mouse_events(
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: area.x,
@@ -2115,7 +2120,8 @@ mod tests {
                 modifiers: crossterm::event::KeyModifiers::NONE,
             },
             &mut app,
-        );
+        ))
+        .unwrap();
 
         assert_eq!(app.input_mode, InputMode::PickChatService);
     }
