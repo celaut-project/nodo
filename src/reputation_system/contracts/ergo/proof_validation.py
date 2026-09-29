@@ -18,6 +18,7 @@ from src.reputation_system.envs import (
 )
 from src.reputation_system.proof_attestation import node_proposition_hex
 from src.utils.config import ConfigManager
+from src.utils.ergo_node_url import ergo_node_url_problem, require_ergo_node_url
 from src.utils.contract_xattrs import get_script, get_token_id
 from src.utils.java_dependency import (
     JavaDependencyMissing,
@@ -117,10 +118,11 @@ def _get_unspent_boxes_by_token(token_id: str) -> List[dict]:
     import requests
 
     node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
-    if not node_url:
-        raise ProofLookupUnavailable("Missing configuration: ledgers.ergo.NODE_URL")
+    problem = ergo_node_url_problem(node_url)
+    if problem:
+        raise ProofLookupUnavailable(problem)
 
-    url = f"{str(node_url).rstrip('/')}/blockchain/box/byTokenId/{token_id}"
+    url = f"{str(node_url).strip().rstrip('/')}/blockchain/box/byTokenId/{token_id}"
     try:
         response = requests.get(url, timeout=30)
     except requests.RequestException as e:
@@ -411,9 +413,7 @@ def __find_reputation_proof_id_for_owner(mnemonic_phrase: str) -> Optional[str]:
     of the first box that is this node's own self-opinion -- R7 the wallet's owner
     propositionBytes, R5 the node's identity public key -- or None.
     """
-    node_url = ConfigManager().get("ledgers.ergo.NODE_URL")
-    if not node_url:
-        raise ValueError("Missing configuration: ledgers.ergo.NODE_URL")
+    node_url = require_ergo_node_url(ConfigManager().get("ledgers.ergo.NODE_URL"))
 
     ensure_ergpy_jvm(feature="Ergo reputation")
     appkit = require_java_module("ergpy.appkit", feature="Ergo reputation")
