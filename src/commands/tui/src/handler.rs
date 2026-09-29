@@ -395,6 +395,9 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Services => {
             app.open_delete_service_confirm()
         }
+        (KeyModifiers::NONE, KeyCode::Char('g')) if app.page() == Page::Services => {
+            app.open_get_service()
+        }
         // Same key as Services' delete, on the page's other destructive target.
         (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Peers => {
             app.open_disconnect_peer_confirm()

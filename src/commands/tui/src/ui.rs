@@ -154,7 +154,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         | InputMode::FilterConfig
         | InputMode::CreditClient
         | InputMode::AddCustomUnit
-        | InputMode::NewChatTopic => draw_input_popup(frame, app),
+        | InputMode::NewChatTopic
+        | InputMode::GetService => draw_input_popup(frame, app),
     }
 }
 
@@ -4258,7 +4259,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         Page::Overview => "r refresh  \u{2022}  q quit",
         Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  r refresh  \u{2022}  q quit",
         Page::Services => {
-            "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  d delete  \u{2022}  q quit"
+            "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  g get by hash  \u{2022}  d delete  \u{2022}  q quit"
         }
         Page::Peers => {
             "\u{2191}/\u{2193} select  \u{2022}  +/- reputation  \u{2022}  c connect  \u{2022}  d forget  \u{2022}  q quit"

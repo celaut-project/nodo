@@ -392,6 +392,9 @@ pub enum InputMode {
     /// message, docked in the conversation pane rather than a centered popup --
     /// `Enter` inserts a newline here instead of submitting (see `handler.rs`).
     ComposeChatMessage,
+    /// SERVICES page: the hash of a service this node does not hold, to ask the
+    /// network for with `nodo get` (issue #438).
+    GetService,
 }
 
 /// How the `EditConfig` popup should let the user set a value, chosen from the
@@ -903,6 +906,11 @@ pub(crate) enum CommandKind {
     Generic,
     /// Render stdout in the Details overlay (carries the service id for the title).
     Inspect(String),
+    /// Report the command's own last line of stdout as the status. For commands
+    /// that print their outcome rather than exit non-zero on it: `nodo get` says
+    /// "not a valid service hash" and "queued" alike with a zero exit, so
+    /// `Generic`'s "completed" would read the same for both.
+    Report,
 }
 
 /// Result of a background `nodo` invocation.
@@ -4044,6 +4052,7 @@ impl App {
             InputMode::PickChatTopic => self.submit_chat_topic_pick(),
             InputMode::NewChatTopic => self.submit_new_chat_topic(),
             InputMode::ComposeChatMessage => self.submit_chat_compose(),
+            InputMode::GetService => self.submit_get_service(),
             // The writes confirmation answers y/n, never Enter: Enter on a
             // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
             // gate answers y/n for the same reason and one stronger: Enter is the
@@ -5181,6 +5190,34 @@ impl App {
         );
     }
 
+    /// Ask for the hash of a service to fetch from the network (`g` on SERVICES).
+    ///
+    /// A popup rather than the selected row: the services this action is for are
+    /// exactly the ones this table does not list.
+    pub fn open_get_service(&mut self) {
+        if self.page() != Page::Services {
+            return;
+        }
+        if self.command_running() {
+            self.status = "Busy: a command is already running".to_string();
+            return;
+        }
+        self.input_mode = InputMode::GetService;
+        self.input.clear();
+        self.input_title = "Get service (hash)".to_string();
+        self.edit_kind = EditKind::Text;
+    }
+
+    pub(crate) fn submit_get_service(&mut self) {
+        match get_service_command(&self.input) {
+            Ok((label, args)) => {
+                self.close_input();
+                self.spawn_command(CommandKind::Report, label, args);
+            }
+            Err(message) => self.status = message,
+        }
+    }
+
     /// Ask for confirmation before deleting the selected service.
     pub fn open_delete_service_confirm(&mut self) {
         if self.page() != Page::Services {
@@ -5330,6 +5367,18 @@ impl App {
                 } else {
                     self.status = format!("nodo inspect failed: {}", first_line(&outcome.stderr));
                 }
+            }
+            CommandKind::Report => {
+                self.status = if outcome.success {
+                    let report = last_line(&outcome.stdout);
+                    if report.is_empty() {
+                        format!("{} completed", outcome.label)
+                    } else {
+                        report
+                    }
+                } else {
+                    format!("{} failed: {}", outcome.label, first_line(&outcome.stderr))
+                };
             }
             CommandKind::Generic => {
                 self.status = if outcome.success {
@@ -5686,6 +5735,40 @@ fn first_line(text: &str) -> String {
         .find(|line| !line.is_empty())
         .unwrap_or("")
         .to_string()
+}
+
+/// Last non-blank line of `text`, trimmed: where a command that narrates its
+/// progress (`Asking known peers…`) puts its verdict.
+fn last_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .last()
+        .unwrap_or("")
+        .to_string()
+}
+
+/// The `nodo get` a typed service hash turns into, or why it does not.
+///
+/// Queued, not `--now`: the running node retries a wanted service across every
+/// peer on its own schedule (`src/commands/get_service.py`), whereas `--now` would
+/// hold the TUI's one command slot for as long as a download from a slow peer
+/// takes. The service shows up in the table once it lands.
+///
+/// Checked here only for shape -- hex -- so a typo is answered in the popup rather
+/// than by a round trip; whether any peer has it is the CLI's question.
+pub(crate) fn get_service_command(input: &str) -> Result<(String, Vec<String>), String> {
+    let hash = input.trim();
+    if hash.is_empty() {
+        return Err("Type a service hash first".to_string());
+    }
+    if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("A service hash is hexadecimal".to_string());
+    }
+    Ok((
+        format!("Get service {}", shorten(hash, 18)),
+        vec!["get".to_string(), hash.to_lowercase()],
+    ))
 }
 
 /// Run `nodo reputation --json` off the UI thread.
@@ -10411,6 +10494,78 @@ ergo: Cold Wallet: 9cold\n";
             // A row from before the column: not recorded, which is not "just now".
             assert_eq!(by_id("b"), None);
             let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// `g` on the Services page: fetch a service this node does not hold (#438).
+    mod getting_a_service {
+        use super::*;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        fn on_services_page() -> App {
+            let mut app = App::default();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Services)
+                .unwrap();
+            app
+        }
+
+        #[test]
+        fn g_opens_a_popup_asking_for_the_hash() {
+            let mut app = on_services_page();
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            rt.block_on(crate::handler::handle_key_events(
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+                &mut app,
+            ))
+            .unwrap();
+
+            assert_eq!(app.input_mode, InputMode::GetService);
+            assert!(app.input.is_empty());
+            assert!(app.command_task.is_none(), "nothing runs before a hash is given");
+        }
+
+        #[test]
+        fn g_means_nothing_on_other_pages_it_is_not_bound_on() {
+            let mut app = on_services_page();
+            app.tabs.index = Page::ALL
+                .iter()
+                .position(|page| *page == Page::Peers)
+                .unwrap();
+            app.open_get_service();
+            assert_eq!(app.input_mode, InputMode::Normal);
+        }
+
+        #[test]
+        fn a_hash_becomes_the_same_nodo_get_the_operator_would_type() {
+            let hash = "AB".repeat(32);
+            let (label, args) = get_service_command(&format!("  {hash} ")).unwrap();
+            assert_eq!(args, vec!["get".to_string(), hash.to_lowercase()]);
+            assert!(label.starts_with("Get service"), "{label}");
+        }
+
+        #[test]
+        fn a_typo_is_answered_in_the_popup_rather_than_run() {
+            let mut app = on_services_page();
+            app.open_get_service();
+            app.input = "not-a-hash".to_string();
+
+            app.submit_get_service();
+
+            assert_eq!(app.input_mode, InputMode::GetService, "still open to fix it");
+            assert!(app.command_task.is_none());
+            assert!(app.status.contains("hexadecimal"), "{}", app.status);
+            assert!(get_service_command("   ").is_err());
+        }
+
+        #[test]
+        fn the_verdict_is_the_commands_last_line() {
+            assert_eq!(
+                last_line("Asking known peers for ab...\nService ab retrieved.\n\n"),
+                "Service ab retrieved."
+            );
+            assert_eq!(last_line(""), "");
         }
     }
 
