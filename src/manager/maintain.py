@@ -32,6 +32,7 @@ from src.virtualizers.interface import (
     maintain as vm_maintain,
 )
 from src.core_services.low_demand import scheduler_tick
+from src.manager.network_change import network_change_tick
 
 env_manager = ConfigManager()
 
@@ -774,6 +775,11 @@ def _manager_pass(short_interval_count: int) -> int:
     # promise: self-gates to its own hourly interval, never raises, and is the only
     # place the reputation contract is read from a network -- the balancer reads rows.
     onchain_reputation_tick()
+
+    # Tell known peers when this node's own address changes (moving off a LAN, a
+    # renewed dynamic public IP), rather than waiting for one of them to notice it
+    # went stale on their own refresh. Self-gates to its own interval, never raises.
+    network_change_tick()
 
     sleep(MANAGER_ITERATION_TIME)
     if DEBUG_MODE():

@@ -406,6 +406,16 @@ network:
   EXTERNAL_INTERFACE: ""  # Optional interface name to use when PUBLIC_IP is empty, e.g. "eth0".
   PUBLIC_TCP_PORT: ""  # Optional external TCP port to advertise for the gateway (GATEWAY_PORT), in case your router forwards a different port than the one this node listens on. Leave empty to advertise GATEWAY_PORT itself.
   PUBLIC_UDP_PORT: ""  # Optional external UDP port to advertise, for when a peer-facing feature that listens on UDP exists. Nothing in nodo does yet -- GATEWAY_PORT is TCP-only (gRPC).
+  # Re-send this node's address to every already-known peer (IntroducePeer) as soon as
+  # it is seen to change -- e.g. moving from a LAN to a mobile connection, or a dynamic
+  # public IP being renewed. Without this, peers keep the stale address until their own
+  # refresh happens to fail and they re-fetch it, and in the meantime they penalise this
+  # node's reputation for being unreachable at an address it no longer holds.
+  REANNOUNCE_ON_NETWORK_CHANGE: true
+  # How often (seconds) the manager loop checks whether this node's announced address
+  # changed. Detection only, not the announcement itself -- cheap, so a short interval
+  # is fine.
+  NETWORK_CHANGE_CHECK_INTERVAL_SECONDS: 60
   # If true, child instances launched by internal instances are NOT exposed on the host.
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
