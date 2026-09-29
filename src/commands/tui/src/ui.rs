@@ -1,6 +1,6 @@
 use crate::app::{
-    format_bytes, format_bytes_compact, format_rate_compact, percent, segment_token, shorten,
-    unix_now, App, DemandByHour,
+    format_bytes, format_bytes_compact, format_rate_compact, memory_breakdown, percent,
+    segment_token, shorten, unix_now, App, DashboardStats, DemandByHour,
     Client, ClientDetail, ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
     LedgerEarnings, PageGroup, PaymentRow, Peer, PeerDetail, PriceEntry, ReputationEvent, ReputationTotals, Service,
     ServiceDetail,
@@ -803,27 +803,193 @@ fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(block, area);
     let rows = Layout::vertical([
         Constraint::Length(2),
-        Constraint::Length(2),
+        Constraint::Length(1),
+        Constraint::Length(1),
         Constraint::Length(1),
     ])
     .split(inner);
     draw_gauge(frame, rows[0], "CPU", app.stats.cpu_percent, warn());
-    draw_gauge(
-        frame,
-        rows[1],
-        "RAM",
-        percent(app.stats.memory_used, app.stats.memory_total),
-        accent(),
+    draw_memory_breakdown(frame, rows[1], rows[2], rows[3], &app.stats);
+}
+
+/// The colour each of the RAM bar's three groups is drawn in, reused between the bar
+/// itself and its legend so a segment and its label are found by colour, not just by
+/// reading order.
+fn ram_breakdown_colours() -> (Color, Color, Color) {
+    (warn(), accent(), series(1))
+}
+
+/// RAM as OVERVIEW draws it since the single-colour gauge was split into groups: one
+/// row of coloured blocks over `memory_total`'s width -- daemon, then instances'
+/// reservations, then everything else the host has resident -- followed by their
+/// percentages and, in bytes, what each figure actually is. Whatever the bar leaves
+/// unfilled is free, exactly as the gauge it replaced also left unfilled.
+fn draw_memory_breakdown(
+    frame: &mut Frame,
+    bar_area: Rect,
+    percent_area: Rect,
+    bytes_area: Rect,
+    stats: &DashboardStats,
+) {
+    let breakdown = memory_breakdown(stats);
+    let (daemon_colour, instances_colour, host_colour) = ram_breakdown_colours();
+
+    let label = Span::styled("RAM ", Style::default().fg(muted()));
+    let bar_width = bar_area.width.saturating_sub(label.content.len() as u16);
+    let total = breakdown.total.max(1);
+    let mut used_so_far = 0u64;
+    let mut width_so_far = 0u16;
+    let mut segment = |bytes: u64| -> u16 {
+        used_so_far = used_so_far.saturating_add(bytes).min(total);
+        let width_now = ((used_so_far * bar_width as u64) / total).min(bar_width as u64) as u16;
+        let width = width_now.saturating_sub(width_so_far);
+        width_so_far = width_now;
+        width
+    };
+    let daemon_w = segment(breakdown.daemon);
+    let instances_w = segment(breakdown.instances_reserved);
+    let host_w = segment(breakdown.host_other);
+    let free_w = bar_width.saturating_sub(width_so_far);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            label,
+            Span::styled("█".repeat(daemon_w as usize), Style::default().fg(daemon_colour)),
+            Span::styled(
+                "█".repeat(instances_w as usize),
+                Style::default().fg(instances_colour),
+            ),
+            Span::styled("█".repeat(host_w as usize), Style::default().fg(host_colour)),
+            Span::styled("░".repeat(free_w as usize), Style::default().fg(muted())),
+        ])),
+        bar_area,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Daemon ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.daemon_percent()),
+                Style::default().fg(daemon_colour).bold(),
+            ),
+            Span::styled("  Instances ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.instances_percent()),
+                Style::default().fg(instances_colour).bold(),
+            ),
+            Span::styled("  Host ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.host_other_percent()),
+                Style::default().fg(host_colour).bold(),
+            ),
+        ])),
+        percent_area,
     );
     frame.render_widget(
         Paragraph::new(format!(
-            "{} used of {}",
-            format_bytes(app.stats.memory_used),
-            format_bytes(app.stats.memory_total)
+            "{} · {} · {} of {}",
+            format_bytes(breakdown.daemon),
+            format_bytes(breakdown.instances_reserved),
+            format_bytes(breakdown.host_other),
+            format_bytes(breakdown.total),
         ))
         .style(Style::default().fg(muted())),
-        rows[2],
+        bytes_area,
     );
+}
+
+/// The HOST CAPACITY panel's RAM bar: three groups of host memory rather than the one
+/// gauge it replaced (the daemon's own cgroup, what running instances have reserved,
+/// and everything else on the host).
+#[cfg(test)]
+mod ram_breakdown {
+    use super::render;
+    use crate::app::{App, Page};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn overview_screen(app: &mut App) -> String {
+        app.tabs.select_page(Page::Overview);
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// A node with a daemon reading, running instances holding a reservation, and the
+    /// rest of the host in between: OVERVIEW names all three groups rather than just
+    /// the combined "used of total" the single RAM gauge used to print.
+    #[test]
+    fn the_three_groups_are_named_on_screen() {
+        let mut app = App::new();
+        app.stats.memory_total = 10_000;
+        app.stats.memory_used = 8_000;
+        app.stats.daemon_memory_used = 500;
+        app.stats.instance_memory_reserved = 2_500;
+
+        let screen = overview_screen(&mut app);
+
+        for label in ["Daemon", "Instances", "Host"] {
+            assert!(screen.contains(label), "no {label} group on screen:\n{screen}");
+        }
+        // 500/10_000, 2_500/10_000 and (8_000-500-2_500)/10_000.
+        assert!(screen.contains("5%"), "{screen}");
+        assert!(screen.contains("25%"), "{screen}");
+        assert!(screen.contains("50%"), "{screen}");
+    }
+
+    /// The bar itself, not just its legend: three distinctly coloured runs of filled
+    /// cells in reservation order (daemon, then instances, then the rest of the
+    /// host), because a legend nobody can line up against the bar it describes is not
+    /// much of a bar chart.
+    #[test]
+    fn the_bar_draws_three_differently_coloured_segments_in_order() {
+        let mut app = App::new();
+        app.stats.memory_total = 10_000;
+        app.stats.memory_used = 8_000;
+        app.stats.daemon_memory_used = 500;
+        app.stats.instance_memory_reserved = 2_500;
+        app.tabs.select_page(Page::Overview);
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        // Found by its "RAM " label immediately followed by the bar's first filled
+        // cell, rather than by the first row with either alone: the WORKLOAD card's
+        // "Reserved" line also says "RAM", and the CPU gauge right above also fills
+        // with the same block glyph.
+        let row = (0..buffer.area.height)
+            .find(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, *row).symbol())
+                    .collect::<String>()
+                    .contains("RAM █")
+            })
+            .expect("a RAM bar row");
+        let colours: Vec<_> = (0..buffer.area.width)
+            .filter(|column| buffer.get(*column, row).symbol() == "█")
+            .map(|column| buffer.get(column, row).style().fg)
+            .collect();
+        assert!(!colours.is_empty(), "no filled cell on the bar row");
+
+        let mut runs: Vec<_> = vec![colours[0]];
+        for colour in &colours[1..] {
+            if runs.last() != Some(colour) {
+                runs.push(*colour);
+            }
+        }
+        assert_eq!(
+            runs.len(),
+            3,
+            "expected three coloured segments, drew {}:\n{colours:?}",
+            runs.len()
+        );
+    }
 }
 
 fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, value: u64, color: Color) {
@@ -9118,6 +9284,11 @@ mod overview_preview {
         )
         .ok();
         app.now_minute = 9 * 60 + 30;
+        app.stats.cpu_percent = 12;
+        app.stats.memory_total = 16 * 1024 * 1024 * 1024;
+        app.stats.memory_used = 9 * 1024 * 1024 * 1024;
+        app.stats.daemon_memory_used = 64 * 1024 * 1024;
+        app.stats.instance_memory_reserved = 4 * 1024 * 1024 * 1024;
 
         let mut terminal = Terminal::new(TestBackend::new(116, 26)).unwrap();
         terminal.draw(|frame| render(&mut app, frame)).unwrap();

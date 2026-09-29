@@ -1774,6 +1774,123 @@ pub struct DashboardStats {
     pub instance_memory_current: u64,
     pub instance_memory_reserved: u64,
     pub instance_disk_reserved: u64,
+    /// The node daemon's own cgroup `memory.current` -- what `nodo.service` itself
+    /// holds, as opposed to anything it has spun up. Read straight from cgroupfs the
+    /// same way an instance's is, since the daemon is just another leaf of the same
+    /// unified hierarchy (`daemon_cgroup_dir`).
+    pub daemon_memory_used: u64,
+}
+
+/// The three groups OVERVIEW's RAM bar splits host memory into.
+///
+/// `instances_reserved` is what running instances have committed (`memory_limit`,
+/// summed as `instance_memory_reserved`), not what they happen to be using inside
+/// that limit right now (`instance_memory_current`) -- a limit is memory nothing
+/// else on the host can be handed, whether or not the instance is currently touching
+/// all of it. `host_other` is everything `memory_used` accounts for once the daemon
+/// and those reservations are set aside: no reading anywhere samples "every other
+/// process", so it is a subtraction rather than its own measurement.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MemoryBreakdown {
+    pub daemon: u64,
+    pub instances_reserved: u64,
+    pub host_other: u64,
+    pub total: u64,
+}
+
+impl MemoryBreakdown {
+    pub fn daemon_percent(&self) -> u64 {
+        percent(self.daemon, self.total)
+    }
+    pub fn instances_percent(&self) -> u64 {
+        percent(self.instances_reserved, self.total)
+    }
+    pub fn host_other_percent(&self) -> u64 {
+        percent(self.host_other, self.total)
+    }
+}
+
+/// `saturating_sub` rather than a signed difference: the daemon, the instance
+/// reservations and `memory_used` are three independent readings taken a moment
+/// apart, so one can momentarily overshoot another. Reporting zero for "other" then
+/// is a smaller lie than reporting a negative amount of memory.
+pub fn memory_breakdown(stats: &DashboardStats) -> MemoryBreakdown {
+    let host_other = stats
+        .memory_used
+        .saturating_sub(stats.daemon_memory_used)
+        .saturating_sub(stats.instance_memory_reserved);
+    MemoryBreakdown {
+        daemon: stats.daemon_memory_used,
+        instances_reserved: stats.instance_memory_reserved,
+        host_other,
+        total: stats.memory_total,
+    }
+}
+
+/// The RAM bar's three-way split of host memory, and the clamp that keeps a
+/// momentary disagreement between readings from reporting negative usage.
+#[cfg(test)]
+mod memory_breakdown_tests {
+    use super::{memory_breakdown, DashboardStats};
+
+    fn stats(memory_used: u64, memory_total: u64, daemon: u64, reserved: u64) -> DashboardStats {
+        DashboardStats {
+            memory_used,
+            memory_total,
+            daemon_memory_used: daemon,
+            instance_memory_reserved: reserved,
+            ..Default::default()
+        }
+    }
+
+    /// The ordinary case: a daemon, some reserved instances, and whatever is left of
+    /// `memory_used` is everyone else on the host.
+    #[test]
+    fn the_third_group_is_what_is_left_of_used_memory() {
+        let breakdown = memory_breakdown(&stats(8_000, 10_000, 200, 3_000));
+
+        assert_eq!(breakdown.daemon, 200);
+        assert_eq!(breakdown.instances_reserved, 3_000);
+        assert_eq!(breakdown.host_other, 8_000 - 200 - 3_000);
+        assert_eq!(breakdown.total, 10_000);
+    }
+
+    /// Percentages read off `memory_total`, the same denominator the single RAM gauge
+    /// this replaced already used, so the three groups compare directly against the
+    /// figure an operator remembers from before.
+    #[test]
+    fn percentages_are_taken_against_the_host_total() {
+        let breakdown = memory_breakdown(&stats(8_000, 10_000, 500, 2_500));
+
+        assert_eq!(breakdown.daemon_percent(), 5);
+        assert_eq!(breakdown.instances_percent(), 25);
+        assert_eq!(breakdown.host_other_percent(), 50);
+    }
+
+    /// Instances can reserve more than `memory_used` currently reflects (a limit set
+    /// the moment before a sweep samples usage, say), and the daemon's own reading is
+    /// independent of both. Neither should ever hand back a host group that reads as
+    /// more memory freed up than the host had -- zero, not an underflow panic or a
+    /// number that reads as "negative usage".
+    #[test]
+    fn a_reservation_that_outgrows_used_memory_floors_the_host_group_at_zero() {
+        let breakdown = memory_breakdown(&stats(1_000, 10_000, 200, 5_000));
+
+        assert_eq!(breakdown.host_other, 0);
+        assert_eq!(breakdown.host_other_percent(), 0);
+    }
+
+    /// A daemon reading taken from an unreadable or missing cgroup defaults to zero
+    /// (`refresh`'s `unwrap_or(0)`), which this function must treat as "none of it is
+    /// the daemon's" rather than propagate as a sentinel.
+    #[test]
+    fn a_zeroed_daemon_reading_attributes_nothing_to_the_daemon() {
+        let breakdown = memory_breakdown(&stats(5_000, 10_000, 0, 1_000));
+
+        assert_eq!(breakdown.daemon, 0);
+        assert_eq!(breakdown.daemon_percent(), 0);
+        assert_eq!(breakdown.host_other, 4_000);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -5641,6 +5758,8 @@ impl App {
             .iter()
             .map(|instance| instance.disk_limit)
             .sum();
+        self.stats.daemon_memory_used =
+            read_u64(&daemon_cgroup_dir(&self.paths).join("memory.current")).unwrap_or(0);
     }
 
     /// Turn the cumulative counters just read into rates, using the previous sweep's
@@ -7362,6 +7481,14 @@ fn read_u64(path: &Path) -> Option<u64> {
 /// moves it keeps working readings.
 fn instance_cgroup_dir(paths: &Paths, instance_id: &str) -> PathBuf {
     paths.cgroups.join("nodo-ch").join(instance_id)
+}
+
+/// Where systemd puts `nodo.service`'s own cgroup: `<CGROUPS_BASE_DIR>/system.slice/
+/// nodo.service`. The unit template (`bash/nodo.service.template`) sets no `Slice=`,
+/// so a system-level unit lands under `system.slice` by systemd's own default --
+/// nothing here needs a config key the way `nodo-ch` needed `CGROUPS_BASE_DIR`.
+fn daemon_cgroup_dir(paths: &Paths) -> PathBuf {
+    paths.cgroups.join("system.slice").join("nodo.service")
 }
 
 /// One sweep of an instance's live counters, read straight from cgroupfs and sysfs.
