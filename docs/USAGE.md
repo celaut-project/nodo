@@ -38,12 +38,11 @@ When this file exists, Nodo treats the KyA as already accepted and starts withou
 
 These are the most commonly used commands for daily tasks:
 
-- **execute `[--remote] [--name <instance-name>] [-e key value] <service id | service tag | '.celaut.bee' file path>`**  
-  Launches a service instance. Use `--remote` to advertise the host-facing IP instead of the internal VM/container IP. Use `--name` to assign a human-readable instance name. Use `-e` to add service enviroment variables.  
+- **execute `[--name <instance-name>] [-e key value] <service id | service tag | '.celaut.bee' file path>`**  
+  Launches a service instance. The address it prints is reachable from this host only; use `nodo tunnel` to reach the instance from elsewhere. Use `--name` to assign a human-readable instance name. Use `-e` to add service enviroment variables.  
   **Example:**  
   `nodo execute 1234567890abcdef`
-  `nodo execute --remote 1234567890abcdef`
-  `nodo execute --remote -e workers 8 -e timeout 20 1234567890abcdef`
+  `nodo execute -e workers 8 -e timeout 20 1234567890abcdef`
 
 - **estimate `<service id | service tag | '.celaut.bee' file path>`**  
   Estimates service execution cost without launching it.  

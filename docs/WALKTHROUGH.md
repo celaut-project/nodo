@@ -82,8 +82,9 @@ or free resources before executing.
 ## 4. Execute — creates a running instance
 
 ```bash
-# Pass only declared envs; --remote advertises the host-facing IP.
-nodo execute --remote -e WORKERS 8 -e TIMEOUT 20 my-solver
+# Pass only declared envs. The address printed is reachable from this host only;
+# use `nodo tunnel` to reach the instance from elsewhere.
+nodo execute -e WORKERS 8 -e TIMEOUT 20 my-solver
 ```
 
 `execute` prints the full `nodo inspect` dump of the launched service, then a

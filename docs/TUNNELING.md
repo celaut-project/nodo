@@ -17,6 +17,11 @@ port out of `network.FREE_PORTS_RANGE` and is published in the instance's
 `uri_slot`. Tunneling does not replace that — it is an additional way in, and the
 only one available when `network.DISABLE_EXPOSE_OUTSIDE` is set.
 
+For an instance you launch yourself with `nodo execute`, tunneling is the **only**
+off-host path: the address `execute` prints is only meaningful on the machine that
+ran it. (`nodo execute --remote`, which advertised a LAN address instead, has been
+removed.)
+
 ### Option 1: Direct exposure (NAT traversal)
 
 1. Forward the relevant ports on your router to the machine running the node.

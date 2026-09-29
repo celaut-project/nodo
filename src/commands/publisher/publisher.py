@@ -972,7 +972,7 @@ def download_from_manifest_url(manifest_url: str, output_dir: Optional[str] = No
 
     print("Download completed successfully.", flush=True)
     if imported_service_id:
-        print(f"\nRun it with:\n   nodo execute {imported_service_id}\n(--remote in case you are in a ssh session)", flush=True)
+        print(f"\nRun it with:\n   nodo execute {imported_service_id}\n(from another machine, e.g. over ssh, reach it with `nodo tunnel`)", flush=True)
     return {
         "manifest": chunk_urls or [manifest_url],
         "manifest_url": manifest_url,
