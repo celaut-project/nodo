@@ -649,21 +649,14 @@ message ChatMessage {
     // for ("tell the other operator something is wrong") in the first place.
     optional string conversation_id = 3;
 
-    // A service shared in this message (issue #438): what the TUI renders as a card
-    // with "get" and "execute" on it, so a peer can hand another one a service
-    // without the hash being copied out of the text by hand. Optional and additive:
-    // a node that predates it skips the unknown field and keeps `body`, which the
-    // sender fills with a line naming the service for exactly that reader.
-    optional ChatServiceCard service = 4;
-}
-
-// The metadata a chat service card carries: the service id `nodo get`/`nodo
-// execute` take, and the tags its sender knows it by. Nothing here is trusted
-// beyond its shape -- the id is only ever handed back to `nodo get`, which asks
-// the network for content by that hash.
-message ChatServiceCard {
-    string service_id = 1;
-    repeated string tags = 2;
+    // A service shared in this message (issue #438): the service's own Metadata,
+    // exactly as its sender's registry holds it -- hashes, tags, format, reputation
+    // proofs -- which the TUI renders as a card with "get" and "execute" on it. The
+    // id those take is the Metadata hash of the receiving node's registry hash type,
+    // so nothing but the Metadata itself travels. Optional and additive: a node that
+    // predates it skips the unknown field and keeps `body`, which the sender fills
+    // with a line naming the service for exactly that reader.
+    optional Metadata service = 4;
 }
 
 // Chat's reply, once storage is confirmed (or refused) instead of nothing. `stored`

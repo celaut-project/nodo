@@ -29,6 +29,7 @@ use crate::ui::{
 };
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Cell, Clear, Paragraph, Row, Table, Wrap};
+use prost::Message;
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::Path;
 
@@ -60,11 +61,80 @@ pub struct ChatMessageRow {
     pub body: String,
     pub ts: String,
     /// A service shared in this message, drawn as a card under its text.
-    pub service: Option<ChatService>,
+    pub service: Option<SharedService>,
 }
 
-/// A service shared in a chat message (issue #438): `ChatMessage.service`, as
-/// `peer_chat_messages.service_id`/`service_tags` store it.
+/// A service shared in a chat message (issue #438): `ChatMessage.service`, the
+/// service's own `Metadata`, as `peer_chat_messages.service_metadata` stores it,
+/// with the registry id the node derived from it (`service_id`, see
+/// `src/utils/verify.py::registry_service_id`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedService {
+    /// What `nodo get`/`nodo execute` take here: the Metadata's hash of this node's
+    /// registry hash type. `None` when it carries no hash of that type, and then
+    /// the card has no buttons -- any other hash would name nothing in this registry.
+    pub id: Option<String>,
+    pub tags: Vec<String>,
+    /// The hash types it carries a digest for, by name (`sha3_256`, ...).
+    pub hash_types: Vec<String>,
+    /// `Metadata.format`'s tags, when the sender's Metadata has any.
+    pub format: Vec<String>,
+    pub reputation_proofs: usize,
+}
+
+impl SharedService {
+    /// Decoded from a stored row. No Metadata, no card; Metadata that no longer
+    /// decodes is still a card, just one with nothing but its id on it.
+    fn from_row(id: Option<String>, metadata: Option<Vec<u8>>) -> Option<Self> {
+        let metadata = metadata?;
+        let metadata = crate::app::protos::Metadata::decode(&*metadata).unwrap_or_default();
+        let hashtag = metadata.hashtag.unwrap_or_default();
+        Some(SharedService {
+            id: id.filter(|id| !id.trim().is_empty()),
+            tags: hashtag.tag.into_iter().filter(|tag| !tag.trim().is_empty()).collect(),
+            hash_types: hashtag.hash.iter().map(|hash| hash_type_name(&hash.r#type)).collect(),
+            format: metadata.format.map(|format| format.tags).unwrap_or_default(),
+            reputation_proofs: metadata.reputation_proofs.len(),
+        })
+    }
+
+    /// What its Get/Execute act on, if this node can name it at all.
+    pub fn actionable(&self) -> Option<ChatService> {
+        Some(ChatService { id: self.id.clone()?, tags: self.tags.clone() })
+    }
+
+    /// The card's third line: what the Metadata says beyond tags and id.
+    fn details(&self) -> String {
+        let mut parts = self.hash_types.clone();
+        parts.extend(self.format.iter().cloned());
+        match self.reputation_proofs {
+            0 => {}
+            1 => parts.push("1 reputation proof".to_string()),
+            count => parts.push(format!("{count} reputation proofs")),
+        }
+        parts.join(" · ")
+    }
+}
+
+/// A `Metadata.HashTag.Hash.type` by the name `hashing.HASH` takes
+/// (`src/utils/hashing.py::HASH_SPECS`), or its first bytes in hex if unknown.
+fn hash_type_name(hash_type: &[u8]) -> String {
+    const KNOWN: [(&str, &str); 4] = [
+        ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "sha2_256"),
+        ("a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a", "sha3_256"),
+        ("46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f", "shake_256"),
+        ("0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8", "blake2b_256"),
+    ];
+    let hex: String = hash_type.iter().map(|byte| format!("{byte:02x}")).collect();
+    KNOWN
+        .iter()
+        .find(|(id, _)| *id == hex)
+        .map(|(_, name)| name.to_string())
+        .unwrap_or_else(|| shorten(&hex, 8))
+}
+
+/// A service a card's buttons act on, or the one attached to a message being
+/// composed: an id this node's registry knows it by, and its tags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatService {
     pub id: String,
@@ -95,20 +165,11 @@ pub enum ChatCardAction {
 /// them to yet -- see `column_exists` for why a missing column must not empty the
 /// whole conversation.
 fn service_columns(connection: &Connection) -> &'static str {
-    if crate::app::column_exists(connection, "peer_chat_messages", "service_id") {
-        "service_id, service_tags"
+    if crate::app::column_exists(connection, "peer_chat_messages", "service_metadata") {
+        "service_id, service_metadata"
     } else {
         "NULL, NULL"
     }
-}
-
-/// A stored card, from its id and its JSON list of tags. No id, no card.
-fn row_service(id: Option<String>, tags: Option<String>) -> Option<ChatService> {
-    let id = id.filter(|id| !id.trim().is_empty())?;
-    let tags = tags
-        .and_then(|tags| serde_json::from_str::<Vec<String>>(&tags).ok())
-        .unwrap_or_default();
-    Some(ChatService { id, tags })
 }
 
 /// A peer's topic-less message history, as one row: `peer_chat_messages` rows with no
@@ -230,7 +291,7 @@ pub fn get_conversation_messages(database: &Path, conversation_id: &str) -> SqlR
                 from_us: row.get(0)?,
                 body: row.get(1)?,
                 ts: crate::app::format_unix_timestamp(ts),
-                service: row_service(row.get(3)?, row.get(4)?),
+                service: SharedService::from_row(row.get(3)?, row.get(4)?),
             })
         })?
         .collect();
@@ -290,7 +351,7 @@ pub fn get_untopiced_messages(database: &Path, peer_id: &str) -> SqlResult<Vec<C
                 from_us: row.get(0)?,
                 body: row.get(1)?,
                 ts: crate::app::format_unix_timestamp(ts),
-                service: row_service(row.get(3)?, row.get(4)?),
+                service: SharedService::from_row(row.get(3)?, row.get(4)?),
             })
         })?
         .collect();
@@ -894,8 +955,8 @@ fn message_lines(message: &ChatMessageRow, entry: &ChatEntry) -> Vec<Line<'stati
     lines
 }
 
-/// A service card's height: border, tags, id, buttons, border.
-const CARD_HEIGHT: u16 = 5;
+/// A service card's height: border, tags, id, details, buttons, border.
+const CARD_HEIGHT: u16 = 6;
 const CARD_MAX_WIDTH: u16 = 72;
 const GET_BUTTON: &str = "[ Get ]";
 const EXECUTE_BUTTON: &str = "[ Execute ]";
@@ -904,7 +965,7 @@ const EXECUTE_BUTTON: &str = "[ Execute ]";
 /// under it.
 enum Segment {
     Text(Vec<Line<'static>>),
-    Card(ChatService),
+    Card(SharedService),
 }
 
 /// The selected chat, oldest first, pinned to the bottom of the pane like any
@@ -966,7 +1027,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect, entry: &ChatEntry
 }
 
 /// A shared service as a card, with the buttons that act on it.
-fn draw_card(frame: &mut Frame, app: &mut App, area: Rect, service: ChatService) {
+fn draw_card(frame: &mut Frame, app: &mut App, area: Rect, service: SharedService) {
     let area = Rect { width: area.width.min(CARD_MAX_WIDTH), ..area };
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -979,25 +1040,36 @@ fn draw_card(frame: &mut Frame, app: &mut App, area: Rect, service: ChatService)
     } else {
         Span::styled(service.tags.join(" · "), Style::default().fg(text_colour()).bold())
     };
+    let id = match &service.id {
+        Some(id) => Span::styled(shorten(id, inner.width as usize), Style::default().fg(muted())),
+        None => Span::styled(
+            "no id of this node's hash type: get it by hand",
+            Style::default().fg(warn()),
+        ),
+    };
     let button = Style::default().fg(accent()).add_modifier(Modifier::BOLD);
-    let lines = vec![
-        Line::from(tags),
-        Line::from(Span::styled(
-            shorten(&service.id, inner.width as usize),
-            Style::default().fg(muted()),
-        )),
+    let actionable = service.actionable();
+    let buttons = if actionable.is_some() {
         Line::from(vec![
             Span::styled(GET_BUTTON, button),
             Span::raw("  "),
             Span::styled(EXECUTE_BUTTON, button),
-        ]),
+        ])
+    } else {
+        Line::default()
+    };
+    let lines = vec![
+        Line::from(tags),
+        Line::from(id),
+        Line::from(Span::styled(service.details(), Style::default().fg(muted()))),
+        buttons,
     ];
     frame.render_widget(Paragraph::new(lines), inner);
 
     // The buttons' own cells, clipped to the card, so a click beside one is not a
     // click on it.
-    let row = inner.y + 2;
-    if row < inner.y + inner.height {
+    let row = inner.y + 3;
+    if let Some(target) = actionable.filter(|_| row < inner.y + inner.height) {
         let get = Rect::new(inner.x, row, GET_BUTTON.len() as u16, 1).intersection(inner);
         let execute = Rect::new(
             inner.x + GET_BUTTON.len() as u16 + 2,
@@ -1006,8 +1078,8 @@ fn draw_card(frame: &mut Frame, app: &mut App, area: Rect, service: ChatService)
             1,
         )
         .intersection(inner);
-        app.chat_card_buttons.push((ChatCardAction::Get(service.clone()), get));
-        app.chat_card_buttons.push((ChatCardAction::Execute(service), execute));
+        app.chat_card_buttons.push((ChatCardAction::Get(target.clone()), get));
+        app.chat_card_buttons.push((ChatCardAction::Execute(target), execute));
     }
 }
 
@@ -1895,6 +1967,39 @@ mod tests {
         ChatService { id: SERVICE_ID.to_string(), tags: vec!["hello-world".to_string()] }
     }
 
+    /// A received card as the database gives it back: Metadata with this node's
+    /// hash of the service, so it has an id and buttons.
+    fn shared() -> SharedService {
+        SharedService {
+            id: Some(SERVICE_ID.to_string()),
+            tags: vec!["hello-world".to_string()],
+            hash_types: vec!["sha3_256".to_string(), "shake_256".to_string()],
+            format: Vec::new(),
+            reputation_proofs: 0,
+        }
+    }
+
+    fn metadata_bytes(tags: &[&str]) -> Vec<u8> {
+        use crate::app::protos::{metadata::hash_tag::Hash, metadata::HashTag, DataFormat, Metadata};
+        let hash = |id: &str, value: &str| Hash {
+            r#type: (0..id.len()).step_by(2).map(|i| u8::from_str_radix(&id[i..i + 2], 16).unwrap()).collect(),
+            value: (0..value.len()).step_by(2).map(|i| u8::from_str_radix(&value[i..i + 2], 16).unwrap()).collect(),
+        };
+        Metadata {
+            hashtag: Some(HashTag {
+                hash: vec![
+                    hash("a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a", SERVICE_ID),
+                    hash("46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f", &"cd".repeat(32)),
+                ],
+                tag: tags.iter().map(|tag| tag.to_string()).collect(),
+                attr_hashtag: Vec::new(),
+            }),
+            format: Some(DataFormat { tags: vec!["linux/amd64".to_string()], ..Default::default() }),
+            reputation_proofs: vec![Default::default(); 2],
+        }
+        .encode_to_vec()
+    }
+
     fn one_conversation(app: &mut App) {
         app.conversations = StatefulList::with_items(vec![ChatEntry {
             key: "conv-1".to_string(),
@@ -1918,24 +2023,56 @@ mod tests {
     }
 
     #[test]
-    fn a_stored_card_is_read_back_with_its_tags() {
+    fn a_stored_card_is_decoded_from_its_metadata() {
         let dir = temp_dir("card");
         let database = chat_database(&dir);
         let connection = Connection::open(&database).unwrap();
         connection
             .execute(
                 "INSERT INTO peer_chat_messages
-                     (peer_id, from_us, body, ts, conversation_id, service_id, service_tags)
-                 VALUES ('peer-1', 0, 'try this', 1, NULL, ?1, '[\"hello-world\",\"demo\"]')",
-                [SERVICE_ID],
+                     (peer_id, from_us, body, ts, conversation_id, service_id, service_metadata)
+                 VALUES ('peer-1', 0, 'try this', 1, NULL, ?1, ?2)",
+                rusqlite::params![SERVICE_ID, metadata_bytes(&["hello-world", "demo"])],
             )
             .unwrap();
 
         let messages = get_untopiced_messages(&database, "peer-1").unwrap();
 
         let service = messages[0].service.clone().expect("a card");
-        assert_eq!(service.id, SERVICE_ID);
+        assert_eq!(service.id.as_deref(), Some(SERVICE_ID));
         assert_eq!(service.tags, vec!["hello-world".to_string(), "demo".to_string()]);
+        assert_eq!(service.hash_types, vec!["sha3_256".to_string(), "shake_256".to_string()]);
+        assert_eq!(service.format, vec!["linux/amd64".to_string()]);
+        assert_eq!(service.reputation_proofs, 2);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Metadata with no hash of this node's type is stored with no id: the card
+    /// still shows, without buttons that would have to guess one.
+    #[test]
+    fn a_card_without_an_id_of_this_nodes_hash_type_has_no_buttons() {
+        let dir = temp_dir("card-no-id");
+        let database = chat_database(&dir);
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "INSERT INTO peer_chat_messages
+                     (peer_id, from_us, body, ts, conversation_id, service_id, service_metadata)
+                 VALUES ('peer-1', 0, 'try this', 1, NULL, NULL, ?1)",
+                [metadata_bytes(&["hello-world"])],
+            )
+            .unwrap();
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.conversation_messages = get_untopiced_messages(&database, "peer-1").unwrap();
+        assert_eq!(app.conversation_messages[0].service.as_ref().unwrap().id, None);
+
+        let screen = render(&mut app, 120, 30);
+
+        assert!(screen.contains("hello-world"), "{screen}");
+        assert!(screen.contains("no id of this node's hash type"), "{screen}");
+        assert!(!screen.contains("[ Get ]"), "{screen}");
+        assert!(app.chat_card_buttons.is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1970,7 +2107,7 @@ mod tests {
             from_us: false,
             body: "try this".to_string(),
             ts: "2026-01-01 00:00:00".to_string(),
-            service: Some(card()),
+            service: Some(shared()),
         }];
 
         let screen = render(&mut app, 120, 30);
@@ -1978,6 +2115,7 @@ mod tests {
         assert!(screen.contains("try this"), "{screen}");
         assert!(screen.contains("SERVICE"), "{screen}");
         assert!(screen.contains("hello-world"), "{screen}");
+        assert!(screen.contains("sha3_256 · shake_256"), "{screen}");
         assert!(screen.contains("[ Get ]"), "{screen}");
         assert!(screen.contains("[ Execute ]"), "{screen}");
         let actions: Vec<_> = app.chat_card_buttons.iter().map(|(action, _)| action.clone()).collect();
@@ -1993,7 +2131,7 @@ mod tests {
             from_us: false,
             body: String::new(),
             ts: "2026-01-01 00:00:00".to_string(),
-            service: Some(card()),
+            service: Some(shared()),
         }];
         render(&mut app, 120, 30);
         let (_, execute) = app
@@ -2025,7 +2163,7 @@ mod tests {
                 from_us: true,
                 body: format!("message number {index}"),
                 ts: "2026-01-01 00:00:00".to_string(),
-                service: (index == 59).then(card),
+                service: (index == 59).then(shared),
             })
             .collect();
 

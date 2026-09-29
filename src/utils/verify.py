@@ -1,4 +1,4 @@
-from typing import Generator, List
+from typing import Generator, List, Optional
 
 from src.utils.hashing import (
     BLAKE2B_ID,
@@ -57,6 +57,23 @@ def get_service_hex_main_hash(
 
     if all_hashes:
         return all_hashes[0].value.hex()
+
+
+def registry_service_id(metadata: Metadata) -> Optional[str]:
+    """The id this node's registry keys ``metadata``'s service by, or None.
+
+    The registry names a service by its digest under the configured hash type
+    (hashing.HASH), so that is the one hash that can be handed to ``nodo get`` /
+    ``nodo execute`` here. Unlike :func:`get_service_hex_main_hash` there is no
+    fallback to another type: for Metadata that came from somewhere else (a chat
+    card, issue #438), an id of the wrong type names nothing in this registry, and
+    None says so instead of guessing.
+    """
+    configured_hash_id = get_configured_hash_id()
+    for hash in metadata.hashtag.hash:
+        if hash.type == configured_hash_id and hash.value:
+            return hash.value.hex()
+    return None
 
 
 def get_service_list_of_hashes(service_buffer: bytes) -> List[Metadata.HashTag.Hash]:

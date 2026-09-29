@@ -494,7 +494,7 @@ TABLES = {
             received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             conversation_id TEXT DEFAULT NULL,
             service_id TEXT DEFAULT NULL,
-            service_tags TEXT DEFAULT NULL,
+            service_metadata BLOB DEFAULT NULL,
             FOREIGN KEY (peer_id) REFERENCES peer (id),
             FOREIGN KEY (conversation_id) REFERENCES peer_chat_conversations (id)
         )
@@ -624,12 +624,13 @@ def create_tables(cursor):
         "advertisement": "BLOB DEFAULT NULL",
         "local_client_id": "TEXT DEFAULT NULL",
     })
-    # A service shared in the message (issue #438, `ChatMessage.service`): its id,
-    # and its tags as a JSON list. NULL on every ordinary message.
+    # A service shared in the message (issue #438, `ChatMessage.service`): its
+    # serialized Metadata, and the registry id this node derived from it (NULL when
+    # the Metadata has no hash of this node's type). NULL on every ordinary message.
     ensure_columns(cursor, "peer_chat_messages", {
         "conversation_id": "TEXT DEFAULT NULL",
         "service_id": "TEXT DEFAULT NULL",
-        "service_tags": "TEXT DEFAULT NULL",
+        "service_metadata": "BLOB DEFAULT NULL",
     })
     # What a payment was *for*, as opposed to how far it got. A donation this node
     # paid out of its own earnings is not a payment to a peer, and `status` cannot say
