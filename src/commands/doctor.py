@@ -16,6 +16,7 @@ from pathlib import Path
 # why the per-arch tables below come from `utils.arch_guard` and not from
 # `virtualizers.qemu.config`, where the emulator lookup that uses them lives.
 from src.utils.arch_guard import QEMU_SYSTEM_BINARIES, host_arch_tag
+from src.virtualizers.ch import vgic as ch_vgic
 from src.virtualizers.microvm import initramfs as ch_initramfs
 from src.virtualizers.microvm import guest as ch_guest
 
@@ -291,7 +292,7 @@ def _parse_kernel_version(release: str):
 
 
 def _classify_ch_smoke_failure(stderr: str) -> str:
-    """Name why the smoke-test VM died: 'vcpu', 'kernel_load' or 'unknown'.
+    """Name why the smoke-test VM died: 'vcpu', 'vgic', 'kernel_load' or 'unknown'.
 
     Matched loosely on purpose. Cloud Hypervisor wraps the same underlying failure
     in different call paths -- a kernel it cannot read surfaces as
@@ -303,6 +304,8 @@ def _classify_ch_smoke_failure(stderr: str) -> str:
     """
     if "VcpuRun" in stderr or "InternalError" in stderr:
         return "vcpu"
+    if ch_vgic.is_vgic_failure(stderr):
+        return "vgic"
     if "KernelLoad" in stderr or "UefiLoad" in stderr or "ReadKernelImage" in stderr:
         return "kernel_load"
     return "unknown"
@@ -480,6 +483,31 @@ def _doctor_initramfs(initramfs_paths: dict, host_arch_tag: str):
     return initramfs_path
 
 
+def _doctor_vgic():
+    """Whether KVM can create the GICv3/ITS Cloud Hypervisor needs on arm64 (#440).
+
+    Asked of KVM directly rather than left to the smoke test, which needs a binary,
+    a guest kernel and an initramfs before it can say anything, and then only says
+    that CH died.
+    """
+    result = ch_vgic.probe()
+    if result.status == ch_vgic.NOT_APPLICABLE:
+        return
+    print("\nCloud Hypervisor interrupt controller (arm64 vGIC):", flush=True)
+    if result.status == ch_vgic.OK:
+        print(f"[OK] {result.detail}.", flush=True)
+    elif result.missing:
+        print(f"[FAIL] {result.detail}.", flush=True)
+        print(f"  {ch_vgic.GUIDANCE}", flush=True)
+        print(
+            "  This node will not advertise linux/arm64 while this is so; foreign "
+            "architectures QEMU emulates are unaffected.",
+            flush=True,
+        )
+    else:
+        print(f"[SKIP] Could not ask KVM: {result.detail}.", flush=True)
+
+
 def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str):
     """Run a minimal Cloud Hypervisor VM to verify vCPU execution works on this host.
 
@@ -574,6 +602,14 @@ def _doctor_ch_smoke_test(ch_binary: str, kernel_path: str, initramfs_path: str)
                     "other way out.",
                     flush=True,
                 )
+            elif failure == "vgic":
+                print(
+                    "[FAIL] Cloud Hypervisor could not create the guest's interrupt "
+                    "controller (vGIC).",
+                    flush=True,
+                )
+                print(f"  stderr: {stderr_content.strip()[:500]}", flush=True)
+                print(f"  {ch_vgic.GUIDANCE}", flush=True)
             elif failure == "kernel_load":
                 print(
                     "[FAIL] Cloud Hypervisor could not load the guest kernel. "
@@ -693,6 +729,7 @@ def _doctor_cloud_hypervisor(main_dir: str):
     _doctor_host_kernel()
     guest_kernel = _doctor_guest_kernel(cfg.get("kernel_paths", {}), host_arch_tag)
     initramfs = _doctor_initramfs(cfg.get("initramfs_paths", {}), host_arch_tag)
+    _doctor_vgic()
     _doctor_ch_smoke_test(ch_binary, guest_kernel, initramfs)
     _doctor_emulated_architectures(cfg, host_arch_tag)
 
