@@ -25,6 +25,7 @@ hashing helpers). That is a different concern -- reading and writing packed serv
 blobs on disk -- from framing a gRPC call, and the files that do it keep importing
 ``bee_rpc`` directly.
 """
+import concurrent.futures
 from typing import Any, Optional, Union
 
 from bee_rpc import client as bee
@@ -43,12 +44,6 @@ from protos.gateway_bee import (
 Buffer = buffer_pb2.Buffer
 Dir = bee.Dir
 
-# The index a Client message travels at, in an envelope that did not already reserve
-# one of its own. Distinct from the payload index every RPC below uses (they all stay
-# at 1), and from StartService's own envelope, which already carries a Client at index
-# 1 (protos/gateway_bee.py).
-CLIENT_INDEX = 90
-
 
 class BeeClient:
     """Stateless: every method is a thin wrapper around one bee_rpc shape."""
@@ -59,27 +54,74 @@ class BeeClient:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def parse(request_iterator, indices, partitions_message_mode: Any = True, control: Optional[StreamControl] = None):
+    def parse(
+            request_iterator, indices, partitions_message_mode: Any = True,
+            control: Optional[StreamControl] = None, timeout: Optional[float] = None,
+    ):
         """The raw, possibly-multi-message parse -- iterate this (``for r in ...``)
         when a request's envelope can carry more than one kind of message (a
         pattern-matching loop over the result), or when its response needs
         block-skip (``control``, issue #371).
+
+        ``timeout``, when given, bounds how long any single next message may take to
+        arrive -- not the call as a whole -- so a handler whose whole request is a
+        short, fixed set of small control messages (a client_id, a hash, a resource
+        profile, ...) cannot be held open forever by a peer that opens the stream and
+        sends less than it declared, or sends it out of the order this parse happens
+        to look for first. Leave it unset for a handler that legitimately keeps
+        reading past its own parsing (``control``'s later ``watch()`` phase during a
+        large response, ``ServiceTunnel``'s relay) -- there, a quiet stretch is normal,
+        not an attack.
         """
-        return bee.parse_from_buffer(
+        generator = bee.parse_from_buffer(
             request_iterator=request_iterator,
             indices=indices,
             partitions_message_mode=partitions_message_mode,
             control=control,
         )
+        return BeeClient._bounded(generator, timeout) if timeout else generator
 
     @staticmethod
-    def parse_one(request_iterator, indices, partitions_message_mode: Any = True, default=None):
+    def parse_one(
+            request_iterator, indices, partitions_message_mode: Any = True, default=None,
+            timeout: Optional[float] = None,
+    ):
         """The common case: exactly one message is expected out of the request, or
         ``default`` when the caller sent nothing (or the wrong type)."""
         return next(
-            BeeClient.parse(request_iterator, indices, partitions_message_mode),
+            BeeClient.parse(request_iterator, indices, partitions_message_mode, timeout=timeout),
             default,
         )
+
+    _NOTHING = object()
+
+    @staticmethod
+    def _bounded(iterator, timeout: float):
+        """Wrap ``iterator`` so each ``next()`` gives up after ``timeout`` seconds.
+
+        Every pull is run on a dedicated one-off worker thread, because nothing short
+        of that can interrupt a call blocked on socket I/O -- gRPC's Python request
+        iterators have no cooperative-cancellation hook to poll instead. Past a
+        timeout the worker is simply abandoned (``shutdown(wait=False)``): it is not
+        killed, but it is never asked for another item either, and it ends on its own
+        the moment the underlying gRPC call is torn down -- which raising here, and
+        the caller refusing the RPC in response, is exactly what triggers.
+        """
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            while True:
+                future = executor.submit(next, iterator, BeeClient._NOTHING)
+                try:
+                    item = future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError(
+                        f"No message received within {timeout}s."
+                    )
+                if item is BeeClient._NOTHING:
+                    return
+                yield item
+        finally:
+            executor.shutdown(wait=False)
 
     @staticmethod
     def respond(message_iterator=None, indices=None, control: Optional[StreamControl] = None):
@@ -158,7 +200,7 @@ class BeeClient:
             channel, peer: celaut_pb2.Peer, client_id: str = ""
     ) -> Optional[celaut_pb2.RecursionGuard]:
         if client_id:
-            indices_serializer = {1: celaut_pb2.Peer, CLIENT_INDEX: celaut_pb2.Client}
+            indices_serializer = {1: celaut_pb2.Peer, 2: celaut_pb2.Client}
             input_messages = [peer, celaut_pb2.Client(client_id=client_id)]
         else:
             indices_serializer = celaut_pb2.Peer
@@ -224,7 +266,7 @@ class BeeClient:
             client_id: str = "",
     ) -> Optional[celaut_pb2.ConfigurationFile.NetworkResolution]:
         if client_id:
-            indices_serializer = {1: celaut_pb2.Service.Network, CLIENT_INDEX: celaut_pb2.Client}
+            indices_serializer = {1: celaut_pb2.Service.Network, 2: celaut_pb2.Client}
             input_messages = [network, celaut_pb2.Client(client_id=client_id)]
         else:
             indices_serializer = celaut_pb2.Service.Network
@@ -276,7 +318,7 @@ class BeeClient:
             client_id: str = "",
     ) -> Optional[celaut_pb2.ResourceAvailability]:
         if client_id:
-            indices_serializer = {1: celaut_pb2.Service.Container.Resources, CLIENT_INDEX: celaut_pb2.Client}
+            indices_serializer = {1: celaut_pb2.Service.Container.Resources, 2: celaut_pb2.Client}
             input_messages = [resources, celaut_pb2.Client(client_id=client_id)]
         else:
             indices_serializer = celaut_pb2.Service.Container.Resources
@@ -342,10 +384,19 @@ class BeeClient:
         """Streamed, and the response can be large (a whole packed service), so this
         returns the raw generator -- iterate it -- rather than collapsing it into one
         message the way ``call_one`` does for everything else here.
+
+        ``client_id``, like everywhere else in this file, is "absent, not empty": a
+        ``Client(client_id="")`` would not even be a no-op to send -- protobuf
+        serializes an all-default message to zero bytes, which bee_rpc's framing
+        cannot tell apart from no message at all, so omitting it costs nothing.
+        ``GetServiceIterable`` waits for both a Client and a resolving Hash, in
+        whichever order they arrive, up to ``client_gate.simple_rpc_timeout_seconds``
+        -- a caller that never sends one just spends that whole wait before the
+        server falls back to treating it as unauthenticated.
         """
         if client_id:
-            indices_serializer = {1: celaut_pb2.Metadata.HashTag.Hash, CLIENT_INDEX: celaut_pb2.Client}
-            input_messages = [hash_message, celaut_pb2.Client(client_id=client_id)]
+            indices_serializer = {1: celaut_pb2.Metadata.HashTag.Hash, 2: celaut_pb2.Client}
+            input_messages = [celaut_pb2.Client(client_id=client_id), hash_message]
         else:
             indices_serializer = celaut_pb2.Metadata.HashTag.Hash
             input_messages = hash_message

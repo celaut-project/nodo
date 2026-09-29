@@ -41,7 +41,7 @@ from src.database.sql_connection import SQLConnection
 from src.gateway.client_pow import is_uuid4_hex
 from src.manager.manager import get_internal_service_id_by_uri
 from src.utils import logger as log
-from src.utils.bee_client import CLIENT_INDEX, BeeClient
+from src.utils.bee_client import BeeClient
 from src.utils.config import ConfigManager
 from src.utils.utils import get_only_the_ip_from_context
 
@@ -77,6 +77,23 @@ def _max_calls_per_window() -> int:
 
 def _quarantine_seconds() -> float:
     return _config_number("communication.CLIENT_RATE_LIMIT_QUARANTINE_SECONDS", 300)
+
+
+def simple_rpc_timeout_seconds() -> float:
+    """How long a "simple" RPC -- one whose whole request is a handful of small
+    control messages, never a full service body -- may wait for its next expected
+    message before this node gives up on it.
+
+    Generous on purpose (60s default): there is no legitimate reason a caller that
+    has already opened the stream takes anywhere near that long to finish sending
+    messages this small, in whatever order it chose to put them in, over any real
+    network. What it bounds is a server thread parked forever by a peer that opens
+    the stream and then sends less than it declared (or never sends the rest) --
+    genuinely unauthenticated at that point, since nothing here has learned a
+    client_id yet, so there is nothing to rate-limit against and a timeout is the
+    only defense.
+    """
+    return _config_number("communication.SIMPLE_RPC_TIMEOUT_SECONDS", 60)
 
 
 class _ClientCallWindow:
@@ -182,6 +199,8 @@ def parse_with_client(
         request_iterator,
         payload_type: Union[Type[Message], Message],
         payload_index: int = 1,
+        client_index: int = 2,
+        timeout: Optional[float] = None,
 ) -> "tuple[Optional[Message], str]":
     """Parse a request stream that may carry ``payload_type`` and/or a ``Client``.
 
@@ -189,13 +208,20 @@ def parse_with_client(
     ``Client`` was sent, the same empty-string convention ``require_caller`` and
     ``generate_client_or_pow_required`` already use elsewhere. Order on the wire is
     the caller's choice, same as every other multi-message envelope in this codebase
-    (``StartService``'s, ``protos/gateway_bee.py``).
+    (``StartService``'s, ``protos/gateway_bee.py``) -- this fully drains the request
+    rather than stopping at the first message that would resolve it, which is what
+    makes the order-independence safe here: nothing is left unread for a later
+    ``next()`` to hang on. ``timeout`` defaults to ``simple_rpc_timeout_seconds()``,
+    since every caller of this is exactly that: a handful of small control messages.
     """
+    if timeout is None:
+        timeout = simple_rpc_timeout_seconds()
     payload = None
     client_id = ""
     for r in BeeClient.parse(
             request_iterator,
-            indices={payload_index: payload_type, CLIENT_INDEX: celaut_pb2.Client},
+            indices={payload_index: payload_type, client_index: celaut_pb2.Client},
+            timeout=timeout,
     ):
         if isinstance(r, celaut_pb2.Client):
             client_id = r.client_id

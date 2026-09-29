@@ -942,6 +942,16 @@ communication:
   CLIENT_RATE_LIMIT_MAX_CALLS: 120
   CLIENT_RATE_LIMIT_QUARANTINE_SECONDS: 300
 
+  # How long a "simple" RPC -- one whose whole request is a handful of small
+  # control messages, never a full service body (GetService, GetResourceAvailability,
+  # ResolveNetwork, IntroducePeer, Payable, GetPeerInfo, ...) -- may wait for its next
+  # expected message before this node gives up on it. These handlers never drain the
+  # rest of the request direction, so an unbounded wait can be parked forever by a
+  # peer that opens the stream and sends less than it declared; a generous timeout is
+  # also what lets them accept their messages (a client_id, a hash, ...) in whichever
+  # order the caller sent them. See src/gateway/client_gate.py.
+  SIMPLE_RPC_TIMEOUT_SECONDS: 60
+
 client:
   MIN_SLOTS_OPEN_PER_PEER: 1
   # A client whose balance is at least this many MU has its expiration pushed back

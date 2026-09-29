@@ -10,7 +10,7 @@ from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
 from src.tunneling.rpc_tunnel import TunnelError, service_tunnel
 from src.gateway.utils import generate_full_node_peer_info
-from src.gateway.client_gate import parse_with_client, require_caller
+from src.gateway.client_gate import parse_with_client, require_caller, simple_rpc_timeout_seconds
 from src.manager.manager import add_peer_instance, modify_deposit, stop_instance, generate_client_or_pow_required, get_internal_service_id_by_uri, spend_mu, \
     hotplug, get_sysresources, associate_client_with_peer
 from src.manager.chat import ChatError, receive_chat_message
@@ -42,7 +42,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
         try:
             log.LOGGER('Stopping instance.')
             token = BeeClient.parse_one(
-                request_iterator, indices=celaut_pb2.TokenMessage, default=celaut_pb2.TokenMessage()
+                request_iterator, indices=celaut_pb2.TokenMessage, default=celaut_pb2.TokenMessage(),
+                timeout=simple_rpc_timeout_seconds(),
             ).token
             log.LOGGER(f'    with id {token}')
             refunded_amount = stop_instance(token=token)
@@ -64,6 +65,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
             _input = BeeClient.parse_one(
                 request_iterator, indices=celaut_pb2.ModifyDepositInput,
                 default=celaut_pb2.ModifyDepositInput(),
+                timeout=simple_rpc_timeout_seconds(),
             )
 
             success, message = modify_deposit(
@@ -83,7 +85,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
             raise Exception('Was imposible stop the service. ' + str(e))
 
     def GetPeerInfo(self, request_iterator, context, **kwargs):
-        client_id = BeeClient.parse_one(request_iterator, indices=celaut_pb2.Client)
+        client_id = BeeClient.parse_one(
+            request_iterator, indices=celaut_pb2.Client, timeout=simple_rpc_timeout_seconds(),
+        )
         require_caller(context, client_id.client_id if client_id else "")
         log.LOGGER(f'Request for instance by {context.peer()}')
         gateway_instance = generate_full_node_peer_info()
@@ -190,7 +194,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # it in Blake2b. The request is optional -- absent, or a bare Client with no
         # challenge, is the first attempt, and on a node still below the free limit that
         # is the whole exchange, exactly as before.
-        request = BeeClient.parse_one(request_iterator, indices=celaut_pb2.Client)
+        request = BeeClient.parse_one(
+            request_iterator, indices=celaut_pb2.Client, timeout=simple_rpc_timeout_seconds(),
+        )
 
         yield from BeeClient.respond(
                 message_iterator=generate_client_or_pow_required(
@@ -213,7 +219,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # time cannot be -- IntroducePeer now requires a client_id too, so minting has
         # to happen before it, not after. This RPC is what lets that same client_id
         # get bound once IntroducePeer has actually registered the caller.
-        request = BeeClient.parse_one(request_iterator, indices=celaut_pb2.Client)
+        request = BeeClient.parse_one(
+            request_iterator, indices=celaut_pb2.Client, timeout=simple_rpc_timeout_seconds(),
+        )
         client_id = request.client_id if request else ""
         # The client_id being associated is itself the caller's identity here -- the
         # same one client_gate's rate limiter keys on for every other gated RPC -- so
@@ -253,7 +261,8 @@ class Gateway(celaut_pb2_grpc.Gateway):
         if not hotplug(
                 vmachine_id=token,
                 system_requeriments_range=BeeClient.parse_one(
-                    request_iterator, indices=celaut_pb2.ModifyServiceSystemResourcesInput
+                    request_iterator, indices=celaut_pb2.ModifyServiceSystemResourcesInput,
+                    timeout=simple_rpc_timeout_seconds(),
                 )
         ):
             try:
@@ -270,7 +279,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         yield from GetServiceIterable(request_iterator, context)
 
     def GenerateDepositToken(self, request_iterator, context, *kwargs):
-        request = BeeClient.parse_one(request_iterator, indices=celaut_pb2.Client)
+        request = BeeClient.parse_one(
+            request_iterator, indices=celaut_pb2.Client, timeout=simple_rpc_timeout_seconds(),
+        )
         client_id = request.client_id if request else ""
         require_caller(context, client_id)
         yield from BeeClient.respond(
@@ -309,6 +320,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
                     token=BeeClient.parse_one(
                         request_iterator, indices=celaut_pb2.TokenMessage,
                         default=celaut_pb2.TokenMessage(),
+                        timeout=simple_rpc_timeout_seconds(),
                     ).token
                 ),
                 indices=celaut_pb2.Metrics,
@@ -357,7 +369,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         yield from ObserveIterable(request_iterator, context)
 
     def Chat(self, request_iterator, context, **kwargs):
-        message = BeeClient.parse_one(request_iterator, indices=celaut_pb2.ChatMessage)
+        message = BeeClient.parse_one(
+            request_iterator, indices=celaut_pb2.ChatMessage, timeout=simple_rpc_timeout_seconds(),
+        )
         if message is None:
             raise Exception("Chat needs a ChatMessage.")
         try:

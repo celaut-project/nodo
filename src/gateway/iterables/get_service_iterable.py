@@ -3,7 +3,7 @@ from bee_rpc.utils import get_expanded_block_length
 
 from protos import celaut_pb2
 from protos.gateway_bee import StartService_input_indices
-from src.gateway.client_gate import CLIENT_INDEX, require_caller
+from src.gateway.client_gate import require_caller, simple_rpc_timeout_seconds
 from src.gateway.iterables.abstract_input_service_iterable import find_service_hash
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.utils.bee_client import BeeClient, Buffer, StreamControl
@@ -19,10 +19,19 @@ class GetServiceIterable:
         # already hold, and the serialize side is what actually stops sending
         # one -- see bee_rpc.control.StreamControl and issue #371.
         self.control = StreamControl()
+        # Bounded, not the unbounded drain a fully order-independent parse would
+        # otherwise need: the request direction is never drained by this iterable
+        # (block-skip keeps it open afterwards for the peer's later skip requests,
+        # control.watch() below), so waiting on a message with no upper bound would
+        # block a server thread forever the moment a caller sends less than it
+        # declared. A generous, configurable timeout is what makes waiting for
+        # *both* the Client and the Hash -- in whichever order the caller sent them
+        # -- safe: see ``client_gate.simple_rpc_timeout_seconds``.
         self.parser_iterator = BeeClient.parse(
             request_iterator,
-            indices={1: celaut_pb2.Metadata.HashTag.Hash, CLIENT_INDEX: celaut_pb2.Client},
+            indices={1: celaut_pb2.Metadata.HashTag.Hash, 2: celaut_pb2.Client},
             control=self.control,
+            timeout=simple_rpc_timeout_seconds(),
         )
         self.context = context
 
@@ -30,23 +39,38 @@ class GetServiceIterable:
         logger('Request for a service.')
         service_hash = None
         client_id = ""
-        # Stops at the first matching hash, same as before this envelope carried a
-        # Client too: the request direction has to be abandoned here, not drained, in
-        # block-skip mode -- it stays open for the peer's later skip requests
-        # (control.watch() below), so fully draining it would block forever waiting
-        # for a message that was never coming. A Client is therefore only seen if the
-        # caller puts it before the hash that resolves the request.
-        for r in self.parser_iterator:
-            if type(r) is celaut_pb2.Client:
-                client_id = r.client_id
-                continue
-            if type(r) is not celaut_pb2.Metadata.HashTag.Hash:
-                logger(f'The hash provided has wrong type. {type(r)}')
-                continue
-            _hash, _ = find_service_hash(r)
-            if _hash:
-                service_hash = _hash
-                break
+        # `client_seen`, not `client_id` itself, is what the break below waits on:
+        # a Client can legitimately carry client_id="" (an unauthenticated caller
+        # exempted some other way), and that empty string is a real answer, not
+        # "not sent yet". Order-independent: whichever of the two messages arrives
+        # first, this stops once both have. A caller that omits the Client
+        # entirely (the "absent, not empty" convention every other RPC here uses --
+        # a *sent* empty Client would not even survive the wire, since protobuf
+        # serializes an all-default message to zero bytes and bee_rpc treats that
+        # as nothing having arrived) is indistinguishable, up front, from one whose
+        # Client is simply running behind the Hash -- both look like "no second
+        # message yet". ``TimeoutError`` is what tells them apart: once it fires,
+        # there is nothing more to wait for, so this proceeds with whatever was
+        # collected (``client_id=""`` if no Client ever showed) rather than
+        # refusing outright -- ``require_caller`` below is still the one deciding
+        # whether that is enough.
+        client_seen = False
+        try:
+            for r in self.parser_iterator:
+                if type(r) is celaut_pb2.Client:
+                    client_id = r.client_id
+                    client_seen = True
+                elif type(r) is celaut_pb2.Metadata.HashTag.Hash:
+                    _hash, _ = find_service_hash(r)
+                    if _hash:
+                        service_hash = _hash
+                else:
+                    logger(f'The hash provided has wrong type. {type(r)}')
+                    continue
+                if service_hash and client_seen:
+                    break
+        except TimeoutError as e:
+            logger(f"Gave up waiting for the rest of a GetService request: {e}")
 
         require_caller(self.context, client_id)
 

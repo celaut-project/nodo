@@ -20,7 +20,6 @@ try:
     from protos import celaut_pb2
     from src.gateway import client_gate
     from src.gateway.client_gate import (
-        CLIENT_INDEX,
         ClientRequired,
         _ClientCallWindow,
         parse_with_client,
@@ -210,7 +209,7 @@ class ParseWithClientWireTests(unittest.TestCase):
 
     def test_a_payload_with_no_client_parses_with_an_empty_client_id(self):
         peer = celaut_pb2.Peer(public_key="abc")
-        buffers = self._round_trip([peer], {1: celaut_pb2.Peer, CLIENT_INDEX: celaut_pb2.Client})
+        buffers = self._round_trip([peer], {1: celaut_pb2.Peer, 2: celaut_pb2.Client})
         payload, client_id = parse_with_client(iter(buffers), payload_type=celaut_pb2.Peer)
         self.assertEqual(payload, peer)
         self.assertEqual(client_id, "")
@@ -222,7 +221,7 @@ class ParseWithClientWireTests(unittest.TestCase):
         for messages in ([peer, client], [client, peer]):
             with self.subTest(order=[type(m).__name__ for m in messages]):
                 buffers = self._round_trip(
-                    messages, {1: celaut_pb2.Peer, CLIENT_INDEX: celaut_pb2.Client}
+                    messages, {1: celaut_pb2.Peer, 2: celaut_pb2.Client}
                 )
                 payload, client_id = parse_with_client(iter(buffers), payload_type=celaut_pb2.Peer)
                 self.assertEqual(payload, peer)
@@ -281,7 +280,7 @@ class IntroducePeerGateTests(unittest.TestCase):
     def _request(messages):
         return iter(list(bee.serialize_to_buffer(
             message_iterator=messages,
-            indices={1: celaut_pb2.Peer, CLIENT_INDEX: celaut_pb2.Client},
+            indices={1: celaut_pb2.Peer, 2: celaut_pb2.Client},
         )))
 
     def test_without_a_client_id_the_peer_is_never_even_looked_at(self):
