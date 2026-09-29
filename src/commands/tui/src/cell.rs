@@ -512,6 +512,25 @@ static LEVERS: &[Lever] = &[
         secret: false,
     },
     Lever {
+        id: "fund-gossip-peers",
+        organelle: Organelle::Vesicles,
+        label: "fund gossip peers",
+        question: "Does auto-pay also fund peers I only heard about through gossip?",
+        consequence: "Identities are free to mint, so on this pays every relayed peer a full deposit. Off, a gossip peer is funded once you connect to it or pay it by hand. Does nothing unless auto-pay is on.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "no",
+                writes: &[("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false")],
+            },
+            LeverState {
+                label: "yes",
+                writes: &[("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "true")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    Lever {
         id: "tunnel-policy",
         organelle: Organelle::Vesicles,
         label: "tunnel delegated",
@@ -1304,6 +1323,7 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
             ("communication.SHARE_KNOWN_PEERS", "false"),
@@ -1344,6 +1364,7 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
             ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
@@ -1387,6 +1408,7 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "true"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
             ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
@@ -1427,6 +1449,7 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "true"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "false"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
             ("communication.SHARE_KNOWN_PEERS", "true"),
@@ -1463,6 +1486,7 @@ static PROFILES: &[Profile] = &[
             ("network.CONSIDER_DEV_AS_INTERNAL", "true"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
             ("communication.SHARE_KNOWN_PEERS", "false"),
@@ -2127,6 +2151,20 @@ mod tests {
                 assert_eq!(value("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS"), expected);
                 assert_eq!(value("communication.SHARE_KNOWN_PEERS"), expected);
                 assert_eq!(value("communication.DISCOVER_PEERS_VIA_GOSSIP"), expected);
+            }
+        }
+
+        /// No profile -- not even `open-renter`, which auto-pays -- funds a peer only
+        /// learned via gossip: that is the Sybil drain #427 closes.
+        #[test]
+        fn no_profile_auto_funds_gossip_learned_peers() {
+            for profile in profiles() {
+                let value = profile
+                    .writes
+                    .iter()
+                    .find(|(path, _)| *path == "deposits.AUTOMATIC_REFILL_GOSSIP_PEERS")
+                    .map(|(_, v)| *v);
+                assert_eq!(value, Some("false"), "profile {}", profile.id);
             }
         }
 

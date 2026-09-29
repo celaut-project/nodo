@@ -103,7 +103,10 @@ So provenance is recorded. `peer.learned_via_gossip` (an `INTEGER NOT NULL DEFAU
 column, added by the usual `ensure_columns` migration; existing rows are 0) is set when
 a peer is *first* registered through gossip pull, or through `IntroducePeer` from a
 caller whose client id is associated with a different known peer, i.e. a push relay.
-It never demotes a peer already known. The automatic refill skips a flagged peer. The
+It never demotes a peer already known. The automatic refill skips a flagged peer
+unless `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS` is `true` (default `false`; read live
+each tick, anything other than `true` counts as `false`, and it only widens a refill
+that `deposits.AUTOMATIC_REFILL` already allows). The
 flag clears when the operator dials it (`nodo connect`) or any deposit to it settles
 (`nodo pay`, `nodo increase_peer_deposit`), so a deliberately chosen peer is funded as
 before.
