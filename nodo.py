@@ -419,12 +419,11 @@ if __name__ == '__main__':
                 integrity_command(service_ref=service_ref, fix=fix)
                 
             case "execute":
-                from src.commands.execute import execute
+                from src.commands.execute import execute, reject_removed_remote_flag
                 import sys
 
                 args = sys.argv[2:]
-                external = "--remote" in args or env_manager.get("network.DEFAULT_EXECUTE_REMOTE", False)
-                args = [arg for arg in args if arg != "--remote"]
+                reject_removed_remote_flag(args)
 
                 envs = {}
                 if "-e" in args:
@@ -452,7 +451,7 @@ if __name__ == '__main__':
                         sys.exit(1)
 
                 if len(args) != 1:
-                    print("Usage: nodo execute [--remote] [--name instance-name] [-e key value] <service id|service tag|'.celaut' file path>", flush=True)
+                    print("Usage: nodo execute [--name instance-name] [-e key value] <service id|service tag|'.celaut' file path>", flush=True)
                     sys.exit(1)
 
                 try:
@@ -461,7 +460,7 @@ if __name__ == '__main__':
                     print(f"Error: {str(e)}")
                     sys.exit(1)
 
-                execute(service=arg, external=external, envs=envs, instance_name=instance_name)
+                execute(service=arg, envs=envs, instance_name=instance_name)
 
             case "force_execution":
                 # Testing/dev only: bypasses execution_balancer and delegates

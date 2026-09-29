@@ -52,7 +52,7 @@ def _forced_generator(
     instance_name: str | None = None,
 ):
     try:
-        client_id = get_execute_client(amount_mu=local_client_balance_mu, external=False)
+        client_id = get_execute_client(amount_mu=local_client_balance_mu)
     except Exception:
         raise RuntimeError("No execute client available.")
 

@@ -68,12 +68,11 @@ DEV_CLIENT_FUNDING_MU = 10**12
 def generator(
     _hash: str,
     client_funding_mu: int = DEV_CLIENT_FUNDING_MU,
-    external: bool = False,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
 ) -> Generator[Any, None, None]:
     try:
-        client_id = get_execute_client(amount_mu=client_funding_mu, external=external)
+        client_id = get_execute_client(amount_mu=client_funding_mu)
     except Exception:
         raise RuntimeError("No execute client available.")
 
@@ -200,38 +199,26 @@ def launch_via_gateway(service: str, input_generator, success_message: str):
             channel.close()
 
 
-def _dim(text: str) -> str:
-    """Dim, but only where something will render it -- never escape noise in a pipe."""
-    if not sys.stdout.isatty():
-        return text
-    return f"\033[2m{text}\033[0m"
+#: `execute --remote` is gone (#437): the address `execute` hands back is only
+#: meaningful on the machine that ran it, and `nodo tunnel` is the one way to reach
+#: an instance from anywhere else. Refused loudly rather than ignored, so a script
+#: still passing it learns why instead of getting a loopback address that looks right.
+REMOVED_REMOTE_FLAG_ERROR = (
+    "Error: `nodo execute --remote` was removed. The address `execute` prints is only "
+    "reachable from this host; to reach the instance from elsewhere use "
+    "`nodo tunnel <instance> <slot> --peer <node address>:<gateway port>` "
+    "(see docs/TUNNELING.md)."
+)
 
 
-def print_lan_reachability_note(response) -> None:
-    """Footnote for `--remote`: the address handed out is the node's LAN address.
-
-    That is the point of the flag -- an external client gets the address the node
-    is reachable at on its own network, not the guest-internal one -- and it is
-    exactly what an operator connected over SSH from somewhere else cannot use.
-    Nothing has gone wrong when that happens, so this stays a footnote.
-    """
-    slot = next(
-        (uri_slot.internal_port for uri_slot in response.instance.uri_slot),
-        "<slot>",
-    )
-    token = response.token or "<instance>"
-
-    print(_dim(
-        "\n  Note: that address is the one the node is reachable at on its own local\n"
-        "  network, so it only answers from a machine on that network. Over the\n"
-        "  internet it is unroutable, whatever you forward on your side. To reach the\n"
-        "  instance from elsewhere, run a node where you are and tunnel in through\n"
-        "  this one:\n"
-        f"      nodo tunnel {token} {slot} --peer <node address>:<gateway port>"
-    ))
+def reject_removed_remote_flag(args: list[str]) -> None:
+    """Exit with ``REMOVED_REMOTE_FLAG_ERROR`` if ``args`` still carries `--remote`."""
+    if "--remote" in args:
+        print(REMOVED_REMOTE_FLAG_ERROR, flush=True)
+        sys.exit(1)
 
 
-def print_endpoints(response, remote: bool = False) -> None:
+def print_endpoints(response) -> None:
     """Print the HTTP endpoints (if any) a `ServiceInstance` response exposes."""
     endpoints: list[str] = []
     for slot in response.instance.api.slot:
@@ -255,13 +242,9 @@ def print_endpoints(response, remote: bool = False) -> None:
     else:
         print("No endpoints available")
 
-    if remote:
-        print_lan_reachability_note(response)
-
 
 def execute(
     service: str,
-    external: bool = False,
     envs: dict[str, str] | None = None,
     instance_name: str | None = None,
     silent: bool = False
@@ -289,7 +272,6 @@ def execute(
             service=service,
             input_generator=generator(
                 _hash=service,
-                external=external,
                 envs=envs,
                 instance_name=instance_name,
             ),
@@ -298,7 +280,7 @@ def execute(
         if response is None:
             return
 
-        print_endpoints(response, remote=external)
+        print_endpoints(response)
 
     finally:
         if sink:

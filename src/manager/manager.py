@@ -62,9 +62,7 @@ MIN_SLOTS_OPEN_PER_PEER = env_manager.get("MIN_SLOTS_OPEN_PER_PEER")
 MEMSWAP_FACTOR = env_manager.get("MEMSWAP_FACTOR")
 
 DEV_CLIENT_PREFIX = "dev-"
-EXTERNAL_DEV_CLIENT_PREFIX = "dev-external-"
 STANDARD_DEV_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_CLIENT_POOL_SIZE", 1))
-DEV_EXTERNAL_CLIENT_POOL_SIZE = int(env_manager.get("client.DEV_EXTERNAL_CLIENT_POOL_SIZE", 1))
 
 sc = SQLConnection()
 _INSTANCE_NAME_RANDOM = secrets.SystemRandom()
@@ -93,13 +91,9 @@ def reserve_instance_name(requested_name: Optional[str] = None) -> str:
     raise RuntimeError("Unable to generate a unique random instance name.")
 
 
-def is_external_execute_client(client_id: str) -> bool:
-    return str(client_id).startswith(EXTERNAL_DEV_CLIENT_PREFIX)
-
-
 def _get_dev_clients_by_prefix(prefix: str) -> List[str]:
-    if prefix == DEV_CLIENT_PREFIX:
-        return [client_id for client_id in sc.get_dev_clients() if not is_external_execute_client(client_id)]
+    # A `dev-external-<uuid>` row left over from the removed `execute --remote` pool
+    # still starts with `dev-`, so it is simply reused as an ordinary dev client.
     return [client_id for client_id in sc.get_dev_clients() if str(client_id).startswith(prefix)]
 
 
@@ -164,7 +158,6 @@ def _ensure_dev_client_pool(prefix: str, pool_size: int) -> List[str]:
 
 def ensure_dev_client_pools() -> None:
     _ensure_dev_client_pool(DEV_CLIENT_PREFIX, STANDARD_DEV_CLIENT_POOL_SIZE)
-    _ensure_dev_client_pool(EXTERNAL_DEV_CLIENT_PREFIX, DEV_EXTERNAL_CLIENT_POOL_SIZE)
 
 
 def _acquire_dev_client(prefix: str, pool_size: int, amount_mu: int) -> str:
@@ -197,19 +190,16 @@ def get_dev_clients(amount_mu: int) -> Generator[str, None, None]:
             yield client_id
 
 
-def get_execute_client(amount_mu: int, external: bool = False) -> str:
-    prefix = EXTERNAL_DEV_CLIENT_PREFIX if external else DEV_CLIENT_PREFIX
-    pool_size = DEV_EXTERNAL_CLIENT_POOL_SIZE if external else STANDARD_DEV_CLIENT_POOL_SIZE
-    return _acquire_dev_client(prefix, pool_size, amount_mu)
+def get_execute_client(amount_mu: int) -> str:
+    return _acquire_dev_client(DEV_CLIENT_PREFIX, STANDARD_DEV_CLIENT_POOL_SIZE, amount_mu)
             
 def is_dev_client_id(client_id: Optional[str]) -> bool:
     """Whether ``client_id`` names one of this node's own dev clients.
 
-    Covers both pools, since `dev-external-` is drawn from `dev-`. Existence in the
-    clients table is checked, not just the prefix: a client id arrives verbatim in the
-    request (see `AbstractInputServiceIterable`), so anything that grants a privilege on
-    the strength of one has to be sure this node issued it. The uuid4 in a real dev
-    client id is not guessable from outside.
+    Existence in the clients table is checked, not just the `dev-` prefix: a client id
+    arrives verbatim in the request (see `AbstractInputServiceIterable`), so anything
+    that grants a privilege on the strength of one has to be sure this node issued it.
+    The uuid4 in a real dev client id is not guessable from outside.
     """
     if not client_id:
         return False
