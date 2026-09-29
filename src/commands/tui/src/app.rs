@@ -1,6 +1,7 @@
 use crate::cell::{self, Lever, LeverKind, LeverStatus, Organelle};
 use crate::chat::{
-    get_conversation_messages, get_untopiced_messages, ChatCompose, ChatEntry, ChatEntryKind,
+    get_conversation_messages, get_untopiced_messages, ChatCardAction, ChatCompose, ChatEntry,
+    ChatEntryKind, ChatService,
     ChatMessageRow,
 };
 use crate::clients::{get_client_detail, get_clients, Client, ClientDetail};
@@ -395,6 +396,10 @@ pub enum InputMode {
     /// SERVICES page: the hash of a service this node does not hold, to ask the
     /// network for with `nodo get` (issue #438).
     GetService,
+    /// CHAT page, a step of `ComposeChatMessage`: which of this node's services to
+    /// attach to the message as a card (issue #438). Esc goes back to the message
+    /// rather than dropping it.
+    PickChatService,
 }
 
 /// How the `EditConfig` popup should let the user set a value, chosen from the
@@ -2963,6 +2968,14 @@ pub struct App {
     /// which `nodo` subcommand, and with what -- set by whichever of the new-chat
     /// wizard or `open_reply_prompt` opened it.
     pub chat_compose: Option<ChatCompose>,
+    /// The service the open compose box will share as a card, and the attach
+    /// picker's highlighted row (0 is "no attachment") -- issue #438.
+    pub chat_attachment: Option<ChatService>,
+    pub chat_service_index: usize,
+    /// Where each service card's buttons, and the compose box's Attach button,
+    /// were drawn this frame -- the same lifecycle as `id_copy_areas`.
+    pub chat_card_buttons: Vec<(ChatCardAction, Rect)>,
+    pub chat_attach_area: Rect,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
@@ -3102,6 +3115,10 @@ impl Default for App {
             chat_wizard_topics: Vec::new(),
             chat_wizard_topic_index: 0,
             chat_compose: None,
+            chat_attachment: None,
+            chat_service_index: 0,
+            chat_card_buttons: Vec::new(),
+            chat_attach_area: Rect::ZERO,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             tabs_area: Rect::ZERO,
@@ -3440,6 +3457,16 @@ impl App {
             self.click_pricing(position);
             return;
         }
+        // A service card's Get/Execute (issue #438).
+        if let Some((action, _)) = self
+            .chat_card_buttons
+            .iter()
+            .find(|(_, area)| area.contains(position))
+            .cloned()
+        {
+            self.run_chat_card_action(action);
+            return;
+        }
         if let Some(visible) = visible_row_at(position, self.list_area) {
             // A click landing in the table's own id column copies that row's id in
             // addition to selecting it, since that column is exactly where an
@@ -3738,6 +3765,8 @@ impl App {
         self.chat_wizard_topics.clear();
         self.chat_wizard_topic_index = 0;
         self.chat_compose = None;
+        self.chat_attachment = None;
+        self.chat_service_index = 0;
     }
 
     /// True while a background `nodo` command is still running.
@@ -4071,6 +4100,7 @@ impl App {
             InputMode::NewChatTopic => self.submit_new_chat_topic(),
             InputMode::ComposeChatMessage => self.submit_chat_compose(),
             InputMode::GetService => self.submit_get_service(),
+            InputMode::PickChatService => self.submit_chat_service_pick(),
             // The writes confirmation answers y/n, never Enter: Enter on a
             // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
             // gate answers y/n for the same reason and one stronger: Enter is the
@@ -5182,12 +5212,15 @@ impl App {
         } else {
             service.tag.clone()
         };
+        self.confirm_execute_service(service.id, label);
+    }
+
+    /// The one spend confirmation both `e` on SERVICES and a chat card's Execute
+    /// button go through.
+    pub(crate) fn confirm_execute_service(&mut self, id: String, label: String) {
         self.input_mode = InputMode::Confirm;
         self.input_title = format!("Run {label}? It is funded now and burns until killed. (y/N)");
-        self.pending_action = Some(PendingAction::ExecuteService {
-            id: service.id.clone(),
-            label,
-        });
+        self.pending_action = Some(PendingAction::ExecuteService { id, label });
     }
 
     /// Open the read-only Details overlay for the selected service by running

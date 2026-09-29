@@ -1,5 +1,6 @@
 use crate::app::{App, AppResult, EditKind, InputMode, Page};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Position;
 
 /// Handle mouse input: the wheel moves the selection, a left click picks the tab, config
 /// node or table row it landed on.
@@ -30,6 +31,15 @@ pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
             MouseEventKind::Up(_) => app.release_schedule_drag(),
             _ => {}
         },
+        // The compose box's own button (issue #438); the page behind it is not
+        // clickable while a message is half-typed.
+        InputMode::ComposeChatMessage => {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                if app.chat_attach_area.contains(Position::new(mouse.column, mouse.row)) {
+                    app.open_chat_service_picker();
+                }
+            }
+        }
         // The scrollable overlay is the one modal with anything to scroll.
         InputMode::Details => match mouse.kind {
             MouseEventKind::ScrollUp => app.scroll_details(-1),
@@ -146,6 +156,19 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             }
             return Ok(());
         }
+        // Attach a service to the message being composed (issue #438). Esc goes
+        // back to the message, not out of it.
+        InputMode::PickChatService => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (_, KeyCode::Up) => app.move_chat_service_selection(-1),
+                (_, KeyCode::Down) => app.move_chat_service_selection(1),
+                (_, KeyCode::Enter) => app.submit_input().await,
+                (_, KeyCode::Esc) => app.back_to_compose(),
+                _ => {}
+            }
+            return Ok(());
+        }
         // New-chat wizard step 2: pick an existing topic, or "+ New topic…".
         InputMode::PickChatTopic => {
             match (key.modifiers, key.code) {
@@ -171,6 +194,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
                 }
                 (_, KeyCode::Enter) => app.input.push('\n'),
                 (_, KeyCode::Esc) => app.close_input(),
+                (KeyModifiers::CONTROL, KeyCode::Char('a')) => app.open_chat_service_picker(),
                 (KeyModifiers::CONTROL, KeyCode::Char('u')) => app.input.clear(),
                 (_, KeyCode::Backspace) => {
                     app.input.pop();
