@@ -2976,6 +2976,7 @@ pub struct App {
     /// were drawn this frame -- the same lifecycle as `id_copy_areas`.
     pub chat_card_buttons: Vec<(ChatCardAction, Rect)>,
     pub chat_attach_area: Rect,
+    pub chat_send_area: Rect,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
@@ -3119,6 +3120,7 @@ impl Default for App {
             chat_service_index: 0,
             chat_card_buttons: Vec::new(),
             chat_attach_area: Rect::ZERO,
+            chat_send_area: Rect::ZERO,
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             tabs_area: Rect::ZERO,

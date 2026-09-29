@@ -597,7 +597,9 @@ impl App {
 
     pub fn back_to_compose(&mut self) {
         self.input_mode = InputMode::ComposeChatMessage;
-        self.status = "Enter: newline • Ctrl+Enter: send • Ctrl+A: attach • Esc: cancel".to_string();
+        self.status =
+            "Enter: newline • Ctrl+Enter / Alt+Enter / Send: send • Ctrl+A: attach • Esc: cancel"
+                .to_string();
     }
 
     /// A card's Get or Execute button.
@@ -1012,6 +1014,7 @@ fn draw_card(frame: &mut Frame, app: &mut App, area: Rect, service: ChatService)
 /// Width of the button column right of the compose box.
 const COMPOSE_BUTTONS_WIDTH: u16 = 12;
 const ATTACH_BUTTON: &str = "[ Attach ]";
+const SEND_BUTTON: &str = "[ Send ]";
 
 /// The compose box's own lines: the attached service first, if any, then the text.
 fn compose_lines(app: &App) -> Vec<Line<'static>> {
@@ -1050,7 +1053,7 @@ fn draw_compose_box(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::bordered()
         .border_style(Style::default().fg(accent()))
         .title(Span::styled(
-            " COMPOSE · Enter: newline · Ctrl+Enter: send · Ctrl+A: attach · Esc: cancel ",
+            " COMPOSE · Enter: newline · Ctrl+Enter or Alt+Enter: send · Ctrl+A: attach · Esc: cancel ",
             Style::default().fg(accent()).bold(),
         ));
     frame.render_widget(
@@ -1072,6 +1075,11 @@ fn draw_compose_box(frame: &mut Frame, app: &mut App, area: Rect) {
     )
     .intersection(buttons);
     frame.render_widget(Paragraph::new(Span::styled(ATTACH_BUTTON, button)), app.chat_attach_area);
+    // Sending with the mouse (issue #438): the chord that sends is the one key in
+    // this interface a terminal may not be able to deliver -- see handler.rs.
+    app.chat_send_area =
+        Rect::new(buttons.x + 1, buttons.y + 2, SEND_BUTTON.len() as u16, 1).intersection(buttons);
+    frame.render_widget(Paragraph::new(Span::styled(SEND_BUTTON, button)), app.chat_send_area);
 }
 
 /// The attach picker: this node's own services -- the only ones a card can name --
@@ -1774,6 +1782,105 @@ mod tests {
         assert!(screen.contains("line two"), "{screen}");
         // Wrapped, not clipped: the tail of the long line reached the screen too.
         assert!(screen.contains("wrapping"), "long message was clipped: {screen}");
+    }
+
+    /// Issue #438: a terminal that sends LF for Ctrl+Enter is read in raw mode as
+    /// Ctrl+J, which used to type a "j" into the message instead of sending it.
+    #[test]
+    fn ctrl_j_is_ctrl_enter_from_a_terminal_that_sends_lf() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.open_reply_prompt();
+        app.input = "hi".to_string();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            crate::handler::handle_key_events(
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL),
+                &mut app,
+            )
+            .await
+            .unwrap();
+        });
+
+        assert_eq!(app.input_mode, InputMode::Normal, "sent, not typed");
+        assert!(app.input.is_empty(), "no stray j: {:?}", app.input);
+    }
+
+    #[test]
+    fn alt_enter_still_sends() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.open_reply_prompt();
+        app.input = "hi".to_string();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            crate::handler::handle_key_events(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT),
+                &mut app,
+            )
+            .await
+            .unwrap();
+        });
+
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    /// The Send button, right of the input next to Attach, sends with the mouse.
+    #[test]
+    fn the_send_button_sends_the_message() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.open_reply_prompt();
+        app.input = "sent by mouse".to_string();
+        let screen = render(&mut app, 120, 30);
+        assert!(screen.contains("[ Send ]"), "{screen}");
+        let send = app.chat_send_area;
+        assert_eq!(send.x, app.chat_attach_area.x, "stacked under Attach");
+
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            crate::handler::handle_mouse_events(
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: send.x + 1,
+                    row: send.y,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+                &mut app,
+            );
+        });
+
+        assert_eq!(app.input_mode, InputMode::Normal, "sent and closed");
+        assert!(app.command_task.is_some(), "the send was spawned");
+    }
+
+    /// An empty box is not sent by the button either.
+    #[test]
+    fn the_send_button_refuses_an_empty_message() {
+        let mut app = on_chat_page(Vec::new());
+        one_conversation(&mut app);
+        app.open_reply_prompt();
+        render(&mut app, 120, 30);
+        let send = app.chat_send_area;
+
+        crate::handler::handle_mouse_events(
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: send.x,
+                row: send.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            &mut app,
+        );
+
+        assert_eq!(app.input_mode, InputMode::ComposeChatMessage);
+        assert!(app.status.contains("Type a message"), "{}", app.status);
     }
 
     // --- Service cards (issue #438) ------------------------------------------

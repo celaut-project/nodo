@@ -35,8 +35,11 @@ pub fn handle_mouse_events(mouse: MouseEvent, app: &mut App) {
         // clickable while a message is half-typed.
         InputMode::ComposeChatMessage => {
             if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-                if app.chat_attach_area.contains(Position::new(mouse.column, mouse.row)) {
+                let position = Position::new(mouse.column, mouse.row);
+                if app.chat_attach_area.contains(position) {
                     app.open_chat_service_picker();
+                } else if app.chat_send_area.contains(position) {
+                    app.submit_chat_compose();
                 }
             }
         }
@@ -183,15 +186,25 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         }
         // The docked, multi-line compose box: the one text entry in this interface
         // where Enter does NOT submit -- it inserts a newline, since a real message
-        // (not a label) is the whole point of this step. Ctrl+Enter/Alt+Enter send,
-        // matching both how crossterm can report the chord depending on the
-        // terminal's protocol support.
+        // (not a label) is the whole point of this step.
+        //
+        // Sending is Ctrl+Enter, and why it used to take Alt+Enter (issue #438): a
+        // terminal speaking the legacy encoding has no Ctrl+Enter to send. Most
+        // send the same CR as a plain Enter, so the chord arrives as Enter and
+        // types a newline -- nothing a program can tell apart. Some send LF
+        // instead, which crossterm reads in raw mode as Ctrl+J, and which fell
+        // through to the character arm below and typed a "j". Alt+Enter arrives
+        // everywhere as ESC CR, which is why it was the one that worked.
+        //
+        // So: Ctrl+Enter where the terminal can report it (kitty keyboard protocol,
+        // enabled in tui.rs where supported), Ctrl+J for the LF terminals, Alt+Enter
+        // everywhere else, and the Send button for any terminal none of those reach.
         InputMode::ComposeChatMessage => {
             match (key.modifiers, key.code) {
                 (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
-                (KeyModifiers::CONTROL, KeyCode::Enter) | (KeyModifiers::ALT, KeyCode::Enter) => {
-                    app.submit_input().await
-                }
+                (KeyModifiers::CONTROL, KeyCode::Enter)
+                | (KeyModifiers::ALT, KeyCode::Enter)
+                | (KeyModifiers::CONTROL, KeyCode::Char('j')) => app.submit_input().await,
                 (_, KeyCode::Enter) => app.input.push('\n'),
                 (_, KeyCode::Esc) => app.close_input(),
                 (KeyModifiers::CONTROL, KeyCode::Char('a')) => app.open_chat_service_picker(),
