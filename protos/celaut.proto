@@ -648,6 +648,22 @@ message ChatMessage {
     // is watching their node at that moment, which is the case this feature is
     // for ("tell the other operator something is wrong") in the first place.
     optional string conversation_id = 3;
+
+    // A service shared in this message (issue #438): what the TUI renders as a card
+    // with "get" and "execute" on it, so a peer can hand another one a service
+    // without the hash being copied out of the text by hand. Optional and additive:
+    // a node that predates it skips the unknown field and keeps `body`, which the
+    // sender fills with a line naming the service for exactly that reader.
+    optional ChatServiceCard service = 4;
+}
+
+// The metadata a chat service card carries: the service id `nodo get`/`nodo
+// execute` take, and the tags its sender knows it by. Nothing here is trusted
+// beyond its shape -- the id is only ever handed back to `nodo get`, which asks
+// the network for content by that hash.
+message ChatServiceCard {
+    string service_id = 1;
+    repeated string tags = 2;
 }
 
 // Chat's reply, once storage is confirmed (or refused) instead of nothing. `stored`
