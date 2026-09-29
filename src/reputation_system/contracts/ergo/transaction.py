@@ -5,6 +5,7 @@ import requests
 
 from src.reputation_system.envs import REPUTATION_PROOF_ADDRESS
 from src.utils.config import ConfigManager
+from src.utils.ergo_node_url import ergo_node_url_problem
 from src.utils.java_dependency import ensure_ergpy_jvm, require_java_module
 from src.utils.logger import LOGGER
 from src.utils.network import resolve_public_port
@@ -413,8 +414,9 @@ def submit_reputation_proof(objects: List[Tuple[str, int, str]]) -> bool:
         mnemonic = env_manager.get('ledgers.ergo.WALLET_MNEMONIC') or env_manager.get('WALLET_MNEMONIC')
         node_url = ERGO_NODE_URL()
 
-        if not node_url:
-            LOGGER("Missing configuration: ledgers.ergo.NODE_URL")
+        problem = ergo_node_url_problem(node_url)
+        if problem:
+            LOGGER(problem)
             return False
 
         if not mnemonic:

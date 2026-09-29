@@ -10,6 +10,7 @@ from src.utils.logger import LOGGER
 from src.utils.config import ConfigManager
 from src.utils.contract_xattrs import set_address, set_script, set_token_id, set_contract_type
 from src.utils.ergo_units import erg_to_nanoerg, is_valid_ergo_address, nanoerg_to_erg_str
+from src.utils.ergo_node_url import require_ergo_node_url
 # This ledger's MU rate and its conversions. A separate, light module on purpose: it is
 # also what `monetary.display_unit` resolves ERG through, and that runs on log lines, so
 # it must not pull in everything below.
@@ -255,10 +256,10 @@ def __nanoerg_to_erg(amount: int) -> float:
 
 
 def __init_ergo():
+    # Validated before the JVM starts: an empty value would otherwise surface much
+    # later as requests' "Invalid URL '/info'" (#441).
+    node_url = require_ergo_node_url(ERGO_NODE_URL()) + '/'
     appkit, _, _, _ = _ergo_runtime()
-    node_url = ERGO_NODE_URL()
-    if not node_url.endswith('/'):
-        node_url += '/'
     return appkit.ErgoAppKit(node_url=node_url)
 
 
@@ -393,7 +394,7 @@ def check_sender_balance(amount: int) -> bool:
             LOGGER(f"Insufficient balance for the wallet. Required: {required}, Available: {available}")
         return check
     except Exception as e:
-        LOGGER(f"Error checking wallet balance: {str(e)}")
+        LOGGER(f"Error checking wallet balance: {type(e).__name__}: {e}")
         return False
 
 
@@ -1065,7 +1066,7 @@ def _token_check_sender_balance(amount: int, asset) -> bool:
             return False
         return True
     except Exception as e:
-        LOGGER(f"Error checking wallet balance: {str(e)}")
+        LOGGER(f"Error checking wallet balance: {type(e).__name__}: {e}")
         return False
 
 
