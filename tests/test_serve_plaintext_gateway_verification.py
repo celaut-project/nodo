@@ -134,6 +134,14 @@ class VerifyPlaintextGatewayPortTests(unittest.TestCase):
             "sudo ufw allow from 192.168.200.0/24 to any port 58444 proto tcp",
         )
 
+    def test_the_probed_port_travels_with_the_notice(self):
+        """So the alert is never read against a port `auto` has since moved to (#438)."""
+        self.result = BLOCKED
+        with patch("src.utils.firewall.frontend.detect_scoped_frontend", return_value=None):
+            serve_module._verify_plaintext_gateway_port(PORT)
+
+        self.assertEqual(self.env.emit_plaintext_gateway_notice.call_args.kwargs.get("port"), PORT)
+
     def test_no_detected_front_end_means_no_command_on_the_notice(self):
         self.result = BLOCKED
         with patch("src.utils.firewall.frontend.detect_scoped_frontend", return_value=None):

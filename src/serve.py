@@ -202,6 +202,7 @@ def _verify_plaintext_gateway_port(port: int) -> None:
         "plaintext gateway unreachable",
         "\n".join(lines),
         command=frontend.command if frontend else None,
+        port=port,
     )
 
 
