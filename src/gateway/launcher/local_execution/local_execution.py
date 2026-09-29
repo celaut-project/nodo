@@ -2,8 +2,6 @@ import json
 import traceback
 from typing import Optional, Callable, List, Dict
 
-import netifaces as ni
-
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.database.sql_connection import SQLConnection
 from src.virtualizers.architecture import get_arch_tag
@@ -11,7 +9,6 @@ from src.virtualizers.interface import build, execute, get_configured_virtualize
 from src.virtualizers.selection import select_virtualizer
 from src.manager.manager import (
     default_initial_balance,
-    is_external_execute_client,
     reserve_instance_name,
 )
 from src.utils import utils, logger as log
@@ -70,92 +67,6 @@ def _serialize_envs(config: Optional[celaut.Configuration]) -> str:
     }
     return json.dumps(envs, sort_keys=True) if envs else ""
 
-
-_INTERFACE_PREFIX_PRIORITY = (
-    "wl",
-    "ww",
-    "en",
-    "eth",
-)
-
-
-def _interface_priority(interface: str) -> tuple[int, int, str]:
-    normalized = (interface or "").strip().lower()
-    if normalized in {"lo", "localhost"}:
-        return (3, len(normalized), normalized)
-    if utils.is_virtual_interface(normalized):
-        return (2, len(normalized), normalized)
-    if normalized.startswith(_INTERFACE_PREFIX_PRIORITY):
-        return (0, len(normalized), normalized)
-    return (1, len(normalized), normalized)
-
-
-def _resolve_default_ipv4_interface() -> str:
-    try:
-        default_gateway = ni.gateways().get("default", {})
-        default_route = default_gateway.get(ni.AF_INET)
-        if default_route and len(default_route) > 1:
-            return str(default_route[1])
-    except Exception as e:
-        log.LOGGER(f"Unable to resolve default IPv4 interface: {e}")
-    return ""
-
-
-def _resolve_default_ipv6_interface() -> str:
-    try:
-        default_gateway = ni.gateways().get("default", {})
-        default_route = default_gateway.get(ni.AF_INET6)
-        if default_route and len(default_route) > 1:
-            return str(default_route[1])
-    except Exception as e:
-        log.LOGGER(f"Unable to resolve default IPv6 interface: {e}")
-    return ""
-
-
-def _find_any_host_interface_ip() -> str:
-    for interface in sorted(ni.interfaces(), key=_interface_priority):
-        if _interface_priority(interface)[0] >= 2:
-            continue
-        if interface in {"lo", "localhost"}:
-            continue
-        try:
-            return utils.get_local_ip_from_network(network=interface, allow_link_local=False)
-        except Exception:
-            continue
-    raise RuntimeError("Unable to find any host interface IP to advertise.")
-
-
-def _get_external_advertised_host_ip(father_ip: str) -> str:
-    configured_public_ip = str(env_manager.get("network.PUBLIC_IP", "") or "").strip()
-    if configured_public_ip:
-        return configured_public_ip
-
-    configured_interface = str(env_manager.get("network.EXTERNAL_INTERFACE", "") or "").strip()
-    if configured_interface:
-        return utils.get_local_ip_from_network(network=configured_interface, allow_link_local=False)
-
-    default_interface = _resolve_default_ipv4_interface()
-    if default_interface:
-        return utils.get_local_ip_from_network(network=default_interface, allow_link_local=False)
-
-    default_ipv6_interface = _resolve_default_ipv6_interface()
-    if default_ipv6_interface:
-        return utils.get_local_ip_from_network(network=default_ipv6_interface, allow_link_local=False)
-
-    try:
-        return _find_any_host_interface_ip()
-    except Exception as e:
-        log.LOGGER(f"Unable to resolve host IP from available interfaces: {e}")
-
-    if father_ip:
-        resolved_network = utils.get_network_name(direction=father_ip)
-        if resolved_network:
-            return utils.get_local_ip_from_network(network=resolved_network, allow_link_local=False)
-
-    raise RuntimeError(
-        "Unable to resolve an external host IP to advertise. "
-        "Configure network.PUBLIC_IP or network.EXTERNAL_INTERFACE."
-    )
 
 def local_execution(
         config: Optional[celaut_pb2.Configuration],
@@ -221,38 +132,28 @@ def local_execution(
     isolate_internal_children = env_manager.get("network.ISOLATE_INTERNAL_CHILDREN", True)
     is_dev_client = "dev" in father_id and env_manager.get("network.CONSIDER_DEV_AS_INTERNAL", True)
     disabled_outside = env_manager.get("network.DISABLE_EXPOSE_OUTSIDE", False)
-    # `dev-external-` client ids are a synthetic pool used to exercise the
-    # "exposed outside" code paths locally for testing, without a real remote
-    # peer -- not a signal that the actual father is on another network (that
-    # is what cross_network, below, is for).
-    is_dev_forced_external = is_external_execute_client(father_id)
     # In case of dev instances, we consider them as internal.
     # If the father is internal, but isolate internal children is disabled, the child should be exposed outside.
-    expose_outside: bool = not disabled_outside and (
-        is_dev_forced_external
-        or (not is_dev_client and (not father_is_local_vmachine or not isolate_internal_children))
+    expose_outside: bool = not disabled_outside and not is_dev_client and (
+        not father_is_local_vmachine or not isolate_internal_children
     )
-    if is_dev_forced_external and disabled_outside:
-        log.LOGGER(
-            "External exposure requested by configuration, but network.DISABLE_EXPOSE_OUTSIDE is enabled."
-        )
 
     # Which of our own networks (if any) father_ip belongs to. None means father_ip
     # shares no subnet with any of our interfaces -- e.g. a real peer reached over
     # the internet -- which is a different situation from "not exposed" and must
     # not be resolved as if it were our own loopback (see get_network_name).
     resolved_network: Optional[str] = None
-    if expose_outside and not is_dev_forced_external:
+    if expose_outside:
         resolved_network = utils.get_network_name(direction=father_ip)
     same_network = resolved_network is not None
-    cross_network = expose_outside and not is_dev_forced_external and not same_network
+    cross_network = expose_outside and not same_network
 
     log.LOGGER(
         "Internal child isolation is "
         + ("enabled" if isolate_internal_children else "disabled")
         + (
             f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside}, "
-            f"is_dev_forced_external={is_dev_forced_external}, cross_network={cross_network})"
+            f"cross_network={cross_network})"
         )
     )
 
@@ -286,9 +187,9 @@ def local_execution(
         configured_public_ip = str(env_manager.get("network.PUBLIC_IP", "") or "").strip()
 
     # Only allocate (and later DNAT) the slots we can actually route to from
-    # outside. same_network and the dev-forced-external test path behave as
-    # before: an OS ephemeral port when FREE_PORTS_RANGE is exhausted or unset is
-    # still fine there, since it stays reachable on this node's own network.
+    # outside. same_network behaves as before: an OS ephemeral port when
+    # FREE_PORTS_RANGE is exhausted or unset is still fine there, since it stays
+    # reachable on this node's own network.
     # cross_network with no PUBLIC_IP configured, or with every configured range
     # already taken, leaves the slot out entirely instead of failing the whole
     # launch: a tunnelled request reaches the container directly on its internal
@@ -427,8 +328,6 @@ def local_execution(
         # get the host ip to be published for this instance. If the instance doesn't require to be exposed, publish the vmachine_ip, otherwise publish the local IP of this node.:
         if not expose_outside:
             _ip = vmachine_ip
-        elif is_dev_forced_external:
-            _ip = _get_external_advertised_host_ip(father_ip=father_ip)
         elif same_network:
             _ip = utils.get_local_ip_from_network(
                 network=resolved_network,
