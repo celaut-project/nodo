@@ -172,14 +172,17 @@ def get_metrics(token: str) -> celaut_pb2.Metrics:
 
     elif sc.internal_instance_exists(id=token):
         return __get_metrics_internal(id=token)
-    
-    elif '##' not in token:
-        raise Exception(f'Invalid token, it should be a client_id or a token with ##.  token: {token}')
 
     else:
-        token = sc.get_delegated_token_by_id(id=token)
-        if not token:
-            raise Exception(f'Invalid token: {token}')
+        # A delegated instance is known by the alias `delegate_execution` handed out
+        # -- the sha256 hex of the peer's token -- which never contains '##'. Gating
+        # this lookup on that old token format rejected every one of them, so a node
+        # that re-delegated a child answered its father's metrics read with "Invalid
+        # token", and the father took that for the child being gone (#442).
+        delegated_token = sc.get_delegated_token_by_id(id=token)
+        if not delegated_token:
+            raise Exception(f'Invalid token, it should be a client_id or an instance token.  token: {token}')
+        token = delegated_token
 
         # Our own books, not the peer's. A delegated instance's deposit is held
         # here, in our MU, and spent down by the maintenance tick at the rate the
