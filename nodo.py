@@ -916,14 +916,17 @@ if __name__ == '__main__':
                 # reading and sending share the one positional shape. Flat,
                 # un-threaded history -- see chat_open/chat_reply/chat_threads
                 # for conversations (issue #431).
-                chat_args = sys.argv[2:]
+                # `--service <id|tag>` attaches a local service as a card (#438).
+                chat_args, chat_service = take_option(sys.argv[2:], "--service")
                 if not chat_args:
-                    print("Usage: nodo chat <peer_id> [message...]", flush=True)
+                    print("Usage: nodo chat <peer_id> [message...] [--service <id|tag>]", flush=True)
                     os._exit(1)
                 chat_peer_id, chat_words = chat_args[0], chat_args[1:]
-                if chat_words:
+                if chat_words or chat_service:
                     from src.commands.chat import send_chat
-                    ok = send_chat(peer_id=chat_peer_id, body=" ".join(chat_words))
+                    ok = send_chat(
+                        peer_id=chat_peer_id, body=" ".join(chat_words), service=chat_service,
+                    )
                 else:
                     from src.commands.chat import show_chat
                     ok = show_chat(peer_id=chat_peer_id)
@@ -933,26 +936,36 @@ if __name__ == '__main__':
                 # `--message` sends a real first message distinct from the topic
                 # label (TUI peer/topic/body wizard); omitting it keeps sending
                 # `topic` itself, exactly as before that wizard existed.
-                chat_open_args, chat_open_opts = take_options(sys.argv[2:], "--message")
+                chat_open_args, chat_open_opts = take_options(sys.argv[2:], "--message", "--service")
                 if len(chat_open_args) < 2:
-                    print("Usage: nodo chat_open <peer_id> <topic...> [--message body]", flush=True)
+                    print(
+                        "Usage: nodo chat_open <peer_id> <topic...> [--message body] "
+                        "[--service <id|tag>]",
+                        flush=True,
+                    )
                     os._exit(1)
                 from src.commands.chat import open_thread
                 ok = open_thread(
                     peer_id=chat_open_args[0],
                     topic=" ".join(chat_open_args[1:]),
                     body=chat_open_opts.get("--message"),
+                    service=chat_open_opts.get("--service"),
                 )
                 os._exit(0 if ok else 1)
 
             case "chat_reply":
-                chat_reply_args = sys.argv[2:]
-                if len(chat_reply_args) < 2:
-                    print("Usage: nodo chat_reply <conversation_id> <message...>", flush=True)
+                chat_reply_args, chat_reply_service = take_option(sys.argv[2:], "--service")
+                if len(chat_reply_args) < (1 if chat_reply_service else 2):
+                    print(
+                        "Usage: nodo chat_reply <conversation_id> <message...> [--service <id|tag>]",
+                        flush=True,
+                    )
                     os._exit(1)
                 from src.commands.chat import reply_in_thread
                 ok = reply_in_thread(
-                    conversation_id=chat_reply_args[0], body=" ".join(chat_reply_args[1:])
+                    conversation_id=chat_reply_args[0],
+                    body=" ".join(chat_reply_args[1:]),
+                    service=chat_reply_service,
                 )
                 os._exit(0 if ok else 1)
 
