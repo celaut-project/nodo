@@ -60,7 +60,7 @@ GROUPS: List[Group] = [
         None,
         [
             ("estimate <service>", "what an execution would cost, before paying for it"),
-            ("execute <service>", "run it (--remote, --name <name>, -e <key> <value>)"),
+            ("execute <service>", "run it (--name <name>, -e <key> <value>)"),
             ("instances [<search>]", "list what is running (--grouped by parent)"),
             ("observe <instance>", "watch an instance live (--save <path> records it)"),
             ("tunnel <instance> <slot>", "reach its port from here (--udp, --listen, --peer)"),
