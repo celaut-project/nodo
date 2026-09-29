@@ -27,6 +27,7 @@ from protos import celaut_pb2 as celaut
 from src.utils import logger as log
 from src.utils.config import ConfigManager
 from src.utils.firewall import policy as fw_policy
+from src.virtualizers.ch import vgic
 from src.virtualizers.firewall import resolve_slot_transport_protocols, remove_vm_rules as vm_remove_vm_rules
 from src.virtualizers.microvm import bundle as microvm_bundle
 from src.virtualizers.microvm import guest as microvm_guest
@@ -527,9 +528,11 @@ def execute(
 
         time.sleep(1.0)
         if process.poll() is not None:
+            stderr_tail = serial.tail_file(stderr_path)
             raise MicroVMError(
                 f"cloud-hypervisor process exited early with code {process.returncode}. "
-                f"See {stderr_path}. stderr tail: {serial.tail_file(stderr_path)}"
+                + (f"{vgic.GUIDANCE} " if vgic.is_vgic_failure(stderr_tail) else "")
+                + f"See {stderr_path}. stderr tail: {stderr_tail}"
             )
         log.LOGGER(f"[CH][{vmachine_id}] process health check passed after 1s")
 
