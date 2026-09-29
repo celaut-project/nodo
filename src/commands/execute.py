@@ -18,6 +18,7 @@ from src.manager.manager import get_execute_client
 from src.identity.grpc_transport import local_channel
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
+from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved, resolve_from_config
 from src.utils.instance_names import inject_instance_name
 from src.utils.registry_errors import ServiceRegistryError
 
@@ -207,7 +208,8 @@ REMOVED_REMOTE_FLAG_ERROR = (
     "Error: `nodo execute --remote` was removed. The address `execute` prints is only "
     "reachable from this host; to reach the instance from elsewhere use "
     "`nodo tunnel <instance> <slot> --peer <node address>:<gateway port>` "
-    "(see docs/TUNNELING.md)."
+    "(see docs/TUNNELING.md). To have `execute` also publish on this host's own "
+    f"interface, set {HOST_EXPOSURE_KEY}."
 )
 
 
@@ -241,6 +243,38 @@ def print_endpoints(response) -> None:
             print(f"  • {endpoint}")
     else:
         print("No endpoints available")
+
+
+def print_host_exposure_note(response) -> None:
+    """With ``HOST_EXPOSURE_KEY`` on, say whether the instance made it onto the host interface.
+
+    The gateway resolves the address from the same config this process reads, so the
+    CLI re-resolves it to tell a published instance (its URIs carry that address)
+    from one that stayed internal -- and says why, instead of letting an internal
+    address pass for a host one.
+    """
+    if not env_manager.get(HOST_EXPOSURE_KEY, False) or not response.instance.uri_slot:
+        return
+    advertised = {uri.ip for uri_slot in response.instance.uri_slot for uri in uri_slot.uri}
+    try:
+        host_ip = resolve_from_config(env_manager.get)
+    except HostInterfaceUnresolved as e:
+        reason = f"no host interface address resolves ({e}); set network.EXTERNAL_INTERFACE or network.PUBLIC_IP"
+    else:
+        if host_ip in advertised:
+            print(f"\n  Published on this host's interface ({host_ip}) by {HOST_EXPOSURE_KEY}.")
+            return
+        reason = "the gateway kept it internal (see the gateway log)"
+
+    slot = next((uri_slot.internal_port for uri_slot in response.instance.uri_slot), "<slot>")
+    token = response.token or "<instance>"
+    print(
+        f"\n  Warning: {HOST_EXPOSURE_KEY} is on, but the instance was not published on "
+        f"this host's interface: {reason}.\n"
+        "  The address above is internal to the node's host. To reach the instance from "
+        "elsewhere:\n"
+        f"      nodo tunnel {token} {slot} --peer <node address>:<gateway port>"
+    )
 
 
 def execute(
@@ -281,6 +315,7 @@ def execute(
             return
 
         print_endpoints(response)
+        print_host_exposure_note(response)
 
     finally:
         if sink:

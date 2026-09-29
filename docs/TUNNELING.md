@@ -20,7 +20,10 @@ only one available when `network.DISABLE_EXPOSE_OUTSIDE` is set.
 For an instance you launch yourself with `nodo execute`, tunneling is the **only**
 off-host path: the address `execute` prints is only meaningful on the machine that
 ran it. (`nodo execute --remote`, which advertised a LAN address instead, has been
-removed.)
+removed.) `network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE` does not change that: it
+publishes the instance on a port of the node host's own interface, for when the
+operator's tools sit just outside the node's network namespace (a node inside a VM, say),
+and never advertises loopback. Anything beyond that host is still a tunnel.
 
 ### Option 1: Direct exposure (NAT traversal)
 

@@ -419,6 +419,15 @@ network:
   # If true, child instances launched by internal instances are NOT exposed on the host.
   # If false, child instances will be published and reachable from the internet (subject to host firewall).
   ISOLATE_INTERNAL_CHILDREN: true
+  # If true, instances started by this node's own local clients (`nodo execute`, which
+  # are otherwise internal) are also published on a port of this host's interface, and
+  # `execute` prints that address. For a host whose operator's tools run outside the
+  # network namespace the node runs in, e.g. a node inside a VM driven from the machine
+  # hosting it. The address comes from PUBLIC_IP, else EXTERNAL_INTERFACE, else the
+  # default-route interface -- never loopback: if none resolves, the instance stays
+  # internal and the error is logged. Ports come from FREE_PORTS_RANGE. This is only the
+  # host's own interface; `nodo tunnel` is still the way in from anywhere else.
+  EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE: false
   CONSIDER_DEV_AS_INTERNAL: true  # If true, instances with "dev" in their father_id are considered internal regardless of actual network location. Use false in case node is controlled via ssh session for example.
   DISABLE_EXPOSE_OUTSIDE: false  # If true, no instances will be exposed outside regardless of other settings. Use for maximum isolation. Services stay reachable through service tunneling (Gateway.ServiceTunnel / `nodo tunnel`), which needs no port of its own -- see docs/TUNNELING.md.
   FREE_PORTS_RANGE:  # Free ports range to use for exposing services. Ports outside this range will not be used for service exposure. Useful to match router forwarding rules. Can be multiple ranges, e.g.: - START: 10000 \n END: 20000 \n - START: 30000 \n END: 40000
