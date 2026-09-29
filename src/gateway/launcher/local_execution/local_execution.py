@@ -14,6 +14,7 @@ from src.manager.manager import (
 from src.utils import utils, logger as log
 from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
+from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved, resolve_from_config
 from src.utils.network import get_free_port
 from src.utils.config import ConfigManager
 from src.virtualizers.firewall import resolve_slot_transport_protocols
@@ -148,12 +149,36 @@ def local_execution(
     same_network = resolved_network is not None
     cross_network = expose_outside and not same_network
 
+    # An instance this node's own local client started is internal (above), but the
+    # operator may have asked for it to be published on this host's interface too:
+    # for a host whose operator's tools run outside the network namespace the node
+    # runs in, the internal address answers nothing they can reach. The address comes
+    # from explicit configuration only and is never loopback (see
+    # utils.host_interface); when none resolves, the instance still runs, internally.
+    host_exposure_ip: Optional[str] = None
+    if not expose_outside and is_dev_client and env_manager.get(HOST_EXPOSURE_KEY, False):
+        if disabled_outside:
+            log.LOGGER(
+                f"[LOCAL_EXEC] {HOST_EXPOSURE_KEY} is on, but network.DISABLE_EXPOSE_OUTSIDE "
+                "wins; the instance stays internal."
+            )
+        else:
+            try:
+                host_exposure_ip = resolve_from_config(env_manager.get)
+            except HostInterfaceUnresolved as e:
+                log.LOGGER(
+                    f"[LOCAL_EXEC] ERROR: {HOST_EXPOSURE_KEY} is on, but no host interface "
+                    f"address could be resolved: {e}. Set network.EXTERNAL_INTERFACE or "
+                    "network.PUBLIC_IP. The instance stays internal; reach it from elsewhere "
+                    "with `nodo tunnel`."
+                )
+
     log.LOGGER(
         "Internal child isolation is "
         + ("enabled" if isolate_internal_children else "disabled")
         + (
             f" (father_id={father_id}, father_ip={father_ip}, by_local={not expose_outside}, "
-            f"cross_network={cross_network})"
+            f"cross_network={cross_network}, host_exposure_ip={host_exposure_ip or 'none'})"
         )
     )
 
@@ -196,7 +221,23 @@ def local_execution(
     # address (src/tunneling/rpc_tunnel.py), bypassing this mapping, so nothing
     # needs to be opened on this host for a slot nobody will be told about.
     assigment_ports: Dict[int, int] = {}
-    for port in supported_slot_ports:
+    if host_exposure_ip is not None:
+        # Every slot or none: a half-published instance would print an endpoint list
+        # that silently mixes host and internal addresses.
+        try:
+            assigment_ports = {
+                port: get_free_port(free_port_ranges=free_port_ranges)
+                for port in supported_slot_ports
+            }
+        except RuntimeError as e:
+            log.LOGGER(
+                f"[LOCAL_EXEC] ERROR: {HOST_EXPOSURE_KEY} is on, but {e}; the instance stays internal."
+            )
+            host_exposure_ip = None
+    publish_on_host = host_exposure_ip is not None
+    by_local = not expose_outside and not publish_on_host
+
+    for port in ([] if publish_on_host else supported_slot_ports):
         if not expose_outside:
             assigment_ports[port] = port
         elif cross_network:
@@ -210,7 +251,7 @@ def local_execution(
             assigment_ports[port] = get_free_port(free_port_ranges=free_port_ranges)
 
     log.LOGGER(
-        f"Execution network mode: by_local={not expose_outside}, "
+        f"Execution network mode: by_local={by_local}, "
         f"assigment_ports={assigment_ports}"
     )
 
@@ -304,7 +345,7 @@ def local_execution(
     try:
         vmachine_id, vmachine_ip, resolved_resources = execute(
             assigment_ports=assigment_ports,
-            by_local=not expose_outside,
+            by_local=by_local,
             service_id=service_id,
             service=service,
             config=config,
@@ -326,7 +367,9 @@ def local_execution(
     uri_slots: List[celaut.Instance.Uri_Slot] = []
     try:
         # get the host ip to be published for this instance. If the instance doesn't require to be exposed, publish the vmachine_ip, otherwise publish the local IP of this node.:
-        if not expose_outside:
+        if publish_on_host:
+            _ip = host_exposure_ip
+        elif not expose_outside:
             _ip = vmachine_ip
         elif same_network:
             _ip = utils.get_local_ip_from_network(
@@ -362,7 +405,7 @@ def local_execution(
                 )
                 log.LOGGER(
                     f"Published URI mapping: internal_port={internal}, advertised={_ip}:{external}, "
-                    f"vmachine_ip={vmachine_ip}, by_local={not expose_outside}"
+                    f"vmachine_ip={vmachine_ip}, by_local={by_local}"
                 )
             else:
                 log.LOGGER(

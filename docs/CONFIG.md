@@ -281,6 +281,18 @@ differs from the internal one — empty means "same as internal"; only
 `DISABLE_EXPOSE_OUTSIDE` and `ISOLATE_INTERNAL_CHILDREN`. See also
 [`NETWORKS.md`](NETWORKS.md).
 
+`EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE` (default `false`) also publishes the
+instances this node's own local clients start — the ones `nodo execute` launches, which
+are otherwise internal — on a port of this host's interface, and `execute` prints that
+address. It is for a host whose operator's tools run outside the network namespace the
+node runs in, e.g. a node inside a VM driven from the machine that hosts it. The address
+comes from `PUBLIC_IP`, else `EXTERNAL_INTERFACE`, else the default-route interface, and
+is never loopback or link-local: when none of those resolves, the instance still starts,
+internally, and the gateway log and `execute` say why. Ports come from
+`FREE_PORTS_RANGE`; `DISABLE_EXPOSE_OUTSIDE` overrides it. It is read at every launch.
+It only publishes on the host's own interface — reaching an instance from anywhere else
+is still [`nodo tunnel`](TUNNELING.md).
+
 Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) and
 `TUNNEL_UDP_IDLE_TIMEOUT_S` — see [`TUNNELING.md`](TUNNELING.md).
 

@@ -478,6 +478,25 @@ static LEVERS: &[Lever] = &[
         warning: None,
         secret: false,
     },
+    Lever {
+        id: "dev-on-host",
+        organelle: Organelle::Ribosomes,
+        label: "publish on host",
+        question: "Should what I launch myself also be published on this host's own interface?",
+        consequence: "For a node whose operator's tools run outside the network it lives in, e.g. inside a VM. `execute` then prints a host address instead of the internal one; never loopback, and nothing beyond this host -- that is still `nodo tunnel`.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "internal only",
+                writes: &[("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false")],
+            },
+            LeverState {
+                label: "on host too",
+                writes: &[("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "true")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
     // --- VESICLES · voice --------------------------------------------------
     Lever {
         id: "delegate",
@@ -1263,6 +1282,7 @@ static PROFILES: &[Profile] = &[
             ("client.ACCEPT_NEW_DEPOSITS", "false"),
             ("network.DISABLE_EXPOSE_OUTSIDE", "true"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
@@ -1301,6 +1321,7 @@ static PROFILES: &[Profile] = &[
             // and the router needs one forward rather than a range of them.
             ("network.DISABLE_EXPOSE_OUTSIDE", "true"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
@@ -1342,6 +1363,7 @@ static PROFILES: &[Profile] = &[
             ("client.ACCEPT_NEW_DEPOSITS", "true"),
             ("network.DISABLE_EXPOSE_OUTSIDE", "false"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "true"),
@@ -1380,6 +1402,7 @@ static PROFILES: &[Profile] = &[
             ("client.ACCEPT_NEW_DEPOSITS", "true"),
             ("network.DISABLE_EXPOSE_OUTSIDE", "false"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "false"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "true"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "false"),
@@ -1413,6 +1436,7 @@ static PROFILES: &[Profile] = &[
             ("client.ACCEPT_NEW_DEPOSITS", "false"),
             ("network.DISABLE_EXPOSE_OUTSIDE", "true"),
             ("network.ISOLATE_INTERNAL_CHILDREN", "true"),
+            ("network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE", "false"),
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.CONSIDER_DEV_AS_INTERNAL", "true"),
             ("network.DELEGATE_EXECUTION", "false"),
@@ -1711,6 +1735,23 @@ mod tests {
             assert_eq!(run_locally.paths(), vec!["network.EXECUTE_LOCALLY"]);
             let delegate = lever("delegate").unwrap();
             assert!(!delegate.paths().contains(&"network.EXECUTE_LOCALLY"));
+        }
+
+        /// Publishing a node's own launches on the host interface is an operator's
+        /// call about their host (an installer may make it), never a posture: every
+        /// profile leaves it off, and one lever owns the key.
+        #[test]
+        fn every_profile_keeps_local_launches_off_the_host_interface() {
+            let key = "network.EXPOSE_LOCAL_EXECUTIONS_ON_HOST_INTERFACE";
+            assert_eq!(lever("dev-on-host").unwrap().paths(), vec![key]);
+            assert_eq!(profiles().len(), 5);
+            for profile in profiles() {
+                assert!(
+                    profile.writes.contains(&(key, "false")),
+                    "profile {} must write {key}: false",
+                    profile.id
+                );
+            }
         }
 
         /// Both off is a node that refuses every launch. Coherent to ask for, and
