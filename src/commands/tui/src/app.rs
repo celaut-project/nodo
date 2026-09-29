@@ -1618,6 +1618,18 @@ pub struct DashboardStats {
     /// same way an instance's is, since the daemon is just another leaf of the same
     /// unified hierarchy (`daemon_cgroup_dir`).
     pub daemon_memory_used: u64,
+    /// Logical cores on the host (`sys.cpus().len()`), the denominator that turns a
+    /// core-normalised CPU reading -- 200% meaning two cores pinned, the same scale
+    /// `Instance::usage.cpu_percent` uses -- into a share of `cpu_percent`, which is
+    /// already averaged across every core.
+    pub cpu_cores: u64,
+    /// The daemon's own cgroup CPU rate, core-normalised like an instance's
+    /// `usage.cpu_percent` (100.0 = one core fully busy), derived from `cpu.stat`
+    /// `usage_usec` across ticks (`daemon_cpu_counter`).
+    pub daemon_cpu_percent: f64,
+    /// Running instances' CPU rates summed, same core-normalised scale as
+    /// `daemon_cpu_percent`.
+    pub instance_cpu_percent: f64,
 }
 
 /// The three groups OVERVIEW's RAM bar splits host memory into.
@@ -1663,6 +1675,54 @@ pub fn memory_breakdown(stats: &DashboardStats) -> MemoryBreakdown {
         instances_reserved: stats.instance_memory_reserved,
         host_other,
         total: stats.memory_total,
+    }
+}
+
+/// The three groups OVERVIEW's CPU bar splits host CPU into, mirroring
+/// `MemoryBreakdown`: the daemon's own cgroup, what running instances are using, and
+/// everything else on the host. Percentage points of `cpu_percent` (already averaged
+/// across every core), not core-normalised readings -- `total` is always 100, so a
+/// group's field *is* its percentage of the host, and `percent()` on it is a no-op
+/// kept only so both breakdowns share the same shape.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CpuBreakdown {
+    pub daemon: u64,
+    pub instances: u64,
+    pub host_other: u64,
+    pub total: u64,
+}
+
+impl CpuBreakdown {
+    pub fn daemon_percent(&self) -> u64 {
+        percent(self.daemon, self.total)
+    }
+    pub fn instances_percent(&self) -> u64 {
+        percent(self.instances, self.total)
+    }
+    pub fn host_other_percent(&self) -> u64 {
+        percent(self.host_other, self.total)
+    }
+}
+
+/// `daemon_cpu_percent` and `instance_cpu_percent` are core-normalised (100.0 = one
+/// core), the scale `usage.cpu_percent` already uses per instance, so both are
+/// divided by `cpu_cores` to land on the same 0-100 scale `cpu_percent` reads on.
+/// `saturating_sub` for the same reason `memory_breakdown` uses it: three independent
+/// readings taken a moment apart can momentarily disagree, and zero is a smaller lie
+/// than negative CPU.
+pub fn cpu_breakdown(stats: &DashboardStats) -> CpuBreakdown {
+    let cores = (stats.cpu_cores.max(1)) as f64;
+    let daemon = (stats.daemon_cpu_percent / cores).round().max(0.0) as u64;
+    let instances = (stats.instance_cpu_percent / cores).round().max(0.0) as u64;
+    let host_other = stats
+        .cpu_percent
+        .saturating_sub(daemon)
+        .saturating_sub(instances);
+    CpuBreakdown {
+        daemon,
+        instances,
+        host_other,
+        total: 100,
     }
 }
 
@@ -1729,6 +1789,71 @@ mod memory_breakdown_tests {
         assert_eq!(breakdown.daemon, 0);
         assert_eq!(breakdown.daemon_percent(), 0);
         assert_eq!(breakdown.host_other, 4_000);
+    }
+}
+
+/// The CPU bar's three-way split of host CPU, the same shape `memory_breakdown_tests`
+/// covers for RAM: the ordinary case, the shared percentage denominator, and the
+/// clamp against a momentary disagreement between readings.
+#[cfg(test)]
+mod cpu_breakdown_tests {
+    use super::{cpu_breakdown, DashboardStats};
+
+    fn stats(cpu_percent: u64, cores: u64, daemon: f64, instances: f64) -> DashboardStats {
+        DashboardStats {
+            cpu_percent,
+            cpu_cores: cores,
+            daemon_cpu_percent: daemon,
+            instance_cpu_percent: instances,
+            ..Default::default()
+        }
+    }
+
+    /// A daemon barely ticking over, an instance pinning most of a core, and whatever
+    /// is left of the host-wide reading is everyone else -- all normalised by the
+    /// core count, the way a per-instance `cpu_percent` already is.
+    #[test]
+    fn groups_are_normalised_by_core_count() {
+        // 4 cores: 100% host average is 400 core-normalised percentage points.
+        // Daemon uses 4 points (1% of a core), instances 200 (half of one core).
+        let breakdown = cpu_breakdown(&stats(52, 4, 4.0, 200.0));
+
+        assert_eq!(breakdown.daemon, 1);
+        assert_eq!(breakdown.instances, 50);
+        assert_eq!(breakdown.host_other, 52 - 1 - 50);
+        assert_eq!(breakdown.total, 100);
+    }
+
+    /// The three groups read directly as percentages, since `total` is fixed at 100 --
+    /// no separate scaling step the way `memory_breakdown`'s bytes need.
+    #[test]
+    fn percentages_match_the_groups_directly() {
+        let breakdown = cpu_breakdown(&stats(80, 2, 40.0, 80.0));
+
+        assert_eq!(breakdown.daemon_percent(), 20);
+        assert_eq!(breakdown.instances_percent(), 40);
+        assert_eq!(breakdown.host_other_percent(), 20);
+    }
+
+    /// Daemon and instance rates are sampled independently of the host-wide reading,
+    /// so together they can momentarily outrun it. The host group floors at zero
+    /// rather than underflowing.
+    #[test]
+    fn groups_that_outgrow_the_host_reading_floor_the_host_group_at_zero() {
+        let breakdown = cpu_breakdown(&stats(10, 1, 6.0, 8.0));
+
+        assert_eq!(breakdown.host_other, 0);
+        assert_eq!(breakdown.host_other_percent(), 0);
+    }
+
+    /// No cores reported (an `App` built before the first `sys.refresh_cpu()`, say)
+    /// must not divide by zero.
+    #[test]
+    fn zero_cores_does_not_panic() {
+        let breakdown = cpu_breakdown(&stats(0, 0, 0.0, 0.0));
+
+        assert_eq!(breakdown.daemon, 0);
+        assert_eq!(breakdown.instances, 0);
     }
 }
 
@@ -2839,6 +2964,11 @@ pub struct App {
     /// network *rates* can be derived across refresh ticks. Rebuilt every sweep, so
     /// an instance that disappears takes its entry with it.
     instance_counters: HashMap<String, InstanceCounters>,
+    /// The daemon's own cgroup `cpu.stat` `usage_usec`, and when it was read, so its
+    /// CPU *rate* can be derived across ticks the same way `instance_counters` derives
+    /// one per instance. A single reading rather than a map, since there is only ever
+    /// one daemon.
+    daemon_cpu_counter: Option<(Instant, u64)>,
     last_data_refresh: Instant,
     last_storage_refresh: Instant,
     last_wallet_refresh: Instant,
@@ -2955,6 +3085,7 @@ impl Default for App {
             id_copy_areas: Vec::new(),
             sys: System::new_all(),
             instance_counters: HashMap::new(),
+            daemon_cpu_counter: None,
             last_data_refresh: now.checked_sub(DATA_REFRESH_INTERVAL).unwrap_or(now),
             last_storage_refresh: now.checked_sub(Duration::from_secs(30)).unwrap_or(now),
             last_wallet_refresh: now.checked_sub(WALLET_REFRESH_INTERVAL).unwrap_or(now),
@@ -5330,6 +5461,7 @@ impl App {
         self.sys.refresh_cpu();
         self.sys.refresh_memory();
         self.stats.cpu_percent = self.sys.global_cpu_info().cpu_usage().round() as u64;
+        self.stats.cpu_cores = self.sys.cpus().len() as u64;
         self.stats.memory_used = self.sys.used_memory();
         self.stats.memory_total = self.sys.total_memory();
         (self.stats.disk_used, self.stats.disk_total) = disk_usage(&self.paths.storage);
@@ -5355,8 +5487,38 @@ impl App {
             .iter()
             .map(|instance| instance.disk_limit)
             .sum();
+        self.stats.instance_cpu_percent = self
+            .instances
+            .items
+            .iter()
+            .filter_map(|instance| instance.usage.cpu_percent)
+            .sum();
         self.stats.daemon_memory_used =
             read_u64(&daemon_cgroup_dir(&self.paths).join("memory.current")).unwrap_or(0);
+        self.stats.daemon_cpu_percent = self.derive_daemon_cpu_rate(Instant::now());
+    }
+
+    /// The daemon's own CPU rate since the previous sweep, core-normalised like an
+    /// instance's `usage.cpu_percent` (`derive_instance_rates`'s sibling, for the one
+    /// cgroup that isn't an instance). No reading yet, or the cgroup gone backwards
+    /// (the service restarted), keeps the last known rate rather than reporting zero
+    /// -- a momentary read failure should not flash the daemon's slice of the CPU bar
+    /// to empty.
+    fn derive_daemon_cpu_rate(&mut self, now: Instant) -> f64 {
+        let usage_usec = read_cgroup_keyed_u64(&daemon_cgroup_dir(&self.paths).join("cpu.stat"), "usage_usec");
+        let Some(current) = usage_usec else {
+            return self.stats.daemon_cpu_percent;
+        };
+        let rate = match self.daemon_cpu_counter {
+            Some((previous_time, previous_usec)) => {
+                let elapsed = now.duration_since(previous_time).as_secs_f64();
+                counter_rate(Some(previous_usec), Some(current), elapsed)
+                    .map(|usec_per_sec| usec_per_sec / 10_000.0)
+            }
+            None => None,
+        };
+        self.daemon_cpu_counter = Some((now, current));
+        rate.unwrap_or(self.stats.daemon_cpu_percent)
     }
 
     /// Turn the cumulative counters just read into rates, using the previous sweep's

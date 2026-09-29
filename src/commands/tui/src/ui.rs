@@ -1,6 +1,6 @@
 use crate::app::{
-    format_bytes, format_bytes_compact, format_rate_compact, memory_breakdown, percent,
-    segment_token, shorten, unix_now, App, DashboardStats, DemandByHour,
+    cpu_breakdown, format_bytes, format_bytes_compact, format_rate_compact, memory_breakdown,
+    percent, segment_token, shorten, unix_now, App, DashboardStats, DemandByHour,
     ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
     LedgerEarnings, PageGroup, PaymentRow, PriceEntry, ReputationEvent, ReputationTotals, Service,
     ServiceDetail,
@@ -241,8 +241,12 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
         area
     };
     let rows = Layout::vertical([
+        // NODE's card is the tallest of the top row's four at six lines, plus the
+        // card's own border.
+        Constraint::Length(8),
+        // HOST CAPACITY's CPU (title, bar, percentages) and RAM (the same, plus a
+        // bytes line) breakdowns, plus the card's own border.
         Constraint::Length(9),
-        Constraint::Length(7),
         Constraint::Min(6),
     ])
     .split(area);
@@ -810,68 +814,133 @@ fn draw_health(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(muted()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let rows = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(inner);
-    draw_gauge(frame, rows[0], "CPU", app.stats.cpu_percent, warn());
-    draw_memory_breakdown(frame, rows[1], rows[2], rows[3], &app.stats);
+    // CPU gets a title line of its own (the way a bare `Gauge` block already put
+    // "CPU" above its bar) plus its bar and the three groups' percentages. RAM gets
+    // the same three rows plus a fourth spelling out what each group actually is in
+    // bytes -- kept because, unlike CPU's percentages, that figure says something the
+    // row above it does not.
+    let rows = Layout::vertical([Constraint::Length(1); 7]).split(inner);
+    draw_cpu_breakdown(frame, rows[0], rows[1], rows[2], &app.stats);
+    draw_memory_breakdown(frame, rows[3], rows[4], rows[5], rows[6], &app.stats);
 }
 
-/// The colour each of the RAM bar's three groups is drawn in, reused between the bar
-/// itself and its legend so a segment and its label are found by colour, not just by
-/// reading order.
-fn ram_breakdown_colours() -> (Color, Color, Color) {
+/// The colour each breakdown bar's three groups are drawn in -- daemon, instances,
+/// host -- reused between the bar itself and its legend, and between CPU and RAM, so
+/// "daemon" means the same colour on both bars.
+fn breakdown_colours() -> (Color, Color, Color) {
     (warn(), accent(), series(1))
 }
 
-/// RAM as OVERVIEW draws it since the single-colour gauge was split into groups: one
-/// row of coloured blocks over `memory_total`'s width -- daemon, then instances'
-/// reservations, then everything else the host has resident -- followed by their
-/// percentages and, in bytes, what each figure actually is. Whatever the bar leaves
-/// unfilled is free, exactly as the gauge it replaced also left unfilled.
+/// One coloured run per group's share of `bar_width`, in group order, with whatever
+/// is left of `total` drawn as the unfilled track -- the bar body both breakdowns
+/// share. Widths are accumulated cumulatively (rather than scaled independently) so
+/// the three runs plus the gap always add up to exactly `bar_width`, with any
+/// rounding loss landing on the last group instead of opening a gap between runs.
+fn draw_breakdown_bar(
+    frame: &mut Frame,
+    bar_area: Rect,
+    groups: [u64; 3],
+    total: u64,
+    colours: (Color, Color, Color),
+) {
+    let bar_width = bar_area.width;
+    let total = total.max(1);
+    let mut used_so_far = 0u64;
+    let mut width_so_far = 0u16;
+    let mut segment = |amount: u64| -> u16 {
+        used_so_far = used_so_far.saturating_add(amount).min(total);
+        let width_now = ((used_so_far * bar_width as u64) / total).min(bar_width as u64) as u16;
+        let width = width_now.saturating_sub(width_so_far);
+        width_so_far = width_now;
+        width
+    };
+    let widths = [segment(groups[0]), segment(groups[1]), segment(groups[2])];
+    let free_w = bar_width.saturating_sub(width_so_far);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("█".repeat(widths[0] as usize), Style::default().fg(colours.0)),
+            Span::styled("█".repeat(widths[1] as usize), Style::default().fg(colours.1)),
+            Span::styled("█".repeat(widths[2] as usize), Style::default().fg(colours.2)),
+            Span::styled("░".repeat(free_w as usize), Style::default().fg(muted())),
+        ])),
+        bar_area,
+    );
+}
+
+/// CPU as OVERVIEW draws it, the same three-group shape `draw_memory_breakdown` uses
+/// for RAM: the daemon's own cgroup, what running instances are using, and everything
+/// else on the host, each a share of `cpu_percent` (already averaged across every
+/// core). Whatever the bar leaves unfilled is host CPU that is simply idle.
+fn draw_cpu_breakdown(
+    frame: &mut Frame,
+    title_area: Rect,
+    bar_area: Rect,
+    percent_area: Rect,
+    stats: &DashboardStats,
+) {
+    let breakdown = cpu_breakdown(stats);
+    let (daemon_colour, instances_colour, host_colour) = breakdown_colours();
+
+    frame.render_widget(
+        Paragraph::new(Span::styled("CPU", Style::default().fg(muted()))),
+        title_area,
+    );
+    draw_breakdown_bar(
+        frame,
+        bar_area,
+        [breakdown.daemon, breakdown.instances, breakdown.host_other],
+        breakdown.total,
+        (daemon_colour, instances_colour, host_colour),
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Daemon ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.daemon_percent()),
+                Style::default().fg(daemon_colour).bold(),
+            ),
+            Span::styled("  Instances ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.instances_percent()),
+                Style::default().fg(instances_colour).bold(),
+            ),
+            Span::styled("  Host ", Style::default().fg(muted())),
+            Span::styled(
+                format!("{}%", breakdown.host_other_percent()),
+                Style::default().fg(host_colour).bold(),
+            ),
+        ])),
+        percent_area,
+    );
+}
+
+/// RAM as OVERVIEW draws it: a title line, then one row of coloured blocks over
+/// `memory_total`'s width -- daemon, then instances' reservations, then everything
+/// else the host has resident -- followed by their percentages and, in bytes, what
+/// each figure actually is. Whatever the bar leaves unfilled is free, exactly as the
+/// gauge it replaced also left unfilled.
 fn draw_memory_breakdown(
     frame: &mut Frame,
+    title_area: Rect,
     bar_area: Rect,
     percent_area: Rect,
     bytes_area: Rect,
     stats: &DashboardStats,
 ) {
     let breakdown = memory_breakdown(stats);
-    let (daemon_colour, instances_colour, host_colour) = ram_breakdown_colours();
-
-    let label = Span::styled("RAM ", Style::default().fg(muted()));
-    let bar_width = bar_area.width.saturating_sub(label.content.len() as u16);
-    let total = breakdown.total.max(1);
-    let mut used_so_far = 0u64;
-    let mut width_so_far = 0u16;
-    let mut segment = |bytes: u64| -> u16 {
-        used_so_far = used_so_far.saturating_add(bytes).min(total);
-        let width_now = ((used_so_far * bar_width as u64) / total).min(bar_width as u64) as u16;
-        let width = width_now.saturating_sub(width_so_far);
-        width_so_far = width_now;
-        width
-    };
-    let daemon_w = segment(breakdown.daemon);
-    let instances_w = segment(breakdown.instances_reserved);
-    let host_w = segment(breakdown.host_other);
-    let free_w = bar_width.saturating_sub(width_so_far);
+    let (daemon_colour, instances_colour, host_colour) = breakdown_colours();
 
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            label,
-            Span::styled("█".repeat(daemon_w as usize), Style::default().fg(daemon_colour)),
-            Span::styled(
-                "█".repeat(instances_w as usize),
-                Style::default().fg(instances_colour),
-            ),
-            Span::styled("█".repeat(host_w as usize), Style::default().fg(host_colour)),
-            Span::styled("░".repeat(free_w as usize), Style::default().fg(muted())),
-        ])),
+        Paragraph::new(Span::styled("RAM", Style::default().fg(muted()))),
+        title_area,
+    );
+    draw_breakdown_bar(
+        frame,
         bar_area,
+        [breakdown.daemon, breakdown.instances_reserved, breakdown.host_other],
+        breakdown.total,
+        (daemon_colour, instances_colour, host_colour),
     );
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -968,18 +1037,23 @@ mod ram_breakdown {
         let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
         terminal.draw(|frame| render(&mut app, frame)).unwrap();
         let buffer = terminal.backend().buffer().clone();
-        // Found by its "RAM " label immediately followed by the bar's first filled
-        // cell, rather than by the first row with either alone: the WORKLOAD card's
-        // "Reserved" line also says "RAM", and the CPU gauge right above also fills
-        // with the same block glyph.
-        let row = (0..buffer.area.height)
+        // The RAM bar is the row right below its own "RAM" title line -- found by
+        // "RAM" followed by nothing but padding up to the card's right border, since
+        // the bar no longer carries an inline label (RAM's title now sits on its own
+        // line, the way CPU's already did). A plain `contains("RAM")` would also match
+        // the WORKLOAD card's "Reserved ... RAM / ..." line, which has more text after
+        // "RAM" than padding.
+        let title_row = (0..buffer.area.height)
             .find(|row| {
-                (0..buffer.area.width)
+                let line: String = (0..buffer.area.width)
                     .map(|column| buffer.get(column, *row).symbol())
-                    .collect::<String>()
-                    .contains("RAM █")
+                    .collect();
+                line.find("RAM")
+                    .map(|start| line[start + 3..].trim_start().starts_with('│'))
+                    .unwrap_or(false)
             })
-            .expect("a RAM bar row");
+            .expect("a RAM title row");
+        let row = title_row + 1;
         let colours: Vec<_> = (0..buffer.area.width)
             .filter(|column| buffer.get(*column, row).symbol() == "█")
             .map(|column| buffer.get(column, row).style().fg)
@@ -1001,27 +1075,100 @@ mod ram_breakdown {
     }
 }
 
-fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, value: u64, color: Color) {
-    // The percentage carries its own background. `Gauge` swaps fg and bg for the
-    // cells the label covers, so a foreground-only label lands on a bar of the same
-    // colour once the fill reaches it -- invisible under `mono`.
-    let gauge = Gauge::default()
-        .block(
-            Block::default()
-                .title(label)
-                .style(Style::default().fg(muted()).bg(background())),
-        )
-        .gauge_style(
-            Style::default()
-                .fg(color)
-                .bg(crate::theme::current().gauge_background),
-        )
-        .percent(value.min(100) as u16)
-        .label(Span::styled(
-            format!("{value}%"),
-            Style::default().fg(inverse_text()).bg(color).bold(),
-        ));
-    frame.render_widget(gauge, area);
+/// The HOST CAPACITY panel's CPU bar: the same three-group shape as `ram_breakdown`,
+/// with a title line of its own above the bar rather than folded into it (issue: CPU
+/// already put its label on its own line via `Gauge`'s block; RAM's bar and this one
+/// now match it).
+#[cfg(test)]
+mod cpu_breakdown_ui {
+    use super::render;
+    use crate::app::{App, Page};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    /// A daemon and some instances each using a slice of a core, and the rest of the
+    /// host-wide reading is everyone else: the same three named groups RAM already
+    /// gets, rather than the single unlabelled percentage the old CPU gauge drew.
+    #[test]
+    fn the_three_groups_are_named_on_screen() {
+        let mut app = App::new();
+        app.stats.cpu_percent = 52;
+        app.stats.cpu_cores = 4;
+        app.stats.daemon_cpu_percent = 4.0;
+        app.stats.instance_cpu_percent = 200.0;
+        app.tabs.select_page(Page::Overview);
+
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let screen: String = (0..buffer.area.height)
+            .map(|row| {
+                (0..buffer.area.width)
+                    .map(|column| buffer.get(column, row).symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for label in ["Daemon", "Instances", "Host"] {
+            assert!(screen.contains(label), "no {label} group on screen:\n{screen}");
+        }
+        // 4/4=1% daemon, 200/4=50% instances, 52-1-50=1% host.
+        assert!(screen.contains("1%"), "{screen}");
+        assert!(screen.contains("50%"), "{screen}");
+    }
+
+    /// The bar sits on its own line directly below the "CPU" title, the same shape
+    /// RAM's bar now has, and still draws three distinctly coloured runs rather than
+    /// the single hue the old `Gauge`-based bar drew.
+    #[test]
+    fn the_bar_is_its_own_line_below_the_title_and_draws_three_segments() {
+        let mut app = App::new();
+        // Wide enough shares (20% / 40% / 20%) that none rounds away to a zero-width
+        // run on the bar -- unlike the first test's 1% daemon and host groups, which
+        // exist for the legend but are too thin to ask a rendered bar to show.
+        app.stats.cpu_percent = 80;
+        app.stats.cpu_cores = 2;
+        app.stats.daemon_cpu_percent = 40.0;
+        app.stats.instance_cpu_percent = 80.0;
+        app.tabs.select_page(Page::Overview);
+
+        let mut terminal = Terminal::new(TestBackend::new(150, 30)).unwrap();
+        terminal.draw(|frame| render(&mut app, frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        // Found the same way `ram_breakdown` finds RAM's: "CPU" followed by nothing
+        // but padding up to the card's border, so this doesn't match some other line
+        // that happens to mention CPU.
+        let title_row = (0..buffer.area.height)
+            .find(|row| {
+                let line: String = (0..buffer.area.width)
+                    .map(|column| buffer.get(column, *row).symbol())
+                    .collect();
+                line.find("CPU")
+                    .map(|start| line[start + 3..].trim_start().starts_with('│'))
+                    .unwrap_or(false)
+            })
+            .expect("a CPU title row");
+        let row = title_row + 1;
+        let colours: Vec<_> = (0..buffer.area.width)
+            .filter(|column| buffer.get(*column, row).symbol() == "█")
+            .map(|column| buffer.get(column, row).style().fg)
+            .collect();
+        assert!(!colours.is_empty(), "no filled cell on the bar row");
+
+        let mut runs: Vec<_> = vec![colours[0]];
+        for colour in &colours[1..] {
+            if runs.last() != Some(colour) {
+                runs.push(*colour);
+            }
+        }
+        assert_eq!(
+            runs.len(),
+            3,
+            "expected three coloured segments, drew {}:\n{colours:?}",
+            runs.len()
+        );
+    }
 }
 
 fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {

@@ -610,6 +610,21 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     draw_conversation(frame, app, split[1]);
 }
 
+/// The peer's name as the chat view shows it: its first three characters, then its
+/// last three, so two ids that share a long common prefix (the common case for
+/// mnemonic-derived ids) still read apart at a glance without spending the sidebar's
+/// width on the full id. Short ids (six characters or fewer) are shown whole rather
+/// than doubled up on themselves.
+fn short_peer_name(peer_id: &str) -> String {
+    let chars: Vec<char> = peer_id.chars().collect();
+    if chars.len() <= 6 {
+        return peer_id.to_string();
+    }
+    let first: String = chars[..3].iter().collect();
+    let last: String = chars[chars.len() - 3..].iter().collect();
+    format!("{first}...{last}")
+}
+
 fn draw_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
     let rows = app.conversations.items.iter().map(|entry| {
         let (glyph, row_color) = match &entry.kind {
@@ -625,7 +640,7 @@ fn draw_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
             ChatEntryKind::Untopiced { .. } => ("•", muted()),
         };
         Row::new(vec![
-            Cell::from(format!("{glyph} {}", shorten(&entry.peer_id, 14))),
+            Cell::from(format!("{glyph} {}", short_peer_name(&entry.peer_id))),
             Cell::from(if entry.topic.is_empty() {
                 "(no topic)".to_string()
             } else {
@@ -686,7 +701,12 @@ fn draw_conversation(frame: &mut Frame, app: &mut App, area: Rect) {
         ChatEntryKind::Untopiced { .. } => "no topic",
     };
     let topic_display = if entry.topic.is_empty() { "(no topic)" } else { &entry.topic };
-    let title = format!(" {}  •  {}  •  {} ", entry.peer_id, topic_display, status_word);
+    let title = format!(
+        " {}  •  {}  •  {} ",
+        short_peer_name(&entry.peer_id),
+        topic_display,
+        status_word
+    );
     let block = section_block(title, accent());
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -731,7 +751,11 @@ fn message_lines(app: &App, entry: &ChatEntry) -> Vec<Line<'static>> {
     }
     let mut lines = Vec::new();
     for message in &app.conversation_messages {
-        let who = if message.from_us { "us".to_string() } else { entry.peer_id.clone() };
+        let who = if message.from_us {
+            "us".to_string()
+        } else {
+            short_peer_name(&entry.peer_id)
+        };
         let mut body_lines = message.body.split('\n');
         let first = body_lines.next().unwrap_or("");
         lines.push(Line::from(vec![
@@ -1413,7 +1437,9 @@ mod tests {
 
         assert!(screen.contains("billing"), "{screen}");
         assert!(screen.contains("(no topic)"), "{screen}");
-        assert!(screen.contains("peer-ours"), "{screen}");
+        // The peer's full id is truncated to its first and last three characters
+        // (short_peer_name), so "peer-ours" reads as "pee...urs" on screen.
+        assert!(screen.contains("pee...urs"), "{screen}");
         assert!(screen.contains("line one"), "{screen}");
         assert!(screen.contains("line two"), "{screen}");
         // Wrapped, not clipped: the tail of the long line reached the screen too.
