@@ -139,11 +139,13 @@ def check_resource_availability_on_peer(
     # BeeClient itself imports bee_rpc at module scope, so it has to stay out of
     # this file's own top-level imports for the same reason.
     from src.identity.grpc_transport import peer_channel
+    from src.manager.manager import get_client_id_on_other_peer
     from src.utils.bee_client import BeeClient
 
     try:
         response = BeeClient.get_resource_availability(
-            peer_channel(peer_id=peer_id), resources, timeout=_timeout()
+            peer_channel(peer_id=peer_id), resources, timeout=_timeout(),
+            client_id=get_client_id_on_other_peer(peer_id=peer_id),
         )
         return response.can_execute
     except Exception as e:

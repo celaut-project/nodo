@@ -83,10 +83,18 @@ def ask_peer(peer_id: str, network: celaut_pb2.Service.Network) -> List[Suggeste
     than failing the address.
     """
     try:
+        # Imported lazily: this module is loaded in isolation by
+        # test_network_discovery.py, with only bee_rpc/sql_connection/grpc_transport
+        # stubbed, and src.manager.manager pulls in the whole DB/config/identity
+        # stack -- the same reason workload_admission.py keeps this import inside
+        # the function rather than at module scope.
+        from src.manager.manager import get_client_id_on_other_peer
+
         resolution = BeeClient.resolve_network(
             peer_channel(peer_id=peer_id),
             network,
             timeout=10,  # A non-answering peer must not hang service launch.
+            client_id=get_client_id_on_other_peer(peer_id=peer_id),
         )
     except Exception as e:
         logger(f"[NETWORK-DISCOVERY] {peer_id} did not answer for {list(network.tags)}: "

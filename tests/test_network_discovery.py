@@ -148,7 +148,8 @@ class AskPeerTests(unittest.TestCase):
 
     def _ask(self, answer):
         with patch.object(self.nd.BeeClient, "call_one", return_value=answer), \
-             patch.object(self.nd, "peer_channel", return_value=MagicMock()):
+             patch.object(self.nd, "peer_channel", return_value=MagicMock()), \
+             patch("src.manager.manager.get_client_id_on_other_peer", return_value="client-1"):
             return self.nd.ask_peer("peer-1", self.network)
 
     def test_every_address_of_every_instance_is_taken_and_flattened(self):
@@ -199,7 +200,8 @@ class AskPeerTests(unittest.TestCase):
 
     def test_peer_requests_have_a_finite_deadline(self):
         with patch.object(self.nd.BeeClient, "call_one", return_value=None) as rpc, \
-             patch.object(self.nd, "peer_channel", return_value=MagicMock()):
+             patch.object(self.nd, "peer_channel", return_value=MagicMock()), \
+             patch("src.manager.manager.get_client_id_on_other_peer", return_value="client-1"):
             self.assertEqual(self.nd.ask_peer("peer-1", self.network), [])
         self.assertEqual(rpc.call_args.kwargs["timeout"], 10)
 
@@ -208,7 +210,19 @@ class AskPeerTests(unittest.TestCase):
             raise RuntimeError("unreachable")
 
         with patch.object(self.nd.BeeClient, "call_one", side_effect=_raise), \
-             patch.object(self.nd, "peer_channel", return_value=MagicMock()):
+             patch.object(self.nd, "peer_channel", return_value=MagicMock()), \
+             patch("src.manager.manager.get_client_id_on_other_peer", return_value="client-1"):
+            self.assertEqual(self.nd.ask_peer("peer-1", self.network), [])
+
+    def test_a_peer_client_id_cannot_be_minted_is_one_fewer_source_too(self):
+        """Minting/reusing our client_id on that peer is itself a round trip that can
+        fail (an unavailable peer, a PoW mint gone wrong) -- the same "one fewer
+        source" outcome as the RPC itself failing, not a launch-aborting exception."""
+        with patch.object(self.nd, "peer_channel", return_value=MagicMock()), \
+             patch(
+                 "src.manager.manager.get_client_id_on_other_peer",
+                 side_effect=Exception("Peer not available."),
+             ):
             self.assertEqual(self.nd.ask_peer("peer-1", self.network), [])
 
 

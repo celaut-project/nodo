@@ -6,7 +6,7 @@ import traceback
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.manager.energy import energy_tick
 from src.manager.ergo import check_ergo_node_availability
-from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu
+from src.manager.manager import ALLOW_DEBT, accept_peer_refresh, descends_from_dev_client, ensure_dev_client_pools, stop_instance, spend_mu, get_client_id_on_other_peer
 from src.manager.metrics import balance_on_other_peer, instance_balance_on_peer
 from src.utils.bee_client import BeeClient, Dir
 from src.payment_system.donations.indexer import tick as donations_tick
@@ -138,8 +138,9 @@ def check_wanted_service(wanted: str):
         """
         log.LOGGER(f"Taking the service {wanted} using peer {peer}")
         try:
+            client_id = get_client_id_on_other_peer(peer_id=peer)
             # TODO A timeout should be implemented when requesting a service.
-            for b in BeeClient.get_service(peer_channel(peer), _hash):
+            for b in BeeClient.get_service(peer_channel(peer), _hash, client_id=client_id):
                 if  type(b) == Dir:
                     log.LOGGER(f"    type of dir {b.type}")
 

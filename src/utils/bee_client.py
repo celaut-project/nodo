@@ -220,11 +220,19 @@ class BeeClient:
 
     @staticmethod
     def resolve_network(
-            channel, network: celaut_pb2.Service.Network, timeout: Optional[float] = None
+            channel, network: celaut_pb2.Service.Network, timeout: Optional[float] = None,
+            client_id: str = "",
     ) -> Optional[celaut_pb2.ConfigurationFile.NetworkResolution]:
+        if client_id:
+            indices_serializer = {1: celaut_pb2.Service.Network, CLIENT_INDEX: celaut_pb2.Client}
+            input_messages = [network, celaut_pb2.Client(client_id=client_id)]
+        else:
+            indices_serializer = celaut_pb2.Service.Network
+            input_messages = network
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).ResolveNetwork,
-            input=network,
+            input=input_messages,
+            indices_serializer=indices_serializer,
             indices_parser=celaut_pb2.ConfigurationFile.NetworkResolution,
             timeout=timeout,
         )
@@ -265,10 +273,18 @@ class BeeClient:
             channel,
             resources: celaut_pb2.Service.Container.Resources,
             timeout: Optional[float] = None,
+            client_id: str = "",
     ) -> Optional[celaut_pb2.ResourceAvailability]:
+        if client_id:
+            indices_serializer = {1: celaut_pb2.Service.Container.Resources, CLIENT_INDEX: celaut_pb2.Client}
+            input_messages = [resources, celaut_pb2.Client(client_id=client_id)]
+        else:
+            indices_serializer = celaut_pb2.Service.Container.Resources
+            input_messages = resources
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetResourceAvailability,
-            input=resources,
+            input=input_messages,
+            indices_serializer=indices_serializer,
             indices_parser=celaut_pb2.ResourceAvailability,
             timeout=timeout,
         )
@@ -322,15 +338,21 @@ class BeeClient:
         )
 
     @staticmethod
-    def get_service(channel, hash_message: celaut_pb2.Metadata.HashTag.Hash):
+    def get_service(channel, hash_message: celaut_pb2.Metadata.HashTag.Hash, client_id: str = ""):
         """Streamed, and the response can be large (a whole packed service), so this
         returns the raw generator -- iterate it -- rather than collapsing it into one
         message the way ``call_one`` does for everything else here.
         """
+        if client_id:
+            indices_serializer = {1: celaut_pb2.Metadata.HashTag.Hash, CLIENT_INDEX: celaut_pb2.Client}
+            input_messages = [hash_message, celaut_pb2.Client(client_id=client_id)]
+        else:
+            indices_serializer = celaut_pb2.Metadata.HashTag.Hash
+            input_messages = hash_message
         return BeeClient.call(
             method=celaut_pb2_grpc.GatewayStub(channel).GetService,
-            input=hash_message,
-            indices_serializer=celaut_pb2.Metadata.HashTag.Hash,
+            input=input_messages,
+            indices_serializer=indices_serializer,
             indices_parser=StartService_input_indices,  # Not all indices are used, but still the same shape.
             partitions_message_mode_parser=StartService_input_message_mode,
             # Tell the peer which blocks of what it sends we already hold, so it
