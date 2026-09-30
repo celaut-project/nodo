@@ -708,6 +708,14 @@ deposits:
   # pays nobody. Delegation keeps working with this off; the peer just has to be funded
   # by hand, which is the point.
   AUTOMATIC_REFILL: false
+  # Whether that automatic refill also funds peers this node only learned via gossip
+  # (another node's ListPeers/IntroducePeer relay) and never chose itself. Keep false:
+  # keypairs and payment contracts are free to mint, so one Sybil identity relayed
+  # across the network would otherwise receive a full deposit from every node that
+  # learns it. `nodo connect` or paying the peer by hand makes it a chosen peer, which
+  # the refill funds as usual. Has no effect unless AUTOMATIC_REFILL (and
+  # network.DELEGATE_EXECUTION) are on; any value other than true reads as false.
+  AUTOMATIC_REFILL_GOSSIP_PEERS: false
   # Largest share of a peer deposit that may be lost to the transaction fee. 0.02 caps
   # the fee at 2 % of the deposit. Lower it for cheaper transfers, at the cost of
   # locking up more per peer.
@@ -947,6 +955,14 @@ communication:
   # prose is small already and is always republished whole.
   SHARE_PROSE_ON_LEDGER: false
   SELF_ANNOUNCE_TO_CONNECTING_PEERS: true
+
+  # Relay only intact signed advertisements whose addresses are all public IPs.
+  # Mixed public/private, DNS-only, and fully expired advertisements are not relayed.
+  SHARE_KNOWN_PEERS: true
+  DISCOVER_PEERS_VIA_GOSSIP: true
+  MAX_PEERS_PER_GOSSIP_RESPONSE: 100  # Also bounds how many replies a pull consumes.
+  MAX_PEERS_PER_GOSSIP_PUSH: 20
+  GOSSIP_INTERVAL_SECONDS: 300
   SEND_ONLY_HASHES_ASKING_COST: true
   DENEGATE_COST_REQUEST_IF_DONT_VE_THE_HASH: false
 

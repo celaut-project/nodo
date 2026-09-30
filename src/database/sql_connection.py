@@ -89,7 +89,12 @@ TRACEABILITY_COLUMNS = {
     # this needs an ADD COLUMN rather than ensure_tables -- without it, a node
     # upgraded in place would raise "no such column: local_client_id" on the first
     # Chat message a peer sends that names its client_id (see gateway.Chat).
-    "peer": {"local_client_id": "TEXT DEFAULT NULL"},
+    "peer": {
+        "local_client_id": "TEXT DEFAULT NULL",
+        # Read by every automatic-refill tick (issue #427), so it cannot wait for
+        # `nodo migrate` either.
+        "learned_via_gossip": "INTEGER NOT NULL DEFAULT 0",
+    },
     # A node that already deployed peer_chat_messages before conversations existed
     # has the table but not this column -- an ADD COLUMN, not ensure_tables, for the
     # same reason as `peer.local_client_id` above.
@@ -1635,7 +1640,8 @@ class SQLConnection(metaclass=Singleton):
             logger.LOGGER(f'Error refreshing balance_mu for peer {peer_id}: {e}')
             return False
 
-    def add_peer(self, peer_id: str, advertisement: bytes) -> bool:
+    def add_peer(self, peer_id: str, advertisement: bytes,
+                 learned_via_gossip: bool = False) -> bool:
         """
         Adds a peer to the database.
 
@@ -1644,6 +1650,9 @@ class SQLConnection(metaclass=Singleton):
             advertisement (bytes): Serialized ``celaut.Peer`` holding what the peer
                 declares node-wide (payment contracts and rates). Its addresses are
                 stored separately, one ``uri`` row each.
+            learned_via_gossip (bool): The claim was relayed by a third party rather
+                than made by the peer to us or fetched by us from it; see
+                :meth:`peer_learned_via_gossip`.
 
         Returns:
             bool: True if the peer was successfully added, False otherwise.
@@ -1653,9 +1662,9 @@ class SQLConnection(metaclass=Singleton):
         if not self.peer_exists(peer_id=peer_id):
             try:
                 self._execute('''
-                    INSERT INTO peer (id, advertisement, remote_client_id, balance_mu)
-                    VALUES (?, ?, '', '0')  -- Initialize with empty remote_client_id and 0 balance_mu
-                ''', (peer_id, advertisement))
+                    INSERT INTO peer (id, advertisement, remote_client_id, balance_mu, learned_via_gossip)
+                    VALUES (?, ?, '', '0', ?)  -- Initialize with empty remote_client_id and 0 balance_mu
+                ''', (peer_id, advertisement, int(bool(learned_via_gossip))))
                 logger.LOGGER(f'Peer {peer_id} added')
                 return True
             except sqlite3.Error as e:
@@ -1941,6 +1950,24 @@ class SQLConnection(metaclass=Singleton):
         ])
         logger.LOGGER(f'Pruned {len(stale)} superseded URI(s) from peer {peer_id}.')
         return len(stale)
+
+    def peer_learned_via_gossip(self, peer_id: str) -> bool:
+        """Was ``peer_id`` registered from a third party's gossip, and not chosen since?
+
+        Issue #427. Minting a keypair is free, so a relayed claim is nobody's choice:
+        the automatic refill must not send it money until this node has dialled it
+        (``nodo connect``) or paid it by hand -- see :meth:`mark_peer_chosen`.
+        """
+        row = self._execute(
+            "SELECT learned_via_gossip FROM peer WHERE id = ?", (peer_id,)
+        ).fetchone()
+        return bool(row and row[0])
+
+    def mark_peer_chosen(self, peer_id: str) -> None:
+        """Clear :meth:`peer_learned_via_gossip`: this node has now chosen the peer."""
+        self._execute(
+            "UPDATE peer SET learned_via_gossip = 0 WHERE id = ?", (peer_id,)
+        )
 
     def get_peer_last_ts(self, peer_id: str) -> Optional[int]:
         """The ``ts`` of the last signed Peer message accepted from ``peer_id``.

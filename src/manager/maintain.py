@@ -33,6 +33,7 @@ from src.virtualizers.interface import (
 )
 from src.core_services.low_demand import scheduler_tick
 from src.manager.network_change import network_change_tick
+from src.manager.gossip import gossip_pull_tick, gossip_push_tick
 
 env_manager = ConfigManager()
 
@@ -495,6 +496,17 @@ def _automatic_refill_enabled() -> bool:
     return False
 
 
+def _automatic_refill_of_gossip_peers_enabled() -> bool:
+    """May the automatic refill also fund a peer only learned via gossip (#427)?
+
+    Off unless the operator set it to exactly ``true``: a missing or malformed value is
+    read as off, because the failure mode of guessing wrong the other way is paying
+    every identity the network relays. Only narrows what ``_automatic_refill_enabled``
+    already allows -- it never turns refills on by itself. Re-read every tick.
+    """
+    return env_manager.get("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", False) is True
+
+
 # Peers already penalised for being unreachable, so an outage costs one penalty and not
 # one per tick. In memory on purpose: a restart re-arms it, which costs a single extra
 # penalty for a peer that is still down, and keeps this out of the schema.
@@ -593,6 +605,21 @@ def peer_deposits(debug_mode: bool = False):
                 log.LOGGER(
                     f"deposits.AUTOMATIC_REFILL is off; leaving peer {peer_id} to be "
                     "funded by hand."
+                )
+            continue
+
+        # A peer some third party's gossip told us about is not one anybody here chose
+        # (issue #427). Keypairs are free, so funding every relayed claim is a way to
+        # drain this wallet a full deposit at a time. `nodo connect` or paying it by
+        # hand is what makes it eligible; until then it is known, not funded -- unless
+        # the operator opted in with `deposits.AUTOMATIC_REFILL_GOSSIP_PEERS`.
+        if not _automatic_refill_of_gossip_peers_enabled() \
+                and SQLConnection().peer_learned_via_gossip(peer_id=peer_id):
+            if debug_mode:
+                log.LOGGER(
+                    f"Peer {peer_id} was learned via gossip; not funding it until it "
+                    "is connected or paid by hand (deposits.AUTOMATIC_REFILL_GOSSIP_PEERS "
+                    "is off)."
                 )
             continue
 
@@ -775,6 +802,10 @@ def _manager_pass(short_interval_count: int) -> int:
     # promise: self-gates to its own hourly interval, never raises, and is the only
     # place the reputation contract is read from a network -- the balancer reads rows.
     onchain_reputation_tick()
+
+    # Bounded third-party peer discovery; each tick gates itself on live config.
+    gossip_pull_tick()
+    gossip_push_tick()
 
     # Tell known peers when this node's own address changes (moving off a LAN, a
     # renewed dynamic public IP), rather than waiting for one of them to notice it

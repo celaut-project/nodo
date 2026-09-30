@@ -196,8 +196,20 @@ class BeeClient:
         )
 
     @staticmethod
+    def list_peers(channel, client_id: str = "", timeout: float = 10):
+        """Stream signed third-party advertisements; the caller bounds their count."""
+        return BeeClient.call(
+            method=celaut_pb2_grpc.GatewayStub(channel).ListPeers,
+            input=celaut_pb2.Client(client_id=client_id) if client_id else None,
+            indices_serializer=celaut_pb2.Client,
+            indices_parser=celaut_pb2.Peer,
+            timeout=timeout,
+        )
+
+    @staticmethod
     def introduce_peer(
-            channel, peer: celaut_pb2.Peer, client_id: str = ""
+            channel, peer: celaut_pb2.Peer, client_id: str = "",
+            timeout: Optional[float] = None,
     ) -> Optional[celaut_pb2.RecursionGuard]:
         if client_id:
             indices_serializer = {1: celaut_pb2.Peer, 2: celaut_pb2.Client}
@@ -210,6 +222,7 @@ class BeeClient:
             input=input_messages,
             indices_serializer=indices_serializer,
             indices_parser=celaut_pb2.RecursionGuard,
+            timeout=timeout,
         )
 
     @staticmethod

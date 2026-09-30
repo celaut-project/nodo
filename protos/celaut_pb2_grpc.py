@@ -44,6 +44,11 @@ class GatewayStub(object):
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
                 response_deserializer=buffer__pb2.Buffer.FromString,
                 )
+        self.ListPeers = channel.stream_stream(
+                '/celaut.Gateway/ListPeers',
+                request_serializer=buffer__pb2.Buffer.SerializeToString,
+                response_deserializer=buffer__pb2.Buffer.FromString,
+                )
         self.ResolveNetwork = channel.stream_stream(
                 '/celaut.Gateway/ResolveNetwork',
                 request_serializer=buffer__pb2.Buffer.SerializeToString,
@@ -149,6 +154,12 @@ class GatewayServicer(object):
 
     def GetPeerInfo(self, request_iterator, context):
         """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListPeers(self, request_iterator, context):
+        """Stream bounded, intact public-address peer advertisements."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -275,6 +286,11 @@ def add_GatewayServicer_to_server(servicer, server):
             ),
             'GetPeerInfo': grpc.stream_stream_rpc_method_handler(
                     servicer.GetPeerInfo,
+                    request_deserializer=buffer__pb2.Buffer.FromString,
+                    response_serializer=buffer__pb2.Buffer.SerializeToString,
+            ),
+            'ListPeers': grpc.stream_stream_rpc_method_handler(
+                    servicer.ListPeers,
                     request_deserializer=buffer__pb2.Buffer.FromString,
                     response_serializer=buffer__pb2.Buffer.SerializeToString,
             ),
@@ -431,6 +447,23 @@ class Gateway(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/GetPeerInfo',
+            buffer__pb2.Buffer.SerializeToString,
+            buffer__pb2.Buffer.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def ListPeers(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(request_iterator, target, '/celaut.Gateway/ListPeers',
             buffer__pb2.Buffer.SerializeToString,
             buffer__pb2.Buffer.FromString,
             options, channel_credentials,

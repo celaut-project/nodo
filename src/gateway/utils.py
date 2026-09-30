@@ -8,6 +8,8 @@ from typing import Generator, List, Optional, Tuple
 
 import netifaces as ni
 
+from src.utils.network import is_globally_routable as _is_globally_routable
+
 from src.payment_system.ledgers import local_payment_methods, register_local_contracts
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
@@ -138,15 +140,6 @@ def _is_loopback(ip: str) -> bool:
         return ipaddress.ip_address(ip).is_loopback
     except ValueError:
         return False
-
-
-def _is_globally_routable(ip: str) -> bool:
-    try:
-        return ipaddress.ip_address(ip).is_global
-    except ValueError:
-        # Not an IP literal at all -- a DNS name, which we cannot judge here and
-        # which is the operator's explicit choice anyway.
-        return True
 
 
 def _uris_for_all_interfaces() -> List[celaut.Instance.Uri]:

@@ -59,7 +59,8 @@ TABLES = {
             reputation_score INTEGER,
             reputation_index INTEGER,
             last_index_on_ledger INTEGER,
-            last_ts INTEGER DEFAULT NULL
+            last_ts INTEGER DEFAULT NULL,
+            learned_via_gossip INTEGER NOT NULL DEFAULT 0
         )
     ''',
     "clients": '''
@@ -623,6 +624,11 @@ def create_tables(cursor):
         "last_ts": "INTEGER DEFAULT NULL",
         "advertisement": "BLOB DEFAULT NULL",
         "local_client_id": "TEXT DEFAULT NULL",
+        # Issue #427: a peer registered from somebody else's gossip rather than one
+        # this node dialled, was dialled by, or has paid. The automatic refill skips
+        # it (see maintain.peer_deposits). 0 on every row written before the column
+        # existed: those peers all arrived directly.
+        "learned_via_gossip": "INTEGER NOT NULL DEFAULT 0",
     })
     # A service shared in the message (issue #438, `ChatMessage.service`): its
     # serialized Metadata, and the registry id this node derived from it (NULL when

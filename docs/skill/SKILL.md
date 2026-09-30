@@ -1,6 +1,6 @@
 ---
 name: celaut-bridge-skill
-version: 1.5.0
+version: 1.6.0
 description: Bridge skill for the Celaut decentralised-compute network — install the Celaut node (nodo), develop services locally with `ggconf` and package them into content-addressed microVM services, execute and observe workloads, and discover on-chain "Unstoppable Skills" via the read-only MCP server (publishing is via the reputation-system TypeScript library).
 author: Community Contribution
 license: MIT
@@ -77,10 +77,14 @@ Understand these before running anything. Full glossary:
   ([`../ERGO.md`](../ERGO.md)).
 * **Peers (nodo's own P2P layer):** nodes reciprocally offer and request services
   from each other, so a workload can run locally or on a peer. There is no
-  bootstrap list, DHT, or gossip: an operator adds a peer explicitly with
+  bootstrap list or DHT: an operator seeds connectivity explicitly with
   `nodo connect <ip:port>`, which dials it over TLS, verifies its identity from
   the certificate, and pulls its signed `Peer` announcement over
-  `Gateway.GetPeerInfo`. **This is a different layer from `Service.Network`
+  `Gateway.GetPeerInfo`. Optional peer gossip then discovers peers transitively
+  through `ListPeers` pulls and `IntroducePeer` pushes, relaying only intact signed
+  advertisements containing exclusively public IP addresses (see
+  [`../CONFIG.md`](../CONFIG.md#transitive-peer-discovery-gossip)).
+  **This is a different layer from `Service.Network`
   below.** `Gateway.ResolveNetwork` (and `network_discovery.py`'s
   `ask_peers`/`ask_peer`) asks a peer you are *already* connected to for the
   addresses of **service instances** inside a named network domain (e.g. a set

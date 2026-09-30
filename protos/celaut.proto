@@ -804,6 +804,7 @@ service Gateway {
     rpc ModifyDeposit(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyDepositInput -> ModifyDepositOutput
 
     rpc GetPeerInfo(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> Peer
+    rpc ListPeers(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> stream Peer (bounded, public-only signed advertisements)
 
     // Ask this node to turn a communication domain into the peers it knows in it.
     //

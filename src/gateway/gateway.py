@@ -5,6 +5,7 @@ from protos.gateway_bee import GenerateClient_output_indices
 from src.gateway.iterables.estimated_cost_iterable import GetServiceEstimatedCostIterable
 from src.gateway.iterables.get_service_iterable import GetServiceIterable
 from src.gateway.iterables.observe_iterable import ObserveIterable
+from src.gateway.iterables.list_peers_iterable import ListPeersIterable
 from src.gateway.iterables.resource_availability_iterable import GetResourceAvailabilityIterable
 from src.gateway.iterables.start_service_iterable import StartServiceIterable
 from src.utils.contract_xattrs import get_script, get_contract_type, get_token_id
@@ -93,6 +94,9 @@ class Gateway(celaut_pb2_grpc.Gateway):
         gateway_instance = generate_full_node_peer_info()
         yield from BeeClient.respond(gateway_instance)
 
+    def ListPeers(self, request_iterator, context, **kwargs):
+        yield from ListPeersIterable(request_iterator, context)
+
     def ResolveNetwork(self, request_iterator, context, **kwargs):
         """Answer with the peers this node knows in the communication domain asked for.
 
@@ -175,10 +179,12 @@ class Gateway(celaut_pb2_grpc.Gateway):
         # write. A client_id is what makes that expensive to repeat -- see
         # client_gate.require_caller.
         peer, client_id = parse_with_client(request_iterator, payload_type=celaut_pb2.Peer)
-        require_caller(context, client_id)
+        caller = require_caller(context, client_id)
 
         log.LOGGER('Introduce peer method.')
-        peer_id = add_peer_instance(peer=peer)
+        # The caller is passed on so a known peer introducing somebody else is filed as
+        # relayed gossip rather than a self-announcement (issue #427).
+        peer_id = add_peer_instance(peer=peer, introducer_client_id=caller)
 
         # Answer with the id the peer was stored under, or REFUSED when it was not.
         # Refusal is a normal outcome now that an unverifiable announcement is turned

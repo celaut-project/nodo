@@ -642,6 +642,9 @@ def increase_deposit_on_peer(peer_id: str, amount: int, on_transaction_url=None,
             # against -- and *this* contract's conversion of it, because a figure from
             # another candidate would credit the peer an amount its own validator never
             # saw.
+            # Paying a peer is choosing it: one learned via gossip is eligible for
+            # the automatic refill from here on (issue #427).
+            sc.mark_peer_chosen(peer_id=peer_id)
             if sc.add_balance_to_peer(peer_id=peer_id, balance_mu=settled.peer_amount):
                 return True
             else:

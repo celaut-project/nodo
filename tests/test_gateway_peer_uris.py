@@ -29,7 +29,9 @@ class UrisForAllInterfacesTests(unittest.TestCase):
             "veth9f8e7d": "172.19.0.5",
         }
 
-        with patch.object(gateway_utils, "_public_host", return_value=None), \
+        # Interface filtering is independent of the boot-time firewall/port assignment.
+        with patch.object(gateway_utils, "_gateway_port", return_value=40001), \
+             patch.object(gateway_utils, "_public_host", return_value=None), \
              patch.object(gateway_utils.ni, "interfaces", return_value=list(interfaces)), \
              patch.object(
                  gateway_utils,

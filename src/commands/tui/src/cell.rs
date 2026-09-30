@@ -531,6 +531,25 @@ static LEVERS: &[Lever] = &[
         secret: false,
     },
     Lever {
+        id: "fund-gossip-peers",
+        organelle: Organelle::Vesicles,
+        label: "fund gossip peers",
+        question: "Does auto-pay also fund peers I only heard about through gossip?",
+        consequence: "Identities are free to mint, so on this pays every relayed peer a full deposit. Off, a gossip peer is funded once you connect to it or pay it by hand. Does nothing unless auto-pay is on.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "no",
+                writes: &[("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false")],
+            },
+            LeverState {
+                label: "yes",
+                writes: &[("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "true")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    Lever {
         id: "tunnel-policy",
         organelle: Organelle::Vesicles,
         label: "tunnel delegated",
@@ -567,6 +586,44 @@ static LEVERS: &[Lever] = &[
             LeverState {
                 label: "on",
                 writes: &[("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "share-peers",
+        organelle: Organelle::Vesicles,
+        label: "share known peers",
+        question: "Do I share public peer announcements with other nodes?",
+        consequence: "On, this node answers peer-list requests and periodically introduces known peers. Private addresses are never relayed.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "off",
+                writes: &[("communication.SHARE_KNOWN_PEERS", "false")],
+            },
+            LeverState {
+                label: "on",
+                writes: &[("communication.SHARE_KNOWN_PEERS", "true")],
+            },
+        ]),
+        warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "discover-peers",
+        organelle: Organelle::Vesicles,
+        label: "discover peers",
+        question: "Do I learn about peers from the nodes I already know?",
+        consequence: "On, this node periodically asks one known peer for signed announcements and verifies each before registering it.",
+        kind: LeverKind::Cycle(&[
+            LeverState {
+                label: "off",
+                writes: &[("communication.DISCOVER_PEERS_VIA_GOSSIP", "false")],
+            },
+            LeverState {
+                label: "on",
+                writes: &[("communication.DISCOVER_PEERS_VIA_GOSSIP", "true")],
             },
         ]),
         warning: None,
@@ -1286,8 +1343,11 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+            ("communication.SHARE_KNOWN_PEERS", "false"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
@@ -1325,9 +1385,12 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
             ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+            ("communication.SHARE_KNOWN_PEERS", "false"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             // Steep, because scarcity is the only automatic brake this node has on
@@ -1367,9 +1430,12 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "false"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "true"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "true"),
             ("network.VERIFY_GATEWAY_REACHABILITY", "true"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
+            ("communication.SHARE_KNOWN_PEERS", "true"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "true"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             ("pricing.SCARCITY_MAX_MULTIPLIER", "10"),
@@ -1406,8 +1472,11 @@ static PROFILES: &[Profile] = &[
             ("network.ANNOUNCE_PRIVATE_ADDRESSES", "true"),
             ("network.DELEGATE_EXECUTION", "true"),
             ("deposits.AUTOMATIC_REFILL", "false"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "true"),
+            ("communication.SHARE_KNOWN_PEERS", "true"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "true"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
@@ -1441,8 +1510,11 @@ static PROFILES: &[Profile] = &[
             ("network.CONSIDER_DEV_AS_INTERNAL", "true"),
             ("network.DELEGATE_EXECUTION", "false"),
             ("deposits.AUTOMATIC_REFILL", "false"),
+            ("deposits.AUTOMATIC_REFILL_GOSSIP_PEERS", "false"),
             ("general_flags.SUBMIT_NETWORK_ADDRESS_TO_REPUTATION_PROOF", "false"),
             ("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS", "false"),
+            ("communication.SHARE_KNOWN_PEERS", "false"),
+            ("communication.DISCOVER_PEERS_VIA_GOSSIP", "false"),
             ("service_networks.blacklist", "[]"),
             ("service_networks.whitelist", "[]"),
             ("pricing.SCARCITY_MAX_MULTIPLIER", "1"),
@@ -2103,6 +2175,37 @@ mod tests {
                     );
                 }
                 document = example_config();
+            }
+        }
+
+        #[test]
+        fn gossip_follows_each_profiles_self_announcement_posture() {
+            for profile in profiles() {
+                let value = |key: &str| {
+                    profile.writes.iter().find(|(path, _)| *path == key).map(|(_, v)| *v)
+                };
+                let expected = match profile.id {
+                    "just-me" | "cautious" | "workbench" => Some("false"),
+                    "open-renter" | "lan-lab" => Some("true"),
+                    other => panic!("gossip posture not specified for {other}"),
+                };
+                assert_eq!(value("communication.SELF_ANNOUNCE_TO_CONNECTING_PEERS"), expected);
+                assert_eq!(value("communication.SHARE_KNOWN_PEERS"), expected);
+                assert_eq!(value("communication.DISCOVER_PEERS_VIA_GOSSIP"), expected);
+            }
+        }
+
+        /// No profile -- not even `open-renter`, which auto-pays -- funds a peer only
+        /// learned via gossip: that is the Sybil drain #427 closes.
+        #[test]
+        fn no_profile_auto_funds_gossip_learned_peers() {
+            for profile in profiles() {
+                let value = profile
+                    .writes
+                    .iter()
+                    .find(|(path, _)| *path == "deposits.AUTOMATIC_REFILL_GOSSIP_PEERS")
+                    .map(|(_, v)| *v);
+                assert_eq!(value, Some("false"), "profile {}", profile.id);
             }
         }
 
