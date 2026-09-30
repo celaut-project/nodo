@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha3_256
 from threading import Lock
 from typing import Callable, Dict, Generator, Iterable, List, Sequence, Tuple, Optional
-from google.protobuf.json_format import MessageToJson
+from src.utils.keyvalue import message_to_json
 
 from protos import celaut_pb2
 from src.utils import logger as log, logger
@@ -1303,7 +1303,7 @@ class SQLConnection(metaclass=Singleton):
                     # silently dropped every peer whose proof we had never validated --
                     # publishing an opinion set narrower than the one we actually held.
                     instance_json = (
-                        MessageToJson(data['peer']) if data['publish_announcement'] else ""
+                        message_to_json(data['peer']) if data['publish_announcement'] else ""
                     )
 
                     # Calculate the percentage of the total reputation token amount

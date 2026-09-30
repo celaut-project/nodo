@@ -27,8 +27,10 @@ The value is written through the entry's own ``value`` field: assigned for the s
 kinds (``bytes``, ``uint64``; declared ``optional`` in the proto so an empty value or a
 0 is still written, as a map entry always did), copied for the message kinds.
 """
+import json
 from typing import Any, Iterable, List, Mapping, MutableMapping, Tuple
 
+from google.protobuf import json_format
 from google.protobuf.message import Message
 
 
@@ -276,3 +278,61 @@ def json_objects_to_entries(document: Any, descriptor: Any, path: str = "") -> A
         else:
             converted[key] = json_objects_to_entries(value, field.message_type, here)
     return converted
+
+
+# ---------------------------------------------------------------------------
+# JSON out: the shape that was published before the fields became lists
+# ---------------------------------------------------------------------------
+#
+# A Peer is published as JSON (the R9 of an on-chain reputation proof, and the record
+# submitted for a peer). Whoever reads that JSON was written against the object a map
+# produced -- ``"muPerCall": {"exec": {"n": "10"}}`` -- and parsing it back with
+# protobuf, or with a reader for the previous release, expects it. So the entry lists are
+# written back out as objects. ``json_objects_to_entries`` reads that shape in again.
+#
+# An object cannot say "twice" or "in this order": a repeated key collapses to the last
+# (the reading rule above) and keys come out sorted. The JSON is a publication of what a
+# reader would resolve, not a second serialization of the message; what is signed is
+# computed from the entries, never from this text.
+
+def _entries_to_objects(document: Any, descriptor: Any) -> Any:
+    if not isinstance(document, dict):
+        return document
+
+    fields = {field.json_name: field for field in descriptor.fields}
+    converted = {}
+    for key, value in document.items():
+        field = fields.get(key)
+        if field is None or field.message_type is None:
+            converted[key] = value
+        elif field.message_type.full_name in _ENTRY_MESSAGES and isinstance(value, list):
+            value_field = field.message_type.fields_by_name["value"]
+            entries = {}
+            for item in value:
+                if "value" in item:
+                    entry_value = item["value"]
+                elif value_field.message_type is not None:
+                    entry_value = {}
+                elif value_field.type == value_field.TYPE_BYTES:
+                    entry_value = ""
+                else:
+                    entry_value = "0"
+                if value_field.message_type is not None:
+                    entry_value = _entries_to_objects(entry_value, value_field.message_type)
+                entries[item.get("key", "")] = entry_value
+            converted[key] = entries
+        elif field.label == field.LABEL_REPEATED and isinstance(value, list):
+            converted[key] = [_entries_to_objects(item, field.message_type) for item in value]
+        else:
+            converted[key] = _entries_to_objects(value, field.message_type)
+    return converted
+
+
+def message_to_dict(message: Message) -> dict:
+    """``json_format.MessageToDict`` with the key/value fields as objects."""
+    return _entries_to_objects(json_format.MessageToDict(message), message.DESCRIPTOR)
+
+
+def message_to_json(message: Message) -> str:
+    """``json_format.MessageToJson`` with the key/value fields as objects."""
+    return json.dumps(message_to_dict(message), indent=2)
