@@ -15,7 +15,7 @@ import psutil
 
 from protos import celaut_pb2 as celaut
 from src.manager.resources import IOBigData, could_ve_this_sysreq
-from src.utils import host_limits
+from src.utils import host_limits, logger as log, min_benchmark
 
 
 def _get_service_memory_snapshot() -> tuple[int, int]:
@@ -122,6 +122,29 @@ def _sysreq_shortfalls(
     return shortfalls
 
 
+def _note_unenforced_min_benchmark(at_most: celaut.Sysresources) -> None:
+    """Say that a declared `min_benchmark` was read and is not being enforced.
+
+    Deliberately not a shortfall. Nothing on this node measures a core yet, so there is
+    no score to hold the requirement against, and -- as with `cpu_total` above -- an
+    unknown capacity is not evidence of an insufficient one. Refusing instead would
+    make this node strictly less useful than one running the previous release, which
+    skips the field as unknown and admits the same service, while protecting nobody.
+    The line is here so the gap is visible in the log of the node that took the
+    service, until a node has scores of its own to compare.
+    """
+    declared = at_most.min_benchmark
+    if not declared:
+        return
+    unknown = min_benchmark.unrecognised_keys(declared)
+    log.LOGGER(
+        "resources.at_most.min_benchmark is declared "
+        f"({min_benchmark.describe(declared)}) but not enforced: this node does not "
+        "measure per-core benchmark scores yet, so admission does not consider it."
+        + (f" Unrecognised primitive(s): {', '.join(unknown)}." if unknown else "")
+    )
+
+
 def get_resource_availability(resources: celaut.Service.Container.Resources) -> Dict[str, Any]:
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
@@ -143,6 +166,7 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
 
     shortfalls: List[str] = []
     if resources and resources.HasField("at_most"):
+        _note_unenforced_min_benchmark(resources.at_most)
         shortfalls = _sysreq_shortfalls(
             resources.at_most,
             disk_free=int(disk.free),
