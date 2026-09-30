@@ -15,6 +15,7 @@ from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
 from src.packers.service_json import populate_possible_environment_workloads
+from src.utils.min_benchmark import parse_min_benchmark, unrecognised_keys
 from src.utils.hashing import (
     BLAKE2B_ID, HASH_SPECS, SHA3_256_ID, get_configured_hash_spec, hash_stream_many,
 )
@@ -290,10 +291,34 @@ class ZipContainerPacker:
         # Read for its side effect: a malformed declaration must be refused here,
         # in __init__, rather than after BuildKit has built the whole image.
         self._read_only_filesystem_requested()
+        self._min_benchmarks()
         # Same reason, and one more: a `pow:` network's `formal` is parsed by the
         # very code that will read it at launch, so an ask that cannot resolve is
         # a pack failure rather than an instance that boots and reaches nothing.
         self._parsed_networks()
+
+    # ------------------------------------------------------------------ #
+    # resources.*.min_benchmark
+    # ------------------------------------------------------------------ #
+
+    def _min_benchmarks(self) -> Tuple[dict, dict]:
+        """``resources.at_init`` / ``at_most`` ``min_benchmark``, as (at_init, at_most).
+
+        Optional on both. ``at_most`` is raised to ``at_init`` key by key, as every
+        other limit is in parseContainer -- and for a better reason here than there:
+        admission reads ``at_most``, so a minimum written only under ``at_init`` would
+        otherwise be one no node ever looks at.
+        """
+        res = self.json.get("resources", {})
+        at_init = parse_min_benchmark(
+            res.get("at_init", {}).get("min_benchmark"), "resources.at_init.min_benchmark"
+        )
+        at_most = parse_min_benchmark(
+            res.get("at_most", {}).get("min_benchmark"), "resources.at_most.min_benchmark"
+        )
+        for key, minimum in at_init.items():
+            at_most[key] = max(minimum, at_most.get(key, 0))
+        return at_init, dict(sorted(at_most.items()))
 
     # ------------------------------------------------------------------ #
     # read_only_filesystem
@@ -562,6 +587,19 @@ class ZipContainerPacker:
         r.at_most.cpu_quota = most_cpu_quota
         r.at_most.mem_limit = most_mem_limit
         r.at_most.disk_space = most_disk_space
+
+        # Minimum per-core benchmark scores. Serialized as declared, recognised key
+        # or not: a key this packer has no name for may be one a node does, so it is
+        # said out loud rather than refused (see src.utils.min_benchmark).
+        init_min_benchmark, most_min_benchmark = self._min_benchmarks()
+        r.at_init.min_benchmark.update(init_min_benchmark)
+        r.at_most.min_benchmark.update(most_min_benchmark)
+        unknown = unrecognised_keys(most_min_benchmark)
+        if unknown:
+            log.LOGGER(
+                "service.json resources.*.min_benchmark declares primitive(s) this node "
+                f"does not recognise, kept as written: {', '.join(unknown)}."
+            )
 
         # Possible descendant workloads. Each scenario is one independent
         # worst-case concurrent execution the service may trigger through its

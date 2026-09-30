@@ -496,8 +496,58 @@ The `service.json` file defines **runtime metadata** for the service: its archit
 | `cpu_period` | int (microseconds) | `0` (no limit) | CPU CFS period |
 | `cpu_quota` | int (microseconds) | `0` (no limit) | CPU CFS quota |
 | `blkio_weight` | int | `0` (no limit) | Block I/O weight |
+| `min_benchmark` | object (`{primitive: int}`) | omitted (no requirement) | Minimum **per-core** benchmark scores, see below |
 
 > A value of `0` means **no limit** for that resource.
+
+##### `min_benchmark`
+
+`cpu_quota`/`cpu_period` say how many cores a service needs, not how fast one has to be: the
+same admitted core is native silicon on one node and software emulation on another.
+`min_benchmark` states the second half, as a map from a named primitive to the least the
+service needs of it **on one core, per second**. It composes with the quota rather than
+competing with it — "2 cores, each at least 500k integer ops/s" is
+`cpu_quota / cpu_period = 2.0` plus `"int_ops_per_sec": 500000`, never a total across cores.
+
+| Key | Unit (per core, per second) | What it stands for |
+|-----|-----------------------------|--------------------|
+| `int_ops_per_sec` | operations | Integer / branch-heavy throughput |
+| `flt_ops_per_sec` | operations | Floating-point throughput |
+| `mem_bandwidth_bytes_per_sec` | bytes | Memory bandwidth (read + written) |
+| `sha256_hashes_per_sec` | digests | SHA-256 hashing |
+
+- The key set is `MIN_BENCHMARK_KEYS` in `src/utils/min_benchmark.py`. It is a map so that a
+  new primitive is a new key, never a change to the wire format.
+- An **omitted key is no requirement** on that primitive; an omitted `min_benchmark` is no
+  requirement at all, and a service that never mentions it packs to the same bytes as before.
+- Values must be **non-negative integers** (JSON numbers, not strings or booleans, at most
+  2^64-1). Anything else is a packing error, raised before the image is built.
+- A key outside the table is **kept as written**, with a line in the log, never refused: a
+  node may know a primitive the packer does not.
+- It may be written under `at_init`, `at_most`, or both. Like every other field, `at_most` is
+  raised to `at_init` key by key — so a minimum written only under `at_init` is also present
+  in `at_most`, which is the half admission reads.
+
+> **Declared, not yet enforced.** This is the request side only. No node measures or
+> publishes its own per-core scores yet, so admission has nothing to compare a requirement
+> against: a node that receives one logs that it is declared and not enforced, and admits
+> the service on its other limits. The requirement is carried intact to every peer the
+> service is delegated to, so it takes effect wherever a node does enforce it.
+
+```json
+{
+    "resources": {
+        "at_most": {
+            "cpu_period": 100000,
+            "cpu_quota": 200000,
+            "min_benchmark": {
+                "int_ops_per_sec": 500000,
+                "sha256_hashes_per_sec": 1000000
+            }
+        }
+    }
+}
+```
 
 **Example — Constrained service:**
 ```json
@@ -658,7 +708,7 @@ node would refuse.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `count` | int | `1` | Number of concurrent descendant instances in this group |
-| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit) |
+| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit — plus an optional [`min_benchmark`](#min_benchmark)) |
 | `dependency` | object or `null` | omitted | Optional identity, embedded specification, and availability information for the descendant service |
 
 ##### `workloads[].dependency`
@@ -685,7 +735,8 @@ service is refused if any group has nowhere that could take it. Every limit the 
 is checked, not just memory: `mem_limit` and `disk_space` against what is free right now,
 `cpu_quota`/`cpu_period` against how many cores the host has at all (a quota is a share of
 time, so a momentary spike is not a reason to refuse), and `blkio_weight` against the
-10–1000 range cgroups accept.
+10–1000 range cgroups accept. A group's `min_benchmark` is the one exception: it travels to
+the peer with the rest, but no node measures its cores yet, so it is logged and not checked.
 
 This is an existence check, not a capacity reservation: it does not prove `count` concurrent
 instances of a group could all run at once, locally or spread across peers, and it does not
