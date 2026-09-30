@@ -370,6 +370,25 @@ message Sysresources {
     optional uint64 mem_limit = 4;
     // Disk space limit in bytes.
     optional uint64 disk_space = 5;
+
+    // Minimum PER-CORE throughput a service requires on named primitives, in
+    // units per second on ONE core -- so it composes with cpu_quota/cpu_period:
+    // "2 cores, each at least 500k int ops/s" is cpu_quota/cpu_period = 2.0 plus
+    // min_benchmark["int_ops_per_sec"] = 500000, never a total across cores.
+    // Absent key = no requirement on that primitive. New primitives are new
+    // map keys, never new proto fields -- this must never need a wire-format
+    // change to add one. A key a node does not recognise is carried as it is,
+    // never an error.
+    //
+    // Recognised keys (src/utils/min_benchmark.py::MIN_BENCHMARK_KEYS):
+    //   int_ops_per_sec             integer/branch-heavy operations per second
+    //   flt_ops_per_sec             floating-point operations per second
+    //   mem_bandwidth_bytes_per_sec bytes of memory read+written per second
+    //   sha256_hashes_per_sec       SHA-256 digests per second
+    //
+    // Request-side only: what a service requires. What a node measures and
+    // publishes about its own cores is a separate concern, not this field.
+    map<string, uint64> min_benchmark = 6;
 }
 
 // -----------------------
