@@ -12,6 +12,7 @@ from bee_rpc.utils import getsize
 from src.commands.__by_tag import get_id
 from src.utils.hashing import SHA3_256_ID, SHAKE_256_ID
 from src.utils.config import ConfigManager
+from src.utils import keyvalue
 from src.utils.utils import read_metadata_from_disk, load_service_from_disk
 from src.utils.registry_errors import ServiceRegistryError
 from src.utils.contract_xattrs import get_address, get_script, get_token_id
@@ -87,7 +88,7 @@ def inspect(service: str):
     try:
         if service_obj.container.environment_variables:
             print("Env Vars:")
-            for var, df in service_obj.container.environment_variables.items():
+            for var, df in keyvalue.items(service_obj.container.environment_variables):
                 print(f"  - {var}: tags={df.tags}, prose='{df.prose}'")
     except Exception as e:
         print(f"Error reading environment variables: {e}")
@@ -120,8 +121,8 @@ def inspect(service: str):
                 print(f"    - mem_limit: {format_size(sysres.mem_limit)}")
             if sysres.disk_space:
                 print(f"    - disk_space: {format_size(sysres.disk_space)}")
-            for primitive in sorted(sysres.min_benchmark):
-                print(f"    - min_benchmark.{primitive}: {sysres.min_benchmark[primitive]} (per core)")
+            for primitive, minimum in keyvalue.items(sysres.min_benchmark):
+                print(f"    - min_benchmark.{primitive}: {minimum} (per core)")
 
         print_sysresources("At Init", resources.at_init)
         print_sysresources("At Most", resources.at_most)

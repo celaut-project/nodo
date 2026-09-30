@@ -9,6 +9,7 @@ import socket
 from typing import Dict
 from pathlib import Path
 from src.utils.config import ConfigManager
+from src.utils import keyvalue
 from protos.celaut_pb2 import Configuration
 
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import (
@@ -153,7 +154,7 @@ def generate_gateway_config_dev(path: str, envs: Dict[str, str]):
         os.makedirs(path, exist_ok=True)
         config = Configuration()
         if envs:
-            config.environment_variables.update({
+            keyvalue.update(config.environment_variables, {
                 k: v.encode() for k, v in envs.items()
             })
         config= get_config(config=config, resources=None)

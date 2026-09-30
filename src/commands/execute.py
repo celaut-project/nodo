@@ -18,6 +18,7 @@ from src.manager.manager import get_execute_client
 from src.identity.grpc_transport import local_channel
 from src.utils.hashing import get_configured_hash_id
 from src.utils.config import ConfigManager
+from src.utils import keyvalue
 from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved, resolve_from_config
 from src.utils.instance_names import inject_instance_name
 from src.utils.registry_errors import ServiceRegistryError
@@ -84,7 +85,7 @@ def generator(
         # deposits.INITIAL_RUNTIME_HOURS, in its own MU.
         config = celaut_pb2.Configuration()
         if envs:
-            config.environment_variables.update({
+            keyvalue.update(config.environment_variables, {
                 k: v.encode() for k, v in envs.items()
             })
         inject_instance_name(config=config, instance_name=instance_name)
