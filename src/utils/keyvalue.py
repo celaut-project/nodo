@@ -163,3 +163,116 @@ def items(entries: Iterable[Any]) -> List[Tuple[str, Any]]:
     resolved = to_dict(entries)
     return [(key, resolved[key]) for key in sorted(resolved)]
 
+
+
+# ---------------------------------------------------------------------------
+# service.json: keep the object syntax
+# ---------------------------------------------------------------------------
+#
+# ``service.json`` is written by people, and a JSON object -- ``{"KEY": value}`` -- is
+# how they have always written these fields (and how protobuf's own JSON mapping wrote
+# a ``map``). The wire format changed; the file format did not. An object is converted
+# to the entry list when the file is read, and the list is what gets sorted and packed,
+# so the order an author happened to type keys in never reaches a service id.
+
+_ENTRY_MESSAGES = frozenset({
+    "celaut.BytesKeyValue",
+    "celaut.AmountKeyValue",
+    "celaut.DataFormatKeyValue",
+    "celaut.Uint64KeyValue",
+})
+
+
+class JsonObject(dict):
+    """A ``dict`` read from JSON that remembers the keys the file repeated.
+
+    ``json`` keeps the last of a repeated key and forgets there were two, which for a
+    price or an environment variable means silently choosing one of two values the
+    author wrote. Load with :func:`json_object_hook` and :func:`check_json_object`
+    can say so.
+    """
+
+    duplicates: Tuple[str, ...] = ()
+
+
+def json_object_hook(pairs: List[Tuple[str, Any]]) -> JsonObject:
+    """``object_pairs_hook`` for ``json.load`` that records repeated keys."""
+    obj = JsonObject()
+    repeated = set()
+    for key, value in pairs:
+        if key in obj:
+            repeated.add(key)
+        obj[key] = value
+    obj.duplicates = tuple(sorted(repeated))
+    return obj
+
+
+def check_json_object(obj: Any, path: str) -> None:
+    """Raise :class:`DuplicateKeyError` if the JSON object at ``path`` repeated a key."""
+    repeated = getattr(obj, "duplicates", ())
+    if repeated:
+        raise DuplicateKeyError(
+            f"service.json {path} repeats key(s): {', '.join(repeated)}. "
+            "Each key may be written once."
+        )
+
+
+def _entries_from_json(value: Any, path: str) -> Any:
+    """A key/value field's JSON as a sorted ``[{"key": .., "value": ..}]`` list.
+
+    An object (the ``service.json`` syntax) and a list of entries (protobuf's own
+    JSON shape for the message) are both accepted. Anything else is returned as it is
+    for the protobuf parser to refuse with its own message.
+    """
+    if isinstance(value, Mapping):
+        check_json_object(value, path)
+        return [{"key": key, "value": value[key]} for key in sorted(value, key=str)]
+    if isinstance(value, list) and all(
+        isinstance(item, Mapping) and isinstance(item.get("key"), str) for item in value
+    ):
+        repeated = sorted({
+            item["key"] for i, item in enumerate(value)
+            if any(other["key"] == item["key"] for other in value[:i])
+        })
+        if repeated:
+            raise DuplicateKeyError(
+                f"service.json {path} repeats key(s): {', '.join(repeated)}."
+            )
+        return sorted(value, key=lambda item: item["key"])
+    return value
+
+
+def json_objects_to_entries(document: Any, descriptor: Any, path: str = "") -> Any:
+    """``document`` (protobuf JSON for ``descriptor``) with every key/value object
+    rewritten as a canonical entry list, ready for ``json_format.ParseDict``.
+
+    Walks the message by its descriptor, so it finds these fields at any depth (an
+    embedded workload dependency's ``container.environment_variables``, a slot's
+    ``mu_per_call``) without a list of paths to keep in step with the proto. Returns a
+    new structure; ``document`` is not modified.
+    """
+    if not isinstance(document, Mapping):
+        return document
+
+    fields = {}
+    for field in descriptor.fields:
+        fields[field.name] = field
+        fields[field.json_name] = field
+
+    converted = {}
+    for key, value in document.items():
+        field = fields.get(key)
+        if field is None or field.message_type is None:
+            converted[key] = value
+            continue
+        here = f"{path}.{key}" if path else str(key)
+        if field.message_type.full_name in _ENTRY_MESSAGES:
+            converted[key] = _entries_from_json(value, here)
+        elif field.label == field.LABEL_REPEATED and isinstance(value, list):
+            converted[key] = [
+                json_objects_to_entries(item, field.message_type, f"{here}[{i}]")
+                for i, item in enumerate(value)
+            ]
+        else:
+            converted[key] = json_objects_to_entries(value, field.message_type, here)
+    return converted
