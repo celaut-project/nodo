@@ -29,7 +29,7 @@ from src.utils.filesystem_xattrs import (
     READ_MODE_RO,
     READ_MODE_RW,
     assert_complete_filesystem_metadata,
-    encode_filesystem_metadata_xattrs,
+    filesystem_metadata_xattrs,
     read_mode,
 )
 from src.virtualizers.microvm import bundle_formats
@@ -42,6 +42,7 @@ from src.virtualizers.microvm import bundle_formats
 LIMITS_IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     ch_limits = importlib.import_module("src.virtualizers.microvm.limits")
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     LIMITS_IMPORT_ERROR = import_exc
@@ -87,13 +88,13 @@ def _complete_branch(name="file.txt", content=b"hello", mode=stat.S_IFREG | 0o64
     branch = celaut.Service.Container.Filesystem.ItemBranch()
     branch.name = name
     branch.file = content
-    encode_filesystem_metadata_xattrs(branch.xattrs, _metadata(mode=mode))
+    keyvalue.update(branch.xattrs, filesystem_metadata_xattrs(_metadata(mode=mode)))
     return branch
 
 
 def _ro_filesystem(*branches):
     fs = celaut.Service.Container.Filesystem()
-    fs.xattrs["read_mode"] = b"ro"
+    keyvalue.set_value(fs.xattrs, "read_mode", b"ro")
     for branch in branches:
         fs.branch.append(branch)
     return fs
@@ -124,7 +125,7 @@ class ReadModeHelperTests(unittest.TestCase):
 
     def test_an_explicit_rw_is_writable(self):
         fs = celaut.Service.Container.Filesystem()
-        fs.xattrs["read_mode"] = b"rw"
+        keyvalue.set_value(fs.xattrs, "read_mode", b"rw")
         self.assertEqual(read_mode(fs), READ_MODE_RW)
 
     def test_ro_is_read_only(self):
@@ -134,13 +135,13 @@ class ReadModeHelperTests(unittest.TestCase):
         # The direction that matters: a typo must not resolve to "rw" and build a
         # service the other way round from the one its author declared.
         fs = celaut.Service.Container.Filesystem()
-        fs.xattrs["read_mode"] = b"readonly"
+        keyvalue.set_value(fs.xattrs, "read_mode", b"readonly")
         with self.assertRaisesRegex(ValueError, "unsupported read_mode"):
             read_mode(fs)
 
     def test_a_non_utf8_value_is_refused(self):
         fs = celaut.Service.Container.Filesystem()
-        fs.xattrs["read_mode"] = b"\xff\xfe"
+        keyvalue.set_value(fs.xattrs, "read_mode", b"\xff\xfe")
         with self.assertRaisesRegex(ValueError, "not valid UTF-8"):
             read_mode(fs)
 
@@ -184,7 +185,7 @@ class MetadataCompletenessGateTests(unittest.TestCase):
         partial = celaut.Service.Container.Filesystem.ItemBranch()
         partial.name = "half.txt"
         partial.file = b"x"
-        partial.xattrs["mode"] = str(stat.S_IFREG | 0o644).encode("utf-8")
+        keyvalue.set_value(partial.xattrs, "mode", str(stat.S_IFREG | 0o644).encode("utf-8"))
 
         with self.assertRaises(ValueError) as ctx:
             assert_complete_filesystem_metadata(_ro_filesystem(partial))
@@ -208,9 +209,7 @@ class MetadataCompletenessGateTests(unittest.TestCase):
         subdir = celaut.Service.Container.Filesystem.ItemBranch()
         subdir.name = "usr"
         subdir.filesystem.CopyFrom(nested)
-        encode_filesystem_metadata_xattrs(
-            subdir.xattrs, _metadata(mode=stat.S_IFDIR | 0o755)
-        )
+        keyvalue.update(subdir.xattrs, filesystem_metadata_xattrs(_metadata(mode=stat.S_IFDIR | 0o755)))
 
         with self.assertRaisesRegex(ValueError, "/usr/deep.bin"):
             assert_complete_filesystem_metadata(_ro_filesystem(subdir))
@@ -219,7 +218,7 @@ class MetadataCompletenessGateTests(unittest.TestCase):
         for missing_key in FILESYSTEM_METADATA_KEYS:
             with self.subTest(missing=missing_key):
                 branch = _complete_branch()
-                del branch.xattrs[missing_key]
+                keyvalue.delete(branch.xattrs, missing_key)
                 with self.assertRaises(ValueError):
                     assert_complete_filesystem_metadata(_ro_filesystem(branch))
 
@@ -560,7 +559,7 @@ class ReadOnlySizingTests(unittest.TestCase):
         # The build raises on it, with the path and the accepted values. Pricing
         # is not where a manifest is rejected.
         fs = celaut.Service.Container.Filesystem()
-        fs.xattrs["read_mode"] = b"garbage"
+        keyvalue.set_value(fs.xattrs, "read_mode", b"garbage")
         self.assertFalse(ch_limits.is_read_only_service(_service(filesystem=fs)))
 
 

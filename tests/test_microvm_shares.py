@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.manager.shares import ShareAuthorizationError
     from src.utils.shared_filesystems import ShareRef, exported_refs
     from src.virtualizers.microvm import shares
@@ -27,7 +28,7 @@ def _dir(name, xattrs=None, children=None):
     for c in (children or []):
         b.filesystem.branch.append(c)
     for k, v in (xattrs or {}).items():
-        b.xattrs[k] = v
+        keyvalue.set_value(b.xattrs, k, v)
     return b
 
 

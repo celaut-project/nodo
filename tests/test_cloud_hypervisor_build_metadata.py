@@ -7,11 +7,12 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from src.utils.filesystem_xattrs import encode_filesystem_metadata_xattrs, FilesystemNodeMetadata
+from src.utils.filesystem_xattrs import filesystem_metadata_xattrs, FilesystemNodeMetadata
 
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     ch_build = importlib.import_module("src.virtualizers.microvm.build")
     ch_limits = importlib.import_module("src.virtualizers.microvm.limits")
     microvm_paths = importlib.import_module("src.virtualizers.microvm.paths")
@@ -72,7 +73,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
         branch = celaut.Service.Container.Filesystem.ItemBranch()
         branch.name = "file.txt"
         branch.file = b"hello"
-        branch.xattrs["mode"] = str(stat.S_IFREG | 0o644).encode("utf-8")
+        keyvalue.set_value(branch.xattrs, "mode", str(stat.S_IFREG | 0o644).encode("utf-8"))
 
         with self.assertRaisesRegex(RuntimeError, "Invalid filesystem metadata xattrs"):
             ch_build._decode_branch_metadata(branch, "/file.txt")
@@ -114,7 +115,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             device_minor=0,
             device_is_block=False,
         )
-        encode_filesystem_metadata_xattrs(branch.xattrs, metadata)
+        keyvalue.update(branch.xattrs, filesystem_metadata_xattrs(metadata))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaisesRegex(RuntimeError, "Invalid link.dst"):
@@ -276,7 +277,7 @@ class CloudHypervisorBuildMetadataTests(unittest.TestCase):
             device_minor=0,
             device_is_block=False,
         )
-        encode_filesystem_metadata_xattrs(branch.xattrs, metadata)
+        keyvalue.update(branch.xattrs, filesystem_metadata_xattrs(metadata))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root_dir = Path(tmpdir)

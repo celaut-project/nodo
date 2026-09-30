@@ -4,7 +4,7 @@ import os
 import stat
 import tarfile
 from dataclasses import dataclass
-from typing import Any, List, Mapping, MutableMapping, Optional
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional
 
 from src.utils import keyvalue
 
@@ -173,19 +173,24 @@ def implicit_directory_metadata() -> FilesystemNodeMetadata:
     )
 
 
+def filesystem_metadata_xattrs(metadata: FilesystemNodeMetadata) -> Dict[str, bytes]:
+    """The xattrs that carry ``metadata``, ready for ``keyvalue.update``/``from_dict``."""
+    return {
+        MODE_KEY: str(metadata.mode).encode("utf-8"),
+        UID_KEY: str(metadata.uid).encode("utf-8"),
+        GID_KEY: str(metadata.gid).encode("utf-8"),
+        MTIME_NS_KEY: str(metadata.mtime_ns).encode("utf-8"),
+        DEVICE_MAJOR_KEY: str(metadata.device_major).encode("utf-8"),
+        DEVICE_MINOR_KEY: str(metadata.device_minor).encode("utf-8"),
+        DEVICE_IS_BLOCK_KEY: b"1" if metadata.device_is_block else b"0",
+    }
+
+
 def encode_filesystem_metadata_xattrs(
     xattrs: MutableMapping[str, bytes],
     metadata: FilesystemNodeMetadata,
 ) -> None:
-    xattrs[MODE_KEY] = str(metadata.mode).encode("utf-8")
-    xattrs[UID_KEY] = str(metadata.uid).encode("utf-8")
-    xattrs[GID_KEY] = str(metadata.gid).encode("utf-8")
-    xattrs[MTIME_NS_KEY] = str(metadata.mtime_ns).encode("utf-8")
-    xattrs[DEVICE_MAJOR_KEY] = str(metadata.device_major).encode("utf-8")
-    xattrs[DEVICE_MINOR_KEY] = str(metadata.device_minor).encode("utf-8")
-    xattrs[DEVICE_IS_BLOCK_KEY] = (
-        b"1" if metadata.device_is_block else b"0"
-    )
+    xattrs.update(filesystem_metadata_xattrs(metadata))
 
 
 def parse_filesystem_metadata_xattrs(

@@ -24,6 +24,7 @@ try:
     from tests.config_bootstrap import load_example_config
     load_example_config()
     from protos import celaut_pb2
+    from src.utils import keyvalue
     from src.identity.node_identity import (
         canonical_peer_content_digest,
         canonical_peer_payload,
@@ -71,16 +72,16 @@ def _announcement():
     uri = _uri(peer)
     uri.expiry_unix_timestamp = 1800000000
     uri.protocol_stack.add(tags=["grpc"], prose="gRPC", formal=b"\x01")
-    peer.mu_per_call["start"].n = "1000"
+    keyvalue.set_value(peer.mu_per_call, "start", celaut_pb2.Amount(n="1000"))
     rate = peer.payment_contracts.add()
     rate.contract.ledger.tags.append("ergo")
     rate.contract.ledger.prose = "Ergo mainnet"
     rate.contract.ledger.formal = b"\x02"
-    rate.contract.xattrs["token_id"] = b"\xaa"
+    keyvalue.set_value(rate.contract.xattrs, "token_id", b"\xaa")
     rate.mu_per_unit.n = "1000000000"
     proof = peer.reputation_proofs.add()
     proof.ledger.tags.append("ergo")
-    proof.xattrs["token_id"] = b"\xbb"
+    keyvalue.set_value(proof.xattrs, "token_id", b"\xbb")
     peer.signature_scheme.components.add(tags=["ed25519"], prose="Ed25519", formal=b"\x03")
     peer.public_key = "ab" * 32
     peer.signature = "cd" * 64
@@ -92,9 +93,9 @@ def _announcement():
 # same names the census uses, so a covered field with no mutation is a failure.
 MUTATIONS = {
     "Peer.uri": lambda p: _uri(p, ip="5.6.7.8", port=9090),
-    "Peer.mu_per_call": lambda p: p.mu_per_call["start"].__setattr__("n", "2000"),
-    "Peer.payment_contracts": lambda p: p.payment_contracts[0].contract.xattrs.__setitem__("token_id", b"\xff"),
-    "Peer.reputation_proofs": lambda p: p.reputation_proofs[0].xattrs.__setitem__("token_id", b"\xff"),
+    "Peer.mu_per_call": lambda p: keyvalue.set_value(p.mu_per_call, "start", celaut_pb2.Amount(n="2000")),
+    "Peer.payment_contracts": lambda p: keyvalue.set_value(p.payment_contracts[0].contract.xattrs, "token_id", b"\xff"),
+    "Peer.reputation_proofs": lambda p: keyvalue.set_value(p.reputation_proofs[0].xattrs, "token_id", b"\xff"),
     "Peer.signature_scheme": lambda p: p.signature_scheme.components.add(tags=["secp256k1"]),
     "Peer.Uri.ip": lambda p: setattr(p.uri[0], "ip", "9.9.9.9"),
     "Peer.Uri.port": lambda p: setattr(p.uri[0], "port", 1234),
@@ -106,7 +107,7 @@ MUTATIONS = {
     "Peer.Uri.Protocol.formal": lambda p: setattr(p.uri[0].protocol_stack[0], "formal", b"\xfe"),
     "Peer.SignatureScheme.components": lambda p: p.signature_scheme.components.add(tags=["schnorr"]),
     "Contract.ledger": lambda p: p.reputation_proofs[0].ledger.tags.append("cardano"),
-    "Contract.xattrs": lambda p: p.reputation_proofs[0].xattrs.__setitem__("script", b"\x99"),
+    "Contract.xattrs": lambda p: keyvalue.set_value(p.reputation_proofs[0].xattrs, "script", b"\x99"),
     "Contract.Ledger.tags": lambda p: p.payment_contracts[0].contract.ledger.tags.append("mainnet"),
     "Contract.Ledger.prose": lambda p: setattr(p.payment_contracts[0].contract.ledger, "prose", "other"),
     "Contract.Ledger.formal": lambda p: setattr(p.payment_contracts[0].contract.ledger, "formal", b"\xfd"),

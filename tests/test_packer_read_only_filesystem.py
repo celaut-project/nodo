@@ -35,12 +35,13 @@ try:
     load_example_config()
 
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.utils.filesystem_xattrs import (
         FILESYSTEM_METADATA_KEYS,
         READ_MODE_KEY,
         READ_MODE_RO,
         FilesystemNodeMetadata,
-        encode_filesystem_metadata_xattrs,
+        filesystem_metadata_xattrs,
         read_mode,
     )
     from src.packers.zip_with_dockerfile import (
@@ -69,11 +70,9 @@ def _branch(name, *, directory=False, xattrs=None, with_metadata=True):
     branch = celaut.Service.Container.Filesystem.ItemBranch()
     branch.name = name
     if with_metadata:
-        encode_filesystem_metadata_xattrs(
-            branch.xattrs, _metadata(0o40755 if directory else 0o100644)
-        )
+        keyvalue.update(branch.xattrs, filesystem_metadata_xattrs(_metadata(0o40755 if directory else 0o100644)))
     for key, value in (xattrs or {}).items():
-        branch.xattrs[key] = value
+        keyvalue.set_value(branch.xattrs, key, value)
     if directory:
         branch.filesystem.CopyFrom(celaut.Service.Container.Filesystem())
     else:
@@ -108,7 +107,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(tree.xattrs[READ_MODE_KEY], b"ro")
+        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
         # And it reads back through the helper the builder actually uses.
         self.assertEqual(read_mode(tree), READ_MODE_RO)
 
@@ -123,7 +122,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(tree.xattrs[READ_MODE_KEY], b"ro")
+        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
         self.assertNotIn(READ_MODE_KEY, outer.filesystem.xattrs)
         self.assertNotIn(READ_MODE_KEY, inner_dir.filesystem.xattrs)
 
@@ -236,7 +235,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
 
         _packer({READ_ONLY_FILESYSTEM_KEY: True})._apply_read_only_filesystem(tree)
 
-        self.assertEqual(tree.xattrs[READ_MODE_KEY], b"ro")
+        self.assertEqual(keyvalue.get(tree.xattrs, READ_MODE_KEY), b"ro")
 
     def test_a_shared_export_without_the_property_is_untouched(self):
         # The refusal is conditional on read_only_filesystem, not a new rule for
@@ -287,7 +286,7 @@ class ReadOnlyFilesystemPropertyTests(unittest.TestCase):
         # recursive_parsing makes on each branch writes all seven keys at once.
         branch = _branch("service.py")
         for key in FILESYSTEM_METADATA_KEYS:
-            self.assertIn(key, branch.xattrs)
+            self.assertTrue(keyvalue.contains(branch.xattrs, key))
 
 
 if __name__ == "__main__":

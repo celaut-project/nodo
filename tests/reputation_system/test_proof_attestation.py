@@ -22,6 +22,7 @@ from src.reputation_system.bip_wallet_verification import (
     derive_compressed_pubkey,
 )
 from src.identity import node_identity as ni
+from src.utils import keyvalue
 from src.utils.contract_xattrs import set_owner_attestation
 
 MNEMONIC = Mnemonic("english").generate(strength=128)
@@ -123,7 +124,7 @@ class ProofOwnerAttestationTests(unittest.TestCase):
         peer.reputation_proofs.append(self._proof())
         with_attestation = ni.canonical_peer_content_digest(peer)
 
-        del peer.reputation_proofs[0].xattrs["owner_signature"]
+        keyvalue.delete(peer.reputation_proofs[0].xattrs, "owner_signature")
         self.assertNotEqual(with_attestation, ni.canonical_peer_content_digest(peer))
 
 if __name__ == "__main__":
