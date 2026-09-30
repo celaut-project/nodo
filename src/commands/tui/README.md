@@ -28,13 +28,14 @@ nobody can look at.
 
 ## Pages
 
-The tab bar is **two rows**. The top row is the five groups — where the node stands,
-what is running and who with, what it earned, what it logged, and everything that
-*writes*. The second row is the pages of whichever group is open, and only those:
+The tab bar is **two rows**. The top row is the six groups — where the node stands,
+what is running and who with, what it earned, what it logged, everything that
+*writes*, and the node's own documentation. The second row is the pages of whichever
+group is open, and only those:
 
 ```
 ┌ NODO   operations console  running ────────────────────────────────┐
-│ OVERVIEW │ WORKLOAD │ EARNINGS │ LOGS │ SETTINGS                       │
+│ OVERVIEW │ WORKLOAD │ EARNINGS │ LOGS │ SETTINGS │ DOCS                │
 └────────────────────────────────────────────────────────┘
  CELL │ PRICING │ SCHEDULE │ ENERGY │ CONFIG
 ```
@@ -48,7 +49,7 @@ never longer than five titles, is the same information at a third of the width.
 A group is labelled by what it *is*, not by its first page. `INSTANCES` is not what
 `WORKLOAD` means, and a group named after its first member would send somebody looking
 for CLIENTS past a label that appears to be about instances. A group holding one page
-(OVERVIEW, EARNINGS, LOGS) draws no second row at all — a row containing a single
+(OVERVIEW, EARNINGS, LOGS, DOCS) draws no second row at all — a row containing a single
 already-selected title says nothing and costs the page below it a line.
 
 | Page | Purpose |
@@ -66,6 +67,7 @@ already-selected title says nothing and costs the page below it a line.
 | **Schedule** | The hours this node takes work in (`activity_window`), drawn as the day it is: every configured window's open stretch as its own run of blocks, a marker at the current hour, and what closing time does to work already running. Underneath, on the same axis, a month of demand folded onto the 24 hours of a clock — peak instances held, and the work refused because the schedule was shut. A night shift and a weekday lunch break are two windows, added and removed with `a`/`d` (or a click), each edited by moving an edge rather than by typing a time, so an unusable hour cannot be expressed. Every element answers the mouse as well as the keyboard: click an edge to select it, `[x]` to remove a window, `+ add window`, or the on/off and closing-time lines to toggle them. |
 | **Config** | Every scalar or empty collection in `config.yaml`, including values inside lists. Values retain their YAML type when edited, and list elements can be added and removed. |
 | **Logs** | Tail of `storage/app.log` beside commands/actions launched from the TUI. |
+| **Docs** | This installation's `docs/` folder, read in place: an index of every Markdown page (subfolders included) beside the selected page rendered to the pane's width, with search, and links between pages that can be followed and walked back. See [Docs](#docs). |
 
 ## Money
 
@@ -201,12 +203,12 @@ Navigation is two axes on two sets of keys, matching the two rows:
 | Key | Action |
 |---|---|
 | `[` / `]` | Previous/next **group**, landing on its first page (both wrap) |
-| `1`…`5` | Jump straight to a group, counted as the labels read on screen |
+| `1`…`6` | Jump straight to a group, counted as the labels read on screen |
 | `Tab` / `Shift+Tab` | Next/previous **page within the open group** (wraps inside it) |
 | click | A group label opens that group; a page title on the second row opens that page |
 
 `[`/`]` are the group keys everywhere **except Schedule**, which uses them to switch
-which of its windows the arrows act on; `1`…`5` work there as they do everywhere. Tab
+which of its windows the arrows act on; `1`…`6` work there as they do everywhere. Tab
 no longer walks all twelve pages: with the groups on their own row, a Tab that crossed
 a boundary would silently re-highlight the top row while you were cycling the bottom
 one. The group keys always land on a group's *first* page rather than the one last
@@ -245,6 +247,48 @@ stale — notably one that reinstalled and came back under a new identity key, s
 `+`/`-` on Clients opens an amount modal (typed in `ui.DISPLAY_UNIT`, same as the balance
 column) and, on `Enter`, runs `nodo credit_client <client id> <amount>` or
 `nodo debit_client <client id> <amount>` in the background.
+
+## Docs
+
+The DOCS page (`6`, or a click on its label) reads the installation's `docs/` folder
+without leaving the console — the same files as on GitHub, from the checkout this node
+runs, so they describe the version that is installed.
+
+The index on the left lists every Markdown file under `docs/`, a folder's own pages
+first (`README`/`INDEX` ahead of the rest, then alphabetically) and each subfolder
+under a heading of its own. A page is listed by its first `#` heading, with its file
+name beside it where there is room. Moving the selection opens the page; `Enter` (or
+`→`) moves the keyboard to it, `←` back to the index.
+
+The page on the right is rendered, not dumped: headings, emphasis, inline and fenced
+code, lists, block quotes and tables, all wrapped to the pane's width — a table too
+wide for it narrows its widest column and wraps the cells rather than running off the
+edge. The bottom border says where you are (`41–63/1388 • 4%`).
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Move through the index, or scroll the page a line |
+| `PgUp` / `PgDn`, `Home` / `End` | A screenful at a time, or to either end |
+| `←` / `→` | Keyboard to the index / to the page |
+| `Enter` | Index: read the selected page. Page: follow the selected link |
+| `l` / `L` | Select the next/previous link on the page |
+| `/`, then `n` / `N` | Search the page (case-insensitive), then step through the matches |
+| `Backspace` | Back to the page a link was followed from, where it was left |
+| `Esc` | Clear the search, then go back; quits only when there is neither |
+| `r` | Re-read the folder and the open page |
+| wheel / click | The wheel scrolls whichever pane is under the pointer; a click opens a page or follows a link; right-click lists the page's actions |
+
+A link to another page (`[CONFIG](CONFIG.md#applying-a-change)`) opens it at that
+heading, including pages outside `docs/` such as this one. An external address is
+shown beside its text and, when followed, copied to the terminal clipboard (OSC 52)
+instead — nothing here opens a browser or touches the network. Files are read when
+selected, never while drawing; the open page is re-read when it changes on disk.
+
+The folder is found at the installation root the rest of the console uses, then by
+walking up from the `tui` binary and from the working directory to a `docs/` holding
+`KyA.md` — which is what finds it for a prebuilt binary, whose compiled-in root is
+the machine it was built on. `NODO_DOCS_DIR` names it explicitly. A node without one
+gets a page that says where it looked, not a crash.
 
 ## Applying a change
 

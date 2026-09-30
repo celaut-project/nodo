@@ -676,8 +676,9 @@ If `hashing.CHECK_INTEGRITY_ON_SERVE` is set to `true`, Nodo runs an automatic i
 
 Run `nodo tui` to open the operations console. Its pages cover node/host statistics, current
 instance resource usage and reservations, local services, peers, clients, what the node has
-earned, complete `config.yaml` editing, logs, storage, and Ergo wallet balances. The old
-tunnels page was removed because nodo does not use it.
+earned, complete `config.yaml` editing, logs, storage, Ergo wallet balances, and this
+documentation (the DOCS page). The old tunnels page was removed because nodo does not
+use it.
 
 - `Tab`/`Shift+Tab` switches pages; Up/Down selects rows.
 - `r` refreshes.
@@ -714,6 +715,9 @@ tunnels page was removed because nodo does not use it.
   reads `config.yaml` once at start and never again, so a change that is not restarted
   into is a change the node never sees. The restart drives `systemctl`, so editing
   configuration on a serving node needs root.
+- On Docs (`6`), the `docs/` folder is indexed on the left and the selected page rendered
+  on the right: `/` searches it, `l` and Enter follow its links to other pages, and
+  Backspace comes back.
 - `q`, Escape, or Ctrl+C exits.
 
 See [the TUI reference](../src/commands/tui/README.md) for page details, refresh behavior, and
