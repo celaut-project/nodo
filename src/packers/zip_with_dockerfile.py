@@ -416,6 +416,16 @@ class ZipContainerPacker:
 
         keyvalue.set_value(root_filesystem.xattrs, READ_MODE_KEY, READ_MODE_RO.encode("utf-8"))
 
+    @staticmethod
+    def _init_xattrs(init: dict) -> dict:
+        """``init.xattrs`` from ``service.json`` (an object) as ``{key: bytes}``."""
+        declared = init.get("xattrs")
+        keyvalue.check_json_object(declared, "init.xattrs")
+        return {
+            key: value.encode("utf-8") if isinstance(value, str) else bytes(value)
+            for key, value in (declared or {}).items()
+        }
+
     def parseContainer(self):
         def _normalize_path_segments(raw_path):
             if isinstance(raw_path, str):
@@ -630,11 +640,7 @@ class ZipContainerPacker:
             # Legacy compatibility: map service.json entrypoint -> container.init.entry_path
             entry_path = _normalize_path_segments(self.json.get("entrypoint"))
         self.service.container.init.entry_path.extend(entry_path)
-        keyvalue.check_json_object(init.get("xattrs"), "init.xattrs")
-        keyvalue.from_dict(self.service.container.init.xattrs, {
-            key: value.encode("utf-8") if isinstance(value, str) else bytes(value)
-            for key, value in init.get("xattrs", {}).items()
-        })
+        keyvalue.from_dict(self.service.container.init.xattrs, self._init_xattrs(init))
         
         # Arch
         

@@ -184,7 +184,7 @@ def _self_network_data() -> str:
 
     import time
 
-    from google.protobuf.json_format import MessageToJson
+    from src.utils.keyvalue import message_to_json
 
     from protos import celaut_pb2
     from src.identity.node_identity import (
@@ -251,7 +251,7 @@ def _self_network_data() -> str:
         LOGGER("No node identity available; publishing the address unsigned.")
 
     LOGGER(f"Advertising {host}:{public_port} on the reputation proof.")
-    return MessageToJson(peer)
+    return message_to_json(peer)
 
 
 def __create_reputation_proof_tx(node_url: str, wallet_mnemonic: str, proof_id: Optional[str], objects: List[Tuple[Optional[str], int, Optional[str]]]):

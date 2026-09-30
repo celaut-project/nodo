@@ -19,7 +19,6 @@ from unittest.mock import patch
 
 IMPORT_ERROR = None
 try:
-    from google.protobuf.json_format import MessageToJson
 
     from protos import celaut_pb2 as celaut
     from src.utils import keyvalue
@@ -182,7 +181,7 @@ class AdvertisedRatesSurviveTheWireTests(unittest.TestCase):
         parsed = celaut.Peer()
         parsed.ParseFromString(self._peer_with_rates().SerializeToString())
 
-        published = MessageToJson(parsed)
+        published = keyvalue.message_to_json(parsed)
 
         self.assertIn("ram_mu_per_gib_second", published)
         self.assertIn("net_mu_per_gib", published)
