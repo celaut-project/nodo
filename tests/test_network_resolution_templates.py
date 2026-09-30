@@ -26,6 +26,7 @@ try:
     load_example_config()
 
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.identity.node_identity import component_formal, parse_component_formal
     from src.utils import network_policy as np
     from src.virtualizers.microvm import rootfs as microvm_rootfs
@@ -62,7 +63,7 @@ def _service(*networks):
 def _config(**env):
     config = celaut.Configuration()
     for key, value in env.items():
-        config.environment_variables[key] = value
+        keyvalue.set_value(config.environment_variables, key, value)
     return config
 
 

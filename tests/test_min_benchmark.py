@@ -26,7 +26,7 @@ from src.packers.service_json import (  # noqa: E402
     parse_service_spec,
     populate_possible_environment_workloads,
 )
-from src.utils import min_benchmark  # noqa: E402
+from src.utils import keyvalue, min_benchmark  # noqa: E402
 from src.utils.cost_functions import resource_availability as ra  # noqa: E402
 from src.utils.cost_functions import workload_admission as wa  # noqa: E402
 from src.utils.min_benchmark import MIN_BENCHMARK_KEYS, parse_min_benchmark  # noqa: E402
@@ -79,25 +79,31 @@ class WireTests(unittest.TestCase):
             ),
         )
 
-    def test_it_is_field_six_a_string_to_uint64_map(self):
+    def test_it_is_field_six_a_repeated_string_to_uint64_entry(self):
+        # Field 6 and key=1/value=2 are what keep it wire-identical to the
+        # `map<string, uint64>` it replaced (see tests/test_keyvalue_wire.py).
         field = celaut.Sysresources.DESCRIPTOR.fields_by_name["min_benchmark"]
         self.assertEqual(field.number, 6)
+        self.assertEqual(field.label, field.LABEL_REPEATED)
         entry = field.message_type
-        self.assertTrue(entry.GetOptions().map_entry)
+        self.assertEqual(entry.full_name, "celaut.Uint64KeyValue")
+        self.assertFalse(entry.GetOptions().map_entry)
+        self.assertEqual(entry.fields_by_name["key"].number, 1)
+        self.assertEqual(entry.fields_by_name["value"].number, 2)
         self.assertEqual(entry.fields_by_name["key"].type, entry.fields_by_name["key"].TYPE_STRING)
         self.assertEqual(entry.fields_by_name["value"].type, entry.fields_by_name["value"].TYPE_UINT64)
 
     def test_round_trip_keeps_every_key_recognised_or_not(self):
         sent = celaut.Sysresources(cpu_quota=200000, cpu_period=100000)
-        sent.min_benchmark["int_ops_per_sec"] = 500000
-        sent.min_benchmark["sha256_hashes_per_sec"] = 2 ** 64 - 1
-        sent.min_benchmark["a_primitive_from_the_future"] = 7
+        keyvalue.set_value(sent.min_benchmark, "int_ops_per_sec", 500000)
+        keyvalue.set_value(sent.min_benchmark, "sha256_hashes_per_sec", 2 ** 64 - 1)
+        keyvalue.set_value(sent.min_benchmark, "a_primitive_from_the_future", 7)
 
         received = celaut.Sysresources()
         received.ParseFromString(sent.SerializeToString())
 
         self.assertEqual(
-            dict(received.min_benchmark),
+            keyvalue.to_dict(received.min_benchmark),
             {
                 "int_ops_per_sec": 500000,
                 "sha256_hashes_per_sec": 2 ** 64 - 1,
@@ -106,16 +112,15 @@ class WireTests(unittest.TestCase):
         )
         self.assertEqual(received, sent)
         self.assertEqual(
-            min_benchmark.unrecognised_keys(received.min_benchmark),
+            min_benchmark.unrecognised_keys(keyvalue.to_dict(received.min_benchmark)),
             ("a_primitive_from_the_future",),
         )
 
     def test_an_absent_key_is_absent_not_zero(self):
         sysreq = celaut.Sysresources()
-        sysreq.min_benchmark["int_ops_per_sec"] = 1
-        self.assertNotIn("flt_ops_per_sec", sysreq.min_benchmark)
-        # A bare read of a map inserts the default; `in` and `.get` are the readers.
-        self.assertIsNone(sysreq.min_benchmark.get("flt_ops_per_sec"))
+        keyvalue.set_value(sysreq.min_benchmark, "int_ops_per_sec", 1)
+        self.assertFalse(keyvalue.contains(sysreq.min_benchmark, "flt_ops_per_sec"))
+        self.assertIsNone(keyvalue.get(sysreq.min_benchmark, "flt_ops_per_sec"))
 
     def test_a_message_without_it_serializes_as_before(self):
         # The service spec is hashed into the service id, so the field existing must
@@ -132,8 +137,8 @@ class WireTests(unittest.TestCase):
         sent = celaut.Sysresources(
             blkio_weight=500, cpu_period=100000, cpu_quota=200000, mem_limit=1024, disk_space=2048
         )
-        sent.min_benchmark["int_ops_per_sec"] = 500000
-        sent.min_benchmark["unknown_primitive"] = 9
+        keyvalue.set_value(sent.min_benchmark, "int_ops_per_sec", 500000)
+        keyvalue.set_value(sent.min_benchmark, "unknown_primitive", 9)
 
         old = _pre_448_sysresources()()
         old.ParseFromString(sent.SerializeToString())
@@ -148,30 +153,30 @@ class WireTests(unittest.TestCase):
         # An old node that parses and re-serializes keeps field 6 as unknown bytes, so
         # a requirement survives being forwarded through a peer that cannot read it.
         sent = celaut.Sysresources(mem_limit=1024)
-        sent.min_benchmark["flt_ops_per_sec"] = 42
+        keyvalue.set_value(sent.min_benchmark, "flt_ops_per_sec", 42)
 
         old = _pre_448_sysresources()()
         old.ParseFromString(sent.SerializeToString())
         received = celaut.Sysresources()
         received.ParseFromString(old.SerializeToString())
 
-        self.assertEqual(dict(received.min_benchmark), {"flt_ops_per_sec": 42})
+        self.assertEqual(keyvalue.to_dict(received.min_benchmark), {"flt_ops_per_sec": 42})
         self.assertEqual(received.mem_limit, 1024)
 
     def test_a_pre_448_message_reads_as_no_requirement(self):
         old = _pre_448_sysresources()(mem_limit=1024, cpu_quota=100000)
         received = celaut.Sysresources()
         received.ParseFromString(old.SerializeToString())
-        self.assertEqual(dict(received.min_benchmark), {})
+        self.assertEqual(keyvalue.to_dict(received.min_benchmark), {})
         self.assertEqual(received.mem_limit, 1024)
 
     def test_it_survives_the_pack_schema_to_celaut_schema_reread(self):
         # ZipContainerPacker.save re-reads the pack.Service bytes as a celaut.Service.
         packed = pack_pb2.Service()
-        packed.container.resources.at_most.min_benchmark["int_ops_per_sec"] = 5
+        keyvalue.set_value(packed.container.resources.at_most.min_benchmark, "int_ops_per_sec", 5)
         spec = celaut.Service()
         spec.ParseFromString(packed.SerializeToString())
-        self.assertEqual(dict(spec.container.resources.at_most.min_benchmark), {"int_ops_per_sec": 5})
+        self.assertEqual(keyvalue.to_dict(spec.container.resources.at_most.min_benchmark), {"int_ops_per_sec": 5})
 
 
 class ParseMinBenchmarkTests(unittest.TestCase):
@@ -291,7 +296,7 @@ class NestedServiceJsonTests(unittest.TestCase):
             {"mem_limit": 100, "min_benchmark": {"int_ops_per_sec": 500000, "unknown_primitive": 1}}
         )
         self.assertEqual(
-            dict(resources.min_benchmark), {"int_ops_per_sec": 500000, "unknown_primitive": 1}
+            keyvalue.to_dict(resources.min_benchmark), {"int_ops_per_sec": 500000, "unknown_primitive": 1}
         )
         self.assertEqual(resources.mem_limit, 100)
 
@@ -309,13 +314,13 @@ class NestedServiceJsonTests(unittest.TestCase):
             "at_most": {"min_benchmark": {"mem_bandwidth_bytes_per_sec": 1000}},
         }}})
         self.assertEqual(
-            dict(service.container.resources.at_most.min_benchmark),
+            keyvalue.to_dict(service.container.resources.at_most.min_benchmark),
             {"mem_bandwidth_bytes_per_sec": 1000},
         )
 
     def test_protobuf_json_round_trip(self):
         sysreq = celaut.Sysresources()
-        sysreq.min_benchmark["int_ops_per_sec"] = 5
+        keyvalue.set_value(sysreq.min_benchmark, "int_ops_per_sec", 5)
         again = json_format.ParseDict(json_format.MessageToDict(sysreq), celaut.Sysresources())
         self.assertEqual(again, sysreq)
 
@@ -324,7 +329,7 @@ def _resources(**benchmarks) -> celaut.Service.Container.Resources:
     resources = celaut.Service.Container.Resources(
         at_most=celaut.Sysresources(mem_limit=1024, cpu_quota=100000, cpu_period=100000)
     )
-    resources.at_most.min_benchmark.update(benchmarks)
+    keyvalue.update(resources.at_most.min_benchmark, benchmarks)
     return resources
 
 
@@ -381,8 +386,8 @@ class DelegationCarryThroughTests(unittest.TestCase):
         workload = service.possible_environment_workload.add().workloads.add()
         workload.count = 1
         workload.resources.mem_limit = 111
-        workload.resources.min_benchmark["int_ops_per_sec"] = 500000
-        workload.resources.min_benchmark["unknown_primitive"] = 4
+        keyvalue.set_value(workload.resources.min_benchmark, "int_ops_per_sec", 500000)
+        keyvalue.set_value(workload.resources.min_benchmark, "unknown_primitive", 4)
 
         asked = []
 
@@ -403,7 +408,7 @@ class DelegationCarryThroughTests(unittest.TestCase):
         for peer_id, resources in asked:
             self.assertEqual(peer_id, "peer-a")
             self.assertEqual(
-                dict(resources.at_most.min_benchmark),
+                keyvalue.to_dict(resources.at_most.min_benchmark),
                 {"int_ops_per_sec": 500000, "unknown_primitive": 4},
             )
             self.assertEqual(resources.at_most.mem_limit, 111)
@@ -422,7 +427,7 @@ class DelegationCarryThroughTests(unittest.TestCase):
             on_the_peer = celaut.Service.Container.Resources()
             on_the_peer.ParseFromString(sent.SerializeToString())
             self.assertEqual(
-                dict(on_the_peer.at_most.min_benchmark),
+                keyvalue.to_dict(on_the_peer.at_most.min_benchmark),
                 {"flt_ops_per_sec": 77, "unknown_primitive": 4},
             )
 
@@ -430,9 +435,9 @@ class DelegationCarryThroughTests(unittest.TestCase):
         # Delegation ships the service's own bytes; a node in the middle that parses
         # and re-serializes the spec hands the next peer the same requirement.
         service = celaut.Service()
-        service.container.resources.at_init.min_benchmark["int_ops_per_sec"] = 100
-        service.container.resources.at_most.min_benchmark["int_ops_per_sec"] = 100
-        service.container.resources.at_most.min_benchmark["unknown_primitive"] = 4
+        keyvalue.set_value(service.container.resources.at_init.min_benchmark, "int_ops_per_sec", 100)
+        keyvalue.set_value(service.container.resources.at_most.min_benchmark, "int_ops_per_sec", 100)
+        keyvalue.set_value(service.container.resources.at_most.min_benchmark, "unknown_primitive", 4)
 
         relayed = celaut.Service()
         relayed.ParseFromString(service.SerializeToString())
@@ -441,7 +446,7 @@ class DelegationCarryThroughTests(unittest.TestCase):
 
         self.assertEqual(forwarded.container.resources, service.container.resources)
         self.assertEqual(
-            dict(forwarded.container.resources.at_most.min_benchmark),
+            keyvalue.to_dict(forwarded.container.resources.at_most.min_benchmark),
             {"int_ops_per_sec": 100, "unknown_primitive": 4},
         )
 

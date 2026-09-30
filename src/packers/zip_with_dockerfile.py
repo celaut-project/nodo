@@ -32,7 +32,7 @@ from src.utils.filesystem_xattrs import (
     READ_MODE_RO,
     assert_complete_filesystem_metadata,
     describe_mode_type,
-    encode_filesystem_metadata_xattrs,
+    filesystem_metadata_xattrs,
     implicit_directory_metadata,
     is_supported_filesystem_entry_mode,
     metadata_from_lstat,
@@ -400,7 +400,7 @@ class ZipContainerPacker:
         # Per-entry metadata is mandatory for ro (assert_complete_filesystem_metadata
         # in src/utils/filesystem_xattrs.py refuses the build otherwise). Nothing to
         # emit here: recursive_parsing already calls
-        # encode_filesystem_metadata_xattrs on every branch it creates, root and
+        # filesystem_metadata_xattrs on every branch it creates, root and
         # nested alike, and that writes all of FILESYSTEM_METADATA_KEYS at once. The
         # gate exists for trees from other packers, and for services packed before
         # the metadata contract. Asserted here anyway, so that if that ever stops
@@ -475,9 +475,9 @@ class ZipContainerPacker:
                         branch_metadata = implicit_directory_metadata()
                     else:
                         branch_metadata = metadata_from_lstat(branch_stat)
-                    branch_xattrs = {}
-                    encode_filesystem_metadata_xattrs(branch_xattrs, branch_metadata)
-                    keyvalue.from_dict(branch.xattrs, branch_xattrs)
+                    keyvalue.from_dict(
+                        branch.xattrs, filesystem_metadata_xattrs(branch_metadata)
+                    )
 
                     # It's a link.
                     if os.path.islink(branch_host_path):

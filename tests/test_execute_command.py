@@ -6,6 +6,7 @@ from unittest.mock import patch
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.commands import execute as execute_cmd
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -26,7 +27,7 @@ class ExecuteCommandTests(unittest.TestCase):
             )
 
         config = messages[1]
-        self.assertEqual(config.environment_variables["__nodo_instance_name"], b"my-instance")
+        self.assertEqual(keyvalue.get(config.environment_variables, "__nodo_instance_name"), b"my-instance")
 
     def _response_with_slot(self, *, protocol_tags=None, transport_tags=None):
         response = celaut.ServiceInstance()

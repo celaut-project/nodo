@@ -3,6 +3,7 @@ import unittest
 
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.utils import shared_filesystems as sf
     IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover - environment-dependent
@@ -17,14 +18,14 @@ def _dir(name, xattrs=None, children=None):
     for c in (children or []):
         b.filesystem.branch.append(c)
     for k, v in (xattrs or {}).items():
-        b.xattrs[k] = v
+        keyvalue.set_value(b.xattrs, k, v)
     return b
 
 
 def _file(name, xattrs=None):
     b = celaut.Service.Container.Filesystem.ItemBranch(name=name, file=b"x")
     for k, v in (xattrs or {}).items():
-        b.xattrs[k] = v
+        keyvalue.set_value(b.xattrs, k, v)
     return b
 
 
@@ -158,7 +159,7 @@ class ShareInvariantsTest(unittest.TestCase):
     def test_two_directories_cannot_carry_the_same_name(self):
         # A path cannot repeat in a tree, so path-named shares never collide; a
         # tag can be repeated, and would resolve two directories to one share.
-        for side in (b"shared", b"guest"):
+        for side in ("shared", "guest"):
             svc = _service(
                 _dir("a", {side: b"true", "share_tag": b"x"}),
                 _dir("b", {side: b"true", "share_tag": b"x"}),

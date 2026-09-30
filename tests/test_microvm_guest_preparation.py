@@ -15,6 +15,7 @@ from unittest.mock import patch
 IMPORT_ERROR = None
 try:
     from protos import celaut_pb2 as celaut
+    from src.utils import keyvalue
     from src.virtualizers.microvm import bundle, initramfs, network, process, rootfs
     from src.virtualizers.microvm.errors import MicroVMError
 except Exception as import_exc:  # pragma: no cover - environment-dependent
@@ -173,16 +174,16 @@ class GuestEnvsFileTests(unittest.TestCase):
 
     def test_a_config_where_every_variable_fails_validation_yields_nothing(self):
         config = celaut.Configuration()
-        config.environment_variables["LD_PRELOAD"] = b"/tmp/evil.so"
+        keyvalue.set_value(config.environment_variables, "LD_PRELOAD", b"/tmp/evil.so")
         self.assertIsNone(rootfs.build_guest_envs_file(config=config))
 
     def test_kept_variables_are_written_as_one_sorted_name_base64value_line_each(self):
         import base64
 
         config = celaut.Configuration()
-        config.environment_variables["ZEBRA"] = b"z-value"
-        config.environment_variables["ALPHA"] = b"a-value"
-        config.environment_variables["LD_PRELOAD"] = b"/tmp/evil.so"  # dropped
+        keyvalue.set_value(config.environment_variables, "ZEBRA", b"z-value")
+        keyvalue.set_value(config.environment_variables, "ALPHA", b"a-value")
+        keyvalue.set_value(config.environment_variables, "LD_PRELOAD", b"/tmp/evil.so")  # dropped
 
         contents = rootfs.build_guest_envs_file(config=config)
         self.assertIsNotNone(contents)
@@ -199,7 +200,7 @@ class GuestEnvsFileTests(unittest.TestCase):
         for name, b64value in (line.split(" ", 1) for line in lines):
             self.assertEqual(
                 base64.b64decode(b64value),
-                config.environment_variables[name],
+                keyvalue.get(config.environment_variables, name),
             )
 
 
