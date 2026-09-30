@@ -19,6 +19,7 @@ from bee_rpc.utils import block_id_from_pointer
 from protos import celaut_pb2
 from src.utils.config import ConfigManager
 from src.utils.container_filesystem import load_container_filesystem, filesystem_hash_types
+from src.utils import keyvalue
 from src.utils.filesystem_xattrs import (
     FilesystemNodeMetadata,
     READ_MODE_RO,
@@ -409,7 +410,7 @@ def _decode_branch_metadata(
     rel_path: str,
 ) -> Optional[FilesystemNodeMetadata]:
     try:
-        return parse_filesystem_metadata_xattrs(branch.xattrs)
+        return parse_filesystem_metadata_xattrs(keyvalue.to_dict(branch.xattrs))
     except ValueError as e:
         raise RuntimeError(
             f"Invalid filesystem metadata xattrs at '{rel_path}': {e}"

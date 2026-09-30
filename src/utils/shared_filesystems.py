@@ -79,6 +79,7 @@ from typing import Dict, List, Mapping, Optional
 
 from protos import celaut_pb2 as celaut
 from src.utils.container_filesystem import load_container_filesystem
+from src.utils import keyvalue
 
 # Reserved sharing xattr keys (distinct from the POSIX metadata keys in
 # src/utils/filesystem_xattrs.py).
@@ -251,7 +252,7 @@ def _walk(
     for branch in fs.branch:
         path = _join(parent_path, branch.name)
         is_dir = branch.HasField("filesystem")
-        decl = declaration_from_xattrs(path, dict(branch.xattrs))
+        decl = declaration_from_xattrs(path, keyvalue.to_dict(branch.xattrs))
         if decl is not None and not is_dir:
             raise ValueError(
                 f"sharing xattrs (shared/guest) are only valid on directories; "
