@@ -28,6 +28,7 @@ from typing import Dict, List, Optional, Tuple
 from protos import celaut_pb2 as celaut
 from src.database.sql_connection import SQLConnection
 from src.utils.registry_errors import ServiceNotInRegistry, ServiceSpecUnavailable
+from src.utils import keyvalue
 from src.utils.shared_filesystems import (
     ShareRef,
     SharedDir,
@@ -242,7 +243,7 @@ def authorize_shares(
     A service that declares no ``guest`` directory returns an empty list without
     consulting anything -- the ordinary case pays nothing for this check.
     """
-    env_values = dict(config.environment_variables) if config else {}
+    env_values = keyvalue.to_dict(config.environment_variables) if config else {}
     wanted = guest_refs(service, father_id or "__no_father__", env_values)
     if not wanted:
         return []
