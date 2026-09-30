@@ -83,8 +83,14 @@
 - Legacy `entrypoint` is still accepted in `service.json` and is mapped to `container.init.entry_path`.
 - If `service.json` provides slash-based input (for example `"/service/start"`), packer normalizes it to segmented form (`["service","start"]`).
 - `init.xattrs` is serialized to `container.init.xattrs` (UTF-8 for text values).
+- Every `service.json` object that becomes a key/value list on the wire (`init.xattrs`,
+  `api[].mu_per_call`, `resources.*.min_benchmark`, and the same fields inside embedded
+  services / workload groups) keeps its **object syntax**. The packer writes the list
+  sorted by key, so the order keys are typed in never changes the service id, and a key
+  written twice in one object is a packing error (JSON alone would silently keep the last).
+  See [`protos/README.md`](../../protos/README.md).
 - `read_only_filesystem` (boolean, optional, default `false`) is serialized to
-  `container.filesystem.xattrs["read_mode"] = "ro"` — the xattr map on the **filesystem
+  `container.filesystem.xattrs["read_mode"] = "ro"` — the xattr list on the **filesystem
   itself**, not on one of its entries, and only on the root tree that
   `container.filesystem` points at. A nested `Filesystem` (a subdirectory, reached via
   `ItemBranch.item.filesystem`) is not separately mounted, so nothing is written there.
@@ -142,7 +148,7 @@
   `workloads[]` item is `count` (number of concurrent descendant instances) × `resources`
   (a `Sysresources`: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`;
   bytes / microseconds; an omitted field defaults to `0` = no limit; plus an optional
-  `min_benchmark` map, as above). Unlike `resources`
+  `min_benchmark` object, as above). Unlike `resources`
   (this instance's own needs), these describe its descendants. At launch (`launch_service`),
   every group that declares `resources` is checked for existence — every limit it declares,
   not just memory — with local admission first, then known peers via
