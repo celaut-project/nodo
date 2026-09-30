@@ -38,6 +38,13 @@ sha1 = "0.10"
 # pages) need their payload base64-encoded; no clipboard crate is used, since
 # OSC 52 reaches the operator's terminal clipboard the same way over SSH.
 base64 = "0.22"
+# The DOCS page renders the installation's own `docs/*.md`. Parser only: the
+# default features are the `pulldown-cmark` binary's argument parsing and the HTML
+# writer, and this crate draws terminal lines instead.
+pulldown-cmark = { version = "0.13", default-features = false }
+# Column widths for wrapping those pages (an em dash is one cell, a CJK character
+# two). Already in the tree through ratatui; named here because docs.rs calls it.
+unicode-width = "0.1"
 
 [build-dependencies]
 prost-build = "0.11"

@@ -134,6 +134,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Page::Energy => draw_energy(frame, app, layout[2]),
         Page::Config => draw_config(frame, app, layout[2]),
         Page::Logs => draw_logs(frame, app, layout[2]),
+        Page::Docs => crate::docs::draw(frame, app, layout[2]),
     }
     draw_footer(frame, app, layout[3]);
 
@@ -160,6 +161,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         | InputMode::CreditClient
         | InputMode::AddCustomUnit
         | InputMode::NewChatTopic
+        | InputMode::SearchDocs
         | InputMode::GetService => draw_input_popup(frame, app),
     }
 }
@@ -4278,6 +4280,9 @@ pub(crate) fn page_controls(page: Page) -> &'static str {
             "\u{2191}/\u{2193} select  \u{2022}  \u{2192}/\u{2190} branch  \u{2022}  \u{23ce} toggle  \u{2022}  e edit  \u{2022}  a add  \u{2022}  d remove  \u{2022}  / filter  \u{2022}  q quit"
         }
         Page::Logs => "r refresh  \u{2022}  q quit",
+        Page::Docs => {
+            "\u{2191}/\u{2193} PgUp/PgDn Home/End  \u{2022}  \u{2190}/\u{2192} index/page  \u{2022}  \u{23ce} open/follow  \u{2022}  l/L link  \u{2022}  / search  \u{2022}  n/N match  \u{2022}  \u{232b} back  \u{2022}  r reload"
+        }
     }
 }
 
@@ -4304,9 +4309,9 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     // where it applies: a footer advertising `[/] group` on the one page where those
     // keys do something else would be advertising the wrong thing.
     let navigation = if app.page() == Page::Schedule {
-        "1-5 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
+        "1-6 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     } else {
-        "[/] or 1-5 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
+        "[/] or 1-6 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     };
     let lines = vec![
         Line::from(Span::styled(controls, Style::default().fg(muted()))),
