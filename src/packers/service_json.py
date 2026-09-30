@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 from google.protobuf import json_format
 
 from protos import celaut_pb2 as celaut
+from src.utils import keyvalue
 from src.utils.hashing import resolve_hash_config
 
 
@@ -94,7 +95,11 @@ def parse_service_spec(value: Any, path: str = "service") -> celaut.Service:
     )
     service = celaut.Service()
     try:
-        json_format.ParseDict(document, service, ignore_unknown_fields=False)
+        json_format.ParseDict(
+            keyvalue.json_objects_to_entries(document, service.DESCRIPTOR, path),
+            service,
+            ignore_unknown_fields=False,
+        )
     except (json_format.ParseError, TypeError, ValueError) as exc:
         raise ValueError(f"service.json {path} is not a valid Service: {exc}") from exc
 
@@ -186,9 +191,12 @@ def populate_possible_environment_workloads(
             workload.count = count
 
             resources = workload_source.get("resources", {})
+            resources_path = _path(workload_path, "resources")
             try:
                 json_format.ParseDict(
-                    resources,
+                    keyvalue.json_objects_to_entries(
+                        resources, workload.resources.DESCRIPTOR, resources_path
+                    ),
                     workload.resources,
                     ignore_unknown_fields=False,
                 )
