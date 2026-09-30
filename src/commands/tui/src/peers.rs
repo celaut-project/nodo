@@ -132,10 +132,15 @@ pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                         .reputation_proofs
                         .into_iter()
                         .filter_map(|contract| {
+                            // An entry list, not a map: a key resolves to the LAST
+                            // entry that carries it (what a map did on a repeat).
                             contract
                                 .xattrs
-                                .get("token_id")
-                                .and_then(|value| String::from_utf8(value.clone()).ok())
+                                .iter()
+                                .rev()
+                                .find(|entry| entry.key == "token_id")
+                                .and_then(|entry| entry.value.clone())
+                                .and_then(|value| String::from_utf8(value).ok())
                         })
                         .filter(|token_id| !token_id.is_empty())
                         .collect()
