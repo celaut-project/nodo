@@ -88,4 +88,3 @@ def build():
 
 def message_class(pool, full_name):
     return message_factory.GetMessageClass(pool.FindMessageTypeByName(full_name))
-

@@ -66,7 +66,7 @@ A selection key may carry the placeholder `${VAR_NAME}` in place of a value:
 ```
 
 The value is filled in at **launch** from the launcher-provided
-`Configuration.environment_variables` — the same map most of a service's own Linux
+`Configuration.environment_variables` — the same set most of a service's own Linux
 environment is built from (see `envs` in [`PACKING.md`](PACKING.md)), so an
 instantiator sets one variable and the guest, the node's resolver and (when the
 name and value pass `src/utils/guest_env.py`'s validation) the entrypoint's own
