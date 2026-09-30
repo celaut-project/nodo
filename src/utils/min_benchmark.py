@@ -2,8 +2,8 @@
 
 `cpu_quota / cpu_period` says how many cores a service needs and nothing about how fast
 one is: the same admitted 1.0 core is native silicon on one host and software emulation
-on another. `min_benchmark` is where a service states the second half, as a map from a
-named primitive to the least it needs of it **per core, per second** -- so it composes
+on another. `min_benchmark` is where a service states the second half, as key/value
+entries from a named primitive to the least it needs of it **per core, per second** -- so it composes
 with the quota ("2 cores, each at least 500k int ops/s") instead of competing with it.
 
 This module is the request side only: the vocabulary, and reading a declaration out of
@@ -11,8 +11,10 @@ This module is the request side only: the vocabulary, and reading a declaration 
 """
 from typing import Any, Dict, Final, Mapping, Tuple
 
+from src.utils import keyvalue
+
 # The primitives this node knows by name, every one of them per core and per second.
-# Adding a key here is all it takes to extend the set: the field is a map precisely so
+# Adding a key here is all it takes to extend the set: the field is keyed precisely so
 # a new primitive is never a wire-format change. A key that is *not* here is still
 # carried -- a peer may know a primitive this node does not -- so this is what the node
 # can name, not a whitelist.
@@ -44,6 +46,7 @@ def parse_min_benchmark(value: Any, path: str) -> Dict[str, int]:
         return {}
     if not isinstance(value, Mapping):
         raise ValueError(f"service.json {path} must be an object.")
+    keyvalue.check_json_object(value, path)
 
     parsed: Dict[str, int] = {}
     for key in sorted(value, key=str):

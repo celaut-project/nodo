@@ -15,6 +15,7 @@ from bee_rpc import buffer_pb2, block_builder
 from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
 from src.packers.service_json import populate_possible_environment_workloads
+from src.utils import keyvalue
 from src.utils.min_benchmark import parse_min_benchmark, unrecognised_keys
 from src.utils.hashing import (
     BLAKE2B_ID, HASH_SPECS, SHA3_256_ID, get_configured_hash_spec, hash_stream_many,
@@ -164,7 +165,12 @@ class ZipContainerPacker:
         self.service = pack_pb2.Service()
         self.metadata = celaut.Metadata()
         self.path = path
-        self.json = json.load(open(self.path + "service.json", "r"))
+        # `json_object_hook` remembers a key an object repeats, so the objects that
+        # become key/value lists can refuse it instead of silently taking the last.
+        self.json = json.load(
+            open(self.path + "service.json", "r"),
+            object_pairs_hook=keyvalue.json_object_hook,
+        )
         self.aux_id = aux_id
         self.error_msg = None
         self._tar_metadata_by_path = {}
@@ -408,7 +414,7 @@ class ZipContainerPacker:
                 f"tree is missing required per-entry filesystem metadata: {e}"
             ) from e
 
-        root_filesystem.xattrs[READ_MODE_KEY] = READ_MODE_RO.encode("utf-8")
+        keyvalue.set_value(root_filesystem.xattrs, READ_MODE_KEY, READ_MODE_RO.encode("utf-8"))
 
     def parseContainer(self):
         def _normalize_path_segments(raw_path):
@@ -469,7 +475,9 @@ class ZipContainerPacker:
                         branch_metadata = implicit_directory_metadata()
                     else:
                         branch_metadata = metadata_from_lstat(branch_stat)
-                    encode_filesystem_metadata_xattrs(branch.xattrs, branch_metadata)
+                    branch_xattrs = {}
+                    encode_filesystem_metadata_xattrs(branch_xattrs, branch_metadata)
+                    keyvalue.from_dict(branch.xattrs, branch_xattrs)
 
                     # It's a link.
                     if os.path.islink(branch_host_path):
@@ -592,8 +600,8 @@ class ZipContainerPacker:
         # or not: a key this packer has no name for may be one a node does, so it is
         # said out loud rather than refused (see src.utils.min_benchmark).
         init_min_benchmark, most_min_benchmark = self._min_benchmarks()
-        r.at_init.min_benchmark.update(init_min_benchmark)
-        r.at_most.min_benchmark.update(most_min_benchmark)
+        keyvalue.from_dict(r.at_init.min_benchmark, init_min_benchmark)
+        keyvalue.from_dict(r.at_most.min_benchmark, most_min_benchmark)
         unknown = unrecognised_keys(most_min_benchmark)
         if unknown:
             log.LOGGER(
@@ -622,11 +630,11 @@ class ZipContainerPacker:
             # Legacy compatibility: map service.json entrypoint -> container.init.entry_path
             entry_path = _normalize_path_segments(self.json.get("entrypoint"))
         self.service.container.init.entry_path.extend(entry_path)
-        for key, value in init.get("xattrs", {}).items():
-            if isinstance(value, str):
-                self.service.container.init.xattrs[key] = value.encode("utf-8")
-            else:
-                self.service.container.init.xattrs[key] = bytes(value)
+        keyvalue.check_json_object(init.get("xattrs"), "init.xattrs")
+        keyvalue.from_dict(self.service.container.init.xattrs, {
+            key: value.encode("utf-8") if isinstance(value, str) else bytes(value)
+            for key, value in init.get("xattrs", {}).items()
+        })
         
         # Arch
         
@@ -707,8 +715,11 @@ class ZipContainerPacker:
                     "renamed to 'mu_per_call' (amounts in MU, the node's unit of account). "
                     "See docs/PRICING.md."
                 )
-            for method, amount_mu in item.get("mu_per_call", {}).items():
-                slot.mu_per_call[method].n = str(amount_mu)
+            keyvalue.check_json_object(item.get("mu_per_call"), f"api[{slot.port}].mu_per_call")
+            keyvalue.from_dict(slot.mu_per_call, {
+                method: celaut.Amount(n=str(amount_mu))
+                for method, amount_mu in item.get("mu_per_call", {}).items()
+            })
             self.service.api.slot.append(slot)
             
     # ------------------------------------------------------------------ #

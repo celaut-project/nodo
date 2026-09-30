@@ -6,6 +6,8 @@ import tarfile
 from dataclasses import dataclass
 from typing import Any, List, Mapping, MutableMapping, Optional
 
+from src.utils import keyvalue
+
 MODE_KEY = "mode"
 UID_KEY = "uid"
 GID_KEY = "gid"
@@ -24,7 +26,7 @@ FILESYSTEM_METADATA_KEYS = (
     DEVICE_IS_BLOCK_KEY,
 )
 
-# `Filesystem.xattrs` -- the map on the tree itself, not on one of its entries.
+# `Filesystem.xattrs` -- the entry list on the tree itself, not on one of its entries.
 # Only the Filesystem referenced directly by `Container.filesystem` is read: a
 # nested one (a subdirectory, reached through `ItemBranch.item.filesystem`) is
 # not separately mounted, so nothing there could be honoured.
@@ -262,7 +264,7 @@ def read_mode(filesystem: Any) -> str:
     Read only from the tree's own ``xattrs``; pass the Filesystem that
     ``Container.filesystem`` points at, not one of its subdirectories.
     """
-    xattrs = getattr(filesystem, "xattrs", None) or {}
+    xattrs = keyvalue.to_dict(getattr(filesystem, "xattrs", None) or [])
     if READ_MODE_KEY not in xattrs:
         return READ_MODE_RW
 
@@ -315,7 +317,7 @@ def assert_complete_filesystem_metadata(
             f"{parent_rel_path.rstrip('/')}/{name}" if name else parent_rel_path
         )
 
-        missing = missing_metadata_keys(getattr(branch, "xattrs", None) or {})
+        missing = missing_metadata_keys(keyvalue.to_dict(getattr(branch, "xattrs", None) or []))
         if missing:
             raise ValueError(
                 f"incomplete filesystem metadata at '{rel_path}': missing "
