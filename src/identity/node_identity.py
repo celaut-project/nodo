@@ -40,6 +40,7 @@ from mnemonic import Mnemonic
 
 from protos import celaut_pb2
 from src.utils.config import ConfigManager
+from src.utils import keyvalue
 
 # A raw Ed25519 public key is 32 bytes -> 64 hex characters.
 _PUBLIC_KEY_HEX_LENGTH = 64
@@ -485,7 +486,7 @@ def get_node_public_key_hex() -> Optional[str]:
 def _canonical_contract_message(contract) -> str:
     """Deterministic encoding of one ``Contract`` (a ledger plus its xattrs)."""
     xattrs = ";".join(
-        f"{key}={bytes(contract.xattrs[key]).hex()}" for key in sorted(contract.xattrs)
+        f"{key}={bytes(value).hex()}" for key, value in keyvalue.items(contract.xattrs)
     )
     return "~".join([
         contract.ledger.formal.hex(),
@@ -579,7 +580,7 @@ def canonical_peer_content_digest(peer) -> str:
         sorted(_canonical_protocol(c) for c in peer.signature_scheme.components)
     )
     rates = ";".join(
-        f"{key}={peer.mu_per_call[key].n}" for key in sorted(peer.mu_per_call)
+        f"{key}={amount.n}" for key, amount in keyvalue.items(peer.mu_per_call)
     )
 
     canonical = "|".join([

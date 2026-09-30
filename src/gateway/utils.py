@@ -11,6 +11,7 @@ import netifaces as ni
 from src.payment_system.ledgers import local_payment_methods, register_local_contracts
 from protos import celaut_pb2 as celaut, celaut_pb2
 from src.utils import logger as log
+from src.utils import keyvalue
 from src.utils.config import ConfigManager
 from src.identity.transport_stack import (
     declare_transport_stack,
@@ -408,8 +409,10 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     # virtualizer stack, which imports this module back at import time.
     from src.utils.cost_functions.general_cost_functions import node_advertised_rates
 
-    for rate, amount_mu in node_advertised_rates().items():
-        peer.mu_per_call[rate].n = str(amount_mu)
+    keyvalue.from_dict(peer.mu_per_call, {
+        rate: celaut.Amount(n=str(amount_mu))
+        for rate, amount_mu in node_advertised_rates().items()
+    })
 
     payment_contracts = _local_payment_contracts()
     log.LOGGER(f'Using {len(payment_contracts)} local payment methods')
@@ -446,8 +449,7 @@ def peer_gateway_instance(peer: celaut_pb2.Peer) -> celaut.Instance:
     slot = instance.api.slot.add()
     slot.port = port
     slot.transport.CopyFrom(celaut.Service.Api.Protocol(tags=["tcp"]))
-    for rate, amount in peer.mu_per_call.items():
-        slot.mu_per_call[rate].n = amount.n
+    keyvalue.from_dict(slot.mu_per_call, keyvalue.to_dict(peer.mu_per_call))
     instance.api.payment_contracts.extend(peer.payment_contracts)
 
     uri_slot = instance.uri_slot.add()

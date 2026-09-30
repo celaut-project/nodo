@@ -1,6 +1,7 @@
 import sqlite3
 
 from src.utils.config import ConfigManager
+from src.utils import keyvalue
 from protos import celaut_pb2 as celaut
 from src.utils.logger import ssformat
 from src.utils.monetary import format_mu
@@ -101,7 +102,7 @@ def list_peers():
                 # Rates the peer advertised. Absent for peers running a version from
                 # before nodes published them.
                 advertised_rates = {
-                    rate: amount.n for rate, amount in announced.mu_per_call.items()
+                    rate: amount.n for rate, amount in keyvalue.items(announced.mu_per_call)
                 }
                 # Every proof the peer announced, not just one: a node can hold
                 # several, and each is an opinion set it published (issue #281).

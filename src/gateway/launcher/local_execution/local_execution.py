@@ -12,6 +12,7 @@ from src.manager.manager import (
     reserve_instance_name,
 )
 from src.utils import utils, logger as log
+from src.utils import keyvalue
 from src.utils.instance_names import extract_instance_name
 from src.utils.utils import from_amount
 from src.utils.host_interface import HOST_EXPOSURE_KEY, HostInterfaceUnresolved, resolve_from_config
@@ -64,7 +65,7 @@ def _serialize_envs(config: Optional[celaut.Configuration]) -> str:
             _REDACTED if _is_secret_env(key)
             else value.decode("utf-8", errors="replace")
         )
-        for key, value in config.environment_variables.items()
+        for key, value in keyvalue.items(config.environment_variables)
     }
     return json.dumps(envs, sort_keys=True) if envs else ""
 

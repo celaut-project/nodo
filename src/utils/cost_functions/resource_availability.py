@@ -15,7 +15,7 @@ import psutil
 
 from protos import celaut_pb2 as celaut
 from src.manager.resources import IOBigData, could_ve_this_sysreq
-from src.utils import host_limits, logger as log, min_benchmark
+from src.utils import host_limits, keyvalue, logger as log, min_benchmark
 
 
 def _get_service_memory_snapshot() -> tuple[int, int]:
@@ -133,7 +133,7 @@ def _note_unenforced_min_benchmark(at_most: celaut.Sysresources) -> None:
     The line is here so the gap is visible in the log of the node that took the
     service, until a node has scores of its own to compare.
     """
-    declared = at_most.min_benchmark
+    declared = keyvalue.to_dict(at_most.min_benchmark)
     if not declared:
         return
     unknown = min_benchmark.unrecognised_keys(declared)
