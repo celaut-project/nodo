@@ -102,6 +102,9 @@ pub enum Page {
     Energy,
     Config,
     Logs,
+    /// The installation's own `docs/` folder: an index of every page, and the
+    /// selected one rendered to read in place.
+    Docs,
 }
 
 /// Which band of the tab bar a page belongs to.
@@ -125,6 +128,8 @@ pub enum PageGroup {
     Record,
     /// The pages that change the node rather than describe it.
     Settings,
+    /// How the node works, as its own documentation says.
+    Reference,
 }
 
 impl PageGroup {
@@ -134,12 +139,13 @@ impl PageGroup {
     /// a test — but written out, because the top row's order is a fact about the top
     /// row and a reader should be able to see it without folding twelve pages down
     /// into five.
-    pub const ALL: [PageGroup; 5] = [
+    pub const ALL: [PageGroup; 6] = [
         PageGroup::Status,
         PageGroup::Activity,
         PageGroup::Money,
         PageGroup::Record,
         PageGroup::Settings,
+        PageGroup::Reference,
     ];
 
     /// The short name on the group row.
@@ -155,6 +161,7 @@ impl PageGroup {
             PageGroup::Money => "EARNINGS",
             PageGroup::Record => "LOGS",
             PageGroup::Settings => "SETTINGS",
+            PageGroup::Reference => "DOCS",
         }
     }
 
@@ -190,7 +197,7 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 13] = [
+    pub const ALL: [Page; 14] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
@@ -216,6 +223,9 @@ impl Page {
         Page::Schedule,
         Page::Energy,
         Page::Config,
+        // Last, and a group of its own: it describes the node rather than being
+        // part of it, and it is where an operator goes from any page above.
+        Page::Docs,
     ];
 
     pub fn title(self) -> &'static str {
@@ -233,6 +243,7 @@ impl Page {
             Page::Energy => "ENERGY",
             Page::Config => "CONFIG",
             Page::Logs => "LOGS",
+            Page::Docs => "DOCS",
         }
     }
 
@@ -250,6 +261,7 @@ impl Page {
             Page::Cell | Page::Pricing | Page::Schedule | Page::Energy | Page::Config => {
                 PageGroup::Settings
             }
+            Page::Docs => PageGroup::Reference,
         }
     }
 }
@@ -336,6 +348,8 @@ fn visible_row_at(position: Position, area: Rect) -> Option<usize> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    /// The DOCS page's `/`: text to find on the open page.
+    SearchDocs,
     /// The Know-your-Assumptions gate, shown once, before anything else is reachable
     /// (issue #395).
     ///
@@ -2982,6 +2996,8 @@ pub struct App {
     pub chat_send_area: Rect,
     /// The open right-click menu, while `input_mode` is `ContextMenu`.
     pub context_menu: Option<crate::context_menu::ContextMenu>,
+    /// The DOCS page: its index, the page open in it, and where both were drawn.
+    pub docs: crate::docs::DocsState,
     /// Contents of the read-only Details overlay, when open.
     pub details: Option<DetailsView>,
     pub status: String,
@@ -3127,6 +3143,7 @@ impl Default for App {
             chat_attach_area: Rect::ZERO,
             chat_send_area: Rect::ZERO,
             context_menu: None,
+            docs: crate::docs::DocsState::default(),
             details: None,
             status: "Press r to refresh • q to quit".to_string(),
             tabs_area: Rect::ZERO,
@@ -3292,7 +3309,7 @@ impl App {
         self.tabs.cycle_group(-1);
     }
 
-    /// `1`..`5`: jump straight to a group.
+    /// `1`..`6`: jump straight to a group.
     ///
     /// One-based, matching the labels as counted on screen rather than as indexed in
     /// an array — nobody reading a row of five looks for a zeroth.
@@ -3315,6 +3332,8 @@ impl App {
                 let next = (self.cell.organelle + 1) % Organelle::ALL.len();
                 self.cell.go_to_organelle(next);
             }
+            // Two panes side by side: → reads the page, ← goes back to the index.
+            Page::Docs => self.docs_focus(crate::docs::Focus::Page),
             _ => {}
         }
     }
@@ -3332,6 +3351,7 @@ impl App {
                 let previous = (self.cell.organelle + count - 1) % count;
                 self.cell.go_to_organelle(previous);
             }
+            Page::Docs => self.docs_focus(crate::docs::Focus::Index),
             _ => {}
         }
     }
@@ -3371,6 +3391,7 @@ impl App {
             Page::Config => {
                 self.config_tree_state.key_up();
             }
+            Page::Docs => self.docs_up_down(-1),
             _ => {}
         }
     }
@@ -3407,6 +3428,7 @@ impl App {
             Page::Config => {
                 self.config_tree_state.key_down();
             }
+            Page::Docs => self.docs_up_down(1),
             _ => {}
         }
     }
@@ -3463,6 +3485,10 @@ impl App {
         }
         if self.page() == Page::Pricing {
             self.click_pricing(position);
+            return;
+        }
+        if self.page() == Page::Docs {
+            self.click_docs(position);
             return;
         }
         // A service card's Get/Execute (issue #438).
@@ -4116,6 +4142,7 @@ impl App {
             InputMode::ComposeChatMessage => self.submit_chat_compose(),
             InputMode::GetService => self.submit_get_service(),
             InputMode::PickChatService => self.submit_chat_service_pick(),
+            InputMode::SearchDocs => self.submit_docs_search(),
             // The writes confirmation answers y/n, never Enter: Enter on a
             // twelve-key diff would apply it on a keystroke meant to scroll. The KyA
             // gate answers y/n for the same reason and one stronger: Enter is the
@@ -5478,6 +5505,15 @@ impl App {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 serde_json::from_str(report_line(&stdout).ok_or("No payment report returned")?).map_err(|e| e.to_string())
             }));
+        }
+        // DOCS: `r` re-reads the folder; otherwise only the open page, and only
+        // when it changed on disk -- one stat per tick, and only on this page.
+        if self.page() == Page::Docs {
+            if force {
+                self.reload_docs();
+            } else {
+                self.docs.reload_if_changed(false);
+            }
         }
         self.refresh_clock();
         self.refresh_local(force);
@@ -7602,6 +7638,7 @@ mod tests {
                     Page::Schedule,
                     Page::Energy,
                     Page::Config,
+                    Page::Docs,
                 ]
             );
         }

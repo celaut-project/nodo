@@ -16,6 +16,14 @@ pub async fn handle_mouse_events(mouse: MouseEvent, app: &mut App) -> AppResult<
         // (issue #395).
         InputMode::AcceptKya => {}
         InputMode::Normal => match mouse.kind {
+            // DOCS has two panes, so the wheel acts on the one under the pointer
+            // rather than on whichever has the keyboard.
+            MouseEventKind::ScrollUp if app.page() == Page::Docs => {
+                app.scroll_docs_at(mouse.column, mouse.row, -1)
+            }
+            MouseEventKind::ScrollDown if app.page() == Page::Docs => {
+                app.scroll_docs_at(mouse.column, mouse.row, 1)
+            }
             MouseEventKind::ScrollUp => app.on_up(),
             MouseEventKind::ScrollDown => app.on_down(),
             MouseEventKind::Down(MouseButton::Left) => app.click_at(mouse.column, mouse.row),
@@ -69,6 +77,8 @@ pub async fn handle_mouse_events(mouse: MouseEvent, app: &mut App) -> AppResult<
         },
         _ => {}
     }
+    // A click on the DOCS tab is what first opens that page.
+    app.sync_docs();
     Ok(())
 }
 
@@ -322,6 +332,13 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         {
             app.discard_schedule_draft()
         }
+        // DOCS likewise: Esc drops a search, then walks back along followed links,
+        // and only quits once there is nothing left to undo.
+        (KeyModifiers::NONE, KeyCode::Esc)
+            if app.page() == Page::Docs && app.docs_escape_pending() =>
+        {
+            app.docs_escape()
+        }
         (KeyModifiers::CONTROL, KeyCode::Char('c'))
         | (KeyModifiers::NONE, KeyCode::Esc)
         | (KeyModifiers::NONE, KeyCode::Char('q')) => app.quit(),
@@ -345,7 +362,7 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         // 1..5 jump straight to a group, one-based as they are counted on screen.
         // Nothing else in this interface binds a digit, so there is no page that has
         // to be excepted the way SCHEDULE is above.
-        (KeyModifiers::NONE, KeyCode::Char(digit @ '1'..='5')) => {
+        (KeyModifiers::NONE, KeyCode::Char(digit @ '1'..='6')) => {
             app.select_group_by_number(digit as usize - '0' as usize)
         }
         (_, KeyCode::Up) => app.on_up(),
@@ -490,7 +507,28 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('x')) if app.page() == Page::Config => {
             app.clear_config_filter()
         }
+        // DOCS: ↑/↓ and ←/→ reach it through on_up/on_down/on_left/on_right; these
+        // are the reading keys no other page needs.
+        (_, KeyCode::PageUp) if app.page() == Page::Docs => app.docs_page(-1),
+        (_, KeyCode::PageDown) if app.page() == Page::Docs => app.docs_page(1),
+        (_, KeyCode::Home) if app.page() == Page::Docs => app.docs_jump(false),
+        (_, KeyCode::End) if app.page() == Page::Docs => app.docs_jump(true),
+        (_, KeyCode::Enter) if app.page() == Page::Docs => app.docs_enter(),
+        (_, KeyCode::Backspace) if app.page() == Page::Docs => app.docs_back(),
+        (KeyModifiers::NONE, KeyCode::Char('/')) if app.page() == Page::Docs => {
+            app.open_docs_search()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('n')) if app.page() == Page::Docs => {
+            app.docs_step_match(1)
+        }
+        (_, KeyCode::Char('N')) if app.page() == Page::Docs => app.docs_step_match(-1),
+        (KeyModifiers::NONE, KeyCode::Char('l')) if app.page() == Page::Docs => {
+            app.docs_step_link(1)
+        }
+        (_, KeyCode::Char('L')) if app.page() == Page::Docs => app.docs_step_link(-1),
         _ => {}
     }
+    // Whichever key opened the DOCS page, it is indexed before it is drawn.
+    app.sync_docs();
     Ok(())
 }

@@ -30,6 +30,7 @@ impl MenuItem {
     pub fn key_hint(&self) -> String {
         match self.key {
             KeyCode::Enter => "\u{23ce}".to_string(),
+            KeyCode::Backspace => "\u{232b}".to_string(),
             KeyCode::Char(key) => key.to_string(),
             other => format!("{other:?}"),
         }
@@ -76,6 +77,13 @@ pub fn page_actions(page: Page) -> Vec<MenuItem> {
             MenuItem::new("Add to list", 'a'),
             MenuItem::new("Remove", 'd'),
         ],
+        Page::Docs => vec![
+            MenuItem { label: "Open / follow link", key: KeyCode::Enter },
+            MenuItem::new("Search this page…", '/'),
+            MenuItem::new("Next match", 'n'),
+            MenuItem::new("Next link", 'l'),
+            MenuItem { label: "Back", key: KeyCode::Backspace },
+        ],
         _ => Vec::new(),
     }
 }
@@ -98,6 +106,10 @@ impl App {
                 return;
             };
             self.config_tree_state.select(identifier);
+        } else if self.page() == Page::Docs {
+            if !self.point_docs_at(position) {
+                return;
+            }
         } else if !self.select_row_at(position) {
             return;
         }
