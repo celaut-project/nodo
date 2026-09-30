@@ -14,6 +14,48 @@ message DataFormat {
     bytes formal = 3;
 }
 
+// Ordered key/value entries, one message per value type.
+//
+// These replace protobuf `map<string, V>` fields. A proto3 map is wire-identical to
+// `repeated Entry { key = 1; value = 2; }` at the same field number, so a field
+// converted from a map keeps its number and name and still reads bytes written before
+// the change -- and is read by nodes that still declare the map. What a map does NOT
+// give is a defined order: protobuf leaves map entry order on the wire to the
+// implementation, and a service id is a hash of the serialized specification, so two
+// implementations (or two runs) could serialize the same service to different bytes and
+// therefore different ids. A repeated field keeps the order it was given.
+//
+// Convention for every field of these types (src/utils/keyvalue.py is the one place
+// that implements it):
+//   * A producer writes entries sorted by key, ascending by UTF-8 bytes, one entry per
+//     key, and no empty key.
+//   * A reader resolves a key to the LAST entry that carries it -- what a map does when
+//     a key repeats -- and must not depend on any other order.
+//   * `optional` on a scalar `value` is deliberate: proto3 omits a scalar equal to its
+//     default (empty bytes, 0), whereas a map entry always wrote both fields. With
+//     presence tracked, an entry whose value is empty/0 is still written as `key` +
+//     `value`, exactly the bytes a map produced, and parses back to the same bytes.
+
+message BytesKeyValue {
+    string key = 1;
+    optional bytes value = 2;
+}
+
+message AmountKeyValue {
+    string key = 1;
+    Amount value = 2;
+}
+
+message DataFormatKeyValue {
+    string key = 1;
+    DataFormat value = 2;
+}
+
+message Uint64KeyValue {
+    string key = 1;
+    optional uint64 value = 2;
+}
+
 // Represents both, payment contracts and reputation proofs.
 //
 // `xattrs` is where everything ledger-specific lives, so the message itself needs no
@@ -53,7 +95,7 @@ message Contract {
         bytes formal = 3;
     }
     Ledger ledger = 1;
-    map<string, bytes> xattrs = 2;
+    repeated BytesKeyValue xattrs = 2;
 }
 
 // An amount in MU (monetary unit), as a numeric string.
@@ -126,7 +168,7 @@ message Service {
             // Protocol stack definitions for this slot.
             repeated Protocol protocol_stack = 3;
             // MU charged per declared method in protocol_stack.
-            map<string, Amount> mu_per_call = 4;
+            repeated AmountKeyValue mu_per_call = 4;
         }
 
         repeated Slot slot = 1;
@@ -203,7 +245,7 @@ message Service {
                     // Nested filesystem tree.
                     Filesystem filesystem = 4;
                 }
-                map<string, bytes> xattrs = 5;
+                repeated BytesKeyValue xattrs = 5;
             }
             repeated ItemBranch branch = 1;
 
@@ -220,12 +262,12 @@ message Service {
             //     capacity beyond /tmp; the node may build it with a
             //     compressed, unpadded format (e.g. squashfs/erofs) instead of
             //     a pre-sized ext4, and mount it read-only.
-            map<string, bytes> xattrs = 2;
+            repeated BytesKeyValue xattrs = 2;
         }
         
         message Init {
             repeated string entry_path = 1;
-            map<string, bytes> xattrs = 2;
+            repeated BytesKeyValue xattrs = 2;
         }
 
         message ConfigDeclaration {
@@ -261,7 +303,7 @@ message Service {
         // Environment variables for the execution environment.
         // (Moved here from Service.Api: env vars belong to the container that
         // runs the code, not to the communication interface.)
-        map<string, DataFormat> environment_variables = 7;
+        repeated DataFormatKeyValue environment_variables = 7;
 
     }
 
@@ -330,7 +372,7 @@ message Instance {
 
 message Configuration {
     // Environment variables for gateway services.
-    map<string, bytes> environment_variables = 1;
+    repeated BytesKeyValue environment_variables = 1;
 
     // Service specification slots.
     repeated int32 spec_slot = 2;
@@ -376,7 +418,7 @@ message Sysresources {
     // "2 cores, each at least 500k int ops/s" is cpu_quota/cpu_period = 2.0 plus
     // min_benchmark["int_ops_per_sec"] = 500000, never a total across cores.
     // Absent key = no requirement on that primitive. New primitives are new
-    // map keys, never new proto fields -- this must never need a wire-format
+    // entry keys, never new proto fields -- this must never need a wire-format
     // change to add one. A key a node does not recognise is carried as it is,
     // never an error.
     //
@@ -388,7 +430,7 @@ message Sysresources {
     //
     // Request-side only: what a service requires. What a node measures and
     // publishes about its own cores is a separate concern, not this field.
-    map<string, uint64> min_benchmark = 6;
+    repeated Uint64KeyValue min_benchmark = 6;
 }
 
 // -----------------------
@@ -480,7 +522,7 @@ message Peer {
     // addresses you reach it through (see cost_functions.node_advertised_rates,
     // which has no notion of a port), so they are not repeated per Uri.
     repeated ContractRate payment_contracts = 3;
-    map<string, Amount> mu_per_call = 4;
+    repeated AmountKeyValue mu_per_call = 4;
 
     // Node identity (issue #236): the public key (hex) of the node's identity keypair,
     // in whatever encoding `signature_scheme` names, and a signature over the canonical

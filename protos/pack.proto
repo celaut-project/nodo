@@ -6,7 +6,7 @@ message Service {
     message Container {
         message Init {
             repeated string entry_path = 1;
-            map<string, bytes> xattrs = 2;
+            repeated celaut.BytesKeyValue xattrs = 2;
         }
 
         message Filesystem {
