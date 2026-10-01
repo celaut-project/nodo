@@ -513,9 +513,13 @@ competing with it — "2 cores, each at least 500k integer ops/s" is
 |-----|-----------------------------|--------------------|
 | `int_ops_per_sec` | operations | Integer / branch-heavy throughput |
 | `flt_ops_per_sec` | operations | Floating-point throughput |
-| `mem_bandwidth_bytes_per_sec` | bytes | Memory bandwidth (read + written) |
+| `mem_bandwidth_bytes_per_sec` | bytes | Memory bandwidth, over the working set below |
+| `mem_bandwidth_working_set_bytes` | bytes (not per second) | The working set the bandwidth is required over; default 1 GiB |
 | `sha256_hashes_per_sec` | digests | SHA-256 hashing |
 
+- **Only under `at_init`.** `benchmark` is a minimum, and a minimum is what `at_init`
+  states; that is the half admission enforces. Under `at_most` it would mean nothing, so the
+  packer refuses it — and refuses the field's old name, `min_benchmark`, naming the new one.
 - The key set is `BENCHMARK_KEYS` in `src/utils/benchmark.py`. It is keyed so that a
   new primitive is a new key, never a change to the wire format. On the wire it is a
   list of key/value entries sorted by key (see [`protos/README.md`](../protos/README.md)).
@@ -525,25 +529,30 @@ competing with it — "2 cores, each at least 500k integer ops/s" is
   2^64-1). Anything else is a packing error, raised before the image is built.
 - A key outside the table is **kept as written**, with a line in the log, never refused: a
   node may know a primitive the packer does not.
-- It may be written under `at_init`, `at_most`, or both. Like every other field, `at_most` is
-  raised to `at_init` key by key — so a minimum written only under `at_init` is also present
-  in `at_most`, which is the half admission reads.
+- **Memory bandwidth is only comparable over the same amount of memory** — 5 KiB lives in
+  cache, 2 GiB does not. A node's bandwidth score meets the requirement only if it was
+  measured over a working set **at least** `mem_bandwidth_working_set_bytes` (a larger set
+  can only lower bandwidth); omitted, that is the pinned 1 GiB. A score that does not say
+  what it was measured over is never accepted.
 
-> **Declared, not yet enforced.** This is the request side only. No node measures or
-> publishes its own per-core scores yet, so admission has nothing to compare a requirement
-> against: a node that receives one logs that it is declared and not enforced, and admits
-> the service on its other limits. The requirement is carried intact to every peer the
-> service is delegated to, so it takes effect wherever a node does enforce it.
+**Enforced per architecture.** A node holds the requirement against its own measured
+scores for the service's architecture (`benchmark.BY_ARCH` in its `config.yaml`, see
+[CONFIG.md](CONFIG.md#benchmark--this-nodes-per-core-scores)) and refuses the service, with
+the reason, when a measured score is lower. A primitive the node has not measured (`-1`) is
+logged and not enforced. A node also announces its scores to its peers (`Peer.resources`),
+so a peer never asks it to run a service it could not admit. The requirement is carried
+intact to every peer the service is delegated to.
 
 ```json
 {
     "resources": {
-        "at_most": {
+        "at_init": {
             "cpu_period": 100000,
             "cpu_quota": 200000,
             "benchmark": {
                 "int_ops_per_sec": 500000,
-                "sha256_hashes_per_sec": 1000000
+                "mem_bandwidth_bytes_per_sec": 5000000000,
+                "mem_bandwidth_working_set_bytes": 2147483648
             }
         }
     }
@@ -736,8 +745,9 @@ service is refused if any group has nowhere that could take it. Every limit the 
 is checked, not just memory: `mem_limit` and `disk_space` against what is free right now,
 `cpu_quota`/`cpu_period` against how many cores the host has at all (a quota is a share of
 time, so a momentary spike is not a reason to refuse), and `blkio_weight` against the
-10–1000 range cgroups accept. A group's `benchmark` is the one exception: it travels to
-the peer with the rest, but no node measures its cores yet, so it is logged and not checked.
+10–1000 range cgroups accept. A group's `benchmark` is checked too, as the minimum it is:
+against the scores of whichever node is asked, for the group's architecture — the embedded
+dependency service's, or the node's native one for a resource-only group.
 
 This is an existence check, not a capacity reservation: it does not prove `count` concurrent
 instances of a group could all run at once, locally or spread across peers, and it does not

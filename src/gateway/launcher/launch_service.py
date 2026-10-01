@@ -45,7 +45,9 @@ def _detect_local_preflight_failure(
         if estimated_cost:
             return None
 
-        availability = get_resource_availability(service.container.resources)
+        availability = get_resource_availability(
+            service.container.resources, arch=get_arch_tag(service=service, metadata=metadata)
+        )
         return availability.get("reason") or "Local execution was rejected due to insufficient resources."
     except UnsupportedArchitectureException as exc:
         return str(exc)

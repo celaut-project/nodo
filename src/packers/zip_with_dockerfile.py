@@ -307,13 +307,14 @@ class ZipContainerPacker:
     # resources.*.benchmark
     # ------------------------------------------------------------------ #
 
-    def _benchmarks(self) -> Tuple[dict, dict]:
-        """``resources.at_init`` / ``at_most`` ``benchmark``, as (at_init, at_most).
+    def _benchmarks(self) -> dict:
+        """``resources.at_init.benchmark``: the per-core minimum the service requires.
 
-        Optional on both. ``at_most`` is raised to ``at_init`` key by key, as every
-        other limit is in parseContainer -- and for a better reason here than there:
-        admission reads ``at_most``, so a minimum written only under ``at_init`` would
-        otherwise be one no node ever looks at.
+        Optional. Only ``at_init`` holds one: ``benchmark`` is a floor, and a floor is
+        what ``at_init`` says, so that is the half admission reads (see
+        Sysresources.benchmark in protos/celaut.proto). Under ``at_most`` it would carry
+        no meaning, so it is refused rather than packed into the service's hash to be
+        ignored by every node -- and so is the field's old name.
         """
         res = self.json.get("resources", {})
         for end in ("at_init", "at_most"):
@@ -322,17 +323,16 @@ class ZipContainerPacker:
             if "min_benchmark" in (res.get(end) or {}):
                 raise ValueError(
                     f"service.json resources.{end}.min_benchmark was renamed to "
-                    f"resources.{end}.benchmark."
+                    "resources.at_init.benchmark."
                 )
-        at_init = parse_benchmark(
-            res.get("at_init", {}).get("benchmark"), "resources.at_init.benchmark"
+        if "benchmark" in (res.get("at_most") or {}):
+            raise ValueError(
+                "service.json resources.at_most.benchmark has no meaning: a per-core "
+                "minimum belongs in resources.at_init.benchmark."
+            )
+        return parse_benchmark(
+            (res.get("at_init") or {}).get("benchmark"), "resources.at_init.benchmark"
         )
-        at_most = parse_benchmark(
-            res.get("at_most", {}).get("benchmark"), "resources.at_most.benchmark"
-        )
-        for key, minimum in at_init.items():
-            at_most[key] = max(minimum, at_most.get(key, 0))
-        return at_init, dict(sorted(at_most.items()))
 
     # ------------------------------------------------------------------ #
     # read_only_filesystem
@@ -617,13 +617,12 @@ class ZipContainerPacker:
         # Minimum per-core benchmark scores. Serialized as declared, recognised key
         # or not: a key this packer has no name for may be one a node does, so it is
         # said out loud rather than refused (see src.utils.benchmark).
-        init_benchmark, most_benchmark = self._benchmarks()
+        init_benchmark = self._benchmarks()
         keyvalue.from_dict(r.at_init.benchmark, init_benchmark)
-        keyvalue.from_dict(r.at_most.benchmark, most_benchmark)
-        unknown = unrecognised_keys(most_benchmark)
+        unknown = unrecognised_keys(init_benchmark)
         if unknown:
             log.LOGGER(
-                "service.json resources.*.benchmark declares primitive(s) this node "
+                "service.json resources.at_init.benchmark declares primitive(s) this node "
                 f"does not recognise, kept as written: {', '.join(unknown)}."
             )
 

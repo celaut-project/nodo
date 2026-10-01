@@ -1,13 +1,14 @@
-"""`Sysresources.benchmark` (#448): the per-core minimum benchmark a service requires.
+"""`Sysresources.benchmark` (#448, #459): the per-core minimum benchmark a service requires.
 
-Four things are pinned here, one class each:
+Four things are pinned here:
 
 * **the wire** -- the map round-trips, an unrecognised key included, and a node built
   before the field existed still reads every other field of a message that carries it;
 * **service.json** -- what the packer accepts, what it refuses, and that a service that
   never mentions the field serializes to exactly what it did before;
-* **admission today** -- the requirement is read and logged, never a reason to refuse,
-  because no node measures its cores yet;
+* **admission** -- `at_init.benchmark` is enforced per architecture against this node's
+  measured scores from config.yaml, an unmeasured (-1) one is only logged, and
+  `at_most.benchmark` means nothing;
 * **delegation** -- the requirement reaches the peer that is asked to run the service.
 """
 import unittest
@@ -244,46 +245,40 @@ def _packer(service_json):
 )
 class PackerServiceJsonTests(unittest.TestCase):
 
-    def test_absent_everywhere_is_two_empty_maps(self):
+    def test_absent_is_no_requirement(self):
         for service_json in ({}, {"resources": {}}, {"resources": {"at_init": {}, "at_most": {}}}):
             with self.subTest(service_json=service_json):
-                self.assertEqual(_packer(service_json)._benchmarks(), ({}, {}))
+                self.assertEqual(_packer(service_json)._benchmarks(), {})
 
-    def test_each_end_is_read_from_its_own_object(self):
-        at_init, at_most = _packer({"resources": {
-            "at_init": {"benchmark": {"int_ops_per_sec": 100}},
-            "at_most": {"benchmark": {"int_ops_per_sec": 300, "flt_ops_per_sec": 50}},
-        }})._benchmarks()
-        self.assertEqual(at_init, {"int_ops_per_sec": 100})
-        self.assertEqual(at_most, {"flt_ops_per_sec": 50, "int_ops_per_sec": 300})
+    def test_it_is_read_from_at_init(self):
+        self.assertEqual(
+            _packer({"resources": {"at_init": {"benchmark": {"int_ops_per_sec": 100}}}})._benchmarks(),
+            {"int_ops_per_sec": 100},
+        )
 
-    def test_at_most_is_raised_to_at_init_key_by_key(self):
-        # Admission reads at_most: a minimum written only under at_init must not be
-        # one no node ever looks at, and at_most must never ask for less than at_init.
-        at_init, at_most = _packer({"resources": {
-            "at_init": {"benchmark": {"int_ops_per_sec": 500, "sha256_hashes_per_sec": 9}},
-            "at_most": {"benchmark": {"int_ops_per_sec": 100}},
-        }})._benchmarks()
-        self.assertEqual(at_init, {"int_ops_per_sec": 500, "sha256_hashes_per_sec": 9})
-        self.assertEqual(at_most, {"int_ops_per_sec": 500, "sha256_hashes_per_sec": 9})
-
-    def test_a_malformed_value_is_refused_at_either_end(self):
-        for end in ("at_init", "at_most"):
-            for bad in (-5, 2.5, "9"):
-                with self.subTest(end=end, value=bad):
-                    with self.assertRaises(ValueError) as raised:
-                        _packer({"resources": {end: {"benchmark": {"flt_ops_per_sec": bad}}}})._benchmarks()
-                    self.assertIn(f"resources.{end}.benchmark.flt_ops_per_sec", str(raised.exception))
+    def test_under_at_most_it_has_no_meaning_and_is_refused(self):
+        # A floor is what at_init says; packed under at_most it would change the
+        # service's hash and be ignored by every node (#459).
+        with self.assertRaises(ValueError) as raised:
+            _packer({"resources": {"at_most": {"benchmark": {"int_ops_per_sec": 300}}}})._benchmarks()
+        self.assertIn("resources.at_init.benchmark", str(raised.exception))
 
     def test_the_old_min_benchmark_key_is_refused_naming_the_new_one(self):
         for end in ("at_init", "at_most"):
             with self.subTest(end=end):
                 with self.assertRaises(ValueError) as raised:
                     _packer({"resources": {end: {"min_benchmark": {"int_ops_per_sec": 1}}}})._benchmarks()
-                self.assertIn(f"resources.{end}.benchmark", str(raised.exception))
+                self.assertIn("resources.at_init.benchmark", str(raised.exception))
+
+    def test_a_malformed_value_is_refused_naming_it(self):
+        for bad in (-5, 2.5, "9"):
+            with self.subTest(value=bad):
+                with self.assertRaises(ValueError) as raised:
+                    _packer({"resources": {"at_init": {"benchmark": {"flt_ops_per_sec": bad}}}})._benchmarks()
+                self.assertIn("resources.at_init.benchmark.flt_ops_per_sec", str(raised.exception))
 
     def test_it_is_refused_when_service_json_is_read_not_after_the_build(self):
-        packer = _packer({"resources": {"at_most": {"benchmark": {"int_ops_per_sec": -1}}}})
+        packer = _packer({"resources": {"at_init": {"benchmark": {"int_ops_per_sec": -1}}}})
         with self.assertRaises(ValueError):
             packer._validate_service_json_shape()
 
@@ -336,53 +331,164 @@ def _resources(**benchmarks) -> celaut.Service.Container.Resources:
     resources = celaut.Service.Container.Resources(
         at_most=celaut.Sysresources(mem_limit=1024, cpu_quota=100000, cpu_period=100000)
     )
-    keyvalue.update(resources.at_most.benchmark, benchmarks)
+    keyvalue.update(resources.at_init.benchmark, benchmarks)
     return resources
 
 
-class AdmissionTodayTests(unittest.TestCase):
-    """Declared, logged, not enforced: nothing on a node measures a core yet."""
+def _scores(**measured):
+    scores = {key: benchmark.UNMEASURED for key in benchmark.SCORE_KEYS}
+    scores.update(measured)
+    return scores
 
-    def _availability(self, resources):
+
+class AdmissionTests(unittest.TestCase):
+    """Enforced per architecture against this node's measured scores; -1 stays log-only."""
+
+    def _availability(self, resources, arch="linux/amd64", **scores):
+        asked = []
+
+        def _node_scores(a):
+            asked.append(a)
+            return _scores(**scores)
+
         with patch.object(ra, "could_ve_this_sysreq", return_value=True), \
                 patch.object(ra.host_limits, "ceiling_shortfalls", return_value=[]), \
+                patch.object(ra.benchmark, "node_scores", side_effect=_node_scores), \
                 patch.object(ra.log, "LOGGER") as logger:
-            return ra.get_resource_availability(resources), [c.args[0] for c in logger.call_args_list]
+            availability = ra.get_resource_availability(resources, arch=arch)
+        self.asked_arch = asked
+        return availability, [c.args[0] for c in logger.call_args_list]
 
-    def test_an_unreachable_requirement_does_not_refuse_the_service(self):
-        availability, _ = self._availability(_resources(int_ops_per_sec=2 ** 64 - 1))
+    def test_a_measured_score_below_the_requirement_is_a_shortfall(self):
+        availability, _ = self._availability(
+            _resources(int_ops_per_sec=500000), int_ops_per_sec=20000
+        )
+        self.assertFalse(availability["can_execute"])
+        self.assertIn("resources.at_init.benchmark.int_ops_per_sec", availability["reason"])
+        self.assertIn("on this node for linux/amd64: 20000", availability["reason"])
+
+    def test_a_score_that_meets_it_admits(self):
+        availability, lines = self._availability(
+            _resources(int_ops_per_sec=500000), int_ops_per_sec=900000
+        )
+        self.assertTrue(availability["can_execute"])
+        self.assertEqual(lines, [])
+
+    def test_the_scores_read_are_the_requested_architectures(self):
+        self._availability(_resources(int_ops_per_sec=1), arch="linux/arm64")
+        self.assertEqual(self.asked_arch, ["linux/arm64"])
+
+    def test_no_architecture_is_the_hosts_own(self):
+        with patch.object(ra, "host_arch_tag", return_value="linux/arm64"):
+            self._availability(_resources(int_ops_per_sec=1), arch=None)
+        self.assertEqual(self.asked_arch, ["linux/arm64"])
+
+    def test_an_unmeasured_score_is_logged_not_enforced(self):
+        availability, lines = self._availability(
+            _resources(sha256_hashes_per_sec=9, int_ops_per_sec=2 ** 64 - 1)
+        )
         self.assertTrue(availability["can_execute"])
         self.assertEqual(availability["reason"], "")
-
-    def test_it_changes_nothing_about_the_answer(self):
-        with_it, _ = self._availability(_resources(int_ops_per_sec=500000))
-        without_it, _ = self._availability(_resources())
-        for volatile in ("system_cpu_available_percent", "system_memory_available", "system_disk_free"):
-            with_it.pop(volatile), without_it.pop(volatile)
-        self.assertEqual(with_it, without_it)
-
-    def test_it_is_said_in_the_log_with_every_declared_primitive(self):
-        _, lines = self._availability(_resources(sha256_hashes_per_sec=9, int_ops_per_sec=500000))
         self.assertEqual(len(lines), 1)
-        self.assertIn("int_ops_per_sec=500000, sha256_hashes_per_sec=9", lines[0])
+        self.assertIn("int_ops_per_sec=18446744073709551615, sha256_hashes_per_sec=9", lines[0])
         self.assertIn("not enforced", lines[0])
-        self.assertNotIn("Unrecognised", lines[0])
+
+    def test_enforced_and_unenforced_primitives_split_cleanly(self):
+        availability, lines = self._availability(
+            _resources(int_ops_per_sec=10, flt_ops_per_sec=10), int_ops_per_sec=1
+        )
+        self.assertFalse(availability["can_execute"])
+        self.assertIn("int_ops_per_sec", availability["reason"])
+        self.assertNotIn("flt_ops_per_sec", availability["reason"])
+        self.assertIn("flt_ops_per_sec=10", lines[0])
 
     def test_an_unrecognised_primitive_is_named_and_is_not_an_error(self):
         availability, lines = self._availability(_resources(quantum_ops_per_sec=3))
         self.assertTrue(availability["can_execute"])
         self.assertIn("Unrecognised primitive(s): quantum_ops_per_sec.", lines[0])
 
+    def test_at_most_benchmark_carries_no_meaning_and_is_ignored(self):
+        resources = _resources()
+        keyvalue.set_value(resources.at_most.benchmark, "int_ops_per_sec", 2 ** 64 - 1)
+        availability, lines = self._availability(resources, int_ops_per_sec=1)
+        self.assertTrue(availability["can_execute"])
+        self.assertIn("ignored", lines[0])
+
+    def test_bandwidth_only_counts_over_a_large_enough_working_set(self):
+        gib = benchmark.DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES
+        resources = _resources(mem_bandwidth_bytes_per_sec=10 ** 9)
+        ok, _ = self._availability(
+            resources, mem_bandwidth_bytes_per_sec=10 ** 10, mem_bandwidth_working_set_bytes=gib
+        )
+        small, _ = self._availability(
+            resources, mem_bandwidth_bytes_per_sec=10 ** 10, mem_bandwidth_working_set_bytes=gib // 4
+        )
+        unknown, _ = self._availability(resources, mem_bandwidth_bytes_per_sec=10 ** 10)
+        self.assertTrue(ok["can_execute"])
+        self.assertFalse(small["can_execute"])
+        self.assertFalse(unknown["can_execute"])
+
     def test_no_requirement_no_log_line(self):
         _, lines = self._availability(_resources())
         self.assertEqual(lines, [])
 
-    def test_a_real_shortfall_is_still_a_refusal(self):
-        resources = _resources(int_ops_per_sec=1)
+    def test_shortfalls_are_joined_with_the_other_limits(self):
+        resources = _resources(int_ops_per_sec=10)
         with patch.object(ra, "could_ve_this_sysreq", return_value=False), \
                 patch.object(ra.host_limits, "ceiling_shortfalls", return_value=[]), \
+                patch.object(ra.benchmark, "node_scores", return_value=_scores(int_ops_per_sec=1)), \
                 patch.object(ra.log, "LOGGER"):
-            self.assertFalse(ra.get_resource_availability(resources)["can_execute"])
+            reason = ra.get_resource_availability(resources, arch="linux/amd64")["reason"]
+        self.assertIn("Insufficient memory", reason)
+        self.assertIn(" | ", reason)
+        self.assertIn("int_ops_per_sec", reason)
+
+    def test_admission_never_imports_a_virtualizer(self):
+        # It reads config.yaml; measuring is the core service's job. A fresh interpreter,
+        # so nothing this test process imported earlier can hide an import.
+        import subprocess
+        import sys
+
+        code = (
+            "from tests.config_bootstrap import load_example_config; load_example_config()\n"
+            "import sys\n"
+            "from protos import celaut_pb2 as c\n"
+            "from src.utils.cost_functions import resource_availability as ra\n"
+            "r = c.Service.Container.Resources()\n"
+            "r.at_init.benchmark.add(key='int_ops_per_sec', value=1)\n"
+            "ra.get_resource_availability(r, arch='linux/amd64')\n"
+            "print(sorted(m for m in sys.modules if m.startswith('src.virtualizers')))\n"
+        )
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.strip().splitlines()[-1], "[]")
+
+
+class ArchitectureAvailabilityTests(unittest.TestCase):
+    """The GetResourceAvailability answer: per architecture, never about another one."""
+
+    def _ask(self, tags, served=("linux/amd64",)):
+        request = celaut.ArchitectureResources()
+        request.architecture.tags.extend(tags)
+        with patch.object(ra, "get_resource_availability", return_value={"can_execute": True}) as gra:
+            answer = ra.get_architecture_availability(request, served=list(served))
+        return answer, gra
+
+    def test_a_served_architecture_is_answered_for_that_architecture(self):
+        answer, gra = self._ask(["amd64"])
+        self.assertTrue(answer["can_execute"])
+        self.assertEqual(gra.call_args.kwargs["arch"], "linux/amd64")
+
+    def test_an_unserved_architecture_is_a_no_with_the_reason(self):
+        answer, gra = self._ask(["linux/arm64"])
+        self.assertFalse(answer["can_execute"])
+        self.assertIn("does not run architecture linux/arm64", answer["reason"])
+        gra.assert_not_called()
+
+    def test_no_architecture_is_the_native_one(self):
+        answer, gra = self._ask([])
+        self.assertTrue(answer["can_execute"])
+        self.assertIsNone(gra.call_args.kwargs["arch"])
 
 
 class DelegationCarryThroughTests(unittest.TestCase):
@@ -398,43 +504,52 @@ class DelegationCarryThroughTests(unittest.TestCase):
 
         asked = []
 
-        def _peer(peer_id, resources):
-            asked.append((peer_id, resources))
+        def _peer(peer_id, request):
+            asked.append((peer_id, request))
             return True
 
         with patch.object(wa, "_local_resource_availability", return_value={"can_execute": False}), \
                 patch.object(wa, "check_resource_availability_on_peer", side_effect=_peer), \
                 patch("src.utils.utils.peers_id_iterator", side_effect=lambda **_: iter(["peer-a"])), \
                 patch.object(wa.env_manager, "get", side_effect=lambda key, default=None: default):
-            self.assertTrue(wa._workload_group_is_satisfiable(
-                celaut.Service.Container.Resources(at_most=workload.resources), None
-            ))
             wa.evaluate_possible_environment_workloads(service, None)
 
         self.assertTrue(asked)
-        for peer_id, resources in asked:
+        for peer_id, request in asked:
             self.assertEqual(peer_id, "peer-a")
+            # A group's benchmark is a minimum, so it travels in at_init -- the half
+            # admission enforces -- and not in at_most, where it would mean nothing.
             self.assertEqual(
-                keyvalue.to_dict(resources.at_most.benchmark),
+                keyvalue.to_dict(request.resources.at_init.benchmark),
                 {"int_ops_per_sec": 500000, "unknown_primitive": 4},
             )
-            self.assertEqual(resources.at_most.mem_limit, 111)
+            self.assertEqual(len(request.resources.at_most.benchmark), 0)
+            self.assertEqual(request.resources.at_most.mem_limit, 111)
+            self.assertEqual(list(request.architecture.tags), [])
+
+    def test_a_group_with_an_embedded_dependency_asks_for_its_architecture(self):
+        workload = celaut.Service.PossibleEnvironmentWorkload.Workload(count=1)
+        workload.resources.mem_limit = 1
+        workload.dependency.service.container.architecture.tags.append("linux/arm64")
+        self.assertEqual(list(wa.group_request(workload).architecture.tags), ["linux/arm64"])
 
     def test_the_get_resource_availability_call_sends_the_message_whole(self):
         from src.utils.bee_client import BeeClient
 
-        resources = _resources(flt_ops_per_sec=77, unknown_primitive=4)
+        request = celaut.ArchitectureResources(resources=_resources(flt_ops_per_sec=77, unknown_primitive=4))
+        request.architecture.tags.append("linux/amd64")
         with patch.object(BeeClient, "call_one", return_value=None) as call_one, \
                 patch("src.utils.bee_client.celaut_pb2_grpc.GatewayStub"):
-            BeeClient.get_resource_availability(object(), resources, client_id="client-1")
-            BeeClient.get_resource_availability(object(), resources)
+            BeeClient.get_resource_availability(object(), request, client_id="client-1")
+            BeeClient.get_resource_availability(object(), request)
 
         with_client, without_client = (call.kwargs["input"] for call in call_one.call_args_list)
         for sent in (with_client[0], without_client):
-            on_the_peer = celaut.Service.Container.Resources()
+            on_the_peer = celaut.ArchitectureResources()
             on_the_peer.ParseFromString(sent.SerializeToString())
+            self.assertEqual(list(on_the_peer.architecture.tags), ["linux/amd64"])
             self.assertEqual(
-                keyvalue.to_dict(on_the_peer.at_most.benchmark),
+                keyvalue.to_dict(on_the_peer.resources.at_init.benchmark),
                 {"flt_ops_per_sec": 77, "unknown_primitive": 4},
             )
 
