@@ -755,6 +755,19 @@ static LEVERS: &[Lever] = &[
         secret: false,
     },
     Lever {
+        id: "ergo-rate",
+        organelle: Organelle::Nucleus,
+        label: "price rate",
+        question: "How many MU is one nanoERG worth?",
+        consequence: "MU is the node's unit of account; this fixes what ERG buys. Raise it and every service costs more nanoERG, lower it and the node sells compute for less. Keep it in step with MU per satoshi: their ratio is what makes the two chains charge the same real price.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.ergo.payments.MU_PER_NANOERG",
+            unit: " MU/nanoERG",
+        },
+        warning: Some("sets the price"),
+        secret: false,
+    },
+    Lever {
         id: "ergo-assets",
         organelle: Organelle::Nucleus,
         label: "assets",
@@ -803,6 +816,19 @@ static LEVERS: &[Lever] = &[
             unit: " BTC",
         },
         warning: None,
+        secret: false,
+    },
+    Lever {
+        id: "bitcoin-rate",
+        organelle: Organelle::Nucleus,
+        label: "price rate",
+        question: "How many MU is one satoshi worth?",
+        consequence: "No default, on purpose: empty means the node does not offer Bitcoin. A satoshi is worth about 2.5 million nanoERG at today's prices, so MU per satoshi = MU per nanoERG × (value of a nanoERG / value of a satoshi). Copying the Ergo rate would sell compute for a millionth of its price.",
+        kind: LeverKind::Scalar {
+            path: "ledgers.bitcoin.payments.MU_PER_SATOSHI",
+            unit: " MU/sat",
+        },
+        warning: Some("sets the price"),
         secret: false,
     },
     // --- IMMUNE · trust ----------------------------------------------------
@@ -1806,12 +1832,18 @@ mod tests {
                     "ergo-wallet-mnemonic",
                     "ergo-cold-wallet",
                     "ergo-hot-limit",
+                    "ergo-rate",
                     "ergo-assets"
                 ]
             );
             assert_eq!(
                 in_run(Group::Bitcoin),
-                vec!["bitcoin-wallet-mnemonic", "bitcoin-cold-wallet", "bitcoin-hot-limit"]
+                vec![
+                    "bitcoin-wallet-mnemonic",
+                    "bitcoin-cold-wallet",
+                    "bitcoin-hot-limit",
+                    "bitcoin-rate"
+                ]
             );
         }
 

@@ -5333,7 +5333,7 @@ mod tests {
         /// different chain's keys depending on the row. Each chain is headed.
         #[test]
         fn the_nucleus_is_headed_by_general_ergo_and_bitcoin() {
-            let screen = screen(140, 40, RENTING);
+            let screen = screen(140, 48, RENTING);
             let at = |needle: &str| {
                 screen
                     .find(needle)
