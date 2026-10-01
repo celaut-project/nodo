@@ -12,6 +12,7 @@ from src.utils.bee_client import BeeClient, Buffer, Dir
 from src.utils.hashing import get_configured_hash_id
 from src.manager.maintain import add_wanted
 from src.utils.config import ConfigManager
+from src.utils.tools.recursion_guard import received_hops
 
 env_manager = ConfigManager()
 
@@ -54,6 +55,10 @@ class Hash:
 
 class AbstractInputServiceIterable:
 
+    # Class-level too, so an iterable built without __init__ (a handler under test)
+    # reads "the sender gave no hop count" rather than failing on the attribute.
+    recursion_guard_hops: Optional[int] = None
+
     def __init__(self, request_iterator, context):
         self.parser_iterator = BeeClient.parse(
             request_iterator,
@@ -66,7 +71,10 @@ class AbstractInputServiceIterable:
         self.configuration: Optional[celaut_pb2.Configuration] = None
 
         self.client_id = None
+        # The RecursionGuard as received (#456): the token, and the hops left when the
+        # sender said (None when it did not -- a root, or a node predating the field).
         self.recursion_guard_token = None
+        self.recursion_guard_hops = None
         self._caller_checked = False
 
         self.service_hash: Optional[str] = None
@@ -84,6 +92,7 @@ class AbstractInputServiceIterable:
 
             case celaut_pb2.RecursionGuard:
                 self.recursion_guard_token = r.token
+                self.recursion_guard_hops = received_hops(r)
 
             case celaut_pb2.Configuration:
                 self.configuration = r
