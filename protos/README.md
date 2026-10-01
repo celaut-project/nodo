@@ -19,7 +19,7 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
 
 ## Key/value lists (no `map<>` fields)
 
-`xattrs`, `mu_per_call`, `environment_variables` and `min_benchmark` are
+`xattrs`, `mu_per_call`, `environment_variables` and `benchmark` are
 `repeated <Value>KeyValue` messages, not protobuf maps. protobuf leaves the order of map
 entries on the wire to the implementation, and a service id is a hash of the serialized
 specification, so the same service could serialize to two byte strings — and get two ids —
@@ -30,7 +30,7 @@ depending on the protobuf implementation. A repeated field keeps its order.
 | `BytesKeyValue` | `bytes` (`optional`) | every `xattrs` (`Contract`, `ItemBranch`, `Filesystem`, `Init`, and `pack.Service.Container.Init`), `Configuration.environment_variables` |
 | `AmountKeyValue` | `Amount` | `Peer.mu_per_call`, `Service.Api.Slot.mu_per_call` |
 | `DataFormatKeyValue` | `DataFormat` | `Service.Container.environment_variables` |
-| `Uint64KeyValue` | `uint64` (`optional`) | `Sysresources.min_benchmark` |
+| `Uint64KeyValue` | `uint64` (`optional`) | `Sysresources.benchmark` |
 
 Every field kept its number and name. `buffer.proto`'s `map<int32, Partition>` is
 bee-rpc's and is untouched.

@@ -496,15 +496,15 @@ The `service.json` file defines **runtime metadata** for the service: its archit
 | `cpu_period` | int (microseconds) | `0` (no limit) | CPU CFS period |
 | `cpu_quota` | int (microseconds) | `0` (no limit) | CPU CFS quota |
 | `blkio_weight` | int | `0` (no limit) | Block I/O weight |
-| `min_benchmark` | object (`{primitive: int}`) | omitted (no requirement) | Minimum **per-core** benchmark scores, see below |
+| `benchmark` | object (`{primitive: int}`) | omitted (no requirement) | Minimum **per-core** benchmark scores, see below |
 
 > A value of `0` means **no limit** for that resource.
 
-##### `min_benchmark`
+##### `benchmark`
 
 `cpu_quota`/`cpu_period` say how many cores a service needs, not how fast one has to be: the
 same admitted core is native silicon on one node and software emulation on another.
-`min_benchmark` states the second half, as an object from a named primitive to the least the
+`benchmark` states the second half, as an object from a named primitive to the least the
 service needs of it **on one core, per second**. It composes with the quota rather than
 competing with it — "2 cores, each at least 500k integer ops/s" is
 `cpu_quota / cpu_period = 2.0` plus `"int_ops_per_sec": 500000`, never a total across cores.
@@ -516,10 +516,10 @@ competing with it — "2 cores, each at least 500k integer ops/s" is
 | `mem_bandwidth_bytes_per_sec` | bytes | Memory bandwidth (read + written) |
 | `sha256_hashes_per_sec` | digests | SHA-256 hashing |
 
-- The key set is `MIN_BENCHMARK_KEYS` in `src/utils/min_benchmark.py`. It is keyed so that a
+- The key set is `BENCHMARK_KEYS` in `src/utils/benchmark.py`. It is keyed so that a
   new primitive is a new key, never a change to the wire format. On the wire it is a
   list of key/value entries sorted by key (see [`protos/README.md`](../protos/README.md)).
-- An **omitted key is no requirement** on that primitive; an omitted `min_benchmark` is no
+- An **omitted key is no requirement** on that primitive; an omitted `benchmark` is no
   requirement at all, and a service that never mentions it packs to the same bytes as before.
 - Values must be **non-negative integers** (JSON numbers, not strings or booleans, at most
   2^64-1). Anything else is a packing error, raised before the image is built.
@@ -541,7 +541,7 @@ competing with it — "2 cores, each at least 500k integer ops/s" is
         "at_most": {
             "cpu_period": 100000,
             "cpu_quota": 200000,
-            "min_benchmark": {
+            "benchmark": {
                 "int_ops_per_sec": 500000,
                 "sha256_hashes_per_sec": 1000000
             }
@@ -709,7 +709,7 @@ node would refuse.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `count` | int | `1` | Number of concurrent descendant instances in this group |
-| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit — plus an optional [`min_benchmark`](#min_benchmark)) |
+| `resources` | object (`Sysresources`) | `{}` | Resources each of those descendants may require (`mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`; bytes / microseconds; `0` = no limit — plus an optional [`benchmark`](#benchmark)) |
 | `dependency` | object or `null` | omitted | Optional identity, embedded specification, and availability information for the descendant service |
 
 ##### `workloads[].dependency`
@@ -736,7 +736,7 @@ service is refused if any group has nowhere that could take it. Every limit the 
 is checked, not just memory: `mem_limit` and `disk_space` against what is free right now,
 `cpu_quota`/`cpu_period` against how many cores the host has at all (a quota is a share of
 time, so a momentary spike is not a reason to refuse), and `blkio_weight` against the
-10–1000 range cgroups accept. A group's `min_benchmark` is the one exception: it travels to
+10–1000 range cgroups accept. A group's `benchmark` is the one exception: it travels to
 the peer with the rest, but no node measures its cores yet, so it is logged and not checked.
 
 This is an existence check, not a capacity reservation: it does not prove `count` concurrent

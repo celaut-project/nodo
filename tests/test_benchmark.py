@@ -1,4 +1,4 @@
-"""`Sysresources.min_benchmark` (#448): the per-core minimum benchmark a service requires.
+"""`Sysresources.benchmark` (#448): the per-core minimum benchmark a service requires.
 
 Four things are pinned here, one class each:
 
@@ -26,10 +26,10 @@ from src.packers.service_json import (  # noqa: E402
     parse_service_spec,
     populate_possible_environment_workloads,
 )
-from src.utils import keyvalue, min_benchmark  # noqa: E402
+from src.utils import keyvalue, benchmark  # noqa: E402
 from src.utils.cost_functions import resource_availability as ra  # noqa: E402
 from src.utils.cost_functions import workload_admission as wa  # noqa: E402
-from src.utils.min_benchmark import MIN_BENCHMARK_KEYS, parse_min_benchmark  # noqa: E402
+from src.utils.benchmark import BENCHMARK_KEYS, parse_benchmark  # noqa: E402
 
 PACKER_IMPORT_ERROR = None
 try:
@@ -70,7 +70,7 @@ class WireTests(unittest.TestCase):
 
     def test_the_vocabulary_is_the_four_named_primitives(self):
         self.assertEqual(
-            MIN_BENCHMARK_KEYS,
+            BENCHMARK_KEYS,
             (
                 "int_ops_per_sec",
                 "flt_ops_per_sec",
@@ -82,7 +82,7 @@ class WireTests(unittest.TestCase):
     def test_it_is_field_six_a_repeated_string_to_uint64_entry(self):
         # Field 6 and key=1/value=2 are what keep it wire-identical to the
         # `map<string, uint64>` it replaced (see tests/test_keyvalue_wire.py).
-        field = celaut.Sysresources.DESCRIPTOR.fields_by_name["min_benchmark"]
+        field = celaut.Sysresources.DESCRIPTOR.fields_by_name["benchmark"]
         self.assertEqual(field.number, 6)
         self.assertEqual(field.label, field.LABEL_REPEATED)
         entry = field.message_type
@@ -95,15 +95,15 @@ class WireTests(unittest.TestCase):
 
     def test_round_trip_keeps_every_key_recognised_or_not(self):
         sent = celaut.Sysresources(cpu_quota=200000, cpu_period=100000)
-        keyvalue.set_value(sent.min_benchmark, "int_ops_per_sec", 500000)
-        keyvalue.set_value(sent.min_benchmark, "sha256_hashes_per_sec", 2 ** 64 - 1)
-        keyvalue.set_value(sent.min_benchmark, "a_primitive_from_the_future", 7)
+        keyvalue.set_value(sent.benchmark, "int_ops_per_sec", 500000)
+        keyvalue.set_value(sent.benchmark, "sha256_hashes_per_sec", 2 ** 64 - 1)
+        keyvalue.set_value(sent.benchmark, "a_primitive_from_the_future", 7)
 
         received = celaut.Sysresources()
         received.ParseFromString(sent.SerializeToString())
 
         self.assertEqual(
-            keyvalue.to_dict(received.min_benchmark),
+            keyvalue.to_dict(received.benchmark),
             {
                 "int_ops_per_sec": 500000,
                 "sha256_hashes_per_sec": 2 ** 64 - 1,
@@ -112,15 +112,15 @@ class WireTests(unittest.TestCase):
         )
         self.assertEqual(received, sent)
         self.assertEqual(
-            min_benchmark.unrecognised_keys(keyvalue.to_dict(received.min_benchmark)),
+            benchmark.unrecognised_keys(keyvalue.to_dict(received.benchmark)),
             ("a_primitive_from_the_future",),
         )
 
     def test_an_absent_key_is_absent_not_zero(self):
         sysreq = celaut.Sysresources()
-        keyvalue.set_value(sysreq.min_benchmark, "int_ops_per_sec", 1)
-        self.assertFalse(keyvalue.contains(sysreq.min_benchmark, "flt_ops_per_sec"))
-        self.assertIsNone(keyvalue.get(sysreq.min_benchmark, "flt_ops_per_sec"))
+        keyvalue.set_value(sysreq.benchmark, "int_ops_per_sec", 1)
+        self.assertFalse(keyvalue.contains(sysreq.benchmark, "flt_ops_per_sec"))
+        self.assertIsNone(keyvalue.get(sysreq.benchmark, "flt_ops_per_sec"))
 
     def test_a_message_without_it_serializes_as_before(self):
         # The service spec is hashed into the service id, so the field existing must
@@ -137,8 +137,8 @@ class WireTests(unittest.TestCase):
         sent = celaut.Sysresources(
             blkio_weight=500, cpu_period=100000, cpu_quota=200000, mem_limit=1024, disk_space=2048
         )
-        keyvalue.set_value(sent.min_benchmark, "int_ops_per_sec", 500000)
-        keyvalue.set_value(sent.min_benchmark, "unknown_primitive", 9)
+        keyvalue.set_value(sent.benchmark, "int_ops_per_sec", 500000)
+        keyvalue.set_value(sent.benchmark, "unknown_primitive", 9)
 
         old = _pre_448_sysresources()()
         old.ParseFromString(sent.SerializeToString())
@@ -147,48 +147,48 @@ class WireTests(unittest.TestCase):
             (old.blkio_weight, old.cpu_period, old.cpu_quota, old.mem_limit, old.disk_space),
             (500, 100000, 200000, 1024, 2048),
         )
-        self.assertFalse(hasattr(old, "min_benchmark"))
+        self.assertFalse(hasattr(old, "benchmark"))
 
     def test_a_pre_448_relay_does_not_strip_it(self):
         # An old node that parses and re-serializes keeps field 6 as unknown bytes, so
         # a requirement survives being forwarded through a peer that cannot read it.
         sent = celaut.Sysresources(mem_limit=1024)
-        keyvalue.set_value(sent.min_benchmark, "flt_ops_per_sec", 42)
+        keyvalue.set_value(sent.benchmark, "flt_ops_per_sec", 42)
 
         old = _pre_448_sysresources()()
         old.ParseFromString(sent.SerializeToString())
         received = celaut.Sysresources()
         received.ParseFromString(old.SerializeToString())
 
-        self.assertEqual(keyvalue.to_dict(received.min_benchmark), {"flt_ops_per_sec": 42})
+        self.assertEqual(keyvalue.to_dict(received.benchmark), {"flt_ops_per_sec": 42})
         self.assertEqual(received.mem_limit, 1024)
 
     def test_a_pre_448_message_reads_as_no_requirement(self):
         old = _pre_448_sysresources()(mem_limit=1024, cpu_quota=100000)
         received = celaut.Sysresources()
         received.ParseFromString(old.SerializeToString())
-        self.assertEqual(keyvalue.to_dict(received.min_benchmark), {})
+        self.assertEqual(keyvalue.to_dict(received.benchmark), {})
         self.assertEqual(received.mem_limit, 1024)
 
     def test_it_survives_the_pack_schema_to_celaut_schema_reread(self):
         # ZipContainerPacker.save re-reads the pack.Service bytes as a celaut.Service.
         packed = pack_pb2.Service()
-        keyvalue.set_value(packed.container.resources.at_most.min_benchmark, "int_ops_per_sec", 5)
+        keyvalue.set_value(packed.container.resources.at_most.benchmark, "int_ops_per_sec", 5)
         spec = celaut.Service()
         spec.ParseFromString(packed.SerializeToString())
-        self.assertEqual(keyvalue.to_dict(spec.container.resources.at_most.min_benchmark), {"int_ops_per_sec": 5})
+        self.assertEqual(keyvalue.to_dict(spec.container.resources.at_most.benchmark), {"int_ops_per_sec": 5})
 
 
-class ParseMinBenchmarkTests(unittest.TestCase):
+class ParseBenchmarkTests(unittest.TestCase):
 
     def test_absent_is_no_requirement(self):
-        self.assertEqual(parse_min_benchmark(None, "resources.at_most.min_benchmark"), {})
-        self.assertEqual(parse_min_benchmark({}, "resources.at_most.min_benchmark"), {})
+        self.assertEqual(parse_benchmark(None, "resources.at_most.benchmark"), {})
+        self.assertEqual(parse_benchmark({}, "resources.at_most.benchmark"), {})
 
     def test_valid_values_are_kept_sorted_by_key(self):
-        parsed = parse_min_benchmark(
+        parsed = parse_benchmark(
             {"sha256_hashes_per_sec": 1000000, "int_ops_per_sec": 500000, "flt_ops_per_sec": 0},
-            "resources.at_most.min_benchmark",
+            "resources.at_most.benchmark",
         )
         self.assertEqual(
             list(parsed.items()),
@@ -197,40 +197,40 @@ class ParseMinBenchmarkTests(unittest.TestCase):
 
     def test_an_unrecognised_key_is_kept_not_refused(self):
         self.assertEqual(
-            parse_min_benchmark({"gpu_matmul_per_sec": 3}, "resources.at_most.min_benchmark"),
+            parse_benchmark({"gpu_matmul_per_sec": 3}, "resources.at_most.benchmark"),
             {"gpu_matmul_per_sec": 3},
         )
 
     def test_the_largest_uint64_is_accepted(self):
         self.assertEqual(
-            parse_min_benchmark({"int_ops_per_sec": 2 ** 64 - 1}, "p"), {"int_ops_per_sec": 2 ** 64 - 1}
+            parse_benchmark({"int_ops_per_sec": 2 ** 64 - 1}, "p"), {"int_ops_per_sec": 2 ** 64 - 1}
         )
 
     def test_anything_but_a_non_negative_integer_is_refused_naming_the_key(self):
         for bad in (-1, 1.5, 500000.0, "500000", True, False, None, [1], {"n": 1}, 2 ** 64):
             with self.subTest(value=bad):
                 with self.assertRaises(ValueError) as raised:
-                    parse_min_benchmark(
-                        {"int_ops_per_sec": bad}, "resources.at_most.min_benchmark"
+                    parse_benchmark(
+                        {"int_ops_per_sec": bad}, "resources.at_most.benchmark"
                     )
                 self.assertIn(
-                    "resources.at_most.min_benchmark.int_ops_per_sec", str(raised.exception)
+                    "resources.at_most.benchmark.int_ops_per_sec", str(raised.exception)
                 )
 
     def test_anything_but_an_object_is_refused(self):
         for bad in (500000, "int_ops_per_sec", ["int_ops_per_sec"], True):
             with self.subTest(value=bad):
                 with self.assertRaises(ValueError) as raised:
-                    parse_min_benchmark(bad, "resources.at_init.min_benchmark")
-                self.assertIn("resources.at_init.min_benchmark must be an object", str(raised.exception))
+                    parse_benchmark(bad, "resources.at_init.benchmark")
+                self.assertIn("resources.at_init.benchmark must be an object", str(raised.exception))
 
     def test_an_empty_key_is_refused(self):
         with self.assertRaises(ValueError):
-            parse_min_benchmark({"": 1}, "resources.at_most.min_benchmark")
+            parse_benchmark({"": 1}, "resources.at_most.benchmark")
 
 
 def _packer(service_json):
-    """A ZipContainerPacker carrying only the json `_min_benchmarks` reads.
+    """A ZipContainerPacker carrying only the json `_benchmarks` reads.
 
     __init__ drives BuildKit; this method reads `self.json` and nothing else.
     """
@@ -247,13 +247,13 @@ class PackerServiceJsonTests(unittest.TestCase):
     def test_absent_everywhere_is_two_empty_maps(self):
         for service_json in ({}, {"resources": {}}, {"resources": {"at_init": {}, "at_most": {}}}):
             with self.subTest(service_json=service_json):
-                self.assertEqual(_packer(service_json)._min_benchmarks(), ({}, {}))
+                self.assertEqual(_packer(service_json)._benchmarks(), ({}, {}))
 
     def test_each_end_is_read_from_its_own_object(self):
         at_init, at_most = _packer({"resources": {
-            "at_init": {"min_benchmark": {"int_ops_per_sec": 100}},
-            "at_most": {"min_benchmark": {"int_ops_per_sec": 300, "flt_ops_per_sec": 50}},
-        }})._min_benchmarks()
+            "at_init": {"benchmark": {"int_ops_per_sec": 100}},
+            "at_most": {"benchmark": {"int_ops_per_sec": 300, "flt_ops_per_sec": 50}},
+        }})._benchmarks()
         self.assertEqual(at_init, {"int_ops_per_sec": 100})
         self.assertEqual(at_most, {"flt_ops_per_sec": 50, "int_ops_per_sec": 300})
 
@@ -261,9 +261,9 @@ class PackerServiceJsonTests(unittest.TestCase):
         # Admission reads at_most: a minimum written only under at_init must not be
         # one no node ever looks at, and at_most must never ask for less than at_init.
         at_init, at_most = _packer({"resources": {
-            "at_init": {"min_benchmark": {"int_ops_per_sec": 500, "sha256_hashes_per_sec": 9}},
-            "at_most": {"min_benchmark": {"int_ops_per_sec": 100}},
-        }})._min_benchmarks()
+            "at_init": {"benchmark": {"int_ops_per_sec": 500, "sha256_hashes_per_sec": 9}},
+            "at_most": {"benchmark": {"int_ops_per_sec": 100}},
+        }})._benchmarks()
         self.assertEqual(at_init, {"int_ops_per_sec": 500, "sha256_hashes_per_sec": 9})
         self.assertEqual(at_most, {"int_ops_per_sec": 500, "sha256_hashes_per_sec": 9})
 
@@ -272,11 +272,18 @@ class PackerServiceJsonTests(unittest.TestCase):
             for bad in (-5, 2.5, "9"):
                 with self.subTest(end=end, value=bad):
                     with self.assertRaises(ValueError) as raised:
-                        _packer({"resources": {end: {"min_benchmark": {"flt_ops_per_sec": bad}}}})._min_benchmarks()
-                    self.assertIn(f"resources.{end}.min_benchmark.flt_ops_per_sec", str(raised.exception))
+                        _packer({"resources": {end: {"benchmark": {"flt_ops_per_sec": bad}}}})._benchmarks()
+                    self.assertIn(f"resources.{end}.benchmark.flt_ops_per_sec", str(raised.exception))
+
+    def test_the_old_min_benchmark_key_is_refused_naming_the_new_one(self):
+        for end in ("at_init", "at_most"):
+            with self.subTest(end=end):
+                with self.assertRaises(ValueError) as raised:
+                    _packer({"resources": {end: {"min_benchmark": {"int_ops_per_sec": 1}}}})._benchmarks()
+                self.assertIn(f"resources.{end}.benchmark", str(raised.exception))
 
     def test_it_is_refused_when_service_json_is_read_not_after_the_build(self):
-        packer = _packer({"resources": {"at_most": {"min_benchmark": {"int_ops_per_sec": -1}}}})
+        packer = _packer({"resources": {"at_most": {"benchmark": {"int_ops_per_sec": -1}}}})
         with self.assertRaises(ValueError):
             packer._validate_service_json_shape()
 
@@ -293,34 +300,34 @@ class NestedServiceJsonTests(unittest.TestCase):
 
     def test_a_workload_group_carries_it(self):
         resources = self._workloads(
-            {"mem_limit": 100, "min_benchmark": {"int_ops_per_sec": 500000, "unknown_primitive": 1}}
+            {"mem_limit": 100, "benchmark": {"int_ops_per_sec": 500000, "unknown_primitive": 1}}
         )
         self.assertEqual(
-            keyvalue.to_dict(resources.min_benchmark), {"int_ops_per_sec": 500000, "unknown_primitive": 1}
+            keyvalue.to_dict(resources.benchmark), {"int_ops_per_sec": 500000, "unknown_primitive": 1}
         )
         self.assertEqual(resources.mem_limit, 100)
 
     def test_a_workload_group_without_it_has_none(self):
-        self.assertEqual(dict(self._workloads({"mem_limit": 100}).min_benchmark), {})
+        self.assertEqual(dict(self._workloads({"mem_limit": 100}).benchmark), {})
 
     def test_a_workload_group_refuses_negative_and_non_integer_values(self):
         for bad in (-1, 1.5, True):
             with self.subTest(value=bad):
                 with self.assertRaises(ValueError):
-                    self._workloads({"min_benchmark": {"int_ops_per_sec": bad}})
+                    self._workloads({"benchmark": {"int_ops_per_sec": bad}})
 
     def test_an_embedded_dependency_service_carries_it(self):
         service = parse_service_spec({"container": {"resources": {
-            "at_most": {"min_benchmark": {"mem_bandwidth_bytes_per_sec": 1000}},
+            "at_most": {"benchmark": {"mem_bandwidth_bytes_per_sec": 1000}},
         }}})
         self.assertEqual(
-            keyvalue.to_dict(service.container.resources.at_most.min_benchmark),
+            keyvalue.to_dict(service.container.resources.at_most.benchmark),
             {"mem_bandwidth_bytes_per_sec": 1000},
         )
 
     def test_protobuf_json_round_trip(self):
         sysreq = celaut.Sysresources()
-        keyvalue.set_value(sysreq.min_benchmark, "int_ops_per_sec", 5)
+        keyvalue.set_value(sysreq.benchmark, "int_ops_per_sec", 5)
         again = json_format.ParseDict(json_format.MessageToDict(sysreq), celaut.Sysresources())
         self.assertEqual(again, sysreq)
 
@@ -329,7 +336,7 @@ def _resources(**benchmarks) -> celaut.Service.Container.Resources:
     resources = celaut.Service.Container.Resources(
         at_most=celaut.Sysresources(mem_limit=1024, cpu_quota=100000, cpu_period=100000)
     )
-    keyvalue.update(resources.at_most.min_benchmark, benchmarks)
+    keyvalue.update(resources.at_most.benchmark, benchmarks)
     return resources
 
 
@@ -381,13 +388,13 @@ class AdmissionTodayTests(unittest.TestCase):
 class DelegationCarryThroughTests(unittest.TestCase):
     """The requirement reaches the peer: no forwarding path rebuilds a Sysresources."""
 
-    def test_a_workload_group_is_put_to_a_peer_with_its_min_benchmark(self):
+    def test_a_workload_group_is_put_to_a_peer_with_its_benchmark(self):
         service = celaut.Service()
         workload = service.possible_environment_workload.add().workloads.add()
         workload.count = 1
         workload.resources.mem_limit = 111
-        keyvalue.set_value(workload.resources.min_benchmark, "int_ops_per_sec", 500000)
-        keyvalue.set_value(workload.resources.min_benchmark, "unknown_primitive", 4)
+        keyvalue.set_value(workload.resources.benchmark, "int_ops_per_sec", 500000)
+        keyvalue.set_value(workload.resources.benchmark, "unknown_primitive", 4)
 
         asked = []
 
@@ -408,7 +415,7 @@ class DelegationCarryThroughTests(unittest.TestCase):
         for peer_id, resources in asked:
             self.assertEqual(peer_id, "peer-a")
             self.assertEqual(
-                keyvalue.to_dict(resources.at_most.min_benchmark),
+                keyvalue.to_dict(resources.at_most.benchmark),
                 {"int_ops_per_sec": 500000, "unknown_primitive": 4},
             )
             self.assertEqual(resources.at_most.mem_limit, 111)
@@ -427,7 +434,7 @@ class DelegationCarryThroughTests(unittest.TestCase):
             on_the_peer = celaut.Service.Container.Resources()
             on_the_peer.ParseFromString(sent.SerializeToString())
             self.assertEqual(
-                keyvalue.to_dict(on_the_peer.at_most.min_benchmark),
+                keyvalue.to_dict(on_the_peer.at_most.benchmark),
                 {"flt_ops_per_sec": 77, "unknown_primitive": 4},
             )
 
@@ -435,9 +442,9 @@ class DelegationCarryThroughTests(unittest.TestCase):
         # Delegation ships the service's own bytes; a node in the middle that parses
         # and re-serializes the spec hands the next peer the same requirement.
         service = celaut.Service()
-        keyvalue.set_value(service.container.resources.at_init.min_benchmark, "int_ops_per_sec", 100)
-        keyvalue.set_value(service.container.resources.at_most.min_benchmark, "int_ops_per_sec", 100)
-        keyvalue.set_value(service.container.resources.at_most.min_benchmark, "unknown_primitive", 4)
+        keyvalue.set_value(service.container.resources.at_init.benchmark, "int_ops_per_sec", 100)
+        keyvalue.set_value(service.container.resources.at_most.benchmark, "int_ops_per_sec", 100)
+        keyvalue.set_value(service.container.resources.at_most.benchmark, "unknown_primitive", 4)
 
         relayed = celaut.Service()
         relayed.ParseFromString(service.SerializeToString())
@@ -446,7 +453,7 @@ class DelegationCarryThroughTests(unittest.TestCase):
 
         self.assertEqual(forwarded.container.resources, service.container.resources)
         self.assertEqual(
-            keyvalue.to_dict(forwarded.container.resources.at_most.min_benchmark),
+            keyvalue.to_dict(forwarded.container.resources.at_most.benchmark),
             {"int_ops_per_sec": 100, "unknown_primitive": 4},
         )
 

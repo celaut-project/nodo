@@ -106,7 +106,7 @@ FIELDS = [
     ("pack.Init.xattrs", "pack.Service.Container.Init", "xattrs", _bytes_value),
     ("Configuration.environment_variables", "celaut.Configuration",
      "environment_variables", _bytes_value),
-    ("Sysresources.min_benchmark", "celaut.Sysresources", "min_benchmark", _uint64_value),
+    ("Sysresources.benchmark", "celaut.Sysresources", "benchmark", _uint64_value),
 ]
 
 
@@ -151,7 +151,7 @@ class SchemaTests(unittest.TestCase):
                 ("legacy_celaut", "Service.Container.Filesystem.ItemBranch", "xattrs", 5),
                 ("legacy_celaut", "Service.Container.Init", "xattrs", 2),
                 ("legacy_celaut", "Configuration", "environment_variables", 1),
-                ("legacy_celaut", "Sysresources", "min_benchmark", 6),
+                ("legacy_celaut", "Sysresources", "benchmark", 6),
                 ("legacy_celaut", "Peer", "mu_per_call", 4),
                 ("legacy_pack", "Service.Container.Init", "xattrs", 2),
             ]),
@@ -259,7 +259,7 @@ class OldBytesReadByNewNodesTests(unittest.TestCase):
              {"token_id": b"token_id" * 2, "script": b"script" * 2,
               "address": b"address" * 2, "reputation_key": b"reputation_key" * 2,
               "empty": b""}),
-            (GOLDEN_SYSRESOURCES, celaut.Sysresources, "min_benchmark",
+            (GOLDEN_SYSRESOURCES, celaut.Sysresources, "benchmark",
              {"int_ops_per_sec": 500000, "sha256_hashes_per_sec": 2 ** 64 - 1,
               "zero": 0, "flt_ops_per_sec": 7}),
             (GOLDEN_CONFIGURATION, celaut.Configuration, "environment_variables",
@@ -330,7 +330,7 @@ class NewBytesReadByOldNodesTests(unittest.TestCase):
         self.assertEqual(contract.SerializeToString(), bytes.fromhex("12050a016b1200"))
 
         sysres = celaut.Sysresources()
-        keyvalue.set_value(sysres.min_benchmark, "a", 0)
+        keyvalue.set_value(sysres.benchmark, "a", 0)
         self.assertEqual(sysres.SerializeToString(), bytes.fromhex("32050a01611000"))
 
         received = celaut.Contract()
@@ -366,7 +366,7 @@ class ServiceIdTests(unittest.TestCase):
              "zeta": "p-zeta"},
         )
         self.assertEqual(
-            keyvalue.to_dict(service.container.resources.at_most.min_benchmark),
+            keyvalue.to_dict(service.container.resources.at_most.benchmark),
             {"zeta": 4, "alpha": 5, "mid": 3, "beta": 4, "read_mode": 9},
         )
         self.assertEqual(
@@ -379,7 +379,7 @@ class ServiceIdTests(unittest.TestCase):
         packed = pack_pb2.Service(prose="x")
         keyvalue.from_dict(packed.container.init.xattrs, {k: _bytes_value(k) for k in KEYS})
         keyvalue.from_dict(
-            packed.container.resources.at_most.min_benchmark, {k: _uint64_value(k) for k in KEYS}
+            packed.container.resources.at_most.benchmark, {k: _uint64_value(k) for k in KEYS}
         )
         keyvalue.from_dict(
             packed.api.slot.add().mu_per_call, {k: _amount_value(k) for k in KEYS}
@@ -397,7 +397,7 @@ class ServiceIdTests(unittest.TestCase):
                 service.api.slot.add().mu_per_call, {k: _amount_value(k) for k in order}
             )
             keyvalue.from_dict(
-                service.container.resources.at_most.min_benchmark,
+                service.container.resources.at_most.benchmark,
                 {k: _uint64_value(k) for k in order},
             )
             keyvalue.from_dict(

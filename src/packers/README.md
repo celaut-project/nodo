@@ -84,7 +84,7 @@
 - If `service.json` provides slash-based input (for example `"/service/start"`), packer normalizes it to segmented form (`["service","start"]`).
 - `init.xattrs` is serialized to `container.init.xattrs` (UTF-8 for text values).
 - Every `service.json` object that becomes a key/value list on the wire (`init.xattrs`,
-  `api[].mu_per_call`, `resources.*.min_benchmark`, and the same fields inside embedded
+  `api[].mu_per_call`, `resources.*.benchmark`, and the same fields inside embedded
   services / workload groups) keeps its **object syntax**. The packer writes the list
   sorted by key, so the order keys are typed in never changes the service id, and a key
   written twice in one object is a packing error (JSON alone would silently keep the last).
@@ -128,11 +128,11 @@
   descriptors. Absent, both serialize exactly as before — the spec is hashed into the
   service id. See `docs/PACKING.md` and `docs/NETWORKS.md`.
 - `resources.start_time_ms` no longer exists.
-- `resources.at_init.min_benchmark` / `resources.at_most.min_benchmark` (object, optional)
-  is serialized to `Sysresources.min_benchmark`: the minimum **per-core, per-second**
+- `resources.at_init.benchmark` / `resources.at_most.benchmark` (object, optional)
+  is serialized to `Sysresources.benchmark`: the minimum **per-core, per-second**
   throughput the service requires on named primitives, e.g.
-  `"min_benchmark": { "int_ops_per_sec": 500000 }`. Recognised keys are
-  `MIN_BENCHMARK_KEYS` in `src/utils/min_benchmark.py` (`int_ops_per_sec`,
+  `"benchmark": { "int_ops_per_sec": 500000 }`. Recognised keys are
+  `BENCHMARK_KEYS` in `src/utils/benchmark.py` (`int_ops_per_sec`,
   `flt_ops_per_sec`, `mem_bandwidth_bytes_per_sec`, `sha256_hashes_per_sec`). An omitted
   key is no requirement; values must be non-negative JSON integers, anything else is a
   packer error raised before the image is built. An unrecognised key is kept and logged,
@@ -148,7 +148,7 @@
   `workloads[]` item is `count` (number of concurrent descendant instances) × `resources`
   (a `Sysresources`: `mem_limit`, `disk_space`, `cpu_period`, `cpu_quota`, `blkio_weight`;
   bytes / microseconds; an omitted field defaults to `0` = no limit; plus an optional
-  `min_benchmark` object, as above). Unlike `resources`
+  `benchmark` object, as above). Unlike `resources`
   (this instance's own needs), these describe its descendants. At launch (`launch_service`),
   every group that declares `resources` is checked for existence — every limit it declares,
   not just memory — with local admission first, then known peers via

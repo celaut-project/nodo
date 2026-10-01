@@ -18,7 +18,7 @@ from src.packers.service_json import (  # noqa: E402
     populate_possible_environment_workloads,
 )
 from src.utils import keyvalue  # noqa: E402
-from src.utils.min_benchmark import parse_min_benchmark  # noqa: E402
+from src.utils.benchmark import parse_benchmark  # noqa: E402
 
 PACKER_IMPORT_ERROR = None
 try:
@@ -134,9 +134,9 @@ class WriteTests(unittest.TestCase):
         self.assertTrue(contract.xattrs[0].HasField("value"))
 
         sysres = celaut.Sysresources()
-        keyvalue.set_value(sysres.min_benchmark, "a", 0)
-        self.assertEqual(keyvalue.get(sysres.min_benchmark, "a"), 0)
-        self.assertTrue(sysres.min_benchmark[0].HasField("value"))
+        keyvalue.set_value(sysres.benchmark, "a", 0)
+        self.assertEqual(keyvalue.get(sysres.benchmark, "a"), 0)
+        self.assertTrue(sysres.benchmark[0].HasField("value"))
 
     def test_a_key_must_be_a_non_empty_string(self):
         contract = celaut.Contract()
@@ -190,14 +190,14 @@ class ServiceJsonObjectSyntaxTests(unittest.TestCase):
                 "ZEBRA": {"prose": "z"}, "ALPHA": {"prose": "a", "tags": ["t"]},
             },
             "init": {"xattrs": {"b": "Yg==", "a": "YQ=="}},
-            "resources": {"at_most": {"min_benchmark": {"int_ops_per_sec": 5, "a": "7"}}},
+            "resources": {"at_most": {"benchmark": {"int_ops_per_sec": 5, "a": "7"}}},
         }, "api": {"slot": [{"port": 1, "mu_per_call": {"rpc": {"n": "10"}, "abc": {"n": "5"}}}]}})
 
         self.assertEqual([e.key for e in service.container.environment_variables], ["ALPHA", "ZEBRA"])
         self.assertEqual(keyvalue.get(service.container.environment_variables, "ALPHA").prose, "a")
         self.assertEqual(keyvalue.to_dict(service.container.init.xattrs), {"a": b"a", "b": b"b"})
         self.assertEqual(
-            keyvalue.to_dict(service.container.resources.at_most.min_benchmark),
+            keyvalue.to_dict(service.container.resources.at_most.benchmark),
             {"a": 7, "int_ops_per_sec": 5},
         )
         self.assertEqual([e.key for e in service.api.slot[0].mu_per_call], ["abc", "rpc"])
@@ -245,31 +245,31 @@ class ServiceJsonObjectSyntaxTests(unittest.TestCase):
     def test_a_value_the_protobuf_parser_rejects_is_still_an_error(self):
         with self.assertRaises(ValueError):
             parse_service_spec({"container": {"resources": {"at_most": {
-                "min_benchmark": {"int_ops_per_sec": "not a number"},
+                "benchmark": {"int_ops_per_sec": "not a number"},
             }}}})
 
     def test_a_workload_group_resources_object(self):
         service = pack_pb2.Service()
         populate_possible_environment_workloads(service, [{"workloads": [{"count": 1, "resources": {
-            "min_benchmark": {"z": 1, "a": 2},
+            "benchmark": {"z": 1, "a": 2},
         }}]}])
         resources = service.possible_environment_workload[0].workloads[0].resources
-        self.assertEqual([e.key for e in resources.min_benchmark], ["a", "z"])
+        self.assertEqual([e.key for e in resources.benchmark], ["a", "z"])
 
     def test_a_workload_group_that_repeats_a_key_is_refused(self):
         resources = json.loads(
-            '{"min_benchmark": {"a": 1, "a": 2}}', object_pairs_hook=keyvalue.json_object_hook
+            '{"benchmark": {"a": 1, "a": 2}}', object_pairs_hook=keyvalue.json_object_hook
         )
         with self.assertRaisesRegex(ValueError, "repeats key.*a"):
             populate_possible_environment_workloads(
                 pack_pb2.Service(), [{"workloads": [{"count": 1, "resources": resources}]}]
             )
 
-    def test_min_benchmark_refuses_a_repeated_key(self):
+    def test_benchmark_refuses_a_repeated_key(self):
         value = json.loads('{"a": 1, "a": 2}', object_pairs_hook=keyvalue.json_object_hook)
-        with self.assertRaisesRegex(ValueError, "resources.at_most.min_benchmark repeats key"):
-            parse_min_benchmark(value, "resources.at_most.min_benchmark")
-        self.assertEqual(parse_min_benchmark({"a": 1, "b": 2}, "p"), {"a": 1, "b": 2})
+        with self.assertRaisesRegex(ValueError, "resources.at_most.benchmark repeats key"):
+            parse_benchmark(value, "resources.at_most.benchmark")
+        self.assertEqual(parse_benchmark({"a": 1, "b": 2}, "p"), {"a": 1, "b": 2})
 
     def test_json_objects_to_entries_does_not_modify_its_input(self):
         document = {"container": {"init": {"xattrs": {"b": "Yg==", "a": "YQ=="}}}}
@@ -323,21 +323,21 @@ class PackerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"init\.xattrs repeats key.*a"):
             ZipContainerPacker._init_xattrs(packer.json["init"])
 
-    def test_min_benchmark_is_packed_sorted_and_refuses_a_repeated_key(self):
+    def test_benchmark_is_packed_sorted_and_refuses_a_repeated_key(self):
         packer = self._packer(
-            '{"resources": {"at_most": {"min_benchmark": {"b_op": 2, "a_op": 1}}}}'
+            '{"resources": {"at_most": {"benchmark": {"b_op": 2, "a_op": 1}}}}'
         )
         keyvalue.from_dict(
-            packer.service.container.resources.at_most.min_benchmark, packer._min_benchmarks()[1]
+            packer.service.container.resources.at_most.benchmark, packer._benchmarks()[1]
         )
         self.assertEqual(
-            [e.key for e in packer.service.container.resources.at_most.min_benchmark],
+            [e.key for e in packer.service.container.resources.at_most.benchmark],
             ["a_op", "b_op"],
         )
-        with self.assertRaisesRegex(ValueError, "min_benchmark repeats key"):
+        with self.assertRaisesRegex(ValueError, "benchmark repeats key"):
             self._packer(
-                '{"resources": {"at_most": {"min_benchmark": {"a": 1, "a": 2}}}}'
-            )._min_benchmarks()
+                '{"resources": {"at_most": {"benchmark": {"a": 1, "a": 2}}}}'
+            )._benchmarks()
 
 
 class PublishedJsonTests(unittest.TestCase):
