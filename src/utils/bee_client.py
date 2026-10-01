@@ -35,6 +35,7 @@ from bee_rpc.control import StreamControl
 from protos import celaut_pb2, celaut_pb2_grpc
 from protos.gateway_bee import (
     GenerateClient_output_indices,
+    GetResourceAvailability_input_indices,
     StartService_input_indices,
     StartService_input_message_mode,
 )
@@ -316,10 +317,21 @@ class BeeClient:
             request: celaut_pb2.ArchitectureResources,
             timeout: Optional[float] = None,
             client_id: str = "",
+            recursion_guard: Optional[celaut_pb2.RecursionGuard] = None,
     ) -> Optional[celaut_pb2.ResourceAvailability]:
-        """``Client & ArchitectureResources -> ResourceAvailability``: could the peer run
-        one instance of this shape, of this architecture (#459)?"""
-        if client_id:
+        """``Client & ArchitectureResources & RecursionGuard -> ResourceAvailability``:
+        could the peer run one instance of this shape, of this architecture (#459)?
+
+        ``recursion_guard`` (#456) is sent only when given, as index 3: a peer that
+        predates it rejects the index outright, so a request with nothing to forward
+        keeps the exact shape it always had.
+        """
+        if recursion_guard is not None:
+            indices_serializer = dict(GetResourceAvailability_input_indices)
+            input_messages = [request, recursion_guard]
+            if client_id:
+                input_messages.append(celaut_pb2.Client(client_id=client_id))
+        elif client_id:
             indices_serializer = {1: celaut_pb2.ArchitectureResources, 2: celaut_pb2.Client}
             input_messages = [request, celaut_pb2.Client(client_id=client_id)]
         else:
