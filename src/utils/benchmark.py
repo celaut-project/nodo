@@ -1,8 +1,8 @@
-"""`Sysresources.min_benchmark`: the minimum per-core throughput a service requires.
+"""`Sysresources.benchmark`: the minimum per-core throughput a service requires.
 
 `cpu_quota / cpu_period` says how many cores a service needs and nothing about how fast
 one is: the same admitted 1.0 core is native silicon on one host and software emulation
-on another. `min_benchmark` is where a service states the second half, as key/value
+on another. `benchmark` is where a service states the second half, as key/value
 entries from a named primitive to the least it needs of it **per core, per second** -- so it composes
 with the quota ("2 cores, each at least 500k int ops/s") instead of competing with it.
 
@@ -18,7 +18,7 @@ from src.utils import keyvalue
 # a new primitive is never a wire-format change. A key that is *not* here is still
 # carried -- a peer may know a primitive this node does not -- so this is what the node
 # can name, not a whitelist.
-MIN_BENCHMARK_KEYS: Final[Tuple[str, ...]] = (
+BENCHMARK_KEYS: Final[Tuple[str, ...]] = (
     "int_ops_per_sec",              # integer/branch-heavy operations
     "flt_ops_per_sec",              # floating-point operations
     "mem_bandwidth_bytes_per_sec",  # bytes of memory read + written
@@ -28,8 +28,8 @@ MIN_BENCHMARK_KEYS: Final[Tuple[str, ...]] = (
 _UINT64_MAX: Final[int] = 2 ** 64 - 1
 
 
-def parse_min_benchmark(value: Any, path: str) -> Dict[str, int]:
-    """A `service.json` ``min_benchmark`` object as ``{primitive: per-core minimum}``.
+def parse_benchmark(value: Any, path: str) -> Dict[str, int]:
+    """A `service.json` ``benchmark`` object as ``{primitive: per-core minimum}``.
 
     Absent (``None``) is valid and is no requirement at all. A value has to be a
     non-negative integer that fits the wire's uint64: a requirement nobody can read is
@@ -38,7 +38,7 @@ def parse_min_benchmark(value: Any, path: str) -> Dict[str, int]:
     ``bool`` is refused although Python counts it as an ``int`` -- ``true`` is a typo
     for a number here, never 1 op/s.
 
-    An unrecognised *key* is kept, not refused; see :data:`MIN_BENCHMARK_KEYS`. The
+    An unrecognised *key* is kept, not refused; see :data:`BENCHMARK_KEYS`. The
     result is ordered by key, so what is logged about a declaration does not depend on
     the order its author happened to write it in.
     """
@@ -63,11 +63,11 @@ def parse_min_benchmark(value: Any, path: str) -> Dict[str, int]:
     return parsed
 
 
-def unrecognised_keys(min_benchmark: Mapping[str, int]) -> Tuple[str, ...]:
-    """The keys of ``min_benchmark`` this node has no name for, sorted."""
-    return tuple(sorted(key for key in min_benchmark if key not in MIN_BENCHMARK_KEYS))
+def unrecognised_keys(benchmark: Mapping[str, int]) -> Tuple[str, ...]:
+    """The keys of ``benchmark`` this node has no name for, sorted."""
+    return tuple(sorted(key for key in benchmark if key not in BENCHMARK_KEYS))
 
 
-def describe(min_benchmark: Mapping[str, int]) -> str:
+def describe(benchmark: Mapping[str, int]) -> str:
     """``key=value`` for every declared primitive, sorted, for a log line."""
-    return ", ".join(f"{key}={min_benchmark[key]}" for key in sorted(min_benchmark))
+    return ", ".join(f"{key}={benchmark[key]}" for key in sorted(benchmark))

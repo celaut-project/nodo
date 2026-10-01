@@ -413,24 +413,38 @@ message Sysresources {
     // Disk space limit in bytes.
     optional uint64 disk_space = 5;
 
-    // Minimum PER-CORE throughput a service requires on named primitives, in
-    // units per second on ONE core -- so it composes with cpu_quota/cpu_period:
-    // "2 cores, each at least 500k int ops/s" is cpu_quota/cpu_period = 2.0 plus
-    // min_benchmark["int_ops_per_sec"] = 500000, never a total across cores.
-    // Absent key = no requirement on that primitive. New primitives are new
+    // PER-CORE throughput on named primitives, in units per second on ONE core
+    // -- so it composes with cpu_quota/cpu_period: "2 cores, each at least 500k
+    // int ops/s" is cpu_quota/cpu_period = 2.0 plus
+    // benchmark["int_ops_per_sec"] = 500000, never a total across cores.
+    // Absent key = nothing said about that primitive. New primitives are new
     // entry keys, never new proto fields -- this must never need a wire-format
     // change to add one. A key a node does not recognise is carried as it is,
     // never an error.
     //
-    // Recognised keys (src/utils/min_benchmark.py::MIN_BENCHMARK_KEYS):
-    //   int_ops_per_sec             integer/branch-heavy operations per second
-    //   flt_ops_per_sec             floating-point operations per second
-    //   mem_bandwidth_bytes_per_sec bytes of memory read+written per second
-    //   sha256_hashes_per_sec       SHA-256 digests per second
+    // No min_/max_ prefix, like every other field here: whether it is a floor or
+    // a ceiling comes from where the Sysresources sits.
+    //   * Service.Container.Resources.at_init of a request: the MINIMUM the
+    //     service requires. This is the half admission enforces.
+    //   * the at_most branch of a Peer's ArchitectureResources: the node's
+    //     MEASURED score for that architecture, i.e. the most it offers.
+    //   * the at_most of a request: carries no meaning. Admission ignores it.
     //
-    // Request-side only: what a service requires. What a node measures and
-    // publishes about its own cores is a separate concern, not this field.
-    repeated Uint64KeyValue min_benchmark = 6;
+    // Recognised keys (src/utils/benchmark.py::BENCHMARK_KEYS):
+    //   int_ops_per_sec                 integer/branch-heavy operations per second
+    //   flt_ops_per_sec                 floating-point operations per second
+    //   mem_bandwidth_bytes_per_sec     bytes of memory written per second, over
+    //   mem_bandwidth_working_set_bytes   a working set of this many bytes
+    //   sha256_hashes_per_sec           SHA-256 digests per second
+    //
+    // mem_bandwidth_working_set_bytes is not a primitive but the qualifier of
+    // the one above it: a bandwidth is only comparable with another measured
+    // over the same amount of memory. A requirement is met only by a score whose
+    // working set is AT LEAST the requested one (a larger set can only lower
+    // bandwidth); a requirement that names none is read against the pinned
+    // default (benchmark.DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES, 1 GiB); and a
+    // score that names none is never accepted.
+    repeated Uint64KeyValue benchmark = 6;
 }
 
 // -----------------------

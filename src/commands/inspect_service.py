@@ -121,8 +121,8 @@ def inspect(service: str):
                 print(f"    - mem_limit: {format_size(sysres.mem_limit)}")
             if sysres.disk_space:
                 print(f"    - disk_space: {format_size(sysres.disk_space)}")
-            for primitive, minimum in keyvalue.items(sysres.min_benchmark):
-                print(f"    - min_benchmark.{primitive}: {minimum} (per core)")
+            for primitive, minimum in keyvalue.items(sysres.benchmark):
+                print(f"    - benchmark.{primitive}: {minimum} (per core)")
 
         print_sysresources("At Init", resources.at_init)
         print_sysresources("At Most", resources.at_most)

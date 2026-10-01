@@ -1,6 +1,6 @@
 """Reading and building the ``repeated *KeyValue`` fields that replaced protobuf maps.
 
-``xattrs``, ``mu_per_call``, ``environment_variables`` and ``min_benchmark`` used to be
+``xattrs``, ``mu_per_call``, ``environment_variables`` and ``benchmark`` used to be
 ``map<string, V>``. A map gives lookup by key and nothing about order on the wire, and a
 service id is a hash of the serialized specification, so the same service could hash to
 two ids depending on the protobuf implementation. They are now

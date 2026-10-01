@@ -16,7 +16,7 @@ from protos import celaut_pb2 as celaut, pack_pb2, gateway_bee
 from src.utils.config import ConfigManager
 from src.packers.service_json import populate_possible_environment_workloads
 from src.utils import keyvalue
-from src.utils.min_benchmark import parse_min_benchmark, unrecognised_keys
+from src.utils.benchmark import parse_benchmark, unrecognised_keys
 from src.utils.hashing import (
     BLAKE2B_ID, HASH_SPECS, SHA3_256_ID, get_configured_hash_spec, hash_stream_many,
 )
@@ -297,18 +297,18 @@ class ZipContainerPacker:
         # Read for its side effect: a malformed declaration must be refused here,
         # in __init__, rather than after BuildKit has built the whole image.
         self._read_only_filesystem_requested()
-        self._min_benchmarks()
+        self._benchmarks()
         # Same reason, and one more: a `pow:` network's `formal` is parsed by the
         # very code that will read it at launch, so an ask that cannot resolve is
         # a pack failure rather than an instance that boots and reaches nothing.
         self._parsed_networks()
 
     # ------------------------------------------------------------------ #
-    # resources.*.min_benchmark
+    # resources.*.benchmark
     # ------------------------------------------------------------------ #
 
-    def _min_benchmarks(self) -> Tuple[dict, dict]:
-        """``resources.at_init`` / ``at_most`` ``min_benchmark``, as (at_init, at_most).
+    def _benchmarks(self) -> Tuple[dict, dict]:
+        """``resources.at_init`` / ``at_most`` ``benchmark``, as (at_init, at_most).
 
         Optional on both. ``at_most`` is raised to ``at_init`` key by key, as every
         other limit is in parseContainer -- and for a better reason here than there:
@@ -316,11 +316,19 @@ class ZipContainerPacker:
         otherwise be one no node ever looks at.
         """
         res = self.json.get("resources", {})
-        at_init = parse_min_benchmark(
-            res.get("at_init", {}).get("min_benchmark"), "resources.at_init.min_benchmark"
+        for end in ("at_init", "at_most"):
+            # Refused rather than ignored: a requirement silently dropped is a service
+            # admitted on hardware its author said it cannot run on (#459).
+            if "min_benchmark" in (res.get(end) or {}):
+                raise ValueError(
+                    f"service.json resources.{end}.min_benchmark was renamed to "
+                    f"resources.{end}.benchmark."
+                )
+        at_init = parse_benchmark(
+            res.get("at_init", {}).get("benchmark"), "resources.at_init.benchmark"
         )
-        at_most = parse_min_benchmark(
-            res.get("at_most", {}).get("min_benchmark"), "resources.at_most.min_benchmark"
+        at_most = parse_benchmark(
+            res.get("at_most", {}).get("benchmark"), "resources.at_most.benchmark"
         )
         for key, minimum in at_init.items():
             at_most[key] = max(minimum, at_most.get(key, 0))
@@ -608,14 +616,14 @@ class ZipContainerPacker:
 
         # Minimum per-core benchmark scores. Serialized as declared, recognised key
         # or not: a key this packer has no name for may be one a node does, so it is
-        # said out loud rather than refused (see src.utils.min_benchmark).
-        init_min_benchmark, most_min_benchmark = self._min_benchmarks()
-        keyvalue.from_dict(r.at_init.min_benchmark, init_min_benchmark)
-        keyvalue.from_dict(r.at_most.min_benchmark, most_min_benchmark)
-        unknown = unrecognised_keys(most_min_benchmark)
+        # said out loud rather than refused (see src.utils.benchmark).
+        init_benchmark, most_benchmark = self._benchmarks()
+        keyvalue.from_dict(r.at_init.benchmark, init_benchmark)
+        keyvalue.from_dict(r.at_most.benchmark, most_benchmark)
+        unknown = unrecognised_keys(most_benchmark)
         if unknown:
             log.LOGGER(
-                "service.json resources.*.min_benchmark declares primitive(s) this node "
+                "service.json resources.*.benchmark declares primitive(s) this node "
                 f"does not recognise, kept as written: {', '.join(unknown)}."
             )
 
