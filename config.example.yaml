@@ -463,6 +463,15 @@ network:
   # refuses every launch. That is a coherent thing to ask for -- a node that is only a
   # wallet and a peer directory -- and nothing stops you, but it is worth meaning.
   EXECUTE_LOCALLY: true
+  # How many nodes one request tree may span (issue #456): a StartService and every peer
+  # it is delegated to in turn, or a cost quote / availability probe passed along the same
+  # way. Counted from the node the request starts at -- or the first node that gets it
+  # without a count, which is what a peer predating the field sends. Each node passing it
+  # on sends one less; one given none left refuses it, and one with a single hop left runs
+  # it itself or not at all. A count from a peer is clamped to this, never raised by it.
+  # Cycles (A -> B -> A) are refused regardless, by the request's token. See
+  # docs/RECURSION_GUARD.md.
+  RECURSION_MAX_HOPS: 16
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
