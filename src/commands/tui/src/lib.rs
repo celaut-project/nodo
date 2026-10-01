@@ -38,6 +38,9 @@ pub mod app;
 /// Terminal events handler.
 pub mod event;
 
+/// Fitting pages, tables and popups to the terminal's size (issue #453).
+pub mod layout_util;
+
 /// Widget renderer.
 pub mod ui;
 
