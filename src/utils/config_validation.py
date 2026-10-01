@@ -243,6 +243,66 @@ def validate_host_policy_config(config: Dict[str, Any]) -> None:
             )
 
 
+def validate_benchmark_config(config: Dict[str, Any]) -> None:
+    """Validate ``benchmark.BY_ARCH``: this node's per-core scores, per architecture.
+
+    Absent is valid and means nothing is measured: every requirement is then logged
+    rather than enforced, which is how a node without the block has always behaved.
+
+    A malformed entry raises. These are the numbers admission refuses a service on, and
+    the two ways of "handling" a score nobody can read are reading it as 0 (refusing
+    every service that asks for anything) or ignoring it (admitting work the node cannot
+    do). Each value is a non-negative integer, or ``-1`` for "not measured", which is
+    what the benchmark core service fills in at startup. An unknown architecture or key
+    raises too -- ``amd64`` for ``linux/amd64`` or a misspelt primitive would otherwise be
+    a score the operator believes is in force and never is.
+    """
+    from src.utils.benchmark import SCORE_KEYS, UNMEASURED
+
+    section = config.get("benchmark")
+    if section is None:
+        return
+    if not isinstance(section, dict):
+        raise ConfigValidationError("Malformed 'benchmark' mapping: expected a BY_ARCH block.")
+    for key in section:
+        if key != "BY_ARCH":
+            raise ConfigValidationError(
+                f"benchmark.{key} is not a setting. Scores go under benchmark.BY_ARCH.<arch>."
+            )
+    block = section.get("BY_ARCH")
+    if block is None:
+        return
+    if not isinstance(block, dict):
+        raise ConfigValidationError(
+            "Malformed 'benchmark.BY_ARCH' mapping: expected one block per architecture, "
+            f"got {type(block).__name__}."
+        )
+    for arch, entry in block.items():
+        if arch not in CANONICAL_ARCHITECTURES:
+            raise ConfigValidationError(
+                f"benchmark.BY_ARCH.{arch} is not an architecture this node knows. Use a "
+                f"canonical tag: {', '.join(CANONICAL_ARCHITECTURES)}."
+            )
+        if entry is None:
+            continue
+        if not isinstance(entry, dict):
+            raise ConfigValidationError(
+                f"Malformed 'benchmark.BY_ARCH.{arch}' mapping: expected score keys, got "
+                f"{type(entry).__name__}."
+            )
+        for key, value in entry.items():
+            if key not in SCORE_KEYS:
+                raise ConfigValidationError(
+                    f"benchmark.BY_ARCH.{arch}.{key} is not a benchmark this node knows. "
+                    f"Known: {', '.join(SCORE_KEYS)}."
+                )
+            if isinstance(value, bool) or not isinstance(value, int) or value < UNMEASURED:
+                raise ConfigValidationError(
+                    f"benchmark.BY_ARCH.{arch}.{key} must be a non-negative integer (per "
+                    f"core, per second), or {UNMEASURED} for not measured; got {value!r}."
+                )
+
+
 PRICE_KEYS = (
     "RAM_MU_PER_GIB_HOUR",
     "CPU_MU_PER_VCPU_HOUR",

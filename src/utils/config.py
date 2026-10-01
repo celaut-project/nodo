@@ -755,6 +755,7 @@ class ConfigManager(metaclass=Singleton):
                 _find_removed_keys,
                 ConfigValidationError,
                 validate_balancers_config,
+                validate_benchmark_config,
                 validate_bitcoin_config,
                 validate_host_policy_config,
                 validate_pricing_config,
@@ -787,6 +788,11 @@ class ConfigManager(metaclass=Singleton):
             validate_balancers_config(
                 self._config, warn=lambda message: self.log(f"[BALANCERS] {message}")
             )
+
+            # This node's per-core benchmark scores, which admission refuses services
+            # on. A score that does not parse would either refuse everything or admit
+            # anything, so it stops here instead (#459).
+            validate_benchmark_config(self._config)
 
             # The Bitcoin ledger block, if there is one. Structural only -- addresses
             # are checked with arithmetic, never by asking a node -- so a node that
