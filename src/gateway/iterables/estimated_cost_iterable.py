@@ -19,6 +19,13 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
     # https://github.com/celaut-project/nodo/issues/70
     
     # Although this call does not perform recursion on the peers (it only returns the local estimated cost and not that of the peers), the estimated cost could be requested by the peer that was just asked to execute the service.
+    #
+    # So the RecursionGuard is held exactly as StartService holds it (#456): validated,
+    # refused on a loop or with no hops left, and kept in `self.recursion_guard_token`
+    # for as long as the quote is being produced. Comparing the peers' quotes, when it
+    # comes, is `estimate_cost_on_peer(..., recursion_guard_token=self.recursion_guard_token)`
+    # from inside `generate` -- `service_extended` forwards the token unchanged with one
+    # hop less, and `Registry().can_forward` says when there are none left to spend.
 
     cost: Optional[int] = None
 
@@ -29,8 +36,9 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
     def generate(self) -> Generator[Buffer, None, None]:
         with RecursionGuard(
                 token=self.recursion_guard_token,
-                generate=True
-        ) as recursion_guard_token:
+                generate=True,
+                remaining_hops=self.recursion_guard_hops,
+        ) as self.recursion_guard_token:
             try:
 
                 if not self.configuration:
