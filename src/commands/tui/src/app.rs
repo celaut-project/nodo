@@ -165,6 +165,19 @@ impl PageGroup {
         }
     }
 
+    /// The name on the group row when the full ones do not fit (issue #453). Four
+    /// letters or fewer, so all six fit a 40-column terminal.
+    pub fn short_title(self) -> &'static str {
+        match self {
+            PageGroup::Status => "OVER",
+            PageGroup::Activity => "WORK",
+            PageGroup::Money => "EARN",
+            PageGroup::Record => "LOGS",
+            PageGroup::Settings => "SET",
+            PageGroup::Reference => "DOCS",
+        }
+    }
+
     /// The pages in this group, in [`Page::ALL`] order.
     ///
     /// Filtered from `Page::ALL` rather than listed again: one place decides what is
@@ -247,6 +260,27 @@ impl Page {
         }
     }
 
+    /// The name on the page row when the full ones do not fit (issue #453): short
+    /// enough that the widest group's five pages fit a 40-column terminal.
+    pub fn short_title(self) -> &'static str {
+        match self {
+            Page::Overview => "OVER",
+            Page::Instances => "INST",
+            Page::Services => "SERV",
+            Page::Peers => "PEERS",
+            Page::Clients => "CLNT",
+            Page::Chat => "CHAT",
+            Page::Earnings => "EARN",
+            Page::Cell => "CELL",
+            Page::Pricing => "PRICE",
+            Page::Schedule => "SCHED",
+            Page::Energy => "ENERGY",
+            Page::Config => "CONFIG",
+            Page::Logs => "LOGS",
+            Page::Docs => "DOCS",
+        }
+    }
+
     /// Which band this page belongs to. Only used to decide where a wider divider is
     /// drawn, so it has no ordering of its own: [`Page::ALL`] remains the one place
     /// order is written down, and a page moved there moves its group boundary with it.
@@ -266,6 +300,62 @@ impl Page {
     }
 }
 
+/// What a tab row draws at a given width: its titles, and the padding either side
+/// of each.
+///
+/// The full titles with one space of padding when they fit; the short ones
+/// ([`Page::short_title`]) when they do not; the short ones unpadded when even that
+/// is too wide (issue #453). Chosen here, once, for both the drawing and the hit
+/// test, so a click lands on the tab drawn under it whichever form was drawn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabRow {
+    pub titles: Vec<&'static str>,
+    pub padding: u16,
+}
+
+impl TabRow {
+    fn fit(full: Vec<&'static str>, short: Vec<&'static str>, available: u16) -> Self {
+        let needed = |titles: &[&str], padding: u16| -> usize {
+            titles.iter().map(|title| title.chars().count() + 2 * padding as usize).sum::<usize>()
+                + TAB_DIVIDER.chars().count() * titles.len().saturating_sub(1)
+        };
+        for (titles, padding) in [(&full, 1), (&short, 1)] {
+            if needed(titles, padding) <= available as usize {
+                return Self { titles: titles.clone(), padding };
+            }
+        }
+        Self { titles: short, padding: 0 }
+    }
+
+    /// The bordered group row drawn `width` columns wide.
+    pub fn groups(width: u16) -> Self {
+        Self::fit(
+            PageGroup::ALL.iter().map(|group| group.title()).collect(),
+            PageGroup::ALL.iter().map(|group| group.short_title()).collect(),
+            width.saturating_sub(2),
+        )
+    }
+
+    /// `group`'s borderless page row drawn `width` columns wide.
+    pub fn pages(group: PageGroup, width: u16) -> Self {
+        let pages = group.pages();
+        Self::fit(
+            pages.iter().map(|page| page.title()).collect(),
+            pages.iter().map(|page| page.short_title()).collect(),
+            width,
+        )
+    }
+
+    /// The padding as the string `Tabs::padding` takes.
+    pub fn pad(&self) -> &'static str {
+        if self.padding > 0 {
+            " "
+        } else {
+            ""
+        }
+    }
+}
+
 /// The divider the `Tabs` widget draws between every pair of tabs.
 ///
 /// One character, not `" │ "`: `Tabs` pads each title already, so both render the
@@ -275,22 +365,30 @@ pub const TAB_DIVIDER: &str = "│";
 /// Which of a row of `titles` covers column `x`, given the row's own `Rect`.
 ///
 /// Retraces what `Tabs` lays out rather than asking it — the widget keeps no hit
-/// map. Each title sits in one space of padding, the title, one space of padding,
-/// and tabs are joined by [`TAB_DIVIDER`]. Measured in characters, not bytes.
+/// map. Each title sits in `padding` spaces either side, and tabs are joined by
+/// [`TAB_DIVIDER`]. Measured in characters, not bytes.
 ///
 /// One function for both rows so the group row and the page row cannot drift into
 /// two slightly different pieces of arithmetic, which is the kind of bug that shows
 /// up as a click landing on the neighbouring tab and gets worked around rather than
 /// reported. `x_offset` is where the titles begin: the bordered group row starts one
 /// column in, the borderless page row starts at its own left edge.
-fn title_row_at(x: u16, area: Rect, titles: &[&str], x_offset: u16) -> Option<usize> {
-    let divider_width = TAB_DIVIDER.chars().count() as u16;
-    let mut cursor = area.x + x_offset;
-    for (index, title) in titles.iter().enumerate() {
+///
+/// A title the row was too narrow to draw is not clickable: `Tabs` stops at the
+/// row's inner edge, and so does this.
+fn title_row_at(x: u16, area: Rect, row: &TabRow, x_offset: u16) -> Option<usize> {
+    let divider_width = TAB_DIVIDER.chars().count() as u32;
+    let right = area.x as u32 + area.width.saturating_sub(x_offset) as u32;
+    let x = x as u32;
+    if x >= right {
+        return None;
+    }
+    let mut cursor = area.x as u32 + x_offset as u32;
+    for (index, title) in row.titles.iter().enumerate() {
         if index > 0 {
             cursor += divider_width;
         }
-        let width = title.chars().count() as u16 + 2;
+        let width = title.chars().count() as u32 + 2 * row.padding as u32;
         if x >= cursor && x < cursor + width {
             return Some(index);
         }
@@ -301,8 +399,7 @@ fn title_row_at(x: u16, area: Rect, titles: &[&str], x_offset: u16) -> Option<us
 
 /// Which group the click at column `x` on the group row landed on.
 pub fn group_at(x: u16, area: Rect) -> Option<PageGroup> {
-    let titles: Vec<&str> = PageGroup::ALL.iter().map(|group| group.title()).collect();
-    title_row_at(x, area, &titles, 1).map(|index| PageGroup::ALL[index])
+    title_row_at(x, area, &TabRow::groups(area.width), 1).map(|index| PageGroup::ALL[index])
 }
 
 /// Which page of `group` the click at column `x` on the page row landed on.
@@ -315,8 +412,7 @@ pub fn page_at(x: u16, area: Rect, group: PageGroup) -> Option<Page> {
     if pages.len() <= 1 {
         return None;
     }
-    let titles: Vec<&str> = pages.iter().map(|page| page.title()).collect();
-    title_row_at(x, area, &titles, 0).map(|index| pages[index])
+    title_row_at(x, area, &TabRow::pages(group, area.width), 0).map(|index| pages[index])
 }
 
 /// How many rows below the first visible one a click at terminal row `y` lands, for a
@@ -3026,6 +3122,10 @@ pub struct App {
     /// click on a page title can be mapped back to it. `Rect::ZERO` for a group with
     /// one page, which draws no second row at all.
     pub page_tabs_area: Rect,
+    /// Whether the last frame was the "terminal too small" notice instead of a page
+    /// (issue #453). The mouse is ignored while it is: every hit-test area a page
+    /// recorded describes something not on screen.
+    pub too_small: bool,
     pub list_area: Rect,
     /// The clickable id column's `[start, end)` on whichever table `list_area` names
     /// this frame (Peers/Clients/Chat all have one; every other page leaves this
@@ -3166,6 +3266,7 @@ impl Default for App {
             status: "Press r to refresh • q to quit".to_string(),
             tabs_area: Rect::ZERO,
             page_tabs_area: Rect::ZERO,
+            too_small: false,
             list_area: Rect::ZERO,
             id_column_x: None,
             id_copy_areas: Vec::new(),

@@ -2,10 +2,13 @@ use crate::app::{
     cpu_breakdown, format_bytes, format_bytes_compact, format_rate_compact, memory_breakdown,
     percent, segment_token, shorten, unix_now, App, DashboardStats, DemandByHour,
     ConfigEntry, DonationWallet, EditKind, InputMode, Instance, Money, Page,
-    LedgerEarnings, PageGroup, PaymentRow, PriceEntry, ReputationEvent, ReputationTotals, Service,
+    LedgerEarnings, PaymentRow, PriceEntry, ReputationEvent, ReputationTotals, Service,
     ServiceDetail,
 };
+#[cfg(test)]
+use crate::app::PageGroup;
 use crate::cell::{self, CellRow, Group, Lever, LeverStatus, Organelle};
+use crate::layout_util::{display_width, fit_hints, truncate_ellipsis};
 use crate::schedule;
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
@@ -90,23 +93,11 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         frame.size(),
     );
 
-    // The page row only exists for a group that has more than one page. A row
-    // holding a single already-selected title says nothing and costs the page below
-    // it a line, so OVERVIEW, EARNINGS and LOGS get their space back.
-    let page_row = if app.tabs.group().pages().len() > 1 { 1 } else { 0 };
-    let layout = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(page_row),
-        Constraint::Min(8),
-        Constraint::Length(2),
-    ])
-    .split(frame.size());
-
     // Remembered for the mouse: a click has only the coordinates, so the hit test needs
     // where things ended up this frame. Cleared here so a page without a table (or the
     // instances tree) cannot inherit the previous page's rows.
-    app.tabs_area = layout[0];
-    app.page_tabs_area = if page_row > 0 { layout[1] } else { Rect::ZERO };
+    app.tabs_area = Rect::ZERO;
+    app.page_tabs_area = Rect::ZERO;
     app.list_area = Rect::ZERO;
     // Recomputed by whichever page draws a copyable id column/id line this frame
     // (issue: click-to-copy full IDs); every other page leaves both empty.
@@ -115,6 +106,40 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     app.chat_card_buttons.clear();
     app.chat_attach_area = Rect::ZERO;
     app.chat_send_area = Rect::ZERO;
+
+    // Below the smallest size the pages are laid out for, say so instead of drawing
+    // a tab bar squeezed to nothing over a table of one-character columns (issue
+    // #453). The mouse is ignored while it shows -- whatever a page last recorded
+    // for its hit tests is not on screen -- and the keys keep working, so `q` still
+    // quits and the next resize redraws the page.
+    app.too_small = crate::layout_util::too_small(frame.size());
+    if app.too_small {
+        crate::layout_util::draw_too_small(
+            frame,
+            frame.size(),
+            Style::default().fg(text_colour()),
+            Style::default().fg(warn()),
+        );
+        return;
+    }
+
+    // The page row only exists for a group that has more than one page. A row
+    // holding a single already-selected title says nothing and costs the page below
+    // it a line, so OVERVIEW, EARNINGS and LOGS get their space back.
+    let page_row = if app.tabs.group().pages().len() > 1 { 1 } else { 0 };
+    // The page takes what the tab rows and the footer leave, never the reverse: a
+    // `Min` here larger than what is left let the solver take rows from the tab bar
+    // instead, and the group titles were the first thing to vanish on a short
+    // terminal. `too_small` above guarantees the page at least one table row.
+    let layout = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(page_row),
+        Constraint::Min(0),
+        Constraint::Length(2),
+    ])
+    .split(frame.size());
+    app.tabs_area = layout[0];
+    app.page_tabs_area = if page_row > 0 { layout[1] } else { Rect::ZERO };
 
     draw_tabs(frame, app, layout[0]);
     if page_row > 0 {
@@ -176,9 +201,12 @@ pub fn render(app: &mut App, frame: &mut Frame) {
 /// Labelled by the group rather than by its first page: a group named `INSTANCES`
 /// would send somebody looking for CLIENTS past a label about instances.
 fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
-    let titles = PageGroup::ALL
+    // The same choice of full or short titles the click hit test makes (issue #453).
+    let row = crate::app::TabRow::groups(area.width);
+    let titles = row
+        .titles
         .iter()
-        .map(|group| Line::from(group.title()))
+        .map(|title| Line::from(*title))
         .collect::<Vec<_>>();
     let status_color = if app.node_info.service_status == "running" {
         good()
@@ -190,7 +218,9 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
             " NODO ",
             Style::default().fg(inverse_text()).bg(accent()).bold(),
         ),
-        Span::raw("  operations console  "),
+        // The tagline is the first thing to go on a narrow terminal: the status
+        // after it is the part of this border worth reading.
+        Span::raw(if area.width >= 60 { "  operations console  " } else { " " }),
         Span::styled(
             if app.node_info.service_status.is_empty() {
                 "unknown"
@@ -205,6 +235,7 @@ fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
         .select(app.tabs.group().index())
         .style(Style::default().fg(muted()))
         .highlight_style(Style::default().fg(accent()).bold())
+        .padding(row.pad(), row.pad())
         .divider(crate::app::TAB_DIVIDER);
     frame.render_widget(tabs, area);
 }
@@ -224,14 +255,17 @@ fn draw_page_tabs(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .position(|page| *page == app.page())
         .unwrap_or(0);
-    let titles = pages
+    let row = crate::app::TabRow::pages(group, area.width);
+    let titles = row
+        .titles
         .iter()
-        .map(|page| Line::from(page.title()))
+        .map(|title| Line::from(*title))
         .collect::<Vec<_>>();
     let tabs = Tabs::new(titles)
         .select(selected)
         .style(Style::default().fg(muted()))
         .highlight_style(Style::default().fg(text_colour()).bold().underlined())
+        .padding(row.pad(), row.pad())
         .divider(crate::app::TAB_DIVIDER);
     frame.render_widget(tabs, area);
 }
@@ -4477,14 +4511,53 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         "[/] or 1-6 group  \u{2022}  tab/shift+tab page in group  \u{2022}  click either row"
     };
     let lines = vec![
-        Line::from(Span::styled(controls, Style::default().fg(muted()))),
-        Line::from(vec![
-            Span::styled(navigation, Style::default().fg(muted())),
-            Span::raw("   "),
-            Span::styled(app.status.clone(), Style::default().fg(warn())),
-        ]),
+        Line::from(Span::styled(
+            fit_hints(controls, HINT_SEPARATOR, area.width as usize),
+            Style::default().fg(muted()),
+        )),
+        navigation_line(navigation, &app.status, area.width),
     ];
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), area);
+}
+
+/// What separates one key hint from the next on the footer and in popups.
+const HINT_SEPARATOR: &str = "  \u{2022}  ";
+
+/// The footer's second line: how to move between pages, then the status message.
+///
+/// The status is what the last action said happened, so on a narrow terminal it is
+/// the navigation hints that give way, whole hint by whole hint, and the status is
+/// only cut once there is no navigation left to drop (issue #453).
+fn navigation_line(navigation: &str, status: &str, width: u16) -> Line<'static> {
+    const GAP: &str = "   ";
+    let width = width as usize;
+    let status_width = display_width(status);
+    let full = display_width(navigation) + GAP.len() + status_width;
+    if full <= width {
+        return Line::from(vec![
+            Span::styled(navigation.to_string(), Style::default().fg(muted())),
+            Span::raw(GAP),
+            Span::styled(status.to_string(), Style::default().fg(warn())),
+        ]);
+    }
+    if status.is_empty() {
+        return Line::from(Span::styled(
+            fit_hints(navigation, HINT_SEPARATOR, width),
+            Style::default().fg(muted()),
+        ));
+    }
+    // Room for at least the first navigation hint and the gap beside the status?
+    let first_hint = navigation.split(HINT_SEPARATOR).next().unwrap_or("");
+    let room = width.saturating_sub(status_width + GAP.len());
+    // (The hint, the separator, and the `…` that says more were dropped.)
+    if room > display_width(first_hint) + display_width(HINT_SEPARATOR) {
+        return Line::from(vec![
+            Span::styled(fit_hints(navigation, HINT_SEPARATOR, room), Style::default().fg(muted())),
+            Span::raw(GAP),
+            Span::styled(status.to_string(), Style::default().fg(warn())),
+        ]);
+    }
+    Line::from(Span::styled(truncate_ellipsis(status, width), Style::default().fg(warn())))
 }
 
 /// Body lines and hint text for the `EditConfig` popup, one variant per
