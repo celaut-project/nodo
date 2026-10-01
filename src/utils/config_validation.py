@@ -257,7 +257,7 @@ def validate_benchmark_config(config: Dict[str, Any]) -> None:
     raises too -- ``amd64`` for ``linux/amd64`` or a misspelt primitive would otherwise be
     a score the operator believes is in force and never is.
     """
-    from src.utils.benchmark import SCORE_KEYS, UNMEASURED
+    from src.utils.benchmark import REMOVED_KEYS, SCORE_KEYS, UNMEASURED
 
     section = config.get("benchmark")
     if section is None:
@@ -291,6 +291,10 @@ def validate_benchmark_config(config: Dict[str, Any]) -> None:
                 f"{type(entry).__name__}."
             )
         for key, value in entry.items():
+            if key in REMOVED_KEYS:
+                raise ConfigValidationError(
+                    f"benchmark.BY_ARCH.{arch}.{key} no longer exists: {REMOVED_KEYS[key]}."
+                )
             if key not in SCORE_KEYS:
                 raise ConfigValidationError(
                     f"benchmark.BY_ARCH.{arch}.{key} is not a benchmark this node knows. "

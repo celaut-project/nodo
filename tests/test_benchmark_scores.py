@@ -18,9 +18,10 @@ load_example_config()
 
 from src.utils import benchmark  # noqa: E402
 from src.utils.benchmark import (  # noqa: E402
-    DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES,
-    MEM_BANDWIDTH_KEY,
-    MEM_WORKING_SET_KEY,
+    MEM_BANDWIDTH_KEYS,
+    MEM_BANDWIDTH_WORKING_SET,
+    MEM_WORKING_SETS,
+    REMOVED_KEYS,
     SCORE_KEYS,
     UNMEASURED,
     shortfalls,
@@ -32,6 +33,9 @@ from src.utils.config_validation import (  # noqa: E402
 )
 
 GIB = 1 << 30
+MIB = 1 << 20
+BW_256 = "mem_bandwidth_256mib_bytes_per_sec"
+BW_1GIB = "mem_bandwidth_1gib_bytes_per_sec"
 
 
 def _with_scores(block):
@@ -83,12 +87,19 @@ class ConfigScoresTests(unittest.TestCase):
         scores["flt_ops_per_sec"] = 0
         self.assertEqual(benchmark.measured(scores), {"flt_ops_per_sec": 0, "int_ops_per_sec": 7})
         self.assertNotIn("int_ops_per_sec", benchmark.unmeasured_keys(scores))
-        self.assertIn(MEM_WORKING_SET_KEY, benchmark.unmeasured_keys(scores))
+        self.assertIn(BW_1GIB, benchmark.unmeasured_keys(scores))
 
-    def test_the_pinned_working_set_is_one_gib(self):
-        # celaut-basics/demo-service's benchmark/bench.sh pins the same number; a
-        # requirement that names no working set is read against it.
-        self.assertEqual(DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES, GIB)
+    def test_memory_bandwidth_has_one_key_per_working_set(self):
+        # The working set is part of the name, so a score is only ever read against a
+        # requirement over the same amount of memory.
+        self.assertEqual(
+            dict(MEM_BANDWIDTH_WORKING_SET),
+            {"mem_bandwidth_64mib_bytes_per_sec": 64 * MIB, BW_256: 256 * MIB, BW_1GIB: GIB},
+        )
+        for key in MEM_BANDWIDTH_KEYS:
+            self.assertIn(key, SCORE_KEYS)
+        # The largest is what the benchmark service (2 GiB guest) can measure.
+        self.assertEqual(max(MEM_WORKING_SETS.values()), GIB)
 
 
 class ValidateBenchmarkConfigTests(unittest.TestCase):
@@ -104,8 +115,13 @@ class ValidateBenchmarkConfigTests(unittest.TestCase):
         self._validate({"linux/arm64": None})
 
     def test_manual_values_are_valid(self):
-        self._validate({"linux/amd64": {"int_ops_per_sec": 0, MEM_BANDWIDTH_KEY: 10 ** 10,
-                                        MEM_WORKING_SET_KEY: GIB}})
+        self._validate({"linux/amd64": {"int_ops_per_sec": 0, BW_1GIB: 10 ** 10, BW_256: 2 * 10 ** 10}})
+
+    def test_the_former_bandwidth_keys_are_refused_naming_the_new_ones(self):
+        for old in REMOVED_KEYS:
+            with self.subTest(key=old):
+                with self.assertRaisesRegex(ConfigValidationError, "no longer exists.*mem_bandwidth_1gib"):
+                    self._validate({"linux/amd64": {old: 1}})
 
     def test_a_value_admission_could_only_misread_is_refused_naming_it(self):
         for bad in (-2, 1.5, "900000", True, None, [1]):
@@ -209,48 +225,68 @@ class ShortfallsTests(unittest.TestCase):
         )
         self.assertEqual(len(found), 2)
 
-    def test_bandwidth_with_no_working_set_named_is_read_against_the_pinned_default(self):
-        required = {MEM_BANDWIDTH_KEY: 10 ** 9}
-        at_default = _scores(**{MEM_BANDWIDTH_KEY: 5 * 10 ** 9, MEM_WORKING_SET_KEY: GIB})
-        self.assertEqual(self._check(required, at_default), ([], {}))
-        smaller = _scores(**{MEM_BANDWIDTH_KEY: 5 * 10 ** 9, MEM_WORKING_SET_KEY: GIB // 2})
-        found, _ = self._check(required, smaller)
+    def test_a_bandwidth_is_held_against_the_score_over_the_same_working_set(self):
+        required = {BW_256: 10 ** 9}
+        self.assertEqual(self._check(required, _scores(**{BW_256: 5 * 10 ** 9})), ([], {}))
+        found, _ = self._check(required, _scores(**{BW_256: 10 ** 8}))
         self.assertEqual(len(found), 1)
-        self.assertIn(f"at least {GIB} bytes", found[0])
+        self.assertIn(BW_256, found[0])
+        self.assertIn("Requested: 1000000000", found[0])
 
-    def test_bandwidth_is_met_only_over_an_equal_or_larger_working_set(self):
-        required = {MEM_BANDWIDTH_KEY: 10 ** 9, MEM_WORKING_SET_KEY: 2 * GIB}
-        for measured_set, ok in ((GIB, False), (2 * GIB, True), (4 * GIB, True)):
-            with self.subTest(measured_set=measured_set):
-                found, _ = self._check(
-                    required, _scores(**{MEM_BANDWIDTH_KEY: 5 * 10 ** 9, MEM_WORKING_SET_KEY: measured_set})
-                )
-                self.assertEqual(found == [], ok, found)
-
-    def test_a_bandwidth_score_without_a_working_set_is_never_accepted(self):
-        found, unenforced = self._check(
-            {MEM_BANDWIDTH_KEY: 1}, _scores(**{MEM_BANDWIDTH_KEY: 10 ** 12})
-        )
+    def test_an_unmeasured_working_set_is_read_against_the_next_larger_measured_one(self):
+        # A larger working set can only lower a bandwidth, so its score is a safe floor.
+        scores = _scores(**{BW_1GIB: 5 * 10 ** 9})
+        self.assertEqual(self._check({BW_256: 10 ** 9}, scores), ([], {}))
+        found, unenforced = self._check({BW_256: 10 ** 10}, scores)
         self.assertEqual(unenforced, {})
         self.assertEqual(len(found), 1)
-        self.assertIn("never accepted", found[0])
+        self.assertIn(BW_256, found[0])
+        self.assertIn(f"measured {self.WHERE}: 5000000000 (over {BW_1GIB})", found[0])
 
-    def test_a_large_enough_set_still_has_to_be_fast_enough(self):
-        found, _ = self._check(
-            {MEM_BANDWIDTH_KEY: 10 ** 10},
-            _scores(**{MEM_BANDWIDTH_KEY: 10 ** 9, MEM_WORKING_SET_KEY: 2 * GIB}),
-        )
+    def test_the_smallest_larger_working_set_is_the_one_used(self):
+        scores = _scores(**{BW_256: 3 * 10 ** 9, BW_1GIB: 10 ** 9})
+        # 100 MiB has no key and no score; the next larger measured is 256 MiB, not 1 GiB.
+        found, _ = self._check({"mem_bandwidth_100mib_bytes_per_sec": 2 * 10 ** 9}, scores)
+        self.assertEqual(found, [])
+        found, _ = self._check({"mem_bandwidth_100mib_bytes_per_sec": 4 * 10 ** 9}, scores)
+        self.assertIn(f"(over {BW_256})", found[0])
+
+    def test_its_own_score_wins_over_a_larger_one(self):
+        scores = _scores(**{BW_256: 10 ** 8, BW_1GIB: 10 ** 12})
+        found, _ = self._check({BW_256: 10 ** 9}, scores)
         self.assertEqual(len(found), 1)
-        self.assertIn("Requested: 10000000000", found[0])
+        self.assertNotIn("over", found[0])
 
-    def test_unmeasured_bandwidth_is_unenforced_whatever_the_working_set(self):
+    def test_a_working_set_larger_than_any_measured_is_unenforced(self):
+        # A smaller set would flatter the bandwidth, so it is no evidence either way.
+        required = {"mem_bandwidth_4gib_bytes_per_sec": 10 ** 12}
+        self.assertEqual(self._check(required, _scores(**{BW_1GIB: 1})), ([], required))
+
+    def test_any_size_is_a_recognised_key_and_a_malformed_one_is_not(self):
+        sizes = ("mem_bandwidth_300mib_bytes_per_sec", "mem_bandwidth_8kib_bytes_per_sec",
+                 "mem_bandwidth_2gib_bytes_per_sec")
+        self.assertEqual(benchmark.unrecognised_keys({key: 1 for key in sizes}), ())
+        bad = ("mem_bandwidth_0mib_bytes_per_sec", "mem_bandwidth_mib_bytes_per_sec",
+               "mem_bandwidth_5mb_bytes_per_sec", "mem_bandwidth_bytes_per_sec")
+        self.assertEqual(benchmark.unrecognised_keys({key: 1 for key in bad}), tuple(sorted(bad)))
+        self.assertEqual(benchmark.mem_bandwidth_working_set(sizes[0]), 300 * MIB)
+
+    def test_an_unmeasured_bandwidth_is_unenforced(self):
+        self.assertEqual(self._check({BW_1GIB: 1}, _scores()), ([], {BW_1GIB: 1}))
+
+    def test_the_former_bandwidth_keys_are_unrecognised_in_a_requirement(self):
+        for old in REMOVED_KEYS:
+            self.assertEqual(self._check({old: 1}, _scores()), ([], {old: 1}))
+            self.assertEqual(benchmark.unrecognised_keys({old: 1}), (old,))
+
+    def test_parse_benchmark_refuses_the_former_bandwidth_keys_naming_the_new_ones(self):
+        for old in REMOVED_KEYS:
+            with self.subTest(key=old):
+                with self.assertRaisesRegex(ValueError, "no longer exists.*mem_bandwidth_64mib"):
+                    benchmark.parse_benchmark({old: 1}, "resources.at_init.benchmark")
         self.assertEqual(
-            self._check({MEM_BANDWIDTH_KEY: 1}, _scores(**{MEM_WORKING_SET_KEY: GIB})),
-            ([], {MEM_BANDWIDTH_KEY: 1}),
+            benchmark.parse_benchmark({BW_256: 3}, "resources.at_init.benchmark"), {BW_256: 3}
         )
-
-    def test_the_working_set_key_alone_requires_nothing(self):
-        self.assertEqual(self._check({MEM_WORKING_SET_KEY: GIB}, _scores()), ([], {}))
 
 
 if __name__ == "__main__":

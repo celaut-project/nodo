@@ -274,8 +274,9 @@ benchmark:
     linux/amd64:
       int_ops_per_sec: -1
       flt_ops_per_sec: -1
-      mem_bandwidth_bytes_per_sec: -1
-      mem_bandwidth_working_set_bytes: -1
+      mem_bandwidth_64mib_bytes_per_sec: -1
+      mem_bandwidth_256mib_bytes_per_sec: -1
+      mem_bandwidth_1gib_bytes_per_sec: -1
       sha256_hashes_per_sec: -1
 ```
 
@@ -286,10 +287,12 @@ benchmark:
   this node scored for the service's architecture is refused, with the reason. A
   requirement on a `-1` score is only logged — an unknown capacity is not evidence of an
   insufficient one.
-- **Memory bandwidth comes with the working set it was measured over**
-  (`mem_bandwidth_working_set_bytes`). It satisfies a requirement only if that set is at
-  least the requested one; a requirement naming none is read against the pinned 1 GiB;
-  and a bandwidth with no working set (`-1`) is never accepted.
+- **Memory bandwidth has one key per working set** it is measured over
+  (`mem_bandwidth_64mib_…`, `…_256mib_…`, `…_1gib_bytes_per_sec`), because a bandwidth is
+  only comparable over the same amount of memory. A requirement is held against the score
+  under the same key, or, for a size the node did not measure, under the smallest larger
+  one it did (a larger working set can only lower a bandwidth). The former `mem_bandwidth_bytes_per_sec` and
+  `mem_bandwidth_working_set_bytes` are refused at load, naming the new keys.
 - The measured scores are **announced to peers** (`Peer.resources`), so a peer whose
   service needs more does not even ask this node.
 - Foreign architectures served under QEMU+TCG have their own block: scoring an emulated
@@ -306,11 +309,9 @@ that is not `-1` — or with the optional `benchmark` core service:
 3. Leave the scores you want measured at `-1` and restart the node.
 
 At startup, while a served architecture has a `-1` primitive, the node launches the
-service **on itself** (never on a peer), asks it for its scores, files the answer under
-the architecture the service reports having run under, and stops it. Only the `-1`s are
-written; the bandwidth and its working set go in together. A
-`mem_bandwidth_working_set_bytes` written by hand while the bandwidth is `-1` is the size
-the service is asked to measure over. It runs on a background thread after the gateway
+service **on itself** (never on a peer), asks it for its scores (once over 1 GiB, and once
+more per other working set still at `-1`), files the answer under the architecture the
+service reports having run under, and stops it. Only the `-1`s are written. It runs on a background thread after the gateway
 is up, so it never holds up startup or billing; a failure is logged (`[BENCHMARK]`) and
 the `-1`s stay for the next start. With `core_services.benchmark` unset, nothing is
 measured and nothing changes.

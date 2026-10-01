@@ -20,16 +20,18 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
 ## Per-architecture resources (#459)
 
 - `ArchitectureResources { Service.Container.Architecture architecture = 1;
-  Service.Container.Resources resources = 2; }` — a resource shape for one
-  architecture.
+  Sysresources resources = 2; }` — a resource shape for one architecture. A single
+  `Sysresources`, with no `at_init`/`at_most` split: the message only says what is
+  supported or asked about.
 - `Peer.resources = 8` is `repeated ArchitectureResources`: the most a node supports per
   architecture it serves, which doubles as its list of supported architectures.
-  `at_most` carries capacity ceilings and the node's measured `benchmark` scores. It is
+  `resources` carries capacity ceilings and the node's measured `benchmark` scores. It is
   covered by the `Peer` signature (`node_identity.canonical_peer_content_digest`).
 - `Peer.ts` moved from field 8 to field 9.
 - `GetResourceAvailability` takes `Client & ArchitectureResources` (it took a bare
   `Service.Container.Resources`). An empty `architecture` means the answering node's
-  native one.
+  native one. In a request, the limits are the most an instance may grow to (the former
+  `at_most`) and `benchmark` is the minimum required (the former `at_init.benchmark`).
 - `Sysresources.min_benchmark` (field 6) is now `Sysresources.benchmark`. Same number,
   so the same bytes; what it means depends on where it sits (see its comment).
 

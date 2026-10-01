@@ -262,4 +262,6 @@ def get_architecture_availability(
                     f"(it runs: {', '.join(served) or 'none'})."
                 ),
             }
-    return get_resource_availability(request.resources, arch=arch)
+    from src.utils.cost_functions.architecture_resources import container_resources_of
+
+    return get_resource_availability(container_resources_of(request.resources), arch=arch)

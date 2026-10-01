@@ -10,7 +10,7 @@ from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
 from src.utils.arch_guard import arch_from_tags
-from src.utils.cost_functions.architecture_resources import should_skip_peer
+from src.utils.cost_functions.architecture_resources import ask_of, should_skip_peer
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import service_extended, peers_id_iterator
@@ -190,7 +190,7 @@ def execution_balancer(
                 # The peer's own announcement already says it could never take this:
                 # it does not run the architecture, or the request exceeds what it
                 # announced (#454, #459). A peer that announced nothing is asked.
-                if should_skip_peer(peer_id, peer_arch, resources, "GetServiceEstimatedCost"):
+                if should_skip_peer(peer_id, peer_arch, ask_of(resources), "GetServiceEstimatedCost"):
                     continue
                 log.LOGGER('Check cost on peer ' + peer_id)
                 # TODO could use async or concurrency

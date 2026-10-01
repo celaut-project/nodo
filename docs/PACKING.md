@@ -513,13 +513,16 @@ competing with it — "2 cores, each at least 500k integer ops/s" is
 |-----|-----------------------------|--------------------|
 | `int_ops_per_sec` | operations | Integer / branch-heavy throughput |
 | `flt_ops_per_sec` | operations | Floating-point throughput |
-| `mem_bandwidth_bytes_per_sec` | bytes | Memory bandwidth, over the working set below |
-| `mem_bandwidth_working_set_bytes` | bytes (not per second) | The working set the bandwidth is required over; default 1 GiB |
+| `mem_bandwidth_64mib_bytes_per_sec` | bytes | Memory bandwidth over a 64 MiB working set |
+| `mem_bandwidth_256mib_bytes_per_sec` | bytes | Memory bandwidth over a 256 MiB working set |
+| `mem_bandwidth_1gib_bytes_per_sec` | bytes | Memory bandwidth over a 1 GiB working set |
 | `sha256_hashes_per_sec` | digests | SHA-256 hashing |
 
 - **Only under `at_init`.** `benchmark` is a minimum, and a minimum is what `at_init`
   states; that is the half admission enforces. Under `at_most` it would mean nothing, so the
-  packer refuses it — and refuses the field's old name, `min_benchmark`, naming the new one.
+  packer refuses it — and refuses the field's old name, `min_benchmark`, and the old
+  memory-bandwidth keys `mem_bandwidth_bytes_per_sec` and `mem_bandwidth_working_set_bytes`,
+  naming the new ones.
 - The key set is `BENCHMARK_KEYS` in `src/utils/benchmark.py`. It is keyed so that a
   new primitive is a new key, never a change to the wire format. On the wire it is a
   list of key/value entries sorted by key (see [`protos/README.md`](../protos/README.md)).
@@ -530,10 +533,13 @@ competing with it — "2 cores, each at least 500k integer ops/s" is
 - A key outside the table is **kept as written**, with a line in the log, never refused: a
   node may know a primitive the packer does not.
 - **Memory bandwidth is only comparable over the same amount of memory** — 5 KiB lives in
-  cache, 2 GiB does not. A node's bandwidth score meets the requirement only if it was
-  measured over a working set **at least** `mem_bandwidth_working_set_bytes` (a larger set
-  can only lower bandwidth); omitted, that is the pinned 1 GiB. A score that does not say
-  what it was measured over is never accepted.
+  cache, 2 GiB does not. So the working set is part of the key: a requirement is held
+  against the node's score under the same key, i.e. over the same amount of memory. The
+  keys above are the sizes a node measures, but a service may require **any** size as
+  `mem_bandwidth_<n><kib|mib|gib>_bytes_per_sec` (say `mem_bandwidth_300mib_bytes_per_sec`):
+  a larger working set can only lower a bandwidth, so it is held against the node's score
+  over the **smallest larger working set it measured**. With none that large it is only
+  logged, not enforced.
 
 **Enforced per architecture.** A node holds the requirement against its own measured
 scores for the service's architecture (`benchmark.BY_ARCH` in its `config.yaml`, see
@@ -551,8 +557,7 @@ intact to every peer the service is delegated to.
             "cpu_quota": 200000,
             "benchmark": {
                 "int_ops_per_sec": 500000,
-                "mem_bandwidth_bytes_per_sec": 5000000000,
-                "mem_bandwidth_working_set_bytes": 2147483648
+                "mem_bandwidth_1gib_bytes_per_sec": 5000000000
             }
         }
     }

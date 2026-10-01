@@ -1059,16 +1059,14 @@ core_services:
 # Per-core benchmark scores of this node, per architecture it serves (issue #459). What a
 # service's `resources.at_init.benchmark` requirement is held against at admission, and
 # what this node announces to its peers (Peer.resources), so a peer whose service needs
-# more does not even ask. Per core and per second, each one; the memory bandwidth comes
-# with the working set (bytes) it was measured over, and only counts for requirements on
-# a working set no larger than that.
+# more does not even ask. Per core and per second, each one. Memory bandwidth is one key
+# per working set it is measured over (64mib, 256mib, 1gib), because a bandwidth is only
+# comparable over the same amount of memory.
 #
 # -1 means "not measured": a requirement on it is logged, never enforced. At startup,
 # while any score of an architecture this node serves is -1, the `benchmark` core service
 # (core_services above) is run to measure it and the result is written here -- only into
-# the -1s, so a value written by hand is never overwritten. A
-# mem_bandwidth_working_set_bytes set by hand while the bandwidth is -1 is the size the
-# service is asked to measure over; -1 there means the pinned default, 1 GiB.
+# the -1s, so a value written by hand is never overwritten.
 #
 # Foreign architectures served under QEMU+TCG get their own scores: a guest there is
 # emulated, and scoring it with the host's numbers would admit exactly the emulated
@@ -1078,14 +1076,16 @@ benchmark:
     linux/amd64:
       int_ops_per_sec: -1
       flt_ops_per_sec: -1
-      mem_bandwidth_bytes_per_sec: -1
-      mem_bandwidth_working_set_bytes: -1
+      mem_bandwidth_64mib_bytes_per_sec: -1
+      mem_bandwidth_256mib_bytes_per_sec: -1
+      mem_bandwidth_1gib_bytes_per_sec: -1
       sha256_hashes_per_sec: -1
     linux/arm64:
       int_ops_per_sec: -1
       flt_ops_per_sec: -1
-      mem_bandwidth_bytes_per_sec: -1
-      mem_bandwidth_working_set_bytes: -1
+      mem_bandwidth_64mib_bytes_per_sec: -1
+      mem_bandwidth_256mib_bytes_per_sec: -1
+      mem_bandwidth_1gib_bytes_per_sec: -1
       sha256_hashes_per_sec: -1
 
 # Opportunistic low-demand fallback scheduler (WIP — see docs/design/low-demand-fallback.md).

@@ -424,27 +424,29 @@ message Sysresources {
     //
     // No min_/max_ prefix, like every other field here: whether it is a floor or
     // a ceiling comes from where the Sysresources sits.
-    //   * Service.Container.Resources.at_init of a request: the MINIMUM the
+    //   * Service.Container.Resources.at_init of a service: the MINIMUM the
     //     service requires. This is the half admission enforces.
-    //   * the at_most branch of a Peer's ArchitectureResources: the node's
-    //     MEASURED score for that architecture, i.e. the most it offers.
-    //   * the at_most of a request: carries no meaning. Admission ignores it.
+    //   * ArchitectureResources.resources: in a Peer, the node's MEASURED score for
+    //     that architecture, i.e. the most it offers; in a GetResourceAvailability
+    //     request, the MINIMUM required.
+    //   * Service.Container.Resources.at_most: carries no meaning. Admission
+    //     ignores it, and the packer refuses it.
     //
     // Recognised keys (src/utils/benchmark.py::BENCHMARK_KEYS):
     //   int_ops_per_sec                 integer/branch-heavy operations per second
     //   flt_ops_per_sec                 floating-point operations per second
-    //   mem_bandwidth_bytes_per_sec     bytes of memory written per second, over
-    //   mem_bandwidth_working_set_bytes   a working set of this many bytes
+    //   mem_bandwidth_64mib_bytes_per_sec   bytes of memory written per second, over
+    //   mem_bandwidth_256mib_bytes_per_sec  a working set of that size (one key per
+    //   mem_bandwidth_1gib_bytes_per_sec    size)
     //   sha256_hashes_per_sec           SHA-256 digests per second
     //
-    // mem_bandwidth_working_set_bytes is not a primitive but the qualifier of
-    // the one above it: a bandwidth is only comparable with another measured
-    // over the same amount of memory. A requirement is met only by a score whose
-    // working set is AT LEAST the requested one (a larger set can only lower
-    // bandwidth); a requirement that names none is read against the pinned
-    // default (benchmark.DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES, 1 GiB); and a
-    // score that names none is never accepted.
-    repeated Uint64KeyValue benchmark = 6;
+    // A bandwidth is only comparable with another measured over the same amount of
+    // memory, so the working set is part of the key. A requirement may name any size
+    // (mem_bandwidth_<n><kib|mib|gib>_bytes_per_sec); it is held against the score under
+    // the same key, or else under the smallest larger working set the node measured (a
+    // larger set can only lower a bandwidth), or is not enforced when there is none.
+    // (benchmark.MEM_WORKING_SETS, benchmark.shortfalls)
+    repeated Uint64KeyValue benchmark = 99;
 }
 
 // -----------------------
@@ -477,12 +479,19 @@ message EstimatedCost {
 // silicon under one virtualizer and software emulation under another (#448), but
 // cpu, memory and disk can too.
 //
+// One Sysresources, no at_init/at_most split: the question is only "is this supported?".
+//   * In Peer.resources: the most this node supports on that architecture, with its
+//     measured `benchmark` scores.
+//   * In a GetResourceAvailability request: the shape asked about. The limits are the
+//     most one instance may grow to (the worst case: a node that supports it supports
+//     any smaller start), and `benchmark` is the minimum per-core score required.
+//
 // `architecture` is matched by tag, the way a service's own is. In a
 // GetResourceAvailability request an empty one means "the node's native
 // architecture", which is what the question meant before it carried one.
 message ArchitectureResources {
     Service.Container.Architecture architecture = 1;
-    Service.Container.Resources resources = 2;
+    Sysresources resources = 2;
 }
 
 message ResourceAvailability {
@@ -695,7 +704,7 @@ message Peer {
     // Anti-replay: a verifier rejects a message whose ts is not strictly newer than
     // the last one it accepted for this public_key. Guards only against a downgrade
     // to a stale address; the claim itself is safe to freely redistribute.
-    int64 ts = 9;
+    int64 ts = 99;
 }
 
 message Client {

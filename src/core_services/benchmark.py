@@ -12,8 +12,10 @@ A node's scores live in ``config.yaml`` under ``benchmark.BY_ARCH`` (see
   (celaut-basics/demo-service, ``benchmark/``) is launched **on this node** -- the
   launch is pinned local through ``launch_service.FORCED_LOCAL``, since a peer that won
   the cost comparison would hand back its own numbers -- and asked
-  ``GET /cgi-bin/benchmark?working_set_bytes=<n>``. It answers with the four scores
-  and the architecture it ran under, and is stopped.
+  ``GET /cgi-bin/benchmark?working_set_bytes=<n>``. It answers with its scores and the
+  architecture it ran under. The first ask is over the largest working set; each memory
+  bandwidth still at ``-1`` for another working set is one more ask of the same
+  instance, which is then stopped.
 * **Per architecture.** A service is one architecture, so the entry is one id or a list
   of them, one per architecture packed. Each runs where the node runs that
   architecture -- Cloud Hypervisor for the host's, QEMU+TCG for a foreign one when
@@ -58,6 +60,16 @@ READY_POLL_S = 1.0
 # failure, and nothing waits on this thread.
 REQUEST_TIMEOUT_S = 1800.0
 
+# The service's own vocabulary for memory bandwidth: one key, and the working set it was
+# measured over beside it. Translated here into this node's one-key-per-working-set
+# names (:data:`benchmark.MEM_BANDWIDTH_WORKING_SET`); a bandwidth over a working set the
+# node has no key for is dropped, not filed under some other size.
+SERVICE_BANDWIDTH_KEY = "mem_bandwidth_bytes_per_sec"
+SERVICE_WORKING_SET_KEY = "mem_bandwidth_working_set_bytes"
+
+# The first ask, which also yields every other primitive: the largest working set.
+FIRST_WORKING_SET = max(benchmark.MEM_WORKING_SETS.values())
+
 # One measurement per node at a time. Two would each measure half a machine.
 _RUN_LOCK = threading.Lock()
 
@@ -94,9 +106,6 @@ def served_architectures() -> List[str]:
 def pending_architectures(served: Sequence[str]) -> Dict[str, Tuple[str, ...]]:
     """Every served architecture with a primitive still at ``-1``, and which ones.
 
-    The working-set key is not a primitive: it is filled alongside the bandwidth, and a
-    bandwidth written by hand without one is left as written (and is then never
-    accepted for enforcement -- see :func:`src.utils.benchmark.shortfalls`).
     An architecture the config lists but this node does not serve cannot be measured
     here; it is said once in the log and otherwise left alone.
     """
@@ -116,24 +125,13 @@ def pending_architectures(served: Sequence[str]) -> Dict[str, Tuple[str, ...]]:
     return pending
 
 
-def requested_working_set(arch: Optional[str]) -> int:
-    """The working set to ask the service to measure over for ``arch``.
-
-    A size the operator wrote while the bandwidth is still ``-1`` is honoured: that is
-    how a node chooses to be scored over a larger set. Otherwise the pinned default.
-    """
-    if arch:
-        scores = benchmark.node_scores(arch)
-        if scores[benchmark.MEM_BANDWIDTH_KEY] < 0 and scores[benchmark.MEM_WORKING_SET_KEY] > 0:
-            return scores[benchmark.MEM_WORKING_SET_KEY]
-    return benchmark.DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES
-
-
 def parse_answer(body: bytes) -> Tuple[Optional[str], Dict[str, int]]:
     """The service's JSON answer as ``(architecture, scores)``.
 
     Only :data:`benchmark.SCORE_KEYS` holding a non-negative integer are kept; anything
     else in the answer (``skipped``, a key from a newer service) is ignored. The
+    service's bandwidth and the working set it names are filed under the key for that
+    working set, or dropped when this node has none. The
     architecture is canonicalised, and None when the answer does not name one this node
     knows -- in which case nothing it says can be filed anywhere. Raises ``ValueError``
     on a body that is not a JSON object.
@@ -142,33 +140,32 @@ def parse_answer(body: bytes) -> Tuple[Optional[str], Dict[str, int]]:
     if not isinstance(answer, dict):
         raise ValueError("the benchmark service did not answer with a JSON object")
     arch = arch_from_tags([answer.get("architecture", "")])
+    def _count(value) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
     scores = {
         key: value for key, value in answer.items()
-        if key in benchmark.SCORE_KEYS
-        and isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        if key in benchmark.SCORE_KEYS and _count(value)
     }
+    bandwidth, working_set = answer.get(SERVICE_BANDWIDTH_KEY), answer.get(SERVICE_WORKING_SET_KEY)
+    if _count(bandwidth) and _count(working_set):
+        for key, size in benchmark.MEM_BANDWIDTH_WORKING_SET.items():
+            if size == working_set:
+                scores[key] = bandwidth
     return arch, scores
 
 
 def merge_scores(current: Mapping[str, int], measured: Mapping[str, int]) -> Tuple[Dict[str, int], List[str]]:
     """``current`` with its ``-1``s filled from ``measured``, and the keys filled.
 
-    Never touches a value that is not ``-1``. The bandwidth and its working set go in
-    together or not at all: a bandwidth without the set it was measured over is a score
-    nothing may be compared against.
+    Never touches a value that is not ``-1``.
     """
     merged = {key: current.get(key, benchmark.UNMEASURED) for key in benchmark.SCORE_KEYS}
     filled: List[str] = []
     for key in benchmark.BENCHMARK_KEYS:
-        if merged[key] >= 0 or key not in measured:
-            continue
-        if key == benchmark.MEM_BANDWIDTH_KEY:
-            if benchmark.MEM_WORKING_SET_KEY not in measured:
-                continue
-            merged[benchmark.MEM_WORKING_SET_KEY] = measured[benchmark.MEM_WORKING_SET_KEY]
-            filled.append(benchmark.MEM_WORKING_SET_KEY)
-        merged[key] = measured[key]
-        filled.append(key)
+        if merged[key] < 0 and key in measured:
+            merged[key] = measured[key]
+            filled.append(key)
     return merged, filled
 
 
@@ -325,8 +322,7 @@ def measure_missing(
             declared = declared_architecture(service_id)
             if declared and declared not in pending:
                 continue
-            arch_hint = declared or (next(iter(pending)) if len(pending) == 1 else None)
-            filled = _measure_with(service_id, declared, arch_hint, pending, launch, get, release)
+            filled = _measure_with(service_id, declared, pending, launch, get, release)
             if filled:
                 arch, keys = filled
                 written[arch] = keys
@@ -350,24 +346,67 @@ def measure_missing(
     return written
 
 
-def _measure_with(service_id, declared, arch_hint, pending, launch, get, release):
+def _usable(service_id, declared, arch, pending) -> bool:
+    """Whether an answer reporting ``arch`` may be filed at all; logs why not."""
+    if arch is None:
+        log.LOGGER(f"[BENCHMARK] {service_id[:16]}... did not say which architecture it ran under.")
+        return False
+    if declared and arch != declared:
+        log.LOGGER(
+            f"[BENCHMARK] {service_id[:16]}... declares {declared} but reports {arch}; "
+            "discarding its answer."
+        )
+        return False
+    if arch not in pending:
+        log.LOGGER(f"[BENCHMARK] {arch} has nothing left to measure; discarding the answer.")
+        return False
+    return True
+
+
+def _other_bandwidths(get, endpoint, service_id, arch, measured) -> Dict[str, int]:
+    """One more ask per working set whose bandwidth ``arch`` still lacks.
+
+    The same instance answers each; only the bandwidth over that working set is taken,
+    the other primitives having been read from the first ask. A failed ask is logged and
+    leaves that one bandwidth at ``-1`` for the next start.
+    """
+    scores = benchmark.node_scores(arch)
+    more: Dict[str, int] = {}
+    for key, size in benchmark.MEM_BANDWIDTH_WORKING_SET.items():
+        if scores[key] >= 0 or key in measured or size == FIRST_WORKING_SET:
+            continue
+        try:
+            _, answer = parse_answer(get(endpoint, size))
+        except Exception as e:
+            log.LOGGER(f"[BENCHMARK] {service_id[:16]}... gave no usable answer for {key}: {e}")
+            continue
+        if key in answer:
+            more[key] = answer[key]
+    return more
+
+
+def _measure_with(service_id, declared, pending, launch, get, release):
     """One launch-ask-stop round with one id; ``(arch, keys written)`` or None."""
-    working_set = requested_working_set(arch_hint)
     log.LOGGER(
         f"[BENCHMARK] Running benchmark service {service_id[:16]}... "
-        f"(declares {declared or 'an unknown architecture'}, working set {working_set} bytes)."
+        f"(declares {declared or 'an unknown architecture'}, "
+        f"working set {FIRST_WORKING_SET} bytes first)."
     )
     try:
         instance = launch(service_id)
     except Exception as e:
         log.LOGGER(f"[BENCHMARK] Could not launch {service_id[:16]}... on this node: {e}")
         return None
+    usable = False
     try:
         endpoint = instance_endpoint(instance)
         if endpoint is None:
             log.LOGGER(f"[BENCHMARK] {service_id[:16]}... came up with no address to ask.")
             return None
-        arch, measured = parse_answer(get(endpoint, working_set))
+        arch, measured = parse_answer(get(endpoint, FIRST_WORKING_SET))
+        usable = _usable(service_id, declared, arch, pending)
+        if usable and measured:
+            measured.update(_other_bandwidths(get, endpoint, service_id, arch, measured))
     except Exception as e:
         log.LOGGER(f"[BENCHMARK] {service_id[:16]}... gave no usable answer: {e}")
         return None
@@ -377,17 +416,7 @@ def _measure_with(service_id, declared, arch_hint, pending, launch, get, release
         except Exception as e:
             log.LOGGER(f"[BENCHMARK] Could not stop the benchmark instance {instance.token}: {e}")
 
-    if arch is None:
-        log.LOGGER(f"[BENCHMARK] {service_id[:16]}... did not say which architecture it ran under.")
-        return None
-    if declared and arch != declared:
-        log.LOGGER(
-            f"[BENCHMARK] {service_id[:16]}... declares {declared} but reports {arch}; "
-            "discarding its answer."
-        )
-        return None
-    if arch not in pending:
-        log.LOGGER(f"[BENCHMARK] {arch} has nothing left to measure; discarding the answer.")
+    if not usable:
         return None
     keys = write_scores(arch, measured)
     log.LOGGER(

@@ -156,19 +156,16 @@ def check_resource_availability_on_peer(
 def group_request(workload: celaut.Service.PossibleEnvironmentWorkload.Workload) -> celaut.ArchitectureResources:
     """What one descendant workload group asks of whoever would run it.
 
-    The group's limits are what each descendant may grow to, so they are its
-    ``at_most``. Its ``benchmark`` is a minimum, so it moves to ``at_init``, the half
-    admission enforces (see Sysresources.benchmark). The architecture is the embedded
-    dependency service's when there is one, and otherwise left empty -- "whatever you
-    natively run" -- because a resource-only group does not say.
+    The group's ``resources`` already is the shape asked about: its limits are what each
+    descendant may grow to, and its ``benchmark`` is a minimum (see
+    Sysresources.benchmark). The architecture is the embedded dependency service's when
+    there is one, and otherwise left empty -- "whatever you natively run" -- because a
+    resource-only group does not say.
     """
     request = celaut.ArchitectureResources()
     if workload.HasField("dependency") and workload.dependency.HasField("service"):
         request.architecture.CopyFrom(workload.dependency.service.container.architecture)
-    request.resources.at_most.CopyFrom(workload.resources)
-    request.resources.at_most.ClearField("benchmark")
-    if len(workload.resources.benchmark):
-        request.resources.at_init.benchmark.extend(workload.resources.benchmark)
+    request.resources.CopyFrom(workload.resources)
     return request
 
 

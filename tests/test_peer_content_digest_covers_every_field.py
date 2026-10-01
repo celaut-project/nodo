@@ -49,7 +49,6 @@ def _censused_messages():
         "Amount": celaut_pb2.Amount.DESCRIPTOR,
         "ArchitectureResources": celaut_pb2.ArchitectureResources.DESCRIPTOR,
         "Service.Container.Architecture": celaut_pb2.Service.Container.Architecture.DESCRIPTOR,
-        "Service.Container.Resources": celaut_pb2.Service.Container.Resources.DESCRIPTOR,
         "Sysresources": celaut_pb2.Sysresources.DESCRIPTOR,
         "Uint64KeyValue": celaut_pb2.Uint64KeyValue.DESCRIPTOR,
     }
@@ -92,8 +91,7 @@ def _announcement():
     announced.architecture.tags.extend(["linux/amd64", "x86_64"])
     announced.architecture.prose = "x86-64"
     announced.architecture.formal = b"\x04"
-    announced.resources.at_init.mem_limit = 1
-    at_most = announced.resources.at_most
+    at_most = announced.resources
     at_most.blkio_weight = 500
     at_most.cpu_period = 100000
     at_most.cpu_quota = 400000
@@ -137,16 +135,14 @@ MUTATIONS = {
     "Service.Container.Architecture.tags": lambda p: p.resources[0].architecture.tags.append("x64"),
     "Service.Container.Architecture.prose": lambda p: setattr(p.resources[0].architecture, "prose", "other"),
     "Service.Container.Architecture.formal": lambda p: setattr(p.resources[0].architecture, "formal", b"\xfc"),
-    "Service.Container.Resources.at_init": lambda p: p.resources[0].resources.ClearField("at_init"),
-    "Service.Container.Resources.at_most": lambda p: p.resources[0].resources.ClearField("at_most"),
-    "Sysresources.blkio_weight": lambda p: setattr(p.resources[0].resources.at_most, "blkio_weight", 10),
-    "Sysresources.cpu_period": lambda p: setattr(p.resources[0].resources.at_most, "cpu_period", 50000),
-    "Sysresources.cpu_quota": lambda p: setattr(p.resources[0].resources.at_most, "cpu_quota", 800000),
-    "Sysresources.mem_limit": lambda p: setattr(p.resources[0].resources.at_most, "mem_limit", 1),
-    "Sysresources.disk_space": lambda p: setattr(p.resources[0].resources.at_most, "disk_space", 1),
-    "Sysresources.benchmark": lambda p: keyvalue.set_value(p.resources[0].resources.at_most.benchmark, "sha256_hashes_per_sec", 1),
-    "Uint64KeyValue.key": lambda p: setattr(p.resources[0].resources.at_most.benchmark[0], "key", "flt_ops_per_sec"),
-    "Uint64KeyValue.value": lambda p: setattr(p.resources[0].resources.at_most.benchmark[0], "value", 1),
+    "Sysresources.blkio_weight": lambda p: setattr(p.resources[0].resources, "blkio_weight", 10),
+    "Sysresources.cpu_period": lambda p: setattr(p.resources[0].resources, "cpu_period", 50000),
+    "Sysresources.cpu_quota": lambda p: setattr(p.resources[0].resources, "cpu_quota", 800000),
+    "Sysresources.mem_limit": lambda p: setattr(p.resources[0].resources, "mem_limit", 1),
+    "Sysresources.disk_space": lambda p: setattr(p.resources[0].resources, "disk_space", 1),
+    "Sysresources.benchmark": lambda p: keyvalue.set_value(p.resources[0].resources.benchmark, "sha256_hashes_per_sec", 1),
+    "Uint64KeyValue.key": lambda p: setattr(p.resources[0].resources.benchmark[0], "key", "flt_ops_per_sec"),
+    "Uint64KeyValue.value": lambda p: setattr(p.resources[0].resources.benchmark[0], "value", 1),
 }
 
 
@@ -221,9 +217,9 @@ class ContentDigestCoversEveryFieldTests(unittest.TestCase):
     def test_an_unset_limit_and_a_zero_limit_are_different_claims(self):
         # Every Sysresources scalar is `optional`: "nothing said" is not "0".
         unset = _announcement()
-        unset.resources[0].resources.at_most.ClearField("blkio_weight")
+        unset.resources[0].resources.ClearField("blkio_weight")
         zero = _announcement()
-        zero.resources[0].resources.at_most.blkio_weight = 0
+        zero.resources[0].resources.blkio_weight = 0
         self.assertNotEqual(
             canonical_peer_content_digest(unset), canonical_peer_content_digest(zero)
         )
