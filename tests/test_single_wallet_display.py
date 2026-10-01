@@ -29,7 +29,7 @@ class PrintPaymentInfoTests(unittest.TestCase):
         self.assertNotIn("Total:", out)
 
     def test_a_wallet_that_is_its_own_cold_wallet_is_printed_once(self):
-        """Bitcoin's read-only backend is paid at the cold wallet: one address, one line.
+        """A cold wallet that is the wallet itself: one address, one line.
 
         Printed twice it reads as two wallets, and an operator counting their money
         would be looking for a second balance that does not exist.

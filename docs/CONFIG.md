@@ -698,28 +698,31 @@ no default on purpose: a satoshi is worth about a million nanoERG, so borrowing
 `MU_PER_NANOERG`'s `1` would sell an hour of compute for a millionth of its price.
 Unset, the node does not offer Bitcoin at all rather than offering it mispriced.
 
-`BACKEND` decides what this node can do and where the key is. With `explorer` (a public
-HTTP API) there is no key anywhere and the node can only be *paid*, at
-`payments.COLD_WALLET`: with no key there is no hot wallet to be paid into and no sweep
-to cold later, so the cold wallet is where payers are sent. With `core` the key
-is in the wallet of a bitcoind you run and back up, and `WALLET_KEYS_EXTERNAL: true` is
-what tells the node not to generate a mnemonic for it.
+`BACKEND` decides how this node reaches Bitcoin and where the key is. All three can be
+paid and can pay. With `explorer` (a public Esplora HTTP API) — the default, and Ergo's
+posture — the node derives its wallet from `WALLET_MNEMONIC` here, builds and signs
+every transaction itself, and asks the explorer only which outputs it owns and to relay
+the result. With `core` the key is in the wallet of a bitcoind you run and back up, so no
+mnemonic is generated for it.
 
 With `service` the node runs the bitcoind itself, as the `bitcoin-node` core service,
-and derives its wallet from `WALLET_MNEMONIC` here — Ergo's posture, with Core still
-doing the signing. That needs `WALLET_KEYS_EXTERNAL: false` (so the node mints the
-mnemonic), `RPC_USER`/`RPC_PASSWORD` (Core's cookie lives inside the service and cannot
-be read from here) and `core_services.bitcoin-node`. `PRUNE_MIB` sizes the chain it
-keeps: `0` is the whole ~700 GB with a `txindex`, anything else prunes to about that many
-MiB. All of it is checked at startup.
+and derives its wallet from the same `WALLET_MNEMONIC` — Core doing the signing. That
+needs `RPC_USER`/`RPC_PASSWORD` (Core's cookie lives inside the service and cannot be
+read from here) and `core_services.bitcoin-node`. `PRUNE_MIB` sizes the chain it keeps:
+`0` is the whole ~700 GB with a `txindex`, anything else prunes to about that many MiB.
+All of it is checked at startup.
+
+Payers are sent to the node's own wallet; `payments.COLD_WALLET` is only where the
+excess is swept. `WALLET_KEYS_EXTERNAL`, which used to switch the mnemonic off, is gone:
+the backend decides, and a config that still has it is refused at load.
 
 Every key, what it does, the BIP-84 path the service derives at, and why on-chain BTC is
 for coarse node-to-node deposits rather than for a client topping up an instance:
 [`BITCOIN.md`](BITCOIN.md).
 
-> ⚠️ `WALLET_MNEMONIC` is a secret — on either ledger. With Bitcoin's `service`
-> backend this file is the *only* backup of that wallet: the service derives its keys
-> and stores none. The `nodo tui` Config editor masks secret values; keep backups
+> ⚠️ `WALLET_MNEMONIC` is a secret — on either ledger. With Bitcoin's `explorer` and
+> `service` backends this file is the *only* backup of that wallet: nothing else
+> stores the keys. The `nodo tui` Config editor masks secret values; keep backups
 > off-repo. Ergo and Bitcoin transactions are both **final and irreversible**
 > (see [`KyA.md`](KyA.md)).
 

@@ -839,13 +839,12 @@ class ConfigManager(metaclass=Singleton):
                 for name, ledger in ledgers.items():
                     if not isinstance(ledger, dict):
                         continue
-                    # Unless the ledger says its keys live somewhere else. A chain
-                    # whose wallet is held by its own node -- Bitcoin's is, in Core --
-                    # would otherwise be handed a BIP-39 mnemonic that nothing uses,
-                    # written into config.yaml and labelled a secret to back up. The
-                    # flag is a generic key in that ledger's own block, so nothing here
-                    # has to know which chains those are.
-                    if ledger.get("WALLET_KEYS_EXTERNAL"):
+                    # Unless the ledger's keys live somewhere else. Bitcoin's do under
+                    # `BACKEND: core`: the wallet is the operator's own bitcoind's, and
+                    # it would otherwise be handed a BIP-39 mnemonic that nothing uses,
+                    # written into config.yaml and labelled a secret to back up. Every
+                    # other backend signs with the mnemonic, so it is minted for them.
+                    if str(ledger.get("BACKEND") or "").strip().lower() == "core":
                         continue
                     configured = str(ledger.get("WALLET_MNEMONIC") or "").strip()
                     if not configured or configured == "auto":

@@ -1,65 +1,62 @@
-"""Reaching Bitcoin over a public HTTP API, to be **paid** without running anything.
+"""Reaching Bitcoin over a public HTTP API, and signing for it locally.
 
-Ergo's posture is a remote public node plus a local key: `ledgers.ergo.NODE_URL`
-defaults to somebody else's node and the wallet mnemonic lives in `config.yaml`. So an
-operator runs no Ergo infrastructure at all. Bitcoin Core over RPC is the opposite --
-Core signs, so it has to be a node you would hand your wallet to -- and requiring that
-of anyone who merely wants to *receive* BTC is a heavier ask than this project makes
-anywhere else.
+This is Ergo's posture, on Bitcoin: ``ledgers.ergo.NODE_URL`` defaults to somebody
+else's public node and the wallet mnemonic lives in ``config.yaml``, so an operator runs
+no Ergo infrastructure at all. Here ``EXPLORER_URL`` points at any server that speaks the
+Esplora HTTP API -- blockstream.info, mempool.space, or one you host -- and the key is
+derived from ``ledgers.bitcoin.WALLET_MNEMONIC`` (see ``signer.py``). The explorer
+answers questions about the chain; it never holds a key and never signs.
 
-This backend closes that gap for the receiving side. Selected as
-`ledgers.bitcoin.BACKEND: explorer`, it implements the read half of the `ChainBackend`
-surface against whatever `EXPLORER_URL` points at, which has to speak the Esplora HTTP
-API: blockstream.info, mempool.space, or a self-hosted instance. It **refuses the
-rest**: it holds no key, so it cannot sign, and it says so rather than failing
-somewhere further in.
+* **To be paid**, the wallet's single BIP-84 address is advertised, and incoming
+  payments are read back off the explorer.
+* **To pay**, the wallet's confirmed outputs are listed, a transaction is built and
+  signed here, and the explorer is asked only to relay it. The transaction id it
+  answers with is checked against the one computed locally.
 
-What that buys, and what it does not:
+The explorer is trusted for what it *reports*, and for nothing else: BIP-143 signs each
+input's amount, so an output it misreports gives a transaction the network rejects, never
+one that moves more than the wallet holds. Choose one you trust to tell the truth, and to
+broadcast; a hosted instance of your own is the strictest answer.
 
-* A node can be **paid** in BTC with no bitcoind and no Bitcoin key anywhere. Being
-  paid is the side that matters to a node earning money.
-* It cannot **pay**. `can_pay` is False, so `check_sender_balance` answers no and the
-  payer falls through to another payment system -- funding is the selection, and a
-  wallet that cannot sign has no funding. Nothing is broadcast and nothing raises
-  mid-payment.
-* It cannot mint a receiving address either, and it holds no hot wallet it could
-  sweep to cold later -- so it is paid into `COLD_WALLET` directly, which is the one
-  Bitcoin address an operator running this backend has any reason to own. That is
-  checked before the contract is offered.
-
-Signing locally instead -- a seed in `config.yaml`, like Ergo's -- would need raw
-segwit construction, BIP-143 sighashes and UTXO selection. Every line of that moves
-money, and none of it is needed to be paid.
+The one address is a hot wallet like any other signing backend's: payments land in it and
+the excess is swept to ``payments.COLD_WALLET`` when that is set.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import requests
 
+from src.payment_system.contracts.bitcoin import signer
 from src.payment_system.contracts.bitcoin.backend import BackendUnavailable
-from src.utils.bitcoin_units import script_pubkey_from_address
+from src.utils.bitcoin_units import script_pubkey_for_address
 from src.utils.config import ConfigManager
-
-#: This backend holds no key. Read by the contract to decide where it is paid: a backend
-#: that signs is paid into its own hot wallet, this one into the cold wallet.
-CAN_SIGN = False
-COLD_WALLET_KEY = "ledgers.bitcoin.payments.COLD_WALLET"
 
 TIMEOUT_SECONDS = 30
 # How many transactions one address page returns. Esplora's own page size; asking for
 # fewer is not an option the API offers.
 PAGE_SIZE = 25
+# Spent outputs must have at least this many confirmations. Unconfirmed change is never
+# spent: a chain of unconfirmed transactions is how one stuck payment becomes three.
+SPEND_MIN_CONFIRMATIONS = 1
+# How much of an explorer's refusal is repeated in an error. It is prose from a server
+# this node does not control, so it is bounded.
+ERROR_EXCERPT = 200
 
 
 class ExplorerBackend:
-    """The read half of the chain, over HTTP. Holds no key and signs nothing."""
+    """The chain over HTTP, and the one wallet key that spends on it."""
 
-    #: No wallet, no signature: this backend cannot move money, and says so up front.
-    can_pay = False
+    #: This backend holds a key, so it can sign and broadcast.
+    can_pay = True
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, wallet: signer.WalletKey):
         self._url = url.rstrip("/")
+        self._wallet = wallet
+
+    @property
+    def address(self) -> str:
+        return self._wallet.address
 
     # ------------------------------------------------------------------ transport
     def _get(self, path: str) -> Any:
@@ -84,6 +81,24 @@ class ExplorerBackend:
             # depending on the deployment, so a non-JSON body is a value, not an error.
             return text
 
+    def _post(self, path: str, body: str) -> str:
+        """POST ``body`` as plain text and return the plain-text answer."""
+        try:
+            response = requests.post(
+                f"{self._url}{path}", data=body, timeout=TIMEOUT_SECONDS,
+                headers={"content-type": "text/plain"},
+            )
+        except requests.exceptions.RequestException as exc:
+            raise BackendUnavailable(
+                f"explorer {path} failed: {type(exc).__name__}"
+            ) from None
+        text = response.text.strip()
+        if response.status_code != 200:
+            raise BackendUnavailable(
+                f"explorer {path}: HTTP {response.status_code} {text[:ERROR_EXCERPT]}".rstrip()
+            )
+        return text
+
     def _tip_height(self) -> Optional[int]:
         value = self._get("/blocks/tip/height")
         try:
@@ -107,19 +122,27 @@ class ExplorerBackend:
         return max(0, int(tip) - int(height) + 1)
 
     # ------------------------------------------------------------------ reads
-    def get_balance(self, min_conf: int = 1) -> int:
-        """Confirmed balance of the configured receiving address, in satoshi.
+    def utxos(self, min_conf: int = SPEND_MIN_CONFIRMATIONS) -> List[signer.Utxo]:
+        """The wallet's unspent outputs with at least ``min_conf`` confirmations."""
+        entries = self._get(f"/address/{self.address}/utxo") or []
+        tip = self._tip_height() if int(min_conf) > 0 else None
+        found = []
+        for entry in entries:
+            if self._confirmations(entry.get("status") or {}, tip) < int(min_conf):
+                continue
+            found.append(signer.Utxo(
+                txid=str(entry["txid"]), vout=int(entry["vout"]), value=int(entry["value"])
+            ))
+        return found
 
-        The *address'* balance, not a wallet's: this backend has no wallet. Esplora's
-        `chain_stats` counts only confirmed transactions, which is what `min_conf`
-        asks for at its default; a deeper threshold is not something the API can
-        express, so it is honoured as "confirmed" rather than approximated.
+    def get_balance(self, min_conf: int = 1) -> int:
+        """Spendable balance of the wallet's address, in satoshi.
+
+        Counted from its outputs rather than from the address' totals, so ``min_conf``
+        means what it says: a deeper threshold than "confirmed" is honoured, where the
+        totals could only have offered the one.
         """
-        address = _receiving_address()
-        stats = (self._get(f"/address/{address}") or {}).get("chain_stats") or {}
-        funded = int(stats.get("funded_txo_sum") or 0)
-        spent = int(stats.get("spent_txo_sum") or 0)
-        return max(0, funded - spent)
+        return sum(u.value for u in self.utxos(min_conf))
 
     def estimate_fee_rate(self, target_conf: int) -> Optional[float]:
         """Fee rate in sat/vB for ``target_conf`` blocks, or None when unknown.
@@ -219,51 +242,114 @@ class ExplorerBackend:
         return {"outputs": outputs}
 
     def list_transactions(self, limit: int) -> List[Dict[str, Any]]:
-        """Recent transactions at the receiving address, newest first.
+        """Recent transactions of the wallet's address, newest first.
 
-        Shaped like Core's ``listtransactions``, with one difference this backend
-        cannot avoid: it sees an *address*, not a wallet, so it can only report what
-        that address received. A payment this node made from elsewhere is not visible
-        to it, and reporting a guess would be worse than reporting nothing.
+        Shaped like Core's ``listtransactions``: a transaction that spends one of the
+        wallet's outputs is a ``send`` for what went to *other* addresses (the fee is
+        not part of it, nor is change), and one that only pays the address is a
+        ``receive``. Both are read off the one address, which is the whole wallet.
         """
-        address = _receiving_address()
+        address = self.address
         tip = self._tip_height()
         rows: List[Dict[str, Any]] = []
         for transaction in (self._get(f"/address/{address}/txs") or [])[: int(limit)]:
-            received = sum(
-                int(output.get("value") or 0)
-                for output in transaction.get("vout") or []
-                if str(output.get("scriptpubkey_address") or "") == address
-            )
-            if received <= 0:
-                continue
             status = transaction.get("status") or {}
+            received = 0
+            sent: List[Tuple[str, int]] = []
+            for output in transaction.get("vout") or []:
+                to = str(output.get("scriptpubkey_address") or "")
+                value = int(output.get("value") or 0)
+                if to == address:
+                    received += value
+                elif to:
+                    sent.append((to, value))
+            spends_ours = any(
+                str((vin.get("prevout") or {}).get("scriptpubkey_address") or "") == address
+                for vin in transaction.get("vin") or []
+            )
+            if spends_ours and sent:
+                category, amount, counterparty = "send", -sum(v for _, v in sent), sent[0][0]
+            elif not spends_ours and received > 0:
+                category, amount, counterparty = "receive", received, address
+            else:
+                continue
             rows.append({
                 "txid": str(transaction.get("txid") or ""),
-                "category": "receive",
-                "amount": received / 100_000_000,
+                "category": category,
+                "amount": amount / 100_000_000,
                 "confirmations": self._confirmations(status, tip),
                 "time": int(status.get("block_time") or 0),
-                "address": address,
+                "address": counterparty,
             })
         return rows
 
-    # ------------------------------------------------------------------ refusals
-    def _cannot_pay(self, what: str):
-        return BackendUnavailable(
-            f"the Bitcoin backend is read-only, so it cannot {what}. It holds no key "
-            "and signs nothing. Configure ledgers.bitcoin.BACKEND: core with an RPC "
-            "URL and credentials to pay out in BTC; see docs/BITCOIN.md."
-        )
+    # ------------------------------------------------------------------ the wallet
+    def receive_address(self, label: str = "nodo") -> str:
+        """The address this node is paid at: derived, so the same on every call."""
+        return self.address
 
     def new_address(self, label: str = "nodo") -> str:
-        raise self._cannot_pay("mint an address")
+        """Nothing is minted: the wallet has the one address, and this is it.
 
-    def send_to(self, address: str, amount_sat: int, **_) -> str:
-        raise self._cannot_pay("send")
+        Present because the contract's ``init()`` asks a signing backend for an address
+        the first time. Another call would be another derivation index, and the
+        advertised ``script`` is one fixed ``scriptPubKey`` by design.
+        """
+        return self.address
 
-    def send_many(self, outputs, **_) -> str:
-        raise self._cannot_pay("send")
+    # ------------------------------------------------------------------ writes
+    def send_to(self, address: str, amount_sat: int, *, op_return: Optional[bytes] = None,
+                fee_rate_sat_vb: float,
+                subtract_fee_from_amount: bool = False) -> str:
+        """Pay one address, optionally carrying ``op_return``. Returns the txid."""
+        return self.send_many(
+            [(address, amount_sat)], op_return=op_return,
+            fee_rate_sat_vb=fee_rate_sat_vb,
+            subtract_fee_from_outputs=[0] if subtract_fee_from_amount else None,
+        )
+
+    def send_many(self, outputs: Sequence[Tuple[str, int]], *,
+                  op_return: Optional[bytes] = None,
+                  fee_rate_sat_vb: float,
+                  subtract_fee_from_outputs: Optional[Sequence[int]] = None) -> str:
+        """Build, sign and relay one transaction paying every output. Returns the txid.
+
+        One transaction, so a donation split across wallets costs one fee. Nothing is
+        sent unless the whole transaction was built and every signature verified, and
+        the explorer is believed about the txid only if it agrees with the one computed
+        here.
+        """
+        if not outputs:
+            raise BackendUnavailable("nothing to send: no outputs")
+        network = self._wallet.network
+        scripts = []
+        for address, amount_sat in outputs:
+            script = script_pubkey_for_address(address, network=network)
+            if script is None:
+                raise BackendUnavailable(
+                    f"{address!r} is not a valid {network} address; nothing was sent"
+                )
+            scripts.append((script, int(amount_sat)))
+        try:
+            built = signer.build_transaction(
+                self._wallet, self.utxos(SPEND_MIN_CONFIRMATIONS), scripts,
+                fee_rate=fee_rate_sat_vb, op_return=op_return,
+                subtract_fee_from=subtract_fee_from_outputs,
+            )
+        except signer.InsufficientFunds as exc:
+            raise BackendUnavailable(f"insufficient funds: {exc}; nothing was sent") from None
+        except ValueError as exc:
+            raise BackendUnavailable(f"could not build the transaction: {exc}") from None
+
+        relayed = self._post("/tx", built.hex)
+        if relayed.lower() != built.txid:
+            # The transaction may well be on its way, which is exactly why this is not a
+            # quiet success: what this node recorded is not what the explorer says.
+            raise BackendUnavailable(
+                f"the explorer answered {relayed[:ERROR_EXCERPT]!r} to a broadcast of "
+                f"{built.txid}"
+            )
+        return built.txid
 
 
 def _op_return_payload(script_hex: str) -> Optional[bytes]:
@@ -289,28 +375,25 @@ def _op_return_payload(script_hex: str) -> Optional[bytes]:
     return None
 
 
-def receiving_address() -> str:
-    """The address this node is paid at on a read-only backend: the cold wallet.
-
-    A backend that signs is paid into a hot wallet and sweeps the excess to cold. This
-    one holds no key, so there is no hot wallet to be paid into and nothing that could
-    ever move a coin out of one -- which leaves the cold wallet as the address payers
-    should be sent to in the first place, and leaves the operator one address to own
-    rather than two.
-
-    ``""`` when it is unset; the caller decides how loudly that matters.
-    """
-    return str(ConfigManager().get(COLD_WALLET_KEY) or "").strip()
+def _network() -> str:
+    return str(ConfigManager().get("ledgers.bitcoin.NETWORK") or "mainnet").strip()
 
 
-def _receiving_address() -> str:
-    address = receiving_address()
-    if not address:
+def _wallet_key() -> signer.WalletKey:
+    """The key for the configured mnemonic. ``BackendUnavailable`` when it cannot be."""
+    config = ConfigManager()
+    mnemonic = str(config.get("ledgers.bitcoin.WALLET_MNEMONIC") or "").strip()
+    if not mnemonic:
         raise BackendUnavailable(
-            f"{COLD_WALLET_KEY} is not set. A read-only backend cannot ask a node for "
-            "an address, and it is paid into the cold wallet directly."
+            "ledgers.bitcoin.WALLET_MNEMONIC is empty. The node generates one on load "
+            "unless BACKEND is core, so this is a config that was edited by hand"
         )
-    return address
+    passphrase = str(config.get("ledgers.bitcoin.WALLET_PASSPHRASE") or "")
+    try:
+        return signer.derive_wallet_key(mnemonic, passphrase, _network())
+    except ValueError as exc:
+        # The message never carries the words: see `signer.derive_wallet_key`.
+        raise BackendUnavailable(f"ledgers.bitcoin.WALLET_MNEMONIC: {exc}") from None
 
 
 def configuration_reason() -> Optional[str]:
@@ -318,22 +401,12 @@ def configuration_reason() -> Optional[str]:
 
     Config only -- no socket -- because the registry asks on the payment path.
     """
-    config = ConfigManager()
-    if not str(config.get("ledgers.bitcoin.EXPLORER_URL") or "").strip():
+    if not str(ConfigManager().get("ledgers.bitcoin.EXPLORER_URL") or "").strip():
         return "ledgers.bitcoin.EXPLORER_URL is not set"
-    cold_wallet = receiving_address()
-    if not cold_wallet:
-        return (
-            f"{COLD_WALLET_KEY} is not set, and a read-only backend cannot ask a node "
-            "for an address -- it is paid into the cold wallet directly, so set the "
-            "address you want to be paid at"
-        )
-    network = str(config.get("ledgers.bitcoin.NETWORK") or "mainnet").strip()
-    if script_pubkey_from_address(cold_wallet, network=network) is None:
-        return (
-            f"{COLD_WALLET_KEY}={cold_wallet!r} is not a segwit {network} address, and "
-            "it is what payers are advertised as a scriptPubKey on this backend"
-        )
+    try:
+        _wallet_key()
+    except BackendUnavailable as exc:
+        return str(exc)
     return None
 
 
@@ -341,4 +414,4 @@ def backend() -> ExplorerBackend:
     url = str(ConfigManager().get("ledgers.bitcoin.EXPLORER_URL") or "").strip()
     if not url:
         raise BackendUnavailable("ledgers.bitcoin.EXPLORER_URL is not set")
-    return ExplorerBackend(url=url)
+    return ExplorerBackend(url=url, wallet=_wallet_key())

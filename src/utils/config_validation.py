@@ -22,6 +22,11 @@ REMOVED_KEYS = (
     "AUXILIAR_MNEMONIC",
     "PAYMENTS_RECEIVER_WALLET",
     "PAYMENTS_RECIVER_WALLET",
+    # Bitcoin signs locally on `explorer` and `service`, so whether the config holds a
+    # mnemonic now follows from BACKEND (`core` is the only one without). A stale `true`
+    # said "put no key in this file"; ignoring it would mint one anyway and move where
+    # this node is paid, so it is rejected and the operator decides.
+    "WALLET_KEYS_EXTERNAL",
     # ERG-native pricing (docs/PRICING.md). The gas model is gone: prices are now per
     # resource, in ERG, under `pricing:`. Leaving a stale key silently in place would
     # keep a node quoting a price nobody charges, so they are rejected outright.
@@ -810,19 +815,12 @@ def _validate_bitcoin_node_service(config: Dict[str, Any], bitcoin: Dict[str, An
 
     * A **published service id**, because the node cannot invent one and a core service
       with no id is not configured (see ``core_services.get_core_service_id``).
-    * A **mnemonic of its own**, which means ``WALLET_KEYS_EXTERNAL`` must be false: the
-      flag is what tells the config loader whether to mint one, and left true for this
-      backend the node would hold no Bitcoin key and the service would come up with no
-      wallet. The pair is checked rather than silently corrected because the honest
-      reading of "the keys are external" is "do not put a key in my config file", and
-      overriding that is not a decision this validator gets to make.
-
-      The *flag* is checked and the mnemonic's emptiness is not, deliberately: this runs
-      **before** the loader mints one, so refusing an empty value would refuse exactly
-      the setup the documentation asks for -- an operator who set the flag and left the
-      phrase blank for the node to fill in. With the flag false a mnemonic is what the
-      next few lines of the loader produce; if it somehow does not, the launch refuses
-      and says which key it wanted rather than starting a bitcoind with no wallet.
+    * A **mnemonic of its own**, which the config loader mints on load for every backend
+      but ``core``. Its emptiness is not checked here, deliberately: this runs **before**
+      the loader mints one, so refusing an empty value would refuse exactly the setup the
+      documentation asks for -- an operator who left the phrase blank for the node to
+      fill in. If it somehow does not, the launch refuses and says which key it wanted
+      rather than starting a bitcoind with no wallet.
     * ``RPC_USER`` **and** ``RPC_PASSWORD``, because they are what nodo and the service
       agree on. Core's cookie is written inside the service's own filesystem, where nodo
       cannot read it -- and a stale cookie from some other node on this host would
@@ -838,15 +836,7 @@ def _validate_bitcoin_node_service(config: Dict[str, Any], bitcoin: Dict[str, An
         raise ConfigValidationError(
             f"ledgers.bitcoin.BACKEND is 'service' but core_services.{BITCOIN_NODE} is "
             "not set to a published service id, so there is no bitcoind for this node "
-            "to run. Set it, or use 'explorer' to be paid in BTC without running one."
-        )
-
-    if bitcoin.get("WALLET_KEYS_EXTERNAL"):
-        raise ConfigValidationError(
-            "ledgers.bitcoin.BACKEND is 'service' but WALLET_KEYS_EXTERNAL is true. "
-            "That flag says this node holds no Bitcoin key, and the service derives its "
-            "wallet from one: set it to false and the node mints a BIP-39 mnemonic into "
-            "ledgers.bitcoin.WALLET_MNEMONIC the way it does for Ergo, or paste your own."
+            "to run. Set it, or use 'explorer' to reach Bitcoin without running a node."
         )
 
     for key in ("RPC_USER", "RPC_PASSWORD"):
@@ -903,8 +893,8 @@ def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
     if chosen not in ("core", "explorer", "service"):
         raise ConfigValidationError(
             f"ledgers.bitcoin.BACKEND must be 'core', 'explorer' or 'service', got "
-            f"{chosen!r}. 'explorer' is a read-only HTTP API -- the node can be paid in "
-            "BTC but not pay in it; 'core' is a bitcoind you run that holds the wallet "
+            f"{chosen!r}. 'explorer' is a public HTTP API, with the node signing locally "
+            "from a mnemonic it holds; 'core' is a bitcoind you run that holds the wallet "
             "and signs; 'service' is a bitcoind the node runs itself as a core service, "
             "with the wallet derived from a mnemonic it holds."
         )
