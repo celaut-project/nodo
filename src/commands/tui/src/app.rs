@@ -2454,7 +2454,7 @@ impl Default for Scarcity {
     }
 }
 
-fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
+pub(crate) fn get_prices(config: &Path) -> (Vec<PriceEntry>, Scarcity) {
     let document = read_yaml(config).ok();
     let read = |key: &str| -> u64 {
         yaml_scalar(document.as_ref(), &["pricing", key])
@@ -7444,7 +7444,7 @@ fn read_service_tag(path: &Path) -> Option<String> {
     metadata.hashtag?.tag.first().cloned()
 }
 
-fn get_config_entries(path: &Path) -> Result<Vec<ConfigEntry>, String> {
+pub(crate) fn get_config_entries(path: &Path) -> Result<Vec<ConfigEntry>, String> {
     let document = read_yaml(path)?;
     let mut entries = Vec::new();
     flatten_yaml(&document, &mut Vec::new(), &mut entries);
