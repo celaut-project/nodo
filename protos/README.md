@@ -17,6 +17,27 @@ Status: **implemented in protobuf schema** and adapted in the main Python consum
   - `protocol_stack`
 - `Resources.start_time_ms` removed.
 
+## Per-architecture resources (#459)
+
+- `ArchitectureResources { Service.Container.Architecture architecture = 1;
+  Service.Container.Resources resources = 2; }` — a resource shape for one
+  architecture.
+- `Peer.resources = 8` is `repeated ArchitectureResources`: the most a node supports per
+  architecture it serves, which doubles as its list of supported architectures.
+  `at_most` carries capacity ceilings and the node's measured `benchmark` scores. It is
+  covered by the `Peer` signature (`node_identity.canonical_peer_content_digest`).
+- `Peer.ts` moved from field 8 to field 9.
+- `GetResourceAvailability` takes `Client & ArchitectureResources` (it took a bare
+  `Service.Container.Resources`). An empty `architecture` means the answering node's
+  native one.
+- `Sysresources.min_benchmark` (field 6) is now `Sysresources.benchmark`. Same number,
+  so the same bytes; what it means depends on where it sits (see its comment).
+
+**Not wire compatible**, deliberately: every node is upgraded together. A node from
+before this change reads field 8 of a new `Peer` as the wrong type, and a new node
+reading a `Peer` stored before it (`peer.advertisement`) finds no `resources` there,
+which the peer pre-filter treats as "announced nothing" and calls as before.
+
 ## Key/value lists (no `map<>` fields)
 
 `xattrs`, `mu_per_call`, `environment_variables` and `benchmark` are

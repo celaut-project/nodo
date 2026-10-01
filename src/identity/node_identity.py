@@ -525,6 +525,35 @@ def _canonical_uri(uri) -> str:
     ])
 
 
+def _canonical_sysresources(sysresources) -> str:
+    """Deterministic encoding of one ``Sysresources``.
+
+    Presence is part of it: every scalar here is ``optional``, and an unset limit
+    ("nothing said") is not the same claim as a limit of 0. ``benchmark`` is sorted
+    by key, like every key/value list in the digest.
+    """
+    scalars = ",".join(
+        f"{name}={getattr(sysresources, name)}" if sysresources.HasField(name) else f"{name}="
+        for name in ("blkio_weight", "cpu_period", "cpu_quota", "mem_limit", "disk_space")
+    )
+    benchmark = ";".join(sorted(
+        f"{entry.key}={entry.value if entry.HasField('value') else ''}"
+        for entry in sysresources.benchmark
+    ))
+    return "~".join([scalars, benchmark])
+
+
+def _canonical_architecture_resources(entry) -> str:
+    """Deterministic encoding of one announced ``ArchitectureResources``."""
+    resources = entry.resources
+    return "~".join([
+        _canonical_protocol(entry.architecture),
+        "1" if entry.HasField("resources") else "0",
+        _canonical_sysresources(resources.at_init) if resources.HasField("at_init") else "-",
+        _canonical_sysresources(resources.at_most) if resources.HasField("at_most") else "-",
+    ])
+
+
 def canonical_peer_content_digest(peer) -> str:
     """A stable digest of everything a peer advertises about itself.
 
@@ -565,6 +594,12 @@ def canonical_peer_content_digest(peer) -> str:
     still verifies -- and, because ``gateway.utils`` caches on this digest, one whose
     fresh value is replaced by the cached announcement (issue #330).
 
+    ``resources`` (#459) is covered too: it is what a peer reads to decide whether to
+    call this node at all, so a relay able to rewrite it could make a node invisible
+    for an architecture it serves, or advertise a benchmark score it never measured.
+    Every field of every ``Sysresources`` is encoded with its presence, since an
+    unset limit and a limit of 0 are different claims.
+
     ``signature_scheme`` is covered as well, which it has to be as soon as more than one
     scheme can be accepted: a relay that could re-label a signature as belonging to a
     different scheme -- one whose verification also accepts those bytes, or simply a
@@ -582,6 +617,7 @@ def canonical_peer_content_digest(peer) -> str:
     rates = ";".join(
         f"{key}={amount.n}" for key, amount in keyvalue.items(peer.mu_per_call)
     )
+    resources = sorted(_canonical_architecture_resources(r) for r in peer.resources)
 
     canonical = "|".join([
         "/".join(uris),
@@ -589,6 +625,7 @@ def canonical_peer_content_digest(peer) -> str:
         "/".join(proofs),
         rates,
         scheme,
+        "/".join(resources),
     ])
     # Blake2b-256. Nothing outside this function reads the value -- a verifier
     # recomputes it from the peer's own advertisement, and it is never stored or
