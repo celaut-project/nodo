@@ -394,6 +394,11 @@ pub enum InputMode {
     /// in the one transaction, the same way a CELL profile writes a dozen keys
     /// rather than leaving the node to run on a partial edit.
     AddCustomUnit,
+    /// The tokens this node accepts besides ERG, reached from the CELL page's
+    /// `assets` lever: the list, with `a` to add one and `d` to remove the selected.
+    EditAssets,
+    /// The form for one new asset, inside the assets modal (see [`AssetForm`]).
+    AddAsset,
     /// CHAT page, new-chat wizard step 1: pick which peer to start a chat with,
     /// narrowed by typing (issue: TUI chat/peers/clients redesign).
     PickChatPeer,
@@ -550,6 +555,12 @@ pub enum PendingAction {
         label: String,
         writes: Vec<(String, String)>,
     },
+    /// Open the value editor on a lever's key once the operator has read what
+    /// replacing it costs. Nothing is written by this: it only lets the editor open.
+    EditLever {
+        lever: &'static Lever,
+        path: &'static str,
+    },
 }
 
 /// The `nodo` invocation a confirmed [`PendingAction`] turns into, and the label its
@@ -577,6 +588,7 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         )),
         PendingAction::DeleteConfigItem { .. } => None,
         PendingAction::ApplyWrites { .. } => None,
+        PendingAction::EditLever { .. } => None,
     }
 }
 
@@ -2877,6 +2889,10 @@ pub struct App {
     /// selected. Empty whenever the picker is closed.
     pub lever_keys: Vec<&'static str>,
     pub lever_key_index: usize,
+    /// Which asset the `EditAssets` modal has highlighted.
+    pub assets_index: usize,
+    /// The new-asset form, while `AddAsset` is open.
+    pub asset_form: AssetForm,
     /// A month of demand folded onto the hours of a clock, drawn under the window on
     /// the SCHEDULE page so the hours can be chosen against what was actually asked
     /// for (issue #337).
@@ -3088,6 +3104,8 @@ impl Default for App {
             price_bar_areas: Vec::new(),
             lever_keys: Vec::new(),
             lever_key_index: 0,
+            assets_index: 0,
+            asset_form: AssetForm::default(),
             now_minute: local_minute_of_day(),
             last_clock_refresh: now,
             demand: DemandByHour::default(),
@@ -3800,6 +3818,8 @@ impl App {
         self.credit_client_id = None;
         self.lever_keys.clear();
         self.lever_key_index = 0;
+        self.assets_index = 0;
+        self.asset_form = AssetForm::default();
         self.chat_wizard_peer_filter.clear();
         self.chat_wizard_peer_index = 0;
         self.chat_wizard_peer_id = None;
@@ -4136,6 +4156,7 @@ impl App {
             InputMode::PickProfile => self.submit_profile_selection(),
             InputMode::PickLeverKey => self.submit_lever_key_selection(),
             InputMode::AddCustomUnit => self.save_custom_unit(),
+            InputMode::AddAsset => self.save_new_asset(),
             InputMode::PickChatPeer => self.submit_chat_peer_pick(),
             InputMode::PickChatTopic => self.submit_chat_topic_pick(),
             InputMode::NewChatTopic => self.submit_new_chat_topic(),
@@ -4152,6 +4173,7 @@ impl App {
             | InputMode::AcceptKya
             | InputMode::Confirm
             | InputMode::ConfirmWrites
+            | InputMode::EditAssets
             | InputMode::Details
             | InputMode::ContextMenu => {}
         }
@@ -4176,6 +4198,12 @@ impl App {
         if let Err(error) = serde_yaml::from_str::<Value>(&self.input) {
             self.status = format!("Invalid YAML value: {error}");
             return;
+        }
+        if is_mnemonic_path(&label_path) {
+            if let Err(message) = check_mnemonic_shape(&self.input) {
+                self.status = message;
+                return;
+            }
         }
 
         if label_path.ends_with("MU_PER_NANOERG") || label_path.ends_with("MU_PER_SATOSHI") {
@@ -4476,6 +4504,7 @@ impl App {
                 }
             }
             LeverKind::Scalar { .. } => self.open_lever_editor(),
+            LeverKind::Assets { .. } => self.open_assets_modal(),
             LeverKind::Cycle(states) => {
                 let document = self.config_document.clone();
                 let current = cell::status(lever, document.as_ref());
@@ -4532,12 +4561,45 @@ impl App {
         };
         match lever.kind {
             LeverKind::Scalar { path, .. } => self.edit_lever_key(lever, path),
+            LeverKind::Assets { .. } => self.open_assets_modal(),
             _ => self.open_lever_key_picker(lever),
         }
     }
 
-    /// Open the value editor on one config key of `lever`.
+    /// Edit one config key of `lever`.
+    ///
+    /// A wallet mnemonic is not an ordinary value: what it opens may hold money, and
+    /// its address may already be in other nodes' hands. Replacing one first shows
+    /// both, and the editor only opens on `y`.
     fn edit_lever_key(&mut self, lever: &'static Lever, path: &'static str) {
+        if let Some(ledger) = wallet_mnemonic_ledger(path) {
+            self.confirm_wallet_replacement(lever, path, ledger);
+            return;
+        }
+        self.open_lever_value_editor(lever, path);
+    }
+
+    /// Show what replacing a ledger's wallet mnemonic leaves behind, and hold the
+    /// editor until the operator has read it.
+    fn confirm_wallet_replacement(
+        &mut self,
+        lever: &'static Lever,
+        path: &'static str,
+        ledger: &str,
+    ) {
+        let lines = wallet_replacement_lines(ledger, &self.node_info.wallets);
+        self.details = Some(DetailsView {
+            title: format!("Replace the {} wallet? (y/N)", capitalised(ledger)),
+            lines,
+            scroll: 0,
+        });
+        self.input_mode = InputMode::ConfirmWrites;
+        self.status = "y opens the editor • n cancels • nothing is written yet".to_string();
+        self.pending_action = Some(PendingAction::EditLever { lever, path });
+    }
+
+    /// Open the value editor on one config key of `lever`.
+    fn open_lever_value_editor(&mut self, lever: &'static Lever, path: &'static str) {
         let document = self.config_document.clone();
         let current = yaml_scalar(document.as_ref(), &path.split('.').collect::<Vec<_>>())
             .unwrap_or_default();
@@ -4566,7 +4628,137 @@ impl App {
         // A secret opens empty, so the plaintext is never on screen -- the same rule
         // the Config editor follows.
         self.input = if lever.secret { String::new() } else { current };
-        self.status = lever.question.to_string();
+        self.status = if wallet_mnemonic_ledger(path).is_some() {
+            "12 or 24 words • \"\" has the node generate a fresh one • Esc cancels".to_string()
+        } else {
+            lever.question.to_string()
+        };
+    }
+
+    /// The tokens this node accepts besides ERG, with the keys to add and remove one.
+    ///
+    /// Add and remove only: an asset is five fields that price a payment method, and
+    /// changing one in place is the same decision as replacing it -- the rate peers
+    /// were told is the old one until the node restarts either way.
+    pub fn open_assets_modal(&mut self) {
+        if self.config_write_running() {
+            self.status = "Busy: a configuration change is being applied".to_string();
+            return;
+        }
+        self.input_mode = InputMode::EditAssets;
+        self.input_title = "Ergo assets".to_string();
+        self.assets_index = 0;
+        self.status = "a add • d remove • ↑/↓ choose • Esc close".to_string();
+    }
+
+    pub fn move_assets_selection(&mut self, delta: i32) {
+        let count = configured_assets(self.config_document.as_ref()).len();
+        if count == 0 {
+            return;
+        }
+        self.assets_index =
+            (self.assets_index as i32 + delta).rem_euclid(count as i32) as usize;
+    }
+
+    /// Open the form for a new asset, over the list.
+    pub fn open_add_asset_prompt(&mut self) {
+        self.input_mode = InputMode::AddAsset;
+        self.input.clear();
+        self.input_title = "New Ergo asset".to_string();
+        self.edit_config_secret = false;
+        self.edit_kind = EditKind::Text;
+        self.asset_form = AssetForm::default();
+        self.status = "Tab/↑/↓ move • Enter next, and saves on the last field • Esc back".to_string();
+    }
+
+    /// Back to the list without adding anything.
+    pub fn cancel_asset_form(&mut self) {
+        self.asset_form = AssetForm::default();
+        self.input_mode = InputMode::EditAssets;
+        self.input_title = "Ergo assets".to_string();
+        self.status = "a add • d remove • ↑/↓ choose • Esc close".to_string();
+    }
+
+    pub fn asset_form_move(&mut self, delta: i32) {
+        let count = ASSET_FIELDS.len() as i32;
+        self.asset_form.focus = (self.asset_form.focus as i32 + delta).rem_euclid(count) as usize;
+    }
+
+    pub fn asset_form_type(&mut self, character: char) {
+        self.asset_form.error = None;
+        let focus = self.asset_form.focus;
+        self.asset_form.values[focus].push(character);
+    }
+
+    pub fn asset_form_backspace(&mut self) {
+        self.asset_form.error = None;
+        let focus = self.asset_form.focus;
+        self.asset_form.values[focus].pop();
+    }
+
+    pub fn asset_form_clear_field(&mut self) {
+        self.asset_form.error = None;
+        let focus = self.asset_form.focus;
+        self.asset_form.values[focus].clear();
+    }
+
+    /// Enter: on to the next field, and on the last one, save.
+    pub fn asset_form_enter(&mut self) {
+        if self.asset_form.focus + 1 < ASSET_FIELDS.len() {
+            self.asset_form_move(1);
+        } else {
+            self.save_new_asset();
+        }
+    }
+
+    fn save_new_asset(&mut self) {
+        let document = self.config_document.clone();
+        let existing = configured_assets(document.as_ref());
+        let declared_units: Vec<String> = document
+            .as_ref()
+            .and_then(|document| document.get("ui")?.get("UNITS")?.as_mapping())
+            .map(|units| {
+                units
+                    .keys()
+                    .filter_map(|key| key.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let entry = match parse_asset_fields(&self.asset_form.values, &existing, &declared_units) {
+            Ok(entry) => entry,
+            Err((field, message)) => {
+                // The form stays open on the field that is wrong: a message about
+                // "field 3" the operator has to go and find is half an answer.
+                self.asset_form.focus = field;
+                self.asset_form.error = Some(message);
+                return;
+            }
+        };
+        let symbol = entry.symbol.clone();
+        let path = config_path_segments(ASSETS_PATH);
+        self.close_input();
+        self.start_config_write(ConfigWrite {
+            label: format!("Add asset {symbol}"),
+            expression: format!("{} += [env(NODO_TUI_V0)]", yq_path_expression(&path)),
+            values: vec![("NODO_TUI_V0".to_string(), entry.flow_yaml())],
+            follow_up: ConfigFollowUp::None,
+        });
+    }
+
+    /// Confirm removing the highlighted asset.
+    pub fn open_remove_asset_confirm(&mut self) {
+        let assets = configured_assets(self.config_document.as_ref());
+        let Some(asset) = assets.get(self.assets_index) else {
+            self.status = "No asset to remove".to_string();
+            return;
+        };
+        let mut path = config_path_segments(ASSETS_PATH);
+        path.push(ConfigPathSegment::Index(self.assets_index));
+        let label = format!("{} ({})", asset.symbol, short_token_id(&asset.token_id));
+        self.input_mode = InputMode::Confirm;
+        self.input_title = format!("Remove {label}? (y/N)");
+        self.status = "The node stops advertising it and restarts onto the new list".to_string();
+        self.pending_action = Some(PendingAction::DeleteConfigItem { path, label });
     }
 
     /// Offer the keys one lever stands for, so any of them can be edited from here.
@@ -5379,6 +5571,10 @@ impl App {
                 self.details = None;
                 self.write_config_values(label, &writes, ConfigFollowUp::None);
             }
+            PendingAction::EditLever { lever, path } => {
+                self.details = None;
+                self.open_lever_value_editor(lever, path);
+            }
             other => {
                 if let Some((label, args)) = pending_command(other) {
                     self.spawn_command(CommandKind::Generic, label, args);
@@ -5956,6 +6152,287 @@ async fn fetch_node_info() -> Result<NodeInfo, String> {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
     Ok(parse_node_info(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Where the Ergo tokens live in config.yaml.
+pub const ASSETS_PATH: &str = "ledgers.ergo.payments.ASSETS";
+
+fn config_path_segments(path: &str) -> Vec<ConfigPathSegment> {
+    path.split('.')
+        .map(|key| ConfigPathSegment::Key(key.to_string()))
+        .collect()
+}
+
+/// One entry of `ledgers.ergo.payments.ASSETS`, as the modal lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetRow {
+    pub token_id: String,
+    pub symbol: String,
+    pub unit_name: String,
+    pub decimals: String,
+    pub mu_per_unit: String,
+}
+
+impl AssetRow {
+    /// The entry as a one-line YAML flow mapping, for `yq`'s `env()` to parse.
+    ///
+    /// Strings go in as JSON, which is valid YAML and cannot be read as anything but a
+    /// string; the two numbers go in bare so they stay numbers.
+    fn flow_yaml(&self) -> String {
+        let quoted = |text: &str| serde_json::to_string(text).unwrap_or_default();
+        format!(
+            "{{TOKEN_ID: {}, SYMBOL: {}, UNIT_NAME: {}, DECIMALS: {}, MU_PER_UNIT: {}}}",
+            quoted(&self.token_id),
+            quoted(&self.symbol),
+            quoted(&self.unit_name),
+            self.decimals,
+            self.mu_per_unit
+        )
+    }
+}
+
+/// `003bd19d…85d0`: enough of a 64-hex id to tell two apart on one row.
+pub fn short_token_id(token_id: &str) -> String {
+    if token_id.chars().count() <= 12 {
+        return token_id.to_string();
+    }
+    let head: String = token_id.chars().take(8).collect();
+    let tail: String = token_id.chars().skip(token_id.chars().count() - 4).collect();
+    format!("{head}…{tail}")
+}
+
+/// The assets config.yaml declares now, in order.
+pub fn configured_assets(document: Option<&Value>) -> Vec<AssetRow> {
+    let text = |entry: &Value, key: &str| match entry.get(key) {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) => number.to_string(),
+        _ => String::new(),
+    };
+    let Some(Value::Sequence(entries)) = document
+        .and_then(|document| document.get("ledgers")?.get("ergo")?.get("payments")?.get("ASSETS"))
+    else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .map(|entry| AssetRow {
+            token_id: text(entry, "TOKEN_ID"),
+            symbol: text(entry, "SYMBOL"),
+            unit_name: text(entry, "UNIT_NAME"),
+            decimals: text(entry, "DECIMALS"),
+            mu_per_unit: text(entry, "MU_PER_UNIT"),
+        })
+        .collect()
+}
+
+/// The fields of the new-asset form, in the order they are asked.
+pub struct AssetFieldInfo {
+    pub name: &'static str,
+    /// One line under the form while the field is focused.
+    pub help: &'static str,
+}
+
+pub const ASSET_FIELDS: [AssetFieldInfo; 5] = [
+    AssetFieldInfo {
+        name: "TOKEN_ID",
+        help: "The token's 64-hex id, never its name: anyone can mint a token called SigUSD.",
+    },
+    AssetFieldInfo {
+        name: "SYMBOL",
+        help: "Shown to people (SigUSD). Never used to match a box.",
+    },
+    AssetFieldInfo {
+        name: "UNIT_NAME",
+        help: "The display unit's name (sigusd): unique, and not erg or one in ui.UNITS.",
+    },
+    AssetFieldInfo {
+        name: "DECIMALS",
+        help: "Stated here, not read from the minter (SigUSD: 2). A wrong one misprices by 10^n.",
+    },
+    AssetFieldInfo {
+        name: "MU_PER_UNIT",
+        help: "MU per BASE unit, as MU_PER_NANOERG is for ERG: one cent of a 2-decimal token.",
+    },
+];
+
+/// What the operator has typed into the new-asset form.
+#[derive(Debug, Clone, Default)]
+pub struct AssetForm {
+    pub values: [String; 5],
+    pub focus: usize,
+    /// Why the last save was refused; cleared by the next keystroke.
+    pub error: Option<String>,
+}
+
+/// Validate the form: the asset, or the field that is wrong and why.
+///
+/// The same rules the node enforces at startup (`parse_assets` in
+/// `contracts/ergo/rate.py`), checked here so a mistake is reported at the form rather
+/// than as a restart that does not come back. A rate out of scale with `MU_PER_NANOERG`
+/// is not caught here -- that is a warning the node prints at start.
+pub fn parse_asset_fields(
+    values: &[String; 5],
+    existing: &[AssetRow],
+    declared_units: &[String],
+) -> Result<AssetRow, (usize, String)> {
+    let [token_id, symbol, unit_name, decimals, rate] = values.each_ref().map(|v| v.trim());
+
+    let token_id = token_id.to_lowercase();
+    if token_id.len() != 64 || !token_id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err((0, "TOKEN_ID is the token's 64-hex id, never its name".to_string()));
+    }
+    if existing.iter().any(|asset| asset.token_id == token_id) {
+        return Err((
+            0,
+            "That token is already accepted; one asset cannot have two rates".to_string(),
+        ));
+    }
+    if symbol.is_empty() {
+        return Err((1, "SYMBOL is required: an amount has to say what it is".to_string()));
+    }
+    if symbol.chars().any(|c| c.is_control()) {
+        return Err((1, "SYMBOL has a control character in it".to_string()));
+    }
+    let unit_name = unit_name.to_lowercase();
+    if unit_name.is_empty() {
+        return Err((2, "UNIT_NAME is required".to_string()));
+    }
+    if !unit_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err((2, "UNIT_NAME is letters, digits or underscore".to_string()));
+    }
+    if unit_name == "erg"
+        || existing.iter().any(|asset| asset.unit_name == unit_name)
+        || declared_units.iter().any(|unit| unit == &unit_name)
+    {
+        return Err((
+            2,
+            format!("\"{unit_name}\" is already a unit name (ERG, another asset or ui.UNITS)"),
+        ));
+    }
+    if decimals.parse::<u32>().is_err() {
+        return Err((3, "DECIMALS is a whole number, 0 or more".to_string()));
+    }
+    let positive = rate.parse::<f64>().map(|rate| rate.is_finite() && rate > 0.0);
+    if positive != Ok(true) {
+        return Err((4, "MU_PER_UNIT is MU per BASE unit, a positive number".to_string()));
+    }
+    Ok(AssetRow {
+        token_id,
+        symbol: symbol.to_string(),
+        unit_name,
+        decimals: decimals.to_string(),
+        mu_per_unit: rate.to_string(),
+    })
+}
+
+/// `ledgers.<ledger>.WALLET_MNEMONIC` -> `<ledger>`.
+fn wallet_mnemonic_ledger(path: &str) -> Option<&str> {
+    path.strip_prefix("ledgers.")?
+        .strip_suffix(".WALLET_MNEMONIC")
+        .filter(|ledger| !ledger.is_empty() && !ledger.contains('.'))
+}
+
+/// A key that holds a BIP-39 phrase: a wallet's, or the node's identity.
+fn is_mnemonic_path(path: &str) -> bool {
+    path == "identity.MNEMONIC" || wallet_mnemonic_ledger(path).is_some()
+}
+
+fn capitalised(word: &str) -> String {
+    let mut letters = word.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
+    }
+}
+
+/// Whether `input` looks like a mnemonic, or like the explicit ask for a fresh one.
+///
+/// A shape check, not a BIP-39 one: the checksum needs the 2048-word list, which lives
+/// on the Python side and is what the node checks at the restart. This catches the
+/// mistakes that are made at a keyboard -- a pasted sentence, a missing word, a stray
+/// capital -- before they are written, restarted on, and rolled back.
+fn check_mnemonic_shape(input: &str) -> Result<(), String> {
+    let trimmed = input.trim();
+    // `""` is how a secret is cleared on purpose, and a cleared mnemonic is one the
+    // node generates on its next load.
+    if matches!(trimmed, "\"\"" | "''" | "auto") {
+        return Ok(());
+    }
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if ![12, 15, 18, 21, 24].contains(&words.len()) {
+        return Err(format!(
+            "A mnemonic is 12, 15, 18, 21 or 24 words; this has {}. \"\" has the node generate one.",
+            words.len()
+        ));
+    }
+    if let Some(word) = words
+        .iter()
+        .find(|word| !word.chars().all(|c| c.is_ascii_lowercase()))
+    {
+        return Err(format!(
+            "Mnemonic words are lowercase letters only; \"{}\" is not.",
+            word.chars().take(1).collect::<String>() + "…"
+        ));
+    }
+    Ok(())
+}
+
+/// What to tell an operator before they replace a ledger's wallet mnemonic.
+///
+/// Two things the editor cannot show them and that cannot be undone from it: whether
+/// the wallet they are about to stop using holds money, and that other nodes may
+/// already know its address. The balance is the one `nodo info` last reported; a
+/// wallet it did not report is treated as funded, because "I could not read it" is not
+/// "it is empty".
+fn wallet_replacement_lines(ledger: &str, wallets: &[LedgerWallet]) -> Vec<String> {
+    let name = capitalised(ledger);
+    let wallet = wallets.iter().find(|wallet| wallet.ledger == ledger);
+    let mut lines = vec![
+        format!("!! This replaces the {name} wallet the node is using now."),
+        "   Nothing on-chain is deleted, but only the old words can ever move what it holds."
+            .to_string(),
+        String::new(),
+        "FUNDS".to_string(),
+    ];
+    let whose = wallet
+        .map(|wallet| wallet.address.as_str())
+        .filter(|address| !address.is_empty())
+        .map(|address| format!("{address} "))
+        .unwrap_or_default();
+    match wallet.and_then(|wallet| wallet.balance.map(|balance| (balance, wallet.unit.as_str()))) {
+        Some((balance, unit)) if balance > 0.0 => {
+            lines.push(format!("  !! {whose}holds {balance} {unit}.").trim_end().to_string());
+            lines.push(
+                "     Back up the old words, or sweep it to your cold wallet, before going on."
+                    .to_string(),
+            );
+        }
+        Some(_) => {
+            lines.push(format!("  {whose}holds nothing that node info can see."));
+            lines.push("     Unconfirmed payments are not counted.".to_string());
+        }
+        None => {
+            lines.push(format!("  !! The balance of {whose}could not be read."));
+            lines.push("     Treat it as holding funds.".to_string());
+        }
+    }
+    lines.push(String::new());
+    lines.push("ANNOUNCED TO PEERS".to_string());
+    lines.push("  The wallet's address is part of the payment contract this node advertises,".to_string());
+    lines.push("  so peers may already hold it — and may have paid to it. After the restart".to_string());
+    lines.push("  the node advertises the new address; a deposit still on its way to the old".to_string());
+    lines.push("  one is rejected, and its money stays at the old address.".to_string());
+    if ledger == "ergo" {
+        lines.push(String::new());
+        lines.push("  Reputation proofs published from the old wallet stay on-chain under it;".to_string());
+        lines.push("  the new wallet starts with none.".to_string());
+    }
+    lines.push(String::new());
+    lines.push("y opens the editor. Nothing is written until you save there.".to_string());
+    lines
 }
 
 pub fn parse_node_info(output: &str) -> NodeInfo {
@@ -7716,7 +8193,11 @@ mod tests {
     /// The cursor is two-dimensional: ←/→ walk the organelles, ↑/↓ the levers inside
     /// the one in focus. Getting that wrong makes a lever unreachable by keyboard.
     mod cell_navigation {
-        use crate::app::{App, InputMode, Page};
+        use crate::app::{
+            check_mnemonic_shape, config_path_display, configured_assets, is_mnemonic_path,
+            parse_asset_fields, wallet_mnemonic_ledger, AssetRow, ConfigPathSegment, ASSET_FIELDS,
+            wallet_replacement_lines, App, InputMode, LedgerWallet, Page, PendingAction,
+        };
         use crate::cell::{LeverKind, LeverStatus, Organelle};
 
         fn on_cell_page() -> App {
@@ -7964,6 +8445,419 @@ mod tests {
             assert!(body.contains("service_networks.blacklist"), "{body}");
             // Flow style, the way the catalogue and the editor write a list.
             assert!(body.contains("[\"*\"]"), "{body}");
+        }
+
+        fn nucleus_lever(app: &mut App, id: &str) {
+            app.cell.organelle = Organelle::ALL
+                .iter()
+                .position(|organelle| *organelle == Organelle::Nucleus)
+                .unwrap();
+            app.cell.lever = Organelle::Nucleus
+                .levers()
+                .iter()
+                .position(|lever| lever.id == id)
+                .unwrap();
+        }
+
+        fn funded(ledger: &str, balance: Option<f64>, unit: &str) -> LedgerWallet {
+            LedgerWallet {
+                ledger: ledger.to_string(),
+                address: format!("{ledger}-address"),
+                balance,
+                unit: unit.to_string(),
+                cold_address: String::new(),
+            }
+        }
+
+        /// Enter on a wallet mnemonic does not open the editor: it shows what
+        /// replacing it leaves behind, and only `y` goes on.
+        #[test]
+        fn replacing_a_wallet_mnemonic_asks_before_the_editor_opens() {
+            for (id, ledger) in [
+                ("ergo-wallet-mnemonic", "ergo"),
+                ("bitcoin-wallet-mnemonic", "bitcoin"),
+            ] {
+                let mut app = on_cell_page();
+                app.config_document =
+                    Some(serde_yaml::from_str("ledgers:\n  ergo: {}\n  bitcoin: {}\n").unwrap());
+                nucleus_lever(&mut app, id);
+                app.toggle_selected_lever();
+
+                assert_eq!(app.input_mode, InputMode::ConfirmWrites, "{id}");
+                let details = app.details.as_ref().expect("the alert is shown");
+                assert!(details.title.contains("wallet"), "{}", details.title);
+                assert!(
+                    matches!(app.pending_action, Some(PendingAction::EditLever { .. })),
+                    "{id}: nothing may be written by this"
+                );
+                assert!(app.edit_config_path.is_none(), "{id}: the editor opened early");
+                let _ = ledger;
+            }
+        }
+
+        #[tokio::test]
+        async fn confirming_opens_the_secret_editor_empty_and_cancelling_does_not() {
+            let mut app = on_cell_page();
+            app.config_document =
+                Some(serde_yaml::from_str("ledgers:\n  ergo:\n    WALLET_MNEMONIC: old words\n").unwrap());
+            nucleus_lever(&mut app, "ergo-wallet-mnemonic");
+            app.toggle_selected_lever();
+            app.cancel_pending_writes();
+            assert!(app.edit_config_path.is_none());
+            assert_eq!(app.input_mode, InputMode::Normal);
+
+            app.toggle_selected_lever();
+            app.confirm_pending().await;
+            assert_eq!(app.input_mode, InputMode::EditConfig);
+            assert!(app.edit_config_secret);
+            assert!(app.input.is_empty(), "the old mnemonic must not be on screen");
+            assert_eq!(
+                app.edit_config_path.as_ref().map(|path| config_path_display(path)),
+                Some("ledgers.ergo.WALLET_MNEMONIC".to_string())
+            );
+        }
+
+        /// Only the wallet mnemonics are held back. The cold wallet and the hot limit
+        /// open straight into their editor, as before.
+        #[test]
+        fn other_nucleus_levers_still_open_their_editor_directly() {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str("ledgers:\n  bitcoin:\n    payments:\n      COLD_WALLET: ''\n")
+                    .unwrap(),
+            );
+            nucleus_lever(&mut app, "bitcoin-cold-wallet");
+            app.toggle_selected_lever();
+            assert_eq!(app.input_mode, InputMode::EditConfig);
+            assert!(app.pending_action.is_none());
+        }
+
+        #[test]
+        fn the_alert_says_what_the_wallet_holds() {
+            let text = |wallets: &[LedgerWallet]| wallet_replacement_lines("ergo", wallets).join("\n");
+
+            let funded_text = text(&[funded("ergo", Some(12.5), "ERG")]);
+            assert!(funded_text.contains("holds 12.5 ERG"), "{funded_text}");
+            assert!(funded_text.contains("ergo-address"), "{funded_text}");
+
+            let empty_text = text(&[funded("ergo", Some(0.0), "ERG")]);
+            assert!(empty_text.contains("holds nothing"), "{empty_text}");
+            assert!(!empty_text.contains("holding funds"), "{empty_text}");
+
+            // "I could not read it" is not "it is empty": both a wallet with no
+            // balance and one `nodo info` did not report at all read as funded.
+            for unreadable in [text(&[funded("ergo", None, "")]), text(&[])] {
+                assert!(unreadable.contains("could not be read"), "{unreadable}");
+                assert!(unreadable.contains("holding funds"), "{unreadable}");
+            }
+        }
+
+        #[test]
+        fn the_alert_reads_the_wallet_of_the_ledger_being_replaced() {
+            let wallets = [funded("ergo", Some(3.0), "ERG"), funded("bitcoin", Some(0.5), "BTC")];
+            let bitcoin = wallet_replacement_lines("bitcoin", &wallets).join("\n");
+            assert!(bitcoin.contains("holds 0.5 BTC"), "{bitcoin}");
+            assert!(!bitcoin.contains("ERG"), "{bitcoin}");
+        }
+
+        #[test]
+        fn the_alert_warns_that_peers_may_already_know_the_address() {
+            for ledger in ["ergo", "bitcoin"] {
+                let body = wallet_replacement_lines(ledger, &[]).join("\n");
+                assert!(body.contains("ANNOUNCED TO PEERS"), "{ledger}:\n{body}");
+                assert!(body.contains("may already hold it"), "{ledger}:\n{body}");
+            }
+        }
+
+        #[test]
+        fn only_ergo_has_reputation_proofs_to_leave_behind() {
+            assert!(wallet_replacement_lines("ergo", &[]).join("\n").contains("Reputation proofs"));
+            assert!(!wallet_replacement_lines("bitcoin", &[]).join("\n").contains("Reputation"));
+        }
+
+        #[test]
+        fn the_ledger_is_read_off_the_key_and_nothing_else_is_a_wallet() {
+            assert_eq!(wallet_mnemonic_ledger("ledgers.ergo.WALLET_MNEMONIC"), Some("ergo"));
+            assert_eq!(wallet_mnemonic_ledger("ledgers.bitcoin.WALLET_MNEMONIC"), Some("bitcoin"));
+            for path in [
+                "identity.MNEMONIC",
+                "ledgers.bitcoin.payments.COLD_WALLET",
+                "ledgers.ergo.payments.WALLET_MNEMONIC",
+                "ledgers..WALLET_MNEMONIC",
+            ] {
+                assert_eq!(wallet_mnemonic_ledger(path), None, "{path}");
+            }
+        }
+
+        #[test]
+        fn a_mnemonic_is_checked_for_its_shape_before_it_is_written() {
+            let twelve = "abandon ".repeat(11) + "about";
+            assert!(check_mnemonic_shape(&twelve).is_ok());
+            assert!(check_mnemonic_shape(&("abandon ".repeat(23) + "art")).is_ok());
+            // Clearing it on purpose is how a fresh one is asked for.
+            for clear in ["\"\"", "''", "auto"] {
+                assert!(check_mnemonic_shape(clear).is_ok(), "{clear}");
+            }
+            assert!(check_mnemonic_shape(&"abandon ".repeat(11)).unwrap_err().contains("has 11"));
+            assert!(check_mnemonic_shape("").is_err());
+            let capital = twelve.replacen("abandon", "Abandon", 1);
+            let message = check_mnemonic_shape(&capital).unwrap_err();
+            assert!(message.contains("lowercase"), "{message}");
+            // The offending word is not repeated whole: it is part of a secret.
+            assert!(!message.contains("Abandon"), "{message}");
+        }
+
+        const TOKEN: &str = "003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0";
+
+        fn sigusd() -> AssetRow {
+            AssetRow {
+                token_id: TOKEN.to_string(),
+                symbol: "SigUSD".to_string(),
+                unit_name: "sigusd".to_string(),
+                decimals: "2".to_string(),
+                mu_per_unit: "20000000".to_string(),
+            }
+        }
+
+        fn fields(token_id: &str, symbol: &str, unit: &str, decimals: &str, rate: &str) -> [String; 5] {
+            [token_id, symbol, unit, decimals, rate].map(str::to_string)
+        }
+
+        #[test]
+        fn a_filled_form_becomes_an_asset() {
+            let asset =
+                parse_asset_fields(&fields(TOKEN, "SigUSD", "sigusd", "2", "20000000"), &[], &[])
+                    .unwrap();
+            assert_eq!(asset, sigusd());
+            // Upper-case hex and unit names are folded, as the node folds them, and
+            // the padding a person leaves around a pasted value is not kept.
+            let asset = parse_asset_fields(
+                &fields(&format!("  {}  ", TOKEN.to_uppercase()), " SigUSD ", "SIGUSD", "2", " 20000000 "),
+                &[],
+                &[],
+            )
+            .unwrap();
+            assert_eq!(asset, sigusd());
+        }
+
+        /// Each rule the node enforces at startup is refused at the form, and the
+        /// refusal names the field it is about so the focus can go there.
+        #[test]
+        fn each_rule_the_node_enforces_is_refused_on_the_field_it_concerns() {
+            let existing = [sigusd()];
+            let units = vec!["usd".to_string()];
+            let other = "1".repeat(64);
+            let refused = |values: [String; 5], field: usize, why: &str| {
+                let (at, message) = parse_asset_fields(&values, &existing, &units)
+                    .expect_err(&format!("{values:?} should be refused"));
+                assert_eq!(at, field, "{values:?}: {message}");
+                assert!(message.contains(why), "{values:?}: {message}");
+            };
+            refused(fields("", "A", "a", "0", "1"), 0, "64-hex");
+            refused(fields("SigUSD", "A", "a", "0", "1"), 0, "64-hex");
+            refused(fields(&"z".repeat(64), "A", "a", "0", "1"), 0, "64-hex");
+            refused(fields(TOKEN, "A", "a", "0", "1"), 0, "already accepted");
+            refused(fields(&other, "", "a", "0", "1"), 1, "SYMBOL is required");
+            refused(fields(&other, "A", "", "0", "1"), 2, "UNIT_NAME is required");
+            refused(fields(&other, "A", "erg", "0", "1"), 2, "already a unit name");
+            refused(fields(&other, "A", "sigusd", "0", "1"), 2, "already a unit name");
+            refused(fields(&other, "A", "usd", "0", "1"), 2, "already a unit name");
+            refused(fields(&other, "A", "bad-name", "0", "1"), 2, "letters, digits");
+            refused(fields(&other, "A", "a", "", "1"), 3, "DECIMALS");
+            refused(fields(&other, "A", "a", "-1", "1"), 3, "DECIMALS");
+            refused(fields(&other, "A", "a", "two", "1"), 3, "DECIMALS");
+            refused(fields(&other, "A", "a", "2", ""), 4, "MU_PER_UNIT");
+            refused(fields(&other, "A", "a", "2", "0"), 4, "MU_PER_UNIT");
+            refused(fields(&other, "A", "a", "2", "-5"), 4, "MU_PER_UNIT");
+            refused(fields(&other, "A", "a", "2", "lots"), 4, "MU_PER_UNIT");
+        }
+
+        /// A symbol may have a space in it now that it is its own field.
+        #[test]
+        fn a_symbol_with_a_space_is_one_symbol() {
+            let asset = parse_asset_fields(
+                &fields(&"2".repeat(64), "Sigma USD", "sigmausd", "2", "5"),
+                &[],
+                &[],
+            )
+            .unwrap();
+            assert_eq!(asset.symbol, "Sigma USD");
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&asset.flow_yaml()).unwrap();
+            assert_eq!(parsed["SYMBOL"], serde_yaml::Value::String("Sigma USD".to_string()));
+        }
+
+        /// What `yq`'s `env()` is handed has to read back as the same entry, with the
+        /// two numbers still numbers and every string still a string.
+        #[test]
+        fn the_entry_is_written_as_yaml_that_reads_back_unchanged() {
+            let asset = sigusd();
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&asset.flow_yaml()).unwrap();
+            let expected: serde_yaml::Value = serde_yaml::from_str(&format!(
+                "TOKEN_ID: \"{TOKEN}\"\nSYMBOL: SigUSD\nUNIT_NAME: sigusd\nDECIMALS: 2\nMU_PER_UNIT: 20000000\n"
+            ))
+            .unwrap();
+            assert_eq!(parsed, expected);
+            assert!(parsed["DECIMALS"].is_number() && parsed["MU_PER_UNIT"].is_number());
+            // A symbol that YAML would read as something else stays a string.
+            let tricky = AssetRow { symbol: "true".to_string(), ..asset };
+            let parsed: serde_yaml::Value = serde_yaml::from_str(&tricky.flow_yaml()).unwrap();
+            assert_eq!(parsed["SYMBOL"], serde_yaml::Value::String("true".to_string()));
+        }
+
+        #[test]
+        fn the_configured_assets_are_read_in_order() {
+            let document: serde_yaml::Value = serde_yaml::from_str(&format!(
+                "ledgers:\n  ergo:\n    payments:\n      ASSETS:\n        - {}\n        - {{TOKEN_ID: x, SYMBOL: Two, UNIT_NAME: two, DECIMALS: 0, MU_PER_UNIT: 5}}\n",
+                sigusd().flow_yaml()
+            ))
+            .unwrap();
+            let assets = configured_assets(Some(&document));
+            assert_eq!(assets.len(), 2);
+            assert_eq!(assets[0], sigusd());
+            assert_eq!(assets[1].symbol, "Two");
+            assert!(configured_assets(None).is_empty());
+            let empty: serde_yaml::Value = serde_yaml::from_str("ledgers: {}\n").unwrap();
+            assert!(configured_assets(Some(&empty)).is_empty());
+        }
+
+        fn on_assets(list: &str) -> App {
+            let mut app = on_cell_page();
+            app.config_document = Some(
+                serde_yaml::from_str(&format!(
+                    "ledgers:\n  ergo:\n    payments:\n      ASSETS: {list}\n"
+                ))
+                .unwrap(),
+            );
+            nucleus_lever(&mut app, "ergo-assets");
+            app
+        }
+
+        #[test]
+        fn enter_on_the_assets_lever_opens_the_modal_without_writing() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+            assert!(app.pending_action.is_none());
+
+            // `e` is the same gesture on this row: there is no scalar behind it.
+            let mut app = on_assets("[]");
+            app.open_lever_editor();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+        }
+
+        fn type_into_form(app: &mut App, text: &str) {
+            for character in text.chars() {
+                app.asset_form_type(character);
+            }
+        }
+
+        #[test]
+        fn the_form_takes_a_field_at_a_time_and_enter_walks_forward() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_add_asset_prompt();
+            assert_eq!(app.input_mode, InputMode::AddAsset);
+            assert_eq!(app.asset_form.focus, 0);
+
+            type_into_form(&mut app, TOKEN);
+            app.asset_form_enter();
+            assert_eq!(app.asset_form.focus, 1);
+            type_into_form(&mut app, "SigUSD");
+            app.asset_form_backspace();
+            assert_eq!(app.asset_form.values[1], "SigUS");
+            assert_eq!(app.asset_form.values[0], TOKEN, "typing must not touch another field");
+
+            app.asset_form_move(-1);
+            assert_eq!(app.asset_form.focus, 0);
+            app.asset_form_move(-1);
+            assert_eq!(app.asset_form.focus, ASSET_FIELDS.len() - 1, "focus wraps");
+            app.asset_form_clear_field();
+            assert!(app.asset_form.values[4].is_empty());
+        }
+
+        /// Saving with a field wrong keeps the form open, puts the focus on that
+        /// field, and writes nothing -- the error is cleared by the next keystroke.
+        #[test]
+        fn saving_a_bad_form_jumps_to_the_field_and_writes_nothing() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_add_asset_prompt();
+            type_into_form(&mut app, TOKEN);
+            app.asset_form_move(1);
+            type_into_form(&mut app, "SigUSD");
+            app.asset_form_move(1);
+            type_into_form(&mut app, "sigusd");
+            // DECIMALS and MU_PER_UNIT are still empty: save from the last field.
+            app.asset_form.focus = ASSET_FIELDS.len() - 1;
+            app.asset_form_enter();
+
+            assert_eq!(app.input_mode, InputMode::AddAsset, "the form must stay open");
+            assert_eq!(app.asset_form.focus, 3, "DECIMALS is the first one that is wrong");
+            let error = app.asset_form.error.clone().expect("the reason is shown");
+            assert!(error.contains("DECIMALS"), "{error}");
+            assert!(app.config_task.is_none(), "nothing may be written");
+
+            app.asset_form_type('2');
+            assert!(app.asset_form.error.is_none(), "typing dismisses the error");
+            assert_eq!(app.asset_form.values[0], TOKEN, "what was typed is kept");
+        }
+
+        #[test]
+        fn escape_goes_back_to_the_list_and_drops_the_form() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_add_asset_prompt();
+            type_into_form(&mut app, "abc");
+            app.cancel_asset_form();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+            assert!(app.asset_form.values.iter().all(String::is_empty));
+            assert_eq!(app.asset_form.focus, 0);
+        }
+
+        #[test]
+        fn removing_asks_first_and_names_the_entry_by_its_index() {
+            let mut app = on_assets(&format!("[{}]", sigusd().flow_yaml()));
+            app.toggle_selected_lever();
+            app.open_remove_asset_confirm();
+            assert_eq!(app.input_mode, InputMode::Confirm);
+            assert!(app.input_title.contains("SigUSD"), "{}", app.input_title);
+            match &app.pending_action {
+                Some(PendingAction::DeleteConfigItem { path, .. }) => {
+                    assert_eq!(
+                        config_path_display(path),
+                        "ledgers.ergo.payments.ASSETS[0]"
+                    );
+                    assert!(matches!(path.last(), Some(ConfigPathSegment::Index(0))));
+                }
+                other => panic!("expected a delete confirmation, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn there_is_nothing_to_remove_from_an_empty_list() {
+            let mut app = on_assets("[]");
+            app.toggle_selected_lever();
+            app.open_remove_asset_confirm();
+            assert_eq!(app.input_mode, InputMode::EditAssets);
+            assert!(app.pending_action.is_none());
+        }
+
+        #[test]
+        fn the_selection_wraps_over_the_assets() {
+            let two = format!("[{}, {}]", sigusd().flow_yaml(), sigusd().flow_yaml());
+            let mut app = on_assets(&two);
+            app.toggle_selected_lever();
+            app.move_assets_selection(-1);
+            assert_eq!(app.assets_index, 1);
+            app.move_assets_selection(1);
+            assert_eq!(app.assets_index, 0);
+        }
+
+        #[test]
+        fn mnemonic_paths_are_the_identity_and_the_wallets() {
+            assert!(is_mnemonic_path("identity.MNEMONIC"));
+            assert!(is_mnemonic_path("ledgers.bitcoin.WALLET_MNEMONIC"));
+            assert!(!is_mnemonic_path("ledgers.bitcoin.WALLET_PASSPHRASE"));
         }
 
         /// A lever already in the position asked for writes nothing, so Enter on it

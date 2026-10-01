@@ -362,7 +362,7 @@ responsible for something is the part of the config responsible for it too:
 | `CHANNELS · reach` | The gateway port, whether this node publishes its address, whether an instance gets a port of its own |
 | `RIBOSOMES · work` | Whether outside work is taken at all, foreign architectures, descendant admission, spare-capacity work |
 | `VESICLES · voice` | Delegating work to peers and paying for it, announcing to peers, how much an announcement carries |
-| `NUCLEUS · identity & wallet` | The identity mnemonic, the Ergo wallet, the cold wallet, and whether payments are real |
+| `NUCLEUS · identity & wallet` | Three headed runs. GENERAL: the identity mnemonic and whether payments are real. ERGO and BITCOIN: each chain's wallet mnemonic (replacing one first shows what it holds and that peers may know its address), cold wallet and hot limit; Ergo also has `assets`, the tokens accepted besides ERG (`a` opens a form to add one, `d` removes the highlighted) |
 | `IMMUNE · trust` | Service egress, child isolation, integrity checks, device nodes, manifest claims |
 | `WALL · footprint & hours` | How much of this machine may be held at once (CPU, RAM, disk, network), and the hours of the day work is taken in |
 | `MITOCHONDRIA · money` | The scarcity surcharge, the free tier, instance debt, the display unit — and a link to Pricing, which owns the prices themselves |

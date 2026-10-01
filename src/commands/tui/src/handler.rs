@@ -148,6 +148,39 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
             }
             return Ok(());
         }
+        // The assets modal: a list, with one key to add and one to remove.
+        InputMode::EditAssets => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (_, KeyCode::Up) => app.move_assets_selection(-1),
+                (_, KeyCode::Down) => app.move_assets_selection(1),
+                (_, KeyCode::Char('a' | 'A')) => app.open_add_asset_prompt(),
+                (_, KeyCode::Char('d' | 'D') | KeyCode::Delete) => app.open_remove_asset_confirm(),
+                (_, KeyCode::Esc | KeyCode::Char('q')) => app.close_input(),
+                _ => {}
+            }
+            return Ok(());
+        }
+        // The new-asset form: a field at a time. Enter walks forward and saves on the
+        // last field; Esc goes back to the list rather than out of the modal.
+        InputMode::AddAsset => {
+            match (key.modifiers, key.code) {
+                (KeyModifiers::CONTROL, KeyCode::Char('c')) => app.quit(),
+                (KeyModifiers::CONTROL, KeyCode::Char('u')) => app.asset_form_clear_field(),
+                (_, KeyCode::Esc) => app.cancel_asset_form(),
+                (_, KeyCode::Tab | KeyCode::Down) => app.asset_form_move(1),
+                (_, KeyCode::BackTab | KeyCode::Up) => app.asset_form_move(-1),
+                (_, KeyCode::Enter) => app.asset_form_enter(),
+                (_, KeyCode::Backspace) => app.asset_form_backspace(),
+                (modifiers, KeyCode::Char(character))
+                    if !modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    app.asset_form_type(character)
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         // Which of a lever's keys to edit. Same keys as the profile picker, since
         // it is the same gesture: choose a row, Enter opens it.
         InputMode::PickLeverKey => {

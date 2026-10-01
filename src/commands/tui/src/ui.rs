@@ -5,7 +5,7 @@ use crate::app::{
     LedgerEarnings, PageGroup, PaymentRow, PriceEntry, ReputationEvent, ReputationTotals, Service,
     ServiceDetail,
 };
-use crate::cell::{self, Lever, LeverStatus, Organelle};
+use crate::cell::{self, CellRow, Group, Lever, LeverStatus, Organelle};
 use crate::schedule;
 use ratatui::{prelude::*, widgets::*};
 use std::collections::{HashMap, HashSet};
@@ -146,6 +146,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         }
         InputMode::PickProfile => draw_profile_popup(frame, app),
         InputMode::PickLeverKey => draw_lever_key_popup(frame, app),
+        InputMode::EditAssets => draw_assets_popup(frame, app),
+        InputMode::AddAsset => draw_asset_form_popup(frame, app),
         InputMode::PickChatPeer => crate::chat::draw_peer_picker(frame, app),
         InputMode::PickChatTopic => crate::chat::draw_topic_picker(frame, app),
         InputMode::PickChatService => crate::chat::draw_service_picker(frame, app),
@@ -2629,7 +2631,9 @@ fn draw_cell_grid(
     area: Rect,
     document: Option<&serde_yaml::Value>,
 ) {
-    let nucleus_height = (Organelle::Nucleus.levers().len() as u16 + 3).min(area.height / 3);
+    // Two fifths rather than a third: with its three headings the nucleus is thirteen
+    // rows, and a third of a 40-row terminal clipped the last wallet.
+    let nucleus_height = (Organelle::Nucleus.rows().len() as u16 + 2).min(area.height * 2 / 5);
     let bands = Layout::vertical([
         Constraint::Min(5),
         Constraint::Length(nucleus_height),
@@ -2682,7 +2686,7 @@ fn draw_cell_accordion(
             if *organelle == focused {
                 // Whatever the collapsed rows leave: a box shorter than its levers
                 // would hide the ones at the bottom with no way to reach them.
-                Constraint::Min(focused.levers().len() as u16 + 2)
+                Constraint::Min(focused.rows().len() as u16 + 2)
             } else {
                 Constraint::Length(1)
             }
@@ -2739,6 +2743,7 @@ fn draw_organelle(
     }
 
     let levers = organelle.levers();
+    let cell_rows = organelle.rows();
     let rows = Layout::vertical(
         (0..inner.height)
             .map(|_| Constraint::Length(1))
@@ -2746,29 +2751,56 @@ fn draw_organelle(
     )
     .split(inner);
 
-    // A box's share of the band can be shorter than its lever list, and a lever drawn
+    // A box's share of the band can be shorter than its rows, and a lever drawn
     // nowhere cannot be operated. So the box scrolls: the selected row is always
-    // drawn. Unfocused boxes start at the first lever.
+    // drawn. Unfocused boxes start at the top. The offset counts drawn rows, headings
+    // included, because that is what runs out of room.
     let visible = rows.len();
-    let offset = if focused && visible > 0 && app.cell.lever >= visible {
-        (app.cell.lever + 1).saturating_sub(visible)
+    let selected_row = cell_rows
+        .iter()
+        .position(|row| *row == CellRow::Lever(app.cell.lever))
+        .unwrap_or(0);
+    let offset = if focused && visible > 0 && selected_row >= visible {
+        (selected_row + 1).saturating_sub(visible)
     } else {
         0
     };
-    for (row, (lever_index, lever)) in rows
-        .iter()
-        .zip(levers.iter().enumerate().skip(offset))
-    {
-        let selected = focused && app.cell.lever == lever_index;
-        // The absolute index, not the position in this window: it is what a mouse
-        // click resolves to a lever, and a scrolled box would otherwise select the
-        // wrong one.
-        app.cell.lever_areas.push((index, lever_index, *row));
-        frame.render_widget(
-            Paragraph::new(lever_line(lever, document, selected, row.width)),
-            *row,
-        );
+    for (row, cell_row) in rows.iter().zip(cell_rows.iter().skip(offset)) {
+        match *cell_row {
+            CellRow::Heading(group) => frame.render_widget(
+                Paragraph::new(group_heading(group, colour, row.width)),
+                *row,
+            ),
+            CellRow::Lever(lever_index) => {
+                let selected = focused && app.cell.lever == lever_index;
+                // The absolute index, not the position in this window: it is what a
+                // mouse click resolves to a lever, and a scrolled box would otherwise
+                // select the wrong one.
+                app.cell.lever_areas.push((index, lever_index, *row));
+                frame.render_widget(
+                    Paragraph::new(lever_line(levers[lever_index], document, selected, row.width)),
+                    *row,
+                );
+            }
+        }
     }
+}
+
+/// The title of a run of levers: a rule, the name, and what the run is about.
+fn group_heading(group: Group, colour: Color, width: u16) -> Line<'static> {
+    let text = format!("── {} · {} ", group.title(), group.subtitle());
+    let rule = "─".repeat((width as usize).saturating_sub(text.chars().count() + 1));
+    Line::from(vec![
+        Span::styled(" ", Style::default()),
+        Span::styled(
+            format!("── {} ", group.title()),
+            Style::default().fg(colour).bold(),
+        ),
+        Span::styled(
+            format!("· {} {rule}", group.subtitle()),
+            Style::default().fg(muted()),
+        ),
+    ])
 }
 
 /// A collapsed organelle: its name, and enough of its state to know whether to open
@@ -2863,6 +2895,137 @@ fn organelle_colour(organelle: Organelle) -> Color {
         Organelle::Mitochondria => good(),
         Organelle::Vacuole => muted(),
     }
+}
+
+/// The tokens this node accepts besides ERG: one row each, and the keys that change them.
+fn draw_assets_popup(frame: &mut Frame, app: &App) {
+    let assets = crate::app::configured_assets(app.config_document.as_ref());
+    let rows = assets.len().max(1) as u16;
+    let area = centered_rect(86, rows + 7, frame.size());
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent()))
+        .style(Style::default().fg(text_colour()).bg(popup_background()))
+        .title(Span::styled(
+            format!(" {} ", app.input_title.to_uppercase()),
+            Style::default().fg(accent()).bold(),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    if assets.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No tokens: this node accepts ERG only.",
+            Style::default().fg(muted()),
+        )));
+    }
+    for (index, asset) in assets.iter().enumerate() {
+        let selected = index == app.assets_index;
+        lines.push(Line::from(vec![
+            Span::styled(
+                if selected { "▸ " } else { "  " },
+                Style::default().fg(accent()).bold(),
+            ),
+            Span::styled(
+                format!("{:<10}", shorten(&asset.symbol, 10)),
+                if selected {
+                    Style::default().fg(text_colour()).bold()
+                } else {
+                    Style::default().fg(muted())
+                },
+            ),
+            Span::styled(
+                format!(" {:<14}", crate::app::short_token_id(&asset.token_id)),
+                Style::default().fg(muted()),
+            ),
+            Span::styled(
+                format!(" {} dec  {} MU/unit  unit {}", asset.decimals, asset.mu_per_unit, asset.unit_name),
+                Style::default().fg(good()),
+            ),
+        ]));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Each token is its own payment method, paid into the same wallet.",
+        Style::default().fg(muted()),
+    )));
+    lines.push(Line::from(Span::styled(
+        "Adding or removing one writes config.yaml and restarts the node.",
+        Style::default().fg(muted()),
+    )));
+    lines.push(Line::from(Span::styled(
+        "a add  ·  d remove  ·  ↑/↓ choose  ·  Esc close",
+        Style::default().fg(warn()),
+    )));
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().fg(text_colour()).bg(popup_background())),
+        inner,
+    );
+}
+
+/// The form for one new asset, in place of the list: a labelled field per datum, the
+/// focused one with its cursor and a line saying what it wants.
+fn draw_asset_form_popup(frame: &mut Frame, app: &App) {
+    let form = &app.asset_form;
+    let area = centered_rect(86, crate::app::ASSET_FIELDS.len() as u16 + 10, frame.size());
+    frame.render_widget(Clear, area);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(accent()))
+        .style(Style::default().fg(text_colour()).bg(popup_background()))
+        .title(Span::styled(
+            " ERGO ASSETS · NEW ",
+            Style::default().fg(accent()).bold(),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (index, field) in crate::app::ASSET_FIELDS.iter().enumerate() {
+        let focused = index == form.focus;
+        let value = &form.values[index];
+        let mut spans = vec![
+            Span::styled(
+                if focused { "▸ " } else { "  " },
+                Style::default().fg(accent()).bold(),
+            ),
+            Span::styled(
+                format!("{:<12}", field.name),
+                if focused {
+                    Style::default().fg(text_colour()).bold()
+                } else {
+                    Style::default().fg(muted())
+                },
+            ),
+            Span::styled(value.clone(), Style::default().fg(good())),
+        ];
+        if focused {
+            spans.push(Span::styled("▏", Style::default().fg(accent()).bold()));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        crate::app::ASSET_FIELDS[form.focus.min(crate::app::ASSET_FIELDS.len() - 1)].help,
+        Style::default().fg(muted()),
+    )));
+    lines.push(match &form.error {
+        Some(error) => Line::from(Span::styled(format!("!! {error}"), Style::default().fg(bad()))),
+        None => Line::from(""),
+    });
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Tab/↑/↓ move  ·  Enter next, saves on the last  ·  Ctrl+U clears  ·  Esc back",
+        Style::default().fg(warn()),
+    )));
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(text_colour()).bg(popup_background())),
+        inner,
+    );
 }
 
 /// The profile picker: the postures, ordered from the most closed to the most open,
@@ -4535,6 +4698,8 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, area);
     let keys = if gating {
         "y accept · n decline · ↑↓ scroll"
+    } else if matches!(app.pending_action, Some(crate::app::PendingAction::EditLever { .. })) {
+        "y continue • n cancel • ↑/↓ scroll"
     } else if confirming {
         "y apply • n cancel • ↑/↓ scroll"
     } else {
@@ -5162,6 +5327,105 @@ mod tests {
                 );
             }
             assert!(screen.contains("MEMBRANE"), "the membrane frames the page");
+        }
+
+        /// The nucleus holds a node's whole financial identity, and "wallet" means a
+        /// different chain's keys depending on the row. Each chain is headed.
+        #[test]
+        fn the_nucleus_is_headed_by_general_ergo_and_bitcoin() {
+            let screen = screen(140, 40, RENTING);
+            let at = |needle: &str| {
+                screen
+                    .find(needle)
+                    .unwrap_or_else(|| panic!("{needle} is missing:\n{screen}"))
+            };
+            assert!(at("GENERAL") < at("ERGO"), "{screen}");
+            assert!(at("ERGO") < at("BITCOIN"), "{screen}");
+            // Every row of the nucleus is on screen at this size, the last one included.
+            for lever in cell::Organelle::Nucleus.levers() {
+                assert!(screen.contains(lever.label), "{} is not drawn:\n{screen}", lever.label);
+            }
+            assert_eq!(screen.matches("keep hot").count(), 2, "{screen}");
+        }
+
+        fn assets_popup(list: &str) -> String {
+            let mut app = App::new();
+            app.config_document = Some(
+                serde_yaml::from_str(&format!(
+                    "ledgers:\n  ergo:\n    payments:\n      ASSETS: {list}\n"
+                ))
+                .unwrap(),
+            );
+            app.open_assets_modal();
+            let mut terminal = Terminal::new(TestBackend::new(110, 30)).unwrap();
+            terminal.draw(|frame| super::super::draw_assets_popup(frame, &app)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|row| {
+                    (0..buffer.area.width)
+                        .map(|column| buffer.get(column, row).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        #[test]
+        fn the_assets_modal_lists_each_token_with_its_rate() {
+            let screen = assets_popup(
+                "[{TOKEN_ID: \"003bd19d0187117f130b62e1bcab0939929ff5c7709f843c5c4dd158949285d0\", SYMBOL: SigUSD, UNIT_NAME: sigusd, DECIMALS: 2, MU_PER_UNIT: 20000000}]",
+            );
+            for needle in ["SigUSD", "003bd19d…85d0", "2 dec", "20000000 MU/unit", "unit sigusd", "a add", "d remove"] {
+                assert!(screen.contains(needle), "{needle} is missing:\n{screen}");
+            }
+        }
+
+        fn draw_form(configure: impl FnOnce(&mut App)) -> String {
+            let mut app = App::new();
+            app.open_add_asset_prompt();
+            configure(&mut app);
+            let mut terminal = Terminal::new(TestBackend::new(110, 30)).unwrap();
+            terminal.draw(|frame| super::super::draw_asset_form_popup(frame, &app)).unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            (0..buffer.area.height)
+                .map(|row| {
+                    (0..buffer.area.width)
+                        .map(|column| buffer.get(column, row).symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        #[test]
+        fn the_asset_form_has_a_labelled_field_for_each_datum() {
+            let screen = draw_form(|app| {
+                app.asset_form.values[1] = "SigUSD".to_string();
+                app.asset_form.focus = 3;
+            });
+            for label in ["TOKEN_ID", "SYMBOL", "UNIT_NAME", "DECIMALS", "MU_PER_UNIT"] {
+                assert!(screen.contains(label), "{label} is missing:\n{screen}");
+            }
+            assert!(screen.contains("SigUSD"), "{screen}");
+            // The help line is the focused field's, not another's.
+            assert!(screen.contains("misprices by 10^n"), "{screen}");
+            assert!(!screen.contains("never its name"), "{screen}");
+            assert!(screen.contains("▸ DECIMALS"), "{screen}");
+        }
+
+        #[test]
+        fn a_refused_form_shows_why_beside_the_fields() {
+            let screen = draw_form(|app| {
+                app.asset_form.error = Some("DECIMALS is a whole number, 0 or more".to_string());
+            });
+            assert!(screen.contains("!! DECIMALS is a whole number"), "{screen}");
+        }
+
+        #[test]
+        fn the_assets_modal_says_so_when_there_are_none() {
+            let screen = assets_popup("[]");
+            assert!(screen.contains("accepts ERG only"), "{screen}");
+            assert!(screen.contains("a add"), "{screen}");
         }
 
         /// An organelle can hold more levers than its share of the band has rows --
