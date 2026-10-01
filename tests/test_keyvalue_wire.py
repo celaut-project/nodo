@@ -32,6 +32,11 @@ def legacy(full_name):
     return legacy_map_schema.message_class(POOL, "legacy_" + full_name)
 
 
+# Sysresources.benchmark (formerly min_benchmark = 6) now lives at field 99: the goldens
+# below were written by the previous module with tag 0x32 for it and were re-tagged by
+# hand (0x9a 0x06), and GOLDEN_SERVICE_ID recomputed over the result. Every other byte
+# is as the previous module wrote it.
+#
 # Written by the real celaut_pb2.py of celaut-project/nodo:dev @ 9c61af6, the last
 # revision with maps: bytes and uint64 values, message values, and entries whose value
 # is empty / 0 (what a proto3 scalar would drop without `optional`). The order of the
@@ -44,9 +49,9 @@ GOLDEN_CONTRACT = bytes.fromhex(
     "72657373"
 )
 GOLDEN_SYSRESOURCES = bytes.fromhex(
-    "20800832150a0f696e745f6f70735f7065725f73656310a0c21e32080a047a65726f1000"
-    "32220a157368613235365f6861736865735f7065725f73656310ffffffffffffffffff01"
-    "32130a0f666c745f6f70735f7065725f7365631007"
+    "2080089a06150a0f696e745f6f70735f7065725f73656310a0c21e9a06080a047a65726f"
+    "10009a06220a157368613235365f6861736865735f7065725f73656310ffffffffffffff"
+    "ffff019a06130a0f666c745f6f70735f7065725f7365631007"
 )
 GOLDEN_CONFIGURATION = bytes.fromhex(
     "0a090a05454d50545912000a0e0a05414c5048411205616c7068610a0a0a034d49441203"
@@ -59,18 +64,18 @@ GOLDEN_PEER = bytes.fromhex(
     "725f6769625f7365636f6e6412050a03323737"
 )
 GOLDEN_SERVICE = bytes.fromhex(
-    "0a076669787475726512fd0112030a01781a570a052f6d61696e120c0a04626574611204"
+    "0a076669787475726512820212030a01781a570a052f6d61696e120c0a04626574611204"
     "62657461120a0a036d696412036d696412160a09726561645f6d6f64651209726561645f"
-    "6d6f6465120e0a05616c7068611205616c706861120c0a047a65746112047a6574612239"
-    "123732080a0462657461100432070a036d69641003320d0a09726561645f6d6f64651009"
-    "32090a05616c706861100532080a047a65746110043a100a046265746112081206702d62"
-    "6574613a0e0a036d696412071205702d6d69643a1a0a09726561645f6d6f6465120d120b"
-    "702d726561645f6d6f64653a120a05616c70686112091207702d616c7068613a100a047a"
-    "65746112081206702d7a6574611a410a3f08c03e220d0a06615f63616c6c12030a013522"
-    "0d0a06625f63616c6c12030a0135220d0a06645f63616c6c12030a0135220d0a06635f63"
-    "616c6c12030a0135"
+    "6d6f6465120e0a05616c7068611205616c706861120c0a047a65746112047a657461223e"
+    "123c9a06080a046265746110049a06070a036d696410039a060d0a09726561645f6d6f64"
+    "6510099a06090a05616c70686110059a06080a047a65746110043a100a04626574611208"
+    "1206702d626574613a0e0a036d696412071205702d6d69643a1a0a09726561645f6d6f64"
+    "65120d120b702d726561645f6d6f64653a120a05616c70686112091207702d616c706861"
+    "3a100a047a65746112081206702d7a6574611a410a3f08c03e220d0a06615f63616c6c12"
+    "030a0135220d0a06625f63616c6c12030a0135220d0a06645f63616c6c12030a0135220d"
+    "0a06635f63616c6c12030a0135"
 )
-GOLDEN_SERVICE_ID = "7b62ce6c8e5c1231df743c8f1d8b2f2946ec800ed49f4e08bc29139f192ee115"  # sha3_256 of GOLDEN_SERVICE
+GOLDEN_SERVICE_ID = "ca61c66d714b31c81428c28280425dae1c63dc5df855ee2c6b63fffc6c5f768b"  # sha3_256 of GOLDEN_SERVICE
 
 # Deliberately not sorted; "empty" is the entry whose value is empty / 0.
 KEYS = ["zeta", "alpha", "mid", "Beta", "b9", "a0", "é", "empty"]
@@ -151,7 +156,7 @@ class SchemaTests(unittest.TestCase):
                 ("legacy_celaut", "Service.Container.Filesystem.ItemBranch", "xattrs", 5),
                 ("legacy_celaut", "Service.Container.Init", "xattrs", 2),
                 ("legacy_celaut", "Configuration", "environment_variables", 1),
-                ("legacy_celaut", "Sysresources", "benchmark", 6),
+                ("legacy_celaut", "Sysresources", "benchmark", 99),
                 ("legacy_celaut", "Peer", "mu_per_call", 4),
                 ("legacy_pack", "Service.Container.Init", "xattrs", 2),
             ]),
@@ -331,7 +336,7 @@ class NewBytesReadByOldNodesTests(unittest.TestCase):
 
         sysres = celaut.Sysresources()
         keyvalue.set_value(sysres.benchmark, "a", 0)
-        self.assertEqual(sysres.SerializeToString(), bytes.fromhex("32050a01611000"))
+        self.assertEqual(sysres.SerializeToString(), bytes.fromhex("9a06050a01611000"))
 
         received = celaut.Contract()
         received.ParseFromString(contract.SerializeToString())

@@ -16,9 +16,46 @@ Nothing here measures anything or imports a virtualizer: admission reads config 
 it and nothing else. Measuring is the optional `benchmark` core service's job
 (:mod:`src.core_services.benchmark`), and an operator may write the scores by hand.
 """
+import re
 from typing import Any, Dict, Final, List, Mapping, Optional, Tuple
 
 from src.utils import keyvalue
+
+# Memory bandwidth is only comparable with another taken over the same amount of memory
+# -- 5 KiB lives in L1 and 2 GiB does not -- and without the size a node could report its
+# cache and call it memory. So the size is part of the *name*: one primitive per working
+# set, ``mem_bandwidth_<size>_bytes_per_sec``. A node *measures* the sizes below; a
+# service may *require* any size (see :func:`shortfalls`). The sizes are the ones the benchmark service can run:
+# its guest has 2 GiB, so 1 GiB is the largest set it measures. Adding a size is adding
+# an entry here (and having the service measure it).
+MEM_WORKING_SETS: Final[Mapping[str, int]] = {
+    "64mib": 64 << 20,
+    "256mib": 256 << 20,
+    "1gib": 1 << 30,
+}
+
+# key -> the working set (bytes) that bandwidth is measured, and required, over.
+MEM_BANDWIDTH_WORKING_SET: Final[Mapping[str, int]] = {
+    f"mem_bandwidth_{size}_bytes_per_sec": nbytes for size, nbytes in MEM_WORKING_SETS.items()
+}
+MEM_BANDWIDTH_KEYS: Final[Tuple[str, ...]] = tuple(MEM_BANDWIDTH_WORKING_SET)
+
+# A requirement may name *any* working set, not only the ones this node measures:
+# ``mem_bandwidth_<n><kib|mib|gib>_bytes_per_sec``. It is read against the score over the
+# smallest measured working set that is at least as large (see :func:`shortfalls`).
+_MEM_BANDWIDTH_KEY: Final = re.compile(r"^mem_bandwidth_([1-9][0-9]*)(kib|mib|gib)_bytes_per_sec$")
+_SIZE_UNITS: Final[Mapping[str, int]] = {"kib": 1 << 10, "mib": 1 << 20, "gib": 1 << 30}
+
+
+def mem_bandwidth_working_set(key: str) -> Optional[int]:
+    """The working set (bytes) a ``mem_bandwidth_<size>_bytes_per_sec`` key names, else None."""
+    match = _MEM_BANDWIDTH_KEY.match(key)
+    return int(match.group(1)) * _SIZE_UNITS[match.group(2)] if match else None
+
+
+def is_recognised(key: str) -> bool:
+    """Whether this node can name ``key``: a primitive it knows, or a bandwidth over some size."""
+    return key in SCORE_KEYS or mem_bandwidth_working_set(key) is not None
 
 # The primitives this node knows by name, every one of them per core and per second.
 # Adding a key here is all it takes to extend the set: the field is keyed precisely so
@@ -28,26 +65,25 @@ from src.utils import keyvalue
 BENCHMARK_KEYS: Final[Tuple[str, ...]] = (
     "int_ops_per_sec",              # integer/branch-heavy operations
     "flt_ops_per_sec",              # floating-point operations
-    "mem_bandwidth_bytes_per_sec",  # bytes of memory written, over a working set
+    *MEM_BANDWIDTH_KEYS,            # bytes of memory written, one key per working set
     "sha256_hashes_per_sec",        # SHA-256 digests
 )
 
-MEM_BANDWIDTH_KEY: Final[str] = "mem_bandwidth_bytes_per_sec"
-
-# Not a primitive: the amount of memory MEM_BANDWIDTH_KEY was (or must be) measured
-# over, travelling in the same keyed field. A bandwidth is only comparable with another
-# taken over the same working set -- 5 KiB lives in L1 and 2 GiB does not -- and without
-# the size a node could report its cache and call it memory.
-MEM_WORKING_SET_KEY: Final[str] = "mem_bandwidth_working_set_bytes"
-
-# The working set a requirement that names none is read against: 1 GiB. Larger than any
-# last-level cache one core can use (the largest unified LLCs ship at ~0.5 GiB) and half
-# the memory the benchmark service runs with. celaut-basics/demo-service's benchmark
-# pins the same number (benchmark/bench.sh, DEFAULT_WORKING_SET_BYTES).
-DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES: Final[int] = 1 << 30
-
 # Every key a node's score for one architecture holds in config.yaml.
-SCORE_KEYS: Final[Tuple[str, ...]] = BENCHMARK_KEYS + (MEM_WORKING_SET_KEY,)
+SCORE_KEYS: Final[Tuple[str, ...]] = BENCHMARK_KEYS
+
+# Names this vocabulary used to have, and what replaced them. Refused at pack time and
+# in config.yaml rather than carried as "an unrecognised key": a requirement the node
+# would silently not enforce is a service admitted on hardware its author said it
+# cannot run on.
+REMOVED_KEYS: Final[Mapping[str, str]] = {
+    "mem_bandwidth_bytes_per_sec": (
+        "it was replaced by one key per working set: " + ", ".join(MEM_BANDWIDTH_KEYS)
+    ),
+    "mem_bandwidth_working_set_bytes": (
+        "the working set is now part of the key: " + ", ".join(MEM_BANDWIDTH_KEYS)
+    ),
+}
 
 # "Not measured" in config.yaml. Never compared against anything: a requirement on an
 # unmeasured primitive is logged, not enforced, because an unknown capacity is not
@@ -72,7 +108,8 @@ def parse_benchmark(value: Any, path: str) -> Dict[str, int]:
     ``bool`` is refused although Python counts it as an ``int`` -- ``true`` is a typo
     for a number here, never 1 op/s.
 
-    An unrecognised *key* is kept, not refused; see :data:`BENCHMARK_KEYS`. The
+    An unrecognised *key* is kept, not refused; see :data:`BENCHMARK_KEYS`. A key this
+    vocabulary used to have (:data:`REMOVED_KEYS`) is refused, naming its replacement. The
     result is ordered by key, so what is logged about a declaration does not depend on
     the order its author happened to write it in.
     """
@@ -81,6 +118,8 @@ def parse_benchmark(value: Any, path: str) -> Dict[str, int]:
     if not isinstance(value, Mapping):
         raise ValueError(f"service.json {path} must be an object.")
     keyvalue.check_json_object(value, path)
+    for key in sorted(k for k in value if k in REMOVED_KEYS):
+        raise ValueError(f"service.json {path}.{key} no longer exists: {REMOVED_KEYS[key]}.")
 
     parsed: Dict[str, int] = {}
     for key in sorted(value, key=str):
@@ -99,7 +138,7 @@ def parse_benchmark(value: Any, path: str) -> Dict[str, int]:
 
 def unrecognised_keys(benchmark: Mapping[str, int]) -> Tuple[str, ...]:
     """The keys of ``benchmark`` this node has no name for, sorted."""
-    return tuple(sorted(key for key in benchmark if key not in SCORE_KEYS))
+    return tuple(sorted(key for key in benchmark if not is_recognised(key)))
 
 
 def describe(benchmark: Mapping[str, int]) -> str:
@@ -158,6 +197,24 @@ def unmeasured_keys(scores: Mapping[str, int]) -> Tuple[str, ...]:
     return tuple(key for key in SCORE_KEYS if scores.get(key, UNMEASURED) < 0)
 
 
+def _score_for(key: str, scores: Mapping[str, int]) -> Tuple[str, Optional[int]]:
+    """``(key, score)`` ``key`` is held against: its own, or for a bandwidth the next larger.
+
+    A bandwidth whose own score is unmeasured falls back to the measured one over the
+    smallest working set that is at least as large; ``(key, None)`` when there is none.
+    """
+    own = scores.get(key, UNMEASURED)
+    wanted = mem_bandwidth_working_set(key)
+    if wanted is None or (own is not None and own >= 0):
+        return key, own
+    larger = sorted(
+        (size, other) for other, value in scores.items()
+        if value is not None and value >= 0
+        and (size := mem_bandwidth_working_set(other)) is not None and size >= wanted
+    )
+    return (larger[0][1], scores[larger[0][1]]) if larger else (key, None)
+
+
 def shortfalls(
         required: Mapping[str, int],
         scores: Mapping[str, int],
@@ -173,52 +230,35 @@ def shortfalls(
     Each declared primitive ends up in exactly one of the two:
 
     * a **shortfall**, one message each, when the score is measured and below what is
-      required -- or, for memory bandwidth, when it was measured over a smaller working
-      set than the one required, or over none at all: a smaller set can only flatter a
-      bandwidth, and a score that does not say its set cannot be compared with anything;
+      required;
     * **unenforced**, when there is no score to hold it against (unmeasured here, or a
       primitive this node has no name for). An unknown capacity is not evidence of an
       insufficient one.
 
-    A requirement on memory bandwidth that names no working set is read against
-    :data:`DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES`. The working-set key on its own,
-    with no bandwidth required, requires nothing.
+    A memory bandwidth is only comparable over the same amount of memory, and a larger
+    working set can only lower a bandwidth. So a requirement over a working set is held
+    against the score under its own key when the node has one, and otherwise against the
+    score over the **smallest larger working set** the node measured: that score is a
+    safe floor for it. With no measured working set that large (or none at all) there is
+    nothing to hold it against, and it is unenforced like any unmeasured primitive: a
+    smaller set would flatter it, and an unknown capacity is not evidence of an
+    insufficient one.
     """
     found: List[str] = []
     unenforced: Dict[str, int] = {}
     for key in sorted(required):
-        if key == MEM_WORKING_SET_KEY:
-            continue
         minimum = required[key]
-        if key not in BENCHMARK_KEYS:
+        if not is_recognised(key):
             unenforced[key] = minimum
             continue
-        score = scores.get(key, UNMEASURED)
+        score_key, score = _score_for(key, scores)
         if score is None or score < 0:
             unenforced[key] = minimum
             continue
-        if key == MEM_BANDWIDTH_KEY:
-            wanted_set = required.get(MEM_WORKING_SET_KEY)
-            if wanted_set is None:
-                wanted_set = DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES
-            measured_set = scores.get(MEM_WORKING_SET_KEY, UNMEASURED)
-            if measured_set is None or measured_set < 0:
-                found.append(
-                    f"resources.at_init.benchmark.{key} cannot be checked: the score "
-                    f"{where} names no {MEM_WORKING_SET_KEY}, and a bandwidth measured "
-                    "over an unknown amount of memory is never accepted."
-                )
-                continue
-            if measured_set < wanted_set:
-                found.append(
-                    f"resources.at_init.benchmark.{key} needs a working set of at least "
-                    f"{wanted_set} bytes; the score {where} was measured over "
-                    f"{measured_set} bytes, which a cache can flatter."
-                )
-                continue
         if score < minimum:
+            over = f" (over {score_key})" if score_key != key else ""
             found.append(
                 f"Insufficient per-core resources.at_init.benchmark.{key}. "
-                f"Requested: {minimum} per core per second, measured {where}: {score}."
+                f"Requested: {minimum} per core per second, measured {where}: {score}{over}."
             )
     return found, unenforced

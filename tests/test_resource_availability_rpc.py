@@ -127,17 +127,15 @@ class ResourceAvailabilityRoundTripTests(unittest.TestCase):
         self.ANSWERS.clear()
         self.ANSWERS.update({"can_execute": True, "reason": ""})
         asked = celaut.ArchitectureResources(
-            resources=celaut.Service.Container.Resources(
-                at_most=celaut.Sysresources(
-                    mem_limit=4 * 1024 ** 3, disk_space=40 * 1024 ** 3,
-                    cpu_quota=200000, cpu_period=100000, blkio_weight=500,
-                )
+            resources=celaut.Sysresources(
+                mem_limit=4 * 1024 ** 3, disk_space=40 * 1024 ** 3,
+                cpu_quota=200000, cpu_period=100000, blkio_weight=500,
             )
         )
         # The question is per architecture now (#459), and the requirement rides in
-        # at_init: both have to reach the peer.
+        # the minimum benchmark: both have to reach the peer.
         asked.architecture.tags.extend(["linux/amd64", "x86_64"])
-        asked.resources.at_init.benchmark.add(key="int_ops_per_sec", value=500000)
+        asked.resources.benchmark.add(key="int_ops_per_sec", value=500000)
         self._ask(asked)
         self.assertEqual(len(self.RECEIVED), 1)
         # Not just "an ArchitectureResources arrived" -- the same one, field for field. A partitioning

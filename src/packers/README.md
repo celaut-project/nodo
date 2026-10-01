@@ -132,12 +132,15 @@
   `Sysresources.benchmark`: the minimum **per-core, per-second** throughput the service
   requires on named primitives, e.g. `"benchmark": { "int_ops_per_sec": 500000 }`.
   Recognised keys are `BENCHMARK_KEYS` in `src/utils/benchmark.py` (`int_ops_per_sec`,
-  `flt_ops_per_sec`, `mem_bandwidth_bytes_per_sec`, `sha256_hashes_per_sec`), plus
-  `mem_bandwidth_working_set_bytes`, the working set the bandwidth is required over. An
+  `flt_ops_per_sec`, `sha256_hashes_per_sec`, and one memory-bandwidth key per working
+  set: `mem_bandwidth_64mib_bytes_per_sec`, `…_256mib_…`, `…_1gib_…`; any other size
+  as `mem_bandwidth_<n><kib|mib|gib>_bytes_per_sec` is read against the node's next larger
+  measured one). An
   omitted key is no requirement; values must be non-negative JSON integers, anything else
   is a packer error raised before the image is built. An unrecognised key is kept and
-  logged, not refused. `resources.at_most.benchmark` has no meaning and is refused, as is
-  the old name `min_benchmark`. Absent, nothing is written and the service id is
+  logged, not refused. `resources.at_most.benchmark` has no meaning and is refused, as are
+  the old name `min_benchmark` and the old keys `mem_bandwidth_bytes_per_sec` and
+  `mem_bandwidth_working_set_bytes`. Absent, nothing is written and the service id is
   unchanged. Admission enforces it per architecture against the node's measured scores;
   see `docs/PACKING.md`.
 - `possible_environment_workload[]` declares the **worst-case descendant workloads** the service

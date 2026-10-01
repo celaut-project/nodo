@@ -44,36 +44,33 @@ class AnnouncedResourcesTests(unittest.TestCase):
         self.assertEqual([list(e.architecture.tags) for e in entries], [AMD64, ARM64])
 
     def test_the_ceilings_are_the_machines(self):
-        at_most = self._announce()[0].resources.at_most
+        at_most = self._announce()[0].resources
         self.assertEqual((at_most.cpu_quota, at_most.cpu_period), (800000, 100000))
         self.assertEqual(at_most.mem_limit, 16 * GIB)
         self.assertEqual(at_most.disk_space, 500 * GIB)
-        self.assertFalse(self._announce()[0].resources.HasField("at_init"))
 
     def test_host_limits_cap_them(self):
         caps = host_limits.Ceilings(cores=2.5, ram_bytes=4 * GIB, disk_bytes=None)
-        at_most = self._announce(caps=caps)[0].resources.at_most
+        at_most = self._announce(caps=caps)[0].resources
         self.assertEqual(at_most.cpu_quota, 250000)
         self.assertEqual(at_most.mem_limit, 4 * GIB)
         self.assertEqual(at_most.disk_space, 500 * GIB)
 
     def test_an_unknown_total_is_left_unset_not_zero(self):
-        at_most = self._announce(totals=(None, None, None))[0].resources.at_most
+        at_most = self._announce(totals=(None, None, None))[0].resources
         for field in ("cpu_quota", "cpu_period", "mem_limit", "disk_space"):
             self.assertFalse(at_most.HasField(field), field)
 
     def test_only_measured_scores_are_announced_per_architecture(self):
         entries = self._announce(served=(AMD64, ARM64), scores={
-            "linux/amd64": _scores(int_ops_per_sec=900000, mem_bandwidth_bytes_per_sec=7 * 10 ** 9,
-                                   mem_bandwidth_working_set_bytes=GIB),
+            "linux/amd64": _scores(int_ops_per_sec=900000, mem_bandwidth_1gib_bytes_per_sec=7 * 10 ** 9),
             "linux/arm64": _scores(int_ops_per_sec=20000),
         })
-        self.assertEqual(keyvalue.to_dict(entries[0].resources.at_most.benchmark), {
+        self.assertEqual(keyvalue.to_dict(entries[0].resources.benchmark), {
             "int_ops_per_sec": 900000,
-            "mem_bandwidth_bytes_per_sec": 7 * 10 ** 9,
-            "mem_bandwidth_working_set_bytes": GIB,
+            "mem_bandwidth_1gib_bytes_per_sec": 7 * 10 ** 9,
         })
-        self.assertEqual(keyvalue.to_dict(entries[1].resources.at_most.benchmark), {"int_ops_per_sec": 20000})
+        self.assertEqual(keyvalue.to_dict(entries[1].resources.benchmark), {"int_ops_per_sec": 20000})
 
     def test_the_same_machine_announces_the_same_bytes(self):
         # Ceilings, not headroom: the signed-announcement cache keys on the content
@@ -89,18 +86,17 @@ def _announced(arch_tags=AMD64, **at_most):
     entry.architecture.tags.extend(arch_tags)
     scores = at_most.pop("benchmark", {})
     for field, value in at_most.items():
-        setattr(entry.resources.at_most, field, value)
-    keyvalue.update(entry.resources.at_most.benchmark, scores)
+        setattr(entry.resources, field, value)
+    keyvalue.update(entry.resources.benchmark, scores)
     return entry
 
 
-def _request(benchmark_required=None, **at_most):
-    resources = celaut.Service.Container.Resources()
-    if at_most:
-        resources.at_most.CopyFrom(celaut.Sysresources(**at_most))
+def _request(benchmark_required=None, **limits):
+    """What is asked about: one Sysresources, its benchmark the required minimum."""
+    ask = celaut.Sysresources(**limits)
     if benchmark_required:
-        keyvalue.update(resources.at_init.benchmark, benchmark_required)
-    return resources
+        keyvalue.update(ask.benchmark, benchmark_required)
+    return ask
 
 
 class RequestMisfitTests(unittest.TestCase):
@@ -152,14 +148,19 @@ class RequestMisfitTests(unittest.TestCase):
             announced, "linux/amd64", _request(benchmark_required={"flt_ops_per_sec": 10 ** 12})
         ))
 
-    def test_bandwidth_over_too_small_an_announced_working_set_is_skipped(self):
-        announced = [_announced(benchmark={
-            "mem_bandwidth_bytes_per_sec": 10 ** 11, "mem_bandwidth_working_set_bytes": GIB // 8,
-        })]
-        reason = ar.request_misfit(
-            announced, "linux/amd64", _request(benchmark_required={"mem_bandwidth_bytes_per_sec": 1})
-        )
-        self.assertIn("working set", reason)
+    def test_bandwidth_is_judged_over_the_working_set_it_names_or_the_next_larger(self):
+        slow_256 = [_announced(benchmark={"mem_bandwidth_256mib_bytes_per_sec": 10 ** 8})]
+        asked = _request(benchmark_required={"mem_bandwidth_256mib_bytes_per_sec": 10 ** 9})
+        self.assertIn("mem_bandwidth_256mib_bytes_per_sec", ar.request_misfit(slow_256, "linux/amd64", asked))
+        # Announced over a larger working set only: that score is a safe floor, so a
+        # fast one fits and a slow one rules the peer out.
+        fast_1gib = [_announced(benchmark={"mem_bandwidth_1gib_bytes_per_sec": 10 ** 12})]
+        slow_1gib = [_announced(benchmark={"mem_bandwidth_1gib_bytes_per_sec": 10 ** 8})]
+        self.assertIsNone(ar.request_misfit(fast_1gib, "linux/amd64", asked))
+        self.assertIn("mem_bandwidth_1gib_bytes_per_sec", ar.request_misfit(slow_1gib, "linux/amd64", asked))
+        # Announced over a smaller one only: says nothing about this, so the peer is asked.
+        small = [_announced(benchmark={"mem_bandwidth_64mib_bytes_per_sec": 1})]
+        self.assertIsNone(ar.request_misfit(small, "linux/amd64", asked))
 
     def test_the_emulated_architecture_is_judged_by_its_own_scores(self):
         # The point of #448: a peer fast natively and slow under TCG must be skipped
@@ -291,10 +292,10 @@ class SignatureCoversResourcesTests(unittest.TestCase):
         import src.manager.manager as manager
 
         for tamper in (
-                lambda p: keyvalue.set_value(p.resources[0].resources.at_most.benchmark, "int_ops_per_sec", 10 ** 9),
+                lambda p: keyvalue.set_value(p.resources[0].resources.benchmark, "int_ops_per_sec", 10 ** 9),
                 lambda p: p.ClearField("resources"),
                 lambda p: p.resources.append(_announced(ARM64)),
-                lambda p: setattr(p.resources[0].resources.at_most, "mem_limit", 10 ** 15),
+                lambda p: setattr(p.resources[0].resources, "mem_limit", 10 ** 15),
         ):
             with self.subTest(tamper=tamper):
                 peer = self._peer(mem_limit=GIB, benchmark={"int_ops_per_sec": 1})
@@ -307,12 +308,12 @@ class SignatureCoversResourcesTests(unittest.TestCase):
         manager.add_peer_instance(self._peer(ts=100, mem_limit=GIB))
         manager.add_peer_instance(self._peer(ts=200, mem_limit=4 * GIB))
         self.assertEqual(
-            ar.stored_announcement(self.fixture.pubkey)[0].resources.at_most.mem_limit, 4 * GIB
+            ar.stored_announcement(self.fixture.pubkey)[0].resources.mem_limit, 4 * GIB
         )
         # A replayed older one does not overwrite it.
         manager.add_peer_instance(self._peer(ts=150, mem_limit=GIB))
         self.assertEqual(
-            ar.stored_announcement(self.fixture.pubkey)[0].resources.at_most.mem_limit, 4 * GIB
+            ar.stored_announcement(self.fixture.pubkey)[0].resources.mem_limit, 4 * GIB
         )
 
 

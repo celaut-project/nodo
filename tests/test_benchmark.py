@@ -29,6 +29,7 @@ from src.packers.service_json import (  # noqa: E402
 )
 from src.utils import keyvalue, benchmark  # noqa: E402
 from src.utils.cost_functions import resource_availability as ra  # noqa: E402
+from src.utils.cost_functions.architecture_resources import ask_of as ar_ask  # noqa: E402
 from src.utils.cost_functions import workload_admission as wa  # noqa: E402
 from src.utils.benchmark import BENCHMARK_KEYS, parse_benchmark  # noqa: E402
 
@@ -69,22 +70,24 @@ def _pre_448_sysresources():
 
 class WireTests(unittest.TestCase):
 
-    def test_the_vocabulary_is_the_four_named_primitives(self):
+    def test_the_vocabulary_is_the_named_primitives_one_bandwidth_per_working_set(self):
         self.assertEqual(
             BENCHMARK_KEYS,
             (
                 "int_ops_per_sec",
                 "flt_ops_per_sec",
-                "mem_bandwidth_bytes_per_sec",
+                "mem_bandwidth_64mib_bytes_per_sec",
+                "mem_bandwidth_256mib_bytes_per_sec",
+                "mem_bandwidth_1gib_bytes_per_sec",
                 "sha256_hashes_per_sec",
             ),
         )
 
-    def test_it_is_field_six_a_repeated_string_to_uint64_entry(self):
-        # Field 6 and key=1/value=2 are what keep it wire-identical to the
-        # `map<string, uint64>` it replaced (see tests/test_keyvalue_wire.py).
+    def test_it_is_field_99_a_repeated_string_to_uint64_entry(self):
+        # key=1/value=2 keep the entry wire-identical to the `map<string, uint64>` it
+        # replaced (see tests/test_keyvalue_wire.py); the field itself moved from 6 to 99.
         field = celaut.Sysresources.DESCRIPTOR.fields_by_name["benchmark"]
-        self.assertEqual(field.number, 6)
+        self.assertEqual(field.number, 99)
         self.assertEqual(field.label, field.LABEL_REPEATED)
         entry = field.message_type
         self.assertEqual(entry.full_name, "celaut.Uint64KeyValue")
@@ -313,11 +316,11 @@ class NestedServiceJsonTests(unittest.TestCase):
 
     def test_an_embedded_dependency_service_carries_it(self):
         service = parse_service_spec({"container": {"resources": {
-            "at_most": {"benchmark": {"mem_bandwidth_bytes_per_sec": 1000}},
+            "at_most": {"benchmark": {"mem_bandwidth_1gib_bytes_per_sec": 1000}},
         }}})
         self.assertEqual(
             keyvalue.to_dict(service.container.resources.at_most.benchmark),
-            {"mem_bandwidth_bytes_per_sec": 1000},
+            {"mem_bandwidth_1gib_bytes_per_sec": 1000},
         )
 
     def test_protobuf_json_round_trip(self):
@@ -414,19 +417,26 @@ class AdmissionTests(unittest.TestCase):
         self.assertTrue(availability["can_execute"])
         self.assertIn("ignored", lines[0])
 
-    def test_bandwidth_only_counts_over_a_large_enough_working_set(self):
-        gib = benchmark.DEFAULT_MEM_BANDWIDTH_WORKING_SET_BYTES
-        resources = _resources(mem_bandwidth_bytes_per_sec=10 ** 9)
-        ok, _ = self._availability(
-            resources, mem_bandwidth_bytes_per_sec=10 ** 10, mem_bandwidth_working_set_bytes=gib
+    def test_bandwidth_is_held_against_the_score_over_the_same_or_next_larger_working_set(self):
+        key_256, key_1gib = "mem_bandwidth_256mib_bytes_per_sec", "mem_bandwidth_1gib_bytes_per_sec"
+        resources = _resources(**{key_256: 10 ** 9})
+        ok, _ = self._availability(resources, **{key_256: 10 ** 10})
+        slow, _ = self._availability(resources, **{key_256: 10 ** 8})
+        # With no score over its own working set it is read against the next larger one.
+        larger_ok, _ = self._availability(resources, **{key_1gib: 10 ** 10})
+        larger_slow, _ = self._availability(resources, **{key_1gib: 10 ** 8})
+        # A requirement over a working set larger than any measured is only logged.
+        beyond, lines = self._availability(
+            _resources(mem_bandwidth_4gib_bytes_per_sec=10 ** 12), **{key_1gib: 1}
         )
-        small, _ = self._availability(
-            resources, mem_bandwidth_bytes_per_sec=10 ** 10, mem_bandwidth_working_set_bytes=gib // 4
-        )
-        unknown, _ = self._availability(resources, mem_bandwidth_bytes_per_sec=10 ** 10)
         self.assertTrue(ok["can_execute"])
-        self.assertFalse(small["can_execute"])
-        self.assertFalse(unknown["can_execute"])
+        self.assertFalse(slow["can_execute"])
+        self.assertIn(key_256, slow["reason"])
+        self.assertTrue(larger_ok["can_execute"])
+        self.assertFalse(larger_slow["can_execute"])
+        self.assertIn(f"(over {key_1gib})", larger_slow["reason"])
+        self.assertTrue(beyond["can_execute"])
+        self.assertTrue(any("is not enforced" in line for line in lines))
 
     def test_no_requirement_no_log_line(self):
         _, lines = self._availability(_resources())
@@ -517,14 +527,13 @@ class DelegationCarryThroughTests(unittest.TestCase):
         self.assertTrue(asked)
         for peer_id, request in asked:
             self.assertEqual(peer_id, "peer-a")
-            # A group's benchmark is a minimum, so it travels in at_init -- the half
-            # admission enforces -- and not in at_most, where it would mean nothing.
+            # A group's benchmark is a minimum, and the request is a single Sysresources,
+            # so it travels next to the limits with nothing else to read it as.
             self.assertEqual(
-                keyvalue.to_dict(request.resources.at_init.benchmark),
+                keyvalue.to_dict(request.resources.benchmark),
                 {"int_ops_per_sec": 500000, "unknown_primitive": 4},
             )
-            self.assertEqual(len(request.resources.at_most.benchmark), 0)
-            self.assertEqual(request.resources.at_most.mem_limit, 111)
+            self.assertEqual(request.resources.mem_limit, 111)
             self.assertEqual(list(request.architecture.tags), [])
 
     def test_a_group_with_an_embedded_dependency_asks_for_its_architecture(self):
@@ -536,7 +545,9 @@ class DelegationCarryThroughTests(unittest.TestCase):
     def test_the_get_resource_availability_call_sends_the_message_whole(self):
         from src.utils.bee_client import BeeClient
 
-        request = celaut.ArchitectureResources(resources=_resources(flt_ops_per_sec=77, unknown_primitive=4))
+        request = celaut.ArchitectureResources(
+            resources=ar_ask(_resources(flt_ops_per_sec=77, unknown_primitive=4))
+        )
         request.architecture.tags.append("linux/amd64")
         with patch.object(BeeClient, "call_one", return_value=None) as call_one, \
                 patch("src.utils.bee_client.celaut_pb2_grpc.GatewayStub"):
@@ -549,7 +560,7 @@ class DelegationCarryThroughTests(unittest.TestCase):
             on_the_peer.ParseFromString(sent.SerializeToString())
             self.assertEqual(list(on_the_peer.architecture.tags), ["linux/amd64"])
             self.assertEqual(
-                keyvalue.to_dict(on_the_peer.resources.at_init.benchmark),
+                keyvalue.to_dict(on_the_peer.resources.benchmark),
                 {"flt_ops_per_sec": 77, "unknown_primitive": 4},
             )
 

@@ -545,12 +545,9 @@ def _canonical_sysresources(sysresources) -> str:
 
 def _canonical_architecture_resources(entry) -> str:
     """Deterministic encoding of one announced ``ArchitectureResources``."""
-    resources = entry.resources
     return "~".join([
         _canonical_protocol(entry.architecture),
-        "1" if entry.HasField("resources") else "0",
-        _canonical_sysresources(resources.at_init) if resources.HasField("at_init") else "-",
-        _canonical_sysresources(resources.at_most) if resources.HasField("at_most") else "-",
+        _canonical_sysresources(entry.resources) if entry.HasField("resources") else "-",
     ])
 
 

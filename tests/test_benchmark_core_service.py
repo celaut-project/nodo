@@ -22,19 +22,38 @@ load_example_config()
 from protos import celaut_pb2 as celaut  # noqa: E402
 from src.core_services import benchmark as core  # noqa: E402
 from src.utils import benchmark  # noqa: E402
-from src.utils.benchmark import MEM_BANDWIDTH_KEY, MEM_WORKING_SET_KEY, UNMEASURED  # noqa: E402
+from src.utils.benchmark import UNMEASURED  # noqa: E402
 from src.utils.config import ConfigManager  # noqa: E402
 
 GIB = 1 << 30
+MIB = 1 << 20
+BW_64, BW_256, BW_1GIB = (
+    "mem_bandwidth_64mib_bytes_per_sec",
+    "mem_bandwidth_256mib_bytes_per_sec",
+    "mem_bandwidth_1gib_bytes_per_sec",
+)
+# The service's own vocabulary: one bandwidth, and the working set it was measured over.
+SERVICE_BW, SERVICE_WS = core.SERVICE_BANDWIDTH_KEY, core.SERVICE_WORKING_SET_KEY
+# What it answers when asked over a smaller working set.
+SMALLER_SET_BANDWIDTH = {64 * MIB: 12000000000, 256 * MIB: 9000000000}
 
 ANSWER = {
     "architecture": "linux/amd64",
     "int_ops_per_sec": 900000,
     "flt_ops_per_sec": 6000000,
-    MEM_BANDWIDTH_KEY: 7000000000,
-    MEM_WORKING_SET_KEY: GIB,
+    SERVICE_BW: 7000000000,
+    SERVICE_WS: GIB,
     "sha256_hashes_per_sec": 320000,
     "skipped": [],
+}
+# What the node files from ANSWER and the two smaller-set asks that follow it.
+FILED = {
+    "int_ops_per_sec": 900000,
+    "flt_ops_per_sec": 6000000,
+    BW_64: SMALLER_SET_BANDWIDTH[64 * MIB],
+    BW_256: SMALLER_SET_BANDWIDTH[256 * MIB],
+    BW_1GIB: 7000000000,
+    "sha256_hashes_per_sec": 320000,
 }
 
 
@@ -52,9 +71,12 @@ class _Fakes:
         self.launch_error = launch_error
         self.get_error = get_error
         self.launched, self.asked, self.released = [], [], []
+        self.skip_sets = set()
+        self.asks_this_launch = 0
 
     def launch(self, service_id):
         self.launched.append(service_id)
+        self.asks_this_launch = 0
         if self.launch_error:
             raise self.launch_error
         return _instance(token=f"inst-{len(self.launched)}")
@@ -63,6 +85,15 @@ class _Fakes:
         self.asked.append((endpoint, working_set))
         if self.get_error:
             raise self.get_error
+        self.asks_this_launch += 1
+        if self.asks_this_launch > 1:
+            # A smaller working set: the same instance, asked again.
+            if working_set in self.skip_sets:
+                raise TimeoutError("no answer")
+            return json.dumps({
+                "architecture": ANSWER["architecture"],
+                SERVICE_BW: SMALLER_SET_BANDWIDTH[working_set], SERVICE_WS: working_set,
+            }).encode()
         return json.dumps(self.answers.pop(0)).encode()
 
     def release(self, instance):
@@ -128,12 +159,14 @@ class MeasureMissingTests(_ConfiguredNode):
         fakes = _Fakes()
         written = fakes.run()
         self.assertEqual(fakes.launched, [self.SERVICE_IDS])
-        self.assertEqual(fakes.asked, [(("10.0.0.9", 3030), GIB)])
+        # One launch; the largest working set first, then one more ask per other size.
+        self.assertEqual(
+            fakes.asked,
+            [(("10.0.0.9", 3030), ws) for ws in (GIB, 64 * MIB, 256 * MIB)],
+        )
         self.assertEqual(fakes.released, ["inst-1"])
         self.assertEqual(sorted(written["linux/amd64"]), sorted(benchmark.SCORE_KEYS))
-        scores = self.scores()
-        for key in benchmark.SCORE_KEYS:
-            self.assertEqual(scores[key], ANSWER[key])
+        self.assertEqual(self.scores(), FILED)
         # The other architecture is untouched.
         self.assertEqual(self.scores("linux/arm64")["int_ops_per_sec"], UNMEASURED)
 
@@ -154,8 +187,7 @@ class MeasureMissingTests(_ConfiguredNode):
 
     def test_nothing_is_launched_when_every_primitive_is_written(self):
         ConfigManager().set("benchmark.BY_ARCH.linux/amd64", {
-            "int_ops_per_sec": 1, "flt_ops_per_sec": 1, MEM_BANDWIDTH_KEY: 1,
-            MEM_WORKING_SET_KEY: GIB, "sha256_hashes_per_sec": 1,
+            key: 1 for key in benchmark.SCORE_KEYS
         })
         fakes = _Fakes()
         self.assertEqual(fakes.run(), {})
@@ -166,19 +198,36 @@ class MeasureMissingTests(_ConfiguredNode):
         self.assertEqual(fakes.run(served=["linux/riscv64"]), {})
         self.assertEqual(fakes.launched, [])
 
-    def test_a_working_set_written_by_hand_is_what_the_service_is_asked_for(self):
-        ConfigManager().set("benchmark.BY_ARCH.linux/amd64.mem_bandwidth_working_set_bytes", 2 * GIB)
-        answer = dict(ANSWER, **{MEM_WORKING_SET_KEY: 2 * GIB})
-        fakes = _Fakes(answers=[answer])
+    def test_a_working_set_measured_by_hand_is_not_asked_again(self):
+        ConfigManager().set(f"benchmark.BY_ARCH.linux/amd64.{BW_64}", 5)
+        fakes = _Fakes()
         fakes.run()
-        self.assertEqual(fakes.asked[0][1], 2 * GIB)
-        self.assertEqual(self.scores()[MEM_WORKING_SET_KEY], 2 * GIB)
+        self.assertEqual([ws for _, ws in fakes.asked], [GIB, 256 * MIB])
+        self.assertEqual(self.scores()[BW_64], 5)
 
-    def test_a_bandwidth_without_its_working_set_is_not_written(self):
-        answer = {k: v for k, v in ANSWER.items() if k != MEM_WORKING_SET_KEY}
+    def test_a_failed_ask_for_one_working_set_leaves_only_that_bandwidth_unmeasured(self):
+        fakes = _Fakes()
+        fakes.skip_sets = {64 * MIB}
+        fakes.run()
+        scores = self.scores()
+        self.assertEqual(scores[BW_64], UNMEASURED)
+        self.assertEqual(scores[BW_256], SMALLER_SET_BANDWIDTH[256 * MIB])
+        self.assertEqual(scores["int_ops_per_sec"], 900000)
+        self.assertEqual(fakes.released, ["inst-1"])
+
+    def test_a_bandwidth_over_a_working_set_with_no_key_is_not_written(self):
+        # 2 GiB is not one of benchmark.MEM_WORKING_SETS: nothing to file it under.
+        answer = dict(ANSWER, **{SERVICE_WS: 2 * GIB})
         _Fakes(answers=[answer]).run()
         scores = self.scores()
-        self.assertEqual(scores[MEM_BANDWIDTH_KEY], UNMEASURED)
+        self.assertEqual(scores[BW_1GIB], UNMEASURED)
+        self.assertEqual(scores["int_ops_per_sec"], 900000)
+
+    def test_a_bandwidth_without_its_working_set_is_not_written(self):
+        answer = {k: v for k, v in ANSWER.items() if k != SERVICE_WS}
+        _Fakes(answers=[answer]).run()
+        scores = self.scores()
+        self.assertEqual(scores[BW_1GIB], UNMEASURED)
         self.assertEqual(scores["int_ops_per_sec"], 900000)
 
     def test_a_skipped_primitive_stays_unmeasured(self):
@@ -290,11 +339,28 @@ class PureHelpersTests(unittest.TestCase):
         self.assertEqual(merged["flt_ops_per_sec"], 7)
         self.assertEqual(filled, ["flt_ops_per_sec"])
 
-    def test_merge_leaves_a_hand_written_bandwidth_and_its_missing_set_alone(self):
+    def test_parse_answer_files_the_service_bandwidth_under_its_working_set(self):
+        for size, key in ((64 * MIB, BW_64), (256 * MIB, BW_256), (GIB, BW_1GIB)):
+            with self.subTest(working_set=size):
+                _, scores = core.parse_answer(json.dumps(
+                    dict(ANSWER, **{SERVICE_BW: 11, SERVICE_WS: size})).encode())
+                self.assertEqual({k: v for k, v in scores.items() if k.startswith("mem_")}, {key: 11})
+
+    def test_parse_answer_drops_a_bandwidth_over_a_working_set_it_has_no_key_for(self):
+        for size in (2 * GIB, 300 * MIB, None):
+            with self.subTest(working_set=size):
+                answer = dict(ANSWER, **{SERVICE_BW: 11})
+                answer.pop(SERVICE_WS)
+                if size is not None:
+                    answer[SERVICE_WS] = size
+                _, scores = core.parse_answer(json.dumps(answer).encode())
+                self.assertEqual([k for k in scores if k.startswith("mem_")], [])
+
+    def test_merge_leaves_a_hand_written_bandwidth_alone(self):
         current = {k: UNMEASURED for k in benchmark.SCORE_KEYS}
-        current[MEM_BANDWIDTH_KEY] = 10
-        merged, filled = core.merge_scores(current, {MEM_BANDWIDTH_KEY: 99, MEM_WORKING_SET_KEY: GIB})
-        self.assertEqual((merged[MEM_BANDWIDTH_KEY], merged[MEM_WORKING_SET_KEY]), (10, UNMEASURED))
+        current[BW_1GIB] = 10
+        merged, filled = core.merge_scores(current, {BW_1GIB: 99})
+        self.assertEqual(merged[BW_1GIB], 10)
         self.assertEqual(filled, [])
 
     def test_the_endpoint_is_the_first_address(self):
