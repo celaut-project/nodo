@@ -957,13 +957,15 @@ fn draw_conversation(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         0
     };
-    let split = Layout::vertical([
-        Constraint::Min(3),
-        Constraint::Length(compose_height),
-    ])
-    .split(inner);
+    // The box being typed in before the messages above it: squeezed by a short
+    // terminal, the messages scroll, but a compose box squeezed to its border hides
+    // what is being typed (issue #453).
+    let compose_height = compose_height.min(inner.height);
+    let split = crate::layout_util::stack(inner, &[inner.height - compose_height, compose_height]);
 
-    draw_messages(frame, app, split[0], &entry);
+    if split[0].height > 0 {
+        draw_messages(frame, app, split[0], &entry);
+    }
     if composing {
         draw_compose_box(frame, app, split[1]);
     }
@@ -1034,10 +1036,17 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect, entry: &ChatEntry
             .wrap(Wrap { trim: false })
             .style(Style::default().fg(text_colour()))
     };
+    // Messages are whatever a peer typed, so a CJK character or an emoji can land in
+    // the pane's last column; wrapped one column narrower it stays off the border.
+    let wide = segments.iter().any(|segment| match segment {
+        Segment::Text(lines) => crate::layout_util::lines_have_wide_glyph(lines),
+        Segment::Card(_) => false,
+    });
+    let text_width = crate::layout_util::wrap_guard(area, wide).width;
     let heights: Vec<u16> = segments
         .iter()
         .map(|segment| match segment {
-            Segment::Text(lines) => text(lines.clone()).line_count(area.width) as u16,
+            Segment::Text(lines) => text(lines.clone()).line_count(text_width) as u16,
             Segment::Card(_) => CARD_HEIGHT,
         })
         .collect();
@@ -1053,7 +1062,10 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect, entry: &ChatEntry
         let visible = height - skip;
         let rect = Rect { x: area.x, y, width: area.width, height: visible };
         match segment {
-            Segment::Text(lines) => frame.render_widget(text(lines).scroll((skip, 0)), rect),
+            Segment::Text(lines) => frame.render_widget(
+                text(lines).scroll((skip, 0)),
+                Rect { width: text_width, ..rect },
+            ),
             // A card is whole or not at all: half a card is a button with no label.
             Segment::Card(service) if skip == 0 => draw_card(frame, app, rect, service),
             Segment::Card(_) => {}
@@ -1165,12 +1177,17 @@ fn draw_compose_box(frame: &mut Frame, app: &mut App, area: Rect) {
             " COMPOSE · Enter: newline · Ctrl+Enter or Alt+Enter: send · Ctrl+A: attach · Esc: cancel ",
             Style::default().fg(accent()).bold(),
         ));
+    let lines = compose_lines(app);
+    let inner = crate::layout_util::wrap_guard(
+        block.inner(split[0]),
+        crate::layout_util::lines_have_wide_glyph(&lines),
+    );
+    frame.render_widget(block.style(Style::default().fg(text_colour())), split[0]);
     frame.render_widget(
-        Paragraph::new(compose_lines(app))
+        Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .block(block)
             .style(Style::default().fg(text_colour())),
-        split[0],
+        inner,
     );
 
     // Buttons to the right of the input, aligned with its first row of text.
