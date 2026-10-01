@@ -1469,6 +1469,7 @@ mod tests {
             proof_ids: Vec::new(),
             reputation_score: "0".to_string(),
             contracts: Vec::new(),
+            resources: Default::default(),
         }
     }
 

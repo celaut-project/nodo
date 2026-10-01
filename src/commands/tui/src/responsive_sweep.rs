@@ -11,6 +11,7 @@ use crate::app::{
 };
 use crate::chat::{ChatCompose, ChatEntry, ChatEntryKind, ChatMessageRow, ChatService, SharedService};
 use crate::clients::Client;
+use crate::peer_resources::{Announced, ArchOffer};
 use crate::peers::Peer;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -63,6 +64,56 @@ fn peer(id: &str) -> Peer {
         proof_ids: vec!["proof-a".to_string()],
         reputation_score: "7".to_string(),
         contracts: Vec::new(),
+        resources: Default::default(),
+    }
+}
+
+/// What peer `n` announced (issue #455): the first, which is the one selected, both
+/// architectures with every benchmark key; then a mix of the silent and the
+/// unreadable among peers that announced one architecture, some of it unstated.
+fn announced(n: usize) -> Announced {
+    const GIB: u64 = 1 << 30;
+    let bench = |pairs: &[(&str, u64)]| pairs.iter().map(|(key, value)| (key.to_string(), *value)).collect();
+    match n % 5 {
+        0 if n == 0 => Announced::Declared(vec![
+            ArchOffer {
+                arch: "linux/amd64".to_string(),
+                millicores: Some(16_000),
+                mem_bytes: Some(64 * GIB),
+                disk_bytes: Some(2048 * GIB),
+                benchmark: bench(&[
+                    ("int_ops_per_sec", 1_840_000_000),
+                    ("flt_ops_per_sec", 920_000_000),
+                    ("mem_bandwidth_64mib_bytes_per_sec", 21 * GIB),
+                    ("mem_bandwidth_256mib_bytes_per_sec", 14 * GIB),
+                    ("mem_bandwidth_1gib_bytes_per_sec", 9 * GIB),
+                    ("sha256_hashes_per_sec", 3_100_000),
+                ]),
+            },
+            ArchOffer {
+                arch: "linux/arm64".to_string(),
+                millicores: Some(16_000),
+                mem_bytes: Some(64 * GIB),
+                disk_bytes: Some(2048 * GIB),
+                benchmark: bench(&[("int_ops_per_sec", 96_000_000)]),
+            },
+        ]),
+        1 => Announced::Undeclared,
+        2 => Announced::Unreadable,
+        3 => Announced::Declared(vec![ArchOffer {
+            arch: "linux/arm64".to_string(),
+            millicores: Some(4_000),
+            mem_bytes: Some(8 * GIB),
+            disk_bytes: None,
+            benchmark: Vec::new(),
+        }]),
+        _ => Announced::Declared(vec![ArchOffer {
+            arch: "linux/amd64".to_string(),
+            millicores: Some(8_000),
+            mem_bytes: Some(32 * GIB),
+            disk_bytes: Some(500 * GIB),
+            benchmark: bench(&[("int_ops_per_sec", 1_500_000_000)]),
+        }]),
     }
 }
 
@@ -96,7 +147,12 @@ pub(crate) fn populated_app() -> App {
             .collect(),
     );
     app.services = StatefulList::with_items(ids.iter().map(|id| service(id)).collect());
-    app.peers = StatefulList::with_items(ids.iter().map(|id| peer(id)).collect());
+    app.peers = StatefulList::with_items(
+        ids.iter()
+            .enumerate()
+            .map(|(n, id)| Peer { resources: announced(n), ..peer(id) })
+            .collect(),
+    );
     app.clients = StatefulList::with_items(ids.iter().map(|id| client(id)).collect());
     app.conversations = StatefulList::with_items(
         ids.iter()
@@ -763,6 +819,60 @@ fn wide_glyphs_stay_inside_the_chat_pane() {
         for row in 5..21 {
             assert_eq!(buffer.get(right, row).symbol(), "│", "row {row} at {width}:\n{}", text(&buffer));
         }
+    }
+}
+
+/// The Overview's estimate of what the peers can reach (issue #455) is drawn on
+/// every terminal the grid is used at, and says what it is: an upper bound, per
+/// architecture, with the peers that said nothing counted.
+#[test]
+fn the_overview_shows_what_peers_can_reach() {
+    for (width, height) in [(80, 24), (120, 40), (200, 60)] {
+        let mut app = on_page(Page::Overview);
+        let screen = text(&draw(&mut app, width, height));
+        for needle in ["PEERS · UPPER BOUND", "amd64", "arm64", "6 undeclared"] {
+            assert!(screen.contains(needle), "{needle:?} missing at {width}x{height}:\n{screen}");
+        }
+    }
+    // 30 peers: 6 undeclared (n % 5 == 1), 6 unreadable (n % 5 == 2).
+    let mut app = on_page(Page::Overview);
+    let screen = text(&draw(&mut app, 200, 60));
+    for needle in ["amd64 104c 416G 7.4T ×12", "arm64 40c 112G 2.0T ×7*", "6 undeclared, 6 unreadable", "not free capacity"] {
+        assert!(screen.contains(needle), "{needle:?} missing:\n{screen}");
+    }
+}
+
+/// The selected peer's card spells out what it announced, per architecture, with
+/// its benchmark scores in their own units.
+#[test]
+fn the_peer_card_shows_announced_resources() {
+    let mut app = on_page(Page::Peers);
+    let screen = text(&draw(&mut app, 120, 60));
+    for needle in [
+        "Announced resources (2 architectures)",
+        "linux/amd64  16 cores • 64.0 GiB RAM • 2.0 TiB disk",
+        "int ops/s",
+        "mem bw @ 64 MiB",
+        "21.0 GiB/s per core",
+        "linux/arm64",
+    ] {
+        assert!(screen.contains(needle), "{needle:?} missing:\n{screen}");
+    }
+    // Too short for the full card: the compact one still names the resources.
+    let mut app = on_page(Page::Peers);
+    let screen = text(&draw(&mut app, 120, 24));
+    assert!(screen.contains("amd64 16c/64G  arm64 16c/64G"), "{screen}");
+}
+
+/// The Overview card and a peer's resources, for the pull request: `cargo test
+/// print_peer_resource_renders -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn print_peer_resource_renders() {
+    for (page, width, height) in [(Page::Overview, 80, 24), (Page::Overview, 120, 30), (Page::Peers, 100, 60), (Page::Overview, 60, 40)] {
+        let mut app = on_page(page);
+        let buffer = draw(&mut app, width, height);
+        println!("{page:?} {width}x{height}\n{}\n", text(&buffer));
     }
 }
 

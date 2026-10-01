@@ -20,6 +20,9 @@ pub mod energy;
 /// The PEERS page: other nodes this one has introduced itself to or heard from.
 pub mod peers;
 
+/// What each peer announced it can run, and the optimistic sum of it (issue #455).
+pub mod peer_resources;
+
 /// The CLIENTS page: who this node's own gateway has issued a client_id to.
 pub mod clients;
 
