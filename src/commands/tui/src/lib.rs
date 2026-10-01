@@ -49,3 +49,7 @@ pub mod tui;
 
 /// Event handler.
 pub mod handler;
+
+/// Every page and popup drawn at a grid of terminal sizes (issue #453).
+#[cfg(test)]
+mod responsive_sweep;
