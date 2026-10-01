@@ -53,7 +53,7 @@ def generate_estimated_cost(
     initial_mu = from_amount(config.initial_mu) \
         if config and config.HasField("initial_mu") else 0
 
-    if not get_resource_availability(resources=resources)["can_execute"]:
+    if not get_resource_availability(resources=resources, arch=arch)["can_execute"]:
         return
 
     # What the client pays up front: the one-off build, plus the balance the instance

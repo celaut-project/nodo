@@ -28,17 +28,18 @@ def _detect_local_preflight_failure(
         configuration: celaut_pb2.Configuration,
 ) -> Optional[str]:
     try:
+        arch = get_arch_tag(service=service, metadata=metadata)
         estimated_cost = generate_estimated_cost(
             resources=service.container.resources,
             metadata=metadata,
             config=configuration,
-            arch=get_arch_tag(service=service, metadata=metadata),
+            arch=arch,
             service=service,
         )
         if estimated_cost:
             return None
 
-        availability = get_resource_availability(service.container.resources)
+        availability = get_resource_availability(service.container.resources, arch=arch)
         return availability.get("reason") or "Local execution was rejected due to insufficient resources."
     except UnsupportedArchitectureException as exc:
         return str(exc)

@@ -1,13 +1,15 @@
 """`Sysresources.min_benchmark` (#448): the per-core minimum benchmark a service requires.
 
-Four things are pinned here, one class each:
+Five things are pinned here, one class each:
 
 * **the wire** -- the map round-trips, an unrecognised key included, and a node built
   before the field existed still reads every other field of a message that carries it;
 * **service.json** -- what the packer accepts, what it refuses, and that a service that
   never mentions the field serializes to exactly what it did before;
-* **admission today** -- the requirement is read and logged, never a reason to refuse,
-  because no node measures its cores yet;
+* **admission, unmeasured** -- with no score of its own, a node logs the requirement and
+  never refuses on it;
+* **admission, measured** (#452) -- a recognised primitive the node measured below the
+  requirement is a shortfall, read from the cache and nowhere else;
 * **delegation** -- the requirement reaches the peer that is asked to run the service.
 """
 import unittest
@@ -333,12 +335,13 @@ def _resources(**benchmarks) -> celaut.Service.Container.Resources:
     return resources
 
 
-class AdmissionTodayTests(unittest.TestCase):
-    """Declared, logged, not enforced: nothing on a node measures a core yet."""
+class AdmissionUnmeasuredTests(unittest.TestCase):
+    """Declared, logged, not enforced: a node with no scores of its own."""
 
     def _availability(self, resources):
         with patch.object(ra, "could_ve_this_sysreq", return_value=True), \
                 patch.object(ra.host_limits, "ceiling_shortfalls", return_value=[]), \
+                patch.object(ra.node_benchmark, "get_cached_node_benchmark", return_value={}), \
                 patch.object(ra.log, "LOGGER") as logger:
             return ra.get_resource_availability(resources), [c.args[0] for c in logger.call_args_list]
 
@@ -374,8 +377,141 @@ class AdmissionTodayTests(unittest.TestCase):
         resources = _resources(int_ops_per_sec=1)
         with patch.object(ra, "could_ve_this_sysreq", return_value=False), \
                 patch.object(ra.host_limits, "ceiling_shortfalls", return_value=[]), \
+                patch.object(ra.node_benchmark, "get_cached_node_benchmark", return_value={}), \
                 patch.object(ra.log, "LOGGER"):
             self.assertFalse(ra.get_resource_availability(resources)["can_execute"])
+
+
+class AdmissionMeasuredTests(unittest.TestCase):
+    """A node with scores of its own holds a declared `min_benchmark` against them (#452)."""
+
+    MEASURED = {"int_ops_per_sec": 1000, "sha256_hashes_per_sec": 50}
+
+    def _availability(self, resources, measured=None, **kwargs):
+        with patch.object(ra, "could_ve_this_sysreq", return_value=True), \
+                patch.object(ra.host_limits, "ceiling_shortfalls", return_value=[]), \
+                patch.object(ra.node_benchmark, "get_cached_node_benchmark",
+                             return_value=dict(self.MEASURED if measured is None else measured)) as cache, \
+                patch.object(ra.log, "LOGGER") as logger:
+            answer = ra.get_resource_availability(resources, **kwargs)
+        return answer, [c.args[0] for c in logger.call_args_list], cache
+
+    def test_a_measured_primitive_below_the_requirement_refuses_the_service(self):
+        availability, _, _ = self._availability(_resources(int_ops_per_sec=1001))
+        self.assertFalse(availability["can_execute"])
+        self.assertIn("min_benchmark.int_ops_per_sec", availability["reason"])
+        self.assertIn("Requested: 1001 per core per second, measured on this node: 1000.",
+                      availability["reason"])
+
+    def test_meeting_it_admits_and_logs_nothing(self):
+        availability, lines, _ = self._availability(_resources(int_ops_per_sec=1000, sha256_hashes_per_sec=1))
+        self.assertTrue(availability["can_execute"])
+        self.assertEqual(lines, [])
+
+    def test_an_unmeasured_primitive_is_logged_not_refused(self):
+        availability, lines, _ = self._availability(_resources(flt_ops_per_sec=2 ** 64 - 1))
+        self.assertTrue(availability["can_execute"])
+        self.assertEqual(len(lines), 1)
+        self.assertIn("flt_ops_per_sec=18446744073709551615", lines[0])
+        self.assertIn("not enforced", lines[0])
+
+    def test_an_unrecognised_primitive_is_logged_not_refused_even_if_scored(self):
+        availability, lines, _ = self._availability(
+            _resources(quantum_ops_per_sec=9), measured={"quantum_ops_per_sec": 1})
+        self.assertTrue(availability["can_execute"])
+        self.assertIn("Unrecognised primitive(s): quantum_ops_per_sec.", lines[0])
+
+    def test_each_declared_primitive_is_either_enforced_or_logged(self):
+        availability, lines, _ = self._availability(
+            _resources(int_ops_per_sec=5000, flt_ops_per_sec=1, quantum_ops_per_sec=1))
+        self.assertFalse(availability["can_execute"])
+        self.assertIn("int_ops_per_sec", availability["reason"])
+        self.assertEqual(len(lines), 1)
+        self.assertIn("(flt_ops_per_sec=1, quantum_ops_per_sec=1)", lines[0])
+        self.assertNotIn("int_ops_per_sec", lines[0])
+
+    def test_it_joins_the_other_shortfalls_rather_than_replacing_them(self):
+        resources = _resources(int_ops_per_sec=5000)
+        with patch.object(ra, "could_ve_this_sysreq", return_value=False), \
+                patch.object(ra.host_limits, "ceiling_shortfalls", return_value=[]), \
+                patch.object(ra.node_benchmark, "get_cached_node_benchmark", return_value=self.MEASURED), \
+                patch.object(ra.log, "LOGGER"):
+            reason = ra.get_resource_availability(resources)["reason"]
+        memory, benchmark = reason.split(" | ")
+        self.assertIn("Insufficient memory", memory)
+        self.assertIn("min_benchmark.int_ops_per_sec", benchmark)
+
+    def test_the_score_is_the_one_measured_for_the_services_architecture(self):
+        _, _, cache = self._availability(_resources(int_ops_per_sec=1), arch="linux/arm64")
+        cache.assert_called_once_with("linux/arm64")
+        _, _, cache = self._availability(_resources(int_ops_per_sec=1))
+        cache.assert_called_once_with(None)
+
+    def test_no_declaration_reads_no_cache(self):
+        _, _, cache = self._availability(_resources())
+        cache.assert_not_called()
+
+    def test_a_real_cache_file_is_read_and_nothing_is_booted(self):
+        import tempfile
+
+        from src.utils import node_benchmark
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = f"{tmp}/{node_benchmark.CACHE_FILE_NAME}"
+            node_benchmark.write_node_benchmark_cache(
+                {"int_ops_per_sec": 10}, arch="linux/amd64", virtualizer="ch", path=path)
+            with patch.object(node_benchmark, "default_cache_path", return_value=path), \
+                    patch("subprocess.Popen", side_effect=AssertionError("admission booted something")), \
+                    patch.object(ra, "could_ve_this_sysreq", return_value=True), \
+                    patch.object(ra.host_limits, "ceiling_shortfalls", return_value=[]), \
+                    patch.object(ra.log, "LOGGER"):
+                refused = ra.get_resource_availability(_resources(int_ops_per_sec=11), arch="linux/amd64")
+                admitted = ra.get_resource_availability(_resources(int_ops_per_sec=10), arch="linux/amd64")
+                other_arch = ra.get_resource_availability(_resources(int_ops_per_sec=11), arch="linux/arm64")
+        self.assertFalse(refused["can_execute"])
+        self.assertTrue(admitted["can_execute"])
+        # Measured for amd64 says nothing about an emulated arm64 core.
+        self.assertTrue(other_arch["can_execute"])
+
+
+class AdmissionImportTests(unittest.TestCase):
+    """Admission reads the cache module and nothing that boots a guest (#452)."""
+
+    def test_admission_imports_no_virtualizer_and_not_the_boot_module(self):
+        # resource_availability's own docstring makes this load-bearing: answering
+        # "does this shape fit?" must not pull in a virtualizer, nor boot anything.
+        # A fresh interpreter, so modules other tests imported do not count.
+        import os
+        import subprocess
+        import sys
+
+        code = (
+            "from tests.config_bootstrap import load_example_config; load_example_config()\n"
+            "import sys\n"
+            "import src.utils.cost_functions.resource_availability\n"
+            "assert 'src.utils.node_benchmark' in sys.modules\n"
+            "print(sorted(m for m in sys.modules if m.startswith('src.virtualizers')))\n"
+        )
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        result = subprocess.run([sys.executable, "-c", code], cwd=root,
+                                capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "[]")
+
+    def test_the_cache_module_imports_no_virtualizer(self):
+        import ast
+        from pathlib import Path
+
+        from src.utils import node_benchmark
+
+        tree = ast.parse(Path(node_benchmark.__file__).read_text(encoding="utf-8"))
+        imported = [
+            alias.name if isinstance(node, ast.Import) else (node.module or "")
+            for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        ]
+        self.assertTrue(imported)
+        self.assertEqual([name for name in imported if name.startswith("src.virtualizers")], [])
 
 
 class DelegationCarryThroughTests(unittest.TestCase):

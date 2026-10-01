@@ -7,15 +7,17 @@ nothing but psutil and the memory pool. It is deliberately not part of
 ``generate_estimated_cost``, whose own imports reach ``src.utils.utils`` (netifaces) and
 ``src.virtualizers.interface`` (the CH build machinery, for unrelated billing helpers):
 asking "does this shape fit?" should not pull in a virtualizer, nor require stubbing one
-to test the answer.
+to test the answer. The same goes for `min_benchmark` (#452): what this node measured
+is read from `node_benchmark`'s cache, and the guest boot that measures it lives in
+`src.virtualizers.microvm.benchmark`, which nothing here imports.
 """
-from typing import Any, Dict, Final, List, Tuple
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 import psutil
 
 from protos import celaut_pb2 as celaut
 from src.manager.resources import IOBigData, could_ve_this_sysreq
-from src.utils import host_limits, keyvalue, logger as log, min_benchmark
+from src.utils import host_limits, keyvalue, logger as log, min_benchmark, node_benchmark
 
 
 def _get_service_memory_snapshot() -> tuple[int, int]:
@@ -122,30 +124,56 @@ def _sysreq_shortfalls(
     return shortfalls
 
 
-def _note_unenforced_min_benchmark(at_most: celaut.Sysresources) -> None:
-    """Say that a declared `min_benchmark` was read and is not being enforced.
+def _note_unenforced_min_benchmark(unenforced: Dict[str, int]) -> None:
+    """Say which declared `min_benchmark` primitives admission could not hold this node to.
 
-    Deliberately not a shortfall. Nothing on this node measures a core yet, so there is
-    no score to hold the requirement against, and -- as with `cpu_total` above -- an
-    unknown capacity is not evidence of an insufficient one. Refusing instead would
-    make this node strictly less useful than one running the previous release, which
+    Deliberately not a shortfall. A primitive this node has no name for, or one it
+    has not measured (no benchmark boot yet, an initramfs that predates it, a
+    measurement that failed), has no score to compare -- and, as with `cpu_total`
+    above, an unknown capacity is not evidence of an insufficient one. Refusing
+    instead would make this node strictly less useful than one running a release that
     skips the field as unknown and admits the same service, while protecting nobody.
     The line is here so the gap is visible in the log of the node that took the
-    service, until a node has scores of its own to compare.
+    service.
     """
-    declared = keyvalue.to_dict(at_most.min_benchmark)
-    if not declared:
+    if not unenforced:
         return
-    unknown = min_benchmark.unrecognised_keys(declared)
+    unknown = min_benchmark.unrecognised_keys(unenforced)
     log.LOGGER(
         "resources.at_most.min_benchmark is declared "
-        f"({min_benchmark.describe(declared)}) but not enforced: this node does not "
-        "measure per-core benchmark scores yet, so admission does not consider it."
+        f"({min_benchmark.describe(unenforced)}) but not enforced: this node has no "
+        "measured score for it, so admission does not consider it."
         + (f" Unrecognised primitive(s): {', '.join(unknown)}." if unknown else "")
     )
 
 
-def get_resource_availability(resources: celaut.Service.Container.Resources) -> Dict[str, Any]:
+def _min_benchmark_shortfalls(at_most: celaut.Sysresources, arch: Optional[str]) -> List[str]:
+    """A declared `min_benchmark` held against what this node measured for ``arch``.
+
+    Only the cache is read (`node_benchmark.get_cached_node_benchmark`): measuring
+    means booting a guest, which belongs to `src.virtualizers.microvm.benchmark` and
+    never to admission. ``arch`` is the service's architecture where the caller knows
+    it, so a service that would run emulated is held to the emulated score; omitted,
+    it is the host's, which is what a service runs under unless it says otherwise.
+
+    Each declared primitive is either enforced (recognised and measured) or logged
+    (anything else), never both and never neither.
+    """
+    declared = keyvalue.to_dict(at_most.min_benchmark)
+    if not declared:
+        return []
+    measured = node_benchmark.get_cached_node_benchmark(arch)
+    _note_unenforced_min_benchmark({
+        key: value for key, value in declared.items()
+        if key not in min_benchmark.MIN_BENCHMARK_KEYS or key not in measured
+    })
+    return node_benchmark.benchmark_shortfalls(declared, measured)
+
+
+def get_resource_availability(
+        resources: celaut.Service.Container.Resources,
+        arch: Optional[str] = None,
+) -> Dict[str, Any]:
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
     cpu_total = psutil.cpu_count(logical=False) or 0
@@ -166,7 +194,6 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
 
     shortfalls: List[str] = []
     if resources and resources.HasField("at_most"):
-        _note_unenforced_min_benchmark(resources.at_most)
         shortfalls = _sysreq_shortfalls(
             resources.at_most,
             disk_free=int(disk.free),
@@ -174,6 +201,7 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
             pool_total=service_memory_pool_total,
             pool_available=service_memory_pool_available,
         )
+        shortfalls.extend(_min_benchmark_shortfalls(resources.at_most, arch))
 
     can_execute = not shortfalls
     reason = " | ".join(shortfalls)
