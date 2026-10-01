@@ -194,7 +194,7 @@ ledgers:
     RPC_COOKIE_PATH: "~/.bitcoin/.cookie"   # or RPC_USER / RPC_PASSWORD
     WALLET_NAME: "nodo"
     payments:
-      MU_PER_SATOSHI: ""             # you must set this -- see below
+      MU_PER_SATOSHI: 1400000        # $0.50/ERG, $70,000/BTC -- set your own, see below
       MIN_CONFIRMATIONS: 1
       TARGET_CONF: 6
       MAX_FEE_RATE_SAT_VB: 100
@@ -213,29 +213,31 @@ The cookie is preferred and is what Core writes on every start, so the ordinary 
 keeps no credential in `config.yaml` at all. `RPC_USER` / `RPC_PASSWORD` are the
 fallback. The RPC password is never written to a log, a URL or an error message.
 
-### `MU_PER_SATOSHI` has no default, on purpose
+### `MU_PER_SATOSHI`: change it to your own market
 
-This is the one setting you cannot skip, and leaving it empty is a working state: **the
-node simply does not offer Bitcoin.**
+The shipped value is `1400000`, and leaving it empty is a working state: **the node
+simply does not offer Bitcoin.**
 
 MU is `nodo`'s unit of account and has no intrinsic value; each payment contract says
 what one MU is worth in its own money. A satoshi and a nanoERG are about **six orders of
 magnitude apart**, so copying Ergo's `MU_PER_NANOERG: 1` by analogy would sell an hour
 of compute for roughly a millionth of its price. That is the exact failure
 [`PRICING.md`](PRICING.md) exists to prevent, and the one the old gas model shipped
-with — so there is no borrowed default to fall into.
+with.
 
-Work it out against your own market:
+The shipped value is worked out like this:
 
 ```
-MU_PER_SATOSHI = MU_PER_NANOERG × (value of one nanoERG / value of one satoshi)
+MU_PER_SATOSHI = MU_PER_NANOERG × (value of one satoshi / value of one nanoERG)
 ```
 
-At $0.50/ERG and $100,000/BTC with `MU_PER_NANOERG: 1`, that is about `2000000`. The
-node warns at startup if you set it to `1`, because 1 is `MU_PER_NANOERG`'s value and
-copying it is the specific mistake worth naming.
+At $0.50/ERG and $70,000/BTC with `MU_PER_NANOERG: 1`, one satoshi is $0.0007 and one
+nanoERG is $0.0000000005, so `MU_PER_SATOSHI` is `1400000`. That is an example, not a
+quoted price: change it to your own market, and keep it in step if you change
+`MU_PER_NANOERG`. The node warns at startup if you set it to `1`, because 1 is
+`MU_PER_NANOERG`'s value and copying it is the specific mistake worth naming.
 
-Until it is set: the contract is not registered, nothing is advertised to peers, `btc`
+While it is empty: the contract is not registered, nothing is advertised to peers, `btc`
 is not offered as a display unit, and `nodo donations` shows no Bitcoin block. Nothing
 half-works.
 

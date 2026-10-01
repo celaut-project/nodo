@@ -693,10 +693,11 @@ full mechanism, the two lists and why they are separate: [`DONATIONS.md`](DONATI
 
 ### `ledgers.bitcoin`
 
-A second payment system, off until `payments.MU_PER_SATOSHI` is set — and that key has
-no default on purpose: a satoshi is worth about a million nanoERG, so borrowing
-`MU_PER_NANOERG`'s `1` would sell an hour of compute for a millionth of its price.
-Unset, the node does not offer Bitcoin at all rather than offering it mispriced.
+A second payment system, priced by `payments.MU_PER_SATOSHI` (shipped as `1400000`, worked
+out at $0.50/ERG and $70,000/BTC with `MU_PER_NANOERG: 1`; change it to your own market).
+A satoshi is worth about a million nanoERG, so borrowing `MU_PER_NANOERG`'s `1` would sell
+an hour of compute for a millionth of its price, and the node warns if you do. Set it empty
+and the node does not offer Bitcoin at all.
 
 `BACKEND` decides how this node reaches Bitcoin and where the key is. All three can be
 paid and can pay. With `explorer` (a public Esplora HTTP API) — the default, and Ergo's

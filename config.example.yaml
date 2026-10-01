@@ -1346,7 +1346,7 @@ ledgers:
       #     DONATION_PERCENTAGE: "0.02"
       #     DONATION_MIN_TRANSFER: "10"
 
-  # A second payment system, off until you fill in MU_PER_SATOSHI below. It needs no
+  # A second payment system, priced by MU_PER_SATOSHI below (empty = off). It needs no
   # Bitcoin node of your own and no new runtime: by default nodo signs locally, like it
   # does for Ergo, and asks a public explorer about the chain.
   #
@@ -1413,16 +1413,16 @@ ledgers:
     # arm board a node lives on. Pruned, the wallet is imported as new (see above).
     PRUNE_MIB: 10000
     payments:
-      # What one satoshi buys, in MU. THERE IS NO DEFAULT, and that is deliberate: a
-      # satoshi and a nanoERG are about six orders of magnitude apart in value, so
-      # copying MU_PER_NANOERG's 1 by analogy would misprice this node by a factor of a
-      # million. Left empty, the node does not offer Bitcoin at all -- which is the only
-      # answer that cannot quietly sell an hour of compute for a millionth of its price.
+      # What one satoshi buys, in MU. A satoshi and a nanoERG are about six orders of
+      # magnitude apart in value, so do NOT copy MU_PER_NANOERG's 1 by analogy: that would
+      # misprice this node by a factor of a million (the node warns if you set 1).
       #
-      # Work it out against your own market: MU_PER_SATOSHI = (MU per nanoERG) x
-      # (value of a nanoERG / value of a satoshi). At $0.50/ERG and $100,000/BTC that is
-      # about 2000000 -- an example, not a quoted price.
-      MU_PER_SATOSHI: ""
+      # The default is worked out at $0.50/ERG and $70,000/BTC, with MU_PER_NANOERG: 1:
+      #   MU_PER_SATOSHI = (MU per nanoERG) x (value of a satoshi / value of a nanoERG)
+      #                  = 1 x ($70,000 / 1e8) / ($0.50 / 1e9) = 7e-4 / 5e-10 = 1400000
+      # It is an example, not a quoted price: change it to your own market, and keep it
+      # in step with MU_PER_NANOERG if you change that. Set it to "" to not offer Bitcoin.
+      MU_PER_SATOSHI: 1400000
       # Confirmations before a payment counts. 1 is enough at these amounts; raise it if
       # you are being paid enough that a shallow reorg would matter.
       MIN_CONFIRMATIONS: 1

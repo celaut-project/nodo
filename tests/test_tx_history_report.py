@@ -21,6 +21,7 @@ load_example_config()
 
 import src.commands.tx_history as tx_history  # noqa: E402
 from src.payment_system.contracts.registry import _Candidate  # noqa: E402
+from src.utils.config import ConfigManager  # noqa: E402
 
 OURS = "9ourWALLETaddress"
 THEIRS = "9theirCONTRACTaddress"
@@ -166,10 +167,15 @@ class TheReportCarriesTheRateTests(unittest.TestCase):
     def test_an_unusable_rate_is_reported_as_a_reason_and_not_as_a_number(self):
         """The Bitcoin case the rate module exists for.
 
-        An unset `MU_PER_SATOSHI` has no default and must not acquire one here: a
-        borrowed rate misprices the node by a factor of a million.
+        An unset `MU_PER_SATOSHI` must not acquire a borrowed rate here: that
+        misprices the node by a factor of a million.
         """
-        data = _report([], configured=("bitcoin",))
+        manager = ConfigManager()
+        real_get = manager.get
+        with mock.patch.object(manager, "get", side_effect=lambda key, default=None: (
+                "" if key == "ledgers.bitcoin.payments.MU_PER_SATOSHI"
+                else real_get(key, default))):
+            data = _report([], configured=("bitcoin",))
         rate = _ledger(data, "bitcoin")["rate"]
 
         self.assertEqual(rate["key"], "ledgers.bitcoin.payments.MU_PER_SATOSHI")
