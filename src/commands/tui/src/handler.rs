@@ -8,6 +8,11 @@ use ratatui::layout::Position;
 /// Only the Normal and Details modes react. While a modal owns the screen, a click on
 /// the page behind it would act on something the user cannot see.
 pub async fn handle_mouse_events(mouse: MouseEvent, app: &mut App) -> AppResult<()> {
+    // The "terminal too small" notice has nothing to click, and the areas the page
+    // recorded before the terminal shrank are not on screen (issue #453).
+    if app.too_small {
+        return Ok(());
+    }
     match app.input_mode {
         // The KyA gate is a decision, and a decision is not something a stray wheel
         // event or a click on the page behind it should be able to make. Scrolling is
