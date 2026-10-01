@@ -13,6 +13,7 @@ from src.utils.arch_guard import arch_from_tags
 from src.utils.cost_functions.architecture_resources import ask_of, should_skip_peer
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.identity.grpc_transport import peer_channel
+from src.utils.tools.recursion_guard import Registry
 from src.utils.utils import service_extended, peers_id_iterator
 from src.utils.config import ConfigManager
 from src.payment_system.mu_conversion import (
@@ -180,7 +181,16 @@ def execution_balancer(
     # candidates that could never be selected. Skipping it leaves 'local' as the only
     # option, so the caller either runs the service here or fails -- which is what
     # network.DELEGATE_EXECUTION: false asks for.
-    if env_manager.get("network.DELEGATE_EXECUTION", True):
+    # A request tree that has spent its hops (#456) may still run here, but may not be
+    # passed on: every peer asked from here would refuse it on arrival, so asking them
+    # for a price is a round-trip each for candidates that could never be selected.
+    if env_manager.get("network.DELEGATE_EXECUTION", True) \
+            and not Registry().can_forward(recursion_guard_token):
+        log.LOGGER(
+            f'Request {recursion_guard_token} has no recursion hops left; '
+            'only the local node is considered.'
+        )
+    elif env_manager.get("network.DELEGATE_EXECUTION", True):
         try:
             # The architecture the service needs, read off the service itself rather than
             # `arch` (which is None for one this node cannot run, and that is exactly the
