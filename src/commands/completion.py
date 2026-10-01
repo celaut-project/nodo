@@ -123,6 +123,7 @@ COMMANDS = sorted(
         "local_builder",
         "daemon",
         "doctor",
+        "benchmark",
         "completion",
         "chat",
         "chat_open",

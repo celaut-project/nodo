@@ -687,6 +687,18 @@ def manager_thread():
     print("Starting manager thread...")
     
     # Functions to be executed at the beginning
+
+    # Measure this node's cores for `min_benchmark` admission (#452), on a thread of
+    # its own: a benchmark boot takes seconds under KVM and minutes under TCG, and
+    # the manager loop below is what bills every instance. A failure costs only the
+    # enforcement, so nothing about it is allowed to reach this thread.
+    try:
+        from src.virtualizers.microvm.benchmark import start_background_refresh
+
+        start_background_refresh()
+    except Exception as e:
+        log.LOGGER(f"Could not start the node benchmark: {type(e).__name__}: {e}")
+
     try:
         _payment_process_module().init_interfaces()
     except JavaDependencyMissing:

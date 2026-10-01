@@ -28,6 +28,7 @@ GROUPS: List[Group] = [
         [
             ("tui", "status, peers and the config editor"),
             ("doctor", "check, and fix, what stops it serving"),
+            ("benchmark [--show]", "re-measure its cores for min_benchmark"),
             ("daemon start|status|stop|restart", "control the nodo.service systemd unit"),
             ("logs", "follow this node's log"),
             ("envs", "print the effective config.yaml"),

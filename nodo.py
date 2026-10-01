@@ -1034,6 +1034,16 @@ if __name__ == '__main__':
                 from src.commands.doctor import doctor_command
                 doctor_command(main_dir=MAIN_DIR)
 
+            case "benchmark":
+                # Booting a guest needs /dev/kvm, and the cache is the daemon's; both
+                # are root's on an installed node. --show only reads.
+                if "--show" not in sys.argv[2:] and os.geteuid() != 0:
+                    print("This command requires superuser privileges. Please run with sudo.")
+                    sys.exit(1)
+                from src.commands.benchmark import benchmark_command
+                if not benchmark_command(sys.argv[2:]):
+                    sys.exit(1)
+
             case "nat-guide":
                 from src.commands.nat_guide import nat_guide
                 nat_guide()
