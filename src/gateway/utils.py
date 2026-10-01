@@ -419,6 +419,18 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     if payment_contracts:
         peer.payment_contracts.extend(payment_contracts)
 
+    # The most this node supports per architecture it serves, measured benchmark scores
+    # included (#459). Covered by the signature like everything else here, and stable
+    # between announcements -- ceilings, not headroom -- so it does not defeat the
+    # announcement cache. Best-effort: a node that cannot work its ceilings out
+    # announces none, and is then called by peers as before.
+    try:
+        from src.utils.cost_functions.architecture_resources import announced_resources
+
+        peer.resources.extend(announced_resources())
+    except Exception as e:
+        log.LOGGER(f'Could not work out the resources to announce: {e}')
+
     from src.reputation_system.fetch import local_proofs
 
     reputation_proofs = list(local_proofs())
