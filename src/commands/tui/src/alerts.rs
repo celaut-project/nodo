@@ -97,6 +97,32 @@ pub const GATEWAY_PLAINTEXT_NOTICE_FILE: &str = ".gateway_plaintext_notice";
 /// `GATEWAY_PLAINTEXT_NOTICE_PORT_FILE` in `src/utils/config.py` (issue #438).
 pub const GATEWAY_PLAINTEXT_NOTICE_PORT_FILE: &str = ".gateway_plaintext_notice.port";
 
+/// What the operator should do, taken from the notice itself rather than pointing at
+/// its file: the one-line command in the `.cmd` companion when there is one,
+/// otherwise the notice's body with its framing rules and title dropped. Mirrors
+/// `_command_block` in `src/utils/operator_alerts.py`, minus the centering -- the
+/// banner wraps its own lines.
+fn notice_instruction(config: &Path, notice_file: &str, notice: &str) -> String {
+    let command = notice_files(config, notice_file)[1].clone();
+    if let Some(command) = fs::read_to_string(command)
+        .ok()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+    {
+        return command;
+    }
+    notice
+        .lines()
+        .map(str::trim)
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with("nodo:")
+                && !line.chars().all(|c| matches!(c, '=' | '-' | '─' | '━' | '*' | '#'))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn gateway_notice_path(config: &Path) -> PathBuf {
     config
         .parent()
@@ -194,9 +220,9 @@ fn gateway_port_alert(
             key: "gateway_port_firewall",
             summary: format!(
                 "{} TCP {port} is not open in the host firewall, so peers cannot reach \
-                 this node. Open it: see {} for the exact command.",
+                 this node. Open it: {}",
                 unreachable_lead(serving),
-                gateway_notice_path(config).display()
+                notice_instruction(config, GATEWAY_NOTICE_FILE, &notice.clone().unwrap_or_default())
             ),
         }),
         // A port is assigned, the firewall has no open question about it, and still
@@ -266,7 +292,7 @@ fn plaintext_gateway_port_alert(
 ) -> Option<OperatorAlert> {
     let port = plaintext_assigned_port(document)?;
 
-    fs::read_to_string(gateway_plaintext_notice_path(config))
+    let pending = fs::read_to_string(gateway_plaintext_notice_path(config))
         .ok()
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())?;
@@ -290,8 +316,8 @@ fn plaintext_gateway_port_alert(
         summary: format!(
             "TCP {port} (the plaintext gateway) is not reachable from the guest \
              subnet, so services this node launches cannot call back into it. Fix \
-             it: see {} for the exact command.",
-            gateway_plaintext_notice_path(config).display()
+             it: {}",
+            notice_instruction(config, GATEWAY_PLAINTEXT_NOTICE_FILE, &pending)
         ),
     })
 }
