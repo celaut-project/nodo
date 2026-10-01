@@ -248,6 +248,42 @@ stale — notably one that reinstalled and came back under a new identity key, s
 column) and, on `Enter`, runs `nodo credit_client <client id> <amount>` or
 `nodo debit_client <client id> <amount>` in the background.
 
+## Terminal size
+
+The console lays itself out for whatever size the terminal is, and lays itself out
+again on every resize — there is nothing to restart.
+
+- **Minimum: 40 × 11.** That is the bordered group row (3), the page row (1), one
+  table showing one row — its borders, header and the line under it (5) — and the
+  two-line footer (2), at the width the short tab titles need. Below it the console
+  shows a *Terminal too small* notice with the current and the needed size instead
+  of a page; the keys keep working (`q` quits) and the mouse is ignored.
+- **Tab rows** switch to short titles (`OVER WORK EARN LOGS SET DOCS`, `INST PEERS
+  SERV CLNT CHAT`, …) when the full ones do not fit; a click lands on whichever form
+  was drawn.
+- **Tables** drop columns by importance when they are short of width, and cut what
+  is left with `…` instead of mid-word (CJK and emoji measured at their real
+  width). The order, most important first:
+  - Instances: Name, Instance, Service, CPU%, Left, RAM, Location, Client, Balance,
+    Up, Net, Burn/h, VM
+  - Peers: Peer ID, Our balance, Rep, Endpoints, Reputation proofs
+  - Services: Tag, Content ID, With blocks, Stored here
+  - Clients: Client ID, Balance, Last usage, Metering
+  - Chat: Chat, Topic
+  - Money taken in: Network, All time, Last day, week, month, year
+  - Who stakes: Stake, Proof, Backed by, Published
+  - Prices: Price, the display unit, MU
+
+  The selected row always stays on screen; the selected-row cards below the
+  Instances/Services/Peers/Clients tables give way to the table first.
+- **Pages** give way in the same spirit: the Overview flows its cards into fewer
+  columns and counts the ones that did not fit; Chat stacks the conversation under the
+  list below 64 columns; DOCS shows only the focused pane below 60; Energy becomes one
+  scrolled list when its three blocks do not fit; Pricing, Schedule and Earnings drop
+  their least important blocks first rather than squeezing every block to its border.
+- **Footer and popup hints** drop whole hints from the end (marked `…`) rather than
+  cutting a key name in half; the status message outlasts the navigation hints.
+
 ## Docs
 
 The DOCS page (`6`, or a click on its label) reads the installation's `docs/` folder
