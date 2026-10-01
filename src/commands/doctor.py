@@ -480,6 +480,27 @@ def _doctor_initramfs(initramfs_paths: dict, host_arch_tag: str):
             flush=True,
         )
 
+    # Informational, never a failure: an initramfs without the benchmark branch
+    # launches services exactly as well, it only means a declared min_benchmark is
+    # logged instead of enforced (#452). Measuring is not doctor's job -- it boots a
+    # guest for ~10s per architecture -- so this only says whether it can happen.
+    try:
+        capability = ch_initramfs.benchmark_capability(initramfs_path)
+    except ch_initramfs.InitramfsReadError:
+        capability = ""
+    if capability == ch_initramfs.BENCHMARK_CAPABILITY:
+        print(
+            f"[OK] Initramfs can measure this node's cores (benchmark:{capability}); "
+            "'sudo nodo benchmark --show' prints the scores.",
+            flush=True,
+        )
+    else:
+        print(
+            "[INFO] Initramfs has no benchmark branch: a service's min_benchmark is "
+            "logged, not enforced, until a guest with one is installed.",
+            flush=True,
+        )
+
     return initramfs_path
 
 

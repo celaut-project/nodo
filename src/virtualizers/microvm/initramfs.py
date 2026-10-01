@@ -19,7 +19,7 @@ launching fail outright on every non-Debian host.
 import gzip
 import shutil
 import subprocess
-from typing import FrozenSet, Set, Tuple
+from typing import Dict, FrozenSet, Set, Tuple
 
 # Bump together with the marker that bash/build_ch_initramfs.sh stamps: they are
 # one version. It covers /init's contract with execute.py -- which files it expects
@@ -50,6 +50,14 @@ CONTRACT_VERSION = "v3"
 MARKER_PATH = "etc/nodo-ch-initramfs.marker"
 MARKER_KEY = "nodo-ch-initramfs"
 
+# A capability rather than a contract bump (#452). /init's `nodo.benchmark=1` branch
+# changes nothing execute.py relies on, so it is announced on a line of its own: a
+# guest without the line still launches services exactly as before, and the
+# benchmark boot simply skips it instead of waiting out a guest that would look for
+# a rootfs it was never given.
+BENCHMARK_MARKER_KEY = "benchmark"
+BENCHMARK_CAPABILITY = "v1"
+
 REQUIRED_ENTRIES: FrozenSet[str] = frozenset({"init", "bin/busybox", MARKER_PATH})
 
 
@@ -70,13 +78,8 @@ def _cpio(args, payload: bytes) -> bytes:
     return result.stdout
 
 
-def read(path: str) -> Tuple[Set[str], str]:
-    """Return the entry names and the contract version of the initramfs at `path`.
-
-    The version is "" when the marker carries no recognisable one; callers decide
-    whether that is fatal. Raises InitramfsReadError if the file cannot be read as
-    a gzip'd cpio archive at all.
-    """
+def _read_archive(path: str) -> Tuple[Set[str], Dict[str, str]]:
+    """The entry names of the initramfs at `path`, and its marker as ``{key: value}``."""
     try:
         with open(path, "rb") as f:
             payload = gzip.decompress(f.read())
@@ -88,16 +91,34 @@ def read(path: str) -> Tuple[Set[str], str]:
         line.strip().lstrip("./") for line in listing.splitlines() if line.strip()
     }
 
-    version = ""
+    fields: Dict[str, str] = {}
     if MARKER_PATH in entries:
         marker = _cpio(["-i", "--to-stdout", "--quiet", MARKER_PATH], payload)
         for line in marker.decode(errors="replace").splitlines():
             key, _, value = line.partition(":")
-            if key.strip() == MARKER_KEY:
-                version = value.strip()
-                break
+            fields.setdefault(key.strip(), value.strip())
 
-    return entries, version
+    return entries, fields
+
+
+def read(path: str) -> Tuple[Set[str], str]:
+    """Return the entry names and the contract version of the initramfs at `path`.
+
+    The version is "" when the marker carries no recognisable one; callers decide
+    whether that is fatal. Raises InitramfsReadError if the file cannot be read as
+    a gzip'd cpio archive at all.
+    """
+    entries, fields = _read_archive(path)
+    return entries, fields.get(MARKER_KEY, "")
+
+
+def benchmark_capability(path: str) -> str:
+    """The ``benchmark:`` line of the marker, or "" for an initramfs that predates it.
+
+    Raises InitramfsReadError like :func:`read`.
+    """
+    _, fields = _read_archive(path)
+    return fields.get(BENCHMARK_MARKER_KEY, "")
 
 
 def missing_entries(entries: Set[str]) -> list:

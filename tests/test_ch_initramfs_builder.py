@@ -1,4 +1,5 @@
 import gzip
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -288,6 +289,183 @@ class InitramfsContractTests(unittest.TestCase):
                 self.assertIn(".missing_entries", content)
                 # The entry names must come from the module, not be respelled.
                 self.assertNotIn('"etc/nodo-ch-initramfs.marker"', content)
+
+
+def _init_script() -> str:
+    """The /init heredoc, as the guest runs it."""
+    content = Path("bash/build_ch_initramfs.sh").read_text(encoding="utf-8")
+    opener = "cat > \"$ROOT/init\" <<'INIT_EOF'\n"
+    start = content.index(opener) + len(opener)
+    return content[start:content.index("\nINIT_EOF\n")]
+
+
+def _benchmark_functions() -> str:
+    """The benchmark branch's definitions, cut out of /init so they can be run alone."""
+    init = _init_script()
+    return init[init.index("BENCH_CS=200"):init.index("mkdir -p /proc /sys /dev /newroot")]
+
+
+# The four primitives, spelled here rather than imported: this file runs on a bare
+# checkout, and `src.utils.min_benchmark` reaches protobuf through keyvalue.
+# tests/test_node_benchmark.py pins that this tuple and MIN_BENCHMARK_KEYS agree.
+BENCHMARK_KEYS = (
+    "int_ops_per_sec",
+    "flt_ops_per_sec",
+    "mem_bandwidth_bytes_per_sec",
+    "sha256_hashes_per_sec",
+)
+
+
+class BenchmarkBranchTests(unittest.TestCase):
+    """/init's `nodo.benchmark=1` branch (#452), read as text the way the rest is."""
+
+    def test_the_branch_is_gated_on_its_own_cmdline_token(self):
+        init = _init_script()
+        self.assertIn("nodo.benchmark=1) return 0 ;;", init)
+        self.assertIn("for token in $(cat /proc/cmdline", init[init.index("benchmark_requested() {"):])
+        self.assertIn("if benchmark_requested; then\n    run_benchmark\nfi", init)
+
+    def test_it_runs_after_the_pseudo_filesystems_and_before_any_rootfs_handling(self):
+        # /proc/uptime and /proc/cmdline need /proc, dd needs /dev/zero. And it has to
+        # come before the wait for /dev/vda: a benchmark boot has no disk, and would
+        # otherwise sit out WAIT_SECONDS and then fatal().
+        init = _init_script()
+        branch = init.index("if benchmark_requested; then")
+        for earlier in ("mount -t proc proc /proc", "mount -t sysfs sysfs /sys",
+                        "mount -t devtmpfs devtmpfs /dev"):
+            with self.subTest(earlier=earlier):
+                self.assertLess(init.index(earlier), branch)
+        main = init.index("mkdir -p /proc /sys /dev /newroot")
+        for later in ("WAIT_SECONDS=20", 'mount -t "$ROOTFSTYPE"', "configure_guest_network\n",
+                      "exec switch_root /newroot"):
+            with self.subTest(later=later):
+                self.assertLess(branch, init.index(later, main))
+
+    def test_it_prints_every_primitive_as_a_tagged_integer_line(self):
+        functions = _benchmark_functions()
+        for key in BENCHMARK_KEYS:
+            with self.subTest(key=key):
+                self.assertIn(f"[nodo-benchmark] {key}=", functions)
+        self.assertIn('echo "[nodo-benchmark] done"', functions)
+
+    def test_it_times_with_proc_uptime_and_not_date(self):
+        functions = _benchmark_functions()
+        self.assertIn("< /proc/uptime", functions)
+        self.assertIn('getline line < "/proc/uptime"', functions)
+        self.assertNotIn("date", functions)
+
+    def test_it_never_parks_the_guest_in_the_fatal_loop(self):
+        # A missing applet costs that primitive's line, not the measurement.
+        functions = _benchmark_functions()
+        self.assertNotIn("fatal", functions)
+        self.assertIn("set +e", functions)
+        # A traced loop times the console, not the CPU.
+        self.assertIn("set +x", functions)
+        self.assertLess(functions.index("set +x"), functions.index("bench_int_ops\n    bench_flt_ops"))
+
+    def test_it_powers_off_on_its_own(self):
+        # A service guest never exits; this one has to, or every measurement costs
+        # the node's whole timeout. -f because the shell is PID 1.
+        functions = _benchmark_functions()
+        self.assertIn("/bin/busybox poweroff -f", functions)
+        self.assertLess(functions.index('echo "[nodo-benchmark] done"'),
+                        functions.index("/bin/busybox poweroff -f"))
+
+    def test_applets_outside_applets_txt_are_called_through_busybox(self):
+        # applets.txt is what gets symlinked; anything else compiled in is reachable
+        # only as `busybox <applet>`, and a bare name would be "not found".
+        functions = _benchmark_functions()
+        for applet in ("awk", "dd", "sha256sum", "poweroff"):
+            with self.subTest(applet=applet):
+                self.assertIn(f"/bin/busybox {applet}", functions)
+
+    def test_the_marker_announces_the_benchmark_capability_without_a_contract_bump(self):
+        builder = Path("bash/build_ch_initramfs.sh").read_text(encoding="utf-8")
+        self.assertIn(
+            f"\\n{ch_initramfs.BENCHMARK_MARKER_KEY}:{ch_initramfs.BENCHMARK_CAPABILITY}\\n",
+            builder,
+        )
+        self.assertEqual(ch_initramfs.CONTRACT_VERSION, "v3")
+
+
+@unittest.skipUnless(shutil.which("sh"), "needs a POSIX sh")
+class BenchmarkBranchExecutionTests(unittest.TestCase):
+    """The branch's shell, executed: arithmetic and output, not only substrings.
+
+    The functions are cut out of /init and run under the host's sh with two stand-ins:
+    a clock that advances STEP centiseconds per reading, so every count is exact, and a
+    `bb` function in place of /bin/busybox, so no applet runs. What is left is the
+    shell itself -- loops, arithmetic, the applet check, the lines it prints.
+    """
+
+    STEP = 100
+
+    def _run(self, body: str, *, applets=("awk", "dd", "sha256sum", "poweroff")) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            script = (
+                _benchmark_functions()
+                .replace("/bin/busybox ", "bb ")
+                # sha256's input goes to the guest's /tmp; keep it out of the host's.
+                .replace("/tmp/nodo-benchmark.in", f"{tmp}/nodo-benchmark.in")
+                + "\nBENCH_FAKE=0\n"
+                + f"bench_now() {{ BENCH_FAKE=$((BENCH_FAKE + {self.STEP})); BENCH_NOW=$BENCH_FAKE; }}\n"
+                + "bb() {\n"
+                + "    case \"$1\" in\n"
+                + f"        --list) printf '%s\\n' {' '.join(applets)} ;;\n"
+                + "        awk) echo '[nodo-benchmark] flt_ops_per_sec=777' ;;\n"
+                + "        *) return 0 ;;\n"
+                + "    esac\n"
+                + "}\n"
+                # poweroff is a no-op here, so the park loop is what ends the run.
+                + "sleep() { exit 0; }\n"
+                + body
+            )
+            result = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_each_rate_is_units_over_elapsed_centiseconds(self):
+        out = self._run('BENCH_APPLETS="$(bb --list)"\n'
+                        "bench_int_ops\nbench_mem_bandwidth\nbench_sha256\n")
+        # int: 1000-iteration batches until 200 cs have passed -- two readings after
+        # the start one, so 2000 iterations in 200 cs.
+        self.assertIn("[nodo-benchmark] int_ops_per_sec=1000\n", out)
+        # mem: the first 64 MiB run already lasts BENCH_CS/2, so one block in 100 cs.
+        self.assertIn(f"[nodo-benchmark] mem_bandwidth_bytes_per_sec={64 * 1024 * 1024}\n", out)
+        # sha256: 256 digests per sha256sum run, two runs in 200 cs.
+        self.assertIn("[nodo-benchmark] sha256_hashes_per_sec=256\n", out)
+
+    def test_the_whole_run_prints_every_primitive_then_done(self):
+        out = self._run("run_benchmark\n")
+        lines = [line for line in out.splitlines() if line.startswith("[nodo-benchmark]")]
+        self.assertEqual(lines[0], "[nodo-benchmark] begin")
+        self.assertEqual(lines[-1], "[nodo-benchmark] done")
+        self.assertEqual(
+            [line.split("=")[0].split()[-1] for line in lines[1:-1]],
+            list(BENCHMARK_KEYS),
+        )
+
+    def test_a_missing_applet_omits_only_its_own_line(self):
+        out = self._run("run_benchmark\n", applets=("awk", "sha256sum", "poweroff"))
+        self.assertNotIn("mem_bandwidth_bytes_per_sec=", out)
+        self.assertIn("[nodo-benchmark] skipped mem_bandwidth_bytes_per_sec: busybox has no dd applet", out)
+        for key in ("int_ops_per_sec", "flt_ops_per_sec", "sha256_hashes_per_sec"):
+            with self.subTest(key=key):
+                self.assertIn(f"[nodo-benchmark] {key}=", out)
+        self.assertIn("[nodo-benchmark] done", out)
+
+    def test_the_clock_reads_proc_uptime_in_centiseconds(self):
+        # The real bench_now, against a stand-in /proc/uptime. ".08" is the case that
+        # breaks naive shell arithmetic: a leading zero is octal, and 8 is not a digit.
+        functions = _benchmark_functions()
+        real = functions[functions.index("bench_now() {"):functions.index("bench_has() {")]
+        for uptime, expected in (("12.08 3.00", 1208), ("0.00 0.00", 0), ("98765.43 1.00", 9876543)):
+            with self.subTest(uptime=uptime), tempfile.TemporaryDirectory() as tmp:
+                fake = Path(tmp) / "uptime"
+                fake.write_text(uptime + "\n", encoding="utf-8")
+                script = real.replace("/proc/uptime", str(fake)) + '\nbench_now\necho "$BENCH_NOW"\n'
+                result = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.stdout.strip(), str(expected), result.stderr)
 
 
 class GuestKernelConfigTests(unittest.TestCase):

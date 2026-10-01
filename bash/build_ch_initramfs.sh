@@ -252,12 +252,202 @@ configure_guest_network() {
     log "configured guest network iface=$iface ip=${client_ip}/${prefix} gw=${gateway_ip:-<none>} autoconf=${autoconf:-<empty>}"
 }
 
+# Benchmark boot (#452): `nodo.benchmark=1` on the cmdline turns this guest into a
+# measurement of what one vCPU of it can do, instead of a service. The node boots it
+# with this same pinned kernel and initramfs and no rootfs at all, reads the tagged
+# lines below off the serial log (src/utils/node_benchmark.py), and holds a declared
+# `min_benchmark` against them at admission.
+#
+# Measured in here rather than on the host because the gap it exists to show is the
+# guest's: the same "1.0 core" is native silicon under CH+KVM and software emulation
+# under QEMU+TCG, and only a guest sees which. And with busybox, not a purpose-built
+# binary, because busybox is the one userspace every node has byte-for-byte -- the
+# same loops under the same build are what makes one node's number comparable to
+# another's.
+#
+# Every primitive runs for about BENCH_CS centiseconds and reports units per second:
+#
+#   int_ops_per_sec              iterations of an ash loop doing one integer LCG step
+#   flt_ops_per_sec              awk float multiply-adds
+#   mem_bandwidth_bytes_per_sec  bytes dd copies out of /dev/zero, in 64 MiB blocks:
+#                                larger than a last-level cache, so it is memory
+#                                that is timed and not cache
+#   sha256_hashes_per_sec        sha256sum digests of a 64-byte message, 256 per
+#                                process, so it is hashing that is timed and not fork
+#
+# Timing is /proc/uptime: centiseconds, no applet, and there from the moment /proc is
+# mounted. `date` is not used -- nothing pins it to sub-second precision.
+#
+# Never fatal(). A primitive whose applet is missing prints no line and the others
+# still run: an unmeasured primitive is unknown to admission, not insufficient, so a
+# partial measurement is worth more than a guest parked in the fatal loop. `set -e`
+# and the trace are off for the same reason and for the timing's sake -- a traced
+# loop measures the console, not the CPU. Anything not in applets.txt is called as
+# `/bin/busybox <applet>`, which reaches every applet compiled in, symlinked or not.
+BENCH_CS=200
+BENCH_MEM_BLOCK=67108864
+
+# Sets BENCH_NOW to the uptime in centiseconds. A variable rather than output, so
+# reading the clock costs no fork. /proc/uptime always has two decimals; "1" in
+# front of them keeps a fraction like "08" from being read as octal.
+bench_now() {
+    local up rest
+    read -r up rest < /proc/uptime
+    BENCH_NOW=$(( ${up%.*} * 100 + 1${up#*.} - 100 ))
+}
+
+bench_has() {
+    case "
+$BENCH_APPLETS
+" in
+        *"
+$1
+"*) return 0 ;;
+    esac
+    echo "[nodo-benchmark] skipped $2: busybox has no $1 applet"
+    return 1
+}
+
+bench_int_ops() {
+    local start elapsed iters i x
+    iters=0
+    x=1
+    elapsed=0
+    bench_now
+    start=$BENCH_NOW
+    while [ "$elapsed" -lt "$BENCH_CS" ]; do
+        i=0
+        while [ "$i" -lt 1000 ]; do
+            x=$(( (x * 1103515245 + 12345) & 2147483647 ))
+            i=$((i + 1))
+        done
+        iters=$((iters + 1000))
+        bench_now
+        elapsed=$((BENCH_NOW - start))
+    done
+    echo "[nodo-benchmark] int_ops_per_sec=$((iters * 100 / elapsed))"
+}
+
+bench_flt_ops() {
+    bench_has awk flt_ops_per_sec || return 0
+    /bin/busybox awk -v cs="$BENCH_CS" '
+        function now(   line, f) {
+            getline line < "/proc/uptime"
+            close("/proc/uptime")
+            split(line, f, " ")
+            return f[1]
+        }
+        BEGIN {
+            x = 1.5
+            n = 0
+            t0 = now()
+            do {
+                for (i = 0; i < 20000; i++) x = x * 0.9999999 + 0.0000001
+                n += 20000
+                elapsed = now() - t0
+            } while (elapsed * 100 < cs)
+            printf "[nodo-benchmark] flt_ops_per_sec=%.0f\n", n / elapsed
+        }' || echo "[nodo-benchmark] skipped flt_ops_per_sec: awk failed"
+}
+
+bench_mem_bandwidth() {
+    local count start elapsed
+    bench_has dd mem_bandwidth_bytes_per_sec || return 0
+    # Doubled until one run lasts BENCH_CS/2: the block is fixed, so how many of them
+    # fit is the only thing that varies between a fast host and an emulated one.
+    count=1
+    while :; do
+        bench_now
+        start=$BENCH_NOW
+        if ! /bin/busybox dd if=/dev/zero of=/dev/null bs="$BENCH_MEM_BLOCK" count="$count" 2>/dev/null; then
+            echo "[nodo-benchmark] skipped mem_bandwidth_bytes_per_sec: dd failed"
+            return 0
+        fi
+        bench_now
+        elapsed=$((BENCH_NOW - start))
+        if [ "$elapsed" -ge $((BENCH_CS / 2)) ]; then
+            break
+        fi
+        if [ "$count" -ge 65536 ]; then
+            echo "[nodo-benchmark] skipped mem_bandwidth_bytes_per_sec: no measurable time"
+            return 0
+        fi
+        count=$((count * 2))
+    done
+    echo "[nodo-benchmark] mem_bandwidth_bytes_per_sec=$((count * BENCH_MEM_BLOCK * 100 / elapsed))"
+}
+
+bench_sha256() {
+    local start elapsed digests i
+    bench_has sha256sum sha256_hashes_per_sec || return 0
+    mkdir -p /tmp
+    printf '%s' "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" \
+        > /tmp/nodo-benchmark.in
+    set --
+    i=0
+    while [ "$i" -lt 256 ]; do
+        set -- "$@" /tmp/nodo-benchmark.in
+        i=$((i + 1))
+    done
+    digests=0
+    elapsed=0
+    bench_now
+    start=$BENCH_NOW
+    while [ "$elapsed" -lt "$BENCH_CS" ]; do
+        if ! /bin/busybox sha256sum "$@" >/dev/null 2>&1; then
+            echo "[nodo-benchmark] skipped sha256_hashes_per_sec: sha256sum failed"
+            return 0
+        fi
+        digests=$((digests + 256))
+        bench_now
+        elapsed=$((BENCH_NOW - start))
+    done
+    echo "[nodo-benchmark] sha256_hashes_per_sec=$((digests * 100 / elapsed))"
+}
+
+run_benchmark() {
+    set +x
+    set +e
+    BENCH_APPLETS="$(/bin/busybox --list 2>/dev/null)"
+    echo "[nodo-benchmark] begin"
+    bench_int_ops
+    bench_flt_ops
+    bench_mem_bandwidth
+    bench_sha256
+    echo "[nodo-benchmark] done"
+    # The node waits for this guest to end on its own: a service guest never does, a
+    # benchmark guest must, or every measurement costs the whole timeout. -f because
+    # this shell is PID 1 and there is no init to ask. If the power-off is refused the
+    # node still has "done" above and stops the VM itself, so park rather than exit --
+    # PID 1 exiting would print a kernel panic after a successful measurement.
+    /bin/busybox poweroff -f
+    while true; do
+        sleep 3600
+    done
+}
+
+benchmark_requested() {
+    local token
+    for token in $(cat /proc/cmdline 2>/dev/null || true); do
+        case "$token" in
+            nodo.benchmark=1) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 mkdir -p /proc /sys /dev /newroot
 mount -t proc proc /proc || fatal "cannot mount /proc"
 mount -t sysfs sysfs /sys || fatal "cannot mount /sys"
 mount -t devtmpfs devtmpfs /dev || mount -t tmpfs tmpfs /dev || fatal "cannot mount /dev"
 mkdir -p /dev/shm
 mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /dev/shm || fatal "cannot mount /dev/shm"
+
+# Before anything that looks for a rootfs: a benchmark boot has no disk, and would
+# otherwise spend WAIT_SECONDS on /dev/vda and then fatal().
+if benchmark_requested; then
+    run_benchmark
+fi
 
 WAIT_SECONDS=20
 i=0
@@ -475,7 +665,11 @@ fatal "switch_root returned unexpectedly"
 INIT_EOF
 chmod 0755 "$ROOT/init"
 
-printf 'nodo-ch-initramfs:v3\narch:%s\n' "$ARCH_TAG" > "$ROOT/etc/nodo-ch-initramfs.marker"
+# `benchmark:` is a capability, not the contract version: /init's contract with
+# execute.py is unchanged by the benchmark branch, and bumping the version would make
+# every node refuse to launch until a new initramfs is published and pinned. The
+# benchmark boot reads this line instead, and skips a guest that predates it.
+printf 'nodo-ch-initramfs:v3\narch:%s\nbenchmark:v1\n' "$ARCH_TAG" > "$ROOT/etc/nodo-ch-initramfs.marker"
 
 # Byte-reproducible output, so CI's published artifact can be checked against a
 # local rebuild of the same commit — which is what makes the pinned digest in
