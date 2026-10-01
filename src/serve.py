@@ -376,4 +376,15 @@ def serve():
     # "nothing answers on this port".
     _verify_gateway_ports(server, port, plaintext_port)
 
+    # Measure any per-core benchmark score still at -1 (#459). After the server is up,
+    # because the benchmark core service is launched through it; on a daemon thread
+    # and fully guarded, so it can neither hold up nor break startup or billing. A node
+    # with no `core_services.benchmark` configured starts no thread at all.
+    try:
+        from src.core_services.benchmark import start_in_background
+
+        start_in_background()
+    except Exception as e:
+        log.LOGGER(f'Could not start the benchmark measurement: {e}')
+
     server.wait_for_termination()

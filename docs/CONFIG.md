@@ -53,7 +53,7 @@ the same second get a snapshot each instead of the second overwriting the first'
 |---|---|---|
 | `nodo tui` | whatever you edit, in one `yq` invocation | Restarts the node, and reverts the file if it does not come back. |
 | A CLI command — `nodo sync_reputation_proof`, `nodo submit_reputation` | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | Restarts a serving node once it sees the file changed. Needs root; if the restart cannot happen the command says so and names the fix. |
-| The daemon itself | `ledgers.ergo.NODE_URL` when the configured Ergo node stops answering, and the proof id when it submits one | None needed — the process that wrote the value is the one running on it, and the value is live in memory the moment it is set. |
+| The daemon itself | `ledgers.ergo.NODE_URL` when the configured Ergo node stops answering, the proof id when it submits one, and the `-1`s of `benchmark.BY_ARCH` once the benchmark core service has measured them | None needed — the process that wrote the value is the one running on it, and the value is live in memory the moment it is set. |
 | First load, on any process | resolves `auto` values (`network.GATEWAY_PORT`, `identity.MNEMONIC`, `ledgers.ergo.WALLET_MNEMONIC`) and interpolated paths | None — this happens before the node serves. |
 
 A hand edit is the one write with none of that: no validation, no backup, no restart.
@@ -257,6 +257,63 @@ closed ("Service not allowed.").
 | `source-application` | Maps a service id → its downloadable sources (manifest URLs). |
 | `packer` | The packer-service used by `nodo pack` (default mode). |
 | `low-demand-fallback` | Opportunistic service run only when the node is idle (WIP). |
+| `bitcoin-node` | A bitcoind this node runs itself (see [BITCOIN.md](BITCOIN.md)). |
+| `benchmark` | **Optional.** Measures this node's per-core scores at startup (see [`benchmark`](#benchmark--this-nodes-per-core-scores) below). One id, or a list of ids — one per architecture. |
+
+## `benchmark` — this node's per-core scores
+
+`cpu_quota`/`cpu_period` say how many cores a service gets, not how fast one is: the same
+"1.0 core" is native silicon under Cloud Hypervisor and software emulation under
+QEMU+TCG. A service states the second half as `resources.at_init.benchmark` in its
+`service.json` (see [PACKING.md](PACKING.md#benchmark)); this block is what it is held
+against, per architecture this node serves:
+
+```yaml
+benchmark:
+  BY_ARCH:
+    linux/amd64:
+      int_ops_per_sec: -1
+      flt_ops_per_sec: -1
+      mem_bandwidth_bytes_per_sec: -1
+      mem_bandwidth_working_set_bytes: -1
+      sha256_hashes_per_sec: -1
+```
+
+- Every value is **per core, per second**, a non-negative integer, or **`-1` for "not
+  measured"**. A malformed value, an unknown key or a non-canonical architecture
+  (`amd64` for `linux/amd64`) stops the node at load.
+- **Admission enforces** a measured score: a service requiring more of a primitive than
+  this node scored for the service's architecture is refused, with the reason. A
+  requirement on a `-1` score is only logged — an unknown capacity is not evidence of an
+  insufficient one.
+- **Memory bandwidth comes with the working set it was measured over**
+  (`mem_bandwidth_working_set_bytes`). It satisfies a requirement only if that set is at
+  least the requested one; a requirement naming none is read against the pinned 1 GiB;
+  and a bandwidth with no working set (`-1`) is never accepted.
+- The measured scores are **announced to peers** (`Peer.resources`), so a peer whose
+  service needs more does not even ask this node.
+- Foreign architectures served under QEMU+TCG have their own block: scoring an emulated
+  guest with the host's numbers would admit exactly the "1.0 core" this exists to tell
+  apart.
+
+**Filling it in.** Either by hand — write the numbers; the node never touches a value
+that is not `-1` — or with the optional `benchmark` core service:
+
+1. Pack `celaut-basics/demo-service`'s `benchmark/` (`cd benchmark && nodo pack .`)
+   once per architecture this node serves, changing `"architecture"` in its
+   `service.json` for each. A pack needs an x86_64 host with KVM for `linux/amd64`.
+2. Put the printed id(s) under `core_services.benchmark` — one string, or a list.
+3. Leave the scores you want measured at `-1` and restart the node.
+
+At startup, while a served architecture has a `-1` primitive, the node launches the
+service **on itself** (never on a peer), asks it for its scores, files the answer under
+the architecture the service reports having run under, and stops it. Only the `-1`s are
+written; the bandwidth and its working set go in together. A
+`mem_bandwidth_working_set_bytes` written by hand while the bandwidth is `-1` is the size
+the service is asked to measure over. It runs on a background thread after the gateway
+is up, so it never holds up startup or billing; a failure is logged (`[BENCHMARK]`) and
+the `-1`s stay for the next start. With `core_services.benchmark` unset, nothing is
+measured and nothing changes.
 
 ## `hashing`
 

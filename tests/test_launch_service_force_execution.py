@@ -160,6 +160,42 @@ class LaunchServiceDispatchTests(unittest.TestCase):
         mock_force_delegate.assert_not_called()
         mock_balancer.assert_called_once()
 
+    def test_a_forced_local_hint_runs_it_here_and_never_on_a_peer(self):
+        # The benchmark core service measures the node that runs it: a cheaper peer
+        # winning the balancer would hand back that peer's scores as this node's (#459).
+        service = celaut.Service()
+        metadata = celaut.Metadata()
+        instance = celaut.ServiceInstance()
+        cost = celaut.EstimatedCost()
+        cost.cost.n = "1"
+
+        with patch.object(
+            launch_service_mod.sc, "pop_forced_execution_peer",
+            return_value=launch_service_mod.FORCED_LOCAL,
+        ), patch.object(launch_service_mod, "_force_delegate") as mock_force_delegate, \
+                patch.object(
+                    launch_service_mod, "execution_balancer",
+                    return_value=iter([("peer-a", cost), ("local", cost)]),
+                ), \
+                patch.object(launch_service_mod, "_detect_local_preflight_failure", return_value=None), \
+                patch.object(launch_service_mod, "spend_mu", return_value=True), \
+                patch.object(launch_service_mod, "delegate_execution") as mock_delegate, \
+                patch.object(launch_service_mod, "local_execution", return_value=instance) as mock_local, \
+                patch.object(launch_service_mod.sc, "internal_instance_exists", return_value=False):
+            result = launch_service_mod.launch_service(
+                service=service,
+                metadata=metadata,
+                father_ip="10.0.0.1",
+                father_id="dev-client-1",
+                service_id="svc-1",
+                recursion_guard_token="tok-1",
+            )
+
+        self.assertIs(result, instance)
+        mock_force_delegate.assert_not_called()
+        mock_delegate.assert_not_called()
+        mock_local.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
