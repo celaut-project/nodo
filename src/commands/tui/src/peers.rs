@@ -8,13 +8,13 @@
 //! `app.rs`/`ui.rs`.
 
 use crate::app::{shorten, App, CommandKind, Identifiable, Money, PaymentRow, PendingAction};
-use crate::ui::{
-    accent, bad, good, header_row, metric_line, muted, nonempty, payment_lines,
+use crate::layout_util::Column;
+use crate::ui::{fitted_column_x, fitted_table, TextCell,
+    accent, bad, good, metric_line, muted, nonempty, payment_lines,
     reputation_event_lines, section_block, selected_style, text_colour, warn,
 };
 use prost::Message;
 use ratatui::prelude::*;
-use ratatui::widgets::{Cell, Row, Table};
 use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
 use std::path::Path;
 
@@ -370,14 +370,16 @@ impl App {
     }
 }
 
-/// The clickable id column's `[start, end)` column range on the Peers table -- the
-/// border, then the table's own highlight-symbol gutter, then the id column itself
-/// (`Constraint::Length(30)` in `draw`). Kept alongside `draw` rather than derived at
-/// click time so the two cannot drift apart.
-pub fn id_column_x(area: Rect) -> (u16, u16) {
-    let start = area.x + 1 /* left border */ + 2 /* "▸ " highlight gutter */;
-    (start, (start + 30).min(area.x + area.width.saturating_sub(1)))
-}
+/// The PEERS table's columns (issue #453): the id, then what this node holds there
+/// and the peer's standing, outlast where it is reached and what it announced --
+/// both of which the card below spells out.
+pub(crate) const PEER_COLUMNS: [Column; 5] = [
+    Column::new("Peer ID", Constraint::Length(30), 10, 0),
+    Column::new("Endpoints", Constraint::Length(24), 9, 3),
+    Column::new("Our balance", Constraint::Length(13), 8, 1),
+    Column::new("Rep", Constraint::Length(7), 3, 2),
+    Column::new("Reputation proofs", Constraint::Min(20), 8, 4),
+];
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     // The card sizes itself to what the selected peer actually has: contracts, the
@@ -413,51 +415,46 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     ])
     .split(area);
 
-    let peers = app.peers.items.iter().map(|peer| {
-        Row::new(vec![
-            Cell::from(peer.id.clone()),
-            Cell::from(peer.uris.clone()),
-            Cell::from(app.money.format_raw(&peer.balance)),
-            Cell::from(peer.reputation_score.clone()).style(Style::default().fg(good()).bold()),
-            Cell::from(match peer.proof_ids.len() {
-                0 => "none".to_string(),
-                1 => shorten(&peer.proof_ids[0], 18),
-                n => format!("{n} announced"),
-            }),
-        ])
-    });
-    let peer_table = Table::new(
-        peers,
-        [
-            Constraint::Length(30),
-            Constraint::Length(24),
-            Constraint::Length(13),
-            Constraint::Length(7),
-            Constraint::Min(20),
-        ],
-    )
-    .header(header_row(vec![
-        "Peer ID",
-        "Endpoints",
-        "Our balance",
-        "Rep",
-        "Reputation proofs",
-    ]))
-    .block(section_block(
-        match &app.peers_error {
-            // Consequence first: an operator reading this row has to learn that the
-            // page is not answering before learning what SQLite said about it.
-            Some(_) => " PEERS • CANNOT BE READ ".to_string(),
-            None => format!(" PEERS • {} connected ", app.peers.items.len()),
-        },
-        if app.peers_error.is_some() { bad() } else { accent() },
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
+    let peers = app
+        .peers
+        .items
+        .iter()
+        .map(|peer| {
+            let cells: Vec<TextCell> = vec![
+                peer.id.clone().into(),
+                peer.uris.clone().into(),
+                app.money.format_raw(&peer.balance).into(),
+                TextCell::from(peer.reputation_score.clone())
+                    .style(Style::default().fg(good()).bold()),
+                match peer.proof_ids.len() {
+                    0 => "none".to_string(),
+                    1 => shorten(&peer.proof_ids[0], 18),
+                    n => format!("{n} announced"),
+                }
+                .into(),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
+    let has_selection = app.peers.state.selected().is_some();
+    let (peer_table, columns) = fitted_table(&PEER_COLUMNS, peers, split[0], has_selection);
+    let peer_table = peer_table
+        .block(section_block(
+            match &app.peers_error {
+                // Consequence first: an operator reading this row has to learn that the
+                // page is not answering before learning what SQLite said about it.
+                Some(_) => " PEERS • CANNOT BE READ ".to_string(),
+                None => format!(" PEERS • {} connected ", app.peers.items.len()),
+            },
+            if app.peers_error.is_some() { bad() } else { accent() },
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("▸ ");
     let selected_id = selected.map(|peer| peer.id.clone());
     let has_error = app.peers_error.is_some();
     app.list_area = split[0];
-    app.id_column_x = Some(id_column_x(split[0]));
+    // Where the id column was actually drawn, after any narrower columns gave way.
+    app.id_column_x = fitted_column_x(split[0], &columns, 0, has_selection);
     frame.render_stateful_widget(peer_table, split[0], &mut app.peers.state);
 
     // A query that failed takes the card, not a corner of it. `0 connected` is the
@@ -470,7 +467,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         // The full id repeats the table's own first line, so it is worth a precise
         // click target: clicking it copies the id even when the table truncated it
         // (issue: click-to-copy full IDs).
-        if let Some(id) = selected_id {
+        if let Some(id) = selected_id.filter(|_| split[1].height > 2) {
             app.id_copy_areas.push((
                 id,
                 Rect {

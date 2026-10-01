@@ -4,9 +4,9 @@
 //! doc on `peers.rs` for why.
 
 use crate::app::{shorten, App, Identifiable, Money, PaymentRow};
-use crate::ui::{accent, good, header_row, metric_line, muted, nonempty, payment_lines, section_block, selected_style, status_color, text_colour};
+use crate::layout_util::Column;
+use crate::ui::{fitted_column_x, fitted_table, TextCell, accent, good, metric_line, muted, nonempty, payment_lines, section_block, selected_style, status_color, text_colour};
 use ratatui::prelude::*;
-use ratatui::widgets::{Cell, Row, Table};
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::Path;
 
@@ -200,18 +200,14 @@ impl App {
     }
 }
 
-/// The clickable id column's `[start, end)` column range on the Clients table. Unlike
-/// Peers' fixed-width id column, this one is `Constraint::Min(38)` -- the flexible
-/// slot that absorbs whatever width the fixed columns after it (`Balance`, `Last
-/// usage`, `Metering`) leave behind, so it has to be derived from the area rather
-/// than hardcoded (kept next to `draw` so the two cannot drift apart).
-pub fn id_column_x(area: Rect) -> (u16, u16) {
-    const OTHER_COLUMNS: u16 = 24 + 20 + 14;
-    let start = area.x + 1 /* left border */ + 2 /* "▸ " highlight gutter */;
-    let inner_width = area.width.saturating_sub(2); // both borders
-    let id_width = inner_width.saturating_sub(2 + OTHER_COLUMNS).max(38);
-    (start, start + id_width)
-}
+/// The CLIENTS table's columns (issue #453): the id and what it holds here outlast
+/// when it last spent and whether it is metered, both of which the card repeats.
+pub(crate) const CLIENT_COLUMNS: [Column; 4] = [
+    Column::new("Client ID", Constraint::Min(38), 12, 0),
+    Column::new("Balance", Constraint::Length(24), 8, 1),
+    Column::new("Last usage", Constraint::Length(20), 10, 2),
+    Column::new("Metering", Constraint::Length(14), 8, 3),
+];
 
 /// The clients page: who pays us, and what they are running here.
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -232,43 +228,39 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     ])
     .split(area);
 
-    let clients = app.clients.items.iter().map(|client| {
-        Row::new(vec![
-            Cell::from(client.id.clone()),
-            Cell::from(app.money.format_raw(&client.balance)),
-            Cell::from(client.last_usage.clone()),
-            // A balance that never moves is the flag doing its job, not a bug.
-            Cell::from(if client.unmetered { "never charged" } else { "" })
-                .style(Style::default().fg(muted())),
-        ])
-    });
-    let client_table = Table::new(
-        clients,
-        [
-            Constraint::Min(38),
-            Constraint::Length(24),
-            Constraint::Length(20),
-            Constraint::Length(14),
-        ],
-    )
-    .header(header_row(vec![
-        "Client ID",
-        "Balance",
-        "Last usage",
-        "Metering",
-    ]))
-    .block(section_block(
-        format!(" CLIENTS • {} known ", app.clients.items.len()),
-        accent(),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
+    let clients = app
+        .clients
+        .items
+        .iter()
+        .map(|client| {
+            let cells: Vec<TextCell> = vec![
+                client.id.clone().into(),
+                app.money.format_raw(&client.balance).into(),
+                client.last_usage.clone().into(),
+                // A balance that never moves is the flag doing its job, not a bug.
+                TextCell::from(if client.unmetered { "never charged" } else { "" })
+                    .style(Style::default().fg(muted())),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
+    let has_selection = app.clients.state.selected().is_some();
+    let (client_table, columns) = fitted_table(&CLIENT_COLUMNS, clients, split[0], has_selection);
+    let client_table = client_table
+        .block(section_block(
+            format!(" CLIENTS • {} known ", app.clients.items.len()),
+            accent(),
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("▸ ");
     let selected_id = selected.map(|client| client.id.clone());
     app.list_area = split[0];
-    app.id_column_x = Some(id_column_x(split[0]));
+    // Where the id column was actually drawn: it is the flexible one, so its width
+    // is whatever the others leave, and it must not claim columns they were drawn in.
+    app.id_column_x = fitted_column_x(split[0], &columns, 0, has_selection);
     frame.render_stateful_widget(client_table, split[0], &mut app.clients.state);
 
-    if let Some(id) = selected_id {
+    if let Some(id) = selected_id.filter(|_| split[1].height > 2) {
         app.id_copy_areas.push((
             id,
             Rect {

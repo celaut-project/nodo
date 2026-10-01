@@ -22,13 +22,14 @@
 use crate::app::{
     get_service_command, shorten, App, CommandKind, EditKind, Identifiable, InputMode, Page,
 };
+use crate::layout_util::Column;
 use crate::peers::Peer;
 use crate::ui::{
-    accent, bad, centered_rect, good, header_row, muted, popup_background, section_block,
+    accent, bad, centered_rect, fitted_column_x, fitted_table, good, muted, TextCell, popup_background, section_block,
     selected_style, text_colour, warn, wrapped,
 };
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, BorderType, Cell, Clear, Paragraph, Row, Table, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use prost::Message;
 use rusqlite::{Connection, Result as SqlResult};
 use std::path::Path;
@@ -784,20 +785,49 @@ pub(crate) fn chat_compose_command(
     (label, args)
 }
 
-/// The clickable id column's `[start, end)` column range on the CHAT sidebar --
-/// mirrors `peers::id_column_x`, over the sidebar's own fixed-width peer column.
-pub fn id_column_x(area: Rect) -> (u16, u16) {
-    let start = area.x + 1 /* left border */ + 2 /* "▸ " highlight gutter */;
-    (start, (start + 16).min(area.x + area.width.saturating_sub(1)))
-}
+/// The CHAT sidebar's columns (issue #453). The peer column is wide enough for the
+/// `→ abc...xyz` it always holds and outlasts the topic, which is in the
+/// conversation pane's title as well.
+pub(crate) const SIDEBAR_COLUMNS: [Column; 2] = [
+    Column::new("Chat", Constraint::Length(16), 11, 0),
+    Column::new("Topic", Constraint::Min(10), 6, 1),
+];
+
+/// Below this width the sidebar and the conversation are stacked rather than side
+/// by side: beside a 34-column sidebar, a conversation narrower than 30 columns
+/// wraps every message a few words to a line (issue #453).
+const SIDE_BY_SIDE_WIDTH: u16 = SIDEBAR_WIDTH + 30;
 
 const SIDEBAR_WIDTH: u16 = 34;
 
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
-    let split =
-        Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(30)]).split(area);
-    draw_sidebar(frame, app, split[0]);
-    draw_conversation(frame, app, split[1]);
+    let split = if area.width >= SIDE_BY_SIDE_WIDTH {
+        Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(30)]).split(area)
+    } else {
+        // Narrow: the list on top, sized to its rows but never more than half the
+        // page, and the conversation under it.
+        // The conversation only when it can show a few lines between its borders;
+        // otherwise the list has the page.
+        let rows = app.conversations.items.len() as u16;
+        let mut sidebar = rows.saturating_add(4).clamp(5, (area.height / 2).max(5)).min(area.height);
+        if area.height - sidebar < 5 {
+            sidebar = area.height;
+        }
+        // Mid-message, the message is the page: the compose box is docked in the
+        // conversation, and a list it cannot be seen under is no use while typing.
+        if matches!(app.input_mode, InputMode::ComposeChatMessage | InputMode::PickChatService)
+            && area.height < 2 * 5 + 5
+        {
+            sidebar = 0;
+        }
+        Layout::vertical([Constraint::Length(sidebar), Constraint::Min(0)]).split(area)
+    };
+    if split[0].height > 0 {
+        draw_sidebar(frame, app, split[0]);
+    }
+    if split[1].height > 0 {
+        draw_conversation(frame, app, split[1]);
+    }
 }
 
 /// The peer's name as the chat view shows it: its first three characters, then its
@@ -816,31 +846,38 @@ fn short_peer_name(peer_id: &str) -> String {
 }
 
 fn draw_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
-    let rows = app.conversations.items.iter().map(|entry| {
-        let (glyph, row_color) = match &entry.kind {
-            ChatEntryKind::Conversation {
-                opened_by_us,
-                closed_at,
-                ..
-            } => {
-                let glyph = if *opened_by_us { "→" } else { "←" };
-                let color = if closed_at.is_some() { muted() } else { good() };
-                (glyph, color)
-            }
-            ChatEntryKind::Untopiced { .. } => ("•", muted()),
-        };
-        Row::new(vec![
-            Cell::from(format!("{glyph} {}", short_peer_name(&entry.peer_id))),
-            Cell::from(if entry.topic.is_empty() {
-                "(no topic)".to_string()
-            } else {
-                entry.topic.clone()
-            }),
-        ])
-        .style(Style::default().fg(row_color))
-    });
-    let table = Table::new(rows, [Constraint::Length(16), Constraint::Min(10)])
-        .header(header_row(vec!["Chat", "Topic"]))
+    let rows = app
+        .conversations
+        .items
+        .iter()
+        .map(|entry| {
+            let (glyph, row_color) = match &entry.kind {
+                ChatEntryKind::Conversation {
+                    opened_by_us,
+                    closed_at,
+                    ..
+                } => {
+                    let glyph = if *opened_by_us { "→" } else { "←" };
+                    let color = if closed_at.is_some() { muted() } else { good() };
+                    (glyph, color)
+                }
+                ChatEntryKind::Untopiced { .. } => ("•", muted()),
+            };
+            let cells: Vec<TextCell> = vec![
+                format!("{glyph} {}", short_peer_name(&entry.peer_id)).into(),
+                if entry.topic.is_empty() {
+                    "(no topic)".to_string()
+                } else {
+                    entry.topic.clone()
+                }
+                .into(),
+            ];
+            (cells, Style::default().fg(row_color))
+        })
+        .collect();
+    let has_selection = app.conversations.state.selected().is_some();
+    let (table, columns) = fitted_table(&SIDEBAR_COLUMNS, rows, area, has_selection);
+    let table = table
         .block(section_block(
             match &app.conversations_error {
                 Some(_) => " CHATS • CANNOT BE READ ".to_string(),
@@ -851,7 +888,7 @@ fn draw_sidebar(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_style(selected_style())
         .highlight_symbol("▸ ");
     app.list_area = area;
-    app.id_column_x = Some(id_column_x(area));
+    app.id_column_x = fitted_column_x(area, &columns, 0, has_selection);
     frame.render_stateful_widget(table, area, &mut app.conversations.state);
 }
 

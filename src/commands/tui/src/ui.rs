@@ -1215,6 +1215,52 @@ mod cpu_breakdown_ui {
     }
 }
 
+/// The INSTANCES table's columns, most important first by `priority` (issue #453).
+///
+/// What identifies the instance (name, id) and what it is doing to the machine
+/// (service, CPU, time left, RAM) outlast who asked for it and what it is worth;
+/// the virtualizer, the network rates and the burn rate go first, because the card
+/// below repeats every one of them in full.
+pub(crate) const INSTANCE_COLUMNS: [crate::layout_util::Column; 13] = {
+    use crate::layout_util::Column;
+    [
+        Column::new("Name", Constraint::Length(14), 6, 0),
+        Column::new("Location", Constraint::Length(12), 5, 6),
+        Column::new("Instance", Constraint::Length(16), 8, 1),
+        Column::new("Service", Constraint::Length(14), 7, 2),
+        Column::new("Client", Constraint::Length(17), 7, 7),
+        Column::new("Up", Constraint::Length(8), 4, 9),
+        Column::new("Left", Constraint::Length(9), 5, 4),
+        Column::new("VM", Constraint::Length(6), 3, 12),
+        Column::new("CPU%", Constraint::Length(6), 4, 3),
+        Column::new("RAM now/max", Constraint::Length(13), 9, 5),
+        Column::new("Net ↓/↑ per s", Constraint::Length(13), 9, 10),
+        Column::new("Balance", Constraint::Length(12), 8, 8),
+        Column::new("Burn/h", Constraint::Min(10), 7, 11),
+    ]
+};
+
+/// A table above the card describing its selected row, when the terminal may be too
+/// short for both (issue #453).
+///
+/// The table comes first: it is how a row gets selected at all, and a card that
+/// squeezed it off the screen would describe a row nobody can change. It keeps
+/// `table_want` rows (border, header and a few rows) before the card grows; the
+/// card gets up to `card_want` and only appears at all with room for one line
+/// between its borders. Whatever is left after the card goes back to the table.
+pub(crate) fn list_and_card(area: Rect, table_want: u16, card_want: u16) -> [Rect; 2] {
+    const TABLE_MIN: u16 = 5;
+    const CARD_MIN: u16 = 3;
+    let heights = crate::layout_util::allocate_heights(
+        area.height,
+        &[(TABLE_MIN, table_want), (CARD_MIN, card_want)],
+        &[0, 1],
+    );
+    let card = heights[1];
+    let rects = crate::layout_util::stack(area, &[area.height - card, card]);
+    [rects[0], rects[1]]
+}
+
 fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     if app.instances_grouped {
         draw_instances_tree(frame, app, area);
@@ -1225,104 +1271,86 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     // the CPU% is measured against, the cumulative disk/net totals, the burn rate, the
     // attributed watts (issue #258), who requested the instance, and what its balance
     // is worth in time.
-    let layout = Layout::vertical([Constraint::Min(8), Constraint::Length(16)]).split(area);
-    let rows = app.instances.items.iter().map(|instance| {
-        let location = if instance.is_local() {
-            "local".to_string()
-        } else {
-            shorten(&instance.location, 14)
-        };
-        let location_style = if instance.is_local() {
-            Style::default().fg(good())
-        } else {
-            Style::default().fg(warn())
-        };
-        Row::new(vec![
-            Cell::from(instance.name.clone()),
-            Cell::from(location).style(location_style),
-            Cell::from(shorten(&instance.id, 18)),
-            Cell::from(instance.service.clone()),
-            // Whose work this is. `father_id` on its own is an opaque string that
-            // could be a client, a parent instance or a dev launch -- the page
-            // grouped by it and never said which.
-            Cell::from(instance.client.short())
-                .style(Style::default().fg(client_colour(&instance.client))),
-            Cell::from(format_duration_compact(instance.age_secs)),
-            // What the balance beside it is worth in time, which is the form the
-            // question is actually asked in: "does this need topping up today".
-            Cell::from(format_duration_compact(instance.remaining_secs()))
-                .style(Style::default().fg(remaining_colour(instance))),
-            Cell::from(instance.virtualizer.clone()),
-            Cell::from(format_cpu_percent(instance.usage.cpu_percent))
-                .style(Style::default().fg(cpu_load_color(instance))),
-            // Used against allocated in one cell: two columns made the operator do the
-            // division, which is the whole question being asked of this page.
-            Cell::from(format!(
-                "{} / {}",
-                instance
-                    .usage
-                    .memory_current
-                    .map(format_bytes_compact)
-                    .unwrap_or_else(|| "—".to_string()),
-                format_bytes_compact(instance.memory_limit)
-            )),
-            Cell::from(format!(
-                "{} / {}",
-                format_rate_compact(instance.usage.net_rx_rate),
-                format_rate_compact(instance.usage.net_tx_rate)
-            )),
-            Cell::from(app.money.format_raw(&instance.balance)),
-            Cell::from(format_burn_rate(instance.mu_per_hour, &app.money)),
-        ])
-    });
+    let layout = list_and_card(area, 8, 16);
+    let rows = app
+        .instances
+        .items
+        .iter()
+        .map(|instance| {
+            let location = if instance.is_local() {
+                "local".to_string()
+            } else {
+                shorten(&instance.location, 14)
+            };
+            let location_style = if instance.is_local() {
+                Style::default().fg(good())
+            } else {
+                Style::default().fg(warn())
+            };
+            let cells: Vec<TextCell> = vec![
+                instance.name.clone().into(),
+                TextCell::from(location).style(location_style),
+                shorten(&instance.id, 18).into(),
+                instance.service.clone().into(),
+                // Whose work this is. `father_id` on its own is an opaque string that
+                // could be a client, a parent instance or a dev launch -- the page
+                // grouped by it and never said which.
+                TextCell::from(instance.client.short())
+                    .style(Style::default().fg(client_colour(&instance.client))),
+                format_duration_compact(instance.age_secs).into(),
+                // What the balance beside it is worth in time, which is the form the
+                // question is actually asked in: "does this need topping up today".
+                TextCell::from(format_duration_compact(instance.remaining_secs()))
+                    .style(Style::default().fg(remaining_colour(instance))),
+                instance.virtualizer.clone().into(),
+                TextCell::from(format_cpu_percent(instance.usage.cpu_percent))
+                    .style(Style::default().fg(cpu_load_color(instance))),
+                // Used against allocated in one cell: two columns made the operator do the
+                // division, which is the whole question being asked of this page.
+                format!(
+                    "{} / {}",
+                    instance
+                        .usage
+                        .memory_current
+                        .map(format_bytes_compact)
+                        .unwrap_or_else(|| "—".to_string()),
+                    format_bytes_compact(instance.memory_limit)
+                )
+                .into(),
+                format!(
+                    "{} / {}",
+                    format_rate_compact(instance.usage.net_rx_rate),
+                    format_rate_compact(instance.usage.net_tx_rate)
+                )
+                .into(),
+                app.money.format_raw(&instance.balance).into(),
+                format_burn_rate(instance.mu_per_hour, &app.money).into(),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
     let local_count = app.instances.items.iter().filter(|i| i.is_local()).count();
     let remote_count = app.instances.items.len() - local_count;
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(14),
-            Constraint::Length(12),
-            Constraint::Length(16),
-            Constraint::Length(14),
-            Constraint::Length(17),
-            Constraint::Length(8),
-            Constraint::Length(9),
-            Constraint::Length(6),
-            Constraint::Length(6),
-            Constraint::Length(13),
-            Constraint::Length(13),
-            Constraint::Length(12),
-            Constraint::Min(10),
-        ],
-    )
     // `IP` moved off the table and onto the card. It is the one column here nobody
     // scans -- an endpoint is copied, not compared -- and the three columns that
     // replaced it each answer a question the page could not answer at all: whose
     // work this is, how long it has been running, and how long it can keep running.
-    .header(header_row(vec![
-        "Name",
-        "Location",
-        "Instance",
-        "Service",
-        "Client",
-        "Up",
-        "Left",
-        "VM",
-        "CPU%",
-        "RAM now/max",
-        "Net ↓/↑ per s",
-        "Balance",
-        "Burn/h",
-    ]))
-    .block(section_block(
-        format!(
-            " INSTANCES • {} local • {} remote ",
-            local_count, remote_count
-        ),
-        series(0),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
+    let (table, _) = fitted_table(
+        &INSTANCE_COLUMNS,
+        rows,
+        layout[0],
+        app.instances.state.selected().is_some(),
+    );
+    let table = table
+        .block(section_block(
+            format!(
+                " INSTANCES • {} local • {} remote ",
+                local_count, remote_count
+            ),
+            series(0),
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("▸ ");
     app.list_area = layout[0];
     frame.render_stateful_widget(table, layout[0], &mut app.instances.state);
 
@@ -1832,51 +1860,57 @@ fn external_parent_label(instance: &Instance, client_ids: &HashSet<&str>) -> Opt
     })
 }
 
+/// The SERVICES table's columns (issue #453): the tag an operator recognises and the
+/// id they would paste outlast the two sizes, and the size a transfer costs outlasts
+/// the one the local disk does.
+pub(crate) const SERVICE_COLUMNS: [crate::layout_util::Column; 4] = {
+    use crate::layout_util::Column;
+    [
+        Column::new("Tag", Constraint::Length(28), 8, 0),
+        Column::new("Content ID", Constraint::Min(38), 12, 1),
+        Column::new("Stored here", Constraint::Length(13), 7, 3),
+        Column::new("With blocks", Constraint::Length(14), 7, 2),
+    ]
+};
+
 fn draw_services(frame: &mut Frame, app: &mut App, area: Rect) {
     // The card grows with the selected service's reputation history, and yields to the
     // table when the terminal is short, like the peer and client cards.
-    const MIN_TABLE_HEIGHT: u16 = 8;
     let card = service_detail_lines(app.services.selected(), app.service_detail.as_ref());
-    let available = area.height.saturating_sub(MIN_TABLE_HEIGHT);
-    let card_height = (card.len() as u16 + 2).clamp(5, available.max(5));
-    let layout =
-        Layout::vertical([Constraint::Min(MIN_TABLE_HEIGHT), Constraint::Length(card_height)])
-            .split(area);
-    let rows = app.services.items.iter().map(|service| {
-        Row::new(vec![
-            Cell::from(service.tag.clone()),
-            Cell::from(service.id.clone()),
-            Cell::from(format_bytes(service.size_bytes)),
-            Cell::from(format_total_size(service))
-                .style(Style::default().fg(total_size_colour(service))),
-        ])
-    });
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(28),
-            Constraint::Min(38),
-            Constraint::Length(13),
-            Constraint::Length(14),
-        ],
-    )
+    let layout = list_and_card(area, 8, (card.len() as u16 + 2).max(5));
+    let rows = app
+        .services
+        .items
+        .iter()
+        .map(|service| {
+            let cells: Vec<TextCell> = vec![
+                service.tag.clone().into(),
+                service.id.clone().into(),
+                format_bytes(service.size_bytes).into(),
+                TextCell::from(format_total_size(service))
+                    .style(Style::default().fg(total_size_colour(service))),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
     // "Stored here" is what this service adds to the disk; "With blocks" is what it
     // weighs. The two differ by every byte it shares with another service, which
     // for a service whose bulk is one large layer is nearly all of it -- so a
     // single figure was answering one of two quite different questions without
     // saying which.
-    .header(header_row(vec![
-        "Tag",
-        "Content ID",
-        "Stored here",
-        "With blocks",
-    ]))
-    .block(section_block(
-        format!(" SERVICES • {} available ", app.services.items.len()),
-        series(1),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
+    let (table, _) = fitted_table(
+        &SERVICE_COLUMNS,
+        rows,
+        layout[0],
+        app.services.state.selected().is_some(),
+    );
+    let table = table
+        .block(section_block(
+            format!(" SERVICES • {} available ", app.services.items.len()),
+            series(1),
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("▸ ");
     app.list_area = layout[0];
     frame.render_stateful_widget(table, layout[0], &mut app.services.state);
 
@@ -2178,65 +2212,58 @@ fn draw_money_taken_in(frame: &mut Frame, app: &App, area: Rect) {
         " MONEY TAKEN IN ".to_string()
     };
 
-    let mut rows: Vec<Row> = app
+    let mut rows: Vec<(Vec<TextCell>, Style)> = app
         .earnings
         .iter()
         .map(|entry| {
-            Row::new(vec![
-                Cell::from(entry.ledger.clone()),
+            let cells = vec![
+                entry.ledger.clone().into(),
                 money_cell(&app.money, entry.day),
                 money_cell(&app.money, entry.week),
                 money_cell(&app.money, entry.month),
                 money_cell(&app.money, entry.year),
                 money_cell(&app.money, entry.total),
-            ])
+            ];
+            (cells, Style::default())
         })
         .collect();
     if rows.is_empty() {
         // A node nobody has paid has earned zero over every window, which is a
         // measurement -- so the row is drawn with the zeros rather than left out, and
         // named for why it has no payment network of its own.
-        rows.push(
-            Row::new(
-                std::iter::once(Cell::from("nothing paid in yet"))
-                    .chain((0..5).map(|_| money_cell(&app.money, 0)))
-                    .collect::<Vec<_>>(),
-            )
-            .style(Style::default().fg(muted())),
-        );
+        rows.push((
+            std::iter::once(TextCell::from("nothing paid in yet"))
+                .chain((0..5).map(|_| money_cell(&app.money, 0)))
+                .collect::<Vec<_>>(),
+            Style::default().fg(muted()),
+        ));
     }
 
-    frame.render_widget(
-        Table::new(
-            rows,
-            [
-                Constraint::Min(20),
-                Constraint::Length(12),
-                Constraint::Length(12),
-                Constraint::Length(12),
-                Constraint::Length(12),
-                Constraint::Length(12),
-            ],
-        )
-        .header(header_row(vec![
-            "Network",
-            "Last day",
-            "Last week",
-            "Last month",
-            "Last year",
-            "All time",
-        ]))
-        .block(section_block(title, accent())),
-        area,
-    );
+    let (table, _) = fitted_table(&MONEY_COLUMNS, rows, area, false);
+    frame.render_widget(table.block(section_block(title, accent())), area);
 }
+
+/// The MONEY TAKEN IN table's columns (issue #453): the network and the all-time
+/// total outlast the windows, which give way longest first -- the last day is the
+/// one a running node is watched by.
+const MONEY_COLUMNS: [crate::layout_util::Column; 6] = {
+    use crate::layout_util::Column;
+    [
+        Column::new("Network", Constraint::Min(20), 8, 0),
+        Column::new("Last day", Constraint::Length(12), 6, 2),
+        Column::new("Last week", Constraint::Length(12), 6, 3),
+        Column::new("Last month", Constraint::Length(12), 6, 4),
+        Column::new("Last year", Constraint::Length(12), 6, 5),
+        Column::new("All time", Constraint::Length(12), 6, 1),
+    ]
+};
 
 /// One amount, in the display unit, greyed when there is nothing in it.
 ///
 /// A real zero, not a `—`: the catalogue was read and nothing came in over that
 /// window, which is a measurement and not a gap.
-fn money_cell(money: &Money, amount: u128) -> Cell<'static> {
-    let cell = Cell::from(money.format_raw(&amount.to_string()));
+fn money_cell(money: &Money, amount: u128) -> TextCell {
+    let cell = TextCell::from(money.format_raw(&amount.to_string()));
     if amount == 0 {
         cell.style(Style::default().fg(muted()))
     } else {
@@ -2356,6 +2383,18 @@ fn reputation_lines(app: &App) -> Vec<Line<'static>> {
 }
 
 /// Every proof that has staked something on this node.
+/// The WHO STAKES table's columns (issue #453): the stake and whose proof it is
+/// outlast what it cost and when it was published.
+const OPINION_COLUMNS: [crate::layout_util::Column; 4] = {
+    use crate::layout_util::Column;
+    [
+        Column::new("Stake", Constraint::Length(10), 6, 0),
+        Column::new("Backed by", Constraint::Length(13), 8, 2),
+        Column::new("Proof", Constraint::Min(26), 10, 1),
+        Column::new("Published", Constraint::Length(10), 6, 3),
+    ]
+};
+
 fn draw_opinions(frame: &mut Frame, app: &mut App, area: Rect) {
     if app.opinions.items.is_empty() {
         frame.render_widget(
@@ -2380,54 +2419,52 @@ fn draw_opinions(frame: &mut Frame, app: &mut App, area: Rect) {
         .reputation
         .read_at
         .unwrap_or_else(|| unix_now().unwrap_or(0));
-    let rows = app.opinions.items.iter().map(|opinion| {
-        Row::new(vec![
-            Cell::from(format!(
-                "{}{}",
-                if opinion.positive { "+" } else { "−" },
-                format_share(opinion.weight)
-            ))
-            .style(Style::default().fg(if opinion.positive { good() } else { bad() })),
-            // What that share cost whoever published it. A proof sitting at the
-            // min-box value has had nothing sacrificed into it, which is what tells a
-            // cheap opinion from an expensive one.
-            Cell::from(format_erg(opinion.backed_nanoerg)).style(Style::default().fg(
-                if opinion.backed_nanoerg > 0.0 {
-                    accent()
-                } else {
-                    muted()
-                },
-            )),
-            // Long enough to identify the proof on an explorer, with the ellipsis
-            // making it plain that it is not the whole id.
-            Cell::from(shorten(&opinion.proof_id, 40)),
-            Cell::from(format_age(opinion.published_at, now)),
-        ])
-    });
-    let table = Table::new(
+    let rows = app
+        .opinions
+        .items
+        .iter()
+        .map(|opinion| {
+            let cells: Vec<TextCell> = vec![
+                TextCell::from(format!(
+                    "{}{}",
+                    if opinion.positive { "+" } else { "−" },
+                    format_share(opinion.weight)
+                ))
+                .style(Style::default().fg(if opinion.positive { good() } else { bad() })),
+                // What that share cost whoever published it. A proof sitting at the
+                // min-box value has had nothing sacrificed into it, which is what tells a
+                // cheap opinion from an expensive one.
+                TextCell::from(format_erg(opinion.backed_nanoerg)).style(Style::default().fg(
+                    if opinion.backed_nanoerg > 0.0 {
+                        accent()
+                    } else {
+                        muted()
+                    },
+                )),
+                // Long enough to identify the proof on an explorer, with the ellipsis
+                // making it plain that it is not the whole id.
+                shorten(&opinion.proof_id, 40).into(),
+                format_age(opinion.published_at, now).into(),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
+    let (table, _) = fitted_table(
+        &OPINION_COLUMNS,
         rows,
-        [
-            Constraint::Length(10),
-            Constraint::Length(13),
-            Constraint::Min(26),
-            Constraint::Length(10),
-        ],
-    )
-    .header(header_row(vec![
-        "Stake",
-        "Backed by",
-        "Proof",
-        "Published",
-    ]))
-    .block(section_block(
-        format!(
-            " WHO STAKES ON THIS NODE • {} opinions ",
-            app.opinions.items.len()
-        ),
-        accent(),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("▸ ");
+        area,
+        app.opinions.state.selected().is_some(),
+    );
+    let table = table
+        .block(section_block(
+            format!(
+                " WHO STAKES ON THIS NODE • {} opinions ",
+                app.opinions.items.len()
+            ),
+            accent(),
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("▸ ");
     app.list_area = area;
     frame.render_stateful_widget(table, area, &mut app.opinions.state);
 }
@@ -3894,7 +3931,7 @@ fn draw_money_card(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let money = app.money.clone();
-    let rows: Vec<Row> = app
+    let rows: Vec<(Vec<TextCell>, Style)> = app
         .prices
         .items
         .iter()
@@ -3907,29 +3944,34 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 money.format_mu(entry.mu)
             };
-            let row = Row::new(vec![entry.short.clone(), entry.mu.to_string(), amount]);
-            if entry.arch.is_some() {
-                row.style(Style::default().fg(muted()))
+            let cells = vec![entry.short.clone().into(), entry.mu.to_string().into(), amount.into()];
+            let style = if entry.arch.is_some() {
+                Style::default().fg(muted())
             } else {
-                row
-            }
+                Style::default()
+            };
+            (cells, style)
         })
         .collect();
-    let table = Table::new(
-        rows,
+    // Built here rather than kept as a constant: the unit column is headed by the
+    // display unit's own symbol.
+    let columns = {
+        use crate::layout_util::Column;
+        // The label and the amount in the operator's unit outlast the raw MU figure.
         [
-            Constraint::Length(12),
-            Constraint::Percentage(40),
-            Constraint::Percentage(48),
-        ],
-    )
-    .header(header_row(vec!["Price", "MU", money.symbol.as_str()]))
-    .block(section_block(
-        " PRICES • +/- adjust, e exact ".to_string(),
-        warn(),
-    ))
-    .highlight_style(selected_style())
-    .highlight_symbol("> ");
+            Column::new("Price", Constraint::Length(12), 6, 0),
+            Column::new("MU", Constraint::Percentage(40), 4, 2),
+            Column::new(money.symbol.as_str(), Constraint::Percentage(48), 6, 1),
+        ]
+    };
+    let (table, _) = fitted_table(&columns, rows, area, app.prices.state.selected().is_some());
+    let table = table
+        .block(section_block(
+            " PRICES • +/- adjust, e exact ".to_string(),
+            warn(),
+        ))
+        .highlight_style(selected_style())
+        .highlight_symbol("> ");
     app.list_area = area;
     frame.render_stateful_widget(table, area, &mut app.prices.state);
 }
@@ -4801,12 +4843,108 @@ pub(crate) fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
         Constraint::Fill(1),
     ])
     .split(area);
-    Layout::horizontal([
+    let rect = Layout::horizontal([
         Constraint::Percentage((100 - percent_x) / 2),
         Constraint::Percentage(percent_x),
         Constraint::Percentage((100 - percent_x) / 2),
     ])
-    .split(vertical[1])[1]
+    .split(vertical[1])[1];
+    if rect.width >= POPUP_MIN_WIDTH.min(area.width) {
+        return rect;
+    }
+    crate::layout_util::centered_rect_clamped(POPUP_MIN_WIDTH, rect.height, vertical[1])
+}
+
+/// The narrowest a centred popup is drawn, on any terminal at least that wide.
+const POPUP_MIN_WIDTH: u16 = 38;
+
+/// One table cell as text and a style, so it can be cut to whatever width its
+/// column ends up drawn at (issue #453). A `Cell` cannot be: it keeps no text to cut.
+pub(crate) struct TextCell {
+    text: String,
+    style: Style,
+}
+
+impl TextCell {
+    pub(crate) fn style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
+    }
+}
+
+impl From<String> for TextCell {
+    fn from(text: String) -> Self {
+        Self { text, style: Style::default() }
+    }
+}
+
+impl From<&str> for TextCell {
+    fn from(text: &str) -> Self {
+        text.to_string().into()
+    }
+}
+
+/// The width a table's `"▸ "` highlight symbol takes, which `Table` reserves on
+/// every row only while a row is selected.
+pub(crate) const HIGHLIGHT_GUTTER: u16 = 2;
+
+/// A bordered table with its columns fitted to `area` (issue #453): those that do not
+/// fit at their minimum width hidden, least important first, and every cell cut to
+/// its column with an ellipsis instead of mid-word.
+///
+/// `selected` is whether a row is highlighted, i.e. whether the highlight gutter
+/// takes its columns. Returns the column layout too, for a hit test to find a column
+/// where it was actually drawn rather than where it would be on a wide terminal.
+pub(crate) fn fitted_table(
+    columns: &[crate::layout_util::Column<'_>],
+    rows: Vec<(Vec<TextCell>, Style)>,
+    area: Rect,
+    selected: bool,
+) -> (Table<'static>, crate::layout_util::FittedColumns) {
+    let gutter = if selected { HIGHLIGHT_GUTTER } else { 0 };
+    let available = area.width.saturating_sub(2).saturating_sub(gutter);
+    let fitted = crate::layout_util::fit_columns(columns, available);
+    let cut = |text: &str, position: usize| truncate_ellipsis(text, fitted.widths[position] as usize);
+    let header = header_row(
+        fitted
+            .keep
+            .iter()
+            .enumerate()
+            .map(|(position, index)| cut(columns[*index].header, position))
+            .collect::<Vec<_>>()
+            .iter()
+            .map(String::as_str)
+            .collect(),
+    );
+    let rows: Vec<Row<'static>> = rows
+        .into_iter()
+        .map(|(cells, style)| {
+            let cells = crate::layout_util::pick(cells, &fitted.keep)
+                .into_iter()
+                .enumerate()
+                .map(|(position, cell)| Cell::from(cut(&cell.text, position)).style(cell.style))
+                .collect::<Vec<_>>();
+            Row::new(cells).style(style)
+        })
+        .collect();
+    let widths: Vec<Constraint> = fitted.widths.iter().map(|width| Constraint::Length(*width)).collect();
+    (Table::new(rows, widths).header(header), fitted)
+}
+
+/// The `[start, end)` screen columns column `index` of a table drawn by
+/// [`fitted_table`] in `area` occupies, or `None` when it was hidden. What the
+/// click-to-copy id columns hit-test against.
+pub(crate) fn fitted_column_x(
+    area: Rect,
+    fitted: &crate::layout_util::FittedColumns,
+    index: usize,
+    selected: bool,
+) -> Option<(u16, u16)> {
+    let (offset, width) = fitted.column(index)?;
+    let gutter = if selected { HIGHLIGHT_GUTTER } else { 0 };
+    let start = area.x.saturating_add(1 /* left border */).saturating_add(gutter).saturating_add(offset);
+    let end = start.saturating_add(width).min(area.right().saturating_sub(1));
+    (start < end).then_some((start, end))
 }
 
 pub(crate) fn header_row(labels: Vec<&str>) -> Row<'static> {
