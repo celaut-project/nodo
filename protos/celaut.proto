@@ -471,6 +471,20 @@ message EstimatedCost {
 // side. Used to evaluate Service.PossibleEnvironmentWorkload scenarios: a
 // descendant workload group can declare only `resources`, with no `hash`/
 // embedded `service` to ask GetServiceEstimatedCost about.
+// A resource shape for one architecture: what a node announces it supports in
+// Peer.resources, and what GetResourceAvailability is asked about. Resources differ
+// per architecture -- most visibly `benchmark`, since the same "1.0 core" is native
+// silicon under one virtualizer and software emulation under another (#448), but
+// cpu, memory and disk can too.
+//
+// `architecture` is matched by tag, the way a service's own is. In a
+// GetResourceAvailability request an empty one means "the node's native
+// architecture", which is what the question meant before it carried one.
+message ArchitectureResources {
+    Service.Container.Architecture architecture = 1;
+    Service.Container.Resources resources = 2;
+}
+
 message ResourceAvailability {
     bool can_execute = 1;
     // Empty when can_execute is true. Human-readable, not meant to be parsed.
@@ -658,10 +672,30 @@ message Peer {
     }
     SignatureScheme signature_scheme = 7;
 
+    // Maximum resources the node supports, per architecture it serves. Doubles as
+    // the list of supported architectures: an architecture absent from it is one
+    // this node does not run at all.
+    //
+    // Each entry's `resources.at_most` is a capacity ceiling, not current headroom
+    // -- the most one instance of that architecture could be granted here (memory
+    // pool, disk, cores, each capped by host_limits) -- so a request that fits can
+    // still be refused for load, while one that does not fit never will be. Its
+    // `benchmark` is the node's measured per-core score for that architecture (see
+    // Sysresources.benchmark); a primitive it has not measured is absent, never 0.
+    // `at_init` is unused.
+    //
+    // A peer reads it before calling GetServiceEstimatedCost/GetResourceAvailability
+    // and skips a node that announced the service's architecture with resources
+    // the request does not fit, or that did not announce that architecture. A node
+    // that announces nothing is called as before.
+    //
+    // Covered by `signature` (node_identity.canonical_peer_content_digest).
+    repeated ArchitectureResources resources = 8;
+
     // Anti-replay: a verifier rejects a message whose ts is not strictly newer than
     // the last one it accepted for this public_key. Guards only against a downgrade
     // to a stale address; the claim itself is safe to freely redistribute.
-    int64 ts = 8;
+    int64 ts = 9;
 }
 
 message Client {
@@ -906,7 +940,7 @@ service Gateway {
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & Payment -> Empty
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> ModifyServiceSystemResourcesOutput
     rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & Metadata.HashTag.Hash & Service -> EstimatedCost
-    rpc GetResourceAvailability(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & Service.Container.Resources -> ResourceAvailability
+    rpc GetResourceAvailability(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & ArchitectureResources -> ResourceAvailability
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & Metadata.HashTag.Hash -> Service
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage | bytes -> bytes
