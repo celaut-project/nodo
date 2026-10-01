@@ -357,6 +357,7 @@ Service tunneling adds `DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`) 
 | Key | Default | Meaning |
 |---|---|---|
 | `network.DELEGATE_EXECUTION` | `true` | Set `false` and this node never asks a peer to run a service for it: the balancer stops polling peers for prices and only ever selects `local`, so a service it cannot run itself fails rather than being delegated. The automatic peer-deposit refill stops too — a deposit buys execution on that peer and nothing else. `nodo pay`, `nodo increase_peer_deposit` and `nodo force_execution` still work, since an operator typing the command overrides the default on purpose. |
+| `network.RECURSION_MAX_HOPS` | `16` | How many nodes one request tree (a StartService and everything it is delegated to, a quote, an availability probe) may span when it starts here or arrives without a hop count. Each node that passes the request on sends one hop less; a node given none left refuses it, and a node with one left runs it itself or fails rather than delegating. A count sent by a peer is clamped to this, never raised by it. See [`RECURSION_GUARD.md`](RECURSION_GUARD.md). |
 
 The two directions are separate settings, and neither implies the other:
 

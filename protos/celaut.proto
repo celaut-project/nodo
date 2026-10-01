@@ -786,8 +786,17 @@ message ChatAck {
     string reason = 2;
 }
 
+// Travels with every request a node may answer by asking its peers the same thing
+// (StartService, GetServiceEstimatedCost, GetResourceAvailability -- issue #456;
+// docs/RECURSION_GUARD.md). `token` names the whole request tree and is forwarded
+// unchanged: a node already answering it refuses it again, which is what stops
+// A -> B -> A. `remaining_hops` is how many nodes the tree may still enter, counting
+// the receiver; each forward sends one less, a receiver given 0 refuses, and absent
+// means the receiver's own network.RECURSION_MAX_HOPS -- so a request from a node
+// that predates the field is a fresh root there, exactly as before.
 message RecursionGuard {
     string token = 1;
+    optional uint32 remaining_hops = 2;
 }
 
 // AssociateClient's answer: whether Client.peer_id/signature bound, and why not when
@@ -948,8 +957,8 @@ service Gateway {
     rpc GenerateDepositToken(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client -> TokenMessage
     rpc Payable(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & Payment -> Empty
     rpc ModifyServiceSystemResources(stream buffer.Buffer) returns (stream buffer.Buffer) {} // ModifyServiceSystemResourcesInput -> ModifyServiceSystemResourcesOutput
-    rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & Metadata.HashTag.Hash & Service -> EstimatedCost
-    rpc GetResourceAvailability(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & ArchitectureResources -> ResourceAvailability
+    rpc GetServiceEstimatedCost(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & RecursionGuard & Metadata.HashTag.Hash & Service -> EstimatedCost (StartService's envelope)
+    rpc GetResourceAvailability(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & ArchitectureResources & RecursionGuard -> ResourceAvailability
     rpc GetService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Client & Metadata.HashTag.Hash -> Service
     rpc GetMetrics(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Metrics
     rpc ServiceTunnel(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage | bytes -> bytes

@@ -22,6 +22,7 @@ from src.utils.registry_errors import (
     ServiceRegistryError,
     ServiceSpecUnavailable,
 )
+from src.utils.tools.recursion_guard import recursion_guard_message
 from src.utils.verify import get_service_hex_main_hash
 from src.utils.config import ConfigManager
 
@@ -141,11 +142,10 @@ def service_extended(
             client_id=client_id
         )
 
-    # 2
-    if recursion_guard_token:
-        yield celaut_pb2.RecursionGuard(
-            token=recursion_guard_token
-        )
+    # 2 -- the token unchanged, with one hop less than this node was given (#456).
+    recursion_guard = recursion_guard_message(recursion_guard_token)
+    if recursion_guard is not None:
+        yield recursion_guard
 
     # 3
     if config:
