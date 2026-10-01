@@ -128,18 +128,18 @@
   descriptors. Absent, both serialize exactly as before — the spec is hashed into the
   service id. See `docs/PACKING.md` and `docs/NETWORKS.md`.
 - `resources.start_time_ms` no longer exists.
-- `resources.at_init.benchmark` / `resources.at_most.benchmark` (object, optional)
-  is serialized to `Sysresources.benchmark`: the minimum **per-core, per-second**
-  throughput the service requires on named primitives, e.g.
-  `"benchmark": { "int_ops_per_sec": 500000 }`. Recognised keys are
-  `BENCHMARK_KEYS` in `src/utils/benchmark.py` (`int_ops_per_sec`,
-  `flt_ops_per_sec`, `mem_bandwidth_bytes_per_sec`, `sha256_hashes_per_sec`). An omitted
-  key is no requirement; values must be non-negative JSON integers, anything else is a
-  packer error raised before the image is built. An unrecognised key is kept and logged,
-  not refused. `at_most` is raised to `at_init` key by key, as the other limits are.
-  Absent, nothing is written and the service id is unchanged. **Declared, not yet
-  enforced**: no node measures its own cores yet, so admission logs it and does not check
-  it. See `docs/PACKING.md`.
+- `resources.at_init.benchmark` (object, optional) is serialized to
+  `Sysresources.benchmark`: the minimum **per-core, per-second** throughput the service
+  requires on named primitives, e.g. `"benchmark": { "int_ops_per_sec": 500000 }`.
+  Recognised keys are `BENCHMARK_KEYS` in `src/utils/benchmark.py` (`int_ops_per_sec`,
+  `flt_ops_per_sec`, `mem_bandwidth_bytes_per_sec`, `sha256_hashes_per_sec`), plus
+  `mem_bandwidth_working_set_bytes`, the working set the bandwidth is required over. An
+  omitted key is no requirement; values must be non-negative JSON integers, anything else
+  is a packer error raised before the image is built. An unrecognised key is kept and
+  logged, not refused. `resources.at_most.benchmark` has no meaning and is refused, as is
+  the old name `min_benchmark`. Absent, nothing is written and the service id is
+  unchanged. Admission enforces it per architecture against the node's measured scores;
+  see `docs/PACKING.md`.
 - `possible_environment_workload[]` declares the **worst-case descendant workloads** the service
   may request during its lifetime, for scheduling admission decisions. It is serialized
   directly to `Service.possible_environment_workload`, outside `Service.Container`. Each entry is **one independent concurrent execution

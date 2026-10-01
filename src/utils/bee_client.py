@@ -313,16 +313,18 @@ class BeeClient:
     @staticmethod
     def get_resource_availability(
             channel,
-            resources: celaut_pb2.Service.Container.Resources,
+            request: celaut_pb2.ArchitectureResources,
             timeout: Optional[float] = None,
             client_id: str = "",
     ) -> Optional[celaut_pb2.ResourceAvailability]:
+        """``Client & ArchitectureResources -> ResourceAvailability``: could the peer run
+        one instance of this shape, of this architecture (#459)?"""
         if client_id:
-            indices_serializer = {1: celaut_pb2.Service.Container.Resources, 2: celaut_pb2.Client}
-            input_messages = [resources, celaut_pb2.Client(client_id=client_id)]
+            indices_serializer = {1: celaut_pb2.ArchitectureResources, 2: celaut_pb2.Client}
+            input_messages = [request, celaut_pb2.Client(client_id=client_id)]
         else:
-            indices_serializer = celaut_pb2.Service.Container.Resources
-            input_messages = resources
+            indices_serializer = celaut_pb2.ArchitectureResources
+            input_messages = request
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetResourceAvailability,
             input=input_messages,

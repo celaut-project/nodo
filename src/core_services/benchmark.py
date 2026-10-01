@@ -39,7 +39,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from src.core_services import BENCHMARK, UNSET_PLACEHOLDER
 from src.utils import benchmark, logger as log
-from src.utils.arch_guard import ARCH_ALIASES
+from src.utils.arch_guard import arch_from_tags
 from src.utils.config import ConfigManager
 
 _env_manager = ConfigManager()
@@ -80,15 +80,6 @@ def configured_service_ids() -> List[str]:
         if service_id and service_id != UNSET_PLACEHOLDER and service_id not in ids:
             ids.append(service_id)
     return ids
-
-
-def canonical_arch(tags: Sequence[str]) -> Optional[str]:
-    """The canonical tag the first recognised entry of ``tags`` names, or None."""
-    for tag in tags:
-        canonical = ARCH_ALIASES.get(str(tag).strip().lower())
-        if canonical:
-            return canonical
-    return None
 
 
 def served_architectures() -> List[str]:
@@ -150,7 +141,7 @@ def parse_answer(body: bytes) -> Tuple[Optional[str], Dict[str, int]]:
     answer = json.loads(body.decode("utf-8"))
     if not isinstance(answer, dict):
         raise ValueError("the benchmark service did not answer with a JSON object")
-    arch = canonical_arch([answer.get("architecture", "")])
+    arch = arch_from_tags([answer.get("architecture", "")])
     scores = {
         key: value for key, value in answer.items()
         if key in benchmark.SCORE_KEYS
@@ -203,7 +194,7 @@ def declared_architecture(service_id: str) -> Optional[str]:
         return None
     if service is None:
         return None
-    return canonical_arch(service.container.architecture.tags)
+    return arch_from_tags(service.container.architecture.tags)
 
 
 # --- The three side effects, each replaceable in a test ------------------------------

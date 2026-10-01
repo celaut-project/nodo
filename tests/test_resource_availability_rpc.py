@@ -74,9 +74,9 @@ class ResourceAvailabilityRoundTripTests(unittest.TestCase):
         class _Servicer(celaut_pb2_grpc.Gateway):
             def GetResourceAvailability(self, request_iterator, context, **kwargs):
                 with patch(
-                    "src.gateway.iterables.resource_availability_iterable.get_resource_availability",
-                    side_effect=lambda resources: (
-                        received.append(resources) or answers
+                    "src.gateway.iterables.resource_availability_iterable.get_architecture_availability",
+                    side_effect=lambda request: (
+                        received.append(request) or answers
                     ),
                 ), patch(
                     "src.gateway.client_gate.get_internal_service_id_by_uri",
@@ -116,32 +116,38 @@ class ResourceAvailabilityRoundTripTests(unittest.TestCase):
     def test_a_yes_survives_the_round_trip(self):
         self.ANSWERS.clear()
         self.ANSWERS.update({"can_execute": True, "reason": ""})
-        self.assertIs(self._ask(celaut.Service.Container.Resources()), True)
+        self.assertIs(self._ask(celaut.ArchitectureResources()), True)
 
     def test_a_no_survives_the_round_trip(self):
         self.ANSWERS.clear()
         self.ANSWERS.update({"can_execute": False, "reason": "not enough memory"})
-        self.assertIs(self._ask(celaut.Service.Container.Resources()), False)
+        self.assertIs(self._ask(celaut.ArchitectureResources()), False)
 
     def test_the_declared_resources_arrive_intact(self):
         self.ANSWERS.clear()
         self.ANSWERS.update({"can_execute": True, "reason": ""})
-        asked = celaut.Service.Container.Resources(
-            at_most=celaut.Sysresources(
-                mem_limit=4 * 1024 ** 3, disk_space=40 * 1024 ** 3,
-                cpu_quota=200000, cpu_period=100000, blkio_weight=500,
+        asked = celaut.ArchitectureResources(
+            resources=celaut.Service.Container.Resources(
+                at_most=celaut.Sysresources(
+                    mem_limit=4 * 1024 ** 3, disk_space=40 * 1024 ** 3,
+                    cpu_quota=200000, cpu_period=100000, blkio_weight=500,
+                )
             )
         )
+        # The question is per architecture now (#459), and the requirement rides in
+        # at_init: both have to reach the peer.
+        asked.architecture.tags.extend(["linux/amd64", "x86_64"])
+        asked.resources.at_init.benchmark.add(key="int_ops_per_sec", value=500000)
         self._ask(asked)
         self.assertEqual(len(self.RECEIVED), 1)
-        # Not just "a Resources arrived" -- the same one, field for field. A partitioning
+        # Not just "an ArchitectureResources arrived" -- the same one, field for field. A partitioning
         # mismatch between the two sides shows up here as a truncated or empty message.
         self.assertEqual(self.RECEIVED[0], asked)
 
     def test_an_unreachable_peer_is_not_a_no(self):
         # None means "could not ask", which _workload_group_is_satisfiable must not read
         # as a refusal. A closed port is the cheapest way to produce it.
-        answer = self._ask(celaut.Service.Container.Resources(), target="127.0.0.1:1")
+        answer = self._ask(celaut.ArchitectureResources(), target="127.0.0.1:1")
         self.assertIsNone(answer)
 
     def test_an_address_held_by_another_identity_is_not_a_no(self):
@@ -150,7 +156,7 @@ class ResourceAvailabilityRoundTripTests(unittest.TestCase):
         # to ask is None here too, never a "no" the admission gate would act on.
         self.ANSWERS.clear()
         self.ANSWERS.update({"can_execute": True, "reason": ""})
-        answer = self._ask(celaut.Service.Container.Resources(), peer_id="ab" * 32)
+        answer = self._ask(celaut.ArchitectureResources(), peer_id="ab" * 32)
         self.assertIsNone(answer)
 
 

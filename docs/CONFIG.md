@@ -301,7 +301,7 @@ that is not `-1` — or with the optional `benchmark` core service:
 
 1. Pack `celaut-basics/demo-service`'s `benchmark/` (`cd benchmark && nodo pack .`)
    once per architecture this node serves, changing `"architecture"` in its
-   `service.json` for each. A pack needs an x86_64 host with KVM for `linux/amd64`.
+   `service.json` for each (it ships as `linux/arm64`, like the other variants).
 2. Put the printed id(s) under `core_services.benchmark` — one string, or a list.
 3. Leave the scores you want measured at `-1` and restart the node.
 

@@ -4,12 +4,12 @@ from protos import celaut_pb2
 from src.gateway.client_gate import parse_with_client, require_caller
 from src.utils import activity_window
 from src.utils.bee_client import BeeClient, Buffer
-from src.utils.cost_functions.resource_availability import get_resource_availability
+from src.utils.cost_functions.resource_availability import get_architecture_availability
 from src.utils.logger import LOGGER as logger
 
 
 class GetResourceAvailabilityIterable:
-    """Answers "could you run an instance shaped like this right now?".
+    """Answers "could you run an instance of this architecture, shaped like this, right now?".
 
     Unlike GetServiceEstimatedCost, the input is a bare resource profile that need not
     correspond to any packed service on either side -- there is no hash to look up and
@@ -17,7 +17,7 @@ class GetResourceAvailabilityIterable:
     Service.PossibleEnvironmentWorkload scenario asks, since a descendant workload
     group may declare only `resources`, with no `hash` or embedded `service`.
 
-    The answer is `get_resource_availability`'s, verbatim: the same admission gate a
+    The answer is `get_architecture_availability`'s, verbatim: the same admission gate a
     real StartService goes through locally, so a peer is told exactly what this node
     would decide about itself and nothing more.
     """
@@ -33,14 +33,14 @@ class GetResourceAvailabilityIterable:
             # you run something with no declared limits?"), so it is answered rather
             # than refused -- the same shape get_resource_availability itself gives an
             # unset `at_most`.
-            resources, client_id = parse_with_client(
-                self.request_iterator, payload_type=celaut_pb2.Service.Container.Resources
+            request, client_id = parse_with_client(
+                self.request_iterator, payload_type=celaut_pb2.ArchitectureResources
             )
             require_caller(self.context, client_id)
-            if resources is None:
-                resources = celaut_pb2.Service.Container.Resources()
+            if request is None:
+                request = celaut_pb2.ArchitectureResources()
 
-            availability = get_resource_availability(resources)
+            availability = get_architecture_availability(request)
 
             # Outside `activity_window` the answer is no, whatever the resources say.
             # A peer probing this node's capacity is asking whether it could place a

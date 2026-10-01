@@ -325,18 +325,18 @@ class PackerTests(unittest.TestCase):
 
     def test_benchmark_is_packed_sorted_and_refuses_a_repeated_key(self):
         packer = self._packer(
-            '{"resources": {"at_most": {"benchmark": {"b_op": 2, "a_op": 1}}}}'
+            '{"resources": {"at_init": {"benchmark": {"b_op": 2, "a_op": 1}}}}'
         )
         keyvalue.from_dict(
-            packer.service.container.resources.at_most.benchmark, packer._benchmarks()[1]
+            packer.service.container.resources.at_init.benchmark, packer._benchmarks()
         )
         self.assertEqual(
-            [e.key for e in packer.service.container.resources.at_most.benchmark],
+            [e.key for e in packer.service.container.resources.at_init.benchmark],
             ["a_op", "b_op"],
         )
         with self.assertRaisesRegex(ValueError, "benchmark repeats key"):
             self._packer(
-                '{"resources": {"at_most": {"benchmark": {"a": 1, "a": 2}}}}'
+                '{"resources": {"at_init": {"benchmark": {"a": 1, "a": 2}}}}'
             )._benchmarks()
 
 

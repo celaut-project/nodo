@@ -9,13 +9,14 @@ nothing but psutil and the memory pool. It is deliberately not part of
 asking "does this shape fit?" should not pull in a virtualizer, nor require stubbing one
 to test the answer.
 """
-from typing import Any, Dict, Final, List, Tuple
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 import psutil
 
 from protos import celaut_pb2 as celaut
 from src.manager.resources import IOBigData, could_ve_this_sysreq
 from src.utils import host_limits, keyvalue, logger as log, benchmark
+from src.utils.arch_guard import arch_from_tags, host_arch_tag
 
 
 def _get_service_memory_snapshot() -> tuple[int, int]:
@@ -122,30 +123,59 @@ def _sysreq_shortfalls(
     return shortfalls
 
 
-def _note_unenforced_benchmark(at_most: celaut.Sysresources) -> None:
-    """Say that a declared `benchmark` was read and is not being enforced.
+def _benchmark_shortfalls(resources: celaut.Service.Container.Resources, arch: Optional[str]) -> List[str]:
+    """Hold the service's required per-core scores against this node's, for ``arch``.
 
-    Deliberately not a shortfall. Nothing on this node measures a core yet, so there is
-    no score to hold the requirement against, and -- as with `cpu_total` above -- an
-    unknown capacity is not evidence of an insufficient one. Refusing instead would
-    make this node strictly less useful than one running the previous release, which
-    skips the field as unknown and admits the same service, while protecting nobody.
-    The line is here so the gap is visible in the log of the node that took the
-    service, until a node has scores of its own to compare.
+    The requirement is ``at_init.benchmark`` -- the minimum the service needs. The same
+    field under ``at_most`` carries no meaning in a request, so it is ignored, and said
+    to be. The scores are this node's for the service's architecture, read from
+    config.yaml (`benchmark.BY_ARCH`) and nothing else: admission never measures, never
+    boots anything and imports no virtualizer. ``arch`` None is the host's own.
+
+    A primitive this node has not measured (``-1``), or has no name for, is logged and
+    not enforced: as with ``cpu_total`` above, an unknown capacity is not evidence of an
+    insufficient one, and refusing on it would make a node that never ran the benchmark
+    strictly less useful than one that ignored the field.
     """
-    declared = keyvalue.to_dict(at_most.benchmark)
-    if not declared:
-        return
-    unknown = benchmark.unrecognised_keys(declared)
-    log.LOGGER(
-        "resources.at_most.benchmark is declared "
-        f"({benchmark.describe(declared)}) but not enforced: this node does not "
-        "measure per-core benchmark scores yet, so admission does not consider it."
-        + (f" Unrecognised primitive(s): {', '.join(unknown)}." if unknown else "")
+    if resources.HasField("at_most") and len(resources.at_most.benchmark):
+        log.LOGGER(
+            "resources.at_most.benchmark is set "
+            f"({benchmark.describe(keyvalue.to_dict(resources.at_most.benchmark))}) and "
+            "ignored: a required minimum belongs in resources.at_init.benchmark."
+        )
+    if not resources.HasField("at_init"):
+        return []
+    required = keyvalue.to_dict(resources.at_init.benchmark)
+    if not required:
+        return []
+
+    arch = arch or host_arch_tag()
+    found, unenforced = benchmark.shortfalls(
+        required, benchmark.node_scores(arch), where=f"on this node for {arch}"
     )
+    if unenforced:
+        unknown = benchmark.unrecognised_keys(unenforced)
+        log.LOGGER(
+            "resources.at_init.benchmark "
+            f"({benchmark.describe(unenforced)}) is not enforced: this node has no "
+            f"measured score for it on {arch} (-1 in config.yaml benchmark.BY_ARCH), so "
+            "admission does not consider it."
+            + (f" Unrecognised primitive(s): {', '.join(unknown)}." if unknown else "")
+        )
+    return found
 
 
-def get_resource_availability(resources: celaut.Service.Container.Resources) -> Dict[str, Any]:
+def get_resource_availability(
+        resources: celaut.Service.Container.Resources,
+        arch: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Could this host run one instance shaped like ``resources``, of architecture ``arch``?
+
+    ``arch`` (a canonical tag; None for the host's own) selects which of this node's
+    benchmark scores a required ``at_init.benchmark`` is held against: a guest under
+    QEMU+TCG is not scored by the host's numbers (#448, #459). The other limits are the
+    machine's whatever the guest's architecture.
+    """
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
     cpu_total = psutil.cpu_count(logical=False) or 0
@@ -166,7 +196,6 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
 
     shortfalls: List[str] = []
     if resources and resources.HasField("at_most"):
-        _note_unenforced_benchmark(resources.at_most)
         shortfalls = _sysreq_shortfalls(
             resources.at_most,
             disk_free=int(disk.free),
@@ -174,6 +203,9 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
             pool_total=service_memory_pool_total,
             pool_available=service_memory_pool_available,
         )
+
+    if resources:
+        shortfalls.extend(_benchmark_shortfalls(resources, arch))
 
     can_execute = not shortfalls
     reason = " | ".join(shortfalls)
@@ -191,3 +223,43 @@ def get_resource_availability(resources: celaut.Service.Container.Resources) -> 
         "system_cpu_total": int(cpu_total),
         "system_cpu_available_percent": float(cpu_available_percent),
     }
+
+
+def _served_architectures() -> List[str]:
+    """Canonical tags of what this node can boot (``src/utils/architectures.py``).
+
+    Imported here, lazily, and only by :func:`get_architecture_availability`: deciding
+    which architectures the node runs probes the emulator setup, which
+    :func:`get_resource_availability` -- the gate every local launch goes through -- has
+    no business doing.
+    """
+    from src.utils.architectures import SUPPORTED_ARCHITECTURES
+
+    return [aliases[0] for aliases in SUPPORTED_ARCHITECTURES if aliases]
+
+
+def get_architecture_availability(
+        request: celaut.ArchitectureResources,
+        served: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """:func:`get_resource_availability` for the architecture ``request`` names (#459).
+
+    What the GetResourceAvailability RPC answers, and what a descendant workload group
+    is checked against locally. An empty architecture is the question as it was asked
+    before it carried one, and is answered for this node's native architecture. One this
+    node does not run is a no with the reason -- never an answer about the capacity it
+    has for some other architecture.
+    """
+    tags = list(request.architecture.tags)
+    arch = arch_from_tags(tags)
+    if tags:
+        served = _served_architectures() if served is None else served
+        if arch not in served:
+            return {
+                "can_execute": False,
+                "reason": (
+                    f"This node does not run architecture {', '.join(tags)} "
+                    f"(it runs: {', '.join(served) or 'none'})."
+                ),
+            }
+    return get_resource_availability(request.resources, arch=arch)
