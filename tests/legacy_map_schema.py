@@ -83,7 +83,30 @@ def build():
         files[original_package] = fdp
     pool.Add(files["celaut"])
     pool.Add(files["pack"])
+    _retain_classes(pool, ("legacy_celaut.proto", "legacy_pack.proto"))
     return pool, maps
+
+
+# Every message class of every pool `build` made. upb (protobuf 4.x) creates the class
+# of a nested message type lazily, the first time a field of that type is touched, and
+# holds it only weakly: the class sits in a reference cycle with nothing outside it, so
+# the next garbage collection frees it while an instance of it is still alive -- and
+# the first ListFields/MessageToJson that reaches that instance reads freed memory and
+# segfaults. Pre-existing and latent; it surfaced deterministically once the schema
+# grew enough for a collection to land inside a test (#459). Creating every class up
+# front and keeping it here makes each one outlive the pool's instances.
+_CLASSES = []
+
+
+def _retain_classes(pool, file_names):
+    def visit(descriptor):
+        _CLASSES.append(message_factory.GetMessageClass(descriptor))
+        for nested in descriptor.nested_types:
+            visit(nested)
+
+    for name in file_names:
+        for descriptor in pool.FindFileByName(name).message_types_by_name.values():
+            visit(descriptor)
 
 
 def message_class(pool, full_name):
