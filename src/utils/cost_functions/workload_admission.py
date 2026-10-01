@@ -194,7 +194,14 @@ def _workload_group_is_satisfiable(
 
     from src.utils.utils import peers_id_iterator  # see check_resource_availability_on_peer
 
+    from src.utils.arch_guard import arch_from_tags
+    from src.utils.cost_functions.architecture_resources import should_skip_peer
+
+    arch = arch_from_tags(request.architecture.tags)
     for peer_id in peers_id_iterator(ignore_network=ignore_network):
+        # Skipped when the peer's own announcement already rules it out (#454, #459).
+        if should_skip_peer(peer_id, arch, request.resources, "GetResourceAvailability"):
+            continue
         if check_resource_availability_on_peer(peer_id, request) is True:
             return True
     return False

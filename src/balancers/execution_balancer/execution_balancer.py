@@ -9,6 +9,8 @@ from src.utils.bee_client import BeeClient
 from src.virtualizers.architecture import UnsupportedArchitectureException
 from src.manager.manager import get_client_id_on_other_peer
 from src.utils import logger as log
+from src.utils.arch_guard import arch_from_tags
+from src.utils.cost_functions.architecture_resources import should_skip_peer
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.identity.grpc_transport import peer_channel
 from src.utils.utils import service_extended, peers_id_iterator
@@ -180,7 +182,16 @@ def execution_balancer(
     # network.DELEGATE_EXECUTION: false asks for.
     if env_manager.get("network.DELEGATE_EXECUTION", True):
         try:
+            # The architecture the service needs, read off the service itself rather than
+            # `arch` (which is None for one this node cannot run, and that is exactly the
+            # service a peer may be asked about).
+            peer_arch = arch_from_tags(service.container.architecture.tags) if service else arch
             for peer_id in peers_id_iterator(ignore_network=ignore_network):
+                # The peer's own announcement already says it could never take this:
+                # it does not run the architecture, or the request exceeds what it
+                # announced (#454, #459). A peer that announced nothing is asked.
+                if should_skip_peer(peer_id, peer_arch, resources, "GetServiceEstimatedCost"):
+                    continue
                 log.LOGGER('Check cost on peer ' + peer_id)
                 # TODO could use async or concurrency
                 cost = estimate_cost_on_peer(
