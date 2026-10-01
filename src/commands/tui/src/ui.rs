@@ -303,19 +303,21 @@ enum OverviewCard {
     Network,
     Wallets,
     HostCapacity,
+    PeerResources,
     Earnings,
     Schedule,
     Energy,
 }
 
 impl OverviewCard {
-    const ALL: [OverviewCard; 9] = [
+    const ALL: [OverviewCard; 10] = [
         OverviewCard::Node,
         OverviewCard::Workload,
         OverviewCard::Storage,
         OverviewCard::Network,
         OverviewCard::Wallets,
         OverviewCard::HostCapacity,
+        OverviewCard::PeerResources,
         OverviewCard::Earnings,
         OverviewCard::Schedule,
         OverviewCard::Energy,
@@ -328,7 +330,7 @@ impl OverviewCard {
             OverviewCard::Node => 8,
             OverviewCard::Workload | OverviewCard::Storage => 5,
             OverviewCard::Network => 4,
-            OverviewCard::Wallets | OverviewCard::HostCapacity => 9,
+            OverviewCard::Wallets | OverviewCard::HostCapacity | OverviewCard::PeerResources => 9,
             OverviewCard::Earnings | OverviewCard::Schedule | OverviewCard::Energy => 6,
         }
     }
@@ -422,6 +424,13 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
         ),
         OverviewCard::Wallets => draw_ergo(frame, app, area),
         OverviewCard::HostCapacity => draw_health(frame, app, area),
+        OverviewCard::PeerResources => draw_card(
+            frame,
+            area,
+            "PEERS · UPPER BOUND",
+            peer_resources_lines(app),
+            series(1),
+        ),
         // Each panel summarises a page that is otherwise a whole tab away, reading the
         // same state that page reads. Nothing here fetches: a summary with its own data
         // path can disagree with the page it summarises.
@@ -449,8 +458,8 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
     }
 }
 
-/// Four cards across, two, then three: the Overview as it is drawn on a terminal of
-/// at least 80×24.
+/// Four cards across, three, then three: the Overview as it is drawn on a terminal
+/// of at least 80×24.
 fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::vertical([
         // NODE's card is the tallest of the top row's four at six lines, plus the
@@ -469,8 +478,14 @@ fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Percentage(25),
     ])
     .split(rows[0]);
-    let middle =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
+    // Wallets and host capacity, then what the peers add to it (issue #455) -- the
+    // machine this node is beside the machines it can reach.
+    let middle = Layout::horizontal([
+        Constraint::Percentage(34),
+        Constraint::Percentage(33),
+        Constraint::Percentage(33),
+    ])
+    .split(rows[1]);
     let summaries = Layout::horizontal([
         Constraint::Percentage(34),
         Constraint::Percentage(33),
@@ -478,8 +493,8 @@ fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
     ])
     .split(rows[2]);
     let areas = [
-        top[0], top[1], top[2], top[3], middle[0], middle[1], summaries[0], summaries[1],
-        summaries[2],
+        top[0], top[1], top[2], top[3], middle[0], middle[1], middle[2], summaries[0],
+        summaries[1], summaries[2],
     ];
     for (card, area) in OverviewCard::ALL.into_iter().zip(areas) {
         draw_overview_card(frame, app, card, area);
@@ -526,6 +541,80 @@ fn draw_overview_flow(frame: &mut Frame, app: &App, area: Rect) {
             Rect { x: area.x, y, width: area.width, height: 1 },
         );
     }
+}
+
+/// The optimistic upper bound on what this node can reach through its peers (issue
+/// #455): every peer's announced ceilings summed, one line per architecture. Read
+/// from the same peer list the PEERS page draws, so the two cannot disagree.
+///
+/// Peers only. This node's own machine is HOST CAPACITY, read live; adding it here
+/// would mix a measurement with announcements. Benchmarks are left out: they are
+/// per-core rates, which do not add up -- the peer's detail card shows them.
+fn peer_resources_lines(app: &App) -> Vec<Line<'static>> {
+    use crate::peer_resources::{aggregate, format_cores, short_arch};
+    let own_id = app.node_info.node_id.as_str();
+    let total = aggregate(
+        app.peers
+            .items
+            .iter()
+            // A node never registers itself, but if one ever did, counting its own
+            // machine as a peer's would double it.
+            .filter(|peer| own_id.is_empty() || peer.id != own_id)
+            .map(|peer| &peer.resources),
+    );
+    let note = |text: String, colour: Color| Line::from(Span::styled(text, Style::default().fg(colour)));
+    let mut lines = Vec::new();
+    // Most important first, since a short card clips from the bottom: the totals,
+    // then who said nothing, then what the figures are. "Upper bound" is in the
+    // card's title, so it is never the line that gets clipped.
+    for (arch, row) in &total.per_arch {
+        lines.push(Line::from(vec![
+            Span::styled(format!("{:<6}", short_arch(arch)), Style::default().fg(muted())),
+            Span::styled(
+                format!(
+                    "{}c {} {}",
+                    format_cores(row.millicores),
+                    format_bytes_compact(row.mem_bytes),
+                    format_bytes_compact(row.disk_bytes),
+                ),
+                Style::default().fg(text_colour()).bold(),
+            ),
+            Span::styled(
+                format!(
+                    " ×{}{}",
+                    row.peers,
+                    // Some peer left a limit unstated: that column is short by it.
+                    if row.partial > 0 { "*" } else { "" }
+                ),
+                Style::default().fg(muted()),
+            ),
+        ]));
+    }
+    if total.per_arch.is_empty() {
+        lines.push(note(
+            if total.peers() == 0 { "No peers yet." } else { "No peer announced resources." }.to_string(),
+            muted(),
+        ));
+    }
+    let mut silent = Vec::new();
+    if total.undeclared > 0 {
+        silent.push(format!("{} undeclared", total.undeclared));
+    }
+    if total.unreadable > 0 {
+        silent.push(format!("{} unreadable", total.unreadable));
+    }
+    if !silent.is_empty() {
+        lines.push(note(silent.join(", "), warn()));
+    }
+    if !total.per_arch.is_empty() {
+        lines.push(note("cores RAM disk ×peers".to_string(), muted()));
+        if total.per_arch.values().any(|row| row.partial > 0) {
+            lines.push(note("* a limit left unstated".to_string(), muted()));
+        }
+        lines.push(note("Sum of announced maxima,".to_string(), muted()));
+        lines.push(note("not free capacity.".to_string(), muted()));
+    }
+    lines
 }
 
 /// The EARNINGS page in five lines: what came in, over the windows that fit.
@@ -7700,6 +7789,7 @@ mod tests {
                         proof_ids: Vec::new(),
                         reputation_score: "0".to_string(),
                         contracts: Vec::new(),
+                        resources: Default::default(),
                     })
                     .collect(),
             );

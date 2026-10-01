@@ -8,7 +8,9 @@
 //! `app.rs`/`ui.rs`.
 
 use crate::app::{shorten, App, CommandKind, Identifiable, Money, PaymentRow, PendingAction};
+use crate::app::{format_bytes, format_bytes_compact};
 use crate::layout_util::Column;
+use crate::peer_resources::{format_benchmark, format_cores, short_arch, Announced};
 use crate::ui::{fitted_column_x, fitted_table, TextCell,
     accent, bad, good, metric_line, muted, nonempty, payment_lines,
     reputation_event_lines, section_block, selected_style, text_colour, warn,
@@ -50,6 +52,10 @@ pub struct Peer {
     /// detail card rather than the table: a peer can hold several instances,
     /// and each carries more than a row can show (see issue #231).
     pub contracts: Vec<PeerContract>,
+    /// What this peer announced it can run, per architecture (`Peer.resources`,
+    /// #459), read from the same stored advertisement as `proof_ids`. Summed on the
+    /// Overview and spelled out in the detail card (issue #455).
+    pub resources: crate::peer_resources::Announced,
 }
 
 /// One `contract_instance` row: the ledger a peer settles on, the contract it
@@ -123,10 +129,15 @@ pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 .unwrap_or_else(|| "0".to_string());
             // Straight out of the advertisement the peer signed, which we store
             // verbatim: it carries every proof the peer holds, where a column of our
-            // own could only ever keep the last one announced (issue #281).
-            let proof_ids = row
-                .get::<_, Option<Vec<u8>>>(3)?
-                .and_then(|bytes| crate::app::protos::Peer::decode(&*bytes).ok())
+            // own could only ever keep the last one announced (issue #281). Decoded
+            // once here for both the proofs and the resources it announced (#455).
+            let advertisement = row.get::<_, Option<Vec<u8>>>(3)?;
+            let decoded = advertisement
+                .as_deref()
+                .map(crate::app::protos::Peer::decode);
+            let resources = crate::peer_resources::from_decoded(decoded.as_ref());
+            let proof_ids = decoded
+                .and_then(Result::ok)
                 .map(|announced| {
                     announced
                         .reputation_proofs
@@ -151,6 +162,7 @@ pub fn get_peers(database: &Path) -> SqlResult<Vec<Peer>> {
                 uris: row.get(1)?,
                 balance: row.get::<_, String>(2)?,
                 proof_ids,
+                resources,
                 reputation_score,
                 remote_client_id: row.get(5)?,
                 local_client_id: row.get(6)?,
@@ -505,6 +517,81 @@ fn peers_unreadable_lines(error: &str) -> Vec<Line<'static>> {
     ]
 }
 
+/// What the peer announced it can run, one block per architecture (issue #455): the
+/// most one instance there could be granted, and its measured per-core scores. As
+/// announced and signed by the peer -- a ceiling it claims, not what is free on it.
+fn announced_resource_lines(resources: &Announced) -> Vec<Line<'static>> {
+    let offers = match resources {
+        Announced::Declared(offers) => offers,
+        Announced::Undeclared => {
+            return vec![metric_line("Resources", "none announced (adds nothing to the total)")];
+        }
+        Announced::Unreadable => {
+            return vec![Line::from(vec![
+                Span::styled(format!("{:<12}", "Resources"), Style::default().fg(muted())),
+                Span::styled(
+                    "announcement could not be decoded",
+                    Style::default().fg(warn()).bold(),
+                ),
+            ])];
+        }
+    };
+    let unstated = || "not stated".to_string();
+    let mut lines = vec![Line::from(Span::styled(
+        format!("Announced resources ({} architecture{})", offers.len(), if offers.len() == 1 { "" } else { "s" }),
+        Style::default().fg(accent()).bold(),
+    ))];
+    for offer in offers {
+        lines.push(Line::from(vec![
+            Span::styled("  ● ", Style::default().fg(good())),
+            Span::styled(offer.arch.clone(), Style::default().fg(good()).bold()),
+            Span::styled(
+                format!(
+                    "  {} cores • {} RAM • {} disk",
+                    offer.millicores.map(format_cores).unwrap_or_else(unstated),
+                    offer.mem_bytes.map(format_bytes).unwrap_or_else(unstated),
+                    offer.disk_bytes.map(format_bytes).unwrap_or_else(unstated),
+                ),
+                Style::default().fg(text_colour()),
+            ),
+        ]));
+        if offer.benchmark.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "      no benchmark scores announced",
+                Style::default().fg(muted()),
+            )));
+        }
+        for (key, value) in &offer.benchmark {
+            let (label, value) = format_benchmark(key, *value);
+            lines.push(Line::from(vec![
+                Span::styled(format!("      {label:<18}"), Style::default().fg(muted())),
+                Span::styled(format!("{value} per core"), Style::default().fg(text_colour())),
+            ]));
+        }
+    }
+    lines
+}
+
+/// [`announced_resource_lines`] in one line, for the compact card.
+fn announced_resources_summary(resources: &Announced) -> String {
+    match resources {
+        Announced::Undeclared => "none announced".to_string(),
+        Announced::Unreadable => "announcement unreadable".to_string(),
+        Announced::Declared(offers) => offers
+            .iter()
+            .map(|offer| {
+                format!(
+                    "{} {}c/{}",
+                    short_arch(&offer.arch),
+                    offer.millicores.map(format_cores).unwrap_or_else(|| "?".to_string()),
+                    offer.mem_bytes.map(format_bytes_compact).unwrap_or_else(|| "?".to_string()),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("  "),
+    }
+}
+
 /// Full breakdown of the peer highlighted in the peers table: identity, balance,
 /// reputation, and every payment contract it has registered. Previously reachable
 /// only through a raw sqlite query (issue #231).
@@ -588,6 +675,12 @@ fn peer_detail_lines(
             },
         ));
         lines.push(Line::from(""));
+        lines.extend(announced_resource_lines(&peer.resources));
+        lines.push(Line::from(""));
+    }
+
+    if compact {
+        lines.push(metric_line("Resources", announced_resources_summary(&peer.resources)));
     }
 
     // Same guard as the client card: the selection can move between the load and the
@@ -881,6 +974,7 @@ mod tests {
                 proof_ids: Vec::new(),
                 reputation_score: "0".to_string(),
                 contracts: Vec::new(),
+                resources: Default::default(),
             }
         }
 
