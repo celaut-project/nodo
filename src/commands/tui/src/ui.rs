@@ -284,6 +284,174 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         area
     };
+    if area.width >= OVERVIEW_GRID_WIDTH && area.height >= OVERVIEW_GRID_HEIGHT {
+        draw_overview_grid(frame, app, area);
+    } else {
+        draw_overview_flow(frame, app, area);
+    }
+}
+
+/// The Overview's cards, in the order they give way on a small terminal: who and
+/// where this node is first, what it is running and holding next, the money and
+/// the machine after that, and the one-line summaries of other pages last -- each of
+/// those is a tab away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OverviewCard {
+    Node,
+    Workload,
+    Storage,
+    Network,
+    Wallets,
+    HostCapacity,
+    Earnings,
+    Schedule,
+    Energy,
+}
+
+impl OverviewCard {
+    const ALL: [OverviewCard; 9] = [
+        OverviewCard::Node,
+        OverviewCard::Workload,
+        OverviewCard::Storage,
+        OverviewCard::Network,
+        OverviewCard::Wallets,
+        OverviewCard::HostCapacity,
+        OverviewCard::Earnings,
+        OverviewCard::Schedule,
+        OverviewCard::Energy,
+    ];
+
+    /// Rows the card needs to show everything, borders included -- the heights the
+    /// grid's rows were sized from.
+    fn height(self) -> u16 {
+        match self {
+            OverviewCard::Node => 8,
+            OverviewCard::Workload | OverviewCard::Storage => 5,
+            OverviewCard::Network => 4,
+            OverviewCard::Wallets | OverviewCard::HostCapacity => 9,
+            OverviewCard::Earnings | OverviewCard::Schedule | OverviewCard::Energy => 6,
+        }
+    }
+}
+
+/// The widest and tallest page area the Overview's fixed grid is drawn in: four
+/// cards across, three rows. The 19 rows are what an 80×24 terminal leaves it.
+const OVERVIEW_GRID_WIDTH: u16 = 80;
+const OVERVIEW_GRID_HEIGHT: u16 = 19;
+/// The narrowest a card is drawn in the flowing layout: a metric label and a short
+/// value.
+const OVERVIEW_CARD_WIDTH: u16 = 26;
+
+fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Rect) {
+    match card {
+        OverviewCard::Node => draw_card(
+            frame,
+            area,
+            "NODE",
+            vec![
+                metric_line(
+                    "Status",
+                    nonempty(&app.node_info.service_status, "checking…"),
+                ),
+                metric_line("Address", nonempty(&app.node_info.address, "—")),
+                // Who this node *is* on the network, beside where it is. Every opinion
+                // it publishes and every opinion published about it is keyed by this
+                // string, so it is what an operator has to hand a peer to be vouched
+                // for -- and the screen they leave open was the one place it could not
+                // be read. Shortened head-and-tail by `shorten`, which is what makes an
+                // id comparable at a glance; `nodo info` prints it whole.
+                metric_line(
+                    "Node id",
+                    shorten(nonempty(&app.node_info.node_id, "no identity yet"), 18),
+                ),
+                metric_line("Version", shorten(&app.node_info.version, 18)),
+                metric_line("Power", node_power_line(&app.node_energy)),
+                metric_line("Elec.", node_cost_line(&app.node_energy)),
+            ],
+            accent(),
+        ),
+        OverviewCard::Workload => draw_card(
+            frame,
+            area,
+            "WORKLOAD",
+            vec![
+                metric_line("Instances", app.instances.items.len().to_string()),
+                metric_line(
+                    "Memory now",
+                    format_bytes(app.stats.instance_memory_current),
+                ),
+                metric_line(
+                    "Reserved",
+                    format!(
+                        "{} RAM / {} disk",
+                        format_bytes(app.stats.instance_memory_reserved),
+                        format_bytes(app.stats.instance_disk_reserved)
+                    ),
+                ),
+            ],
+            series(0),
+        ),
+        OverviewCard::Storage => draw_card(
+            frame,
+            area,
+            "STORAGE",
+            vec![
+                metric_line(
+                    "Host disk",
+                    format!(
+                        "{} / {} ({}%)",
+                        format_bytes(app.stats.disk_used),
+                        format_bytes(app.stats.disk_total),
+                        percent(app.stats.disk_used, app.stats.disk_total)
+                    ),
+                ),
+                metric_line("Nodo data", format_bytes(app.stats.storage_bytes)),
+                metric_line("Services", app.services.items.len().to_string()),
+            ],
+            series(1),
+        ),
+        OverviewCard::Network => draw_card(
+            frame,
+            area,
+            "NETWORK",
+            vec![
+                metric_line("Peers", app.peers.items.len().to_string()),
+                metric_line("Clients", app.clients.items.len().to_string()),
+            ],
+            series(2),
+        ),
+        OverviewCard::Wallets => draw_ergo(frame, app, area),
+        OverviewCard::HostCapacity => draw_health(frame, app, area),
+        // Each panel summarises a page that is otherwise a whole tab away, reading the
+        // same state that page reads. Nothing here fetches: a summary with its own data
+        // path can disagree with the page it summarises.
+        OverviewCard::Earnings => draw_card(
+            frame,
+            area,
+            "EARNINGS",
+            earnings_summary_lines(app),
+            series(2),
+        ),
+        OverviewCard::Schedule => draw_card(
+            frame,
+            area,
+            "SCHEDULE",
+            schedule_summary_lines(app),
+            series(0),
+        ),
+        OverviewCard::Energy => draw_card(
+            frame,
+            area,
+            "ENERGY",
+            energy_summary_lines(app),
+            warn(),
+        ),
+    }
+}
+
+/// Four cards across, two, then three: the Overview as it is drawn on a terminal of
+/// at least 80×24.
+fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::vertical([
         // NODE's card is the tallest of the top row's four at six lines, plus the
         // card's own border.
@@ -301,119 +469,63 @@ fn draw_overview(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Percentage(25),
     ])
     .split(rows[0]);
-
-    draw_card(
-        frame,
-        top[0],
-        "NODE",
-        vec![
-            metric_line(
-                "Status",
-                nonempty(&app.node_info.service_status, "checking…"),
-            ),
-            metric_line("Address", nonempty(&app.node_info.address, "—")),
-            // Who this node *is* on the network, beside where it is. Every opinion
-            // it publishes and every opinion published about it is keyed by this
-            // string, so it is what an operator has to hand a peer to be vouched
-            // for -- and the screen they leave open was the one place it could not
-            // be read. Shortened head-and-tail by `shorten`, which is what makes an
-            // id comparable at a glance; `nodo info` prints it whole.
-            metric_line(
-                "Node id",
-                shorten(nonempty(&app.node_info.node_id, "no identity yet"), 18),
-            ),
-            metric_line("Version", shorten(&app.node_info.version, 18)),
-            metric_line("Power", node_power_line(&app.node_energy)),
-            metric_line("Elec.", node_cost_line(&app.node_energy)),
-        ],
-        accent(),
-    );
-    draw_card(
-        frame,
-        top[1],
-        "WORKLOAD",
-        vec![
-            metric_line("Instances", app.instances.items.len().to_string()),
-            metric_line(
-                "Memory now",
-                format_bytes(app.stats.instance_memory_current),
-            ),
-            metric_line(
-                "Reserved",
-                format!(
-                    "{} RAM / {} disk",
-                    format_bytes(app.stats.instance_memory_reserved),
-                    format_bytes(app.stats.instance_disk_reserved)
-                ),
-            ),
-        ],
-        series(0),
-    );
-    draw_card(
-        frame,
-        top[2],
-        "STORAGE",
-        vec![
-            metric_line(
-                "Host disk",
-                format!(
-                    "{} / {} ({}%)",
-                    format_bytes(app.stats.disk_used),
-                    format_bytes(app.stats.disk_total),
-                    percent(app.stats.disk_used, app.stats.disk_total)
-                ),
-            ),
-            metric_line("Nodo data", format_bytes(app.stats.storage_bytes)),
-            metric_line("Services", app.services.items.len().to_string()),
-        ],
-        series(1),
-    );
-    draw_card(
-        frame,
-        top[3],
-        "NETWORK",
-        vec![
-            metric_line("Peers", app.peers.items.len().to_string()),
-            metric_line("Clients", app.clients.items.len().to_string()),
-        ],
-        series(2),
-    );
-
     let middle =
         Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
-    draw_ergo(frame, app, middle[0]);
-    draw_health(frame, app, middle[1]);
-
-    // Each panel summarises a page that is otherwise a whole tab away, reading the
-    // same state that page reads. Nothing here fetches: a summary with its own data
-    // path can disagree with the page it summarises.
     let summaries = Layout::horizontal([
         Constraint::Percentage(34),
         Constraint::Percentage(33),
         Constraint::Percentage(33),
     ])
     .split(rows[2]);
-    draw_card(
-        frame,
-        summaries[0],
-        "EARNINGS",
-        earnings_summary_lines(app),
-        series(2),
-    );
-    draw_card(
-        frame,
-        summaries[1],
-        "SCHEDULE",
-        schedule_summary_lines(app),
-        series(0),
-    );
-    draw_card(
-        frame,
+    let areas = [
+        top[0], top[1], top[2], top[3], middle[0], middle[1], summaries[0], summaries[1],
         summaries[2],
-        "ENERGY",
-        energy_summary_lines(app),
-        warn(),
-    );
+    ];
+    for (card, area) in OverviewCard::ALL.into_iter().zip(areas) {
+        draw_overview_card(frame, app, card, area);
+    }
+}
+
+/// The Overview on a terminal too small for the grid (issue #453): as many cards
+/// across as are at least [`OVERVIEW_CARD_WIDTH`] wide, in [`OverviewCard::ALL`]
+/// order, row after row while they fit. What does not fit is counted on the last
+/// line rather than drawn as a stack of empty borders.
+fn draw_overview_flow(frame: &mut Frame, app: &App, area: Rect) {
+    const MIN_CARD_HEIGHT: u16 = 3;
+    let across = (area.width / OVERVIEW_CARD_WIDTH).clamp(1, 4) as usize;
+    let rows: Vec<&[OverviewCard]> = OverviewCard::ALL.chunks(across).collect();
+    let mut y = area.y;
+    let mut drawn = 0;
+    for (index, row) in rows.iter().enumerate() {
+        let left = area.bottom() - y;
+        let last = index + 1 == rows.len();
+        // A line for the "more" note under this row, unless it is the last one.
+        let reserve = if last { 0 } else { 1 };
+        let want = row.iter().map(|card| card.height()).max().unwrap_or(MIN_CARD_HEIGHT);
+        let height = want.min(left.saturating_sub(reserve));
+        if height < MIN_CARD_HEIGHT {
+            break;
+        }
+        let row_area = Rect { x: area.x, y, width: area.width, height };
+        let cells = Layout::horizontal(vec![Constraint::Ratio(1, across as u32); across]).split(row_area);
+        for (card, cell) in row.iter().zip(cells.iter()) {
+            draw_overview_card(frame, app, *card, *cell);
+        }
+        drawn += row.len();
+        y += height;
+    }
+    let hidden = OverviewCard::ALL.len() - drawn;
+    if hidden > 0 && y < area.bottom() {
+        let note = format!("+{hidden} more card{} on a larger terminal", if hidden == 1 { "" } else { "s" });
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                truncate_ellipsis(&note, area.width as usize),
+                Style::default().fg(muted()),
+            ))
+            .alignment(Alignment::Center),
+            Rect { x: area.x, y, width: area.width, height: 1 },
+        );
+    }
 }
 
 /// The EARNINGS page in five lines: what came in, over the windows that fit.
@@ -2035,18 +2147,47 @@ fn draw_earnings(frame: &mut Frame, app: &mut App, area: Rect) {
     // Two borders, the header, the blank line `header_row` puts under it, and a row
     // per payment network -- one placeholder row when there is none.
     let table_height = app.earnings.len().max(1) as u16 + 4;
-    let rows = Layout::vertical([
-        Constraint::Length(table_height),
-        Constraint::Length(donations.len() as u16 + 2),
-        Constraint::Length(notes.len() as u16 + 2),
-        Constraint::Min(MIN_OPINIONS_HEIGHT),
-    ])
-    .split(area);
+    let donations_height = donations.len() as u16 + 2;
+    let notes_height = notes.len() as u16 + 2;
+    let fixed = table_height + donations_height + notes_height;
+    let rows = if fixed + MIN_OPINIONS_HEIGHT <= area.height {
+        Layout::vertical([
+            Constraint::Length(table_height),
+            Constraint::Length(donations_height),
+            Constraint::Length(notes_height),
+            Constraint::Min(MIN_OPINIONS_HEIGHT),
+        ])
+        .split(area)
+        .to_vec()
+    } else {
+        // Short (issue #453): each card shrinks toward a single line between its
+        // borders, and then goes, in the order it matters least -- the notes about
+        // reputation first, then the donations, then the opinions table; what came in
+        // goes last. A card squeezed to its borders says nothing and hides the rows
+        // that would have.
+        let mut heights = crate::layout_util::allocate_heights(
+            area.height,
+            &[(5, table_height), (3, donations_height), (3, notes_height), (MIN_OPINIONS_HEIGHT, MIN_OPINIONS_HEIGHT)],
+            &[0, 3, 1, 2],
+        );
+        // What is left goes to the opinions when they are drawn at all, and to what
+        // came in when they are not -- never to an empty box.
+        let used: u16 = heights.iter().sum();
+        let grow = if heights[3] > 0 { 3 } else { 0 };
+        heights[grow] += area.height - used;
+        crate::layout_util::stack(area, &heights)
+    };
 
     draw_money_taken_in(frame, app, rows[0]);
-    draw_card(frame, rows[1], "DONATIONS PAID OUT", donations, series(1));
-    draw_card(frame, rows[2], "REPUTATION HELD ON THIS NODE", notes, accent());
-    draw_opinions(frame, app, rows[3]);
+    if rows[1].height > 0 {
+        draw_card(frame, rows[1], "DONATIONS PAID OUT", donations, series(1));
+    }
+    if rows[2].height > 0 {
+        draw_card(frame, rows[2], "REPUTATION HELD ON THIS NODE", notes, accent());
+    }
+    if rows[3].height > 0 {
+        draw_opinions(frame, app, rows[3]);
+    }
 }
 
 /// What this node donates, what is waiting to go out, and to whom.
@@ -3239,17 +3380,45 @@ fn draw_schedule(frame: &mut Frame, app: &mut App, area: Rect) {
     // exemption note -- six -- plus one row per window (or one placeholder line when
     // there are none), plus the block's own two border rows.
     let summary_height = 8 + schedule.windows.len().max(1) as u16;
-    let rows = Layout::vertical([
-        Constraint::Length(11),
-        Constraint::Length(summary_height),
-        Constraint::Min(3),
-    ])
-    .split(area);
+    let rows = if area.height >= 11 + 3 + 3 {
+        Layout::vertical([
+            Constraint::Length(11),
+            Constraint::Length(summary_height),
+            Constraint::Min(3),
+        ])
+        .split(area)
+        .to_vec()
+    } else {
+        // Short (issue #453): the day bar keeps the five lines inside its borders it
+        // needs to be a bar with an axis (`draw_day_bar` draws nothing in fewer),
+        // then the window list, then the help; a block that cannot have a line
+        // inside its borders is left out.
+        let heights = crate::layout_util::allocate_heights(
+            area.height,
+            &[(7, 11), (3, summary_height), (3, 3)],
+            &[0, 1, 2],
+        );
+        crate::layout_util::stack(area, &heights)
+    };
 
-    draw_day_bar(frame, rows[0], app, &schedule, now);
-    draw_schedule_summary(frame, rows[1], app, &schedule, now);
-
-    draw_schedule_help(frame, rows[2], app);
+    // The areas the summary and help record for the mouse are rebuilt by whichever
+    // of them is drawn; the ones left out must not keep last frame's.
+    app.schedule_edge_areas.clear();
+    app.schedule_remove_areas.clear();
+    app.schedule_add_area = Rect::ZERO;
+    app.schedule_enabled_area = Rect::ZERO;
+    app.schedule_on_close_area = Rect::ZERO;
+    if rows[0].height > 0 {
+        draw_day_bar(frame, rows[0], app, &schedule, now);
+    } else {
+        app.schedule_bar = None;
+    }
+    if rows[1].height > 0 {
+        draw_schedule_summary(frame, rows[1], app, &schedule, now);
+    }
+    if rows[2].height > 0 {
+        draw_schedule_help(frame, rows[2], app);
+    }
 }
 
 fn draw_day_bar(
@@ -3661,6 +3830,22 @@ fn draw_schedule_summary(
     )));
 
     frame.render_widget(Paragraph::new(lines), inner);
+
+    // A line the box was too short (or too narrow) to show is not a click target:
+    // recorded unclipped, the closing-policy line of a short box sat over the help
+    // block below it, and a click there flipped what closing does (issue #453).
+    let clip = |rect: Rect| rect.intersection(inner);
+    for (_, _, rect) in app.schedule_edge_areas.iter_mut() {
+        *rect = clip(*rect);
+    }
+    for (_, rect) in app.schedule_remove_areas.iter_mut() {
+        *rect = clip(*rect);
+    }
+    app.schedule_edge_areas.retain(|(_, _, rect)| !rect.is_empty());
+    app.schedule_remove_areas.retain(|(_, rect)| !rect.is_empty());
+    app.schedule_add_area = clip(app.schedule_add_area);
+    app.schedule_enabled_area = clip(app.schedule_enabled_area);
+    app.schedule_on_close_area = clip(app.schedule_on_close_area);
 }
 
 fn draw_schedule_help(frame: &mut Frame, area: Rect, app: &App) {
@@ -3701,16 +3886,44 @@ fn draw_schedule_help(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
-    let sections = Layout::vertical([Constraint::Min(8), Constraint::Length(12)]).split(area);
-    draw_payment_systems(frame, app, sections[1]);
+    // The payment-system cards yield first on a short terminal: the prices are what
+    // this page edits, and the ratios below them are a key each (issue #453).
+    let payments = 12.min(area.height.saturating_sub(8));
+    let payments = if payments >= 4 { payments } else { 0 };
+    let sections = crate::layout_util::stack(area, &[area.height - payments, payments]);
+    if payments > 0 {
+        draw_payment_systems(frame, app, sections[1]);
+    } else {
+        // Not drawn, so not clickable where they were last frame.
+        app.payment_rate_areas.clear();
+    }
     let area = sections[0];
-    let columns = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
-        .split(area);
-    let left = Layout::vertical([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
-    .split(columns[0]);
+    // Narrow (issue #453): one column, the table that selects and edits a price kept
+    // above everything else, then the two charts, then the unit card.
+    let narrow = area.width < 80;
+    let (left, money_area, table_area) = if narrow {
+        let heights = crate::layout_util::allocate_heights(
+            area.height,
+            &[(4, 6), (4, 6), (3, 13), (5, area.height)],
+            &[3, 0, 1, 2],
+        );
+        let rects = crate::layout_util::stack(area, &heights);
+        ([rects[0], rects[1]], rects[2], rects[3])
+    } else {
+        let columns = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)])
+            .split(area);
+        let left = Layout::vertical([
+            Constraint::Percentage(50),
+            Constraint::Percentage(50),
+        ])
+        .split(columns[0]);
+        // 13 rows fit the card's tallest state (a price selected, plus the worked
+        // example on the last line); anything shorter silently clips the example.
+        // The table keeps a row of its own before the card grows, though: a table
+        // squeezed to its header is a list of prices with none in it.
+        let [card, table] = card_and_list(columns[1], 13, 5);
+        ([left[0], left[1]], card, table)
+    };
 
     let selected = app.prices.state_id.clone();
     // Rebuilt every frame, so a bar that moved (a resize, a price appearing) is not
@@ -3744,11 +3957,24 @@ fn draw_pricing(frame: &mut Frame, app: &mut App, area: Rect) {
     );
     app.price_bar_areas = bar_areas;
 
-    // 13 rows fit the card's tallest state (a price selected, plus the worked
-    // example on the last line); anything shorter silently clips the example.
-    let right = Layout::vertical([Constraint::Length(13), Constraint::Min(4)]).split(columns[1]);
-    draw_money_card(frame, app, right[0]);
-    draw_price_table(frame, app, right[1]);
+    if money_area.height > 0 {
+        draw_money_card(frame, app, money_area);
+    }
+    draw_price_table(frame, app, table_area);
+}
+
+/// A card above a table, where the table must keep `table_min` rows (border, header
+/// and a row) before the card grows toward `card_want`; the table takes the rest.
+/// The card is left out rather than drawn as two borders when it cannot have a line.
+fn card_and_list(area: Rect, card_want: u16, table_min: u16) -> [Rect; 2] {
+    let heights = crate::layout_util::allocate_heights(
+        area.height,
+        &[(3, card_want), (table_min, table_min)],
+        &[1, 0],
+    );
+    let card = heights[0];
+    let rects = crate::layout_util::stack(area, &[card, area.height - card]);
+    [rects[0], rects[1]]
 }
 
 /// Which half of the price vector a chart draws, and how it looks.
@@ -3986,8 +4212,18 @@ fn draw_price_table(frame: &mut Frame, app: &mut App, area: Rect) {
 /// Rows record where they were drawn (`energy_row_areas`) so the mouse can find
 /// them: three bordered sections is not a geometry a generic hit test can retrace.
 fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
-    let columns = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
-        .split(area);
+    // Narrow (issue #453): the explanation goes under the keys rather than beside
+    // them, and only when it can have a few lines of its own.
+    let columns = if area.width >= 80 {
+        Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)])
+            .split(area)
+            .to_vec()
+    } else {
+        let keys = (crate::energy::entries().len() as u16 + 2).min(area.height);
+        let help = area.height - keys;
+        let help = if help >= 4 { help } else { 0 };
+        crate::layout_util::stack(area, &[area.height - help, help])
+    };
 
     let entries = crate::energy::entries();
     // One block per section, each as tall as the rows it holds plus its border and
@@ -4001,6 +4237,18 @@ fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
             _ => sections.push((*section, vec![index])),
         }
     }
+    app.energy_row_areas.clear();
+    let needed: u16 = sections.iter().map(|(_, rows)| rows.len() as u16 + 3).sum();
+    if needed > columns[0].height {
+        // Too short for the three blocks: they were clipped from the bottom, and a
+        // selected key in the last of them was off screen (issue #453). One list
+        // instead, scrolled so the selection is always on it.
+        draw_energy_compact(frame, app, columns[0]);
+        if columns[1].height > 0 {
+            draw_energy_help(frame, app, columns[1]);
+        }
+        return;
+    }
     let constraints: Vec<Constraint> = sections
         .iter()
         .map(|(_, rows)| Constraint::Length(rows.len() as u16 + 3))
@@ -4008,7 +4256,6 @@ fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
     let panes = Layout::vertical(constraints).split(columns[0]);
 
-    app.energy_row_areas.clear();
     // `list_area` stays zero: this page is three blocks rather than one table, and a
     // generic row hit test over it would land on the wrong key.
     for (pane, (section, rows)) in panes.iter().zip(sections.iter()) {
@@ -4021,7 +4268,51 @@ fn draw_energy(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_energy_chart(frame, app, *chart_area);
     }
 
-    draw_energy_help(frame, app, columns[1]);
+    if columns[1].height > 0 {
+        draw_energy_help(frame, app, columns[1]);
+    }
+}
+
+/// Every `energy:` key in one block, one line each, scrolled to keep the selected one
+/// on screen: the ENERGY page on a terminal too short for its three sections.
+fn draw_energy_compact(frame: &mut Frame, app: &mut App, area: Rect) {
+    let entries = crate::energy::entries();
+    let section = entries
+        .get(app.energy_selected)
+        .map(|(section, _)| section.title())
+        .unwrap_or("");
+    let block = section_block(format!(" ENERGY • {section} "), accent());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+    let visible = inner.height as usize;
+    let offset = app.energy_selected.saturating_sub(visible - 1).min(entries.len().saturating_sub(visible));
+    let key_width = 26.min(inner.width as usize / 2);
+    let mut lines = Vec::new();
+    for (row, (index, (_, entry))) in entries.iter().enumerate().skip(offset).take(visible).enumerate() {
+        let selected = app.energy_selected == index;
+        let value = app
+            .energy_value(entry)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "(not set)".to_string());
+        let marker = if selected { "> " } else { "  " };
+        let key = truncate_ellipsis(entry.key(), key_width);
+        let key_style = if selected {
+            selected_style()
+        } else {
+            Style::default().fg(text_colour())
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{marker}{key:<key_width$}"), key_style),
+            Span::raw(" "),
+            Span::styled(value, Style::default().fg(energy_value_colour(entry, app))),
+        ]));
+        app.energy_row_areas
+            .push((index, Rect::new(inner.x, inner.y + row as u16, inner.width, 1)));
+    }
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// The chart the config catalogue's own layout leaves room for: peaks over
@@ -4458,25 +4749,30 @@ fn config_branch_line(token: &str, count: usize, highlighted: bool) -> Line<'sta
     ])
 }
 
+/// Muted, wrapped text in a bordered block, kept inside the border whatever the text
+/// holds (see [`crate::layout_util::wrap_guard`]): a log line is whatever the node
+/// or a service printed.
+fn draw_wrapped_text(frame: &mut Frame, text: String, block: Block<'static>, area: Rect) {
+    let inner = crate::layout_util::wrap_guard(
+        block.inner(area),
+        crate::layout_util::has_wide_glyph(&text),
+    );
+    frame.render_widget(block.style(Style::default().fg(muted())), area);
+    frame.render_widget(
+        Paragraph::new(text)
+            .style(Style::default().fg(muted()))
+            .wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
 fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
     let split =
         Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)]).split(area);
     let node_text = visible_tail(&app.node_logs, split[0].height.saturating_sub(2) as usize);
-    frame.render_widget(
-        Paragraph::new(node_text)
-            .block(section_block(" NODE LOG • app.log ", text_colour()))
-            .style(Style::default().fg(muted()))
-            .wrap(Wrap { trim: false }),
-        split[0],
-    );
+    draw_wrapped_text(frame, node_text, section_block(" NODE LOG • app.log ", text_colour()), split[0]);
     let action_text = visible_tail(&app.app_logs, split[1].height.saturating_sub(2) as usize);
-    frame.render_widget(
-        Paragraph::new(action_text)
-            .block(section_block(" TUI ACTIONS ", accent()))
-            .style(Style::default().fg(muted()))
-            .wrap(Wrap { trim: false }),
-        split[1],
-    );
+    draw_wrapped_text(frame, action_text, section_block(" TUI ACTIONS ", accent()), split[1]);
 }
 
 /// The footer's page-local keys. The navigation keys are the same everywhere and
@@ -4678,7 +4974,7 @@ fn edit_popup_body(app: &App) -> (Vec<Line<'static>>, String) {
     }
 }
 
-/// Break `text` into lines of at most `width` characters, on word boundaries.
+/// Break `text` into lines of at most `width` columns, on word boundaries.
 ///
 /// Characters, not bytes: splitting a multi-byte one produces a replacement glyph.
 /// An over-long word is left ragged rather than cut mid-token, because a truncated
@@ -4690,10 +4986,12 @@ pub(crate) fn wrapped(text: &str, width: usize) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
     for word in text.split_whitespace() {
+        // Terminal columns rather than characters, so a line of CJK text is not
+        // counted at half the room it takes (issue #453). The same count for ASCII.
         let would_be = if current.is_empty() {
-            word.chars().count()
+            display_width(word)
         } else {
-            current.chars().count() + 1 + word.chars().count()
+            display_width(&current) + 1 + display_width(word)
         };
         if !current.is_empty() && would_be > width {
             lines.push(std::mem::take(&mut current));
@@ -4738,6 +5036,8 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
     let height = (content.len() as u16 + 2).max(3) + 2 + hint_rows;
     let area = centered_rect(72, height, frame.size());
     frame.render_widget(Clear, area);
+    // Whole keys or none: a hint cut mid-word names a key that does not exist.
+    let hint = fit_hints(&hint, " • ", area.width.saturating_sub(2) as usize);
     content.push(Line::from(Span::styled(hint, Style::default().fg(muted()))));
     if let Some(root_hint) = root_hint {
         // Wrapped here rather than through `Paragraph::wrap`, which would also
@@ -4762,19 +5062,23 @@ fn draw_input_popup(frame: &mut Frame, app: &App) {
 }
 
 fn draw_confirm_popup(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 6, frame.size());
+    // The question wraps rather than running off the box on a narrow terminal: it
+    // names what is about to be deleted or killed, and that is the part to read
+    // before pressing y (issue #453). One line, the usual case, is the box it always
+    // was.
+    let probe = centered_rect(60, 6, frame.size());
+    let question = wrapped(&app.input_title, probe.width.saturating_sub(2) as usize);
+    let area = centered_rect(60, question.len() as u16 + 5, frame.size());
     frame.render_widget(Clear, area);
-    let content = vec![
-        Line::from(Span::styled(
-            app.input_title.clone(),
-            Style::default().fg(text_colour()).bold(),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "y confirms • n / Esc cancels",
-            Style::default().fg(muted()),
-        )),
-    ];
+    let mut content: Vec<Line> = question
+        .into_iter()
+        .map(|line| Line::from(Span::styled(line, Style::default().fg(text_colour()).bold())))
+        .collect();
+    content.push(Line::from(""));
+    content.push(Line::from(Span::styled(
+        fit_hints("y confirms • n / Esc cancels", " • ", area.width.saturating_sub(2) as usize),
+        Style::default().fg(muted()),
+    )));
     let popup = Paragraph::new(content)
         .alignment(Alignment::Center)
         .block(
@@ -4821,21 +5125,30 @@ fn draw_details_popup(frame: &mut Frame, app: &App) {
         "↑/↓ scroll • Esc close"
     };
     let colour = if confirming || gating { warn() } else { accent() };
+    let block = Block::bordered()
+        .title(Span::styled(
+            format!(" {title} • {keys} "),
+            Style::default().fg(colour).bold(),
+        ))
+        .border_style(Style::default().fg(colour))
+        .style(Style::default().fg(text_colour()).bg(popup_background()));
+    let inner = crate::layout_util::wrap_guard(
+        block.inner(area),
+        crate::layout_util::has_wide_glyph(&text),
+    );
+    frame.render_widget(block, area);
     let popup = Paragraph::new(text)
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false })
-        .block(
-            Block::bordered()
-                .title(Span::styled(
-                    format!(" {title} • {keys} "),
-                    Style::default().fg(colour).bold(),
-                ))
-                .border_style(Style::default().fg(colour)),
-        )
         .style(Style::default().fg(text_colour()).bg(popup_background()));
-    frame.render_widget(popup, area);
+    frame.render_widget(popup, inner);
 }
 
+/// A popup `percent_x` of `area`'s width and `height` rows tall, centred.
+///
+/// Never narrower than [`POPUP_MIN_WIDTH`] while the screen is wider than that: a
+/// percentage of a 40-column terminal is a box too narrow for the sentence inside it
+/// (issue #453). Never larger than `area` either way.
 pub(crate) fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     let vertical = Layout::vertical([
         Constraint::Fill(1),

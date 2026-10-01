@@ -1732,6 +1732,9 @@ impl App {
 // Drawing
 // ---------------------------------------------------------------------------
 
+/// Below this width the DOCS page shows one pane at a time.
+const NARROW_WIDTH: u16 = 60;
+
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     let docs = &mut app.docs;
     docs.index_area = Rect::ZERO;
@@ -1752,6 +1755,16 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    // Narrow (issue #453): two panes of eighteen columns are an index nobody can
+    // read beside a page nobody can read, so only the one with the keyboard is
+    // drawn, full width. ←/→ already move between them.
+    if area.width < NARROW_WIDTH {
+        match docs.focus {
+            Focus::Index => draw_index(frame, docs, area),
+            Focus::Page => draw_page(frame, docs, area),
+        }
+        return;
+    }
     let index_width = (area.width * 3 / 10).clamp(22, 42).min(area.width / 2);
     let split =
         Layout::horizontal([Constraint::Length(index_width), Constraint::Min(10)]).split(area);
