@@ -44,6 +44,10 @@ const REPUTATION_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 /// rows the node's own hourly indexing tick wrote, plus config, so refreshing it
 /// faster than the tick that fills it in would only re-read the same numbers.
 const DONATIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(600);
+/// How often this node's own announced resources are re-read (`nodo resources
+/// --json`, issue #455). Ceilings, not headroom: they move when the machine, its
+/// `host_limits` caps or its benchmark scores do, so there is no point asking often.
+const OWN_RESOURCES_REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 /// How much demand history the SCHEDULE page reads back. A month shows the weekly shape
 /// without letting one unusual day set the scale of the whole chart.
 const DEMAND_HISTORY_DAYS: u16 = 30;
@@ -3020,6 +3024,9 @@ pub struct App {
     pub reputation: NodeReputation,
     /// What this node donates and what it counts, from `nodo donations --json`.
     pub donations: NodeDonations,
+    /// What this node itself announces it can run, from `nodo resources --json`
+    /// (issue #455): its own row of the Overview's total, and a card of its own.
+    pub own_resources: crate::peer_resources::OwnResources,
     pub payment_report: serde_json::Value,
     pub payment_error: String,
     pub payment_rate_areas: Vec<(String, Rect)>,
@@ -3154,6 +3161,8 @@ pub struct App {
     reputation_task: Option<JoinHandle<Result<NodeReputation, String>>>,
     last_donations_refresh: Instant,
     donations_task: Option<JoinHandle<Result<NodeDonations, String>>>,
+    last_own_resources_refresh: Instant,
+    own_resources_task: Option<JoinHandle<Result<crate::peer_resources::Announced, String>>>,
     /// In-flight background `nodo` command, if any (keeps the UI responsive).
     pub(crate) command_task: Option<JoinHandle<CommandOutcome>>,
     /// In-flight configuration transaction: write, restart, and revert on failure.
@@ -3215,6 +3224,7 @@ impl Default for App {
             earnings: Vec::new(),
             reputation: NodeReputation::default(),
             donations: NodeDonations::default(),
+            own_resources: Default::default(),
             payment_report: serde_json::Value::Null,
             payment_error: String::new(),
             payment_rate_areas: Vec::new(),
@@ -3285,6 +3295,10 @@ impl Default for App {
                 .checked_sub(DONATIONS_REFRESH_INTERVAL)
                 .unwrap_or(now),
             donations_task: None,
+            last_own_resources_refresh: now
+                .checked_sub(OWN_RESOURCES_REFRESH_INTERVAL)
+                .unwrap_or(now),
+            own_resources_task: None,
             command_task: None,
             config_task: None,
             config_follow_up: ConfigFollowUp::None,
@@ -5837,6 +5851,13 @@ impl App {
             self.last_donations_refresh = Instant::now();
             self.donations_task = Some(tokio::spawn(fetch_node_donations()));
         }
+        self.poll_own_resources_task().await;
+        if self.own_resources_task.is_none()
+            && (force || self.last_own_resources_refresh.elapsed() >= OWN_RESOURCES_REFRESH_INTERVAL)
+        {
+            self.last_own_resources_refresh = Instant::now();
+            self.own_resources_task = Some(tokio::spawn(fetch_own_resources()));
+        }
     }
 
     /// Update the schedule marker on its own timer.
@@ -6064,6 +6085,28 @@ impl App {
         }
     }
 
+    /// Collect this node's announced resources. A failed read keeps the last
+    /// announcement on screen with the failure beside it, as reputation does.
+    async fn poll_own_resources_task(&mut self) {
+        if !self
+            .own_resources_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let task = self.own_resources_task.take().unwrap();
+        match task.await {
+            Ok(Ok(announced)) => {
+                self.own_resources.announced = Some(announced);
+                self.own_resources.error.clear();
+            }
+            Ok(Err(error)) => self.own_resources.error = error,
+            Err(error) => self.own_resources.error = format!("Resources read failed: {error}"),
+        }
+    }
+
     async fn poll_donations_task(&mut self) {
         if !self
             .donations_task
@@ -6188,6 +6231,29 @@ async fn fetch_node_reputation() -> Result<NodeReputation, String> {
     match report_line(&stdout) {
         Some(line) => parse_node_reputation(line),
         None => Err(nonblank_error(&String::from_utf8_lossy(&output.stderr))),
+    }
+}
+
+/// Run `nodo resources --json` off the UI thread: this node's own `Peer.resources`.
+async fn fetch_own_resources() -> Result<crate::peer_resources::Announced, String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        Command::new("nodo").args(["resources", "--json"]).output(),
+    )
+    .await
+    .map_err(|_| "nodo resources timed out after 30 seconds".to_string())?
+    .map_err(|error| format!("Unable to run nodo resources: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match report_line(&stdout) {
+        Some(line) => crate::peer_resources::parse_own_resources(line),
+        None => {
+            let stderr = first_line(&String::from_utf8_lossy(&output.stderr));
+            Err(if stderr.is_empty() {
+                "nodo resources produced no output".to_string()
+            } else {
+                stderr
+            })
+        }
     }
 }
 

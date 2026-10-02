@@ -303,6 +303,7 @@ enum OverviewCard {
     Network,
     Wallets,
     HostCapacity,
+    NodeResources,
     PeerResources,
     Earnings,
     Schedule,
@@ -310,13 +311,14 @@ enum OverviewCard {
 }
 
 impl OverviewCard {
-    const ALL: [OverviewCard; 10] = [
+    const ALL: [OverviewCard; 11] = [
         OverviewCard::Node,
         OverviewCard::Workload,
         OverviewCard::Storage,
         OverviewCard::Network,
         OverviewCard::Wallets,
         OverviewCard::HostCapacity,
+        OverviewCard::NodeResources,
         OverviewCard::PeerResources,
         OverviewCard::Earnings,
         OverviewCard::Schedule,
@@ -331,7 +333,10 @@ impl OverviewCard {
             OverviewCard::Workload | OverviewCard::Storage => 5,
             OverviewCard::Network => 4,
             OverviewCard::Wallets | OverviewCard::HostCapacity | OverviewCard::PeerResources => 9,
-            OverviewCard::Earnings | OverviewCard::Schedule | OverviewCard::Energy => 6,
+            OverviewCard::NodeResources
+            | OverviewCard::Earnings
+            | OverviewCard::Schedule
+            | OverviewCard::Energy => 6,
         }
     }
 }
@@ -424,10 +429,17 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
         ),
         OverviewCard::Wallets => draw_ergo(frame, app, area),
         OverviewCard::HostCapacity => draw_health(frame, app, area),
+        OverviewCard::NodeResources => draw_card(
+            frame,
+            area,
+            "NODE · ANNOUNCED",
+            node_resources_lines(app),
+            series(0),
+        ),
         OverviewCard::PeerResources => draw_card(
             frame,
             area,
-            "PEERS · UPPER BOUND",
+            "TOTAL · UPPER BOUND",
             peer_resources_lines(app),
             series(1),
         ),
@@ -458,7 +470,7 @@ fn draw_overview_card(frame: &mut Frame, app: &App, card: OverviewCard, area: Re
     }
 }
 
-/// Four cards across, three, then three: the Overview as it is drawn on a terminal
+/// Four cards across, three, then four: the Overview as it is drawn on a terminal
 /// of at least 80×24.
 fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
     let rows = Layout::vertical([
@@ -478,8 +490,8 @@ fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Percentage(25),
     ])
     .split(rows[0]);
-    // Wallets and host capacity, then what the peers add to it (issue #455) -- the
-    // machine this node is beside the machines it can reach.
+    // Wallets and host capacity, then everything this node can reach, itself and its
+    // peers (issue #455) -- the machine this node is beside the machines it reaches.
     let middle = Layout::horizontal([
         Constraint::Percentage(34),
         Constraint::Percentage(33),
@@ -487,14 +499,17 @@ fn draw_overview_grid(frame: &mut Frame, app: &App, area: Rect) {
     ])
     .split(rows[1]);
     let summaries = Layout::horizontal([
-        Constraint::Percentage(34),
-        Constraint::Percentage(33),
-        Constraint::Percentage(33),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
     ])
     .split(rows[2]);
+    // In `OverviewCard::ALL` order. This node's own announcement sits under the total
+    // it is part of, at the end of the summaries row.
     let areas = [
-        top[0], top[1], top[2], top[3], middle[0], middle[1], middle[2], summaries[0],
-        summaries[1], summaries[2],
+        top[0], top[1], top[2], top[3], middle[0], middle[1], summaries[3], middle[2],
+        summaries[0], summaries[1], summaries[2],
     ];
     for (card, area) in OverviewCard::ALL.into_iter().zip(areas) {
         draw_overview_card(frame, app, card, area);
@@ -543,17 +558,67 @@ fn draw_overview_flow(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// The optimistic upper bound on what this node can reach through its peers (issue
-/// #455): every peer's announced ceilings summed, one line per architecture. Read
-/// from the same peer list the PEERS page draws, so the two cannot disagree.
+/// What this node announces it can run (issue #455): its own `Peer.resources`, as
+/// `nodo resources --json` reports it -- the ceilings its peers read, one line per
+/// architecture. An announcement, not the live machine: HOST CAPACITY is that.
+fn node_resources_lines(app: &App) -> Vec<Line<'static>> {
+    use crate::peer_resources::{format_cores, short_arch, Announced};
+    let note = |text: &str, colour: Color| Line::from(Span::styled(text.to_string(), Style::default().fg(colour)));
+    let own = &app.own_resources;
+    let mut lines = Vec::new();
+    match &own.announced {
+        None if own.error.is_empty() => lines.push(note("reading…", muted())),
+        None => {}
+        Some(Announced::Undeclared) => lines.push(note("Announces none.", warn())),
+        Some(Announced::Unreadable) => lines.push(note("Unreadable.", warn())),
+        Some(Announced::Declared(offers)) => {
+            let unstated = || "?".to_string();
+            for offer in offers {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{:<6}", short_arch(&offer.arch)), Style::default().fg(muted())),
+                    Span::styled(
+                        format!(
+                            "{}c {} {}",
+                            offer.millicores.map(format_cores).unwrap_or_else(unstated),
+                            offer.mem_bytes.map(format_bytes_compact).unwrap_or_else(unstated),
+                            offer.disk_bytes.map(format_bytes_compact).unwrap_or_else(unstated),
+                        ),
+                        Style::default().fg(text_colour()).bold(),
+                    ),
+                ]));
+            }
+            // Peers holding a request to a benchmark skip an architecture with no
+            // score for it, so an unmeasured one is worth saying.
+            let unscored: Vec<&str> = offers
+                .iter()
+                .filter(|offer| offer.benchmark.is_empty())
+                .map(|offer| short_arch(&offer.arch))
+                .collect();
+            if !unscored.is_empty() {
+                lines.push(note(&format!("No scores: {}", unscored.join(", ")), warn()));
+            }
+        }
+    }
+    if !own.error.is_empty() {
+        lines.push(note(&own.error, bad()));
+    }
+    lines.push(note("Maxima, not free.", muted()));
+    lines
+}
+
+/// The optimistic upper bound on what this node can reach (issue #455): its own
+/// announced ceilings plus every peer's, summed, one line per architecture. The
+/// peers are the list the PEERS page draws, and this node's share is what the
+/// NODE · ANNOUNCED card shows, so neither can disagree with the total.
 ///
-/// Peers only. This node's own machine is HOST CAPACITY, read live; adding it here
+/// Announcements only. This node's live machine is HOST CAPACITY; adding it here
 /// would mix a measurement with announcements. Benchmarks are left out: they are
 /// per-core rates, which do not add up -- the peer's detail card shows them.
 fn peer_resources_lines(app: &App) -> Vec<Line<'static>> {
-    use crate::peer_resources::{aggregate, format_cores, short_arch};
+    use crate::peer_resources::{aggregate_with_own, format_cores, short_arch};
     let own_id = app.node_info.node_id.as_str();
-    let total = aggregate(
+    let total = aggregate_with_own(
+        app.own_resources.announced.as_ref(),
         app.peers
             .items
             .iter()
@@ -596,6 +661,10 @@ fn peer_resources_lines(app: &App) -> Vec<Line<'static>> {
             muted(),
         ));
     }
+    if !total.own_included {
+        // Not read yet, or this node announces nothing: what is left is peers only.
+        lines.push(note("This node not included.".to_string(), warn()));
+    }
     let mut silent = Vec::new();
     if total.undeclared > 0 {
         silent.push(format!("{} undeclared", total.undeclared));
@@ -607,7 +676,7 @@ fn peer_resources_lines(app: &App) -> Vec<Line<'static>> {
         lines.push(note(silent.join(", "), warn()));
     }
     if !total.per_arch.is_empty() {
-        lines.push(note("cores RAM disk ×peers".to_string(), muted()));
+        lines.push(note("cores RAM disk ×nodes".to_string(), muted()));
         if total.per_arch.values().any(|row| row.partial > 0) {
             lines.push(note("* a limit left unstated".to_string(), muted()));
         }
