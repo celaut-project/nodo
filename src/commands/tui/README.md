@@ -55,7 +55,8 @@ already-selected title says nothing and costs the page below it a line.
 | Page | Purpose |
 |---|---|
 | **Overview** | Node status/version/address, host CPU and RAM, current and reserved instance resources, disk usage, nodo storage size, peer/client counts, service count, reputation proof, and wallet balances — plus compact summaries of what this node has earned, the hours it works, and what it costs to run. The ENERGY summary adds what today has drawn and cost so far, and the worst hour of the last two days, once a sample has landed. An `ACTION REQUIRED` banner appears above everything when the gateway port needs opening or Java is missing, and takes no space at all when there is nothing to say. |
-| **Instances** | Running instances with service, endpoint, virtualizer, balance, and what each one is *using* rather than only what it was allocated: live CPU%, memory used against its limit, and network rates. The detail card adds the vCPU allowance the CPU% is measured against, cumulative disk and network totals, and the disk allocation. |
+| **Instances** | Running instances with service, endpoint, virtualizer, balance, and what each one is *using* rather than only what it was allocated: live CPU%, memory used against its limit, and network rates. The detail card adds the vCPU allowance the CPU% is measured against, cumulative disk and network totals, the disk allocation, and the tunnels that reach the instance. `t` opens a new tunnel to the selected instance: type the slot (and optionally `--listen <port>`, `--udp`, `--host`, `--peer`, `--idle`), and it runs `nodo tunnel <instance> <slot> … --detach`. |
+| **Tunnels** | The `nodo tunnel` processes running on this host — opened here, from INSTANCES, or in any shell — read from the registry each one keeps under `<main.STORAGE>/tunnels/` while it runs: where it listens, the slot and instance token it reaches, through which node, its pid and age; the card adds the gateway and its log file. `n` opens one (`<instance> <slot> [flags]`), `d` closes the selected one after a confirmation (`nodo tunnel_close`), and `i` shows it with the tail of its log. |
 | **Services** | Locally available services, metadata tag, content ID, stored size, and execution action. The detail card carries the service's reputation — accumulated over every instance of it that has run here, since an instance is gone minutes after it misbehaves — and the events behind it. |
 | **Peers** | Who we talk to: endpoints, our balance with each, reputation, and the payment contracts and rates a peer declares. The detail card adds every payment we have made to the selected peer — including one broadcast that the peer never acknowledged — and the reputation events behind its score, each with the reason that produced it. Peers can be connected (`c`) and forgotten (`d`) from here. |
 | **Clients** | Who pays us: balance, last usage, and whether the client is metered at all. The detail card lists what it has paid, the deposit tokens it holds and what became of them, and the instances it started here. A client cannot be resolved to a peer and the page does not pretend otherwise (see issue #178). Balance can be credited/debited with `+`/`-`. |
@@ -221,14 +222,15 @@ visited there, so `]` twice then `[` twice returns you to where you started.
 | `r` | Force a refresh (on Earnings, re-reads the chain as well) |
 | `c` | Connect a peer, from Peers; on Schedule, what closing time does (refuse / stop) |
 | `a` | Config: append an element to the selected list |
-| `d` | Delete the selected service, forget the selected peer on Peers, remove the selected Config list element, or show how this node deviates from its closest profile on Cell |
+| `d` | Delete the selected service, forget the selected peer on Peers, close the selected tunnel on Tunnels, remove the selected Config list element, or show how this node deviates from its closest profile on Cell |
 | `k` | Kill the selected instance |
+| `t` | Instances: open a tunnel to the selected instance (`nodo tunnel … --detach`) |
 | `g` | Instances: dependency tree / flat list |
-| `i` | Service details |
+| `i` | Service details, or the selected tunnel with its log on Tunnels |
 | `e` | Execute the selected service, or edit the selected Config, Pricing, Cell or Energy value |
 | `p` | Cell: apply a profile |
 | `+` / `-` | Adjust peer reputation on Peers, the selected price by 10 % on Pricing, or open a credit/debit amount modal on Clients |
-| `n` | Cell: the router steps (`nodo nat-guide`) |
+| `n` | Cell: the router steps (`nodo nat-guide`); Tunnels: open a new tunnel |
 | `w` | Schedule: enforce the hours, or stop enforcing them |
 | `/` | Filter Config paths/values |
 | `x` | Clear the Config filter |
