@@ -148,6 +148,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     match app.page() {
         Page::Overview => draw_overview(frame, app, layout[2]),
         Page::Instances => draw_instances(frame, app, layout[2]),
+        Page::Tunnels => crate::tunnels::draw(frame, app, layout[2]),
         Page::Services => draw_services(frame, app, layout[2]),
         Page::Peers => crate::peers::draw(frame, app, layout[2]),
         Page::Clients => crate::clients::draw(frame, app, layout[2]),
@@ -189,7 +190,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         | InputMode::AddCustomUnit
         | InputMode::NewChatTopic
         | InputMode::SearchDocs
-        | InputMode::GetService => draw_input_popup(frame, app),
+        | InputMode::GetService
+        | InputMode::NewTunnel => draw_input_popup(frame, app),
     }
 }
 
@@ -1536,12 +1538,12 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
         draw_instances_tree(frame, app, area);
         return;
     }
-    // 16 = 14 detail lines + the block's two border rows. The card carries the figures
+    // 18 = 16 detail lines + the block's two border rows. The card carries the figures
     // the row has no width for: the endpoint, the disk allocation, the vCPU allowance
     // the CPU% is measured against, the cumulative disk/net totals, the burn rate, the
-    // attributed watts (issue #258), who requested the instance, and what its balance
-    // is worth in time.
-    let layout = list_and_card(area, 8, 16);
+    // attributed watts (issue #258), who requested the instance, what its balance
+    // is worth in time, and the tunnels that reach it.
+    let layout = list_and_card(area, 8, 18);
     let rows = app
         .instances
         .items
@@ -1678,6 +1680,11 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
                 format!("nodo observe {}", instance.id),
             ));
         }
+        // The way in from here that does not need a port of its own; `t` opens one.
+        lines.push(metric_line(
+            "Tunnels",
+            crate::tunnels::instance_summary(&app.tunnels.items, &instance.id, &instance.name),
+        ));
         lines
     } else {
         vec![Line::from(Span::styled(
@@ -1733,7 +1740,7 @@ fn started_detail(instance: &Instance) -> String {
 /// before `launched_at` existed) or has no answer (a remaining lifetime against no
 /// burn rate). Never `0`: that is a real reading -- an instance whose balance is
 /// already spent -- and it must not be what "unknown" looks like.
-fn format_duration_compact(secs: Option<f64>) -> String {
+pub(crate) fn format_duration_compact(secs: Option<f64>) -> String {
     let Some(secs) = secs.filter(|secs| secs.is_finite() && *secs >= 0.0) else {
         return "—".to_string();
     };
@@ -4943,7 +4950,10 @@ fn draw_logs(frame: &mut Frame, app: &App, area: Rect) {
 pub(crate) fn page_controls(page: Page) -> &'static str {
     match page {
         Page::Overview => "r refresh  \u{2022}  q quit",
-        Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  r refresh  \u{2022}  q quit",
+        Page::Instances => "\u{2191}/\u{2193} select  \u{2022}  t tunnel  \u{2022}  g tree/flat  \u{2022}  k kill  \u{2022}  r refresh  \u{2022}  q quit",
+        Page::Tunnels => {
+            "\u{2191}/\u{2193} select  \u{2022}  n new tunnel  \u{2022}  i details  \u{2022}  d close  \u{2022}  r refresh  \u{2022}  q quit"
+        }
         Page::Services => {
             "\u{2191}/\u{2193} select  \u{2022}  e execute  \u{2022}  i details  \u{2022}  g get by hash  \u{2022}  d delete  \u{2022}  q quit"
         }

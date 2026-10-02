@@ -26,6 +26,9 @@ pub mod peer_resources;
 /// The CLIENTS page: who this node's own gateway has issued a client_id to.
 pub mod clients;
 
+/// The TUNNELS page: the `nodo tunnel` processes running on this host.
+pub mod tunnels;
+
 /// The CHAT page: free-text conversations with peer operators (issue #431).
 pub mod chat;
 

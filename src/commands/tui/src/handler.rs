@@ -414,6 +414,21 @@ pub async fn handle_key_events(key: KeyEvent, app: &mut App) -> AppResult<()> {
         (KeyModifiers::NONE, KeyCode::Char('k')) if app.page() == Page::Instances => {
             app.open_kill_instance_confirm()
         }
+        // Tunnels: `t` opens one to the selected instance, the TUNNELS page lists them
+        // (`n` opens one to any instance, `d` closes, `i` shows the log). Every action
+        // is the `nodo tunnel` / `nodo tunnel_close` an operator would type.
+        (KeyModifiers::NONE, KeyCode::Char('t')) if app.page() == Page::Instances => {
+            app.open_new_tunnel()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('n')) if app.page() == Page::Tunnels => {
+            app.open_new_tunnel()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('d')) if app.page() == Page::Tunnels => {
+            app.open_close_tunnel_confirm()
+        }
+        (KeyModifiers::NONE, KeyCode::Char('i')) if app.page() == Page::Tunnels => {
+            app.open_tunnel_details()
+        }
         (KeyModifiers::NONE, KeyCode::Char('c')) if app.page() == Page::Peers => {
             app.open_connect()
         }
