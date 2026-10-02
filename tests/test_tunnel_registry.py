@@ -294,6 +294,66 @@ class InstanceRelationshipTests(RegistryTestCase):
             self.assertEqual(tunnels_command.instance_references("web"), {"web"})
 
 
+class InboundSnapshotTests(RegistryTestCase):
+    """``nodo tunnels --inbound``: what the daemon says it is relaying for others."""
+
+    def _stream(self, **overrides):
+        stream = {"id": "in000001", "caller": "ipv4:203.0.113.7:51000", "token": "abcdef0123456789",
+                  "slot": 8080, "transport": "tcp", "target": "10.0.0.5:8080",
+                  "started_at": int(time.time()) - 90, "bytes_in": 2048, "bytes_out": 3 << 20}
+        stream.update(overrides)
+        return stream
+
+    def _write(self, pid, written_at, streams):
+        with open(registry.inbound_path(), "w") as handle:
+            json.dump({"pid": pid, "written_at": written_at, "streams": streams}, handle)
+
+    def test_a_live_daemons_streams_are_read_with_their_age(self):
+        registry.write_inbound([self._stream()])
+        inbound = registry.read_inbound()
+        self.assertEqual([s["id"] for s in inbound["streams"]], ["in000001"])
+        self.assertGreaterEqual(inbound["streams"][0]["age_secs"], 90)
+        self.assertIsNotNone(inbound["snapshot_at"])
+
+    def test_a_snapshot_left_by_a_dead_daemon_lists_nothing(self):
+        process = self.spawn()
+        process.kill()
+        process.wait()
+        self._write(process.pid, int(time.time()), [self._stream()])
+        self.assertEqual(registry.read_inbound(), {"streams": [], "snapshot_at": None})
+
+    def test_a_stale_snapshot_lists_nothing(self):
+        self._write(os.getpid(), int(time.time()) - registry.INBOUND_STALE_S - 5, [self._stream()])
+        self.assertEqual(registry.read_inbound()["streams"], [])
+
+    def test_no_snapshot_is_no_streams(self):
+        self.assertEqual(registry.read_inbound(), {"streams": [], "snapshot_at": None})
+
+    def test_the_snapshot_is_not_mistaken_for_a_tunnel_or_a_tunnel_id(self):
+        registry.write_inbound([self._stream()])
+        self.assertEqual(registry.list_tunnels(), [])
+        self.assertEqual(completion.candidates("tunnels", {"storage": None}), [])
+
+    def test_json_is_one_object(self):
+        registry.write_inbound([self._stream()])
+        ok, document = _run_json(tunnels_command.list_inbound)
+        self.assertTrue(ok)
+        self.assertEqual(document["inbound"][0]["caller"], "ipv4:203.0.113.7:51000")
+        for key in ("id", "token", "slot", "transport", "target", "started_at",
+                    "bytes_in", "bytes_out", "age_secs"):
+            self.assertIn(key, document["inbound"][0])
+        self.assertIn("snapshot_at", document)
+
+    def test_the_table_says_who_reaches_what_and_how_much(self):
+        text = tunnels_command.render_inbound([dict(self._stream(), age_secs=90)], 1)
+        for expected in ("CALLER", "ipv4:203.0.113.7:51000", "8080", "2.0 KiB", "3.0 MiB", "1m"):
+            self.assertIn(expected, text)
+        for line in text.splitlines():
+            self.assertLess(len(line), 100, line)
+        self.assertIn("not relaying", tunnels_command.render_inbound([], 1))
+        self.assertIn("not running", tunnels_command.render_inbound([], None))
+
+
 @unittest.skipIf(kill_command is None, f"Missing runtime dependencies: {KILL_IMPORT_ERROR}")
 class KillClosesTunnelsTests(RegistryTestCase):
     """``nodo kill`` closes the tunnels this host opened to the instance."""

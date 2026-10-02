@@ -9,6 +9,11 @@
 //!
 //! The field names are the contract with the Python side; a file whose process is
 //! gone is not a tunnel and is not listed (`nodo tunnels` sweeps it).
+//!
+//! Under them, the other end: the `ServiceTunnel` streams this node is relaying for
+//! others (`src/tunneling/inbound.py`), from `inbound.snapshot` in the same
+//! directory -- `nodo tunnels --inbound`. Listed, not closed: nothing outside the
+//! daemon can reach those streams.
 
 use crate::app::{shorten, App, CommandKind, DetailsView, Identifiable, InputMode, PendingAction, Page};
 use crate::layout_util::Column;
@@ -18,6 +23,12 @@ use std::path::{Path, PathBuf};
 
 /// Overrides where the registry lives; the same variable the Python side reads.
 const DIR_ENV: &str = "NODO_TUNNELS_DIR";
+
+/// The daemon's snapshot of the streams it relays (`tunnel_registry.INBOUND_FILE`).
+const INBOUND_FILE: &str = "inbound.snapshot";
+/// `tunnel_registry.INBOUND_STALE_S`: a snapshot listing streams that is older than
+/// this was left by a daemon that is gone.
+const INBOUND_STALE_SECS: i64 = 30;
 
 /// Log lines the details overlay shows of a detached tunnel.
 const LOG_TAIL_LINES: usize = 40;
@@ -118,6 +129,90 @@ pub fn pid_alive(pid: i64) -> bool {
     match std::fs::read(format!("/proc/{pid}/cmdline")) {
         Ok(cmdline) => cmdline.split(|byte| *byte == 0).any(|arg| arg == b"tunnel"),
         Err(_) => true,
+    }
+}
+
+/// One `ServiceTunnel` stream this node is relaying for someone else.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InboundStream {
+    pub id: String,
+    /// Who it is relayed for, as gRPC names the connection (`ipv4:1.2.3.4:5678`).
+    pub caller: String,
+    /// The instance it reaches.
+    pub token: String,
+    pub slot: String,
+    pub transport: String,
+    pub started_at: Option<i64>,
+    /// Caller -> service.
+    pub bytes_in: u64,
+    /// Service -> caller.
+    pub bytes_out: u64,
+}
+
+impl InboundStream {
+    pub fn age_secs(&self, now: Option<i64>) -> Option<f64> {
+        Some((now? - self.started_at?).max(0) as f64)
+    }
+}
+
+/// Whether a process exists at all (the daemon; EPERM: it does, it is root's).
+fn process_exists(pid: i64) -> bool {
+    if pid <= 0 || pid > i32::MAX as i64 {
+        return false;
+    }
+    // SAFETY: signal 0 delivers nothing; it only asks the kernel whether the pid exists.
+    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// The streams in a snapshot, or none when it was left by a daemon that is gone --
+/// `read_inbound` in the registry, in Rust.
+pub fn parse_inbound(text: &str, now: Option<i64>, alive: impl Fn(i64) -> bool) -> Vec<InboundStream> {
+    let Ok(document) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    if !document.get("pid").and_then(|pid| pid.as_i64()).map(&alive).unwrap_or(false) {
+        return Vec::new();
+    }
+    let Some(entries) = document.get("streams").and_then(|streams| streams.as_array()) else {
+        return Vec::new();
+    };
+    let written_at = document.get("written_at").and_then(|at| at.as_i64());
+    let fresh = match (now, written_at) {
+        (Some(now), Some(at)) => now - at <= INBOUND_STALE_SECS,
+        _ => false,
+    };
+    if !entries.is_empty() && !fresh {
+        return Vec::new();
+    }
+    let text_of = |value: &serde_json::Value, key: &str| match value.get(key) {
+        Some(serde_json::Value::String(text)) => text.clone(),
+        Some(serde_json::Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
+    };
+    let mut streams: Vec<InboundStream> = entries
+        .iter()
+        .filter_map(|entry| {
+            Some(InboundStream {
+                id: Some(text_of(entry, "id")).filter(|id| !id.is_empty())?,
+                caller: text_of(entry, "caller"),
+                token: text_of(entry, "token"),
+                slot: text_of(entry, "slot"),
+                transport: text_of(entry, "transport"),
+                started_at: entry.get("started_at").and_then(|at| at.as_i64()),
+                bytes_in: entry.get("bytes_in").and_then(|count| count.as_u64()).unwrap_or(0),
+                bytes_out: entry.get("bytes_out").and_then(|count| count.as_u64()).unwrap_or(0),
+            })
+        })
+        .collect();
+    streams.sort_by(|a, b| (a.started_at, &a.id).cmp(&(b.started_at, &b.id)));
+    streams
+}
+
+pub fn read_inbound(directory: &Path) -> Vec<InboundStream> {
+    match std::fs::read_to_string(directory.join(INBOUND_FILE)) {
+        Ok(text) => parse_inbound(&text, crate::app::unix_now(), process_exists),
+        Err(_) => Vec::new(),
     }
 }
 
@@ -331,8 +426,77 @@ pub(crate) const TUNNEL_COLUMNS: [Column; 6] = [
     Column::new("Age", Constraint::Length(6), 4, 5),
 ];
 
+/// The inbound table's columns.
+pub(crate) const INBOUND_COLUMNS: [Column; 7] = [
+    Column::new("Caller", Constraint::Min(22), 12, 0),
+    Column::new("Instance", Constraint::Length(18), 10, 1),
+    Column::new("Slot", Constraint::Length(7), 5, 2),
+    Column::new("Proto", Constraint::Length(6), 5, 5),
+    Column::new("In", Constraint::Length(10), 7, 3),
+    Column::new("Out", Constraint::Length(10), 7, 4),
+    Column::new("Age", Constraint::Length(6), 4, 6),
+];
+
+/// Rows the inbound table wants: borders, header and the gap under it, and a row per
+/// stream (or the one line saying there are none).
+pub fn inbound_height(count: usize) -> u16 {
+    if count == 0 {
+        3
+    } else {
+        4 + count.min(10) as u16
+    }
+}
+
+fn draw_inbound(frame: &mut Frame, streams: &[InboundStream], area: Rect) {
+    if area.height < 3 {
+        return;
+    }
+    let title = format!(" INBOUND • {} relayed for others • list only ", streams.len());
+    if streams.is_empty() {
+        let block = section_block(title, accent());
+        let line = Line::from(Span::styled(
+            "Nobody is tunnelling through this node right now (nodo tunnels --inbound).",
+            Style::default().fg(muted()),
+        ));
+        frame.render_widget(ratatui::widgets::Paragraph::new(line).block(block), area);
+        return;
+    }
+    let now = crate::app::unix_now();
+    let rows = streams
+        .iter()
+        .map(|stream| {
+            let cells: Vec<crate::ui::TextCell> = vec![
+                stream.caller.clone().into(),
+                shorten(&stream.token, 18).into(),
+                stream.slot.clone().into(),
+                stream.transport.clone().into(),
+                crate::app::format_bytes_compact(stream.bytes_in).into(),
+                crate::app::format_bytes_compact(stream.bytes_out).into(),
+                format_duration_compact(stream.age_secs(now)).into(),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
+    let (table, _) = fitted_table(&INBOUND_COLUMNS, rows, area, false);
+    frame.render_widget(table.block(section_block(title, accent())), area);
+}
+
 pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
-    let layout = crate::ui::list_and_card(area, 8, 11);
+    // The tunnels this host opened (selectable), their card, and under them the
+    // streams this node relays for others. The inbound table gives way first.
+    let heights = crate::layout_util::allocate_heights(
+        area.height,
+        &[(5, 8), (3, 11), (3, inbound_height(app.inbound_tunnels.len()))],
+        &[0, 1, 2],
+    );
+    let rects = crate::layout_util::stack(
+        area,
+        &[area.height - heights[1] - heights[2], heights[1], heights[2]],
+    );
+    let layout = [rects[0], rects[1]];
+    if rects[2].height > 0 {
+        draw_inbound(frame, &app.inbound_tunnels, rects[2]);
+    }
     let now = crate::app::unix_now();
     let rows = app
         .tunnels
@@ -410,6 +574,7 @@ impl App {
     pub(crate) fn refresh_tunnels(&mut self) {
         let directory = tunnels_dir(&self.paths.storage);
         self.tunnels.refresh(read_tunnels(&directory));
+        self.inbound_tunnels = read_inbound(&directory);
     }
 
     /// Ask for a new tunnel: `t` on INSTANCES (to the selected instance) or `n` on
@@ -566,6 +731,64 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_inbound_snapshot_is_read_only_from_a_live_fresh_daemon() {
+        let snapshot = r#"{"pid": 77, "written_at": 1790000000, "streams": [
+            {"id": "in2", "caller": "ipv4:203.0.113.8:1", "token": "tok", "slot": 53,
+             "transport": "udp", "started_at": 1789999990, "bytes_in": 10, "bytes_out": 20},
+            {"id": "in1", "caller": "ipv4:203.0.113.7:51000", "token": "abcdef", "slot": 8080,
+             "transport": "tcp", "started_at": 1789999900, "bytes_in": 2048, "bytes_out": 4096},
+            {"caller": "no id: skipped"}]}"#;
+        let streams = parse_inbound(snapshot, Some(1790000010), |pid| pid == 77);
+        let ids: Vec<&str> = streams.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["in1", "in2"], "oldest first, id-less entries dropped");
+        assert_eq!(streams[0].slot, "8080");
+        assert_eq!(streams[0].bytes_out, 4096);
+        assert_eq!(streams[0].age_secs(Some(1790000000)), Some(100.0));
+
+        assert!(parse_inbound(snapshot, Some(1790000010), |_| false).is_empty(), "daemon gone");
+        assert!(parse_inbound(snapshot, Some(1790000100), |_| true).is_empty(), "stale");
+        assert!(parse_inbound("{not json", Some(1), |_| true).is_empty());
+        let idle = r#"{"pid": 77, "written_at": 1, "streams": []}"#;
+        assert!(parse_inbound(idle, Some(1790000000), |_| true).is_empty());
+    }
+
+    #[test]
+    fn the_inbound_file_is_not_a_tunnel() {
+        let dir = temp_dir("inbound");
+        fs::write(
+            dir.join(INBOUND_FILE),
+            format!(r#"{{"pid": {}, "written_at": 1, "streams": []}}"#, std::process::id()),
+        )
+        .unwrap();
+        assert!(read_tunnels(&dir).is_empty());
+        assert!(read_inbound(&dir).is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_tunnels_page_draws_both_tables() {
+        let mut app = App::default();
+        app.tabs.index = Page::ALL.iter().position(|p| *p == Page::Tunnels).unwrap();
+        app.tunnels = crate::app::StatefulList::with_items(vec![parse_tunnel(&record("ab12cd34", 1)).unwrap()]);
+        app.inbound_tunnels = vec![InboundStream {
+            id: "in1".into(),
+            caller: "ipv4:203.0.113.7:51000".into(),
+            token: "abcdef".into(),
+            slot: "8080".into(),
+            transport: "tcp".into(),
+            started_at: None,
+            bytes_in: 2048,
+            bytes_out: 0,
+        }];
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(110, 40)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut app, frame.size())).unwrap();
+        let text: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
+        for expected in ["TUNNELS • 1 running", "SELECTED TUNNEL", "INBOUND • 1 relayed", "ipv4:203.0.113.7:51000"] {
+            assert!(text.contains(expected), "{expected} missing from {text}");
+        }
     }
 
     #[test]

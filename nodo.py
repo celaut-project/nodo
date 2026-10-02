@@ -657,7 +657,17 @@ if __name__ == '__main__':
                 from src.commands.tunnels import list_tunnels
                 args = sys.argv[2:]
                 as_json = "--json" in args and not args.remove("--json")
-                usage = "Usage: nodo tunnels [<tunnel id> | --instance <instance>] [--json]"
+                usage = (
+                    "Usage: nodo tunnels [<tunnel id> | --instance <instance> | --inbound] "
+                    "[--json]"
+                )
+                if "--inbound" in args:
+                    args.remove("--inbound")
+                    if args:
+                        print(usage, flush=True)
+                        sys.exit(1)
+                    from src.commands.tunnels import list_inbound
+                    os._exit(0 if list_inbound(as_json=as_json) else 1)
                 instance = ""
                 if "--instance" in args:
                     index = args.index("--instance")

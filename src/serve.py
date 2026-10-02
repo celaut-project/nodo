@@ -311,6 +311,14 @@ def serve():
     except Exception as e:
         log.LOGGER(f'Could not restore delegated tunnel endpoints: {e}')
 
+    # The inbound-tunnel snapshot on disk is the last daemon's; none of its streams
+    # survived it.
+    try:
+        from src.tunneling import inbound as inbound_tunnels
+        inbound_tunnels.reset()
+    except Exception as e:
+        log.LOGGER(f'Could not reset the inbound tunnel snapshot: {e}')
+
     # Run manager.
     threading.Thread(
         target=manager_thread,

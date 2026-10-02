@@ -204,6 +204,57 @@ class ServiceTunnelRelayTests(unittest.TestCase):
 
 
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ServiceTunnelInboundListTests(unittest.TestCase):
+    """The relaying node lists the streams it carries (``nodo tunnels --inbound``)."""
+
+    def setUp(self):
+        import os
+        import tempfile
+        from src.utils import tunnel_registry
+
+        self.registry = tunnel_registry
+        self.directory = tempfile.mkdtemp(prefix="nodo-inbound-")
+        self.env = patch.dict(os.environ, {tunnel_registry.DIR_ENV: self.directory})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+
+    def test_a_stream_is_listed_while_it_relays_and_dropped_when_it_ends(self):
+        port, _ = _start_server(_echo)
+        with patch.object(
+            rpc_tunnel.sc, "get_internal_instance", return_value=_serialized_instance(port)
+        ), patch.object(rpc_tunnel.sc, "get_internal_ip", return_value="127.0.0.1"), \
+                _charges_granted():
+            _conn, relay = rpc_tunnel.service_tunnel(
+                iter([celaut.TokenMessage(token="tok", slot=str(port)), b"ping"]),
+                is_active=_deadline(),
+                caller="ipv4:203.0.113.7:51000",
+            )
+            # Not listed before it relays: a relay never iterated never existed.
+            self.assertEqual(self.registry.read_inbound()["streams"], [])
+
+            first = next(relay)
+            listed = self.registry.read_inbound()["streams"]
+            self.assertEqual(len(listed), 1)
+            stream = listed[0]
+            self.assertEqual(stream["caller"], "ipv4:203.0.113.7:51000")
+            self.assertEqual(stream["token"], "tok")
+            self.assertEqual(stream["slot"], port)
+            self.assertEqual(stream["transport"], "tcp")
+            # The byte counts in the file move every refresh; in memory, at once.
+            from src.tunneling import inbound
+            live = [s for s in inbound.snapshot() if s["id"] == stream["id"]][0]
+            self.assertEqual(live["bytes_out"], len(first))
+            self.assertEqual(live["bytes_in"], 4)
+
+            self.assertEqual(first + b"".join(relay), b"ping")
+
+        self.assertEqual(self.registry.read_inbound()["streams"], [])
+        self.assertNotIn(stream["id"], [s["id"] for s in inbound.snapshot()])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ServiceTunnelUdpTests(unittest.TestCase):
     """Datagram slots. A UDP relay has no EOF, so it ends on an idle timeout."""
 

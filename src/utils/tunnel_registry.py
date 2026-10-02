@@ -9,9 +9,11 @@ runs, and removes it on the way out:
     <main.STORAGE>/tunnels/<id>.json    what it is (see :func:`new_record`)
     <main.STORAGE>/tunnels/<id>.log     its output, for one started with --detach
 
-This is not the server-side registry ``docs/TUNNELING.md`` says was dropped: the
-node still keeps no table of the ``ServiceTunnel`` streams it relays. These are the
-*client* ends this host opened, which is what an operator can list and close.
+This is not the server-side registry ``docs/TUNNELING.md`` says was dropped. These
+are the *client* ends this host opened, which is what an operator can list and close.
+The other end -- the ``ServiceTunnel`` streams this node relays for others -- is kept
+in the daemon's memory (``src/tunneling/inbound.py``) and mirrored to
+``inbound.snapshot`` here, which :func:`read_inbound` reads.
 
 A file whose process is gone -- killed with -9, or a host that rebooted -- is not a
 tunnel, so readers check the pid and sweep the file instead of reporting it. The
@@ -37,6 +39,14 @@ ID_ENV = "NODO_TUNNEL_ID"
 
 RECORD_SUFFIX = ".json"
 LOG_SUFFIX = ".log"
+
+#: The relaying side: the ``ServiceTunnel`` streams the node carries for others, as
+#: the daemon last wrote them (``src/tunneling/inbound.py``). Not ``.json``, so no
+#: reader of the client records above mistakes it for one.
+INBOUND_FILE = "inbound.snapshot"
+#: The daemon rewrites the snapshot every few seconds while a stream is open; one
+#: that lists streams and is older than this was left by a daemon that is gone.
+INBOUND_STALE_S = 30
 
 
 def registry_dir() -> str:
@@ -254,3 +264,59 @@ def log_tail(record: Dict[str, Any], lines: int = 20) -> List[str]:
             return [line.rstrip("\n") for line in handle.readlines()[-lines:]]
     except OSError:
         return []
+
+
+def inbound_path(directory: Optional[str] = None) -> str:
+    return os.path.join(directory or registry_dir(), INBOUND_FILE)
+
+
+def write_inbound(streams: List[Dict[str, Any]], directory: Optional[str] = None) -> None:
+    """Replace the inbound snapshot (the daemon's side), atomically."""
+    directory = directory or registry_dir()
+    os.makedirs(directory, exist_ok=True)
+    path = inbound_path(directory)
+    temporary = f"{path}.{os.getpid()}.tmp"
+    with open(temporary, "w") as handle:
+        json.dump({"pid": os.getpid(), "written_at": int(time.time()), "streams": streams}, handle)
+    os.replace(temporary, path)
+
+
+def process_exists(pid: Any) -> bool:
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass  # The daemon runs as root; a user asking can see it exists, no more.
+    return True
+
+
+def read_inbound(directory: Optional[str] = None) -> Dict[str, Any]:
+    """The streams the node is relaying for others, as ``{"streams", "snapshot_at"}``.
+
+    Empty, with ``snapshot_at`` None, when there is no snapshot or it was left by a
+    daemon that is no longer running: those streams died with it.
+    """
+    try:
+        with open(inbound_path(directory)) as handle:
+            document = json.load(handle)
+    except (OSError, ValueError):
+        return {"streams": [], "snapshot_at": None}
+    if not isinstance(document, dict) or not process_exists(document.get("pid")):
+        return {"streams": [], "snapshot_at": None}
+    written_at = document.get("written_at")
+    streams = [stream for stream in document.get("streams") or [] if isinstance(stream, dict)]
+    now = time.time()
+    if streams and (not isinstance(written_at, (int, float)) or now - written_at > INBOUND_STALE_S):
+        return {"streams": [], "snapshot_at": None}
+    for stream in streams:
+        started = stream.get("started_at")
+        stream["age_secs"] = int(now - started) if isinstance(started, (int, float)) else None
+    streams.sort(key=lambda stream: (stream.get("started_at") or 0, str(stream.get("id"))))
+    return {"streams": streams, "snapshot_at": written_at}
