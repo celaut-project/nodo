@@ -235,7 +235,7 @@ These are the most commonly used commands for daily tasks:
   part of the delegated instance, not `nodo tunnel` processes, and are not listed by
   `nodo tunnels`.
 
-- **tunnels `[<tunnel id>] [--json]`**  
+- **tunnels `[<tunnel id> | --instance <instance>] [--json]`**  
   Lists the tunnels running on this host — every `nodo tunnel`, detached or in a
   terminal — with where each listens, the slot it reaches, the instance, through
   which node, its pid and age. A tunnel id (or an unambiguous prefix of one) shows
@@ -243,11 +243,17 @@ These are the most commonly used commands for daily tasks:
   without cleaning up (killed with `-9`, a reboot) are swept, not listed. Only the
   client ends this host opened are here: the node keeps no record of the
   `ServiceTunnel` streams it relays for others.
-  JSON: `{"tunnels": [tunnel, …]}` / `{"tunnel": {…, "log_tail": ["…"]}}`, with
-  `tunnel` as above. An unknown or ambiguous id is `{"error": …}`, exit `1`.  
+  `--instance <instance>` lists only the tunnels that reach that instance (by id or
+  name, through this node) — the instance → tunnels table the TUI shows under the
+  INSTANCES card. `nodo instances --json` also carries each local instance's tunnel
+  ids in `tunnels`.
+  JSON: `{"tunnels": [tunnel, …]}` / `{"tunnel": {…, "log_tail": ["…"]}}` /
+  `{"instance": "web", "tunnels": [tunnel, …]}`, with `tunnel` as above. An unknown
+  or ambiguous id is `{"error": …}`, exit `1`.  
   **Examples:**  
   `nodo tunnels`  
-  `nodo tunnels 3f9a --json`
+  `nodo tunnels 3f9a --json`  
+  `nodo tunnels --instance my-instance --json`
 
 - **tunnel_close `<tunnel id>... | --all` `[--json]`**  
   Stops tunnels: SIGTERM, and SIGKILL if one is still running five seconds later.
@@ -799,6 +805,7 @@ nodo config profile --json                 # which posture is this node closest 
 nodo logs -n 100 --json                    # last 100 log lines, then exit
 nodo tunnel <instance> 8080 --detach --json  # reach a slot from here; returns its id
 nodo tunnels --json                        # tunnels running on this host
+nodo tunnels --instance <instance> --json  # the ones reaching one instance
 nodo tunnel_close <tunnel id> --json       # and close one
 ```
 
@@ -969,7 +976,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | INSTANCES: dependency tree | `g` | `nodo instances --grouped`; `parent_id` in `--json` |
 | INSTANCES: kill | `k` | `nodo kill <instance>` |
 | INSTANCES: open a tunnel to the selected instance | `t` | `nodo tunnel <instance> <slot> [--listen <port>] [--udp] --detach [--json]` (new `--detach`) |
-| INSTANCES: tunnels reaching the selected instance (card) | — | `nodo tunnels --json` → `token` (new) |
+| INSTANCES: tunnels of the selected instance (card line + table under it) | — | `nodo tunnels --instance <instance> [--json]` (new); `nodo instances --json` → `tunnels` |
 | TUNNELS: table, card | — | `nodo tunnels [--json]` (new) |
 | TUNNELS: details + log tail | `i` | `nodo tunnels <tunnel id> [--json]` (new) |
 | TUNNELS: open a tunnel to any instance | `n` | `nodo tunnel <instance> <slot> [flags] --detach` (new `--detach`) |
@@ -1060,7 +1067,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `instances [<search>] [--grouped] [--json]` | what is running |
 | `observe <instance> [--save <path>]` | live metrics and network capture (streams; Ctrl+C) |
 | `tunnel <instance> <slot> [...] [--detach] [--json]` | reach an instance's port from here (until stopped; `--detach`: in the background) |
-| `tunnels [<tunnel>] [--json]` | the tunnels running on this host, or one with its log |
+| `tunnels [<tunnel> \| --instance <i>] [--json]` | the tunnels running on this host, one with its log, or those reaching an instance |
 | `tunnel_close <tunnel>... \| --all [--json]` | stop tunnels |
 | `kill <instance>` | stop one instance (root) |
 | `burnall [--yes]` | stop every instance, parents first |
@@ -1127,7 +1134,8 @@ running on this host.
 - On Instances, `t` opens a tunnel to the selected instance: type the slot, plus any of
   `--listen <port>`, `--udp`, `--host`, `--peer`, `--idle`. It runs
   `nodo tunnel <instance> <slot> … --detach` and the status line says where it listens.
-  The card lists the tunnels already reaching that instance.
+  The card counts the tunnels already reaching that instance, and a table under it
+  lists them (listen, slot, id, via, age) — `nodo tunnels --instance <instance>`.
 - On Tunnels, `n` opens a tunnel to any instance (`<instance> <slot> [flags]`), `d`
   closes the selected one after a confirmation (`nodo tunnel_close`), and `i` shows it
   with the tail of its log.

@@ -652,10 +652,21 @@ if __name__ == '__main__':
                 from src.commands.tunnels import list_tunnels
                 args = sys.argv[2:]
                 as_json = "--json" in args and not args.remove("--json")
-                if len(args) > 1:
-                    print("Usage: nodo tunnels [<tunnel id>] [--json]", flush=True)
+                usage = "Usage: nodo tunnels [<tunnel id> | --instance <instance>] [--json]"
+                instance = ""
+                if "--instance" in args:
+                    index = args.index("--instance")
+                    if index + 1 >= len(args):
+                        print(usage, flush=True)
+                        sys.exit(1)
+                    instance = args[index + 1]
+                    args = args[:index] + args[index + 2:]
+                if len(args) > 1 or (instance and args):
+                    print(usage, flush=True)
                     sys.exit(1)
-                ok = list_tunnels(reference=args[0] if args else "", as_json=as_json)
+                ok = list_tunnels(
+                    reference=args[0] if args else "", as_json=as_json, instance=instance,
+                )
                 os._exit(0 if ok else 1)
 
             case "tunnel_close":

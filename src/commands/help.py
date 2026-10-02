@@ -69,7 +69,7 @@ GROUPS: List[Group] = [
             ("instances [<search>]", "list what is running (--grouped, --json)"),
             ("observe <instance>", "watch an instance live (--save <path> records it)"),
             ("tunnel <instance> <slot>", "reach its port from here (--detach, --udp, …)"),
-            ("tunnels [<tunnel>]", "list running tunnels, or inspect one (--json)"),
+            ("tunnels [<tunnel>]", "list or inspect tunnels (--instance <i>, --json)"),
             ("tunnel_close <tunnel>", "stop a tunnel (--all: every one)"),
             ("kill <instance>", "stop one instance"),
             ("burnall", "stop every instance, parents first (--yes)"),

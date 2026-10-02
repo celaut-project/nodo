@@ -227,6 +227,24 @@ def close(record: Dict[str, Any], directory: Optional[str] = None, grace_s: floa
     return True
 
 
+def reaches(record: Dict[str, Any], references) -> bool:
+    """Whether ``record`` is a tunnel through this node to an instance ``references``
+    names (its id, its name, or whatever the operator typed when opening it).
+
+    A ``--peer`` tunnel reaches an instance of another node, which shares nothing
+    with the instances here but the shape of its token.
+    """
+    if record.get("peer"):
+        return False
+    references = {reference for reference in references if reference}
+    return record.get("token") in references or record.get("instance") in references
+
+
+def for_instance(references, directory: Optional[str] = None) -> List[Dict[str, Any]]:
+    """The running tunnels that reach the instance ``references`` names."""
+    return [record for record in list_tunnels(directory) if reaches(record, references)]
+
+
 def log_tail(record: Dict[str, Any], lines: int = 20) -> List[str]:
     path = record.get("log")
     if not path:
