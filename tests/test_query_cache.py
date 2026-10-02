@@ -1,8 +1,8 @@
 """The query cache that replaces the recursion guard on the two query RPCs (issue #456).
 
-- ``QueryCache`` on its own: unknown -> compute, in progress -> refuse, done -> serve
-  until the TTL; an error is never remembered; the size is bounded; one question is
-  computed once under concurrency.
+- ``QueryCache`` on its own: unknown -> compute, in progress -> wait for it (or refuse a
+  loop, or past the wait), done -> serve until the TTL or an invalidation; an error is
+  never remembered; the size is bounded; one question is computed once under concurrency.
 - ``canonical_key``: field order, unknown fields and the order of metadata hashes cannot
   vary the key, while anything that changes the answer does.
 - A chain of nodes, one cache per simulated node: A -> B -> A is refused at A.
@@ -12,6 +12,7 @@
 """
 import contextlib
 import threading
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -79,7 +80,7 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(self.cache.get_or_compute("k", 30, compute), "answer")
         compute.assert_called_once()
 
-    def test_a_question_in_progress_is_refused_not_answered_or_awaited(self):
+    def test_a_question_back_at_the_thread_computing_it_is_refused_at_once(self):
         def compute():
             with self.assertRaises(QueryInProgress):
                 self.cache.get_or_compute("k", 30, lambda: "never")
@@ -149,12 +150,87 @@ class CacheTests(unittest.TestCase):
         others = [threading.Thread(target=ask) for _ in range(7)]
         for t in others:
             t.start()
-        for t in others:
-            t.join(5)
+        time.sleep(0.05)  # let them reach the wait
         gate.set()
-        first.join(5)
+        for t in [first] + others:
+            t.join(5)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(sorted(outcomes), ["answer"] + ["retry"] * 7)
+        self.assertEqual(outcomes, ["answer"] * 8)
+
+    def test_a_waiter_computes_it_when_the_first_attempt_fails(self):
+        started, gate = threading.Event(), threading.Event()
+        outcomes = []
+
+        def failing():
+            started.set()
+            gate.wait(5)
+            raise RuntimeError("down")
+
+        def first():
+            with contextlib.suppress(RuntimeError):
+                self.cache.get_or_compute("k", 30, failing)
+
+        t = threading.Thread(target=first)
+        t.start()
+        self.assertTrue(started.wait(5))
+        second = threading.Thread(
+            target=lambda: outcomes.append(self.cache.get_or_compute("k", 30, lambda: "answer"))
+        )
+        second.start()
+        time.sleep(0.05)
+        gate.set()
+        t.join(5)
+        second.join(5)
+        self.assertEqual(outcomes, ["answer"])
+
+    def test_a_waiter_is_refused_once_its_wait_runs_out(self):
+        started, gate = threading.Event(), threading.Event()
+
+        def slow():
+            started.set()
+            gate.wait(5)
+            return "late"
+
+        t = threading.Thread(target=lambda: self.cache.get_or_compute("k", 30, slow))
+        t.start()
+        self.addCleanup(t.join, 5)
+        self.addCleanup(gate.set)
+        self.assertTrue(started.wait(5))
+        with patch.object(qc, "wait_seconds", return_value=0.05):
+            with self.assertRaises(QueryInProgress):
+                self.cache.get_or_compute("k", 30, lambda: "never")
+
+    def test_invalidate_forgets_one_rpc_only(self):
+        avail = canonical_key("GetResourceAvailability", "q")
+        quote = canonical_key("GetServiceEstimatedCost", "q")
+        self.cache.get_or_compute(avail, 30, lambda: "room")
+        self.cache.get_or_compute(quote, 30, lambda: "price")
+        self.cache.invalidate("GetResourceAvailability")
+        self.assertEqual(self.cache.begin(avail)[0], MISS)
+        self.assertEqual(self.cache.begin(quote), (HIT, "price"))
+
+    def test_an_answer_computed_across_an_invalidation_is_not_remembered(self):
+        key = canonical_key("GetResourceAvailability", "q")
+
+        def compute():
+            self.cache.invalidate("GetResourceAvailability")  # an instance started meanwhile
+            return "old room"
+
+        self.assertEqual(self.cache.get_or_compute(key, 30, compute), "old room")
+        self.assertEqual(self.cache.begin(key)[0], MISS)
+
+    def test_eviction_reads_its_limit_outside_the_lock(self):
+        held = []
+
+        def limit():
+            held.append(self.cache._lock.locked())
+            return 4096
+
+        with patch.object(qc, "max_entries", side_effect=limit):
+            self.cache.get_or_compute("k", 30, lambda: 1)
+            self.cache.remember("p", 1, 30)
+        self.assertTrue(held)
+        self.assertNotIn(True, held)
 
     def test_asking_does_not_refuse_a_concurrent_identical_question(self):
         # `recall` and `remember` are what a node asking a peer uses: it never claims a key.
@@ -290,6 +366,7 @@ class EstimatedCostRpcTests(unittest.TestCase):
         self.cache = self._node.__enter__()
         self.addCleanup(self._node.__exit__, None, None, None)
         self.window_open = True
+        self.room = True
 
     def _quote(self, hash_order=("a", "b"), initial_mu=None, token=None):
         it = cost_mod.GetServiceEstimatedCostIterable.__new__(cost_mod.GetServiceEstimatedCostIterable)
@@ -304,6 +381,7 @@ class EstimatedCostRpcTests(unittest.TestCase):
                 patch.object(cost_mod, "enforce_network_policy"), \
                 patch.object(cost_mod, "default_initial_balance", return_value=1), \
                 patch.object(cost_mod, "generate_estimated_cost", side_effect=lambda **_: celaut.EstimatedCost()) as quote, \
+                patch.object(cost_mod, "get_resource_availability", side_effect=lambda **_: {"can_execute": self.room}), \
                 patch.object(cost_mod.BeeClient, "respond", side_effect=lambda message_iterator, indices: iter([message_iterator])), \
                 patch.object(cost_mod.activity_window, "is_open", side_effect=lambda: self.window_open), \
                 patch.object(cost_mod, "to_amount", side_effect=lambda v: celaut.Amount()):
@@ -344,7 +422,19 @@ class EstimatedCostRpcTests(unittest.TestCase):
             self.assertNotIn("tok-1", Registry().tokens)
         self.assertEqual(calls, 1)
 
-    def test_a_quote_asked_while_it_is_computed_is_refused(self):
+    def test_room_is_checked_on_every_answer_not_remembered(self):
+        self.assertIsInstance(self._quote()[0], celaut.EstimatedCost)
+        self.room = False
+        self.assertIsNone(self._quote()[0])  # full now: no offer, whatever was remembered
+        self.room = True
+        self.assertIsInstance(self._quote()[0], celaut.EstimatedCost)  # room again: offered
+        self._quote_mock.assert_not_called()  # the price itself came from memory
+
+    def test_the_price_is_computed_whatever_the_load(self):
+        self._quote()
+        self.assertIs(self._quote_mock.call_args.kwargs["check_availability"], False)
+
+    def test_a_quote_asked_again_by_the_thread_computing_it_is_refused(self):
         refused = []
         it = cost_mod.GetServiceEstimatedCostIterable.__new__(cost_mod.GetServiceEstimatedCostIterable)
         it.configuration, it.service_hash, it.metadata = celaut.Configuration(), "abc123", celaut.Metadata()
@@ -363,6 +453,7 @@ class EstimatedCostRpcTests(unittest.TestCase):
                 patch.object(cost_mod, "enforce_network_policy"), \
                 patch.object(cost_mod, "default_initial_balance", return_value=1), \
                 patch.object(cost_mod, "to_amount", side_effect=lambda v: celaut.Amount()), \
+                patch.object(cost_mod, "get_resource_availability", return_value={"can_execute": True}), \
                 patch.object(cost_mod.BeeClient, "respond", side_effect=lambda message_iterator, indices: iter([message_iterator])), \
                 patch.object(cost_mod.activity_window, "is_open", return_value=True):
             list(it.generate())
@@ -486,6 +577,76 @@ class AskingSideTests(unittest.TestCase):
             second = estimate()
         self.assertEqual(len(asked), 1)
         self.assertEqual(second.cost.n, "7")
+
+    def test_a_peers_quote_is_reused_for_less_than_a_local_one(self):
+        asked = []
+        clock = _Clock()
+
+        def _cost(channel, message_iterator, timeout=None):
+            asked.append(1)
+            return celaut.EstimatedCost()
+
+        with patch.object(balancer_mod, "peer_channel"), \
+                patch.object(balancer_mod, "get_client_id_on_other_peer", return_value="c"), \
+                patch.object(balancer_mod, "matching_payment_system", return_value=object()), \
+                patch.object(balancer_mod, "configuration_for_peer", side_effect=lambda c, **_: c), \
+                patch.object(balancer_mod, "estimated_cost_for_local", side_effect=lambda e, **_: e), \
+                patch.object(balancer_mod.BeeClient, "get_service_estimated_cost", side_effect=_cost), \
+                patch.object(qc.time, "monotonic", clock):
+            for _ in range(2):
+                balancer_mod.estimate_cost_on_peer(
+                    peer_id="peer-a",
+                    resources=celaut.Service.Container.Resources(),
+                    metadata=celaut.Metadata(),
+                    configuration=celaut.Configuration(),
+                )
+                clock.now += qc.peer_quote_ttl() + 1
+        self.assertLess(qc.peer_quote_ttl(), qc.quote_ttl())
+        self.assertEqual(len(asked), 2)
+
+
+@unittest.skipIf(
+    IMPORT_ERROR is not None or RUNTIME_IMPORT_ERROR is not None,
+    f"Missing runtime dependencies: {IMPORT_ERROR or RUNTIME_IMPORT_ERROR}",
+)
+class LocalCapacityTests(unittest.TestCase):
+    """Starting, stopping or resizing a local instance forgets the availability answers."""
+
+    def setUp(self):
+        self._node = _node()
+        self.cache = self._node.__enter__()
+        self.addCleanup(self._node.__exit__, None, None, None)
+        from src.database.sql_connection import SQLConnection
+        self.db = SQLConnection.__new__(SQLConnection)
+        self.db._execute = MagicMock()
+        self.avail = canonical_key("GetResourceAvailability", "q")
+        self.quote = canonical_key("GetServiceEstimatedCost", "q")
+
+    def _remembered(self):
+        self.cache.get_or_compute(self.avail, 30, lambda: "room")
+        self.cache.get_or_compute(self.quote, 30, lambda: "price")
+
+    def _assert_forgotten(self):
+        self.assertEqual(self.cache.recall(self.avail)[0], MISS)
+        self.assertEqual(self.cache.recall(self.quote), (HIT, "price"))
+
+    def test_a_start(self):
+        self._remembered()
+        self.db.add_local_instance(
+            father_id="f", container_ip="ip", container_id="id", name="n", balance_mu=0,
+            serialized_instance="", service_id="s", virtualizer="v", disk_space=0, envs="",
+        )
+        self._assert_forgotten()
+
+    def test_a_stop(self):
+        self._remembered()
+        self.db.purge_internal("id")
+        self._assert_forgotten()
+
+    def test_a_resize(self):
+        self._remembered()
+        self.assertTrue(self.db.update_sys_req("id", mem_limit=1))
+        self._assert_forgotten()
 
 
 if __name__ == "__main__":

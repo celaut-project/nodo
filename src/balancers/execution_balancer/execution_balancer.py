@@ -13,7 +13,7 @@ from src.utils.arch_guard import arch_from_tags
 from src.utils.cost_functions.architecture_resources import ask_of, should_skip_peer
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.identity.grpc_transport import peer_channel
-from src.utils.tools.query_cache import HIT, QueryCache, canonical_key, quote_ttl, with_sorted_hashes
+from src.utils.tools.query_cache import HIT, QueryCache, canonical_key, peer_quote_ttl, with_sorted_hashes
 from src.utils.tools.recursion_guard import Registry
 from src.utils.utils import service_extended, peers_id_iterator
 from src.utils.config import ConfigManager
@@ -96,7 +96,7 @@ def estimate_cost_on_peer(
     the balancer and the caller with one comparable/accountable scale.
 
     A quote already obtained for this very question is reused for
-    `network.QUERY_CACHE_TTL_SECONDS` (#456), so launches that price the same service
+    `network.QUERY_CACHE_PEER_TTL_SECONDS` (#456), so launches that price the same service
     do not ask the same peer again. The question carries no recursion token: the peer
     answers from its own machine and never passes it on, and what it remembers is keyed
     by content (`src/utils/tools/query_cache.py`).
@@ -106,7 +106,8 @@ def estimate_cost_on_peer(
         peer_configuration = configuration_for_peer(
             configuration, payment_system=payment_system
         )
-        ttl = quote_ttl()
+        # Shorter than the peer's own quote TTL: it may have served this from its cache.
+        ttl = peer_quote_ttl()
         key = canonical_key(
             "peer-quote", peer_id, peer_configuration, with_sorted_hashes(metadata)
         ) if ttl > 0 else None
