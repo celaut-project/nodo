@@ -311,6 +311,20 @@ def serve():
     except Exception as e:
         log.LOGGER(f'Could not restore delegated tunnel endpoints: {e}')
 
+    # Detached `nodo tunnel`s that were running before the restart come back, on the
+    # ports their clients were given. In the background: each waits for its child to
+    # bind, and the gateway must not wait for that.
+    def _restore_detached_tunnels():
+        try:
+            from src.commands.tunnel import restore_detached
+            restore_detached()
+        except Exception as e:
+            log.LOGGER(f'Could not restore detached tunnels: {e}')
+
+    threading.Thread(
+        target=_restore_detached_tunnels, name='restore-detached-tunnels', daemon=True,
+    ).start()
+
     # The inbound-tunnel snapshot on disk is the last daemon's; none of its streams
     # survived it.
     try:

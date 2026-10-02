@@ -253,6 +253,15 @@ on every open and close and every 2 s while one is open. They are listed, not
 closed: the daemon has no control path for that, and the instance's balance and
 `host_limits` are what end them.
 
+A tunnel started with `--detach` comes back after a reboot or a daemon restart: its
+spec (`<id>.spec` beside its record — instance, slot, flags, pinned to the port it
+got) is kept, and the daemon re-runs the same detach path on start, under the same
+id and port, the way delegated endpoints are restored. Closing it on purpose
+(`nodo tunnel_close`, the TUI's `d`, `nodo kill` of its instance) removes the spec. A
+tunnel whose instance no longer exists is dropped with a log line; one that fails to
+start (its port taken, say) is retried on the next start, and dropped after three
+failures in a row.
+
 `nodo kill <instance>` closes the tunnels this host opened to that instance as well:
 with the instance gone they would only hold their ports and fail every connection.
 
@@ -397,7 +406,9 @@ they existed:
   `nodo tunnel` process leaves `<main.STORAGE>/tunnels/<id>.json` for as long as it
   runs (`src/utils/tunnel_registry.py`), so `nodo tunnels` can list the client ends
   this host opened, and the relaying node lists the streams it carries in memory
-  (`nodo tunnels --inbound`). Nothing is restored after a restart.
+  (`nodo tunnels --inbound`). Detached client tunnels are reopened after a restart
+  from a spec kept beside their record; the relayed streams are not (they end with
+  the daemon that carried them).
 * **A reachability check from outside.** The router guide (`nodo nat-guide`)
   exists, but nothing confirms from *outside* that the gateway port is really
   forwarded: a connection from inside the node's own network succeeds either way.

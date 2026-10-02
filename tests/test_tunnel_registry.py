@@ -444,6 +444,102 @@ _FAKE_NODO = textwrap.dedent("""
 """)
 
 
+class PersistenceTests(RegistryTestCase):
+    """Detached tunnels come back after a restart until closed on purpose."""
+
+    def setUp(self):
+        super().setUp()
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.fake = os.path.join(self.directory, "fake_nodo.py")
+        with open(self.fake, "w") as handle:
+            handle.write(_FAKE_NODO.format(root=root))
+        self.logged = []
+
+    def tearDown(self):
+        for record in registry.list_tunnels():
+            registry.close(record)
+        super().tearDown()
+
+    def _restore(self, exists=lambda reference: True):
+        return registry.restore(self.fake, exists, log=self.logged.append, timeout_s=20)
+
+    def _spec(self, tunnel_id, argv=("my-instance", "8080"), **overrides):
+        record = _record(tunnel_id, 1, listen_port=41000)
+        registry.save_spec(record, list(argv))
+        if overrides:
+            with open(registry.spec_path(tunnel_id)) as handle:
+                spec = json.load(handle)
+            spec.update(overrides)
+            with open(registry.spec_path(tunnel_id), "w") as handle:
+                json.dump(spec, handle)
+
+    def test_the_spec_is_pinned_to_the_port_the_tunnel_got(self):
+        self._spec("pin00001")
+        (spec,) = registry.list_specs()
+        self.assertEqual(spec["argv"], ["my-instance", "8080", "--listen", "41000"])
+        self._spec("pin00002", argv=("x", "53", "--listen", "5353"))
+        self.assertEqual(registry.list_specs()[1]["argv"], ["x", "53", "--listen", "5353"])
+
+    def test_the_spec_is_neither_a_tunnel_nor_a_tunnel_id(self):
+        self._spec("pin00003")
+        self.assertEqual(registry.list_tunnels(), [])
+        self.assertEqual(completion.candidates("tunnels", {"storage": None}), [])
+
+    def test_a_tunnel_gone_with_the_restart_is_reopened_under_its_id(self):
+        self._spec("back0001")
+
+        self.assertEqual(self._restore(), 1)
+
+        (record,) = registry.list_tunnels()
+        self.assertEqual(record["id"], "back0001")
+        self.assertTrue(record["detached"])
+        self.assertTrue(record["persistent"])
+        self.assertIn("Reopened tunnel back0001", self.logged[0])
+
+    def test_one_still_running_is_left_alone(self):
+        process = self.spawn()
+        registry.register(_record("live0002", process.pid))
+        self._spec("live0002")
+        self.assertEqual(self._restore(), 0)
+        self.assertEqual([r["pid"] for r in registry.list_tunnels()], [process.pid])
+
+    def test_one_whose_instance_is_gone_is_dropped_with_a_log_line(self):
+        self._spec("gone0001")
+        self.assertEqual(self._restore(exists=lambda reference: False), 0)
+        self.assertEqual(registry.list_specs(), [])
+        self.assertIn("no longer exists", self.logged[0])
+
+    def test_a_peer_tunnel_is_not_checked_against_local_instances(self):
+        self._spec("peer0001", peer="10.0.0.2:8090")
+        self.assertEqual(self._restore(exists=lambda reference: False), 1)
+
+    def test_one_that_fails_is_retried_then_dropped(self):
+        self._spec("fail0001", argv=("fail", "8080"))
+        for attempt in range(1, registry.RESTORE_ATTEMPTS):
+            self.assertEqual(self._restore(), 0)
+            (spec,) = registry.list_specs()
+            self.assertEqual(spec["failures"], attempt)
+            self.assertIn("will retry", self.logged[-1])
+        self._restore()
+        self.assertEqual(registry.list_specs(), [])
+        self.assertIn("Dropped tunnel fail0001", self.logged[-1])
+        self.assertIn("cannot bind", self.logged[-1])
+
+    def test_closing_on_purpose_forgets_it(self):
+        self._spec("shut0002")
+        self._restore()
+        self.assertTrue(registry.close(registry.find("shut0002")[0]))
+        self.assertEqual(registry.list_specs(), [])
+        self.assertEqual(self._restore(), 0, "not reopened again")
+
+    def test_tunnel_close_and_kill_go_through_the_same_close(self):
+        self._spec("shut0003")
+        self._restore()
+        ok, document = _run_json(tunnels_command.close_tunnels, ["shut0003"])
+        self.assertTrue(ok)
+        self.assertEqual(registry.list_specs(), [])
+
+
 @unittest.skipIf(tunnel_command is None, f"Missing runtime dependencies: {TUNNEL_IMPORT_ERROR}")
 class DetachTests(RegistryTestCase):
     def setUp(self):
@@ -470,6 +566,10 @@ class DetachTests(RegistryTestCase):
         self.assertTrue(record["detached"])
         self.assertEqual([r["id"] for r in registry.list_tunnels()], [record["id"]])
         self.assertTrue(registry.pid_alive(record["pid"]))
+        # Kept, pinned to its port, for the daemon to reopen after a restart.
+        self.assertTrue(record["persistent"])
+        (spec,) = registry.list_specs()
+        self.assertEqual(spec["argv"], ["my-instance", "8080", "--listen", "40000"])
 
     def test_detach_reports_why_the_tunnel_could_not_start(self):
         ok, document = _run_json(tunnel_command.detach, ["fail", "8080"], timeout_s=20)
@@ -477,6 +577,7 @@ class DetachTests(RegistryTestCase):
         self.assertFalse(ok)
         self.assertIn("cannot bind", document["error"])
         self.assertEqual(os.listdir(self.directory), ["fake_nodo.py"], "no files left behind")
+        self.assertEqual(registry.list_specs(), [], "nothing to reopen")
 
 
 if __name__ == "__main__":
