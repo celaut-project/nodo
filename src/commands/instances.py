@@ -25,6 +25,13 @@ DATABASE_FILE = env_manager.get("DATABASE_FILE")
 METADATA = env_manager.get("METADATA_REGISTRY")
 DEFAULT_VIRTUALIZER = env_manager.get("virtualizers.DEFAULT_VIRTUALIZER", "ch")
 
+def _int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _direct_purge_local_instance(instance_id: str) -> None:
     conn = sqlite3.connect(DATABASE_FILE)
     try:
@@ -107,7 +114,52 @@ def _prune_stale_instances() -> None:
                 pass
             _direct_purge_local_instance(instance_id)
 
-def list_instances(groupable: bool = False, search: str = ""):
+def _live_usage(instance_id: str) -> dict:
+    """Cumulative counters the TUI turns into CPU% and network rates.
+
+    Read from the same places `nodo tui` and `nodo observe` read: the instance's
+    cgroup (`cpu.stat`, `memory.current`) and its tap interface's byte counters.
+    Cumulative rather than rates, because a rate needs two readings and this is
+    one: a caller wanting CPU% reads twice and divides the `cpu_usage_usec`
+    delta by the elapsed microseconds. A figure that cannot be read is None,
+    never 0 -- an idle instance and one we cannot see into are different claims.
+    """
+    usage = {"cpu_usage_usec": None, "memory_current_bytes": None,
+             "net_rx_bytes": None, "net_tx_bytes": None}
+    base = env_manager.get("virtualizers.ch.CGROUPS_BASE_DIR", "/sys/fs/cgroup")
+    cgroup = os.path.join(str(base), "nodo-ch", instance_id)
+    try:
+        with open(os.path.join(cgroup, "cpu.stat")) as f:
+            for line in f:
+                key, _, value = line.partition(" ")
+                if key == "usage_usec":
+                    usage["cpu_usage_usec"] = int(value)
+    except (OSError, ValueError):
+        pass
+    try:
+        with open(os.path.join(cgroup, "memory.current")) as f:
+            usage["memory_current_bytes"] = int(f.read().strip())
+    except (OSError, ValueError):
+        pass
+    try:
+        from src.commands.observe import tap_ifname_for_instance
+
+        tap = tap_ifname_for_instance(instance_id)
+        for counter, key in (("rx_bytes", "net_rx_bytes"), ("tx_bytes", "net_tx_bytes")):
+            with open(f"/sys/class/net/{tap}/statistics/{counter}") as f:
+                usage[key] = int(f.read().strip())
+    except (OSError, ValueError, ImportError):
+        pass
+    return usage
+
+
+def list_instances(groupable: bool = False, search: str = "", as_json: bool = False):
+    """``nodo instances [<search>] [--grouped] [--json]``.
+
+    ``--json`` prints one object, ``{"instances": [...]}``, each record carrying the
+    raw values (``balance_mu``, byte counts, URIs, live usage counters) beside the
+    display strings the printed form uses. Returns whether the listing was read.
+    """
     _prune_stale_instances()
 
     conn = sqlite3.connect(DATABASE_FILE)
@@ -131,6 +183,17 @@ def list_instances(groupable: bool = False, search: str = ""):
                 return s.strip() if s else "N/A"
             except Exception:
                 return "Error Parsing Instance"
+
+        def get_uris(serialized_instance: bytes) -> list:
+            try:
+                instance = celaut.Instance()
+                instance.ParseFromString(serialized_instance)
+                return [
+                    {"ip": _uri.ip, "port": _uri.port, "internal_port": _exp.internal_port}
+                    for _exp in instance.uri_slot for _uri in _exp.uri
+                ]
+            except Exception:
+                return []
 
         def get_tag(service_id: str) -> str:
             if not service_id: return "Unknown Service ID"
@@ -239,6 +302,16 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'vm_mem_rss': vm_mem_rss,
                     'vm_mem_limit_cgroup': vm_mem_limit_cgroup,
                     'vm_mem_current_cgroup': vm_mem_current_cgroup,
+                    **({
+                        'service_id': service,
+                        'balance_mu': _int_or_none(balance_mu),
+                        'mem_limit_bytes': mem_limit,
+                        'disk_space_bytes': disk_space,
+                        'uris': get_uris(si) if si else [],
+                        'runtime': get_vm_runtime_snapshot(vmachine_id=id_)
+                        if _has_runtime_snapshot(runtime_virtualizer) and id_ else None,
+                        'usage': _live_usage(id_) if id_ else None,
+                    } if as_json else {}),
                 })
 
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='delegated_instances';")
@@ -277,11 +350,24 @@ def list_instances(groupable: bool = False, search: str = ""):
                     'vm_mem_rss': 'N/A',
                     'vm_mem_limit_cgroup': 'N/A',
                     'vm_mem_current_cgroup': 'N/A',
+                    **({
+                        'service_id': service,
+                        'balance_mu': _int_or_none(balance_mu),
+                        'uris': get_uris(si) if si else [],
+                    } if as_json else {}),
                 })
 
     except sqlite3.Error as e:
+        if as_json:
+            from src.commands._catalogue import emit_error
+            conn.close()
+            return emit_error(True, f"An error occurred while retrieving instances: {e}")
         print(f"An error occurred while retrieving instances: {e}")
     except Exception as e:
+        if as_json:
+            from src.commands._catalogue import emit_error
+            conn.close()
+            return emit_error(True, f"An unexpected error occurred: {e}")
         print(f"An unexpected error occurred: {e}")
     finally:
         conn.close()
@@ -295,12 +381,17 @@ def list_instances(groupable: bool = False, search: str = ""):
                 filtered_instances.append(inst)
         instances = filtered_instances
 
+    if as_json:
+        from src.commands._catalogue import emit_json
+        emit_json({"instances": instances})
+        return True
+
     if not instances:
         if search:
             print(f"No service instances found matching '{search}'.")
         else:
             print("No service instances found.")
-        return
+        return True
 
     def format_instance(inst, prefix="", include_runtime=False):
         color = '\033[37m' if inst.get('location', 'local') != 'local' else ''
@@ -391,3 +482,4 @@ def list_instances(groupable: bool = False, search: str = ""):
             format_instance(inst, include_runtime=False)
             if i < len(instances) - 1:
                 print("-" * 40 + "\n")
+    return True

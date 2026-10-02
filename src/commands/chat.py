@@ -39,11 +39,19 @@ def send_chat(peer_id: str, body: str, service: str = None) -> bool:
     return True
 
 
-def show_chat(peer_id: str, limit: int = 100) -> bool:
+def _emit(document: dict) -> bool:
+    from src.commands._catalogue import emit_json
+    emit_json(document)
+    return True
+
+
+def show_chat(peer_id: str, limit: int = 100, as_json: bool = False) -> bool:
     """Print the stored conversation with ``peer_id``, oldest first."""
     from src.manager.chat import get_chat_history
 
     history = get_chat_history(peer_id=peer_id, limit=limit)
+    if as_json:
+        return _emit({"peer_id": peer_id, "messages": history})
     if not history:
         print(f"No stored messages with {peer_id}.", flush=True)
         return True
@@ -55,7 +63,8 @@ def show_chat(peer_id: str, limit: int = 100) -> bool:
     return True
 
 
-def open_thread(peer_id: str, topic: str, body: str = None, service: str = None) -> bool:
+def open_thread(peer_id: str, topic: str, body: str = None, service: str = None,
+                as_json: bool = False) -> bool:
     """Open a new conversation with ``peer_id``, sending ``body`` as its first message.
 
     ``body`` defaults to ``topic`` itself when not given, which is the whole of
@@ -87,6 +96,8 @@ def open_thread(peer_id: str, topic: str, body: str = None, service: str = None)
         close_conversation(conversation_id)
         print(f"Could not reach peer {peer_id}: {e}", flush=True)
         return False
+    if as_json:
+        return _emit({"conversation_id": conversation_id, "peer_id": peer_id, "topic": topic})
     print(f"Opened {conversation_id} with {peer_id}.", flush=True)
     return True
 
@@ -107,11 +118,13 @@ def reply_in_thread(conversation_id: str, body: str, service: str = None) -> boo
     return True
 
 
-def list_threads(peer_id: str = None) -> bool:
+def list_threads(peer_id: str = None, as_json: bool = False) -> bool:
     """Print every conversation (open and closed) this node knows, newest first."""
     from src.manager.chat import list_conversations
 
     conversations = list_conversations(peer_id=peer_id)
+    if as_json:
+        return _emit({"conversations": conversations})
     if not conversations:
         print("No conversations." if peer_id is None else f"No conversations with {peer_id}.", flush=True)
         return True
@@ -127,11 +140,13 @@ def list_threads(peer_id: str = None) -> bool:
     return True
 
 
-def show_thread(conversation_id: str, limit: int = 200) -> bool:
+def show_thread(conversation_id: str, limit: int = 200, as_json: bool = False) -> bool:
     """Print one conversation's messages, oldest first."""
     from src.manager.chat import get_conversation_history
 
     history = get_conversation_history(conversation_id=conversation_id, limit=limit)
+    if as_json:
+        return _emit({"conversation_id": conversation_id, "messages": history})
     if not history:
         print(f"No stored messages in {conversation_id}.", flush=True)
         return True
