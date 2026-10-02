@@ -586,15 +586,17 @@ if __name__ == '__main__':
                 observe(instance_id=instance_id, save_path=save_path)
 
             case "tunnel":
-                from src.commands.tunnel import tunnel
+                from src.commands.tunnel import detach, tunnel
 
                 args = sys.argv[2:]
                 usage = (
                     "Usage: nodo tunnel <instance id> <slot> [--udp] "
                     "[--listen <port>] [--host <addr>] [--peer <host:port>] "
-                    "[--idle <seconds>]"
+                    "[--idle <seconds>] [--detach] [--json]"
                 )
 
+                as_json = "--json" in args and not args.remove("--json")
+                detached = "--detach" in args and not args.remove("--detach")
                 udp = "--udp" in args
                 if udp:
                     args.remove("--udp")
@@ -626,6 +628,12 @@ if __name__ == '__main__':
                     )
                     sys.exit(1)
 
+                if detached:
+                    # The same arguments, minus --detach/--json, for the background
+                    # process; it registers itself and this one reports it.
+                    child_args = [a for a in sys.argv[2:] if a not in ("--detach", "--json")]
+                    os._exit(0 if detach(child_args, as_json=as_json) else 1)
+
                 tunnel_kwargs = {
                     "instance": args[0],
                     "slot": slot,
@@ -633,11 +641,30 @@ if __name__ == '__main__':
                     "listen_host": valued_flags["--host"] or "127.0.0.1",
                     "peer": valued_flags["--peer"],
                     "udp": udp,
+                    "as_json": as_json,
                 }
                 if idle_timeout is not None:
                     tunnel_kwargs["idle_timeout"] = idle_timeout
 
-                tunnel(**tunnel_kwargs)
+                os._exit(0 if tunnel(**tunnel_kwargs) else 1)
+
+            case "tunnels":
+                from src.commands.tunnels import list_tunnels
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                if len(args) > 1:
+                    print("Usage: nodo tunnels [<tunnel id>] [--json]", flush=True)
+                    sys.exit(1)
+                ok = list_tunnels(reference=args[0] if args else "", as_json=as_json)
+                os._exit(0 if ok else 1)
+
+            case "tunnel_close":
+                from src.commands.tunnels import close_tunnels
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                close_all = "--all" in args and not args.remove("--all")
+                ok = close_tunnels(args, close_all=close_all, as_json=as_json)
+                os._exit(0 if ok else 1)
 
             case "increase_deposit":
                 from src.commands.modify_deposit import modify_instance_deposit
