@@ -244,6 +244,9 @@ nodo tunnels --instance my-instance                   # the ones reaching it
 nodo tunnel_close 3f9a0c12                            # stop it (or --all)
 ```
 
+`nodo kill <instance>` closes the tunnels this host opened to that instance as well:
+with the instance gone they would only hold their ports and fail every connection.
+
 With TCP each accepted connection gets its own stream, so concurrent clients
 work. UDP has no connections, so traffic is keyed by source address: the first
 datagram from an `ip:port` opens a stream, later ones reuse it, and the flow is

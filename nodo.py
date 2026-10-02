@@ -550,8 +550,13 @@ if __name__ == '__main__':
                     os.system(f"/bin/bash {MAIN_DIR}/install.sh")
 
             case "kill":
+                args = sys.argv[2:]
+                as_json = "--json" in args and not args.remove("--json")
+                if len(args) != 1:
+                    print("Usage: nodo kill <instance id> [--json]", flush=True)
+                    os._exit(1)
                 from src.commands.kill import kill
-                kill(instance=sys.argv[2])
+                os._exit(0 if kill(instance=args[0], as_json=as_json) else 1)
 
             case "burnall":
                 from src.commands.burnall import burnall
