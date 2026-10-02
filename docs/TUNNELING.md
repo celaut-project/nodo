@@ -232,6 +232,17 @@ nodo tunnel abcdef1234567890 8080 --peer 192.168.1.10:4040
 `--udp` selects the *local* socket type; the node picks the node-to-service
 transport from what the slot declares, so the two must match to be useful.
 
+Each `nodo tunnel` registers itself while it runs, so it can be found and stopped
+from elsewhere — another shell, a script, or the TUI's TUNNELS page (and `t` on
+INSTANCES, which opens one):
+
+```bash
+nodo tunnel my-instance 8080 --listen 9000 --detach   # background; prints its id
+nodo tunnels                                          # what is running here
+nodo tunnels 3f9a0c12                                 # one, with its log
+nodo tunnel_close 3f9a0c12                            # stop it (or --all)
+```
+
 With TCP each accepted connection gets its own stream, so concurrent clients
 work. UDP has no connections, so traffic is keyed by source address: the first
 datagram from an `ip:port` opens a stream, later ones reuse it, and the flow is
@@ -369,7 +380,11 @@ they existed:
   per service in a `tunnels` table. That approach was dropped: a tunnel lives
   exactly as long as its stream, and the table is gone. Delegated endpoints do
   survive restarts, but their state rides along in `delegated_instances` rather
-  than in a registry of their own.
+  than in a registry of their own. What *does* exist is narrower: each running
+  `nodo tunnel` process leaves `<main.STORAGE>/tunnels/<id>.json` for as long as it
+  runs (`src/utils/tunnel_registry.py`), so `nodo tunnels` can list the client ends
+  this host opened. Nothing is restored after a restart, and the relaying node still
+  keeps no list of the streams it carries.
 * **A reachability check from outside.** The router guide (`nodo nat-guide`)
   exists, but nothing confirms from *outside* that the gateway port is really
   forwarded: a connection from inside the node's own network succeeds either way.

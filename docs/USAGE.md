@@ -185,7 +185,7 @@ These are the most commonly used commands for daily tasks:
   - Full AF_PACKET capture needs a Linux host with `CAP_NET_RAW`; elsewhere the
     RPC degrades to the conntrack fallback exactly like the CLI.
 
-- **tunnel `<instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>]`**  
+- **tunnel `<instance id> <slot> [--udp] [--listen <port>] [--host <addr>] [--peer <host:port>] [--idle <seconds>] [--detach] [--json]`**  
   Binds a local port and forwards its traffic to `<slot>` of the instance through
   the node's `Gateway.ServiceTunnel` stream, so a service can be reached without
   publishing a port of its own. `<slot>` must be a port the service **declares**
@@ -194,7 +194,25 @@ These are the most commonly used commands for daily tasks:
   `<instance id>` must be the token as **that** node knows it, since only it can
   resolve the token. The listener binds to `127.0.0.1` unless `--host` says
   otherwise, and `--listen` is optional (an ephemeral port is picked and
-  printed). Press `Ctrl-C` to stop.  
+  printed). Press `Ctrl-C` to stop, or close it from anywhere with
+  `nodo tunnel_close <id>`. Exits `1` when the local port cannot be bound.  
+
+  Every tunnel registers itself while it runs (`<main.STORAGE>/tunnels/<id>.json`,
+  removed on exit), which is what `nodo tunnels` and the TUI's TUNNELS page list.
+  `--detach` starts it in the background and returns once the listener is bound,
+  printing its id; its output goes to `<main.STORAGE>/tunnels/<id>.log`. This is
+  the form for scripts, agents and the TUI, none of which can keep a terminal open
+  for the tunnel's lifetime. `--json` prints the tunnel as one object — at once
+  with `--detach`, or as the first line in the foreground (the per-connection log
+  then goes to stderr):
+  ```json
+  {"tunnel": {"id": "3f9a0c12", "pid": 41872, "instance": "my-instance",
+   "token": "abcdef1234567890", "slot": 8080, "transport": "tcp",
+   "listen_host": "127.0.0.1", "listen_port": 40517, "gateway": "127.0.0.1:8090",
+   "peer": null, "detached": true, "log": "/nodo/storage/tunnels/3f9a0c12.log",
+   "started_at": 1790000000, "age_secs": 0}, "read_at": 1790000000}
+  ```
+  A tunnel that could not start is `{"error": "Error: cannot bind …"}` with exit `1`.  
 
   `--udp` makes the local socket a datagram socket, for slots that declare UDP;
   the node picks the node-to-service transport from the slot's own declaration,
@@ -208,11 +226,38 @@ These are the most commonly used commands for daily tasks:
   `nodo tunnel abcdef1234567890 8080 --listen 9000`  
   `nodo tunnel abcdef1234567890 5353 --udp --listen 5353`  
   `nodo tunnel abcdef1234567890 8080 --peer 192.168.1.10:4040`  
+  `nodo tunnel my-instance 8080 --listen 9000 --detach`  
 
   The node also opens these tunnels for itself: when a service is delegated to a
   peer whose advertised addresses this node cannot reach, it stands in for the
   service locally and hands our client an endpoint of its own. That is controlled
-  by `network.DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`).
+  by `network.DELEGATION_TUNNEL_POLICY` (`auto` / `always` / `never`). Those are
+  part of the delegated instance, not `nodo tunnel` processes, and are not listed by
+  `nodo tunnels`.
+
+- **tunnels `[<tunnel id>] [--json]`**  
+  Lists the tunnels running on this host — every `nodo tunnel`, detached or in a
+  terminal — with where each listens, the slot it reaches, the instance, through
+  which node, its pid and age. A tunnel id (or an unambiguous prefix of one) shows
+  that tunnel with the last lines of its log. Files left by a tunnel that died
+  without cleaning up (killed with `-9`, a reboot) are swept, not listed. Only the
+  client ends this host opened are here: the node keeps no record of the
+  `ServiceTunnel` streams it relays for others.
+  JSON: `{"tunnels": [tunnel, …]}` / `{"tunnel": {…, "log_tail": ["…"]}}`, with
+  `tunnel` as above. An unknown or ambiguous id is `{"error": …}`, exit `1`.  
+  **Examples:**  
+  `nodo tunnels`  
+  `nodo tunnels 3f9a --json`
+
+- **tunnel_close `<tunnel id>... | --all` `[--json]`**  
+  Stops tunnels: SIGTERM, and SIGKILL if one is still running five seconds later.
+  The tunnel closes its listener and removes its own registry file. A tunnel
+  started by another user (root, typically) needs that user. Exits `1` if any
+  named tunnel was not found or could not be stopped.
+  JSON: `{"closed": ["3f9a0c12"], "failed": []}`.  
+  **Examples:**  
+  `nodo tunnel_close 3f9a0c12`  
+  `nodo tunnel_close --all`
 
 - **increase_deposit `<instance id> <amount>`**  
   Adds to a service instance's deposit. The amount is in `ui.DISPLAY_UNIT` (ERG by default).  
@@ -738,7 +783,8 @@ pages, peer reputation adjustment, the detail cards) are commands now too.
 Commands with `--json`: `status`, `services`, `instances`, `peers`, `clients`,
 `peer_reputation`, `config` (all subcommands), `earnings`, `energy`, `schedule`,
 `logs -n`, `docs`, `chat <peer>` (reading), `chat_open`, `chat_threads`,
-`chat_thread`, `reputation`, `donations`, `resources`, `tx_history`.
+`chat_thread`, `reputation`, `donations`, `resources`, `tx_history`, `tunnel`,
+`tunnels`, `tunnel_close`.
 
 ### Agent quick start
 
@@ -751,6 +797,9 @@ nodo config get pricing --json             # read any config subtree
 sudo nodo config set network.DELEGATE_EXECUTION=true --json   # atomic, restarts, rolls back
 nodo config profile --json                 # which posture is this node closest to?
 nodo logs -n 100 --json                    # last 100 log lines, then exit
+nodo tunnel <instance> 8080 --detach --json  # reach a slot from here; returns its id
+nodo tunnels --json                        # tunnels running on this host
+nodo tunnel_close <tunnel id> --json       # and close one
 ```
 
 ### New commands for TUI parity
@@ -919,6 +968,12 @@ nodo logs -n 100 --json                    # last 100 log lines, then exit
 | INSTANCES: table, live CPU/RAM/net | — | `nodo instances --json` (new `--json`, live counters); `nodo observe <id>` (interactive stream) |
 | INSTANCES: dependency tree | `g` | `nodo instances --grouped`; `parent_id` in `--json` |
 | INSTANCES: kill | `k` | `nodo kill <instance>` |
+| INSTANCES: open a tunnel to the selected instance | `t` | `nodo tunnel <instance> <slot> [--listen <port>] [--udp] --detach [--json]` (new `--detach`) |
+| INSTANCES: tunnels reaching the selected instance (card) | — | `nodo tunnels --json` → `token` (new) |
+| TUNNELS: table, card | — | `nodo tunnels [--json]` (new) |
+| TUNNELS: details + log tail | `i` | `nodo tunnels <tunnel id> [--json]` (new) |
+| TUNNELS: open a tunnel to any instance | `n` | `nodo tunnel <instance> <slot> [flags] --detach` (new `--detach`) |
+| TUNNELS: close | `d` | `nodo tunnel_close <tunnel id>` (new) |
 | SERVICES: list | — | `nodo services [--json]` (new `--json`) |
 | SERVICES: reputation card | — | `nodo services <service> [--json]` (new) |
 | SERVICES: details | `i` | `nodo inspect <service>` |
@@ -1004,7 +1059,9 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `execute [--name n] [-e k v] <service>` | run a service |
 | `instances [<search>] [--grouped] [--json]` | what is running |
 | `observe <instance> [--save <path>]` | live metrics and network capture (streams; Ctrl+C) |
-| `tunnel <instance> <slot> [...]` | reach an instance's port from here (runs until stopped) |
+| `tunnel <instance> <slot> [...] [--detach] [--json]` | reach an instance's port from here (until stopped; `--detach`: in the background) |
+| `tunnels [<tunnel>] [--json]` | the tunnels running on this host, or one with its log |
+| `tunnel_close <tunnel>... \| --all [--json]` | stop tunnels |
 | `kill <instance>` | stop one instance (root) |
 | `burnall [--yes]` | stop every instance, parents first |
 | `prune [--all] [--dry-run]` | reclaim orphaned runtime dirs |
@@ -1046,8 +1103,8 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 Run `nodo tui` to open the operations console. Its pages cover node/host statistics, current
 instance resource usage and reservations, local services, peers, clients, what the node has
 earned, complete `config.yaml` editing, logs, storage, Ergo wallet balances, and this
-documentation (the DOCS page). The old tunnels page was removed because nodo does not
-use it.
+documentation (the DOCS page). The TUNNELS page lists the `nodo tunnel` processes
+running on this host.
 
 - `Tab`/`Shift+Tab` switches pages; Up/Down selects rows.
 - `r` refreshes.
@@ -1067,6 +1124,13 @@ use it.
   donates, what is still accrued, and the wallets it funds and counts, from
   `nodo donations` re-read every ten minutes. A peer's own donation credit, and the
   bonus it earns in routing, are on its card on the Peers page.
+- On Instances, `t` opens a tunnel to the selected instance: type the slot, plus any of
+  `--listen <port>`, `--udp`, `--host`, `--peer`, `--idle`. It runs
+  `nodo tunnel <instance> <slot> … --detach` and the status line says where it listens.
+  The card lists the tunnels already reaching that instance.
+- On Tunnels, `n` opens a tunnel to any instance (`<instance> <slot> [flags]`), `d`
+  closes the selected one after a confirmation (`nodo tunnel_close`), and `i` shows it
+  with the tail of its log.
 - On Services, `e` executes the selected service and `d` deletes it.
 - On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
@@ -1106,6 +1170,7 @@ commands that take one, the identifier of the relevant object:
 - **Peer id** — `disconnect`, `increase_peer_deposit`, `peers`, `peer_reputation`, `reputation`,
   `verify_reputation`, `pay`, `chat`, `chat_open`, `chat_threads`, `force_execution`
 - **Client id** — `credit_client`, `debit_client`, `clients`
+- **Tunnel id** — `tunnels`, `tunnel_close`
 - **Subcommands** — `daemon start|status|stop|restart`
 
 The installer sets this up automatically. To (re)install it yourself:
