@@ -35,6 +35,7 @@ SERVICE_COMMANDS = [
     "export",
     "integrity",
     "get",
+    "services",
 ]
 
 # Commands whose first positional argument is an instance id.
@@ -51,10 +52,12 @@ PEER_COMMANDS = [
     "chat",
     "chat_open",
     "chat_threads",
+    "peers",
+    "peer_reputation",
 ]
 
 # Commands whose first positional argument is a client id.
-CLIENT_COMMANDS = ["credit_client", "debit_client"]
+CLIENT_COMMANDS = ["credit_client", "debit_client", "clients"]
 
 # Commands whose first positional argument is a filesystem path (a project dir,
 # a .bee file, a config dir, …). These get file/dir completion, not an id list.
@@ -71,6 +74,13 @@ COMMANDS = sorted(
     {
         "help",
         "logs",
+        "status",
+        "config",
+        "docs",
+        "earnings",
+        "energy",
+        "schedule",
+        "peer_reputation",
         "export",
         "import",
         "publish",
