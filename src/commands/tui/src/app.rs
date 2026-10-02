@@ -659,6 +659,10 @@ pub enum PendingAction {
     /// Stop a running tunnel. Confirmed because whatever is connected through it is
     /// cut off, and reopening it may not get the same local port back.
     CloseTunnel { id: String, label: String },
+    /// Open a tunnel (`t` on INSTANCES, `n` on TUNNELS). Confirmed because every
+    /// connection through it spends `pricing.TUNNEL_OPEN_MU` of the instance's balance;
+    /// the question says how much.
+    OpenTunnel { label: String, args: Vec<String> },
     /// Remove one element from a list in config.yaml. Confirmed like the others
     /// because dropping an entry from, say, a network policy loosens it silently.
     DeleteConfigItem {
@@ -708,6 +712,7 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         )),
         PendingAction::DeleteConfigItem { .. } => None,
         PendingAction::ApplyWrites { .. } => None,
+        PendingAction::OpenTunnel { label, args } => Some((label, args)),
         PendingAction::EditLever { .. } => None,
     }
 }
@@ -5741,6 +5746,9 @@ impl App {
                 if let Some((label, args)) = pending_command(PendingAction::CloseTunnel { id, label }) {
                     self.spawn_command(CommandKind::Tunnel, label, args);
                 }
+            }
+            PendingAction::OpenTunnel { label, args } => {
+                self.spawn_command(CommandKind::Tunnel, label, args);
             }
             other => {
                 if let Some((label, args)) = pending_command(other) {

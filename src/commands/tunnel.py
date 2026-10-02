@@ -74,6 +74,34 @@ def describe(record: dict) -> str:
     )
 
 
+def open_fee_mu(peer: Optional[str]) -> Optional[int]:
+    """``pricing.TUNNEL_OPEN_MU``, which each connection through the tunnel spends of
+    the instance's balance on this node. None with ``--peer``: the remote node's own
+    price applies, and it is not known here."""
+    if peer:
+        return None
+    try:
+        from src.utils.monetary import prices
+
+        return prices().tunnel_open_mu
+    except Exception:
+        return None
+
+
+def describe_fee(record: dict) -> str:
+    """The line that says what using the tunnel costs. No prompt: agents run this."""
+    fee = record.get("open_fee_mu")
+    if fee is None:
+        return ("Fee: each connection is charged to the instance by the relaying node, "
+                "at its own prices.")
+    from src.utils.monetary import format_mu
+
+    if fee == 0:
+        return "Fee: opening a connection is free here (pricing.TUNNEL_OPEN_MU = 0); traffic is billed."
+    return (f"Fee: each connection spends {format_mu(fee)} of the instance's balance "
+            "(pricing.TUNNEL_OPEN_MU), plus traffic.")
+
+
 def tunnel(
     instance: str,
     slot: int,
@@ -136,6 +164,7 @@ def tunnel(
         peer=peer,
         detached=bool(detached_id),
         log=registry.log_path(tunnel_id) if detached_id else None,
+        open_fee_mu=open_fee_mu(peer),
     )
     registered = True
     try:
@@ -153,6 +182,7 @@ def tunnel(
     else:
         _print(f"Tunnel {tunnel_id} listening on {bound_host}:{bound_port}/{record['transport']}")
         _print(f"  -> slot {slot} of {token} via {gateway}")
+        _print(describe_fee(record))
         _print(f"Press Ctrl-C (or run `nodo tunnel_close {tunnel_id}`) to stop.")
 
     # SIGTERM is how `nodo tunnel_close` asks; the serve loops poll this between
@@ -222,6 +252,7 @@ def detach(argv: List[str], as_json: bool = False, timeout_s: float = DETACH_TIM
         _print("It is reopened when the node restarts, until it is closed.")
         _print(f"Stop it with `nodo tunnel_close {record['id']}`.")
         _print(describe(record))
+        _print(describe_fee(record))
     return True
 
 
