@@ -1543,7 +1543,40 @@ fn draw_instances(frame: &mut Frame, app: &mut App, area: Rect) {
     // the CPU% is measured against, the cumulative disk/net totals, the burn rate, the
     // attributed watts (issue #258), who requested the instance, what its balance
     // is worth in time, and the tunnels that reach it.
-    let layout = list_and_card(area, 8, 18);
+    //
+    // Below the card, the selected instance's tunnels as a table of their own -- one
+    // row per tunnel, the relationship `nodo tunnels --instance <id>` prints -- and
+    // only when there is one: the card's Tunnels line says "none" otherwise.
+    let (reaching, instance_label) = match app.instances.selected() {
+        Some(instance) => (
+            crate::tunnels::reaching(&app.tunnels.items, &instance.id, &instance.name)
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            if instance.name.trim().is_empty() { instance.id.clone() } else { instance.name.clone() },
+        ),
+        None => (Vec::new(), String::new()),
+    };
+    let tunnels_want = crate::tunnels::instance_tunnels_height(reaching.len());
+    let (layout, tunnels_area) = if tunnels_want == 0 {
+        (list_and_card(area, 8, 18), Rect::default())
+    } else {
+        // The table and the card keep their minimums first; the relationship table
+        // takes what is left, up to a row per tunnel.
+        let heights = crate::layout_util::allocate_heights(
+            area.height,
+            &[(5, 8), (3, 18), (3, tunnels_want)],
+            &[0, 1, 2],
+        );
+        let rects = crate::layout_util::stack(
+            area,
+            &[area.height - heights[1] - heights[2], heights[1], heights[2]],
+        );
+        ([rects[0], rects[1]], rects[2])
+    };
+    if tunnels_area.height > 0 {
+        crate::tunnels::draw_instance_tunnels(frame, &reaching, &instance_label, tunnels_area);
+    }
     let rows = app
         .instances
         .items

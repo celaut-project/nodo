@@ -166,6 +166,22 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
     cursor = conn.cursor()
 
     instances = []
+    # The tunnels each instance is reached through (`nodo tunnels --instance <id>`
+    # has the full records); read once, not once per row.
+    running_tunnels = []
+    if as_json:
+        try:
+            from src.utils import tunnel_registry
+
+            running_tunnels = tunnel_registry.list_tunnels()
+        except Exception:
+            running_tunnels = []
+
+    def tunnel_ids(*references) -> list:
+        from src.utils.tunnel_registry import reaches
+
+        return [record["id"] for record in running_tunnels if reaches(record, references)]
+
     try:
         cursor.execute("SELECT id FROM local_instances;")
         internal_ids = {row[0] for row in cursor.fetchall()}
@@ -311,6 +327,7 @@ def list_instances(groupable: bool = False, search: str = "", as_json: bool = Fa
                         'runtime': get_vm_runtime_snapshot(vmachine_id=id_)
                         if _has_runtime_snapshot(runtime_virtualizer) and id_ else None,
                         'usage': _live_usage(id_) if id_ else None,
+                        'tunnels': tunnel_ids(id_, name),
                     } if as_json else {}),
                 })
 

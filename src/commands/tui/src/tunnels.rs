@@ -242,18 +242,70 @@ pub fn outcome_status(label: &str, success: bool, stdout: &str, stderr: &str) ->
     format!("{label} completed")
 }
 
-/// The INSTANCES card's line about tunnels to the selected instance.
-pub fn instance_summary(tunnels: &[Tunnel], instance_id: &str, instance_name: &str) -> String {
-    let reaching: Vec<String> = tunnels
+/// The tunnels that reach an instance: the INSTANCES page's relationship table, and
+/// `nodo tunnels --instance <id>` on the CLI.
+pub fn reaching<'a>(tunnels: &'a [Tunnel], instance_id: &str, instance_name: &str) -> Vec<&'a Tunnel> {
+    tunnels
         .iter()
         .filter(|tunnel| tunnel.reaches(instance_id, instance_name))
-        .map(|tunnel| format!("{} -> {}", tunnel.listen(), tunnel.slot))
-        .collect();
-    if reaching.is_empty() {
-        "none • t opens one".to_string()
-    } else {
-        format!("{} • t opens another", reaching.join(", "))
+        .collect()
+}
+
+/// The INSTANCES card's line about tunnels to the selected instance; the table under
+/// the card lists them.
+pub fn instance_summary(tunnels: &[Tunnel], instance_id: &str, instance_name: &str) -> String {
+    match reaching(tunnels, instance_id, instance_name).len() {
+        0 => "none • t opens one".to_string(),
+        1 => "1, listed below • t opens another".to_string(),
+        count => format!("{count}, listed below • t opens another"),
     }
+}
+
+/// The relationship table's columns: the instance is the selected row already.
+pub(crate) const INSTANCE_TUNNEL_COLUMNS: [Column; 5] = [
+    Column::new("Listen", Constraint::Min(22), 14, 0),
+    Column::new("Slot", Constraint::Length(7), 5, 1),
+    Column::new("ID", Constraint::Length(10), 8, 2),
+    Column::new("Via", Constraint::Length(22), 9, 3),
+    Column::new("Age", Constraint::Length(6), 4, 4),
+];
+
+/// Rows the relationship table wants: its borders, its header (and the gap under it)
+/// and one per tunnel.
+pub fn instance_tunnels_height(count: usize) -> u16 {
+    if count == 0 {
+        0
+    } else {
+        4 + count.min(12) as u16
+    }
+}
+
+/// The tunnels of the selected instance, under its card on INSTANCES. Read-only: the
+/// TUNNELS page is where one is closed or inspected.
+pub fn draw_instance_tunnels(frame: &mut Frame, tunnels: &[Tunnel], label: &str, area: Rect) {
+    if area.height < 3 {
+        return;
+    }
+    let now = crate::app::unix_now();
+    let rows = tunnels
+        .iter()
+        .map(|tunnel| {
+            let cells: Vec<crate::ui::TextCell> = vec![
+                tunnel.listen().into(),
+                tunnel.slot.to_string().into(),
+                tunnel.id.clone().into(),
+                tunnel.via().into(),
+                format_duration_compact(tunnel.age_secs(now)).into(),
+            ];
+            (cells, Style::default())
+        })
+        .collect();
+    let (table, _) = fitted_table(&INSTANCE_TUNNEL_COLUMNS, rows, area, false);
+    let table = table.block(section_block(
+        format!(" TUNNELS → {} • {} ", shorten(label, 24), tunnels.len()),
+        accent(),
+    ));
+    frame.render_widget(table, area);
 }
 
 fn last_lines(path: &str, count: usize) -> Vec<String> {
@@ -584,10 +636,49 @@ mod tests {
         let tunnels = vec![tunnel, remote];
         assert_eq!(
             instance_summary(&tunnels, "abcdef0123456789", ""),
-            "127.0.0.1:9000/tcp -> 8080 • t opens another"
+            "1, listed below • t opens another"
         );
-        assert_eq!(instance_summary(&tunnels, "other", "web"), "127.0.0.1:9000/tcp -> 8080 • t opens another");
+        assert_eq!(instance_summary(&tunnels, "other", "web"), "1, listed below • t opens another");
         assert_eq!(instance_summary(&tunnels, "other", "other"), "none • t opens one");
+    }
+
+    #[test]
+    fn the_relationship_table_holds_the_tunnels_of_one_instance() {
+        let mine = parse_tunnel(&record("ab12cd34", 1)).unwrap();
+        let second = Tunnel { id: "ef56ab78".into(), listen_port: 9001, ..mine.clone() };
+        let remote = Tunnel { id: "remote01".into(), peer: Some("10.0.0.2:4040".into()), ..mine.clone() };
+        let other = Tunnel { id: "other001".into(), instance: "db".into(), token: "ffff".into(), ..mine.clone() };
+        let tunnels = vec![mine, second, remote, other];
+
+        let ids: Vec<&str> = reaching(&tunnels, "abcdef0123456789", "web")
+            .iter()
+            .map(|tunnel| tunnel.id.as_str())
+            .collect();
+        assert_eq!(ids, ["ab12cd34", "ef56ab78"]);
+        assert_eq!(instance_summary(&tunnels, "abcdef0123456789", "web"), "2, listed below • t opens another");
+        assert_eq!(instance_tunnels_height(0), 0, "no table without tunnels");
+        assert_eq!(instance_tunnels_height(2), 6);
+        assert_eq!(instance_tunnels_height(40), 16, "capped");
+    }
+
+    #[test]
+    fn the_relationship_table_draws_each_tunnel_with_its_columns() {
+        let tunnel = parse_tunnel(&record("ab12cd34", 1)).unwrap();
+        let backend = ratatui::backend::TestBackend::new(80, 6);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| draw_instance_tunnels(frame, &[tunnel.clone()], "web", frame.size()))
+            .unwrap();
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        for expected in ["TUNNELS → web", "Listen", "127.0.0.1:9000/tcp", "8080", "ab12cd34", "this node"] {
+            assert!(text.contains(expected), "{expected} missing from {text}");
+        }
     }
 
     mod keys {

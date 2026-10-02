@@ -10,6 +10,7 @@ import io
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -238,6 +239,52 @@ class TunnelsCommandTests(RegistryTestCase):
         ok, document = _run_json(tunnels_command.close_tunnels, [])
         self.assertFalse(ok)
         self.assertIn("Usage", document["error"])
+
+
+class InstanceRelationshipTests(RegistryTestCase):
+    """``nodo tunnels --instance``: the INSTANCES page's instance -> tunnels table."""
+
+    def test_reaches_by_token_or_by_what_was_typed_but_never_through_a_peer(self):
+        record = _record("rel00001", 1)
+        self.assertTrue(registry.reaches(record, {"abcdef0123456789"}))
+        self.assertTrue(registry.reaches(record, {"my-instance"}))
+        self.assertFalse(registry.reaches(record, {"other", "", None}))
+        remote = _record("rel00002", 1, peer="10.0.0.2:8090")
+        self.assertFalse(registry.reaches(remote, {"abcdef0123456789"}))
+
+    def test_for_instance_lists_only_the_tunnels_that_reach_it(self):
+        process = self.spawn()
+        registry.register(_record("mine0001", process.pid))
+        registry.register(_record("other001", process.pid, instance="x", token="y"))
+
+        self.assertEqual(
+            [r["id"] for r in registry.for_instance({"abcdef0123456789"})], ["mine0001"]
+        )
+
+    def test_json_names_the_instance_and_its_tunnels(self):
+        process = self.spawn()
+        registry.register(_record("mine0002", process.pid))
+        registry.register(_record("other002", process.pid, instance="x", token="y"))
+        # The catalogue says `web` is the instance whose id the tunnel resolved to.
+        with patch.object(tunnels_command, "instance_references",
+                          return_value={"web", "abcdef0123456789"}):
+            ok, document = _run_json(tunnels_command.list_tunnels, instance="web")
+
+        self.assertTrue(ok)
+        self.assertEqual(document["instance"], "web")
+        self.assertEqual([t["id"] for t in document["tunnels"]], ["mine0002"])
+
+    def test_an_instance_without_tunnels_says_how_to_open_one(self):
+        text = io.StringIO()
+        with patch.object(tunnels_command, "instance_references", return_value={"web"}), \
+                redirect_stdout(text):
+            self.assertTrue(tunnels_command.list_tunnels(instance="web"))
+        self.assertIn("nodo tunnel web <slot> --detach", text.getvalue())
+
+    def test_an_unreadable_catalogue_still_matches_the_reference_itself(self):
+        with patch.dict(os.environ, {}, clear=False), \
+                patch("sqlite3.connect", side_effect=sqlite3.Error("no db")):
+            self.assertEqual(tunnels_command.instance_references("web"), {"web"})
 
 
 class CompletionTests(RegistryTestCase):

@@ -240,6 +240,7 @@ INSTANCES, which opens one):
 nodo tunnel my-instance 8080 --listen 9000 --detach   # background; prints its id
 nodo tunnels                                          # what is running here
 nodo tunnels 3f9a0c12                                 # one, with its log
+nodo tunnels --instance my-instance                   # the ones reaching it
 nodo tunnel_close 3f9a0c12                            # stop it (or --all)
 ```
 

@@ -6,8 +6,9 @@ or the TUI's TUNNELS page, which reads the same registry
 the node keeps no table of the streams it relays for others (``docs/TUNNELING.md``).
 """
 
+import sqlite3
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 from src.commands._catalogue import emit_error, emit_json
 from src.utils import tunnel_registry as registry
@@ -88,8 +89,52 @@ def _one(reference: str, as_json: bool):
     return matches[0], True
 
 
-def list_tunnels(reference: str = "", as_json: bool = False) -> bool:
-    """No reference: every running tunnel. A tunnel id (or prefix): that one."""
+def instance_references(reference: str) -> Set[str]:
+    """``reference`` and, when it names a local instance, that instance's id and name.
+
+    A tunnel records what was typed and the token it resolved to, so a tunnel opened
+    by name must still be found by id and the other way round. Read straight from
+    the catalogue: this command stays clear of the manager's import graph.
+    """
+    references = {reference}
+    try:
+        from src.utils.config import ConfigManager
+
+        database = ConfigManager().get("DATABASE_FILE")
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        try:
+            rows = connection.execute(
+                "SELECT id, name FROM local_instances WHERE id = ? OR name = ?",
+                (reference, reference),
+            ).fetchall()
+        finally:
+            connection.close()
+    except Exception:
+        return references
+    for instance_id, name in rows:
+        references.update(value for value in (instance_id, name) if value)
+    return references
+
+
+def list_tunnels(reference: str = "", as_json: bool = False, instance: str = "") -> bool:
+    """No reference: every running tunnel. A tunnel id (or prefix): that one.
+
+    ``instance``: the tunnels that reach that instance -- the INSTANCES page's
+    relationship table, for a script.
+    """
+    if instance:
+        references = instance_references(instance)
+        tunnels = [record for record in registry.list_tunnels()
+                   if registry.reaches(record, references)]
+        if as_json:
+            emit_json({"instance": instance, "tunnels": tunnels})
+        elif tunnels:
+            print(render_list(tunnels), end="", flush=True)
+        else:
+            print(f"No tunnels reach '{instance}'. Open one with "
+                  f"`nodo tunnel {instance} <slot> --detach`.", flush=True)
+        return True
+
     if reference:
         record, ok = _one(reference, as_json)
         if record is None:
