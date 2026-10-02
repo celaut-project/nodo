@@ -123,34 +123,20 @@ def _timeout() -> Optional[int]:
     return timeout if timeout > 0 else None
 
 
-# How a peer that predates #456 answers a GetResourceAvailability carrying index 3:
-# bee-rpc's parser raises on an index it was not given, and the peer's gateway turns
-# that into the RPC's error detail.
-_UNKNOWN_INDEX_ERROR = "buffer head index is not correct"
-
-
-def _rejected_unknown_index(e: Exception) -> bool:
-    details = getattr(e, "details", None)
-    return callable(details) and _UNKNOWN_INDEX_ERROR in (details() or "")
-
-
 def check_resource_availability_on_peer(
         peer_id: str,
         request: celaut.ArchitectureResources,
-        recursion_guard_token: Optional[str] = None,
 ) -> Optional[bool]:
     """Ask exactly one peer whether it could run an instance of this architecture
     shaped like `request` right now. None means the peer could not be asked
-    (unreachable, timed out, running a version without the RPC, holding an
-    address that turns out not to prove its identity, or refusing the request as a
-    recursion loop or past its depth) -- not a "no".
+    (unreachable, timed out, running a version without the RPC, or holding an
+    address that turns out not to prove its identity) -- not a "no".
 
-    ``recursion_guard_token`` is the request tree this probe belongs to (#456), for a
-    caller that is itself answering a guarded request -- a GetResourceAvailability
-    that probes peers in turn. It is forwarded unchanged, with one hop less, and not
-    at all once the tree has no hops left. A peer that predates the guard cannot
-    parse it; it is asked again without one, which loses nothing, since such a peer
-    answers from its own machine and never passes the question on.
+    An answer already obtained for this very question is reused for
+    `network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS` (#456), so probes for the same shape
+    do not ask the same peer again. The question carries no recursion token: the peer
+    answers from its own machine and never passes it on, and what it remembers is keyed
+    by content (`src/utils/tools/query_cache.py`).
     """
     # Imported lazily: this is the only place in the module that talks to a
     # peer, and keeping the rest importable without bee_rpc/grpc installed is
@@ -161,34 +147,21 @@ def check_resource_availability_on_peer(
     from src.identity.grpc_transport import peer_channel
     from src.manager.manager import get_client_id_on_other_peer
     from src.utils.bee_client import BeeClient
-    from src.utils.tools.recursion_guard import Registry, recursion_guard_message
-
-    if recursion_guard_token and not Registry().can_forward(recursion_guard_token):
-        log.LOGGER(
-            f"Not asking peer {peer_id} for resource availability: request "
-            f"{recursion_guard_token} has no recursion hops left."
-        )
-        return None
-
-    def _ask(recursion_guard):
-        return BeeClient.get_resource_availability(
-            peer_channel(peer_id=peer_id), request, timeout=_timeout(),
-            client_id=get_client_id_on_other_peer(peer_id=peer_id),
-            recursion_guard=recursion_guard,
-        )
+    from src.utils.tools.query_cache import HIT, QueryCache, availability_ttl, canonical_key
 
     try:
-        recursion_guard = recursion_guard_message(recursion_guard_token)
-        try:
-            response = _ask(recursion_guard)
-        except Exception as e:
-            if recursion_guard is None or not _rejected_unknown_index(e):
-                raise
-            log.LOGGER(
-                f"Peer {peer_id} predates the recursion guard on GetResourceAvailability; "
-                "asking again without it."
-            )
-            response = _ask(None)
+        ttl = availability_ttl()
+        key = canonical_key("peer-availability", peer_id, request) if ttl > 0 else None
+        if key is not None:
+            status, remembered = QueryCache().recall(key)
+            if status == HIT:
+                return remembered
+        response = BeeClient.get_resource_availability(
+            peer_channel(peer_id=peer_id), request, timeout=_timeout(),
+            client_id=get_client_id_on_other_peer(peer_id=peer_id),
+        )
+        if key is not None:
+            QueryCache().remember(key, response.can_execute, ttl)
         return response.can_execute
     except Exception as e:
         log.LOGGER(f"Could not check resource availability on peer {peer_id}: {e}")

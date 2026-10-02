@@ -1,4 +1,4 @@
-"""The recursion guard on every RPC that may re-delegate to peers (issue #456).
+"""The recursion guard on StartService and the delegation it starts (issue #456).
 
 Three layers, each on its own:
 
@@ -8,15 +8,15 @@ Three layers, each on its own:
 - A chain of nodes, simulated in one process by giving each "node" its own
   ``Registry`` (it is a per-process singleton): A -> B -> A is refused at A, and a chain
   longer than ``network.RECURSION_MAX_HOPS`` stops where the budget runs out.
-- Each RPC that carries the guard -- StartService (``launch_service``),
-  GetServiceEstimatedCost and GetResourceAvailability -- accepts, validates and
-  forwards it. GetResourceAvailability is driven over a real gRPC stream, because its
-  guard rides a new bee-rpc index that a peer predating it cannot parse.
+- StartService (``launch_service``) accepts, validates and forwards the guard, and the
+  balancer stops asking peers once the hops are spent.
+
+The two query RPCs, GetServiceEstimatedCost and GetResourceAvailability, carry no guard:
+they are protected by ``src/utils/tools/query_cache.py`` (see ``test_query_cache.py``).
 """
 import contextlib
 import threading
 import unittest
-from concurrent import futures
 from unittest.mock import patch
 
 IMPORT_ERROR = None
@@ -46,15 +46,6 @@ try:
     from src.utils import utils as utils_mod
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     RUNTIME_IMPORT_ERROR = import_exc
-
-GRPC_IMPORT_ERROR = None
-try:
-    import grpc
-    from bee_rpc import client as bee
-    list(bee.serialize_to_buffer(message_iterator=celaut.ResourceAvailability(can_execute=True)))
-except Exception as import_exc:  # pragma: no cover - environment-dependent
-    GRPC_IMPORT_ERROR = import_exc
-
 
 @contextlib.contextmanager
 def _node():
@@ -428,10 +419,11 @@ class StartServiceTests(unittest.TestCase):
         peers.assert_not_called()
         self.assertEqual(candidates, ["local"])
 
-    def test_the_balancer_asks_peers_with_the_token_one_hop_less(self):
-        sent = []
+    def test_the_balancer_still_asks_peers_while_hops_remain_and_sends_no_guard_on_the_quote(self):
+        sent, asked = [], []
 
         def _cost(channel, message_iterator, timeout=None):
+            asked.append("peer-a")
             sent.extend(m for m in message_iterator if isinstance(m, celaut.RecursionGuard))
             return celaut.EstimatedCost()
 
@@ -453,81 +445,18 @@ class StartServiceTests(unittest.TestCase):
                 configuration=celaut.Configuration(),
                 recursion_guard_token="tok-1",
             )
-        self.assertEqual([(m.token, _hops(m)) for m in sent], [("tok-1", 3)])
+        # A quote is answered from the peer's own machine and never passed on, so it
+        # carries no guard; the hops matter again when a peer is selected to run it.
+        self.assertEqual(asked, ["peer-a"])
+        self.assertEqual(sent, [])
 
 
 @unittest.skipIf(
     IMPORT_ERROR is not None or RUNTIME_IMPORT_ERROR is not None,
     f"Missing runtime dependencies: {IMPORT_ERROR or RUNTIME_IMPORT_ERROR}",
 )
-class EstimatedCostTests(unittest.TestCase):
-    """GetServiceEstimatedCost reads StartService's envelope, guard included."""
-
-    def setUp(self):
-        self._node = _node()
-        self.registry = self._node.__enter__()
-        self.addCleanup(self._node.__exit__, None, None, None)
-
-    def _quote(self, token, hops=None):
-        it = cost_mod.GetServiceEstimatedCostIterable.__new__(cost_mod.GetServiceEstimatedCostIterable)
-        it.configuration = None
-        it.service_hash = "abc123"
-        it.metadata = celaut.Metadata()
-        it.recursion_guard_token = token
-        it.recursion_guard_hops = hops
-        seen = {}
-
-        def _estimate(**kwargs):
-            seen["held"] = dict(Registry().tokens)
-            seen["token"] = it.recursion_guard_token
-            seen["forwarded"] = recursion_guard_message(it.recursion_guard_token)
-            return celaut.EstimatedCost()
-
-        with _patch_policy(), patch.object(
-            cost_mod, "read_service_from_disk", return_value=celaut.Service()
-        ), patch.object(cost_mod, "default_initial_balance", return_value=1), patch.object(
-            cost_mod, "generate_estimated_cost", side_effect=_estimate
-        ) as quote, patch.object(
-            cost_mod.BeeClient, "respond", side_effect=lambda message_iterator, indices: iter([message_iterator])
-        ), patch.object(cost_mod.activity_window, "is_open", return_value=True):
-            list(it.generate())
-        return seen, quote
-
-    def test_the_callers_token_is_held_while_quoting(self):
-        with _max_hops(16):
-            seen, _ = self._quote("tok-1")
-        self.assertEqual(seen["held"], {"tok-1": 16})
-        self.assertEqual(self.registry.tokens, {})
-
-    def test_a_missing_token_is_a_root(self):
-        seen, _ = self._quote(None)
-        self.assertRegex(seen["token"], r"^[0-9a-f]{32}$")
-        self.assertEqual(list(seen["held"]), [seen["token"]])
-
-    def test_the_token_is_kept_for_a_downstream_quote_one_hop_less(self):
-        seen, _ = self._quote("tok-1", hops=3)
-        self.assertEqual(seen["held"], {"tok-1": 3})
-        self.assertEqual(seen["forwarded"].token, "tok-1")
-        self.assertEqual(_hops(seen["forwarded"]), 2)
-
-    def test_a_loop_is_refused_without_quoting(self):
-        self.registry.add("tok-1", 2)
-        with patch.object(cost_mod, "generate_estimated_cost") as quote:
-            with self.assertRaises(RecursionLoop):
-                it = cost_mod.GetServiceEstimatedCostIterable.__new__(cost_mod.GetServiceEstimatedCostIterable)
-                it.configuration, it.service_hash, it.metadata = None, "abc123", celaut.Metadata()
-                it.recursion_guard_token = "tok-1"
-                list(it.generate())
-        quote.assert_not_called()
-        self.assertEqual(self.registry.tokens, {"tok-1": 2})
-
-    def test_no_hops_left_is_refused(self):
-        with self.assertRaises(RecursionDepthExhausted):
-            self._quote("tok-1", hops=0)
-
-    def test_a_malformed_token_is_refused(self):
-        with self.assertRaises(MalformedRecursionToken):
-            self._quote("tok 1")
+class EnvelopeTests(unittest.TestCase):
+    """The StartService envelope, which a delegated launch is sent in."""
 
     def test_the_envelope_carries_the_guard_at_index_2(self):
         from protos.gateway_bee import StartService_input_indices
@@ -544,154 +473,6 @@ class EstimatedCostTests(unittest.TestCase):
             metadata=celaut.Metadata(), send_only_hashes=True, client_id="c",
         ))
         self.assertFalse([m for m in sent if isinstance(m, celaut.RecursionGuard)])
-
-
-@unittest.skipIf(
-    IMPORT_ERROR is not None or GRPC_IMPORT_ERROR is not None,
-    f"needs a working grpc/bee_rpc ({IMPORT_ERROR or GRPC_IMPORT_ERROR})",
-)
-class ResourceAvailabilityWireTests(unittest.TestCase):
-    """GetResourceAvailability over a real gRPC stream: the guard rides index 3."""
-
-    @classmethod
-    def setUpClass(cls):
-        from protos import celaut_pb2_grpc
-        from src.gateway.client_gate import parse_with_client
-        from src.gateway.iterables.resource_availability_iterable import (
-            GetResourceAvailabilityIterable,
-        )
-        from src.utils.bee_client import BeeClient
-
-        held = cls.HELD = []
-
-        class _Servicer(celaut_pb2_grpc.Gateway):
-            def GetResourceAvailability(self, request_iterator, context, **kwargs):
-                def _answer(request):
-                    held.append(dict(Registry().tokens))
-                    return {"can_execute": True, "reason": ""}
-
-                with patch(
-                    "src.gateway.iterables.resource_availability_iterable.get_architecture_availability",
-                    side_effect=_answer,
-                ), patch(
-                    "src.gateway.client_gate.get_internal_service_id_by_uri",
-                    return_value="self",
-                ):
-                    yield from GetResourceAvailabilityIterable(request_iterator, context)
-
-        class _LegacyServicer(celaut_pb2_grpc.Gateway):
-            # GetResourceAvailability exactly as it parsed its request before #456.
-            def GetResourceAvailability(self, request_iterator, context, **kwargs):
-                request, _ = parse_with_client(
-                    request_iterator, payload_type=celaut.ArchitectureResources
-                )
-                yield from BeeClient.respond(
-                    message_iterator=celaut.ResourceAvailability(can_execute=True)
-                )
-
-        cls.servers = []
-        cls.ports = {}
-        for name, servicer in (("new", _Servicer()), ("legacy", _LegacyServicer())):
-            server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
-            celaut_pb2_grpc.add_GatewayServicer_to_server(servicer, server)
-            cls.ports[name] = server.add_insecure_port("127.0.0.1:0")
-            server.start()
-            cls.servers.append(server)
-
-    @classmethod
-    def tearDownClass(cls):
-        for server in cls.servers:
-            server.stop(None)
-
-    def setUp(self):
-        self.HELD.clear()
-        self._node = _node()
-        self.registry = self._node.__enter__()
-        self.addCleanup(self._node.__exit__, None, None, None)
-
-    def _channel(self, name):
-        return grpc.insecure_channel(f"127.0.0.1:{self.ports[name]}")
-
-    def _check(self, name, token=None):
-        from src.utils.cost_functions.workload_admission import check_resource_availability_on_peer
-        with patch("src.identity.grpc_transport.peer_channel", side_effect=lambda peer_id: self._channel(name)), \
-                patch("src.manager.manager.get_client_id_on_other_peer", return_value=""):
-            return check_resource_availability_on_peer("peer-a", celaut.ArchitectureResources(), recursion_guard_token=token)
-
-    def _raw(self, guard):
-        from src.utils.bee_client import BeeClient
-        return BeeClient.get_resource_availability(
-            self._channel("new"), celaut.ArchitectureResources(), timeout=10, recursion_guard=guard,
-        )
-
-    def test_a_request_without_a_guard_is_a_root(self):
-        with _max_hops(16):
-            self.assertIs(self._check("new"), True)
-        (held,) = self.HELD
-        ((token, hops),) = held.items()
-        self.assertRegex(token, r"^[0-9a-f]{32}$")
-        self.assertEqual(hops, 16)
-        self.assertEqual(self.registry.tokens, {})
-
-    def test_the_token_arrives_unchanged_one_hop_less(self):
-        # The caller is node A holding "tok-1"; the server is node B. They share this
-        # process, so A's registration is moved out of the way before B checks it --
-        # the count was already taken off when the message was built.
-        guard = RecursionGuard(token="tok-1", generate=True, remaining_hops=5)
-        message = recursion_guard_message("tok-1")
-        guard.__exit__(None, None, None)
-        self.assertEqual(self._raw(message).can_execute, True)
-        self.assertEqual(self.HELD, [{"tok-1": 4}])
-
-    def test_a_loop_is_refused(self):
-        self.registry.add("tok-1", 3)  # the server node is already answering tok-1
-        with self.assertRaises(grpc.RpcError) as ctx:
-            self._raw(celaut.RecursionGuard(token="tok-1"))
-        self.assertIn("Block recursion loop", ctx.exception.details())
-        self.assertEqual(self.HELD, [])
-        # And through the probe helper it is "could not ask", never a "no".
-        self.assertIsNone(self._check("new", token="tok-1"))
-
-    def test_no_hops_left_is_refused(self):
-        with self.assertRaises(grpc.RpcError) as ctx:
-            self._raw(celaut.RecursionGuard(token="tok-1", remaining_hops=0))
-        self.assertIn("Recursion depth exhausted", ctx.exception.details())
-        self.assertEqual(self.HELD, [])
-
-    def test_a_malformed_token_is_refused(self):
-        with self.assertRaises(grpc.RpcError) as ctx:
-            self._raw(celaut.RecursionGuard(token="not a token"))
-        self.assertIn("Malformed recursion token", ctx.exception.details())
-        self.assertEqual(self.HELD, [])
-
-    def test_the_prober_does_not_ask_once_the_hops_are_spent(self):
-        from src.utils.bee_client import BeeClient
-        with RecursionGuard(token="tok-1", generate=True, remaining_hops=1), \
-                patch.object(BeeClient, "get_resource_availability") as ask:
-            self.assertIsNone(self._check("new", token="tok-1"))
-        ask.assert_not_called()
-
-    def test_a_peer_that_predates_the_guard_is_asked_again_without_it(self):
-        from src.utils.bee_client import BeeClient
-        calls = []
-        real = BeeClient.get_resource_availability
-
-        def _spy(*args, **kwargs):
-            calls.append(kwargs.get("recursion_guard"))
-            return real(*args, **kwargs)
-
-        with patch.object(BeeClient, "get_resource_availability", side_effect=_spy):
-            self.assertIs(self._check("legacy", token="tok-1"), True)
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0].token, "tok-1")
-        self.assertIsNone(calls[1])
-
-    def test_without_a_token_the_wire_shape_is_unchanged(self):
-        # A legacy server answers a request with nothing to forward on the first try.
-        from src.utils.bee_client import BeeClient
-        with patch.object(BeeClient, "get_resource_availability", wraps=BeeClient.get_resource_availability) as ask:
-            self.assertIs(self._check("legacy"), True)
-        self.assertEqual(ask.call_count, 1)
 
 
 if __name__ == "__main__":

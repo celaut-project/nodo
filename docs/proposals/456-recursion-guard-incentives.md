@@ -2,13 +2,63 @@
 
 Working document for [#456](https://github.com/celaut-project/nodo/issues/456). The
 issue asks for two things. One is to carry the recursion guard on every RPC that
-re-delegates; that is done and described in [`RECURSION_GUARD.md`](../RECURSION_GUARD.md).
+re-delegates; that is done for StartService and described in
+[`RECURSION_GUARD.md`](../RECURSION_GUARD.md). The two read-only queries ended up with a
+cache instead (see the outcome below).
 The other is this study: **does a node have a reason to forward the guard honestly, and
 what happens to the network if it does not?**
 
 Every claim about how nodo behaves cites the file and function it comes from, and was
 checked against the code on `dev` at the time of writing. Every claim about why a node
 would behave a certain way is an argument, and is labelled as one.
+
+---
+
+## Outcome: the read-only queries need no incentive
+
+This study was written assuming `GetServiceEstimatedCost` and `GetResourceAvailability`
+would carry the guard, and most of §3-§4 and option (b1)/(b2) is about getting a peer to
+forward it on those two. The conclusion after review is that they should not carry it.
+
+- **Their answer depends only on their content.** A quote does not depend on who asks,
+  and a probe asks about resources. So a node does not need a token to know it met a
+  question before: it hashes the content it received and keeps one of three states per
+  hash (unknown, in progress, done). Same question while in progress: refused with
+  "retry", which ends A → B → A after one lap. Same question done: served until the TTL.
+  See [`RECURSION_GUARD.md`](../RECURSION_GUARD.md#the-query-cache-for-the-two-read-only-rpcs).
+- **It is unilateral.** The cache is a node protecting itself with what it observes. It
+  needs no forwarding peer to be honest, so the whole of §3 (why a node would carry,
+  omit, reset or truncate a token) does not apply to queries. A peer that strips a token
+  from a query changes nothing, because the token was never needed.
+- **StartService keeps the token and the hop budget.** An execution is not an idempotent
+  answer, two clients may start the same service at once, and each hop is prepaid. §3
+  and (a) stand for it unchanged.
+- **Today the in-progress refusal is latent.** Neither query asks peers while answering,
+  so nothing can come back to the node asking. What the cache does now is deduplicate
+  repeated quotes and probes, on both sides: a node answers a repeated question once, and
+  `estimate_cost_on_peer` / `check_resource_availability_on_peer` do not ask a peer what
+  they already hold.
+- **Considered and not needed:** detecting a dishonest forwarder by asking through two
+  clients and comparing. The cache gives the same protection without the extra calls.
+
+Open items, none of which changes the decision:
+
+1. **Canonicalization.** The key is built from the question as this node parses it, with
+   unknown fields discarded and a deterministic serialization, and metadata hashes sorted
+   (the parser collects them in a set). A new field this node learns later changes how it
+   keys that question; that only costs a recompute.
+2. **Freshness.** A remembered answer can be stale up to its TTL: 30 s for a quote, 5 s
+   for availability. A quote is remembered after the network-policy check, so a policy
+   change lags by one TTL. `activity_window` is applied outside the cache, so closed
+   hours are never served from memory.
+3. **A forwarder that changes the content forces a recompute.** That is correct for a
+   different question, and the cache does not try to stop it. What bounds someone who
+   varies queries on purpose is the same as in (b2): the price of each call. If a query
+   ever relays, the entry bound (`network.QUERY_CACHE_MAX_ENTRIES`) and the per-client
+   rate limit contain the memory it can fill.
+4. **b1 and b2 only matter if a query starts asking peers.** The cache refuses a
+   repeat, but a distinct question each time still fans out, so (b1)/(b2) below stay the
+   answer to that. They are no longer needed for the queries as they behave today.
 
 ---
 
@@ -382,8 +432,9 @@ give. Rejected.
    a cycle hurts the nodes inside it, and hops are prepaid. Together these make
    forwarding the guard the rational default, and no current mechanism could catch a
    cheater anyway.
-2. **Before any free RPC starts querying peers, do b1 and b2:** a small hop budget for
-   quotes and probes, and a per-call price on them. Amplification is the only failure
+2. **Before any free RPC starts querying peers, do b1 and b2** (the queries themselves are
+   covered by the cache, see the outcome above, but a distinct question each time still
+   fans out): a small hop budget for quotes and probes, and a per-call price on them. Amplification is the only failure
    that the incentives in §3 do not discourage, because its cost falls on others. A
    price on calls makes each hop pay for what it triggers, and it rests on actions nodo
    can observe, not on claims it cannot verify.
@@ -402,7 +453,8 @@ observed loops). Both are cheap and only ever reduce load.
 |---|---|
 | Guard semantics (token, hops, clamp, refusals) | `src/utils/tools/recursion_guard.py` |
 | Forwarded guard built in one place | `recursion_guard_message`; `src/utils/utils.py:service_extended` |
-| No peer is asked once hops are spent | `execution_balancer` (`Registry().can_forward`); `check_resource_availability_on_peer` |
+| No peer is selected for a delegated StartService once hops are spent | `execution_balancer` (`Registry().can_forward`) |
+| Read-only queries are answered from a local cache by content hash | `src/utils/tools/query_cache.py`; `GetServiceEstimatedCostIterable`, `GetResourceAvailabilityIterable`; the asking side in `estimate_cost_on_peer`, `check_resource_availability_on_peer` |
 | Caller identity is a per-node `client_id` | `src/gateway/client_gate.py:require_caller` |
 | Delegating node is its peer's client | `delegate_execution` → `get_client_id_on_other_peer` |
 | Hops are prepaid from the delegator's deposit | `delegate_execution` (`balance_on_other_peer` check) |

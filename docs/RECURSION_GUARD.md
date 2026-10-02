@@ -1,16 +1,18 @@
 # The recursion guard
 
-Some Gateway RPCs can be answered by asking peers the same question: a node asked to
-run a service may delegate it, and the peer it delegates to may delegate again. Without
-a limit, that is how a request comes back to a node already working on it (A → B → A),
-and how one call fans out into many. The **recursion guard** is the limit. It rides
-along with every such request as a `RecursionGuard` message
+A node asked to run a service may delegate it, and the peer it delegates to may delegate
+again. Without a limit, that is how a request comes back to a node already working on it
+(A → B → A), and how one call fans out into many. The **recursion guard** is the limit
+for StartService. It rides along with the request as a `RecursionGuard` message
 ([`protos/celaut.proto`](../protos/celaut.proto)) and is held by
 `RecursionGuard` in [`src/utils/tools/recursion_guard.py`](../src/utils/tools/recursion_guard.py).
 
-Issue [#456](https://github.com/celaut-project/nodo/issues/456) extended it from
-StartService to every RPC that re-delegates, or will. Whether a peer has a reason to
-carry it honestly is a separate question, covered in
+Issue [#456](https://github.com/celaut-project/nodo/issues/456) added the hop budget to it
+and audited every RPC. The two read-only queries, GetServiceEstimatedCost and
+GetResourceAvailability, do **not** carry the guard: a question's answer depends only on
+its content, so a node recognises a question it has met by hashing it. That is a local
+[query cache](#the-query-cache-for-the-two-read-only-rpcs) and needs no field on the wire.
+Whether a peer has a reason to carry the guard honestly is a separate question, covered in
 [`proposals/456-recursion-guard-incentives.md`](proposals/456-recursion-guard-incentives.md).
 
 ---
@@ -58,19 +60,13 @@ held token sits in memory until the request ends, and the sender picks it.
 | RPC | Envelope | Guard at |
 |---|---|---|
 | StartService | `StartService_input_indices` | index **2**, unchanged |
-| GetServiceEstimatedCost | the same envelope (`service_extended`) | index **2**, unchanged |
-| GetResourceAvailability | `GetResourceAvailability_input_indices` | index **3**, new (1 = `ArchitectureResources`, 2 = `Client` as before) |
 
 The hop count is a new field inside a message that already existed, so nodes that
-predate it skip it as an unknown field. The new index on GetResourceAvailability is
-different. bee-rpc refuses any index it was not told about, so an older node fails to
-parse a request that carries one. Two rules handle that:
+predate it skip it as an unknown field. No RPC got a new index, so no peer is affected
+by the change.
 
-- `BeeClient.get_resource_availability` sends index 3 only when it has a token to
-  forward. Requests with nothing to forward go out in the old shape.
-- `workload_admission.check_resource_availability_on_peer` sees an older peer reject the
-  index (`buffer head index is not correct`) and asks again without it. Nothing is
-  lost: an older peer answers from its own machine and never passes the question on.
+(GetServiceEstimatedCost reads the same envelope and still parses an index-2 guard if an
+older peer sends one, but ignores it: its answer comes from the cache.)
 
 ---
 
@@ -83,8 +79,8 @@ answering, this node sends a request to another node: the same RPC or a differen
 | RPC | Re-delegates today? | To whom | Guard before #456 | Guard after #456 |
 |---|---|---|---|---|
 | **StartService** | **Yes**: `launch_service` → `execution_balancer` (a GetServiceEstimatedCost per peer), `delegate_execution` (StartService on the chosen peer), `_force_delegate`, and `evaluate_possible_environment_workloads` (GetResourceAvailability per peer) | any known peer outside the caller's network | Token accepted (index 2), registered by `RecursionGuard` while `launch_service` runs, forwarded to the balancer's quotes and to the delegated StartService. Loop refused. No depth limit. A launch requested by a local instance runs unguarded (`generate=False`) | Same token, same places, same loop refusal. Added: a hop budget (`remaining_hops`) that is accepted, validated, decremented and forwarded; a malformed token is refused; with no hops left the balancer asks no peers and only `local` is a candidate. The availability probe for descendant workloads deliberately does **not** forward the token (see below). Local-instance launches are unchanged |
-| **GetServiceEstimatedCost** | Not today: it returns the local quote only (`GetServiceEstimatedCostIterable.generate`). A request for a hash it lacks does `add_wanted`, and the maintainer later fetches that hash with GetService. That fetch is asynchronous, one level deep and not repeated | (none synchronously) | Token accepted (index 2) and registered. A loop is refused, for example when the peer that asked you to run something then asks you for a quote under the same token. The token was **not** kept for any downstream call, and no hop count existed | Accepted, validated, registered with its hop count; loop, depth and malformed refusals. The effective token stays on `self.recursion_guard_token` while the quote is produced, so a future peer comparison is just `estimate_cost_on_peer(..., recursion_guard_token=self.recursion_guard_token)`. `service_extended` forwards it one hop less, and `Registry().can_forward` reports when no hops remain |
-| **GetResourceAvailability** | Not today: it answers from `get_architecture_availability` alone | (none) | **None.** No index for it; the input was `Client & ArchitectureResources` (#459) | Accepted at index 3, validated, and registered with its hop count (loop, depth and malformed refusals). It is held in `self.recursion_guard_token` while answering. The client side is ready to forward it: `check_resource_availability_on_peer(peer, request, recursion_guard_token=…)` sends it one hop less, skips the peer when no hops remain, and falls back for older peers |
+| **GetServiceEstimatedCost** | Not today: it returns the local quote only (`GetServiceEstimatedCostIterable.generate`). A request for a hash it lacks does `add_wanted`, and the maintainer later fetches that hash with GetService. That fetch is asynchronous, one level deep and not repeated | (none synchronously) | Token accepted (index 2) and registered. A loop is refused. The token was **not** kept for any downstream call, and no hop count existed | **No guard. Query cache.** The answer is keyed by the hash of the service, configuration and metadata as received. Same question: computed once per `network.QUERY_CACHE_TTL_SECONDS`. Same question while it is being computed: refused with "retry". Asking side: `estimate_cost_on_peer` keeps what a peer answered and does not ask it again. The token on the wire is accepted and ignored, and not sent |
+| **GetResourceAvailability** | Not today: it answers from `get_architecture_availability` alone | (none) | **None.** No index for it; the input was `Client & ArchitectureResources` (#459) | **No guard. Query cache**, with a short TTL (`network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS`, 5 s). The wire is unchanged from before #456. `activity_window` is applied on top of the cached answer, so closed hours always win. Asking side: `check_resource_availability_on_peer` keeps what a peer answered |
 | StopService | Yes, along a recorded path: `stop_instance` for a delegated instance calls StopService on the peer that runs it (`manager.py`, `BeeClient.stop_service`), and that peer may do the same | the one peer in the instance's `delegated_instances` row | none | **None, on purpose.** The next hop is a stored record, not a choice, and there is one per hop, so there is no fan-out. The chain is as long as the delegation chain StartService already built under the guard. The input is a lone `TokenMessage` that older nodes parse with a single index, so adding one would break every older peer on the most important cleanup call. Noted in the study as a residual risk |
 | ModifyDeposit | Yes, along a recorded path: `modify_deposit` for a delegated instance calls ModifyDeposit on its peer | the one peer holding the instance | none | **None, on purpose.** Same reasoning as StopService |
 | GetService | No. It serves from the registry. A miss is answered as a miss, and GetService never calls `add_wanted` | – | none (`service_extended(..., recursion_guard_token=None)` with a TODO) | Unchanged. If GetService ever fetches from peers on a miss, it has to take the guard first: its server already parses `StartService_input_indices`, so index 2 is available |
@@ -117,6 +113,48 @@ guards it from there.
 
 ---
 
+## The query cache for the two read-only RPCs
+
+[`src/utils/tools/query_cache.py`](../src/utils/tools/query_cache.py). A node keeps, per
+question, one of three states:
+
+| State | What the node does |
+|---|---|
+| unknown | computes the answer, holding the question *in progress* meanwhile |
+| in progress | refuses with `QueryInProgress` (the caller sees the RPC error "retry") |
+| done | answers from memory until the TTL runs out |
+
+The key is the sha256 of the question's content as this node reads it: each message is
+parsed back, stripped of fields this node does not know, and serialized deterministically,
+so the order of fields (or a field the node would ignore anyway) cannot produce another key.
+The set of metadata hashes is sorted first, as the gateway parser collects them in a set.
+Who asked, and the guard, are not part of it.
+
+What it gives:
+
+- **The same question is answered once.** Repeated quotes and probes (`launch_service` prices
+  the same service every time) stop costing a recomputation or a call to each peer.
+- **A loop stops after one lap, if the question ever relays.** Neither query asks peers today,
+  so this refusal is latent. If one later does, A → B → A arrives at A as a question A holds
+  in progress and is refused. It needs nobody's cooperation, unlike a token.
+- **A forwarder that changes the question gets it computed again.** That is the right answer
+  to a different question. What bounds someone who varies it on purpose is the price of each
+  call, not the cache.
+
+Limits, on purpose:
+
+- Entries are bounded (`network.QUERY_CACHE_MAX_ENTRIES`, least recently used first, never one
+  in progress) and expire (`network.QUERY_CACHE_TTL_SECONDS`, `…_AVAILABILITY_TTL_SECONDS`).
+  A TTL of 0 turns it off.
+- A quote is remembered after the network-policy check, so a change of policy shows up up to
+  one TTL late. `activity_window` is checked before the cache, so a closed node never serves one.
+- The asking side only recalls and remembers: it never refuses its own concurrent identical
+  questions, which would drop a candidate peer from a second launch for no reason.
+- StartService does not use it. Running a service is not an idempotent answer, two clients may
+  start the same one at once, and every hop is prepaid, so it keeps the token and the budget.
+
+---
+
 ## Tests
 
 [`tests/test_recursion_guard.py`](../tests/test_recursion_guard.py) covers:
@@ -127,8 +165,10 @@ guards it from there.
 - **Multi-node chains**, each node with its own registry: A → B → A and A → B → C → A
   are refused at A; the budget stops a chain; a node from before the field resets only
   the count, and the loop is still caught.
-- **Each RPC that carries the guard.** For StartService through `launch_service`,
-  `StartServiceIterable` and the balancer, the tests also check that existing behaviour
-  is unchanged. GetServiceEstimatedCost is driven through its iterable.
-  GetResourceAvailability goes over a real gRPC stream, including a server that
-  predates #456.
+- **StartService**, through `launch_service`, `StartServiceIterable` and the balancer,
+  including that existing behaviour is unchanged and that a quote goes out without a token.
+
+[`tests/test_query_cache.py`](../tests/test_query_cache.py) covers the cache: the three
+states, errors not cached, TTL, the size bound, one computation under concurrent arrivals,
+canonical keys, an A → B → A chain refused at A, both RPCs through their iterables
+(including closed hours), and the asking side.
