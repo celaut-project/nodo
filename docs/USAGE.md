@@ -95,8 +95,13 @@ These are the most commonly used commands for daily tasks:
   `sudo nodo prune`  
   `sudo nodo prune --all`
 
-- **kill `<instance id>`** (requires root)  
-  Stops a running service instance by ID.  
+- **kill `<instance id> [--json]`** (requires root)  
+  Stops a running service instance by ID or name, and closes the tunnels this host
+  opened to it (`nodo tunnels --instance <id>`): a tunnel to a stopped instance would
+  keep its port bound and fail every connection. Each is closed the way
+  `nodo tunnel_close` closes it. Exits `1`
+  when the instance could not be stopped.
+  JSON: `{"killed": "<id>", "tunnels": {"closed": ["3f9a0c12"], "failed": []}}`.  
   **Example:**  
   `sudo nodo kill abcdef1234567890`
 
@@ -789,7 +794,7 @@ pages, peer reputation adjustment, the detail cards) are commands now too.
 Commands with `--json`: `status`, `services`, `instances`, `peers`, `clients`,
 `peer_reputation`, `config` (all subcommands), `earnings`, `energy`, `schedule`,
 `logs -n`, `docs`, `chat <peer>` (reading), `chat_open`, `chat_threads`,
-`chat_thread`, `reputation`, `donations`, `resources`, `tx_history`, `tunnel`,
+`chat_thread`, `reputation`, `donations`, `resources`, `tx_history`, `kill`, `tunnel`,
 `tunnels`, `tunnel_close`.
 
 ### Agent quick start
@@ -974,7 +979,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | OVERVIEW: energy / schedule summary | — | `nodo energy`, `nodo schedule` (new) |
 | INSTANCES: table, live CPU/RAM/net | — | `nodo instances --json` (new `--json`, live counters); `nodo observe <id>` (interactive stream) |
 | INSTANCES: dependency tree | `g` | `nodo instances --grouped`; `parent_id` in `--json` |
-| INSTANCES: kill | `k` | `nodo kill <instance>` |
+| INSTANCES: kill (closes its tunnels too) | `k` | `nodo kill <instance> [--json]` (new: closes its tunnels; `--json`) |
 | INSTANCES: open a tunnel to the selected instance | `t` | `nodo tunnel <instance> <slot> [--listen <port>] [--udp] --detach [--json]` (new `--detach`) |
 | INSTANCES: tunnels of the selected instance (card line + table under it) | — | `nodo tunnels --instance <instance> [--json]` (new); `nodo instances --json` → `tunnels` |
 | TUNNELS: table, card | — | `nodo tunnels [--json]` (new) |
@@ -1069,7 +1074,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `tunnel <instance> <slot> [...] [--detach] [--json]` | reach an instance's port from here (until stopped; `--detach`: in the background) |
 | `tunnels [<tunnel> \| --instance <i>] [--json]` | the tunnels running on this host, one with its log, or those reaching an instance |
 | `tunnel_close <tunnel>... \| --all [--json]` | stop tunnels |
-| `kill <instance>` | stop one instance (root) |
+| `kill <instance> [--json]` | stop one instance and close its tunnels (root) |
 | `burnall [--yes]` | stop every instance, parents first |
 | `prune [--all] [--dry-run]` | reclaim orphaned runtime dirs |
 | `peers [<peer>] [--json] [--limit N]` | peers, or one with its history |

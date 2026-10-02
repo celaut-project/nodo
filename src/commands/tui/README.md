@@ -223,7 +223,7 @@ visited there, so `]` twice then `[` twice returns you to where you started.
 | `c` | Connect a peer, from Peers; on Schedule, what closing time does (refuse / stop) |
 | `a` | Config: append an element to the selected list |
 | `d` | Delete the selected service, forget the selected peer on Peers, close the selected tunnel on Tunnels, remove the selected Config list element, or show how this node deviates from its closest profile on Cell |
-| `k` | Kill the selected instance |
+| `k` | Kill the selected instance (`nodo kill`, which also closes the tunnels to it; the confirmation says how many) |
 | `t` | Instances: open a tunnel to the selected instance (`nodo tunnel … --detach`) |
 | `g` | Instances: dependency tree / flat list |
 | `i` | Service details, or the selected tunnel with its log on Tunnels |

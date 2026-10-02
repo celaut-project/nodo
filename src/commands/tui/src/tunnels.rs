@@ -799,6 +799,24 @@ mod tests {
         }
 
         #[test]
+        fn killing_an_instance_says_its_tunnels_close_with_it() {
+            let mut app = on_page(Page::Instances);
+            app.instances = StatefulList::with_items(vec![instance("abcdef0123456789", "web")]);
+            app.instances.next();
+            app.tunnels = StatefulList::with_items(vec![parse_tunnel(&record("ab12cd34", 1)).unwrap()]);
+
+            app.open_kill_instance_confirm();
+
+            assert_eq!(app.input_mode, InputMode::Confirm);
+            assert!(app.input_title.contains("Its tunnel is closed too"), "{}", app.input_title);
+
+            app.close_input();
+            app.tunnels = StatefulList::with_items(Vec::new());
+            app.open_kill_instance_confirm();
+            assert_eq!(app.input_title, "Kill instance web? (y/N)");
+        }
+
+        #[test]
         fn the_keys_mean_nothing_on_other_pages() {
             let mut app = on_page(Page::Services);
             app.open_new_tunnel();

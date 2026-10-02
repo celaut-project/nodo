@@ -31,6 +31,13 @@ except Exception as import_exc:  # pragma: no cover - environment-dependent
     tunnel_command = None
     TUNNEL_IMPORT_ERROR = import_exc
 
+try:
+    from src.commands import kill as kill_command
+    KILL_IMPORT_ERROR = None
+except Exception as import_exc:  # pragma: no cover - environment-dependent
+    kill_command = None
+    KILL_IMPORT_ERROR = import_exc
+
 # A process the registry accepts as a tunnel. TERM_IGNORED makes it outlive SIGTERM.
 _SLEEPER = "import signal, sys, time\n{ignore}\ntime.sleep(60)\n"
 TERM_IGNORED = "signal.signal(signal.SIGTERM, signal.SIG_IGN)"
@@ -285,6 +292,66 @@ class InstanceRelationshipTests(RegistryTestCase):
         with patch.dict(os.environ, {}, clear=False), \
                 patch("sqlite3.connect", side_effect=sqlite3.Error("no db")):
             self.assertEqual(tunnels_command.instance_references("web"), {"web"})
+
+
+@unittest.skipIf(kill_command is None, f"Missing runtime dependencies: {KILL_IMPORT_ERROR}")
+class KillClosesTunnelsTests(RegistryTestCase):
+    """``nodo kill`` closes the tunnels this host opened to the instance."""
+
+    def setUp(self):
+        super().setUp()
+        self.patches = [
+            patch.object(kill_command.os, "geteuid", return_value=0),
+            # `web` is the name; the tunnel recorded the id it resolved to.
+            patch.object(kill_command, "resolve_instance_token",
+                         return_value="abcdef0123456789"),
+        ]
+        for patcher in self.patches:
+            patcher.start()
+
+    def tearDown(self):
+        for patcher in self.patches:
+            patcher.stop()
+        super().tearDown()
+
+    def test_kill_closes_the_instances_tunnels_and_leaves_the_others(self):
+        mine, other = self.spawn(), self.spawn()
+        registry.register(_record("mine0003", mine.pid, instance="abcdef0123456789"))
+        registry.register(_record("othr0003", other.pid, instance="db", token="ffff"))
+
+        with patch.object(kill_command, "stop_instance", return_value=0) as stop:
+            ok, document = _run_json(kill_command.kill, "web")
+
+        self.assertTrue(ok)
+        stop.assert_called_once_with(token="web")
+        self.assertEqual(document["killed"], "abcdef0123456789")
+        self.assertEqual(document["tunnels"], {"closed": ["mine0003"], "failed": []})
+        self.assertEqual(mine.wait(timeout=5), -signal.SIGTERM)
+        self.assertEqual([r["id"] for r in registry.list_tunnels()], ["othr0003"])
+
+    def test_the_text_output_names_each_closed_tunnel(self):
+        process = self.spawn()
+        registry.register(_record("mine0004", process.pid))
+        text = io.StringIO()
+        with patch.object(kill_command, "stop_instance", return_value=0), redirect_stdout(text):
+            self.assertTrue(kill_command.kill("web"))
+        self.assertIn("Service instance web deleted.", text.getvalue())
+        self.assertIn("Closed tunnel mine0004", text.getvalue())
+
+    def test_a_failed_kill_leaves_the_tunnels_alone(self):
+        process = self.spawn()
+        registry.register(_record("mine0005", process.pid))
+        with patch.object(kill_command, "stop_instance", return_value=None):
+            ok, document = _run_json(kill_command.kill, "web")
+        self.assertFalse(ok)
+        self.assertIn("error", document)
+        self.assertEqual([r["id"] for r in registry.list_tunnels()], ["mine0005"])
+
+    def test_kill_needs_root(self):
+        with patch.object(kill_command.os, "geteuid", return_value=1000):
+            ok, document = _run_json(kill_command.kill, "web")
+        self.assertFalse(ok)
+        self.assertIn("superuser", document["error"])
 
 
 class CompletionTests(RegistryTestCase):

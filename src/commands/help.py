@@ -71,7 +71,7 @@ GROUPS: List[Group] = [
             ("tunnel <instance> <slot>", "reach its port from here (--detach, --udp, …)"),
             ("tunnels [<tunnel>]", "list or inspect tunnels (--instance <i>, --json)"),
             ("tunnel_close <tunnel>", "stop a tunnel (--all: every one)"),
-            ("kill <instance>", "stop one instance"),
+            ("kill <instance>", "stop one instance and its tunnels (--json)"),
             ("burnall", "stop every instance, parents first (--yes)"),
             ("prune", "reclaim orphaned runtime dirs (--all, --dry-run)"),
         ],

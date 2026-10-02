@@ -5699,8 +5699,15 @@ impl App {
         } else {
             instance.name.clone()
         };
+        // `nodo kill` closes the tunnels this host opened to it, so say so here.
+        let tunnels = crate::tunnels::reaching(&self.tunnels.items, &instance.id, &instance.name).len();
+        let also = match tunnels {
+            0 => String::new(),
+            1 => " Its tunnel is closed too.".to_string(),
+            count => format!(" Its {count} tunnels are closed too."),
+        };
         self.input_mode = InputMode::Confirm;
-        self.input_title = format!("Kill instance {label}? (y/N)");
+        self.input_title = format!("Kill instance {label}?{also} (y/N)");
         self.pending_action = Some(PendingAction::KillInstance {
             id: instance.id.clone(),
             label,
