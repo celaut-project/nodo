@@ -96,8 +96,14 @@ def new_record(
     detached: bool,
     pid: Optional[int] = None,
     log: Optional[str] = None,
+    open_fee_mu: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """The one shape a tunnel is described in, by the CLI and the TUI alike."""
+    """The one shape a tunnel is described in, by the CLI and the TUI alike.
+
+    ``open_fee_mu`` is what each connection through it spends of the instance's
+    balance to open (``pricing.TUNNEL_OPEN_MU``; traffic is billed on top). None
+    through ``--peer``: the remote node charges its own price, which is not known here.
+    """
     return {
         "id": tunnel_id,
         "pid": pid if pid is not None else os.getpid(),
@@ -112,6 +118,7 @@ def new_record(
         "detached": detached,
         "log": log,
         "started_at": int(time.time()),
+        "open_fee_mu": open_fee_mu,
     }
 
 

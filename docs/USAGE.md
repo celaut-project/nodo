@@ -222,10 +222,17 @@ These are the most commonly used commands for daily tasks:
    "token": "abcdef1234567890", "slot": 8080, "transport": "tcp",
    "listen_host": "127.0.0.1", "listen_port": 40517, "gateway": "127.0.0.1:8090",
    "peer": null, "detached": true, "log": "/nodo/storage/tunnels/3f9a0c12.log",
-   "started_at": 1790000000, "age_secs": 0, "persistent": true},
+   "started_at": 1790000000, "open_fee_mu": 10000, "age_secs": 0,
+   "persistent": true},
    "read_at": 1790000000}
   ```
   A tunnel that could not start is `{"error": "Error: cannot bind …"}` with exit `1`.  
+  **Fee.** Opening the listener is free; each connection through it (each UDP flow)
+  opens a `ServiceTunnel` stream, which spends `pricing.TUNNEL_OPEN_MU` of the
+  instance's balance on the relaying node, plus traffic (`pricing.NET_MU_PER_GIB`).
+  The output says how much (`Fee: …`; `open_fee_mu` in JSON, `null` through `--peer`,
+  whose node charges its own price). There is no prompt — scripts and agents run
+  this — while the TUI asks y/N with the amount before opening one.  
 
   `--udp` makes the local socket a datagram socket, for slots that declare UDP;
   the node picks the node-to-service transport from the slot's own declaration,
@@ -999,11 +1006,11 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | INSTANCES: table, live CPU/RAM/net | — | `nodo instances --json` (new `--json`, live counters); `nodo observe <id>` (interactive stream) |
 | INSTANCES: dependency tree | `g` | `nodo instances --grouped`; `parent_id` in `--json` |
 | INSTANCES: kill (closes its tunnels too) | `k` | `nodo kill <instance> [--json]` (new: closes its tunnels; `--json`) |
-| INSTANCES: open a tunnel to the selected instance | `t` | `nodo tunnel <instance> <slot> [--listen <port>] [--udp] --detach [--json]` (new `--detach`) |
+| INSTANCES: open a tunnel to the selected instance (y/N with the fee) | `t` | `nodo tunnel <instance> <slot> [--listen <port>] [--udp] --detach [--json]` (new `--detach`; fee in `open_fee_mu`) |
 | INSTANCES: tunnels of the selected instance (card line + table under it) | — | `nodo tunnels --instance <instance> [--json]` (new); `nodo instances --json` → `tunnels` |
 | TUNNELS: table, card | — | `nodo tunnels [--json]` (new) |
 | TUNNELS: details + log tail | `i` | `nodo tunnels <tunnel id> [--json]` (new) |
-| TUNNELS: open a tunnel to any instance | `n` | `nodo tunnel <instance> <slot> [flags] --detach` (new `--detach`) |
+| TUNNELS: open a tunnel to any instance (y/N with the fee) | `n` | `nodo tunnel <instance> <slot> [flags] --detach` (new `--detach`; fee in `open_fee_mu`) |
 | TUNNELS: close | `d` | `nodo tunnel_close <tunnel id>` (new) |
 | TUNNELS: INBOUND table (streams relayed for others; list only) | — | `nodo tunnels --inbound [--json]` (new) |
 | SERVICES: list | — | `nodo services [--json]` (new `--json`) |
@@ -1158,7 +1165,9 @@ running on this host.
   bonus it earns in routing, are on its card on the Peers page.
 - On Instances, `t` opens a tunnel to the selected instance: type the slot, plus any of
   `--listen <port>`, `--udp`, `--host`, `--peer`, `--idle`. It runs
-  `nodo tunnel <instance> <slot> … --detach` and the status line says where it listens.
+  `nodo tunnel <instance> <slot> … --detach` after a y/N that states the fee (each
+  connection spends `pricing.TUNNEL_OPEN_MU` of the instance's balance), and the
+  status line says where it listens.
   The card counts the tunnels already reaching that instance, and a table under it
   lists them (listen, slot, id, via, age) — `nodo tunnels --instance <instance>`.
 - On Tunnels, `n` opens a tunnel to any instance (`<instance> <slot> [flags]`), `d`

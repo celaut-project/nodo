@@ -144,7 +144,7 @@ authorises the tunnel in the first place.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `pricing.TUNNEL_OPEN_MU` | `10000` | Charged once per tunnel. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
+| `pricing.TUNNEL_OPEN_MU` | `10000` | Charged once per tunnel stream — with `nodo tunnel`, each TCP connection or UDP flow through the local port. `nodo tunnel` prints it (`open_fee_mu` in `--json`) and the TUI asks y/N with the amount before opening one. An instance that cannot pay it is refused up front with `INVALID_ARGUMENT`, before any socket is opened. |
 | `pricing.NET_MU_PER_GIB` | `2000000` | Charged per GiB relayed, counting **both** directions. |
 | `costs.TUNNEL_CHARGE_INTERVAL_KB` | `1024` | How much traffic accumulates before it is billed. |
 

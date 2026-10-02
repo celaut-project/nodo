@@ -438,7 +438,7 @@ _FAKE_NODO = textwrap.dedent("""
     registry.register(registry.new_record(
         tunnel_id=tunnel_id, instance=sys.argv[2], token=sys.argv[2], slot=int(sys.argv[3]),
         udp=False, listen_host="127.0.0.1", listen_port=40000, gateway="127.0.0.1:8090",
-        peer=None, detached=True, log=registry.log_path(tunnel_id)))
+        peer=None, detached=True, log=registry.log_path(tunnel_id), open_fee_mu=10000))
     print("Tunnel listening", flush=True)
     time.sleep(60)
 """)
@@ -541,6 +541,33 @@ class PersistenceTests(RegistryTestCase):
 
 
 @unittest.skipIf(tunnel_command is None, f"Missing runtime dependencies: {TUNNEL_IMPORT_ERROR}")
+class FeeTests(unittest.TestCase):
+    """Opening is never prompted on the CLI (agents run it); the fee is in the output."""
+
+    def test_the_record_carries_the_open_fee(self):
+        record = registry.new_record(
+            tunnel_id="fee00001", instance="i", token="t", slot=80, udp=False,
+            listen_host="127.0.0.1", listen_port=1, gateway="g", peer=None,
+            detached=False, open_fee_mu=10000,
+        )
+        self.assertEqual(record["open_fee_mu"], 10000)
+
+    def test_the_fee_is_this_nodes_price_except_through_a_peer(self):
+        with patch("src.utils.monetary.prices") as prices:
+            prices.return_value.tunnel_open_mu = 10000
+            self.assertEqual(tunnel_command.open_fee_mu(None), 10000)
+            self.assertIsNone(tunnel_command.open_fee_mu("10.0.0.2:8090"))
+
+    def test_the_fee_line_says_what_a_connection_costs(self):
+        with patch("src.utils.monetary.format_mu", return_value="10,000 MU"):
+            line = tunnel_command.describe_fee({"open_fee_mu": 10000})
+        self.assertIn("each connection spends 10,000 MU", line)
+        self.assertIn("TUNNEL_OPEN_MU", line)
+        self.assertIn("free", tunnel_command.describe_fee({"open_fee_mu": 0}))
+        self.assertIn("its own prices", tunnel_command.describe_fee({"open_fee_mu": None}))
+
+
+@unittest.skipIf(tunnel_command is None, f"Missing runtime dependencies: {TUNNEL_IMPORT_ERROR}")
 class DetachTests(RegistryTestCase):
     def setUp(self):
         super().setUp()
@@ -564,6 +591,7 @@ class DetachTests(RegistryTestCase):
         record = document["tunnel"]
         self.assertEqual(record["slot"], 8080)
         self.assertTrue(record["detached"])
+        self.assertEqual(record["open_fee_mu"], 10000, "the fee is in the --json output")
         self.assertEqual([r["id"] for r in registry.list_tunnels()], [record["id"]])
         self.assertTrue(registry.pid_alive(record["pid"]))
         # Kept, pinned to its port, for the daemon to reopen after a restart.

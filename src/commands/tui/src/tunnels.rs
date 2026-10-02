@@ -53,6 +53,10 @@ pub struct Tunnel {
     pub detached: bool,
     pub log: Option<String>,
     pub started_at: Option<i64>,
+    /// What each connection through it spends of the instance's balance to open
+    /// (`pricing.TUNNEL_OPEN_MU` when it was opened). `None` through `--peer`: the
+    /// remote node charges its own price.
+    pub open_fee_mu: Option<u64>,
     /// Has a `<id>.spec` beside it: the daemon reopens it after a restart, until it is
     /// closed on purpose (`tunnel_registry.restore`). `persistent` in `nodo tunnels`.
     pub persistent: bool,
@@ -112,6 +116,7 @@ pub fn parse_tunnel(text: &str) -> Option<Tunnel> {
         detached: value.get("detached").and_then(|v| v.as_bool()).unwrap_or(false),
         log: string("log"),
         started_at: integer("started_at"),
+        open_fee_mu: value.get("open_fee_mu").and_then(|v| v.as_u64()),
         persistent: value.get("persistent").and_then(|v| v.as_bool()).unwrap_or(false),
     })
 }
@@ -353,6 +358,25 @@ pub fn reaching<'a>(tunnels: &'a [Tunnel], instance_id: &str, instance_name: &st
         .collect()
 }
 
+/// The y/N question before a tunnel opens: what each connection through it costs.
+///
+/// `fee` is this node's `pricing.TUNNEL_OPEN_MU`, already formatted; it does not apply
+/// through `--peer`, whose node charges its own price.
+pub fn open_confirmation(label: &str, args: &[String], fee: Option<(u64, String)>) -> String {
+    let through_peer = args.iter().any(|arg| arg == "--peer");
+    let cost = match fee {
+        _ if through_peer => {
+            "The remote node charges each connection to the instance at its own price.".to_string()
+        }
+        Some((0, _)) => "Connections are free to open here (TUNNEL_OPEN_MU 0); traffic is billed.".to_string(),
+        Some((_, text)) => format!(
+            "Each connection spends {text} of the instance's balance (TUNNEL_OPEN_MU), plus traffic."
+        ),
+        None => "Each connection spends pricing.TUNNEL_OPEN_MU of the instance's balance.".to_string(),
+    };
+    format!("{label}? {cost} (y/N)")
+}
+
 /// The INSTANCES card's line about tunnels to the selected instance; the table under
 /// the card lists them.
 pub fn instance_summary(tunnels: &[Tunnel], instance_id: &str, instance_name: &str) -> String {
@@ -493,7 +517,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     // streams this node relays for others. The inbound table gives way first.
     let heights = crate::layout_util::allocate_heights(
         area.height,
-        &[(5, 8), (3, 12), (3, inbound_height(app.inbound_tunnels.len()))],
+        &[(5, 8), (3, 13), (3, inbound_height(app.inbound_tunnels.len()))],
         &[0, 1, 2],
     );
     let rects = crate::layout_util::stack(
@@ -554,6 +578,14 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
                     if tunnel.detached { " (detached)" } else { "" },
                     format_duration_compact(tunnel.age_secs(now))
                 ),
+            ),
+            metric_line(
+                "Fee",
+                match tunnel.open_fee_mu {
+                    Some(mu) => format!("{} per connection, plus traffic", app.money.format_mu(mu)),
+                    None if tunnel.peer.is_some() => "the remote node's prices".to_string(),
+                    None => "pricing.TUNNEL_OPEN_MU per connection".to_string(),
+                },
             ),
             metric_line(
                 "Restart",
@@ -624,15 +656,28 @@ impl App {
         self.edit_kind = crate::app::EditKind::Text;
     }
 
+    /// The typed line, checked; then a y/N that names the fee before anything runs.
     pub(crate) fn submit_new_tunnel(&mut self) {
         match open_command(self.tunnel_instance.as_deref(), &self.input) {
             Ok((label, args)) => {
                 self.close_input();
                 self.tunnel_instance = None;
-                self.spawn_command(CommandKind::Tunnel, label, args);
+                let fee = self.tunnel_open_fee().map(|mu| (mu, self.money.format_mu(mu)));
+                self.input_mode = InputMode::Confirm;
+                self.input_title = open_confirmation(&label, &args, fee);
+                self.pending_action = Some(PendingAction::OpenTunnel { label, args });
             }
             Err(message) => self.status = message,
         }
+    }
+
+    /// This node's `pricing.TUNNEL_OPEN_MU`, as the PRICES page read it.
+    pub(crate) fn tunnel_open_fee(&self) -> Option<u64> {
+        self.prices
+            .items
+            .iter()
+            .find(|price| price.key == "TUNNEL_OPEN_MU" && price.arch.is_none())
+            .map(|price| price.mu)
     }
 
     /// `d` on TUNNELS: confirm, then `nodo tunnel_close <id>`.
@@ -997,6 +1042,39 @@ mod tests {
             press(&mut app, 'n');
             assert_eq!(app.input_mode, InputMode::NewTunnel);
             assert_eq!(app.tunnel_instance, None);
+        }
+
+        #[test]
+        fn opening_asks_first_and_names_the_fee() {
+            let mut app = on_page(Page::Instances);
+            app.instances = StatefulList::with_items(vec![instance("inst-1", "web")]);
+            app.instances.next();
+            press(&mut app, 't');
+            app.input = "8080".to_string();
+
+            app.submit_new_tunnel();
+
+            assert_eq!(app.input_mode, InputMode::Confirm);
+            assert!(app.command_task.is_none(), "nothing runs before y");
+            assert!(app.input_title.contains("TUNNEL_OPEN_MU"), "{}", app.input_title);
+            assert!(app.input_title.ends_with("(y/N)"), "{}", app.input_title);
+            let action = app.pending_action.clone().expect("a pending open");
+            let (_, args) = pending_command(action).unwrap();
+            assert_eq!(args, ["tunnel", "inst-1", "8080", "--detach", "--json"]);
+        }
+
+        #[test]
+        fn the_question_states_the_amount() {
+            let label = "Open tunnel to slot 8080 of web";
+            let local = vec!["tunnel".to_string(), "web".to_string(), "8080".to_string()];
+            assert_eq!(
+                open_confirmation(label, &local, Some((10000, "10,000 MU".to_string()))),
+                "Open tunnel to slot 8080 of web? Each connection spends 10,000 MU of the \
+                 instance's balance (TUNNEL_OPEN_MU), plus traffic. (y/N)"
+            );
+            assert!(open_confirmation(label, &local, Some((0, "0 MU".to_string()))).contains("free to open"));
+            let remote = vec!["tunnel".into(), "tok".into(), "80".into(), "--peer".into(), "h:1".into()];
+            assert!(open_confirmation(label, &remote, Some((10000, "x".into()))).contains("remote node"));
         }
 
         #[test]
