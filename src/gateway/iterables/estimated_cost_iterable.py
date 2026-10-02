@@ -1,5 +1,5 @@
 from src.utils.utils import read_service_from_disk
-from typing import Optional, Generator
+from typing import Generator, Optional, Tuple
 
 from protos import celaut_pb2
 from src.utils.tools.query_cache import QueryCache, canonical_key, quote_ttl, with_sorted_hashes
@@ -8,6 +8,7 @@ from src.gateway.iterables.abstract_input_service_iterable import AbstractInputS
 from src.manager.manager import default_initial_balance
 from src.utils.bee_client import BeeClient, Buffer
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
+from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils import activity_window
 from src.utils.network_policy import enforce_network_policy
 from src.utils.logger import LOGGER as logger
@@ -20,10 +21,13 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
     
     # Although this call does not perform recursion on the peers (it only returns the local estimated cost and not that of the peers), the estimated cost could be requested by the peer that was just asked to execute the service.
     #
-    # The answer depends only on what was asked, so it is remembered by the content of
+    # The price depends only on what was asked, so it is remembered by the content of
     # the question (#456) rather than guarded by a token: the same quote asked again
-    # within `network.QUERY_CACHE_TTL_SECONDS` is served from memory, and one asked while
-    # it is being computed is refused with "retry". See `src/utils/tools/query_cache.py`.
+    # within `network.QUERY_CACHE_TTL_SECONDS` is priced from memory, and one asked while
+    # it is being computed waits for that answer. Whether there is room for it right now
+    # is not remembered: it is checked on every answer, so a full node never serves a
+    # remembered "can run" and a node that has freed room never serves a remembered
+    # "no". See `src/utils/tools/query_cache.py`.
 
     cost: Optional[int] = None
 
@@ -65,11 +69,16 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 self.configuration,
                 with_sorted_hashes(self.metadata),
             )
-            estimated_cost = QueryCache().get_or_compute(
+            price, resources, arch = QueryCache().get_or_compute(
                 key,
                 quote_ttl(),
                 self._quote,
             )
+            # No room, no offer (#280): the same gate `generate_estimated_cost` applies
+            # when it is not split from its price.
+            estimated_cost = price \
+                if get_resource_availability(resources=resources, arch=arch)["can_execute"] \
+                else None
 
             yield from BeeClient.respond(
                 message_iterator=estimated_cost,
@@ -83,7 +92,8 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
             # raise BreakIteration
             yield Buffer(signal=True)
 
-    def _quote(self) -> Optional[celaut_pb2.EstimatedCost]:
+    def _quote(self) -> Tuple[celaut_pb2.EstimatedCost, celaut_pb2.Service.Container.Resources, Optional[str]]:
+        """The price, whatever the load, with what `generate` checks the room for."""
         service = read_service_from_disk(service_hash=self.service_hash)
 
         if not service:
@@ -128,13 +138,15 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 logger(f"Failed to set initial_mu: {e}")
                 raise Exception(f"Failed to set initial_mu: {e}")
 
-        return generate_estimated_cost(
+        price = generate_estimated_cost(
             metadata=self.metadata,
             config=self.configuration,
             resources=resources,
             arch=service_arch,
             service=priced_service,
+            check_availability=False,
         )
+        return price, resources, service_arch
 
     def final(self):
         logger('End request for the cost of a service.')

@@ -79,8 +79,8 @@ answering, this node sends a request to another node: the same RPC or a differen
 | RPC | Re-delegates today? | To whom | Guard before #456 | Guard after #456 |
 |---|---|---|---|---|
 | **StartService** | **Yes**: `launch_service` → `execution_balancer` (a GetServiceEstimatedCost per peer), `delegate_execution` (StartService on the chosen peer), `_force_delegate`, and `evaluate_possible_environment_workloads` (GetResourceAvailability per peer) | any known peer outside the caller's network | Token accepted (index 2), registered by `RecursionGuard` while `launch_service` runs, forwarded to the balancer's quotes and to the delegated StartService. Loop refused. No depth limit. A launch requested by a local instance runs unguarded (`generate=False`) | Same token, same places, same loop refusal. Added: a hop budget (`remaining_hops`) that is accepted, validated, decremented and forwarded; a malformed token is refused; with no hops left the balancer asks no peers and only `local` is a candidate. The availability probe for descendant workloads deliberately does **not** forward the token (see below). Local-instance launches are unchanged |
-| **GetServiceEstimatedCost** | Not today: it returns the local quote only (`GetServiceEstimatedCostIterable.generate`). A request for a hash it lacks does `add_wanted`, and the maintainer later fetches that hash with GetService. That fetch is asynchronous, one level deep and not repeated | (none synchronously) | Token accepted (index 2) and registered. A loop is refused. The token was **not** kept for any downstream call, and no hop count existed | **No guard. Query cache.** The answer is keyed by the hash of the service, configuration and metadata as received. Same question: computed once per `network.QUERY_CACHE_TTL_SECONDS`. Same question while it is being computed: refused with "retry". Asking side: `estimate_cost_on_peer` keeps what a peer answered and does not ask it again. The token on the wire is accepted and ignored, and not sent |
-| **GetResourceAvailability** | Not today: it answers from `get_architecture_availability` alone | (none) | **None.** No index for it; the input was `Client & ArchitectureResources` (#459) | **No guard. Query cache**, with a short TTL (`network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS`, 5 s). The wire is unchanged from before #456. `activity_window` is applied on top of the cached answer, so closed hours always win. Asking side: `check_resource_availability_on_peer` keeps what a peer answered |
+| **GetServiceEstimatedCost** | Not today: it returns the local quote only (`GetServiceEstimatedCostIterable.generate`). A request for a hash it lacks does `add_wanted`, and the maintainer later fetches that hash with GetService. That fetch is asynchronous, one level deep and not repeated | (none synchronously) | Token accepted (index 2) and registered. A loop is refused. The token was **not** kept for any downstream call, and no hop count existed | **No guard. Query cache.** The answer is keyed by the hash of the service, configuration and metadata as received. Same question: priced once per `network.QUERY_CACHE_TTL_SECONDS`, with room for it checked fresh on every answer. Same question while it is being computed: waits for that answer (`network.QUERY_CACHE_WAIT_SECONDS`). Asking side: `estimate_cost_on_peer` keeps what a peer answered for `network.QUERY_CACHE_PEER_TTL_SECONDS` and does not ask it again. The token on the wire is accepted and ignored, and not sent |
+| **GetResourceAvailability** | Not today: it answers from `get_architecture_availability` alone | (none) | **None.** No index for it; the input was `Client & ArchitectureResources` (#459) | **No guard. Query cache**, with a short TTL (`network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS`, 5 s), forgotten whenever a local instance starts, stops or is resized. The wire is unchanged from before #456. `activity_window` is applied on top of the cached answer, so closed hours always win. Asking side: `check_resource_availability_on_peer` keeps what a peer answered |
 | StopService | Yes, along a recorded path: `stop_instance` for a delegated instance calls StopService on the peer that runs it (`manager.py`, `BeeClient.stop_service`), and that peer may do the same | the one peer in the instance's `delegated_instances` row | none | **None, on purpose.** The next hop is a stored record, not a choice, and there is one per hop, so there is no fan-out. The chain is as long as the delegation chain StartService already built under the guard. The input is a lone `TokenMessage` that older nodes parse with a single index, so adding one would break every older peer on the most important cleanup call. Noted in the study as a residual risk |
 | ModifyDeposit | Yes, along a recorded path: `modify_deposit` for a delegated instance calls ModifyDeposit on its peer | the one peer holding the instance | none | **None, on purpose.** Same reasoning as StopService |
 | GetService | No. It serves from the registry. A miss is answered as a miss, and GetService never calls `add_wanted` | – | none (`service_extended(..., recursion_guard_token=None)` with a TODO) | Unchanged. If GetService ever fetches from peers on a miss, it has to take the guard first: its server already parses `StartService_input_indices`, so index 2 is available |
@@ -121,8 +121,8 @@ question, one of three states:
 | State | What the node does |
 |---|---|
 | unknown | computes the answer, holding the question *in progress* meanwhile |
-| in progress | refuses with `QueryInProgress` (the caller sees the RPC error "retry") |
-| done | answers from memory until the TTL runs out |
+| in progress | waits for that answer, up to `network.QUERY_CACHE_WAIT_SECONDS`, and serves it (single-flight). Past the wait, or when the thread computing it asks again itself, refuses with `QueryInProgress` (the caller sees the RPC error "retry") |
+| done | answers from memory until the TTL runs out, or until `invalidate` drops it |
 
 The key is the sha256 of the question's content as this node reads it: each message is
 parsed back, stripped of fields this node does not know, and serialized deterministically,
@@ -136,7 +136,11 @@ What it gives:
   the same service every time) stop costing a recomputation or a call to each peer.
 - **A loop stops after one lap, if the question ever relays.** Neither query asks peers today,
   so this refusal is latent. If one later does, A → B → A arrives at A as a question A holds
-  in progress and is refused. It needs nobody's cooperation, unlike a token.
+  in progress: it waits at most `QUERY_CACHE_WAIT_SECONDS` and is refused, and the lap ends.
+  Inside one process the same thread re-asking is refused at once. It needs nobody's
+  cooperation, unlike a token.
+- **Concurrent launches do not drop each other's candidates.** Two identical questions at once
+  get the same answer; the second waits for the first instead of being told to retry.
 - **A forwarder that changes the question gets it computed again.** That is the right answer
   to a different question. What bounds someone who varies it on purpose is the price of each
   call, not the cache.
@@ -144,10 +148,18 @@ What it gives:
 Limits, on purpose:
 
 - Entries are bounded (`network.QUERY_CACHE_MAX_ENTRIES`, least recently used first, never one
-  in progress) and expire (`network.QUERY_CACHE_TTL_SECONDS`, `…_AVAILABILITY_TTL_SECONDS`).
+  in progress) and expire (`network.QUERY_CACHE_TTL_SECONDS`, `…_PEER_TTL_SECONDS`,
+  `…_AVAILABILITY_TTL_SECONDS`).
   A TTL of 0 turns it off.
-- A quote is remembered after the network-policy check, so a change of policy shows up up to
-  one TTL late. `activity_window` is checked before the cache, so a closed node never serves one.
+- A quote's price is remembered after the network-policy check, so a change of policy shows up
+  up to one TTL late. Whether there is room for it is not remembered: `get_resource_availability`
+  runs on every answer, so a full node never serves a remembered offer and a "no" is never
+  remembered. `activity_window` is checked before the cache, so a closed node never serves one.
+- Availability answers are dropped as soon as a local instance starts, stops or is resized
+  (`SQLConnection.add_local_instance`, `purge_internal`, `update_sys_req`). One being computed
+  at that moment is handed to its caller but not remembered.
+- A peer's quote is reused for less time than this node's own (`…_PEER_TTL_SECONDS`, 10 s):
+  the peer may already have served it from its cache, so the two stack.
 - The asking side only recalls and remembers: it never refuses its own concurrent identical
   questions, which would drop a candidate peer from a second launch for no reason.
 - StartService does not use it. Running a service is not an idempotent answer, two clients may
@@ -169,6 +181,8 @@ Limits, on purpose:
   including that existing behaviour is unchanged and that a quote goes out without a token.
 
 [`tests/test_query_cache.py`](../tests/test_query_cache.py) covers the cache: the three
-states, errors not cached, TTL, the size bound, one computation under concurrent arrivals,
-canonical keys, an A → B → A chain refused at A, both RPCs through their iterables
-(including closed hours), and the asking side.
+states, errors not cached, TTL, the size bound, one computation under concurrent arrivals
+(the others wait and get it), a waiter that computes when the first fails and refuses past
+its wait, invalidation on local starts/stops, canonical keys, an A → B → A chain refused at
+A, both RPCs through their iterables (including closed hours and a quote whose room went
+away), and the asking side.

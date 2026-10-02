@@ -474,11 +474,14 @@ network:
   RECURSION_MAX_HOPS: 16
   # Answers to the two read-only queries (GetServiceEstimatedCost, GetResourceAvailability)
   # are remembered by the content of the question (issue #456), so the same question is
-  # computed once, and one still being computed is refused with "retry" rather than
-  # computed twice (or looped on). The same memory keeps what peers answered us, so a peer
-  # is not asked the same thing twice. A TTL of 0 turns it off for that query.
-  QUERY_CACHE_TTL_SECONDS: 30  # How long a price quote is remembered.
-  QUERY_CACHE_AVAILABILITY_TTL_SECONDS: 5  # How long an availability answer is remembered. Short: it moves fast.
+  # computed once, and one still being computed is waited for rather than computed twice;
+  # it is refused with "retry" only if the wait runs out, or if it came back to the node
+  # computing it (a loop). The same memory keeps what peers answered us, so a peer is not
+  # asked the same thing twice. A TTL of 0 turns it off for that query.
+  QUERY_CACHE_TTL_SECONDS: 30  # How long a quote's price is remembered. Whether there is room for it is checked on every answer.
+  QUERY_CACHE_PEER_TTL_SECONDS: 10  # How long a quote got from a peer is reused. Shorter: the peer may have served it from its own cache.
+  QUERY_CACHE_AVAILABILITY_TTL_SECONDS: 5  # How long an availability answer is remembered. Short: it moves fast. A local start, stop or resize forgets it at once.
+  QUERY_CACHE_WAIT_SECONDS: 5  # How long a question waits for the same one already being computed before it is refused with "retry".
   QUERY_CACHE_MAX_ENTRIES: 4096  # Questions remembered at once; the least recently used go first.
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).

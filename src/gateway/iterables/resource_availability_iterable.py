@@ -24,8 +24,9 @@ class GetResourceAvailabilityIterable:
 
     The answer depends only on the question, so it is remembered by the content of the
     question for `network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS` (#456), and one asked
-    while it is being computed is refused with "retry". Availability moves fast, which
-    is why that TTL is short; 0 turns the cache off. See `src/utils/tools/query_cache.py`.
+    while it is being computed waits for that answer. Availability moves fast, which is
+    why that TTL is short, and every local start, stop or resize forgets these answers
+    at once; 0 turns the cache off. See `src/utils/tools/query_cache.py`.
     """
 
     def __init__(self, request_iterator, context):
