@@ -99,7 +99,7 @@ These are the most commonly used commands for daily tasks:
   Stops a running service instance by ID or name, and closes the tunnels this host
   opened to it (`nodo tunnels --instance <id>`): a tunnel to a stopped instance would
   keep its port bound and fail every connection. Each is closed the way
-  `nodo tunnel_close` closes it. Exits `1`
+  `nodo tunnel_close` closes it, so none of them is reopened after a restart. Exits `1`
   when the instance could not be stopped.
   JSON: `{"killed": "<id>", "tunnels": {"closed": ["3f9a0c12"], "failed": []}}`.  
   **Example:**  
@@ -207,7 +207,14 @@ These are the most commonly used commands for daily tasks:
   `--detach` starts it in the background and returns once the listener is bound,
   printing its id; its output goes to `<main.STORAGE>/tunnels/<id>.log`. This is
   the form for scripts, agents and the TUI, none of which can keep a terminal open
-  for the tunnel's lifetime. `--json` prints the tunnel as one object — at once
+  for the tunnel's lifetime. A detached tunnel survives a reboot or a daemon
+  restart: its spec (`<id>.spec`: instance, slot, flags, pinned to the port it got)
+  is kept, and the daemon reopens it on start under the same id and port, the way
+  delegated endpoints are restored. Closing it on purpose (`nodo tunnel_close`, `d`
+  in the TUI, `nodo kill` of its instance) drops the spec; one whose instance no
+  longer exists is dropped with a log line, and one that fails to start three
+  daemon starts in a row is dropped too. A foreground tunnel is not reopened.
+  `--json` prints the tunnel as one object — at once
   with `--detach`, or as the first line in the foreground (the per-connection log
   then goes to stderr):
   ```json
@@ -215,7 +222,8 @@ These are the most commonly used commands for daily tasks:
    "token": "abcdef1234567890", "slot": 8080, "transport": "tcp",
    "listen_host": "127.0.0.1", "listen_port": 40517, "gateway": "127.0.0.1:8090",
    "peer": null, "detached": true, "log": "/nodo/storage/tunnels/3f9a0c12.log",
-   "started_at": 1790000000, "age_secs": 0}, "read_at": 1790000000}
+   "started_at": 1790000000, "age_secs": 0, "persistent": true},
+   "read_at": 1790000000}
   ```
   A tunnel that could not start is `{"error": "Error: cannot bind …"}` with exit `1`.  
 
@@ -271,7 +279,8 @@ These are the most commonly used commands for daily tasks:
 
 - **tunnel_close `<tunnel id>... | --all` `[--json]`**  
   Stops tunnels: SIGTERM, and SIGKILL if one is still running five seconds later.
-  The tunnel closes its listener and removes its own registry file. A tunnel
+  The tunnel closes its listener and removes its own registry file, and a detached
+  one is no longer reopened when the node restarts. A tunnel
   started by another user (root, typically) needs that user. Exits `1` if any
   named tunnel was not found or could not be stopped.
   JSON: `{"closed": ["3f9a0c12"], "failed": []}`.  

@@ -53,6 +53,9 @@ pub struct Tunnel {
     pub detached: bool,
     pub log: Option<String>,
     pub started_at: Option<i64>,
+    /// Has a `<id>.spec` beside it: the daemon reopens it after a restart, until it is
+    /// closed on purpose (`tunnel_registry.restore`). `persistent` in `nodo tunnels`.
+    pub persistent: bool,
 }
 
 impl Identifiable for Tunnel {
@@ -109,6 +112,7 @@ pub fn parse_tunnel(text: &str) -> Option<Tunnel> {
         detached: value.get("detached").and_then(|v| v.as_bool()).unwrap_or(false),
         log: string("log"),
         started_at: integer("started_at"),
+        persistent: value.get("persistent").and_then(|v| v.as_bool()).unwrap_or(false),
     })
 }
 
@@ -226,8 +230,11 @@ pub fn read_tunnels(directory: &Path) -> Vec<Tunnel> {
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().map(|ext| ext == "json").unwrap_or(false))
-        .filter_map(|path| std::fs::read_to_string(path).ok())
-        .filter_map(|text| parse_tunnel(&text))
+        .filter_map(|path| {
+            let mut tunnel = parse_tunnel(&std::fs::read_to_string(&path).ok()?)?;
+            tunnel.persistent = path.with_extension("spec").exists();
+            Some(tunnel)
+        })
         .filter(|tunnel| pid_alive(tunnel.pid))
         .collect();
     tunnels.sort_by(|a, b| (a.started_at, &a.id).cmp(&(b.started_at, &b.id)));
@@ -486,7 +493,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
     // streams this node relays for others. The inbound table gives way first.
     let heights = crate::layout_util::allocate_heights(
         area.height,
-        &[(5, 8), (3, 11), (3, inbound_height(app.inbound_tunnels.len()))],
+        &[(5, 8), (3, 12), (3, inbound_height(app.inbound_tunnels.len()))],
         &[0, 1, 2],
     );
     let rects = crate::layout_util::stack(
@@ -547,6 +554,14 @@ pub fn draw(frame: &mut Frame, app: &mut App, area: Rect) {
                     if tunnel.detached { " (detached)" } else { "" },
                     format_duration_compact(tunnel.age_secs(now))
                 ),
+            ),
+            metric_line(
+                "Restart",
+                if tunnel.persistent {
+                    "reopened by the node, until closed"
+                } else {
+                    "not reopened (started in a terminal)"
+                },
             ),
             metric_line("Log", tunnel.log.clone().unwrap_or_else(|| "its terminal".to_string())),
             metric_line("Close", format!("d here, or nodo tunnel_close {}", tunnel.id)),
@@ -635,7 +650,8 @@ impl App {
         };
         let label = format!("{} ({})", tunnel.id, tunnel.listen());
         self.input_mode = InputMode::Confirm;
-        self.input_title = format!("Close tunnel {label}? Its clients are cut off. (y/N)");
+        let restart = if tunnel.persistent { " It is not reopened after a restart." } else { "" };
+        self.input_title = format!("Close tunnel {label}? Its clients are cut off.{restart} (y/N)");
         self.pending_action = Some(PendingAction::CloseTunnel { id: tunnel.id, label });
     }
 
@@ -723,11 +739,15 @@ mod tests {
         fs::write(dir.join("live0001.json"), record("live0001", child.id() as i64)).unwrap();
         fs::write(dir.join("dead0001.json"), record("dead0001", i32::MAX as i64 - 1)).unwrap();
         fs::write(dir.join("notes.txt"), "not a tunnel").unwrap();
+        fs::write(dir.join("live0001.spec"), "{}").unwrap();
+        fs::write(dir.join("gone0001.spec"), "{}").unwrap();
 
-        let ids: Vec<String> = read_tunnels(&dir).into_iter().map(|t| t.id).collect();
+        let tunnels = read_tunnels(&dir);
+        let ids: Vec<String> = tunnels.iter().map(|t| t.id.clone()).collect();
 
         assert!(!ids.contains(&"dead0001".to_string()), "{ids:?}");
-        assert_eq!(ids, vec!["live0001".to_string()]);
+        assert_eq!(ids, vec!["live0001".to_string()], "a spec alone is not a tunnel");
+        assert!(tunnels[0].persistent, "its spec says the node reopens it");
         let _ = child.kill();
         let _ = child.wait();
         let _ = fs::remove_dir_all(&dir);
@@ -1005,6 +1025,19 @@ mod tests {
             let action = app.pending_action.clone().expect("a pending close");
             let (_, args) = pending_command(action).unwrap();
             assert_eq!(args, ["tunnel_close", "ab12cd34", "--json"]);
+            assert!(!app.input_title.contains("restart"), "{}", app.input_title);
+        }
+
+        #[test]
+        fn closing_a_persistent_tunnel_says_it_will_not_come_back() {
+            let mut app = on_page(Page::Tunnels);
+            let tunnel = Tunnel { persistent: true, ..parse_tunnel(&record("ab12cd34", 1)).unwrap() };
+            app.tunnels = StatefulList::with_items(vec![tunnel]);
+            app.tunnels.next();
+
+            press(&mut app, 'd');
+
+            assert!(app.input_title.contains("not reopened after a restart"), "{}", app.input_title);
         }
 
         #[test]

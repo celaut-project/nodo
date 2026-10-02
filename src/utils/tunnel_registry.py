@@ -28,8 +28,10 @@ import json
 import os
 import secrets
 import signal
+import subprocess
+import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: Overrides the directory, for tests and for a node whose storage is elsewhere.
 DIR_ENV = "NODO_TUNNELS_DIR"
@@ -39,6 +41,12 @@ ID_ENV = "NODO_TUNNEL_ID"
 
 RECORD_SUFFIX = ".json"
 LOG_SUFFIX = ".log"
+#: What a detached tunnel was opened with, so the daemon can open it again after a
+#: restart (:func:`restore`). Kept until the tunnel is closed on purpose.
+SPEC_SUFFIX = ".spec"
+#: Daemon starts in a row a persisted tunnel may fail to come back before it is
+#: dropped -- a port someone else took, say -- rather than retried forever.
+RESTORE_ATTEMPTS = 3
 
 #: The relaying side: the ``ServiceTunnel`` streams the node carries for others, as
 #: the daemon last wrote them (``src/tunneling/inbound.py``). Not ``.json``, so no
@@ -69,6 +77,10 @@ def record_path(tunnel_id: str, directory: Optional[str] = None) -> str:
 
 def log_path(tunnel_id: str, directory: Optional[str] = None) -> str:
     return os.path.join(directory or registry_dir(), tunnel_id + LOG_SUFFIX)
+
+
+def spec_path(tunnel_id: str, directory: Optional[str] = None) -> str:
+    return os.path.join(directory or registry_dir(), tunnel_id + SPEC_SUFFIX)
 
 
 def new_record(
@@ -190,6 +202,8 @@ def list_tunnels(directory: Optional[str] = None, sweep: bool = True) -> List[Di
             continue
         started = record.get("started_at")
         record["age_secs"] = int(now - started) if isinstance(started, (int, float)) else None
+        # Reopened by the daemon after a restart (see `restore`).
+        record["persistent"] = os.path.exists(spec_path(record["id"], directory))
         tunnels.append(record)
     tunnels.sort(key=lambda record: (record.get("started_at") or 0, record["id"]))
     return tunnels
@@ -220,6 +234,7 @@ def close(record: Dict[str, Any], directory: Optional[str] = None, grace_s: floa
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         unregister(record["id"], directory)
+        forget(record["id"], directory)
         return True
     except PermissionError:
         return False
@@ -234,6 +249,8 @@ def close(record: Dict[str, Any], directory: Optional[str] = None, grace_s: floa
         except ProcessLookupError:
             pass
     unregister(record["id"], directory)
+    # Closed on purpose (tunnel_close, the TUI's `d`, kill): not to be reopened.
+    forget(record["id"], directory)
     return True
 
 
@@ -320,3 +337,164 @@ def read_inbound(directory: Optional[str] = None) -> Dict[str, Any]:
         stream["age_secs"] = int(now - started) if isinstance(started, (int, float)) else None
     streams.sort(key=lambda stream: (stream.get("started_at") or 0, str(stream.get("id"))))
     return {"streams": streams, "snapshot_at": written_at}
+
+
+# -- Detached tunnels, and bringing them back after a restart ------------------------
+
+
+def spawn_detached(
+    argv: List[str],
+    nodo_py: str,
+    tunnel_id: Optional[str] = None,
+    timeout_s: float = 60.0,
+    directory: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Run ``nodo tunnel <argv>`` in the background; ``(record, None)`` once it is up.
+
+    The child is the same command with its output sent to ``<id>.log`` beside its
+    record, in a session of its own so closing a terminal does not take it down. It
+    reports success the only way that cannot lie: by registering, which it does after
+    binding. If it exits first, its last log line is the error.
+    """
+    tunnel_id = tunnel_id or new_id()
+    directory = directory or registry_dir()
+    try:
+        os.makedirs(directory, exist_ok=True)
+        log_file = open(log_path(tunnel_id, directory), "ab")
+    except OSError as e:
+        return None, f"Error: cannot write the tunnel registry {directory} ({e})."
+
+    with log_file:
+        child = subprocess.Popen(
+            [sys.executable, nodo_py, "tunnel", *argv],
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            env=dict(os.environ, **{DIR_ENV: directory, ID_ENV: tunnel_id}),
+            start_new_session=True,
+        )
+
+    path = record_path(tunnel_id, directory)
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if os.path.exists(path):
+            break
+        if child.poll() is not None:
+            # Its last words, not the whole log: start-up chatter comes first.
+            said = [line.strip() for line in log_tail({"log": log_file.name}) if line.strip()]
+            unregister(tunnel_id, directory)
+            return None, said[-1] if said else f"Error: the tunnel exited ({child.returncode})."
+        time.sleep(0.1)
+    else:
+        child.kill()
+        unregister(tunnel_id, directory)
+        return None, f"Error: the tunnel did not start within {int(timeout_s)}s."
+
+    found = find(tunnel_id, directory)
+    if not found:
+        return None, "Error: the tunnel registered and exited at once."
+    return found[0], None
+
+
+def save_spec(record: Dict[str, Any], argv: List[str], directory: Optional[str] = None,
+              failures: int = 0) -> None:
+    """Remember how to reopen a detached tunnel.
+
+    ``argv`` is pinned to the port it got: a client given that address after a
+    restart cannot be told about another one.
+    """
+    argv = list(argv)
+    if "--listen" not in argv and record.get("listen_port"):
+        argv += ["--listen", str(record["listen_port"])]
+    spec = {
+        "id": record["id"],
+        "argv": argv,
+        "instance": record.get("instance"),
+        "token": record.get("token"),
+        "peer": record.get("peer"),
+        "slot": record.get("slot"),
+        "transport": record.get("transport"),
+        "listen_port": record.get("listen_port"),
+        "saved_at": int(time.time()),
+        "failures": failures,
+    }
+    directory = directory or registry_dir()
+    os.makedirs(directory, exist_ok=True)
+    path = spec_path(record["id"], directory)
+    temporary = f"{path}.{os.getpid()}.tmp"
+    with open(temporary, "w") as handle:
+        json.dump(spec, handle)
+    os.replace(temporary, path)
+
+
+def forget(tunnel_id: str, directory: Optional[str] = None) -> None:
+    try:
+        os.remove(spec_path(tunnel_id, directory))
+    except FileNotFoundError:
+        pass
+
+
+def list_specs(directory: Optional[str] = None) -> List[Dict[str, Any]]:
+    directory = directory or registry_dir()
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    specs = []
+    for name in names:
+        if not name.endswith(SPEC_SUFFIX):
+            continue
+        spec = _read(os.path.join(directory, name))
+        if spec is not None and isinstance(spec.get("argv"), list):
+            specs.append(spec)
+    return specs
+
+
+def restore(
+    nodo_py: str,
+    instance_exists: Callable[[str], bool],
+    log: Callable[[str], None] = print,
+    directory: Optional[str] = None,
+    timeout_s: float = 60.0,
+) -> int:
+    """Reopen the detached tunnels that were running before a restart.
+
+    Called once when the daemon starts, the way delegated endpoints are restored.
+    Each comes back under its own id, on its own port, through the same detach path
+    ``nodo tunnel --detach`` takes. One still running (a daemon restart that did not
+    take it down) is left alone. One whose instance is gone is dropped with a log
+    line; one that fails to start is retried on the next start, up to
+    ``RESTORE_ATTEMPTS`` in a row, then dropped. Returns how many were reopened.
+    """
+    directory = directory or registry_dir()
+    restored = 0
+    for spec in list_specs(directory):
+        tunnel_id = spec["id"]
+        if any(record["id"] == tunnel_id for record in list_tunnels(directory)):
+            continue
+        target = spec.get("token") or spec.get("instance") or ""
+        if not spec.get("peer") and not instance_exists(target):
+            forget(tunnel_id, directory)
+            log(f"[TUNNEL] Dropped tunnel {tunnel_id}: instance {target} no longer exists.")
+            continue
+        record, error = spawn_detached(
+            spec["argv"], nodo_py, tunnel_id=tunnel_id, timeout_s=timeout_s, directory=directory,
+        )
+        if record is not None:
+            save_spec(record, spec["argv"], directory)
+            restored += 1
+            log(f"[TUNNEL] Reopened tunnel {tunnel_id} on "
+                f"{record['listen_host']}:{record['listen_port']} -> slot {record['slot']}.")
+            continue
+        failures = int(spec.get("failures") or 0) + 1
+        if failures >= RESTORE_ATTEMPTS:
+            forget(tunnel_id, directory)
+            log(f"[TUNNEL] Dropped tunnel {tunnel_id} after {failures} failed reopenings: {error}")
+        else:
+            spec["failures"] = failures
+            path = spec_path(tunnel_id, directory)
+            with open(path, "w") as handle:
+                json.dump(spec, handle)
+            log(f"[TUNNEL] Could not reopen tunnel {tunnel_id} ({error}); "
+                f"will retry on the next start.")
+    return restored

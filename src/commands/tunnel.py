@@ -15,7 +15,8 @@ Every tunnel registers itself while it runs (``src/utils/tunnel_registry.py``), 
 ``nodo tunnels`` lists it and ``nodo tunnel_close`` stops it -- from another shell,
 a script, or the TUI. ``--detach`` starts the same command in the background and
 returns once the listener is bound, which is what the TUI and an agent need: neither
-can keep a terminal open for the length of a tunnel.
+can keep a terminal open for the length of a tunnel. A detached tunnel is also
+reopened when the node restarts, until it is closed on purpose.
 
 The listener binds to loopback by default — it is a local entry point to a
 remote service, not a new way to expose one.
@@ -29,10 +30,8 @@ make sense end to end. The relay engine itself lives in
 import os
 import signal
 import socket
-import subprocess
 import sys
 import threading
-import time
 from typing import List, Optional
 
 from src.manager.manager import resolve_instance_token
@@ -201,55 +200,38 @@ def detach(argv: List[str], as_json: bool = False, timeout_s: float = DETACH_TIM
     """Run ``nodo tunnel <argv>`` in the background; return once it is listening.
 
     The child is the same command with its output sent to ``<id>.log`` beside its
-    registry file, in a session of its own so closing this terminal does not take
-    it down. It reports success the only way that cannot lie: by registering, which
-    it does after binding. If it exits first, its log says why.
+    registry file (``tunnel_registry.spawn_detached``). Its spec is kept too, pinned
+    to the port it got, so the daemon reopens it after a restart
+    (``tunnel_registry.restore``) until it is closed on purpose.
     """
     from src.commands._catalogue import emit_error, emit_json
 
-    tunnel_id = registry.new_id()
-    directory = registry.registry_dir()
+    record, error = registry.spawn_detached(argv, NODO_PY, timeout_s=timeout_s)
+    if record is None:
+        return emit_error(as_json, error)
     try:
-        os.makedirs(directory, exist_ok=True)
-        log_file = open(registry.log_path(tunnel_id, directory), "ab")
+        registry.save_spec(record, argv)
+        record["persistent"] = True
     except OSError as e:
-        return emit_error(as_json, f"Error: cannot write the tunnel registry {directory} ({e}).")
-
-    with log_file:
-        child = subprocess.Popen(
-            [sys.executable, NODO_PY, "tunnel", *argv],
-            stdin=subprocess.DEVNULL,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            env=dict(os.environ, **{registry.ID_ENV: tunnel_id}),
-            start_new_session=True,
-        )
-
-    path = registry.record_path(tunnel_id, directory)
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        if os.path.exists(path):
-            break
-        if child.poll() is not None:
-            # Its last words, not the whole log: start-up chatter comes first.
-            said = [line.strip() for line in registry.log_tail({"log": log_file.name}) if line.strip()]
-            reason = said[-1] if said else ""
-            registry.unregister(tunnel_id, directory)
-            return emit_error(as_json, reason or f"Error: the tunnel exited ({child.returncode}).")
-        time.sleep(0.1)
-    else:
-        child.kill()
-        registry.unregister(tunnel_id, directory)
-        return emit_error(as_json, f"Error: the tunnel did not start within {int(timeout_s)}s.")
-
-    record = registry.find(tunnel_id, directory)
-    if not record:
-        return emit_error(as_json, "Error: the tunnel registered and exited at once.")
-    record = record[0]
+        record["persistent"] = False
+        _eprint(f"Warning: it will not be reopened after a restart ({e}).")
     if as_json:
         emit_json({"tunnel": record})
     else:
         _print(f"Started in the background (pid {record['pid']}, log {record['log']}).")
-        _print(f"Stop it with `nodo tunnel_close {tunnel_id}`.")
+        _print("It is reopened when the node restarts, until it is closed.")
+        _print(f"Stop it with `nodo tunnel_close {record['id']}`.")
         _print(describe(record))
     return True
+
+
+def restore_detached() -> int:
+    """Reopen the detached tunnels of the last run; called once at daemon start."""
+    from src.manager.manager import resolve_instance_token
+    from src.utils.logger import LOGGER
+
+    return registry.restore(
+        nodo_py=NODO_PY,
+        instance_exists=lambda reference: bool(resolve_instance_token(reference=reference)),
+        log=LOGGER,
+    )
