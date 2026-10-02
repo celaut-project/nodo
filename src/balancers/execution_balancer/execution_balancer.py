@@ -13,6 +13,7 @@ from src.utils.arch_guard import arch_from_tags
 from src.utils.cost_functions.architecture_resources import ask_of, should_skip_peer
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
 from src.identity.grpc_transport import peer_channel
+from src.utils.tools.query_cache import HIT, QueryCache, canonical_key, quote_ttl, with_sorted_hashes
 from src.utils.tools.recursion_guard import Registry
 from src.utils.utils import service_extended, peers_id_iterator
 from src.utils.config import ConfigManager
@@ -87,19 +88,34 @@ def estimate_cost_on_peer(
         resources: celaut.Service.Container.Resources,
         metadata: celaut.Metadata,
         configuration: celaut_pb2.Configuration,
-        recursion_guard_token: str = None,
 ) -> Optional[celaut_pb2.EstimatedCost]:
     """Ask exactly one peer for its `GetServiceEstimatedCost` on this service.
 
     The configuration is converted to the target peer's MU before asking for a
     quote, and the returned quote is converted back to local MU.  This leaves
     the balancer and the caller with one comparable/accountable scale.
+
+    A quote already obtained for this very question is reused for
+    `network.QUERY_CACHE_TTL_SECONDS` (#456), so launches that price the same service
+    do not ask the same peer again. The question carries no recursion token: the peer
+    answers from its own machine and never passes it on, and what it remembers is keyed
+    by content (`src/utils/tools/query_cache.py`).
     """
     try:
         payment_system = matching_payment_system(peer_id)
         peer_configuration = configuration_for_peer(
             configuration, payment_system=payment_system
         )
+        ttl = quote_ttl()
+        key = canonical_key(
+            "peer-quote", peer_id, peer_configuration, with_sorted_hashes(metadata)
+        ) if ttl > 0 else None
+        if key is not None:
+            status, remembered = QueryCache().recall(key)
+            if status == HIT:
+                reused = type(remembered)()
+                reused.CopyFrom(remembered)
+                return reused
         peer_cost = BeeClient.get_service_estimated_cost(
             peer_channel(peer_id),
             service_extended(
@@ -107,11 +123,15 @@ def estimate_cost_on_peer(
                 metadata=metadata,
                 send_only_hashes=SEND_ONLY_HASHES_ASKING_COST,
                 client_id=get_client_id_on_other_peer(peer_id=peer_id),
-                recursion_guard_token=recursion_guard_token
             ),
             timeout=_timeout_for_cost_request(),
         )
-        return estimated_cost_for_local(peer_cost, payment_system=payment_system)  # MUpeer -> MUlocal
+        cost = estimated_cost_for_local(peer_cost, payment_system=payment_system)  # MUpeer -> MUlocal
+        if key is not None and cost is not None:
+            kept = type(cost)()
+            kept.CopyFrom(cost)
+            QueryCache().remember(key, kept, ttl)
+        return cost
     except Exception as e:
         _log_cost_request_exception(peer_id=peer_id, exc=e)
         return None
@@ -182,8 +202,9 @@ def execution_balancer(
     # option, so the caller either runs the service here or fails -- which is what
     # network.DELEGATE_EXECUTION: false asks for.
     # A request tree that has spent its hops (#456) may still run here, but may not be
-    # passed on: every peer asked from here would refuse it on arrival, so asking them
-    # for a price is a round-trip each for candidates that could never be selected.
+    # passed on: a peer selected from here would be handed the StartService with no hops
+    # left and refuse it on arrival, so asking for its price is a round-trip each for
+    # candidates that could never be selected.
     if env_manager.get("network.DELEGATE_EXECUTION", True) \
             and not Registry().can_forward(recursion_guard_token):
         log.LOGGER(
@@ -209,7 +230,6 @@ def execution_balancer(
                     resources=resources,
                     metadata=metadata,
                     configuration=configuration,
-                    recursion_guard_token=recursion_guard_token,
                 )
                 if cost is not None:
                     peers[peer_id] = cost

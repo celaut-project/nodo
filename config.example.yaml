@@ -463,15 +463,23 @@ network:
   # refuses every launch. That is a coherent thing to ask for -- a node that is only a
   # wallet and a peer directory -- and nothing stops you, but it is worth meaning.
   EXECUTE_LOCALLY: true
-  # How many nodes one request tree may span (issue #456): a StartService and every peer
-  # it is delegated to in turn, or a cost quote / availability probe passed along the same
-  # way. Counted from the node the request starts at -- or the first node that gets it
-  # without a count, which is what a peer predating the field sends. Each node passing it
-  # on sends one less; one given none left refuses it, and one with a single hop left runs
-  # it itself or not at all. A count from a peer is clamped to this, never raised by it.
-  # Cycles (A -> B -> A) are refused regardless, by the request's token. See
-  # docs/RECURSION_GUARD.md.
+  # How many nodes one StartService tree may span (issue #456): a StartService and every
+  # peer it is delegated to in turn. Counted from the node the request starts at -- or the
+  # first node that gets it without a count, which is what a peer predating the field
+  # sends. Each node passing it on sends one less; one given none left refuses it, and one
+  # with a single hop left runs it itself or not at all. A count from a peer is clamped to
+  # this, never raised by it. Cycles (A -> B -> A) are refused regardless, by the request's
+  # token. Cost quotes and availability probes carry none of this: they are answered from
+  # the cache below. See docs/RECURSION_GUARD.md.
   RECURSION_MAX_HOPS: 16
+  # Answers to the two read-only queries (GetServiceEstimatedCost, GetResourceAvailability)
+  # are remembered by the content of the question (issue #456), so the same question is
+  # computed once, and one still being computed is refused with "retry" rather than
+  # computed twice (or looped on). The same memory keeps what peers answered us, so a peer
+  # is not asked the same thing twice. A TTL of 0 turns it off for that query.
+  QUERY_CACHE_TTL_SECONDS: 30  # How long a price quote is remembered.
+  QUERY_CACHE_AVAILABILITY_TTL_SECONDS: 5  # How long an availability answer is remembered. Short: it moves fast.
+  QUERY_CACHE_MAX_ENTRIES: 4096  # Questions remembered at once; the least recently used go first.
   # Service tunneling (Gateway.ServiceTunnel) -- see docs/TUNNELING.md.
   DELEGATION_TUNNEL_POLICY: auto  # When a service is delegated to a peer, how its uri_slot is served to our client. "auto": tunnel only when the peer's advertised address is not reachable from us (a client on the same network keeps talking to the peer directly, with no tunnel overhead). "always": tunnel every delegated instance, no reachability guessing. "never": always hand over the peer's own address (a client on another network will fail to connect).
   TUNNEL_UDP_IDLE_TIMEOUT_S: 30  # A datagram slot has no EOF, so a UDP tunnel closes after this many seconds of silence once the caller stops sending.
