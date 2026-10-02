@@ -300,7 +300,27 @@ if __name__ == '__main__':
                 warn_if_not_serving()
 
             case "logs":
-                os.system(f"tail -f {MAIN_DIR}/storage/app.log")
+                # Bare: follow forever. `-n <lines>` / `--json`: a bounded tail that exits.
+                from src.commands.logs import logs
+                ok = logs(main_dir=MAIN_DIR, argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "status":
+                # OVERVIEW as one report (`--json` for one object); bare `nodo` in prose.
+                from src.commands.status import status
+                ok = status(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "config":
+                # get/set/append/remove/profile -- the TUI's config transaction, scriptable.
+                from src.commands.config_edit import config_command
+                ok = config_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "docs":
+                from src.commands.docs import docs
+                ok = docs(main_dir=MAIN_DIR, argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
 
             case "export":
                 if len(sys.argv) < 4:
@@ -643,8 +663,9 @@ if __name__ == '__main__':
                     pass
 
             case "services":
-                from src.commands.services import list_services
-                list_services()
+                from src.commands.services import services_command
+                ok = services_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
             
             case "tag":
                 from src.commands.services import modify_tag
@@ -652,19 +673,36 @@ if __name__ == '__main__':
                 modify_tag(service=sys.argv[2], tag=tag)
                 
             case 'clients':
-                from src.commands.clients import list_clients
-                list_clients()
+                from src.commands.clients import clients_command
+                ok = clients_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
                 
             case "peers":
-                from src.commands.peers import list_peers
-                list_peers()
+                from src.commands.peers import peers_command
+                ok = peers_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "peer_reputation":
+                # The TUI's `+`/`-` on PEERS: move our local score of a peer, with an event.
+                peer_reputation_args = [a for a in sys.argv[2:] if a != "--json"]
+                if len(peer_reputation_args) != 2:
+                    print("Usage: nodo peer_reputation <peer_id> <+N|-N> [--json]", flush=True)
+                    os._exit(1)
+                from src.commands.peers import adjust_peer_reputation
+                ok = adjust_peer_reputation(
+                    peer_id=peer_reputation_args[0], delta=peer_reputation_args[1],
+                    as_json="--json" in sys.argv[2:],
+                )
+                os._exit(0 if ok else 1)
 
             case "instances":
                 from src.commands.instances import list_instances
                 args = sys.argv[2:]
                 groupable = "--grouped" in args and not args.remove("--grouped")
+                as_json = "--json" in args and not args.remove("--json")
                 search = " ".join(args)
-                list_instances(groupable=groupable, search=search)
+                ok = list_instances(groupable=groupable, search=search, as_json=as_json)
+                os._exit(0 if ok is not False else 1)
 
             case 'connect':
                 from src.commands.connect import connect
@@ -854,6 +892,21 @@ if __name__ == '__main__':
                 ok = reputation(argv=sys.argv[2:])
                 os._exit(0 if ok else 1)
 
+            case "earnings":
+                from src.commands.history import earnings
+                ok = earnings(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "energy":
+                from src.commands.history import energy
+                ok = energy(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
+            case "schedule":
+                from src.commands.history import schedule
+                ok = schedule(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
             case "donations":
                 from src.commands.donations import donations
                 ok = donations(argv=sys.argv[2:])
@@ -921,7 +974,9 @@ if __name__ == '__main__':
                 # un-threaded history -- see chat_open/chat_reply/chat_threads
                 # for conversations (issue #431).
                 # `--service <id|tag>` attaches a local service as a card (#438).
-                chat_args, chat_service = take_option(sys.argv[2:], "--service")
+                chat_as_json = "--json" in sys.argv[2:]
+                chat_args, chat_service = take_option(
+                    [a for a in sys.argv[2:] if a != "--json"], "--service")
                 if not chat_args:
                     print("Usage: nodo chat <peer_id> [message...] [--service <id|tag>]", flush=True)
                     os._exit(1)
@@ -933,14 +988,15 @@ if __name__ == '__main__':
                     )
                 else:
                     from src.commands.chat import show_chat
-                    ok = show_chat(peer_id=chat_peer_id)
+                    ok = show_chat(peer_id=chat_peer_id, as_json=chat_as_json)
                 os._exit(0 if ok else 1)
 
             case "chat_open":
                 # `--message` sends a real first message distinct from the topic
                 # label (TUI peer/topic/body wizard); omitting it keeps sending
                 # `topic` itself, exactly as before that wizard existed.
-                chat_open_args, chat_open_opts = take_options(sys.argv[2:], "--message", "--service")
+                chat_open_args, chat_open_opts = take_options(
+                    [a for a in sys.argv[2:] if a != "--json"], "--message", "--service")
                 if len(chat_open_args) < 2:
                     print(
                         "Usage: nodo chat_open <peer_id> <topic...> [--message body] "
@@ -954,6 +1010,7 @@ if __name__ == '__main__':
                     topic=" ".join(chat_open_args[1:]),
                     body=chat_open_opts.get("--message"),
                     service=chat_open_opts.get("--service"),
+                    as_json="--json" in sys.argv[2:],
                 )
                 os._exit(0 if ok else 1)
 
@@ -976,9 +1033,12 @@ if __name__ == '__main__':
             case "chat_threads":
                 # `nodo chat_threads` lists every conversation; `nodo chat_threads
                 # <peer_id>` narrows to one peer's.
-                chat_threads_args = sys.argv[2:]
+                chat_threads_args = [a for a in sys.argv[2:] if a != "--json"]
                 from src.commands.chat import list_threads
-                ok = list_threads(peer_id=chat_threads_args[0] if chat_threads_args else None)
+                ok = list_threads(
+                    peer_id=chat_threads_args[0] if chat_threads_args else None,
+                    as_json="--json" in sys.argv[2:],
+                )
                 os._exit(0 if ok else 1)
 
             case "chat_thread":
@@ -987,7 +1047,7 @@ if __name__ == '__main__':
                     print("Usage: nodo chat_thread <conversation_id>", flush=True)
                     os._exit(1)
                 from src.commands.chat import show_thread
-                ok = show_thread(conversation_id=sys.argv[2])
+                ok = show_thread(conversation_id=sys.argv[2], as_json="--json" in sys.argv[3:])
                 os._exit(0 if ok else 1)
 
             case "chat_close":
