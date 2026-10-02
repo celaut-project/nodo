@@ -78,6 +78,9 @@ pub trait Identifiable {
 pub enum Page {
     Overview,
     Instances,
+    /// The `nodo tunnel` processes running on this host: where each listens and
+    /// what it reaches. Opened here or with `t` on INSTANCES; see `tunnels.rs`.
+    Tunnels,
     Services,
     /// Peers we talk to, and what we have paid them.
     Peers,
@@ -214,12 +217,14 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 14] = [
+    pub const ALL: [Page; 15] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
         // network this node is part of and the services are what it brings to it.
         Page::Instances,
+        // Beside Instances: a tunnel is a way into one of them.
+        Page::Tunnels,
         Page::Peers,
         Page::Services,
         Page::Clients,
@@ -249,6 +254,7 @@ impl Page {
         match self {
             Page::Overview => "OVERVIEW",
             Page::Instances => "INSTANCES",
+            Page::Tunnels => "TUNNELS",
             Page::Services => "SERVICES",
             Page::Peers => "PEERS",
             Page::Clients => "CLIENTS",
@@ -265,11 +271,12 @@ impl Page {
     }
 
     /// The name on the page row when the full ones do not fit (issue #453): short
-    /// enough that the widest group's five pages fit a 40-column terminal.
+    /// enough that the widest group's six pages fit a 40-column terminal (unpadded).
     pub fn short_title(self) -> &'static str {
         match self {
             Page::Overview => "OVER",
             Page::Instances => "INST",
+            Page::Tunnels => "TUNL",
             Page::Services => "SERV",
             Page::Peers => "PEERS",
             Page::Clients => "CLNT",
@@ -291,9 +298,12 @@ impl Page {
     pub fn group(self) -> PageGroup {
         match self {
             Page::Overview => PageGroup::Status,
-            Page::Instances | Page::Peers | Page::Services | Page::Clients | Page::Chat => {
-                PageGroup::Activity
-            }
+            Page::Instances
+            | Page::Tunnels
+            | Page::Peers
+            | Page::Services
+            | Page::Clients
+            | Page::Chat => PageGroup::Activity,
             Page::Earnings => PageGroup::Money,
             Page::Logs => PageGroup::Record,
             Page::Cell | Page::Pricing | Page::Schedule | Page::Energy | Page::Config => {
@@ -515,6 +525,9 @@ pub enum InputMode {
     /// SERVICES page: the hash of a service this node does not hold, to ask the
     /// network for with `nodo get` (issue #438).
     GetService,
+    /// A new tunnel: `<slot> [flags]` from INSTANCES (`t`, to the selected
+    /// instance) or `<instance> <slot> [flags]` from TUNNELS (`n`).
+    NewTunnel,
     /// CHAT page, a step of `ComposeChatMessage`: which of this node's services to
     /// attach to the message as a card (issue #438). Esc goes back to the message
     /// rather than dropping it.
@@ -643,6 +656,9 @@ pub enum PendingAction {
     /// moment it launches, and goes on burning MU until something stops it.
     ExecuteService { id: String, label: String },
     DisconnectPeer { id: String, label: String },
+    /// Stop a running tunnel. Confirmed because whatever is connected through it is
+    /// cut off, and reopening it may not get the same local port back.
+    CloseTunnel { id: String, label: String },
     /// Remove one element from a list in config.yaml. Confirmed like the others
     /// because dropping an entry from, say, a network policy loosens it silently.
     DeleteConfigItem {
@@ -685,6 +701,10 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         PendingAction::DisconnectPeer { id, label } => Some((
             format!("Forget peer {label}"),
             vec!["disconnect".to_string(), id],
+        )),
+        PendingAction::CloseTunnel { id, label } => Some((
+            format!("Close tunnel {label}"),
+            vec!["tunnel_close".to_string(), id, "--json".to_string()],
         )),
         PendingAction::DeleteConfigItem { .. } => None,
         PendingAction::ApplyWrites { .. } => None,
@@ -1063,6 +1083,9 @@ pub(crate) enum CommandKind {
     /// "not a valid service hash" and "queued" alike with a zero exit, so
     /// `Generic`'s "completed" would read the same for both.
     Report,
+    /// `nodo tunnel --detach --json` / `nodo tunnel_close --json`: the status comes
+    /// from the one JSON object, whose `error` is on stdout (`tunnels::outcome_status`).
+    Tunnel,
 }
 
 /// Result of a background `nodo` invocation.
@@ -2914,6 +2937,11 @@ pub struct App {
     pub running: bool,
     pub peers: StatefulList<Peer>,
     pub clients: StatefulList<Client>,
+    /// The TUNNELS page: running `nodo tunnel` processes, read from the registry.
+    pub tunnels: StatefulList<crate::tunnels::Tunnel>,
+    /// The instance a `t` on INSTANCES opened the new-tunnel prompt for; `None` when
+    /// the prompt came from TUNNELS and the instance is typed.
+    pub tunnel_instance: Option<String>,
     /// The CHAT sidebar (issue #431): every conversation, both directions, plus each
     /// peer's topic-less bucket, merged and sorted by recency -- see `chat::ChatEntry`.
     pub conversations: StatefulList<ChatEntry>,
@@ -3185,6 +3213,10 @@ impl Default for App {
             running: true,
             peers: StatefulList::with_items(get_peers(&paths.database).unwrap_or_default()),
             clients: StatefulList::with_items(get_clients(&paths.database).unwrap_or_default()),
+            tunnels: StatefulList::with_items(crate::tunnels::read_tunnels(
+                &crate::tunnels::tunnels_dir(&paths.storage),
+            )),
+            tunnel_instance: None,
             conversations: StatefulList::with_items(
                 crate::chat::load_entries(&paths.database).unwrap_or_default(),
             ),
@@ -3496,6 +3528,7 @@ impl App {
             // than up/down adjusting and ←/← selecting.
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.previous(),
+            Page::Tunnels => self.tunnels.previous(),
             Page::Services => {
                 self.services.previous();
                 self.load_selection_details();
@@ -3533,6 +3566,7 @@ impl App {
         match self.page() {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.next(),
+            Page::Tunnels => self.tunnels.next(),
             Page::Services => {
                 self.services.next();
                 self.load_selection_details();
@@ -3841,6 +3875,7 @@ impl App {
     fn select_visible_row(&mut self, visible: usize) {
         match self.page() {
             Page::Instances => self.instances.select_visible(visible),
+            Page::Tunnels => self.tunnels.select_visible(visible),
             Page::Services => {
                 self.services.select_visible(visible);
                 self.load_selection_details();
@@ -4277,6 +4312,7 @@ impl App {
             InputMode::NewChatTopic => self.submit_new_chat_topic(),
             InputMode::ComposeChatMessage => self.submit_chat_compose(),
             InputMode::GetService => self.submit_get_service(),
+            InputMode::NewTunnel => self.submit_new_tunnel(),
             InputMode::PickChatService => self.submit_chat_service_pick(),
             InputMode::SearchDocs => self.submit_docs_search(),
             // The writes confirmation answers y/n, never Enter: Enter on a
@@ -5690,6 +5726,11 @@ impl App {
                 self.details = None;
                 self.open_lever_value_editor(lever, path);
             }
+            PendingAction::CloseTunnel { id, label } => {
+                if let Some((label, args)) = pending_command(PendingAction::CloseTunnel { id, label }) {
+                    self.spawn_command(CommandKind::Tunnel, label, args);
+                }
+            }
             other => {
                 if let Some((label, args)) = pending_command(other) {
                     self.spawn_command(CommandKind::Generic, label, args);
@@ -5784,6 +5825,14 @@ impl App {
                 } else {
                     format!("{} failed: {}", outcome.label, first_line(&outcome.stderr))
                 };
+            }
+            CommandKind::Tunnel => {
+                self.status = crate::tunnels::outcome_status(
+                    &outcome.label,
+                    outcome.success,
+                    &outcome.stdout,
+                    &outcome.stderr,
+                );
             }
             CommandKind::Generic => {
                 self.status = if outcome.success {
@@ -5893,6 +5942,7 @@ impl App {
         self.refresh_peers();
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
+        self.refresh_tunnels();
         self.refresh_chat();
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
@@ -8271,6 +8321,7 @@ mod tests {
                 vec![
                     Page::Overview,
                     Page::Instances,
+                    Page::Tunnels,
                     Page::Peers,
                     Page::Services,
                     Page::Clients,

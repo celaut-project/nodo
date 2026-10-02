@@ -51,7 +51,16 @@ pub struct ContextMenu {
 /// no menu. Every key here is one `handle_key_events` answers on that page.
 pub fn page_actions(page: Page) -> Vec<MenuItem> {
     match page {
-        Page::Instances => vec![MenuItem::new("Kill", 'k'), MenuItem::new("Tree / flat view", 'g')],
+        Page::Instances => vec![
+            MenuItem::new("Open a tunnel…", 't'),
+            MenuItem::new("Kill", 'k'),
+            MenuItem::new("Tree / flat view", 'g'),
+        ],
+        Page::Tunnels => vec![
+            MenuItem::new("Details", 'i'),
+            MenuItem::new("Close", 'd'),
+            MenuItem::new("New tunnel…", 'n'),
+        ],
         Page::Services => vec![
             MenuItem::new("Execute", 'e'),
             MenuItem::new("Details", 'i'),
