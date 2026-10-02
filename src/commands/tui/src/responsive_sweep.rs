@@ -117,6 +117,28 @@ fn announced(n: usize) -> Announced {
     }
 }
 
+/// What this node announces, as `nodo resources --json` would report it: both
+/// architectures, arm64 unbenchmarked.
+fn own_announcement() -> Announced {
+    const GIB: u64 = 1 << 30;
+    Announced::Declared(vec![
+        ArchOffer {
+            arch: "linux/amd64".to_string(),
+            millicores: Some(12_000),
+            mem_bytes: Some(48 * GIB),
+            disk_bytes: Some(1024 * GIB),
+            benchmark: vec![("int_ops_per_sec".to_string(), 1_700_000_000)],
+        },
+        ArchOffer {
+            arch: "linux/arm64".to_string(),
+            millicores: Some(8_000),
+            mem_bytes: Some(16 * GIB),
+            disk_bytes: Some(512 * GIB),
+            benchmark: Vec::new(),
+        },
+    ])
+}
+
 fn client(id: &str) -> Client {
     Client {
         id: id.to_string(),
@@ -154,6 +176,7 @@ pub(crate) fn populated_app() -> App {
             .collect(),
     );
     app.clients = StatefulList::with_items(ids.iter().map(|id| client(id)).collect());
+    app.own_resources.announced = Some(own_announcement());
     app.conversations = StatefulList::with_items(
         ids.iter()
             .take(8)
@@ -822,7 +845,7 @@ fn wide_glyphs_stay_inside_the_chat_pane() {
     }
 }
 
-/// The Overview's estimate of what the peers can reach (issue #455) is drawn on
+/// The Overview's estimate of what this node can reach (issue #455) is drawn on
 /// every terminal the grid is used at, and says what it is: an upper bound, per
 /// architecture, with the peers that said nothing counted.
 #[test]
@@ -830,16 +853,47 @@ fn the_overview_shows_what_peers_can_reach() {
     for (width, height) in [(80, 24), (120, 40), (200, 60)] {
         let mut app = on_page(Page::Overview);
         let screen = text(&draw(&mut app, width, height));
-        for needle in ["PEERS · UPPER BOUND", "amd64", "arm64", "6 undeclared"] {
+        for needle in ["TOTAL · UPPER BOUND", "amd64", "arm64", "6 undeclared"] {
             assert!(screen.contains(needle), "{needle:?} missing at {width}x{height}:\n{screen}");
         }
     }
-    // 30 peers: 6 undeclared (n % 5 == 1), 6 unreadable (n % 5 == 2).
+    // 30 peers: 6 undeclared (n % 5 == 1), 6 unreadable (n % 5 == 2); plus this
+    // node's own 12c/48G/1T amd64 and 8c/16G/512G arm64.
     let mut app = on_page(Page::Overview);
     let screen = text(&draw(&mut app, 200, 60));
-    for needle in ["amd64 104c 416G 7.4T ×12", "arm64 40c 112G 2.0T ×7*", "6 undeclared, 6 unreadable", "not free capacity"] {
+    for needle in ["amd64 116c 464G 8.4T ×13", "arm64 48c 128G 2.5T ×8*", "6 undeclared, 6 unreadable", "not free capacity"] {
         assert!(screen.contains(needle), "{needle:?} missing:\n{screen}");
     }
+    assert!(!screen.contains("This node not included"), "{screen}");
+
+    // Until `nodo resources` answers, the total is the peers' alone, and says so.
+    let mut app = on_page(Page::Overview);
+    app.own_resources = Default::default();
+    let screen = text(&draw(&mut app, 200, 60));
+    for needle in ["amd64 104c 416G 7.4T ×12", "arm64 40c 112G 2.0T ×7*", "This node not included"] {
+        assert!(screen.contains(needle), "{needle:?} missing:\n{screen}");
+    }
+}
+
+/// This node's own announcement has a card of its own beside the total, at every
+/// size the grid is drawn at, and a failed read says why.
+#[test]
+fn the_overview_shows_what_this_node_announces() {
+    for (width, height) in [(80, 24), (120, 40), (200, 60)] {
+        let mut app = on_page(Page::Overview);
+        let screen = text(&draw(&mut app, width, height));
+        for needle in ["NODE · ANNOUNCED", "amd64 12c 48G 1.0T", "arm64 8c 16G 512G", "No scores: arm64"] {
+            assert!(screen.contains(needle), "{needle:?} missing at {width}x{height}:\n{screen}");
+        }
+    }
+    let mut app = on_page(Page::Overview);
+    app.own_resources = crate::peer_resources::OwnResources {
+        announced: None,
+        error: "nodo resources timed out".to_string(),
+    };
+    let screen = text(&draw(&mut app, 200, 60));
+    assert!(screen.contains("nodo resources timed out"), "{screen}");
+    assert!(!screen.contains("reading…"), "{screen}");
 }
 
 /// The selected peer's card spells out what it announced, per architecture, with

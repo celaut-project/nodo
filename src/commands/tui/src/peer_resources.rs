@@ -17,8 +17,10 @@
 //! * benchmark scores are not summed or maxed into it: they are per-core rates, and
 //!   "N cores, best score X" would read as N cores each at X, which no peer said.
 //!   They are shown per peer, in its detail card, where they mean what they say;
-//! * this node's own capacity is not in it -- HOST CAPACITY is the card for that, and
-//!   it reads the live machine rather than an announcement.
+//! * this node's own *announcement* is in it -- what `nodo resources --json` reports,
+//!   the same `Peer.resources` this node signs for its peers -- so the total is what
+//!   the node can reach, itself included. An announcement beside announcements: the
+//!   live machine is still HOST CAPACITY's, and is never added to them.
 
 use crate::app::protos;
 use std::collections::BTreeMap;
@@ -165,10 +167,40 @@ pub fn decode_advertisement(bytes: Option<&[u8]>) -> Announced {
     from_decoded(bytes.map(protos::Peer::decode).as_ref())
 }
 
+/// This node's own announcement, as `nodo resources --json` last reported it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OwnResources {
+    /// `None` until the first report lands.
+    pub announced: Option<Announced>,
+    /// Why the last read failed; the previous announcement, if any, stays.
+    pub error: String,
+}
+
+/// The report line of `nodo resources --json`: `{"peer": "<base64 Peer>"}`, the
+/// serialized `Peer` carrying only `resources`, so it is decoded exactly like a
+/// peer's stored advertisement. `{"error": ...}` is the command's own failure.
+pub fn parse_own_resources(line: &str) -> Result<Announced, String> {
+    use base64::Engine;
+    let report: serde_json::Value =
+        serde_json::from_str(line).map_err(|error| format!("Unreadable resources report: {error}"))?;
+    if let Some(error) = report.get("error").and_then(|error| error.as_str()) {
+        return Err(error.to_string());
+    }
+    let encoded = report
+        .get("peer")
+        .and_then(|peer| peer.as_str())
+        .ok_or_else(|| "Resources report has no announcement".to_string())?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("Unreadable resources report: {error}"))?;
+    Ok(decode_advertisement(Some(&bytes)))
+}
+
 /// One architecture's row of the total.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ArchTotal {
-    /// Peers that announced this architecture at all.
+    /// Nodes that announced this architecture at all: peers, plus this node when
+    /// its own announcement is in the total.
     pub peers: usize,
     pub millicores: u64,
     pub mem_bytes: u64,
@@ -183,9 +215,12 @@ pub struct ArchTotal {
 pub struct PotentialResources {
     /// Per canonical architecture, in tag order so the card does not reshuffle.
     pub per_arch: BTreeMap<String, ArchTotal>,
+    /// Peers only; this node is [`PotentialResources::own_included`].
     pub declared: usize,
     pub undeclared: usize,
     pub unreadable: usize,
+    /// Whether this node's own announced ceilings are in `per_arch`.
+    pub own_included: bool,
 }
 
 impl PotentialResources {
@@ -205,20 +240,39 @@ pub fn aggregate<'a>(announcements: impl IntoIterator<Item = &'a Announced>) -> 
             Announced::Unreadable => total.unreadable += 1,
             Announced::Declared(offers) => {
                 total.declared += 1;
-                for offer in offers {
-                    let row = total.per_arch.entry(offer.arch.clone()).or_default();
-                    row.peers += 1;
-                    row.millicores = row.millicores.saturating_add(offer.millicores.unwrap_or(0));
-                    row.mem_bytes = row.mem_bytes.saturating_add(offer.mem_bytes.unwrap_or(0));
-                    row.disk_bytes = row.disk_bytes.saturating_add(offer.disk_bytes.unwrap_or(0));
-                    if offer.is_partial() {
-                        row.partial += 1;
-                    }
-                }
+                add_offers(&mut total, offers);
             }
         }
     }
     total
+}
+
+/// [`aggregate`] with this node's own announcement added in, when it declared one:
+/// what this node can reach, itself included. Its own silence is not a peer's, so it
+/// is never counted as undeclared or unreadable -- the card says it is missing instead.
+pub fn aggregate_with_own<'a>(
+    own: Option<&Announced>,
+    peers: impl IntoIterator<Item = &'a Announced>,
+) -> PotentialResources {
+    let mut total = aggregate(peers);
+    if let Some(Announced::Declared(offers)) = own {
+        add_offers(&mut total, offers);
+        total.own_included = true;
+    }
+    total
+}
+
+fn add_offers(total: &mut PotentialResources, offers: &[ArchOffer]) {
+    for offer in offers {
+        let row = total.per_arch.entry(offer.arch.clone()).or_default();
+        row.peers += 1;
+        row.millicores = row.millicores.saturating_add(offer.millicores.unwrap_or(0));
+        row.mem_bytes = row.mem_bytes.saturating_add(offer.mem_bytes.unwrap_or(0));
+        row.disk_bytes = row.disk_bytes.saturating_add(offer.disk_bytes.unwrap_or(0));
+        if offer.is_partial() {
+            row.partial += 1;
+        }
+    }
 }
 
 /// Millicores as cores: `12`, `2.5`, `0.25`. Never rounds a fraction up to a whole
@@ -436,6 +490,45 @@ pub(crate) mod tests {
         let total = aggregate([&huge, &huge]);
         let row = &total.per_arch["linux/amd64"];
         assert_eq!((row.millicores, row.mem_bytes, row.disk_bytes), (u64::MAX, u64::MAX, u64::MAX));
+    }
+
+    #[test]
+    fn this_node_adds_its_own_rows_but_is_never_a_silent_peer() {
+        let peer = decode_advertisement(Some(&advertisement(vec![entry(&["linux/amd64"], sys(8, 16 * GIB, GIB))])));
+        let own = decode_advertisement(Some(&advertisement(vec![
+            entry(&["x86_64"], sys(4, 8 * GIB, GIB)),
+            entry(&["linux/arm64"], sys(2, 4 * GIB, GIB)),
+        ])));
+        let total = aggregate_with_own(Some(&own), [&peer]);
+        assert!(total.own_included);
+        assert_eq!((total.declared, total.undeclared, total.unreadable), (1, 0, 0));
+        assert_eq!(
+            total.per_arch["linux/amd64"],
+            ArchTotal { peers: 2, millicores: 12_000, mem_bytes: 24 * GIB, disk_bytes: 2 * GIB, partial: 0 }
+        );
+        assert_eq!(total.per_arch["linux/arm64"].peers, 1);
+
+        // Not read yet, or nothing announced: the peers' total, flagged as such.
+        for own in [None, Some(&Announced::Undeclared), Some(&Announced::Unreadable)] {
+            let total = aggregate_with_own(own, [&peer]);
+            assert!(!total.own_included);
+            assert_eq!(total, aggregate([&peer]));
+        }
+    }
+
+    #[test]
+    fn the_own_report_decodes_like_a_stored_advertisement() {
+        use base64::Engine;
+        let bytes = advertisement(vec![entry(&["linux/amd64"], sys(4, GIB, GIB))]);
+        let line = format!(
+            r#"{{"peer": "{}", "read_at": 1}}"#,
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        );
+        assert_eq!(parse_own_resources(&line), Ok(decode_advertisement(Some(&bytes))));
+        assert_eq!(parse_own_resources(r#"{"peer": ""}"#), Ok(Announced::Undeclared));
+        assert_eq!(parse_own_resources(r#"{"error": "no psutil"}"#), Err("no psutil".to_string()));
+        assert!(parse_own_resources(r#"{"peer": "%%"}"#).is_err());
+        assert!(parse_own_resources("not json").is_err());
     }
 
     #[test]

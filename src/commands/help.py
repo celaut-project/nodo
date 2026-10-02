@@ -74,6 +74,7 @@ GROUPS: List[Group] = [
         None,
         [
             ("peers", "list the peers this node knows"),
+            ("resources", "what this node announces it can run (--json)"),
             ("connect <ip:port>", "introduce this node to a peer"),
             ("disconnect <peer>", "forget a peer"),
             ("chat <peer> [message...]", "read a peer's chat history, or send it a message"),

@@ -859,6 +859,11 @@ if __name__ == '__main__':
                 ok = donations(argv=sys.argv[2:])
                 os._exit(0 if ok else 1)
 
+            case "resources":
+                from src.commands.resources import resources
+                ok = resources(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
             case "verify_reputation":
                 if len(sys.argv) < 3:
                     print("Usage: nodo verify_reputation <peer_id>", flush=True)

@@ -99,6 +99,7 @@ COMMANDS = sorted(
         "disconnect",
         "reputation",
         "donations",
+        "resources",
         "submit_reputation",
         "sync_reputation_proof",
         "refresh_ergo_nodes",
