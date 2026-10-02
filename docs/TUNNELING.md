@@ -244,6 +244,15 @@ nodo tunnels --instance my-instance                   # the ones reaching it
 nodo tunnel_close 3f9a0c12                            # stop it (or --all)
 ```
 
+On the relaying node, `nodo tunnels --inbound` (and the INBOUND table on the TUI's
+TUNNELS page) lists the `ServiceTunnel` streams it is carrying for others: the
+caller's address, the instance token and slot, the protocol, the bytes relayed each
+way so far, and the age. They are kept in the daemon's memory
+(`src/tunneling/inbound.py`) and mirrored to `<main.STORAGE>/tunnels/inbound.snapshot`
+on every open and close and every 2 s while one is open. They are listed, not
+closed: the daemon has no control path for that, and the instance's balance and
+`host_limits` are what end them.
+
 `nodo kill <instance>` closes the tunnels this host opened to that instance as well:
 with the instance gone they would only hold their ports and fail every connection.
 
@@ -387,8 +396,8 @@ they existed:
   than in a registry of their own. What *does* exist is narrower: each running
   `nodo tunnel` process leaves `<main.STORAGE>/tunnels/<id>.json` for as long as it
   runs (`src/utils/tunnel_registry.py`), so `nodo tunnels` can list the client ends
-  this host opened. Nothing is restored after a restart, and the relaying node still
-  keeps no list of the streams it carries.
+  this host opened, and the relaying node lists the streams it carries in memory
+  (`nodo tunnels --inbound`). Nothing is restored after a restart.
 * **A reachability check from outside.** The router guide (`nodo nat-guide`)
   exists, but nothing confirms from *outside* that the gateway port is really
   forwarded: a connection from inside the node's own network succeeds either way.

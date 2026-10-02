@@ -240,25 +240,34 @@ These are the most commonly used commands for daily tasks:
   part of the delegated instance, not `nodo tunnel` processes, and are not listed by
   `nodo tunnels`.
 
-- **tunnels `[<tunnel id> | --instance <instance>] [--json]`**  
+- **tunnels `[<tunnel id> | --instance <instance> | --inbound] [--json]`**  
   Lists the tunnels running on this host — every `nodo tunnel`, detached or in a
   terminal — with where each listens, the slot it reaches, the instance, through
   which node, its pid and age. A tunnel id (or an unambiguous prefix of one) shows
   that tunnel with the last lines of its log. Files left by a tunnel that died
-  without cleaning up (killed with `-9`, a reboot) are swept, not listed. Only the
-  client ends this host opened are here: the node keeps no record of the
-  `ServiceTunnel` streams it relays for others.
+  without cleaning up (killed with `-9`, a reboot) are swept, not listed. These are
+  the client ends this host opened.  
+  `--inbound` is the other end: the `ServiceTunnel` streams this node is relaying
+  for others right now — who (the caller's address), which instance and slot, the
+  protocol, bytes in (caller → service) and out so far, and age. The daemon keeps
+  them in memory and mirrors them to `<main.STORAGE>/tunnels/inbound.snapshot` (every
+  open and close, and every 2 s while one is open); a snapshot left by a daemon that
+  is no longer running lists nothing. List only: they cannot be closed from here.
   `--instance <instance>` lists only the tunnels that reach that instance (by id or
   name, through this node) — the instance → tunnels table the TUI shows under the
   INSTANCES card. `nodo instances --json` also carries each local instance's tunnel
   ids in `tunnels`.
   JSON: `{"tunnels": [tunnel, …]}` / `{"tunnel": {…, "log_tail": ["…"]}}` /
   `{"instance": "web", "tunnels": [tunnel, …]}`, with `tunnel` as above. An unknown
-  or ambiguous id is `{"error": …}`, exit `1`.  
+  or ambiguous id is `{"error": …}`, exit `1`. `--inbound`:
+  `{"inbound": [{"id", "caller", "token", "slot", "transport", "target",
+  "started_at", "bytes_in", "bytes_out", "age_secs"}, …], "snapshot_at": 1790000000}`
+  (`snapshot_at` is `null` when the node is not running).  
   **Examples:**  
   `nodo tunnels`  
   `nodo tunnels 3f9a --json`  
-  `nodo tunnels --instance my-instance --json`
+  `nodo tunnels --instance my-instance --json`  
+  `nodo tunnels --inbound`
 
 - **tunnel_close `<tunnel id>... | --all` `[--json]`**  
   Stops tunnels: SIGTERM, and SIGKILL if one is still running five seconds later.
@@ -811,6 +820,7 @@ nodo logs -n 100 --json                    # last 100 log lines, then exit
 nodo tunnel <instance> 8080 --detach --json  # reach a slot from here; returns its id
 nodo tunnels --json                        # tunnels running on this host
 nodo tunnels --instance <instance> --json  # the ones reaching one instance
+nodo tunnels --inbound --json              # streams this node relays for others
 nodo tunnel_close <tunnel id> --json       # and close one
 ```
 
@@ -986,6 +996,7 @@ nodo tunnel_close <tunnel id> --json       # and close one
 | TUNNELS: details + log tail | `i` | `nodo tunnels <tunnel id> [--json]` (new) |
 | TUNNELS: open a tunnel to any instance | `n` | `nodo tunnel <instance> <slot> [flags] --detach` (new `--detach`) |
 | TUNNELS: close | `d` | `nodo tunnel_close <tunnel id>` (new) |
+| TUNNELS: INBOUND table (streams relayed for others; list only) | — | `nodo tunnels --inbound [--json]` (new) |
 | SERVICES: list | — | `nodo services [--json]` (new `--json`) |
 | SERVICES: reputation card | — | `nodo services <service> [--json]` (new) |
 | SERVICES: details | `i` | `nodo inspect <service>` |
@@ -1072,7 +1083,7 @@ Every command `nodo help` lists, in one place (details elsewhere on this page):
 | `instances [<search>] [--grouped] [--json]` | what is running |
 | `observe <instance> [--save <path>]` | live metrics and network capture (streams; Ctrl+C) |
 | `tunnel <instance> <slot> [...] [--detach] [--json]` | reach an instance's port from here (until stopped; `--detach`: in the background) |
-| `tunnels [<tunnel> \| --instance <i>] [--json]` | the tunnels running on this host, one with its log, or those reaching an instance |
+| `tunnels [<tunnel> \| --instance <i> \| --inbound] [--json]` | the tunnels running on this host, one with its log, those reaching an instance, or the streams relayed for others |
 | `tunnel_close <tunnel>... \| --all [--json]` | stop tunnels |
 | `kill <instance> [--json]` | stop one instance and close its tunnels (root) |
 | `burnall [--yes]` | stop every instance, parents first |
@@ -1143,7 +1154,8 @@ running on this host.
   lists them (listen, slot, id, via, age) — `nodo tunnels --instance <instance>`.
 - On Tunnels, `n` opens a tunnel to any instance (`<instance> <slot> [flags]`), `d`
   closes the selected one after a confirmation (`nodo tunnel_close`), and `i` shows it
-  with the tail of its log.
+  with the tail of its log. The INBOUND table under the card lists the streams this
+  node relays for others (`nodo tunnels --inbound`); it is read-only.
 - On Services, `e` executes the selected service and `d` deletes it.
 - On Config, Right/Left enter and leave a branch of the tree, `e` edits any selected YAML
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are

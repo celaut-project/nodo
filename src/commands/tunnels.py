@@ -2,8 +2,9 @@
 
 ``nodo tunnel`` opens one; these find and stop them again, from any shell, a script
 or the TUI's TUNNELS page, which reads the same registry
-(``src/utils/tunnel_registry.py``). Only the client ends this host opened are here:
-the node keeps no table of the streams it relays for others (``docs/TUNNELING.md``).
+(``src/utils/tunnel_registry.py``). ``nodo tunnels --inbound`` is the other end: the
+streams this node is relaying for others, from the snapshot the daemon keeps
+(``src/tunneling/inbound.py``). Those are listed, not closed.
 """
 
 import sqlite3
@@ -52,6 +53,52 @@ def render_list(tunnels: List[Dict[str, Any]]) -> str:
     lines = ["  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip()
              for row in [header, *rows]]
     return "\n".join(lines) + "\n"
+
+
+def _bytes(count: Any) -> str:
+    if not isinstance(count, (int, float)):
+        return "?"
+    for unit, size in (("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10)):
+        if count >= size:
+            return f"{count / size:.1f} {unit}"
+    return f"{int(count)} B"
+
+
+def render_inbound(streams: List[Dict[str, Any]], snapshot_at: Any) -> str:
+    """The inbound table. Pure, like :func:`render_list`."""
+    if snapshot_at is None:
+        return ("No inbound tunnels: the node is not running (or has not relayed one "
+                "since it started).\n")
+    if not streams:
+        return "No inbound tunnels: this node is not relaying for anyone right now.\n"
+    header = ("ID", "CALLER", "INSTANCE", "SLOT", "PROTO", "IN", "OUT", "AGE")
+    rows = [
+        (
+            str(stream.get("id")),
+            str(stream.get("caller") or "?"),
+            str(stream.get("token") or "?")[:16],
+            str(stream.get("slot")),
+            str(stream.get("transport") or "?"),
+            _bytes(stream.get("bytes_in")),
+            _bytes(stream.get("bytes_out")),
+            _age(stream.get("age_secs")),
+        )
+        for stream in streams
+    ]
+    widths = [max(len(row[i]) for row in [header, *rows]) for i in range(len(header))]
+    lines = ["  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip()
+             for row in [header, *rows]]
+    return "\n".join(lines) + "\n"
+
+
+def list_inbound(as_json: bool = False) -> bool:
+    """``nodo tunnels --inbound``: the ServiceTunnel streams this node relays."""
+    inbound = registry.read_inbound()
+    if as_json:
+        emit_json({"inbound": inbound["streams"], "snapshot_at": inbound["snapshot_at"]})
+    else:
+        print(render_inbound(inbound["streams"], inbound["snapshot_at"]), end="", flush=True)
+    return True
 
 
 def render_one(record: Dict[str, Any], log_lines: List[str]) -> str:

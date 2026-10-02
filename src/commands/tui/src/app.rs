@@ -2939,6 +2939,9 @@ pub struct App {
     pub clients: StatefulList<Client>,
     /// The TUNNELS page: running `nodo tunnel` processes, read from the registry.
     pub tunnels: StatefulList<crate::tunnels::Tunnel>,
+    /// The TUNNELS page's second table: the `ServiceTunnel` streams this node relays
+    /// for others, from the daemon's snapshot. Listed only, never selected.
+    pub inbound_tunnels: Vec<crate::tunnels::InboundStream>,
     /// The instance a `t` on INSTANCES opened the new-tunnel prompt for; `None` when
     /// the prompt came from TUNNELS and the instance is typed.
     pub tunnel_instance: Option<String>,
@@ -3216,6 +3219,7 @@ impl Default for App {
             tunnels: StatefulList::with_items(crate::tunnels::read_tunnels(
                 &crate::tunnels::tunnels_dir(&paths.storage),
             )),
+            inbound_tunnels: crate::tunnels::read_inbound(&crate::tunnels::tunnels_dir(&paths.storage)),
             tunnel_instance: None,
             conversations: StatefulList::with_items(
                 crate::chat::load_entries(&paths.database).unwrap_or_default(),

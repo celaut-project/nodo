@@ -339,6 +339,7 @@ class Gateway(celaut_pb2_grpc.Gateway):
                     partitions_message_mode={1: True, 0: True},
                 ),
                 is_active=context.is_active,
+                caller=context.peer(),
             )
         except TunnelError as e:
             log.LOGGER(f'Tunnel refused: {e}')
