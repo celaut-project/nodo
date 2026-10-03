@@ -114,6 +114,42 @@ class ForeignLedgerTests(unittest.TestCase):
         ledger.formal = bytes(ledger.formal).replace(b"network=mainnet", b"network=testnet")
         self.assertFalse(manager._accept_contract(self._contract(ledger), "p"))
 
+    def test_a_ledger_declaring_only_its_tag_is_not_stored(self):
+        # A node from before ledgers were declared: its rate is per whole unit, and
+        # read here as per base unit it would be wrong by 10^9 (#467).
+        for tag in ("ergo", "bitcoin"):
+            legacy = celaut_pb2.Contract.Ledger(tags=[tag], formal=b"")
+            self.assertFalse(manager._accept_contract(self._contract(legacy), "p"))
+            self.assertIsNone(payment_process._ledger_tag(legacy))
+
+    def test_a_proof_ledger_declaring_only_its_tag_does_not_match(self):
+        from src.identity.node_identity import same_component, same_declaration
+
+        legacy = celaut_pb2.Contract.Ledger(tags=["ergo"], formal=b"")
+        ours = ledger_descriptors.reputation_ledger("ergo")
+        self.assertTrue(same_component(legacy, ours))  # the loose rule, kept elsewhere
+        self.assertFalse(same_declaration(legacy, ours))
+        self.assertFalse(same_declaration(legacy, legacy))  # two empty formals agree on nothing
+
+    def test_a_reputation_proof_declaring_only_its_tag_is_refused(self):
+        from src.reputation_system.contracts.ergo import proof_validation
+        from src.reputation_system.envs import REPUTATION_PROOF_ERGO_TREE
+        from src.utils.contract_xattrs import set_script
+
+        def proof(ledger):
+            contract = celaut_pb2.Contract(ledger=ledger)
+            set_script(contract, bytes.fromhex(REPUTATION_PROOF_ERGO_TREE))
+            return contract
+
+        legacy = proof_validation.explain_contract_ledger(
+            proof(celaut_pb2.Contract.Ledger(tags=["ergo"], formal=b"")), "00"
+        )
+        self.assertEqual(legacy, "Contract ledger not compatible: ledger=False script=True")
+        declared = proof_validation.explain_contract_ledger(
+            proof(ledger_descriptors.reputation_ledger("ergo")), "00"
+        )
+        self.assertNotIn("ledger=False", declared or "")
+
     def test_a_ledger_this_node_does_not_know_is_not_stored(self):
         ledger = celaut_pb2.Contract.Ledger(tags=["dogecoin"], formal=b"chain=dogecoin")
         self.assertFalse(manager._accept_contract(self._contract(ledger), "p"))

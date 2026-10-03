@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from protos import celaut_pb2 as celaut
 
-from src.identity.node_identity import get_node_public_key_hex, same_component
+from src.identity.node_identity import get_node_public_key_hex, same_declaration
 from src.reputation_system.contracts.ergo.utils import (
     box_register,
     decode_coll_byte_hex,
@@ -212,11 +212,11 @@ def explain_contract_ledger(
     the first two checks, so it could pass a proof the node refused.
     """
     # Equivalence policy: the ledger is compared the way every descriptor is
-    # (node_identity.same_component: `formal`, which here declares the whole Ergo ledger
+    # (node_identity.same_declaration: a non-empty `formal`, which here declares the whole Ergo ledger
     # including the reputation register layout), plus the compiled ErgoTree the proof
     # actually names (get_script). `prose` is for a reader and decides nothing.
     expected_script = bytes.fromhex(REPUTATION_PROOF_ERGO_TREE)
-    ledger_matches = same_component(contract_ledger.ledger, ergo_ledger())
+    ledger_matches = same_declaration(contract_ledger.ledger, ergo_ledger())
     script_matches = get_script(contract_ledger) == expected_script
     if not (ledger_matches and script_matches):
         return (

@@ -649,6 +649,7 @@ def create_tables(cursor):
     })
     retire_slot_table(cursor)
     ensure_peer_address_uniqueness(cursor)
+    forget_peer_rates_per_whole_unit(cursor)
 
 
 def retire_slot_table(cursor) -> None:
@@ -705,6 +706,42 @@ def ensure_peer_address_uniqueness(cursor) -> None:
         )
     except sqlite3.Error as e:
         print(f"Error enforcing peer address uniqueness: {e}")
+
+
+def forget_peer_rates_per_whole_unit(cursor) -> None:
+    """Clear every peer's stored ``contract_instance.mu_per_unit``, once.
+
+    ``ContractRate.mu_per_unit`` used to be MU per whole unit (1e9 per ERG by default)
+    and is now MU per base unit (nanoERG, satoshi, a token's smallest unit). Nothing on
+    the wire marked the change, so a stored peer rate cannot be told apart from a new
+    one: read as per base unit, an old one is wrong by 10^9 (10^8 on Bitcoin). They are
+    set to NULL -- "no rate known", which every reader already handles -- and each peer's
+    next announcement stores its rate again; one from a node that still announces per
+    whole unit is refused, as it declares no ledger (``manager._accept_contract``).
+
+    This node's own rows (``peer_id = 'LOCAL'``) are not touched: they are written from
+    its own config at startup. Run once, recorded in ``applied_migrations``: after it, a
+    stored rate is per base unit and must survive a restart.
+    """
+    name = "peer_mu_per_unit_is_per_base_unit"
+    try:
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS applied_migrations "
+            "(name TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+        )
+        cursor.execute("SELECT 1 FROM applied_migrations WHERE name = ?", (name,))
+        if cursor.fetchone():
+            return
+        cursor.execute(
+            "UPDATE contract_instance SET mu_per_unit = NULL WHERE peer_id != 'LOCAL'"
+        )
+        cleared = cursor.rowcount
+        cursor.execute("INSERT INTO applied_migrations (name) VALUES (?)", (name,))
+        if cleared:
+            print(f"Cleared {cleared} peer rate(s) stored per whole unit; "
+                  "peers announce them again per base unit.")
+    except sqlite3.Error as e:
+        print(f"Error clearing peer rates stored per whole unit: {e}")
 
 
 def ensure_columns(cursor, table_name: str, columns: dict) -> None:

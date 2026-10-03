@@ -78,7 +78,7 @@ def _compare_ledgers(peer) -> List[Dict]:
     node declares that ledger for payments, a reputation proof against how it declares
     it for proofs. A ledger this node has no declaration for there is ``unknown``.
     """
-    from src.identity.node_identity import same_component
+    from src.identity.node_identity import same_declaration
     from src.identity.transport_stack import formal_difference
     from src.utils.ledger_descriptors import payment_ledger, reputation_ledger
 
@@ -96,7 +96,7 @@ def _compare_ledgers(peer) -> List[Dict]:
         entry = {"where": where, "tags": tags}
         if ours is None:
             entry["status"] = "unknown"
-        elif same_component(ledger, ours):
+        elif same_declaration(ledger, ours):
             entry["status"] = "match"
         else:
             entry["status"] = "differs"

@@ -69,6 +69,7 @@ from src.identity.node_identity import (
     component_formal,
     parse_component_formal,
     same_component,
+    same_declaration,
 )
 from src.identity.protocol_schema import schema_pairs
 from src.utils.config import ConfigManager
@@ -619,23 +620,18 @@ def carries_prose(peer) -> bool:
 def same_layer_stack(a_layers, b_layers) -> bool:
     """Whether two ordered stacks of layers denote the same protocol.
 
-    Layer ``i`` against layer ``i``, with :func:`node_identity.same_component` for each
-    pair -- ``formal`` when both declare one, a shared tag otherwise -- and the same
-    number of layers on both sides. Unlike a signature scheme, whose building blocks
+    Layer ``i`` against layer ``i``, with :func:`node_identity.same_declaration` for each
+    pair -- a non-empty ``formal`` on both sides, byte for byte; a layer declaring only
+    tags names a protocol without saying which version of it -- and the same number of
+    layers on both sides. Unlike a signature scheme, whose building blocks
     have no order, a stack does: ``grpc`` over ``tls`` is not ``tls`` over ``grpc``, and
     reading it in order is also what keeps the comparison linear in a length a peer
-    chooses. A layer that declares neither tags nor formal names nothing, and is never
-    the same as anything.
+    chooses. A layer without a formal is never the same as anything.
     """
     a_layers, b_layers = list(a_layers), list(b_layers)
     if len(a_layers) != len(b_layers):
         return False
-    return all(
-        (bool(a.tags) or bool(bytes(a.formal)))
-        and (bool(b.tags) or bool(bytes(b.formal)))
-        and same_component(a, b)
-        for a, b in zip(a_layers, b_layers)
-    )
+    return all(same_declaration(a, b) for a, b in zip(a_layers, b_layers))
 
 
 def speaks_our_transport_stack(protocol_stack: Iterable) -> bool:
@@ -733,7 +729,7 @@ def compare_layer_stacks(ours: Iterable, theirs: Iterable) -> List[Dict]:
     node announces. One entry per position, each with a ``status``:
 
     ``match``
-        The two layers at that position match (:func:`node_identity.same_component`).
+        The two layers at that position match (:func:`node_identity.same_declaration`).
     ``differs``
         Both sides have a layer there and they do not match; ``formal_difference``
         names the keys that differ when the two share a tag -- the same protocol with

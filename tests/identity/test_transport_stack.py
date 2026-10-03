@@ -182,6 +182,20 @@ class ComparisonTests(unittest.TestCase):
         del uri.protocol_stack[2:]
         self.assertFalse(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
 
+    def test_a_stack_declaring_only_tags_is_refused(self):
+        # Tags name a protocol without saying which version of it: a peer whose
+        # layers carry only tags has not declared what this node checks (#467).
+        uri = _stack()
+        for layer in uri.protocol_stack:
+            layer.ClearField("formal")
+        self.assertTrue(all(layer.tags for layer in uri.protocol_stack))
+        self.assertFalse(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
+
+    def test_one_layer_declaring_only_tags_is_refused(self):
+        uri = _stack()
+        uri.protocol_stack[0].ClearField("formal")
+        self.assertFalse(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
+
     def test_a_layer_naming_nothing_is_refused(self):
         uri = _stack()
         layer = uri.protocol_stack[1]

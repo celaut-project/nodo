@@ -535,17 +535,19 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 def _accept_contract(contract: celaut_pb2.Contract, peer_id: str) -> bool:
     """Whether a payment contract a peer advertises is on a ledger this node settles on.
 
-    The ledger is compared on its whole declaration (``node_identity.same_component``
+    The ledger is compared on its whole declaration (``node_identity.same_declaration``
     against ``ledger_descriptors.payment_ledger``), not on its tag: a contract that says
     "ergo" but declares another network, other units or another deposit binding cannot
-    be paid by this node, and storing it would make the payer try.
+    be paid by this node, and storing it would make the payer try. A contract with only
+    a tag (a node from before ledgers were declared) is refused too: its rate is per
+    whole unit, and it would be read here as per base unit.
     """
-    from src.identity.node_identity import same_component
+    from src.identity.node_identity import same_declaration
     from src.utils.ledger_descriptors import payment_ledger
 
     tags = list(contract.ledger.tags)
     ours = payment_ledger(tags[0]) if tags else None
-    if ours is not None and same_component(contract.ledger, ours):
+    if ours is not None and same_declaration(contract.ledger, ours):
         return True
     log.LOGGER(
         f"[PEER][{peer_id}] Skipping a payment contract on ledger {tags or '(none)'}: "

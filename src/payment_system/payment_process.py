@@ -141,19 +141,19 @@ def _ledger_tag(ledger) -> Optional[str]:
     holds and what `get_peer_contract_instances` yields.
 
     None unless the message declares the same ledger this node settles on
-    (``ledger_descriptors.payment_ledger``, compared on `formal` by
-    ``node_identity.same_component``): a payer that means another network, other units
-    or another way to bind a deposit token is not paying into this node's ledger,
-    whatever its tag says.
+    (``ledger_descriptors.payment_ledger``, compared on a non-empty `formal` by
+    ``node_identity.same_declaration``): a payer that means another network, other
+    units or another way to bind a deposit token -- or that does not say -- is not
+    paying into this node's ledger, whatever its tag says.
     """
-    from src.identity.node_identity import same_component
+    from src.identity.node_identity import same_declaration
     from src.utils.ledger_descriptors import payment_ledger
 
     tags = getattr(ledger, "tags", None)
     if not tags:
         return None
     ours = payment_ledger(tags[0])
-    return tags[0] if ours is not None and same_component(ledger, ours) else None
+    return tags[0] if ours is not None and same_declaration(ledger, ours) else None
 
 
 def _address_of(script) -> Optional[str]:
