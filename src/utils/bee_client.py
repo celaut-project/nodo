@@ -192,7 +192,7 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetPeerInfo,
             input=celaut_pb2.Client(client_id=client_id) if client_id else None,
-                        indices_serializer=rpc_input("GetPeerInfo"),
+            indices_serializer=rpc_input("GetPeerInfo"),
             indices_parser=rpc_output("GetPeerInfo"),
         )
 
@@ -236,7 +236,7 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GenerateClient,
             input=message,
-                        indices_parser=rpc_output("GenerateClient"),
+            indices_parser=rpc_output("GenerateClient"),
             indices_serializer=rpc_input("GenerateClient"),
         )
 
@@ -252,7 +252,7 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).AssociateClient,
             input=message,
-                        indices_parser=rpc_output("AssociateClient"),
+            indices_parser=rpc_output("AssociateClient"),
             indices_serializer=rpc_input("AssociateClient"),
         )
 

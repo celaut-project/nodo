@@ -261,7 +261,10 @@ def parse_assets(raw) -> Tuple[Asset, ...]:
             raise ValueError(
                 f"{where}.MU_PER_UNIT={mu_per_base} is not a whole number of MU per base "
                 "unit. It travels to peers as is (ContractRate.mu_per_unit, an "
-                "integer), so it has to be one."
+                "integer), so it has to be one. A token whose base unit is worth less "
+                "than 1 MU cannot be priced on this node as it is: the only way to "
+                "price it is to rescale the whole node's MU (raise "
+                "ledgers.ergo.payments.MU_PER_NANOERG, and every other rate with it)."
             )
 
         seen_ids[token_id] = index

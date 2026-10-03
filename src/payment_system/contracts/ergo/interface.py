@@ -148,8 +148,9 @@ def __mu_to_nanoerg(amount: int) -> int:
 
     The rate lives in ``ledgers.ergo.payments.MU_PER_NANOERG`` (1 by default, which makes
     the conversion the identity). It is the single point where the node's unit of account
-    meets real money, and it is the same number peers are told as
-    ``ContractRate.mu_per_unit``, so payer and receiver compute the same figure.
+    meets real money, and it is the same number peers are told, per nanoERG, as
+    ``ContractRate.mu_per_unit`` (:func:`mu_per_base_unit`), so payer and receiver
+    compute the same figure.
 
     The old `GAS_PER_ERG` did this with a float reciprocal set to 1e58, which silently
     turned every real charge into zero nanoERG.
@@ -204,10 +205,8 @@ def mu_per_base_unit() -> int:
 def mu_per_unit() -> int:
     """MU bought by one **whole** unit of this ledger -- one ERG, not one nanoERG.
 
-    What travels to peers as ``ContractRate.mu_per_unit``, and the only thing that makes
-    a price quoted in MU actionable to whoever reads it. Whole units rather than base
-    units because both sides convert through the same figure (``mu_conversion``): the
-    convention only has to be *shared*, and a whole unit is the one a person can check.
+    For a person to read and type amounts in (``nodo pay`` takes ERG). Not what a peer
+    is told: ``ContractRate.mu_per_unit`` is per base unit (:func:`mu_per_base_unit`).
     """
     return rate.mu_per_erg()
 
