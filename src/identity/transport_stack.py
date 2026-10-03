@@ -336,9 +336,19 @@ def _rpc_pairs() -> Dict[str, str]:
     }
 
 
-def _service_hash_type() -> str:
-    from src.utils.hashing import get_configured_hash_id
-    return get_configured_hash_id().hex()
+def _service_hash_types() -> str:
+    """Every hash type this node's code understands for a service id, sorted.
+
+    Not the one ``hashing.HASH`` selects: that is the operator's choice of which digest
+    the registry keys services by (docs/CONFIG.md), so two nodes on the same code could
+    differ on it, and nothing each node chooses for itself belongs in ``formal``. It is
+    not something a caller has to agree on either -- a service id travels as
+    ``Metadata.HashTag.Hash`` entries that each name their type, and the receiver picks
+    the one it keys by. What both sides must share is the set of types either may send
+    or read, which the code defines (``hashing.HASH_SPECS``).
+    """
+    from src.utils.hashing import HASH_SPECS
+    return ",".join(sorted(hash_id.hex() for hash_id in HASH_SPECS))
 
 
 # What every method says it does, for the prose. Keyed by RPC so a method with no entry
@@ -445,7 +455,9 @@ def gateway_component() -> Layer:
         "keyvalue": "producer: sorted by key (UTF-8 bytes), one entry per key, no empty "
                     "key; reader: last entry wins",
         "hash.type": "the algorithm's digest of the empty input",
-        "service_id.hash_type": _service_hash_type(),
+        "service_id": "Metadata.HashTag.Hash entries, each with its hash.type; the "
+                      "receiver reads the one type it keys its registry by",
+        "service_id.hash_types": _service_hash_types(),
         "peer.ts": "unix seconds; accepted only if greater than the last accepted ts "
                    "for that public key",
         "peer.uri.expiry": "unix seconds; 0 means no estimate",
@@ -503,8 +515,9 @@ def gateway_component() -> Layer:
         "of key-value entries is sorted by key, with one entry for each key. If a "
         "key occurs two times, the last entry is correct. The type of a hash "
         "algorithm is the digest of an empty input with that algorithm. The formal "
-        "field gives the hash type that the node uses to identify a service. Send a "
-        "hash of this type.\n"
+        "field gives the hash types that a node can use to identify a service. Each "
+        "node selects one of them for its registry. Send a hash of each type that "
+        "you have, each with its type.\n"
         "\n"
         "PEER SIGNATURE. The node signs its Peer with the scheme of "
         "Peer.signature_scheme. The signed text is the public key, the ts and a "

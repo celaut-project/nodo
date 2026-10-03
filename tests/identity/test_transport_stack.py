@@ -9,6 +9,7 @@ differing in any of those parameters is seen as speaking something else, while o
 merely worded its description differently is not.
 """
 import unittest
+from unittest import mock
 
 IMPORT_ERROR = None
 try:
@@ -195,6 +196,21 @@ class ComparisonTests(unittest.TestCase):
         uri = _stack()
         uri.protocol_stack[0].ClearField("formal")
         self.assertFalse(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
+
+    def test_the_configured_service_hash_is_not_part_of_the_protocol(self):
+        # hashing.HASH is each operator's choice (docs/CONFIG.md); two nodes on the
+        # same code that chose differently still speak the same protocol (#467).
+        from src.utils import hashing
+
+        with mock.patch.object(hashing, "get_configured_hash_id", return_value=hashing.SHA256_ID):
+            sha2 = _stack()
+        with mock.patch.object(hashing, "get_configured_hash_id", return_value=hashing.SHA3_256_ID):
+            sha3 = _stack()
+        self.assertTrue(
+            transport_stack.same_layer_stack(sha2.protocol_stack, sha3.protocol_stack)
+        )
+        declared = _formal("celaut-gateway")["service_id.hash_types"].split(",")
+        self.assertEqual(declared, sorted(h.hex() for h in hashing.HASH_SPECS))
 
     def test_a_layer_naming_nothing_is_refused(self):
         uri = _stack()
