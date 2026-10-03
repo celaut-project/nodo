@@ -94,6 +94,31 @@ class ComparisonTests(unittest.TestCase):
         peer.uri[0].transport.CopyFrom(celaut_pb2.Peer.Uri.Protocol(tags=["udp"]))
         self.assertFalse(protocol.compare_with(peer, "ab" * 32)["compatible"])
 
+    def test_a_signature_that_does_not_verify_is_not_compatible(self):
+        # add_peer_instance would refuse this peer, whatever it speaks (#467).
+        with mock.patch.object(manager, "verified_peer_public_key", return_value=None):
+            report = protocol.compare_with(_peer(), "ab" * 32)
+        self.assertFalse(report["signature_verifies"])
+        self.assertTrue(report["uris"][0]["speaks"])
+        self.assertFalse(report["compatible"])
+
+    def test_an_address_held_by_another_identity_is_not_compatible(self):
+        report = protocol.compare_with(_peer(), "cd" * 32)
+        self.assertFalse(report["identity_matches"])
+        self.assertFalse(report["compatible"])
+
+    def test_an_unknown_holder_is_not_compatible(self):
+        report = protocol.compare_with(_peer(), None)
+        self.assertFalse(report["identity_matches"])
+        self.assertFalse(report["compatible"])
+
+    def test_the_help_says_an_address_gets_a_client(self):
+        from src.commands import help as help_command
+
+        line = next(l for l in help_command.render_help().splitlines() if "protocol [<peer>]" in l)
+        self.assertIn("client", line)
+        self.assertLess(len(line), 80)
+
 
 if __name__ == "__main__":
     unittest.main()

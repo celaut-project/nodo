@@ -16,9 +16,18 @@ change did to the declaration before peers started refusing it.
     nodo protocol <peer_id | ip:port> [--json]
         Asks the peer for its announcement (``GetPeerInfo``) and compares it with this
         node's, layer by layer, and each ledger its payment contracts and reputation
-        proofs declare. Exits 0 when the peer speaks this node's protocol on at least
-        one address, 1 otherwise; a ledger that differs is reported, and is what this
-        node will not pay into, but does not by itself make the peer unreachable.
+        proofs declare. Exits 0 when the announcement's signature verifies, it is
+        signed by the identity that holds the address, and the peer speaks this
+        node's protocol on at least one address -- what ``add_peer_instance`` needs
+        to store the peer -- and 1 otherwise. A ledger that differs is reported, and
+        is what this node will not pay into, but does not by itself make the peer
+        unreachable.
+
+        Not read-only on the remote side: ``GetPeerInfo`` refuses a caller without a
+        client, so given an ``ip:port`` it mints one on that node first -- the same
+        first contact ``nodo connect`` makes -- and given a peer id it reuses this
+        node's client there or mints one. Either way the client stays registered on
+        the peer.
 
 The comparison is the one the node itself makes -- ``tags`` and ``formal``, never
 ``prose`` (``node_identity.same_component``) -- so what this prints is what the node
@@ -171,10 +180,16 @@ def compare_with(peer, certificate_peer_id: Optional[str]) -> Dict:
         })
 
     scheme = peer.signature_scheme
+    signature_verifies = verified_peer_public_key(peer) is not None
+    # The identity that holds the address (its TLS certificate, or the peer id asked
+    # for) has to be the one the announcement is signed by, or the announcement is
+    # somebody else's -- `add_peer_instance` refuses that peer, so this does too.
+    identity_matches = bool(peer.public_key) and certificate_peer_id == peer.public_key
     return {
         "peer_id": peer.public_key or None,
         "certificate_peer_id": certificate_peer_id,
-        "signature_verifies": verified_peer_public_key(peer) is not None,
+        "identity_matches": identity_matches,
+        "signature_verifies": signature_verifies,
         "signature_scheme": {
             "declares_scheme": bool(len(scheme.components)),
             "speaks": speaks_our_signature_scheme(peer),
@@ -184,7 +199,8 @@ def compare_with(peer, certificate_peer_id: Optional[str]) -> Dict:
         },
         "uris": uris,
         "ledgers": _compare_ledgers(peer),
-        "compatible": speaks_our_signature_scheme(peer) and any(
+        "compatible": signature_verifies and identity_matches
+        and speaks_our_signature_scheme(peer) and any(
             u["speaks"] and u["transport"]["match"] for u in uris
         ),
     }
@@ -226,8 +242,9 @@ def _print_layers(layers: List[Dict], indent: str = "    ") -> None:
 
 def _print_comparison(report: Dict) -> None:
     print(f"Peer:      {report['peer_id'] or '(announced no identity)'}")
-    if report["certificate_peer_id"] and report["certificate_peer_id"] != report["peer_id"]:
-        print(f"Warning:   the address is held by {report['certificate_peer_id']}, "
+    if not report["identity_matches"]:
+        print(f"Warning:   the address is held by "
+              f"{report['certificate_peer_id'] or 'an unknown identity'}, "
               "which is not the identity it announced.")
     print(f"Signature: {'verifies' if report['signature_verifies'] else 'DOES NOT VERIFY'}")
 
