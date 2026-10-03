@@ -43,6 +43,7 @@ from src.commands.packer.zip_with_dockerfile.prepare_directory import prepare_di
 from src.commands.packer.zip_with_dockerfile.generate_service_zip import generate_service_zip
 from src.core_services import PACKER, get_core_service_id
 from src.core_services.runtime import ensure_core_service_running
+from src.utils import pack_registry
 from src.utils.config import ConfigManager
 
 # `import_bee` pulls in the bee_rpc runtime (only needed when actually importing a
@@ -183,8 +184,13 @@ def pack(directory: str) -> Optional[str]:
 
 
 def _pack_via_service(directory: str) -> Optional[str]:
+    pack_registry.stage("starting the packer service")
     packer_url = _resolve_packer_endpoint()
     if not packer_url:
+        pack_registry.note_error(
+            "No packer service is configured: set core_services.packer (or "
+            "packer.PACKER_SERVICE_URL) in config.yaml."
+        )
         _msg = (
             "\nNo packer service is configured.\n\n"
             "nodo does not build services locally anymore — packing is done by a\n"
@@ -205,13 +211,18 @@ def _pack_via_service(directory: str) -> Optional[str]:
 
     _id: Optional[str] = None
     # TODO Better approach, generator: return only path and finally remove if remote.
+    pack_registry.stage("cloning" if directory.startswith("http") else "copying the project")
     is_remote, directory = prepare_directory(directory)
 
     # If nodo just launched the packer, its endpoint resolves before the in-VM
     # HTTP server is serving. Wait for /health before the first request (the
     # dependency upload below is the first packer contact) so we don't race
     # startup. prepare_directory() above already gave the VM some warmup time.
+    pack_registry.stage("waiting for the packer service")
     if not _wait_for_packer_health(packer_url):
+        pack_registry.note_error(
+            f"The packer service at {packer_url} did not become healthy within {_HEALTH_TIMEOUT}s."
+        )
         print(
             f"\nThe packer service at {packer_url} did not become healthy within "
             f"{_HEALTH_TIMEOUT}s.\n"
@@ -232,6 +243,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
         from src.commands.packer.zip_with_dockerfile.packer_service_client import (
             resolve_and_upload_dependencies,
         )
+        pack_registry.stage("uploading dependencies")
         print(f"Resolving dependencies against packer service {packer_url} ...")
         summary = resolve_and_upload_dependencies(
             project_directory=directory,
@@ -242,8 +254,10 @@ def _pack_via_service(directory: str) -> Optional[str]:
         if summary["already_present"]:
             print(f"Dependencies already on packer: {', '.join(summary['already_present'])}")
 
+        pack_registry.stage("zipping the project")
         service_zip_dir: str = generate_service_zip(project_directory=directory)
 
+        pack_registry.stage("building in the packer service")
         pack_endpoint = f"{packer_url}/pack"
         print(f"Sending your project to the packer service at {pack_endpoint} ...")
         print("Building inside the packer microVM — this might take a while.")
@@ -257,6 +271,9 @@ def _pack_via_service(directory: str) -> Optional[str]:
             )
 
         if response.status_code != 200:
+            pack_registry.note_error(
+                f"Packer service returned HTTP {response.status_code}: {response.text[:300]}"
+            )
             print(
                 f"\nPacker service returned an error (HTTP {response.status_code}):\n"
                 f"{response.text}"
@@ -265,6 +282,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
 
         service_id_header = response.headers.get("X-Service-Id")
         if not response.content:
+            pack_registry.note_error("Packer service returned an empty body.")
             print("\nPacker service returned an empty body; no service was produced.")
             return None
 
@@ -281,6 +299,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
         if service_id_header:
             print("Service ID -> ", service_id_header)
         print("\nImporting the packed service into the local registry...")
+        pack_registry.stage("importing")
 
         from src.commands.import_bee import import_bee
         _id = import_bee(path=bee_path)
@@ -291,6 +310,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
             raise Exception(_msg)
 
     except requests.exceptions.ConnectionError as e:
+        pack_registry.note_error(f"Could not reach the packer service at {packer_url}: {e}")
         print(
             f"\nCould not reach the packer service at {packer_url}: {e}\n"
             "Check the packer id in core_services (and that its instance is running "
@@ -299,6 +319,7 @@ def _pack_via_service(directory: str) -> Optional[str]:
         )
         return None
     except Exception as e:
+        pack_registry.note_error(f"Exception packing {directory}: {e}")
         print(f"Exception packing {directory}: {e}")
         return None
 
