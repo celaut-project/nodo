@@ -125,6 +125,54 @@ class ForeignLedgerTests(unittest.TestCase):
         self.assertIsNone(payment_process._ledger_tag(ledger))
 
 
+def _configured(**overrides):
+    """``ledger_descriptors`` reading a config with ``overrides`` on top of this one's."""
+    real = ledger_descriptors.ConfigManager
+
+    class _Config:
+        def get(self, key, default=None):
+            if key in overrides:
+                return overrides[key]
+            return real().get(key, default)
+
+    return mock.patch.object(ledger_descriptors, "ConfigManager", _Config)
+
+
+@unittest.skipIf(
+    IMPORT_ERROR is not None or MANAGER_IMPORT_ERROR is not None,
+    f"Missing runtime dependencies: {IMPORT_ERROR or MANAGER_IMPORT_ERROR}",
+)
+class NetworkFromConfigTests(unittest.TestCase):
+    """The network a descriptor declares is the one this node is configured on (#467)."""
+
+    def test_a_signet_node_declares_signet_and_a_mainnet_node_does_not_store_it(self):
+        with _configured(**{"ledgers.bitcoin.NETWORK": "signet"}):
+            signet = ledger_descriptors.bitcoin_payment_ledger()
+        mainnet = ledger_descriptors.bitcoin_payment_ledger()
+        self.assertEqual(_formal(signet)["network"], "signet")
+        self.assertEqual(_formal(mainnet)["network"], "mainnet")
+        self.assertNotEqual(signet.formal, mainnet.formal)
+        self.assertIn("Bitcoin signet", signet.prose)
+        self.assertFalse(manager._accept_contract(celaut_pb2.Contract(ledger=signet), "p"))
+        self.assertIsNone(payment_process._ledger_tag(signet))
+
+    def test_a_node_on_another_ergo_chain_declares_its_genesis_block(self):
+        testnet_genesis = "AB" * 32
+        with _configured(**{"ledgers.ergo.GENESIS_BLOCK_ID": testnet_genesis}):
+            payment = ledger_descriptors.ergo_payment_ledger()
+            reputation = ledger_descriptors.ergo_reputation_ledger()
+        self.assertEqual(_formal(payment)["network"], f"genesis {testnet_genesis.lower()}")
+        self.assertEqual(_formal(reputation)["network"], _formal(payment)["network"])
+        self.assertNotEqual(payment.formal, ledger_descriptors.ergo_payment_ledger().formal)
+        self.assertFalse(manager._accept_contract(celaut_pb2.Contract(ledger=payment), "p"))
+
+    def test_mainnet_genesis_is_named_mainnet(self):
+        from src.reputation_system.contracts.ergo.utils import MAINNET_GENESIS_BLOCK_ID
+
+        with _configured(**{"ledgers.ergo.GENESIS_BLOCK_ID": MAINNET_GENESIS_BLOCK_ID.upper()}):
+            self.assertEqual(_formal(ledger_descriptors.ergo_payment_ledger())["network"], "mainnet")
+
+
 @unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
 class ProtocolCommandLedgerTests(unittest.TestCase):
     def test_our_declaration_lists_every_ledger_per_place(self):

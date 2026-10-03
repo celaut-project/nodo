@@ -50,10 +50,28 @@ def _ledger(tag: str, *parts: Part) -> celaut_pb2.Contract.Ledger:
 # Ergo
 # ---------------------------------------------------------------------------------
 
+def _ergo_network_name() -> str:
+    """Which Ergo network this node is on, from ``ledgers.ergo.GENESIS_BLOCK_ID``.
+
+    The genesis block is what the config already uses to say which chain this node
+    belongs on (``manager.ergo`` refuses an Ergo node that reports another one). Only
+    mainnet's id is known to the code, so any other chain is named by its genesis id
+    itself: two nodes on the same testnet or private chain declare the same network,
+    and neither declares mainnet.
+    """
+    from src.reputation_system.contracts.ergo.utils import MAINNET_GENESIS_BLOCK_ID
+
+    genesis = str(ConfigManager().get("ledgers.ergo.GENESIS_BLOCK_ID") or "").strip().lower()
+    if genesis == MAINNET_GENESIS_BLOCK_ID:
+        return "mainnet"
+    return f"genesis {genesis or 'unset'}"
+
+
 def _ergo_network() -> Part:
+    network = _ergo_network_name()
     return {
         "chain": "ergo",
-        "network": "mainnet",
+        "network": network,
         "consensus": "autolykos2",
         "model": "eutxo",
         "script": "ErgoTree",
@@ -62,7 +80,7 @@ def _ergo_network() -> Part:
         "asset.native.decimals": "9",
         "asset.token": "EIP-4 token id, 64 hex characters, compared without case",
     }, (
-        "This ledger is Ergo mainnet. Ergo is a proof-of-work blockchain (Autolykos) "
+        f"This ledger is Ergo {network}. Ergo is a proof-of-work blockchain (Autolykos) "
         "with an extended UTXO model. ErgoTree scripts lock the boxes. The native asset "
         "is ERG. One ERG is 10^9 nanoERG. A token is an EIP-4 token. Its id is 64 "
         "hexadecimal characters. Compare ids without case."
@@ -179,17 +197,29 @@ def ergo_reputation_ledger() -> celaut_pb2.Contract.Ledger:
 # Bitcoin
 # ---------------------------------------------------------------------------------
 
+def _bitcoin_network_name() -> str:
+    """``ledgers.bitcoin.NETWORK``: mainnet, testnet, signet or regtest.
+
+    Read with the same default as ``payment_system.contracts.bitcoin.interface.NETWORK``,
+    which is what this node derives its own addresses and scripts with. A scriptPubKey
+    is the same bytes on every network, so this line is the only thing that keeps a
+    mainnet payer from paying a signet node real BTC it will never see.
+    """
+    return str(ConfigManager().get("ledgers.bitcoin.NETWORK") or "mainnet").strip().lower()
+
+
 def _bitcoin_network() -> Part:
+    network = _bitcoin_network_name()
     return {
         "chain": "bitcoin",
-        "network": "mainnet",
+        "network": network,
         "consensus": "sha256d-pow",
         "model": "utxo",
         "asset.native": "BTC",
         "asset.native.base_unit": "satoshi",
         "asset.native.decimals": "8",
     }, (
-        "This ledger is Bitcoin mainnet. Bitcoin is a proof-of-work blockchain with a "
+        f"This ledger is Bitcoin {network}. Bitcoin is a proof-of-work blockchain with a "
         "UTXO model. The only asset is BTC. One BTC is 10^8 satoshi."
     )
 
