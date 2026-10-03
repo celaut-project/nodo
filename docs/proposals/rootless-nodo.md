@@ -33,7 +33,8 @@ the kernel and the binaries are marked:
   is *ownership* or a *`geteuid()` guard*, not a kernel requirement:
   `/dev/kvm` is a group permission, cgroups are a delegation, the storage tree is
   file ownership, ports are already ≥ 50000.
-* **Even `CAP_NET_ADMIN` can leave the hypervisor and the daemon.** Verified:
+* **Even `CAP_NET_ADMIN` can leave the hypervisor and the daemon.** Verified on
+  aarch64 and on x86_64 (§2.5):
   `cloud-hypervisor` v51.1 run as an unprivileged user with **no capabilities at
   all** boots a nodo guest if the tap was created in advance, **owned by that
   user, and already UP**. So the privilege can be concentrated in a tiny helper
@@ -53,8 +54,7 @@ the kernel and the binaries are marked:
 
 ## 2. What was verified, and how
 
-**Setup.** The Alienware x86_64 node normally used for nodo testing was offline
-during this investigation, so the probes ran in a throwaway **Ubuntu 24.04.4 LTS**
+**Setup.** The probes first ran in a throwaway **Ubuntu 24.04.4 LTS**
 VM (kernel 6.8.0-117, systemd 255, cgroup v2, `aarch64`) on Apple Virtualization
 with **nested virtualization**, i.e. a real `/dev/kvm` (`crw-rw---- root kvm`).
 Binaries were the ones nodo installs: `cloud-hypervisor-static-aarch64` **v51.1**
@@ -65,9 +65,9 @@ plus the `kvm` group, with capabilities set by `setpriv`; the systemd test used 
 transient `systemd-run` unit. Every link, table and cgroup the probe created was
 removed and the VM deleted afterwards.
 
-The x86_64 kernel paths involved (tun, bridge, nf_tables, cgroup v2, sysctl
-permission checks) are architecture-independent; the CH tap code is shared across
-architectures. Re-running §2.3 on an x86_64 node is still listed as an open item.
+All of it was then **re-run on a real x86_64 + KVM node** (WSL2, see §2.5); every
+result in §2.1–§2.4 held there. The only differences are WSL-specific and are
+listed in §2.5.
 
 ### 2.1 Correction to ROOTLESS.md: `CAP_NET_ADMIN` *can* write `net.*` sysctls
 
@@ -162,6 +162,49 @@ tap has the same requirement (docs, not verified here).
 * created `nodo-ch/vm-rl/`, moved a process in, and wrote `memory.max=268435456`
   and `cpu.max="50000 100000"` — exactly what `cgroups.py:103-128` does;
 * created a tap; `CapEff = CapAmb = 0x1000` (only `CAP_NET_ADMIN`).
+
+### 2.5 x86_64 (WSL2 on the Alienware) results
+
+**Setup.** The live x86_64 nodo node: **Ubuntu 22.04.5 LTS** under **WSL2**, kernel
+`6.6.87.2-microsoft-standard-WSL2`, systemd 249 as PID 1, cgroup v2 (root
+`subtree_control`: `cpuset cpu io memory hugetlb pids rdma`), `/dev/kvm`
+`crw-rw---- root:kvm`, `/dev/net/tun` `0666`. Binaries were the ones the running
+node uses: `/nodo/bin/cloud-hypervisor` **v51.1** (static x86_64), guest kernel
+`vmlinuz` `75f06d96…` (= `vmlinuz-linux-amd64` in `SHA256SUMS.pinned`, Linux
+6.12.103), the node's installed `initramfs` (`ee89a955…`), virtiofsd 1.11.0,
+nftables 1.0.2, iptables 1.8.7 (nf_tables), procps-ng 3.3.17. The unprivileged
+identity was a throwaway user (no home, not in any group) plus the `kvm` group via
+`setpriv`. Everything ran beside the live daemon without touching its bridge,
+nft tables or cgroups; all probe links/tables/chains, the user and the temp dir
+were removed afterwards.
+
+| Claim (section) | aarch64 VM | x86_64 WSL2 |
+|---|---|---|
+| CH, zero caps, tap `user <uid>` + UP (+ enslaved) boots (§2.3) | boots | **confirmed** — `Run /init as init process` |
+| same tap left DOWN | `TapEnable` `SIOCSIFFLAGS` EPERM | **confirmed** (`IoctlError(35092)`) |
+| tap owned by root / by another user (`nobody`) | `TapOpen(ConfigureTap(EPERM))` | **confirmed** for both |
+| ownerless tap, UP | anyone can attach | **confirmed** — boots |
+| tap not pre-created: no caps / ambient `CAP_NET_ADMIN` | fails / boots | **confirmed** / **confirmed** |
+| `CAP_NET_ADMIN` only: bridge, addr, up, tuntap, master, `isolated on` (§2.4) | OK | **confirmed** |
+| `CAP_NET_ADMIN` only: own nft table with masquerade + dnat | OK | **confirmed** |
+| `CAP_NET_ADMIN` only: iptables (own chain + rule) | OK | **confirmed** |
+| `CAP_NET_ADMIN` writes `net.*` (`proxy_arp` on a probe bridge, file `0644 root`) (§2.1) | OK | **confirmed** (0→1→0, by `echo` and by `sysctl -w`) |
+| `CAP_NET_ADMIN` writes `kernel.*` | Permission denied | **confirmed** denied |
+| `ip netns add` / `unshare -n` with `CAP_NET_ADMIN` | fails | **confirmed** fails (`mount --make-shared /run/netns failed`) |
+| `AF_PACKET` with `CAP_NET_RAW` only | OK | **confirmed** |
+| procps `sysctl -w` on EPERM, no caps (§2.2) | prints "permission denied … ignoring", **exit 0** | **confirmed** — exit 0, value unchanged |
+| `systemd-run User= Delegate=yes AmbientCapabilities=CAP_NET_ADMIN` (§2.4) | own cgroup owned by the user; leaf move; `memory.max`/`cpu.max` on `nodo-ch/vm-rl` | **confirmed** — `system.slice/run-u29.service` owned by the user, all controllers available, limits written, tap created, `CapEff = CapAmb = 0x1000` |
+| virtiofsd `--sandbox chroot` as non-root | root only | **confirmed** root only |
+| virtiofsd `--sandbox namespace` | needed `uidmap` + a subuid range | **differs:** listened even with no subuid range for the user (`newuidmap` already installed); also with one |
+| `unshare -Urn` (unprivileged userns) | blocked by `apparmor_restrict_unprivileged_userns=1` | **differs:** allowed — the WSL kernel has no such sysctl |
+
+**WSL-specific notes.** systemd delegation behaves exactly as on native Linux, so
+the Phase 2 unit works on WSL as written; nft and iptables-nft are available and
+coexist with nodo's own `inet nodo` / `ip nat` / `ip filter` tables. The two
+differences above are permissive (an older procps/kernel/virtiofsd combination
+and no AppArmor userns restriction), not new blockers. The guest initramfs on the
+node does not match the pinned release hash because the node ships its own build;
+the kernel does.
 
 ---
 
@@ -367,8 +410,9 @@ out of nftables. Not recommended before Phases 1–2 ship.
   complaint is a native-Linux one. The Phase 1 CLI changes still matter there for
   agents and scripts that run as a normal user.
 * WSL's systemd (enabled by the installer) supports `User=`,
-  `AmbientCapabilities=`, `Delegate=` and polkit the same way (expected; not
-  verified on WSL in this pass — the Alienware node was offline).
+  `AmbientCapabilities=` and `Delegate=` the same way — **verified** on WSL2
+  (§2.5): the transient unit got a user-owned delegated cgroup and set per-VM
+  limits. Polkit was not tested.
 * `/dev/kvm` ownership/mode under WSL2 varies with the kernel and udev rules;
   `nodo doctor` already checks access for a non-root service user
   (`doctor.py:113-131`) and suggests `usermod -aG kvm`.
@@ -391,7 +435,8 @@ out of nftables. Not recommended before Phases 1–2 ship.
    `CAP_NET_ADMIN` an acceptable end state for now?
 4. **`nodo observe` capture:** daemon-side capture over RPC (needs
    `CAP_NET_RAW` in the daemon/helper), or keep it a `sudo` feature?
-5. **Re-run §2.3 on x86_64 + KVM** before Phase 2 merges (the probe script is
-   ~60 lines; can be attached).
+5. ~~Re-run §2.3 on x86_64 + KVM~~ — done on WSL2 (§2.5), all confirmed. A
+   native (non-WSL) x86_64 host would still be worth one run before Phase 2
+   merges; the probe script is ~150 lines and can be attached.
 6. Should ROOTLESS.md's Route A step 3 be corrected in place (§2.1)? This PR only
    points to it.
