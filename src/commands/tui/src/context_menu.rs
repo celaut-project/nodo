@@ -61,10 +61,16 @@ pub fn page_actions(page: Page) -> Vec<MenuItem> {
             MenuItem::new("Close", 'd'),
             MenuItem::new("New tunnel…", 'n'),
         ],
+        Page::Packs => vec![
+            MenuItem::new("Details and log", 'i'),
+            MenuItem::new("Cancel", 'c'),
+            MenuItem::new("New pack…", 'n'),
+        ],
         Page::Services => vec![
             MenuItem::new("Execute", 'e'),
             MenuItem::new("Details", 'i'),
             MenuItem::new("Get by hash…", 'g'),
+            MenuItem::new("Pack a project…", 'p'),
             MenuItem::new("Delete", 'd'),
         ],
         Page::Peers => vec![

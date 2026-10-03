@@ -29,6 +29,9 @@ pub mod clients;
 /// The TUNNELS page: the `nodo tunnel` processes running on this host.
 pub mod tunnels;
 
+/// The PACKS page: the `nodo pack` runs on this host, current and recent.
+pub mod packs;
+
 /// The CHAT page: free-text conversations with peer operators (issue #431).
 pub mod chat;
 

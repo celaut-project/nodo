@@ -82,6 +82,10 @@ pub enum Page {
     /// what it reaches. Opened here or with `t` on INSTANCES; see `tunnels.rs`.
     Tunnels,
     Services,
+    /// The `nodo pack` runs on this host, current and recent: what each packs, where
+    /// it is, and the service id it produced. Launched here or with `p` on SERVICES;
+    /// see `packs.rs`.
+    Packs,
     /// Peers we talk to, and what we have paid them.
     Peers,
     /// Clients that talk to us, and what they have paid.
@@ -217,7 +221,7 @@ impl Page {
     /// before SERVICES because a node's peers are what it has, and its services are
     /// what it can offer them. ENERGY sits among the editors with the other pages
     /// that own one config block.
-    pub const ALL: [Page; 15] = [
+    pub const ALL: [Page; 16] = [
         Page::Overview,
         // What is running here and who it runs for. Instances first because it is
         // what is happening now; peers before services because the peers are the
@@ -227,6 +231,8 @@ impl Page {
         Page::Tunnels,
         Page::Peers,
         Page::Services,
+        // Beside Services: a pack is how a service gets into the registry.
+        Page::Packs,
         Page::Clients,
         // Beside Clients: both are "who is on the other end", and Chat is often
         // reached from noticing something worth telling that operator about.
@@ -256,6 +262,7 @@ impl Page {
             Page::Instances => "INSTANCES",
             Page::Tunnels => "TUNNELS",
             Page::Services => "SERVICES",
+            Page::Packs => "PACKS",
             Page::Peers => "PEERS",
             Page::Clients => "CLIENTS",
             Page::Chat => "CHAT",
@@ -278,6 +285,7 @@ impl Page {
             Page::Instances => "INST",
             Page::Tunnels => "TUNL",
             Page::Services => "SERV",
+            Page::Packs => "PACK",
             Page::Peers => "PEERS",
             Page::Clients => "CLNT",
             Page::Chat => "CHAT",
@@ -302,6 +310,7 @@ impl Page {
             | Page::Tunnels
             | Page::Peers
             | Page::Services
+            | Page::Packs
             | Page::Clients
             | Page::Chat => PageGroup::Activity,
             Page::Earnings => PageGroup::Money,
@@ -528,6 +537,9 @@ pub enum InputMode {
     /// A new tunnel: `<slot> [flags]` from INSTANCES (`t`, to the selected
     /// instance) or `<instance> <slot> [flags]` from TUNNELS (`n`).
     NewTunnel,
+    /// PACKS page (`n`) or SERVICES (`p`): a folder or an https git URL to pack. Tab
+    /// completes folder names.
+    NewPack,
     /// CHAT page, a step of `ComposeChatMessage`: which of this node's services to
     /// attach to the message as a card (issue #438). Esc goes back to the message
     /// rather than dropping it.
@@ -663,6 +675,8 @@ pub enum PendingAction {
     /// connection through it spends `pricing.TUNNEL_OPEN_MU` of the instance's balance;
     /// the question says how much.
     OpenTunnel { label: String, args: Vec<String> },
+    /// Stop a running pack. Confirmed because the build so far is thrown away.
+    CancelPack { id: String, label: String },
     /// Remove one element from a list in config.yaml. Confirmed like the others
     /// because dropping an entry from, say, a network policy loosens it silently.
     DeleteConfigItem {
@@ -713,6 +727,10 @@ pub(crate) fn pending_command(action: PendingAction) -> Option<(String, Vec<Stri
         PendingAction::DeleteConfigItem { .. } => None,
         PendingAction::ApplyWrites { .. } => None,
         PendingAction::OpenTunnel { label, args } => Some((label, args)),
+        PendingAction::CancelPack { id, label } => Some((
+            format!("Cancel pack {label}"),
+            vec!["pack_cancel".to_string(), id, "--json".to_string()],
+        )),
         PendingAction::EditLever { .. } => None,
     }
 }
@@ -1091,6 +1109,9 @@ pub(crate) enum CommandKind {
     /// `nodo tunnel --detach --json` / `nodo tunnel_close --json`: the status comes
     /// from the one JSON object, whose `error` is on stdout (`tunnels::outcome_status`).
     Tunnel,
+    /// `nodo pack --detach --json` / `nodo pack_cancel --json`, read the same way
+    /// (`packs::outcome_status`).
+    Pack,
 }
 
 /// Result of a background `nodo` invocation.
@@ -2950,6 +2971,8 @@ pub struct App {
     /// The instance a `t` on INSTANCES opened the new-tunnel prompt for; `None` when
     /// the prompt came from TUNNELS and the instance is typed.
     pub tunnel_instance: Option<String>,
+    /// The PACKS page: `nodo pack` runs, newest first, read from the registry.
+    pub packs: StatefulList<crate::packs::Pack>,
     /// The CHAT sidebar (issue #431): every conversation, both directions, plus each
     /// peer's topic-less bucket, merged and sorted by recency -- see `chat::ChatEntry`.
     pub conversations: StatefulList<ChatEntry>,
@@ -3226,6 +3249,9 @@ impl Default for App {
             )),
             inbound_tunnels: crate::tunnels::read_inbound(&crate::tunnels::tunnels_dir(&paths.storage)),
             tunnel_instance: None,
+            packs: StatefulList::with_items(crate::packs::read_packs(&crate::packs::packs_dir(
+                &paths.storage,
+            ))),
             conversations: StatefulList::with_items(
                 crate::chat::load_entries(&paths.database).unwrap_or_default(),
             ),
@@ -3538,6 +3564,7 @@ impl App {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.previous(),
             Page::Tunnels => self.tunnels.previous(),
+            Page::Packs => self.packs.previous(),
             Page::Services => {
                 self.services.previous();
                 self.load_selection_details();
@@ -3576,6 +3603,7 @@ impl App {
             Page::Schedule => self.toggle_schedule_edge(),
             Page::Instances => self.instances.next(),
             Page::Tunnels => self.tunnels.next(),
+            Page::Packs => self.packs.next(),
             Page::Services => {
                 self.services.next();
                 self.load_selection_details();
@@ -3885,6 +3913,7 @@ impl App {
         match self.page() {
             Page::Instances => self.instances.select_visible(visible),
             Page::Tunnels => self.tunnels.select_visible(visible),
+            Page::Packs => self.packs.select_visible(visible),
             Page::Services => {
                 self.services.select_visible(visible);
                 self.load_selection_details();
@@ -4322,6 +4351,7 @@ impl App {
             InputMode::ComposeChatMessage => self.submit_chat_compose(),
             InputMode::GetService => self.submit_get_service(),
             InputMode::NewTunnel => self.submit_new_tunnel(),
+            InputMode::NewPack => self.submit_new_pack(),
             InputMode::PickChatService => self.submit_chat_service_pick(),
             InputMode::SearchDocs => self.submit_docs_search(),
             // The writes confirmation answers y/n, never Enter: Enter on a
@@ -5750,6 +5780,11 @@ impl App {
             PendingAction::OpenTunnel { label, args } => {
                 self.spawn_command(CommandKind::Tunnel, label, args);
             }
+            PendingAction::CancelPack { id, label } => {
+                if let Some((label, args)) = pending_command(PendingAction::CancelPack { id, label }) {
+                    self.spawn_command(CommandKind::Pack, label, args);
+                }
+            }
             other => {
                 if let Some((label, args)) = pending_command(other) {
                     self.spawn_command(CommandKind::Generic, label, args);
@@ -5844,6 +5879,14 @@ impl App {
                 } else {
                     format!("{} failed: {}", outcome.label, first_line(&outcome.stderr))
                 };
+            }
+            CommandKind::Pack => {
+                self.status = crate::packs::outcome_status(
+                    &outcome.label,
+                    outcome.success,
+                    &outcome.stdout,
+                    &outcome.stderr,
+                );
             }
             CommandKind::Tunnel => {
                 self.status = crate::tunnels::outcome_status(
@@ -5962,6 +6005,7 @@ impl App {
         self.clients
             .refresh(get_clients(&self.paths.database).unwrap_or_default());
         self.refresh_tunnels();
+        self.refresh_packs();
         self.refresh_chat();
         self.earnings = get_earnings(&self.paths.database).unwrap_or_default();
         self.node_energy = get_node_energy(&self.paths);
@@ -8343,6 +8387,7 @@ mod tests {
                     Page::Tunnels,
                     Page::Peers,
                     Page::Services,
+                    Page::Packs,
                     Page::Clients,
                     Page::Chat,
                     Page::Earnings,
