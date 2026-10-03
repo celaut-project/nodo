@@ -735,6 +735,11 @@ if __name__ == '__main__':
                 ok = peers_command(argv=sys.argv[2:])
                 os._exit(0 if ok else 1)
 
+            case "protocol":
+                from src.commands.protocol import protocol_command
+                ok = protocol_command(argv=sys.argv[2:])
+                os._exit(0 if ok else 1)
+
             case "peer_reputation":
                 # The TUI's `+`/`-` on PEERS: move our local score of a peer, with an event.
                 peer_reputation_args = [a for a in sys.argv[2:] if a != "--json"]

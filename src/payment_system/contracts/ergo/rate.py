@@ -59,11 +59,28 @@ def mu_per_nanoerg() -> Decimal:
     rate = _decimal(raw if raw not in (None, "") else 1, what=RATE_KEY)
     if rate <= 0:
         raise ValueError(f"{RATE_KEY} must be positive, got {rate}.")
+    if rate != rate.to_integral_value():
+        raise ValueError(
+            f"{RATE_KEY}={rate} is not a whole number of MU per nanoERG. It travels to "
+            "peers as is (ContractRate.mu_per_unit, an integer), so it has to be one."
+        )
     return rate
 
 
+def advertised_mu_per_nanoerg() -> int:
+    """MU per nanoERG, as peers are told it in ``ContractRate.mu_per_unit``.
+
+    Per base unit: between nodes a rate is MU per the smallest unit the chain moves.
+    The whole ERG is a presentation for a person (:func:`mu_per_erg`), never the wire.
+    """
+    return int(mu_per_nanoerg())
+
+
 def mu_per_erg() -> int:
-    """MU bought by one whole ERG. This is what a peer is told as ``ContractRate``."""
+    """MU bought by one whole ERG, for a person to read and type amounts in.
+
+    Not what a peer is told: that is :func:`advertised_mu_per_nanoerg`, per base unit.
+    """
     rate = mu_per_nanoerg()
     value = rate * NANOERG_PER_ERG
     if value != value.to_integral_value():
@@ -240,6 +257,12 @@ def parse_assets(raw) -> Tuple[Asset, ...]:
         mu_per_base = _decimal(entry.get("MU_PER_UNIT"), what=f"{where}.MU_PER_UNIT")
         if mu_per_base <= 0:
             raise ValueError(f"{where}.MU_PER_UNIT must be positive, got {mu_per_base}.")
+        if mu_per_base != mu_per_base.to_integral_value():
+            raise ValueError(
+                f"{where}.MU_PER_UNIT={mu_per_base} is not a whole number of MU per base "
+                "unit. It travels to peers as is (ContractRate.mu_per_unit, an "
+                "integer), so it has to be one."
+            )
 
         seen_ids[token_id] = index
         seen_units[unit_name] = index
@@ -275,12 +298,20 @@ def require_asset(token_id: str) -> Asset:
     return asset
 
 
-def mu_per_whole_unit(asset: Asset) -> int:
-    """MU bought by one **whole** unit of ``asset``. What a peer is told as its rate.
+def advertised_mu_per_base_unit(asset: Asset) -> int:
+    """MU per base unit of ``asset``, as peers are told it in ``ContractRate.mu_per_unit``.
 
-    Whole units rather than base ones for the same reason as ``mu_per_erg``: both sides
-    convert through the same figure, so the convention only has to be shared, and a
-    whole unit is the one a person can check against a price they know.
+    Per base unit, like :func:`advertised_mu_per_nanoerg`: a peer converts through it
+    without having to know the token's decimals.
+    """
+    return int(asset.mu_per_base_unit)
+
+
+def mu_per_whole_unit(asset: Asset) -> int:
+    """MU bought by one **whole** unit of ``asset``, for a person to read and type in.
+
+    A whole unit is the one a person can check against a price they know. Not what a
+    peer is told: that is :func:`advertised_mu_per_base_unit`.
     """
     value = asset.mu_per_base_unit * (Decimal(10) ** asset.decimals)
     if value != value.to_integral_value():

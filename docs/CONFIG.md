@@ -734,7 +734,7 @@ swept to a cold wallet once thresholds are met. Payments/reputation require Java
 |---|---|---|
 | `ledgers.ergo.WALLET_MNEMONIC` | `""` | The one wallet the node controls: what it is paid into, what publishes its reputation proofs, and what attests its identity on Ergo. Not the node's identity. Empty disables payments/reputation; `"auto"` generates a fresh mnemonic on first load. **Secret.** |
 | `ledgers.ergo.NODE_URL` | `https://node.sigmaspace.io` | Ergo node used for chain access. |
-| `ledgers.ergo.payments.MU_PER_NANOERG` | `1` | What one nanoERG buys in MU — the one place the node's unit of account meets real money, and what peers are told as `ContractRate.mu_per_unit`. ERG↔nanoERG is fixed in code, not here. |
+| `ledgers.ergo.payments.MU_PER_NANOERG` | `1` | What one nanoERG buys in MU — the one place the node's unit of account meets real money, and what peers are told as `ContractRate.mu_per_unit` (MU per base unit). A whole number. ERG↔nanoERG is fixed in code, not here. |
 | `ledgers.ergo.reputation.REPUTATION_PROOF_ID` | `""` | This node's reputation proof id (reconciled by `nodo sync_reputation_proof`). |
 | `ledgers.ergo.payments.HOT_WALLET_LIMITS` | `100` | Max ERG kept in the operational wallet before sweeping. |
 | `ledgers.ergo.payments.COLD_WALLET` | `""` | Public address to sweep excess to. Empty disables sweeping. Never a mnemonic. |

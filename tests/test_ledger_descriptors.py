@@ -1,0 +1,155 @@
+"""Every ledger is declared whole, and the same declaration is used everywhere it appears.
+
+A ``Contract.Ledger`` names a chain, and two nodes settling on it have to agree on far
+more than a tag: the network, the units, what each contract attribute holds, how a
+payment is bound to a deposit token and -- on Ergo -- how a reputation proof box is
+laid out and how its owner attests a peer. These pin that all of it is in ``formal``,
+that a payment contract and a reputation proof carry the very same descriptor, and that
+a peer declaring something else is refused rather than paid.
+"""
+import unittest
+from unittest import mock
+
+IMPORT_ERROR = None
+try:
+    from tests.config_bootstrap import load_example_config
+    load_example_config()
+    from protos import celaut_pb2
+    from src.identity.node_identity import attestation_payload, parse_component_formal
+    from src.utils import ledger_descriptors
+except Exception as import_exc:  # pragma: no cover - environment-dependent
+    IMPORT_ERROR = import_exc
+
+MANAGER_IMPORT_ERROR = None
+try:
+    from src.manager import manager
+    from src.payment_system import payment_process
+except Exception as import_exc:  # pragma: no cover - environment-dependent
+    MANAGER_IMPORT_ERROR = import_exc
+
+
+def _formal(ledger):
+    return parse_component_formal(ledger.formal)
+
+
+NETWORK_KEYS = ("chain", "network", "consensus", "asset.native", "asset.native.base_unit")
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class DescriptorTests(unittest.TestCase):
+    def test_the_ergo_network_is_the_same_in_both_places(self):
+        # The definition of the ledger itself repeats, whole, wherever it appears.
+        payment = _formal(ledger_descriptors.ergo_payment_ledger())
+        reputation = _formal(ledger_descriptors.ergo_reputation_ledger())
+        network = {k: v for k, v in payment.items() if not k.startswith("payment.")}
+        self.assertEqual(
+            network, {k: v for k, v in reputation.items() if not k.startswith("reputation.")}
+        )
+        for key in NETWORK_KEYS:
+            self.assertIn(key, network)
+        self.assertEqual(network["network"], "mainnet")
+
+    def test_each_place_carries_only_its_own_rules(self):
+        payment = _formal(ledger_descriptors.ergo_payment_ledger())
+        reputation = _formal(ledger_descriptors.ergo_reputation_ledger())
+        self.assertFalse(any(k.startswith("reputation.") for k in payment))
+        self.assertFalse(any(k.startswith("payment.") for k in reputation))
+        self.assertIn("R4", payment["payment.deposit_token"])
+        self.assertIn("reputation.contract.ergo_tree", reputation)
+        self.assertEqual(
+            reputation["reputation.attestation.payload"],
+            attestation_payload("") + "<peer_id>",
+        )
+
+    def test_bitcoin_declares_how_a_payment_is_bound(self):
+        formal = _formal(ledger_descriptors.bitcoin_payment_ledger())
+        self.assertEqual(formal["network"], "mainnet")
+        self.assertIn("OP_RETURN", formal["payment.deposit_token"])
+        self.assertEqual(formal["payment.contract_type.p2wpkh"], "p2wpkh")
+
+    def test_the_rate_unit_is_the_base_unit(self):
+        # ContractRate.mu_per_unit is MU per nanoERG / satoshi / token base unit; the
+        # whole unit is only how an amount is shown to a person.
+        for ledger in ledger_descriptors.payment_ledgers():
+            self.assertIn("base unit", _formal(ledger)["payment.rate.unit"].replace(
+                "per satoshi", "per base unit"))
+
+    def test_what_each_node_chooses_is_not_declared(self):
+        # A wallet's derivation path, a deposit token's lifetime and a proof's total
+        # supply are each node's own.
+        for ledger in ledger_descriptors.payment_ledgers() + ledger_descriptors.reputation_ledgers():
+            text = bytes(ledger.formal).decode()
+            self.assertNotIn("m/44'", text)
+            self.assertNotIn("ttl", text.lower())
+            self.assertNotIn("total", text.lower())
+
+    def test_formal_is_canonical(self):
+        for ledger in ledger_descriptors.payment_ledgers() + ledger_descriptors.reputation_ledgers():
+            keys = [l.split("=", 1)[0] for l in bytes(ledger.formal).decode().splitlines()]
+            self.assertEqual(keys, sorted(keys))
+
+    def test_payments_and_proofs_use_their_own_declaration(self):
+        from src.payment_system.contracts.ergo import interface as ergo_payments
+        from src.reputation_system.envs import ergo_ledger as reputation_ledger
+
+        self.assertEqual(ergo_payments.ledger(), ledger_descriptors.ergo_payment_ledger())
+        self.assertEqual(reputation_ledger(), ledger_descriptors.ergo_reputation_ledger())
+
+
+@unittest.skipIf(
+    IMPORT_ERROR is not None or MANAGER_IMPORT_ERROR is not None,
+    f"Missing runtime dependencies: {IMPORT_ERROR or MANAGER_IMPORT_ERROR}",
+)
+class ForeignLedgerTests(unittest.TestCase):
+    def _contract(self, ledger):
+        return celaut_pb2.Contract(ledger=ledger)
+
+    def test_a_contract_on_our_ledger_is_stored(self):
+        self.assertTrue(
+            manager._accept_contract(self._contract(ledger_descriptors.ergo_payment_ledger()), "p")
+        )
+
+    def test_a_contract_tagged_ergo_but_declaring_another_network_is_not(self):
+        ledger = ledger_descriptors.ergo_payment_ledger()
+        ledger.formal = bytes(ledger.formal).replace(b"network=mainnet", b"network=testnet")
+        self.assertFalse(manager._accept_contract(self._contract(ledger), "p"))
+
+    def test_a_ledger_this_node_does_not_know_is_not_stored(self):
+        ledger = celaut_pb2.Contract.Ledger(tags=["dogecoin"], formal=b"chain=dogecoin")
+        self.assertFalse(manager._accept_contract(self._contract(ledger), "p"))
+
+    def test_an_incoming_payment_on_another_ledger_has_no_tag(self):
+        ledger = ledger_descriptors.bitcoin_payment_ledger()
+        self.assertEqual(payment_process._ledger_tag(ledger), "bitcoin")
+        ledger.formal = bytes(ledger.formal).replace(b"satoshi", b"millisatoshi")
+        self.assertIsNone(payment_process._ledger_tag(ledger))
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class ProtocolCommandLedgerTests(unittest.TestCase):
+    def test_our_declaration_lists_every_ledger_per_place(self):
+        from src.commands import protocol
+
+        declared = protocol.own_declaration(prose=False)
+        self.assertEqual([d["tags"] for d in declared["payment_ledgers"]], [["ergo"], ["bitcoin"]])
+        self.assertEqual([d["tags"] for d in declared["reputation_ledgers"]], [["ergo"]])
+
+    def test_a_peer_ledger_that_differs_is_reported_with_the_key(self):
+        from src.commands import protocol
+
+        peer = celaut_pb2.Peer()
+        rate = peer.payment_contracts.add()
+        rate.contract.ledger.CopyFrom(ledger_descriptors.ergo_payment_ledger())
+        rate.contract.ledger.formal = bytes(rate.contract.ledger.formal).replace(
+            b"network=mainnet", b"network=testnet"
+        )
+        peer.reputation_proofs.add().ledger.CopyFrom(ledger_descriptors.ergo_reputation_ledger())
+        # A proof carrying the payment declaration is not a proof's declaration.
+        peer.reputation_proofs.add().ledger.CopyFrom(ledger_descriptors.ergo_payment_ledger())
+        report = protocol._compare_ledgers(peer)
+        self.assertEqual([r["status"] for r in report], ["differs", "match", "differs"])
+        self.assertEqual(list(report[0]["formal_difference"]), ["network"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -353,14 +353,22 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
             # then fail in the handshake, with nothing in the error saying why, so the
             # address is skipped here and the reason logged from what the peer itself
             # declared. Only `formal` and the tags are read: prose is the same protocol
-            # worded differently (node_identity.same_component_stack).
-            declared = "; ".join(
-                " ".join(c.tags) + (f" formal={bytes(c.formal).hex()}" if c.formal else "")
-                for c in uri.protocol_stack
-            )
+            # worded differently (transport_stack.same_layer_stack).
+            # The layers by name and which of them differ; the keys that differ are what
+            # `nodo protocol <peer>` prints -- a formal carries the whole schema, far too
+            # much for a log line.
+            from src.identity.transport_stack import compare_layer_stacks, node_transport_stack
+            differing = [
+                "/".join(layer["tags"]) + f":{layer['status']}"
+                for layer in compare_layer_stacks(
+                    node_transport_stack(prose=False), uri.protocol_stack
+                )
+                if layer["status"] != "match"
+            ]
             log.LOGGER(
-                f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} speaks [{declared}], "
-                "which this node does not. Skipping."
+                f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} speaks another protocol "
+                f"({', '.join(differing) or 'nothing declared'}). Skipping; "
+                f"'nodo protocol {peer_id}' shows the differences."
             )
             continue
         sc.add_peer_uri(uri=uri, peer_id=peer_id, transport=protocol.value)
@@ -501,7 +509,9 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 
     # Contracts
     for rate in peer.payment_contracts:
-        log.LOGGER(f"Adding contract {rate.contract} for peer {peer_id}")
+        if not _accept_contract(rate.contract, peer_id):
+            continue
+        log.LOGGER(f"Adding contract {rate.contract.ledger.tags} for peer {peer_id}")
         try:
             sc.add_contract(contract=rate.contract, peer_id=peer_id, mu_per_unit=from_amount(rate.mu_per_unit))
         except Exception as e:
@@ -522,6 +532,28 @@ def add_peer_instance(peer: celaut_pb2.Peer) -> Optional[str]:
 
     return peer_id
 
+def _accept_contract(contract: celaut_pb2.Contract, peer_id: str) -> bool:
+    """Whether a payment contract a peer advertises is on a ledger this node settles on.
+
+    The ledger is compared on its whole declaration (``node_identity.same_component``
+    against ``ledger_descriptors.payment_ledger``), not on its tag: a contract that says
+    "ergo" but declares another network, other units or another deposit binding cannot
+    be paid by this node, and storing it would make the payer try.
+    """
+    from src.identity.node_identity import same_component
+    from src.utils.ledger_descriptors import payment_ledger
+
+    tags = list(contract.ledger.tags)
+    ours = payment_ledger(tags[0]) if tags else None
+    if ours is not None and same_component(contract.ledger, ours):
+        return True
+    log.LOGGER(
+        f"[PEER][{peer_id}] Skipping a payment contract on ledger {tags or '(none)'}: "
+        "it does not declare a ledger this node settles on."
+    )
+    return False
+
+
 def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int]]:
     """Refresh a known peer; returns the addresses actually stored (see
     :func:`_store_peer_uris`), which is what a caller may then prune down to."""
@@ -538,7 +570,9 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
     if not peer.payment_contracts:
         log.LOGGER(f"Peer {peer_id} advertises no payment contract; it cannot be paid.")
     for rate in peer.payment_contracts:
-        log.LOGGER(f"Adding contract {rate.contract} for peer {peer_id}")
+        if not _accept_contract(rate.contract, peer_id):
+            continue
+        log.LOGGER(f"Adding contract {rate.contract.ledger.tags} for peer {peer_id}")
         try:
             sc.add_contract(contract=rate.contract, peer_id=peer_id, mu_per_unit=from_amount(rate.mu_per_unit))
         except Exception as e:
@@ -557,6 +591,27 @@ def update_peer_instance(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str,
     return stored
 
 
+def fetch_peer_info(channel, peer_id: str) -> Optional[celaut_pb2.Peer]:
+    """``GetPeerInfo`` from a known peer over ``channel``, under our client_id there.
+
+    GetPeerInfo is gated like every RPC but GenerateClient (issue #428), so asking a
+    known peer without a client_id is asking to be refused. The client this node already
+    holds at that peer is reused; when there is none yet it is minted over the channel
+    the caller already opened -- not through ``get_client_id_on_other_peer``, which
+    refuses a peer that is not currently "available", and a refresh exists precisely
+    for peers whose availability is in doubt.
+    """
+    client_id = sc.get_peer_client(peer_id=peer_id)
+    if not client_id:
+        proposed_id = uuid4().hex
+        client_id = _mint_client_over_channel(
+            channel, proposed_id=proposed_id, binding=_peer_identity_binding(proposed_id)
+        )
+        if client_id:
+            sc.add_external_client(peer_id=peer_id, client_id=client_id)
+    return BeeClient.get_peer_info(channel, client_id=client_id or "")
+
+
 def refresh_peer_instance(peer_id: str) -> bool:
     """Re-fetch a known peer's instance over ``GetPeerInfo`` and re-register it.
 
@@ -569,7 +624,7 @@ def refresh_peer_instance(peer_id: str) -> bool:
         log.LOGGER(f"No known URI for peer {peer_id}; cannot refresh.")
         return False
     try:
-        peer = BeeClient.get_peer_info(node_channel(uri, expected_peer_id=peer_id))
+        peer = fetch_peer_info(node_channel(uri, expected_peer_id=peer_id), peer_id)
     except Exception as e:
         log.LOGGER(f"Could not fetch info for peer {peer_id}: {e}")
         return False

@@ -479,6 +479,17 @@ These commands offer extended management and exploration features:
   `nodo peers`  
   `nodo peers <peer id> --json`
 
+- **protocol `[<peer id> | <ip:port>] [--json] [--no-prose]`**  
+  Without an argument, prints the protocol this node announces on every address:
+  the signature scheme, the transport and the stack of layers (tls, http2, grpc,
+  bee-rpc, celaut-gateway), each with its `formal` parameters and its prose. With a
+  peer, asks it for its announcement and compares it with this node's, layer by layer,
+  naming every `formal` key that differs. Exits 0 when the peer speaks this node's
+  protocol on at least one address.  
+  **Example:**  
+  `nodo protocol`  
+  `nodo protocol <peer id> --json`
+
 - **peer_reputation `<peer id> <+N|-N>` `[--json]`**  
   Moves this node's local reputation score of a peer and records why
   (`operator_adjustment`) — the TUI's `+`/`-` on PEERS.  
@@ -816,7 +827,7 @@ pages, peer reputation adjustment, the detail cards) are commands now too.
 - **`--limit N`** bounds the history rows in a detail view (default 50; the TUI
   shows 8).
 
-Commands with `--json`: `status`, `services`, `instances`, `peers`, `clients`,
+Commands with `--json`: `status`, `services`, `instances`, `peers`, `protocol`, `clients`,
 `peer_reputation`, `config` (all subcommands), `earnings`, `energy`, `schedule`,
 `logs -n`, `docs`, `chat <peer>` (reading), `chat_open`, `chat_threads`,
 `chat_thread`, `reputation`, `donations`, `resources`, `tx_history`, `kill`, `tunnel`,

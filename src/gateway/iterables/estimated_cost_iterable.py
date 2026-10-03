@@ -8,6 +8,7 @@ from src.gateway.iterables.abstract_input_service_iterable import AbstractInputS
 from src.manager.manager import default_initial_balance
 from src.utils.bee_client import BeeClient, Buffer
 from src.utils.cost_functions.generate_estimated_cost import generate_estimated_cost
+from src.utils.cost_functions.resource_availability import get_resource_availability
 from src.utils import activity_window
 from src.utils.network_policy import enforce_network_policy
 from src.utils.logger import LOGGER as logger
@@ -97,14 +98,28 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                         logger(f"Failed to set initial_mu: {e}")
                         raise Exception(f"Failed to set initial_mu: {e}")
 
+                estimated_cost = generate_estimated_cost(
+                    metadata=self.metadata,
+                    config=self.configuration,
+                    resources=resources,
+                    arch=service_arch,
+                    service=priced_service,
+                )
+                if estimated_cost is None:
+                    # generate_estimated_cost declines to quote a service this node
+                    # could not admit right now. Handing that None to respond() used to
+                    # fail inside the serializer, so the caller got an UNKNOWN status
+                    # naming a KeyError rather than the reason the node refused.
+                    availability = get_resource_availability(
+                        resources=resources, arch=service_arch
+                    )
+                    raise Exception(
+                        "This node cannot run the service right now: "
+                        f"{availability.get('reason') or 'not enough resources.'}"
+                    )
+
                 yield from BeeClient.respond(
-                    message_iterator=generate_estimated_cost(
-                        metadata=self.metadata,
-                        config=self.configuration,
-                        resources=resources,
-                        arch=service_arch,
-                        service=priced_service,
-                    ),
+                    message_iterator=estimated_cost,
                     indices=celaut_pb2.EstimatedCost
                 )
             

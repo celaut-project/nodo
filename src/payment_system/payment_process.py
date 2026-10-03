@@ -134,14 +134,26 @@ def _donation_accrual():
 
 
 def _ledger_tag(ledger) -> Optional[str]:
-    """The tag ("ergo") of a `Contract.Ledger` as it arrives on the wire.
+    """The tag ("ergo") of a `Contract.Ledger` as it arrives on the wire, if it is ours.
 
     Only for the incoming side, where a peer sends the whole advertised message. The
     payer's own side already works in tags: that is what a `contract_instance` row
     holds and what `get_peer_contract_instances` yields.
+
+    None unless the message declares the same ledger this node settles on
+    (``ledger_descriptors.payment_ledger``, compared on `formal` by
+    ``node_identity.same_component``): a payer that means another network, other units
+    or another way to bind a deposit token is not paying into this node's ledger,
+    whatever its tag says.
     """
+    from src.identity.node_identity import same_component
+    from src.utils.ledger_descriptors import payment_ledger
+
     tags = getattr(ledger, "tags", None)
-    return tags[0] if tags else None
+    if not tags:
+        return None
+    ours = payment_ledger(tags[0])
+    return tags[0] if ours is not None and same_component(ledger, ours) else None
 
 
 def _address_of(script) -> Optional[str]:
@@ -391,11 +403,18 @@ def __attempt_payment_communication(peer_id: str, peer_amount: int, deposit_toke
                 _l.LOGGER(f"Failed to get gRPC stub for peer {peer_id}")
                 return False
 
+            # The same client the deposit token was issued to (__obtain_deposit_token):
+            # stored by then, so this reads it back rather than minting another.
+            client_id = _manager_module().get_client_id_on_other_peer(peer_id=peer_id)
+            if not client_id:
+                _l.LOGGER(f"No client_id at peer {peer_id} to communicate the payment with.")
+                return False
+
             BeeClient.payable(channel, celaut_pb2.Payment(
                 amount=to_amount(peer_amount),
                 deposit_token=deposit_token,
                 contract=contract_ledger,
-            ))
+            ), client_id=client_id)
 
             _l.LOGGER(f"Payment of {peer_amount} (peer MU) to {peer_id} communicated successfully.")
             return True
@@ -667,9 +686,9 @@ def validate_payment_process(amount: int, ledger: celaut_pb2.Contract.Ledger, co
     """
     if not sc.deposit_token_exists(token_id=token, status='pending'):
         raise Exception(f"Deposit token {token} doesn't exists.")
-    # The wire carries the whole `Contract.Ledger` a peer advertises; the tag is the
-    # only part of it anything reads, so it is taken here, once, and everything below
-    # this line works in tags. `prose` and `formal` are description and are dropped.
+    # The wire carries the whole `Contract.Ledger` a peer advertises. It is checked
+    # against this node's own declaration of that ledger and reduced to its tag here,
+    # once; everything below this line works in tags.
     ledger_tag: str = _ledger_tag(ledger) or ""
     # Resolved once, up front, because the payment record needs it whichever way the
     # validation goes -- a deposit we refused is exactly the one a client will ask about.

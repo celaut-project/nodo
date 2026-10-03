@@ -106,10 +106,17 @@ class TheThreeUnitsTests(unittest.TestCase):
 
     def test_the_ledger_rate_rescales_what_an_mu_is_worth(self):
         """The rate belongs to the payment contract, not to MU."""
+        with _config(**{"ledgers.ergo.payments.MU_PER_NANOERG": "1000"}):
+            # A finer MU: one nanoERG is now a thousand MU.
+            self.assertEqual(mu_per_erg(), 1_000_000_000_000)
+            self.assertEqual(mu_to_nanoerg(1_000_000), 1_000)
+
+    def test_a_rate_coarser_than_the_base_unit_is_refused(self):
+        # Peers are told MU per nanoERG as an integer (ContractRate.mu_per_unit), so an
+        # MU worth more than a nanoERG cannot be expressed.
         with _config(**{"ledgers.ergo.payments.MU_PER_NANOERG": "0.001"}):
-            # A coarser MU: one MU is now a thousand nanoERG.
-            self.assertEqual(mu_per_erg(), 1_000_000)
-            self.assertEqual(mu_to_nanoerg(1_000), 1_000_000)
+            with self.assertRaises(ValueError):
+                mu_per_erg()
 
     def test_a_rate_that_does_not_divide_an_erg_is_refused(self):
         with _config(**{"ledgers.ergo.payments.MU_PER_NANOERG": "0.0000000003"}):

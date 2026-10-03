@@ -138,18 +138,13 @@ class PaymentContract(Protocol):
     #: ``contract_hash`` peers match on; the per-instance wallet script travels apart.
     CONTRACT: str
     CONTRACT_HASH: str
-    #: The ledger's TAG, and its whole identity: what a `contract_instance` row is keyed
-    #: by, what `MethodKey` carries, and what a contract checks a payment against.
+    #: The ledger's TAG: what a `contract_instance` row is keyed by, what `MethodKey`
+    #: carries, and what a contract checks a payment against.
     LEDGER: str
-    #: Description of the chain, for peers to read. Carried in the advertised
-    #: `Contract.Ledger` and never read back by anything here -- which is why they are
-    #: separate constants rather than part of the identity.
-    PROSE: str
-    FORMAL: bytes
 
-    #: The full message peers receive, assembled from the module's own LEDGER, PROSE
-    #: and FORMAL constants. Only `LEDGER`, the tag, identifies anything; the other two
-    #: are description and no code on the receiving side reads them back.
+    #: The full message peers receive: everything two nodes must agree on to settle on
+    #: this ledger, in `formal` (src/utils/ledger_descriptors.py). A peer's contract
+    #: whose ledger does not match this one is not stored (manager._accept_contract).
     def ledger(self) -> "celaut_pb2.Contract.Ledger": ...
     def init(self) -> None: ...
     def manager(self) -> None: ...
@@ -168,8 +163,6 @@ REQUIRED_MEMBERS = (
     "CONTRACT",
     "CONTRACT_HASH",
     "LEDGER",
-    "PROSE",
-    "FORMAL",
     "ledger",
     "init",
     "manager",

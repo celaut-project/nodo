@@ -1,6 +1,7 @@
 import os
 from typing import Generator
 
+from src.gateway.client_gate import require_caller
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable
 from src.gateway.launcher.launch_service import launch_service
 from src.utils import logger as log
@@ -66,3 +67,9 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 f"This is on registry -> {[h for h in os.listdir(REGISTRY)]} \n"
                 f"\n"
             )
+        elif not self.generated:
+            # The service was ready but no client_id ever arrived: the gate in the base
+            # class deferred, waiting for one, and the stream ended first. Its final()
+            # makes that refusal definitive; overriding it without doing the same left
+            # such a caller with an empty response instead of an error.
+            require_caller(self.context, self.client_id or "")

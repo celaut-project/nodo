@@ -34,9 +34,10 @@ from bee_rpc.control import StreamControl
 
 from protos import celaut_pb2, celaut_pb2_grpc
 from protos.gateway_bee import (
-    GenerateClient_output_indices,
     StartService_input_indices,
     StartService_input_message_mode,
+    rpc_input,
+    rpc_output,
 )
 
 # Re-exported so a caller that only talks to BeeClient never needs a second import
@@ -191,25 +192,20 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetPeerInfo,
             input=celaut_pb2.Client(client_id=client_id) if client_id else None,
-            indices_serializer=celaut_pb2.Client,
-            indices_parser=celaut_pb2.Peer,
+                        indices_serializer=rpc_input("GetPeerInfo"),
+            indices_parser=rpc_output("GetPeerInfo"),
         )
 
     @staticmethod
     def introduce_peer(
             channel, peer: celaut_pb2.Peer, client_id: str = ""
     ) -> Optional[celaut_pb2.RecursionGuard]:
-        if client_id:
-            indices_serializer = {1: celaut_pb2.Peer, 2: celaut_pb2.Client}
-            input_messages = [peer, celaut_pb2.Client(client_id=client_id)]
-        else:
-            indices_serializer = celaut_pb2.Peer
-            input_messages = peer
+        input_messages = [peer, celaut_pb2.Client(client_id=client_id)] if client_id else peer
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).IntroducePeer,
             input=input_messages,
-            indices_serializer=indices_serializer,
-            indices_parser=celaut_pb2.RecursionGuard,
+            indices_serializer=rpc_input("IntroducePeer"),
+            indices_parser=rpc_output("IntroducePeer"),
         )
 
     @staticmethod
@@ -240,8 +236,8 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GenerateClient,
             input=message,
-            indices_parser=dict(GenerateClient_output_indices),
-            indices_serializer=celaut_pb2.Client,
+                        indices_parser=rpc_output("GenerateClient"),
+            indices_serializer=rpc_input("GenerateClient"),
         )
 
     @staticmethod
@@ -256,8 +252,8 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).AssociateClient,
             input=message,
-            indices_parser=celaut_pb2.AssociateClientOutput,
-            indices_serializer=celaut_pb2.Client,
+                        indices_parser=rpc_output("AssociateClient"),
+            indices_serializer=rpc_input("AssociateClient"),
         )
 
     @staticmethod
@@ -265,17 +261,12 @@ class BeeClient:
             channel, network: celaut_pb2.Service.Network, timeout: Optional[float] = None,
             client_id: str = "",
     ) -> Optional[celaut_pb2.ConfigurationFile.NetworkResolution]:
-        if client_id:
-            indices_serializer = {1: celaut_pb2.Service.Network, 2: celaut_pb2.Client}
-            input_messages = [network, celaut_pb2.Client(client_id=client_id)]
-        else:
-            indices_serializer = celaut_pb2.Service.Network
-            input_messages = network
+        input_messages = [network, celaut_pb2.Client(client_id=client_id)] if client_id else network
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).ResolveNetwork,
             input=input_messages,
-            indices_serializer=indices_serializer,
-            indices_parser=celaut_pb2.ConfigurationFile.NetworkResolution,
+            indices_serializer=rpc_input("ResolveNetwork"),
+            indices_parser=rpc_output("ResolveNetwork"),
             timeout=timeout,
         )
 
@@ -284,7 +275,8 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).Chat,
             input=message,
-            indices_parser=celaut_pb2.ChatAck,
+            indices_serializer=rpc_input("Chat"),
+            indices_parser=rpc_output("Chat"),
         )
 
     @staticmethod
@@ -292,7 +284,8 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetMetrics,
             input=celaut_pb2.TokenMessage(token=token),
-            indices_parser=celaut_pb2.Metrics,
+            indices_serializer=rpc_input("GetMetrics"),
+            indices_parser=rpc_output("GetMetrics"),
         )
 
     @staticmethod
@@ -300,14 +293,20 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GenerateDepositToken,
             input=celaut_pb2.Client(client_id=client_id),
-            indices_parser=celaut_pb2.TokenMessage,
+            indices_serializer=rpc_input("GenerateDepositToken"),
+            indices_parser=rpc_output("GenerateDepositToken"),
         )
 
     @staticmethod
-    def payable(channel, payment: celaut_pb2.Payment) -> None:
+    def payable(channel, payment: celaut_pb2.Payment, client_id: str) -> None:
+        """``Client & Payment -> Empty``. The peer gates Payable like every RPC but
+        GenerateClient (``client_gate.parse_with_client``: payload at 1, Client at 2),
+        so a Payment sent without a Client is refused before it is ever validated."""
         BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).Payable,
-            input=payment,
+            input=[payment, celaut_pb2.Client(client_id=client_id)],
+            indices_serializer=rpc_input("Payable"),
+            indices_parser=rpc_output("Payable"),
         )
 
     @staticmethod
@@ -319,17 +318,12 @@ class BeeClient:
     ) -> Optional[celaut_pb2.ResourceAvailability]:
         """``Client & ArchitectureResources -> ResourceAvailability``: could the peer run
         one instance of this shape, of this architecture (#459)?"""
-        if client_id:
-            indices_serializer = {1: celaut_pb2.ArchitectureResources, 2: celaut_pb2.Client}
-            input_messages = [request, celaut_pb2.Client(client_id=client_id)]
-        else:
-            indices_serializer = celaut_pb2.ArchitectureResources
-            input_messages = request
+        input_messages = [request, celaut_pb2.Client(client_id=client_id)] if client_id else request
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetResourceAvailability,
             input=input_messages,
-            indices_serializer=indices_serializer,
-            indices_parser=celaut_pb2.ResourceAvailability,
+            indices_serializer=rpc_input("GetResourceAvailability"),
+            indices_parser=rpc_output("GetResourceAvailability"),
             timeout=timeout,
         )
 
@@ -345,8 +339,8 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).GetServiceEstimatedCost,
             input=message_iterator,
-            indices_parser=celaut_pb2.EstimatedCost,
-            indices_serializer=StartService_input_indices,
+            indices_parser=rpc_output("GetServiceEstimatedCost"),
+            indices_serializer=rpc_input("GetServiceEstimatedCost"),
             timeout=timeout,
         )
 
@@ -358,8 +352,8 @@ class BeeClient:
         return next(BeeClient.call(
             method=celaut_pb2_grpc.GatewayStub(channel).StartService,
             input=message_iterator,
-            indices_parser=celaut_pb2.ServiceInstance,
-            indices_serializer=StartService_input_indices,
+            indices_parser=rpc_output("StartService"),
+            indices_serializer=rpc_input("StartService"),
             timeout=timeout,
         ))
 
@@ -368,7 +362,8 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).StopService,
             input=celaut_pb2.TokenMessage(token=token),
-            indices_parser=celaut_pb2.Refund,
+            indices_serializer=rpc_input("StopService"),
+            indices_parser=rpc_output("StopService"),
         )
 
     @staticmethod
@@ -378,7 +373,8 @@ class BeeClient:
         return BeeClient.call_one(
             method=celaut_pb2_grpc.GatewayStub(channel).ModifyDeposit,
             input=celaut_pb2.ModifyDepositInput(difference=difference, service_token=service_token),
-            indices_parser=celaut_pb2.ModifyDepositOutput,
+            indices_serializer=rpc_input("ModifyDeposit"),
+            indices_parser=rpc_output("ModifyDeposit"),
         )
 
     @staticmethod
@@ -396,17 +392,15 @@ class BeeClient:
         -- a caller that never sends one just spends that whole wait before the
         server falls back to treating it as unauthenticated.
         """
-        if client_id:
-            indices_serializer = {1: celaut_pb2.Metadata.HashTag.Hash, 2: celaut_pb2.Client}
-            input_messages = [celaut_pb2.Client(client_id=client_id), hash_message]
-        else:
-            indices_serializer = celaut_pb2.Metadata.HashTag.Hash
-            input_messages = hash_message
+        input_messages = [celaut_pb2.Client(client_id=client_id), hash_message] if client_id \
+            else hash_message
         return BeeClient.call(
             method=celaut_pb2_grpc.GatewayStub(channel).GetService,
             input=input_messages,
-            indices_serializer=indices_serializer,
-            indices_parser=StartService_input_indices,  # Not all indices are used, but still the same shape.
+            indices_serializer=rpc_input("GetService"),
+            # A superset of rpc_output("GetService"): its 4/5/6 are the StartService
+            # envelope's, and the partition modes below are keyed by the whole envelope.
+            indices_parser=StartService_input_indices,
             partitions_message_mode_parser=StartService_input_message_mode,
             # Tell the peer which blocks of what it sends we already hold, so it
             # stops mid-block instead of us draining and discarding bytes it did
@@ -423,6 +417,6 @@ class BeeClient:
         return BeeClient.call(
             method=celaut_pb2_grpc.GatewayStub(channel).ServiceTunnel,
             input=outbound,
-            indices_parser={0: bytes},
-            indices_serializer={1: celaut_pb2.TokenMessage},
+            indices_parser=rpc_output("ServiceTunnel"),
+            indices_serializer=rpc_input("ServiceTunnel"),
         )

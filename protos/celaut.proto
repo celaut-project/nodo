@@ -108,16 +108,23 @@ message Contract {
 // payment system and defaults to 1 MU = 1 nanoERG, but that is a default the operator
 // can rescale (ledgers.ergo.payments.MU_PER_NANOERG), not a definition. Read the rate.
 //
-// A string rather than an integer because a balance is unbounded.
+// A string rather than an integer because a balance is unbounded: a signed decimal
+// integer ("-" for a negative value). Most fields carry a value >= 0; the one that
+// takes a negative value is ModifyDepositInput.difference, where it moves balance out
+// of the instance instead of into it.
 message Amount {
     string n = 1;
 }
 
-// How much one unit of a payment contract is worth, in MU.
+// How much one BASE unit of a payment contract's asset is worth, in MU: one nanoERG,
+// one satoshi, one smallest unit of a token -- never a whole ERG or BTC, which is only
+// how an amount is shown to a person. A whole number, like every Amount, so a node's MU
+// is at least as fine as the smallest unit it is paid in.
 //
 // This is what lets a node be paid in something other than ERG without giving up a
-// common scale: ERG is simply the contract whose rate is the peg (1e9 MU per ERG), and
-// another ledger declares its own.
+// common scale: ERG is simply the contract whose rate is the peg (1 MU per nanoERG by
+// default), and another ledger declares its own. The ledger's own declaration
+// (Contract.ledger, `payment.rate.unit`) states the same.
 message ContractRate {
     Contract contract = 1;
     Amount mu_per_unit = 2;
@@ -614,8 +621,8 @@ message Peer {
     // unverified admits anyone. So a scheme needs no global consensus, but it does
     // need the peer reading it to speak it.
     //
-    // An empty descriptor means the sender's default, so an announcement from a node
-    // that predates this field still verifies.
+    // An empty descriptor is refused: a verifier cannot check a signature whose scheme
+    // the announcement does not state.
     //
     // One scheme per Peer, and therefore one public_key: they are not repeated, and a
     // node signing under two schemes at once is not representable. That is a decision,
@@ -910,12 +917,24 @@ message ObserveEvent {
 // GATEWAY SERVICE DEFINITION
 // -----------------------
 
-// Every RPC below but GenerateClient itself requires a Client -- mint one there first
-// (issue #428). A local instance of this node is exempt, identified the way
-// ModifyServiceSystemResources identifies one (by its address); everyone else is
-// refused outright without a client_id this node already knows, and is then subject
-// to a shared per-client_id rate limit across every one of these RPCs together. See
-// src/gateway/client_gate.py.
+// How each RPC below authenticates its caller. Three kinds:
+//
+//   * A Client (issue #428), minted by GenerateClient first: GetPeerInfo,
+//     ResolveNetwork, IntroducePeer, AssociateClient, GenerateDepositToken, Payable,
+//     StartService, GetServiceEstimatedCost, GetResourceAvailability and GetService.
+//     The payload travels at index 1 and the Client at index 2, in either order. A
+//     local instance of this node is exempt, identified by its address; everyone else
+//     is refused without a client_id this node already knows, and is then subject to
+//     a shared per-client_id rate limit across all of these RPCs together. See
+//     src/gateway/client_gate.py.
+//   * A bearer token held by the caller, with no Client: StopService, ModifyDeposit,
+//     GetMetrics, ServiceTunnel and Observe take an instance token (GetMetrics also
+//     takes a client_id, to read that client's balance), and Chat takes the client_id
+//     inside its ChatMessage, which must already be bound to a peer.
+//   * The caller's address alone: ModifyServiceSystemResources answers only a local
+//     instance of this node.
+//
+// GenerateClient itself needs nothing, but may answer with a PoWRequired.
 service Gateway {
     rpc StartService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // Configuration | Hash | Client | RecursionGuard | Service -> Instance
     rpc StopService(stream buffer.Buffer) returns (stream buffer.Buffer) {} // TokenMessage -> Refund
