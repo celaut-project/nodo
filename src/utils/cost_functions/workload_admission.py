@@ -131,6 +131,12 @@ def check_resource_availability_on_peer(
     shaped like `request` right now. None means the peer could not be asked
     (unreachable, timed out, running a version without the RPC, or holding an
     address that turns out not to prove its identity) -- not a "no".
+
+    An answer already obtained for this very question is reused for
+    `network.QUERY_CACHE_AVAILABILITY_TTL_SECONDS` (#456), so probes for the same shape
+    do not ask the same peer again. The question carries no recursion token: the peer
+    answers from its own machine and never passes it on, and what it remembers is keyed
+    by content (`src/utils/tools/query_cache.py`).
     """
     # Imported lazily: this is the only place in the module that talks to a
     # peer, and keeping the rest importable without bee_rpc/grpc installed is
@@ -141,12 +147,21 @@ def check_resource_availability_on_peer(
     from src.identity.grpc_transport import peer_channel
     from src.manager.manager import get_client_id_on_other_peer
     from src.utils.bee_client import BeeClient
+    from src.utils.tools.query_cache import HIT, QueryCache, availability_ttl, canonical_key
 
     try:
+        ttl = availability_ttl()
+        key = canonical_key("peer-availability", peer_id, request) if ttl > 0 else None
+        if key is not None:
+            status, remembered = QueryCache().recall(key)
+            if status == HIT:
+                return remembered
         response = BeeClient.get_resource_availability(
             peer_channel(peer_id=peer_id), request, timeout=_timeout(),
             client_id=get_client_id_on_other_peer(peer_id=peer_id),
         )
+        if key is not None:
+            QueryCache().remember(key, response.can_execute, ttl)
         return response.can_execute
     except Exception as e:
         log.LOGGER(f"Could not check resource availability on peer {peer_id}: {e}")

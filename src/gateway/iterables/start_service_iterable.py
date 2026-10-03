@@ -53,7 +53,8 @@ class StartServiceIterable(AbstractInputServiceIterable):
                 configuration=self.configuration,
                 father_ip=get_only_the_ip_from_context(context_peer=self.context.peer()),
                 father_id=self.client_id,  # Only client, not set the internal_service_id because depends of the recursion guard.
-                recursion_guard_token=self.recursion_guard_token
+                recursion_guard_token=self.recursion_guard_token,
+                recursion_guard_hops=self.recursion_guard_hops,
             )
         )
 

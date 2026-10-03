@@ -25,3 +25,16 @@ if not os.path.exists(_CONFIG) and os.path.exists(_EXAMPLE):
             os.remove(_CONFIG)
         except OSError:
             pass
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _fresh_query_cache():
+    """The query cache (#456) is process-wide; a test must not inherit another's answers."""
+    from src.utils.singleton import Singleton
+    from src.utils.tools.query_cache import QueryCache
+    Singleton._instances.pop(QueryCache, None)
+    yield
+    Singleton._instances.pop(QueryCache, None)

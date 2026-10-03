@@ -219,6 +219,12 @@ def _ensure_traceability_tables(connection) -> None:
         logger.LOGGER(f'Could not ensure the traceability tables exist: {e}')
 
 
+def _local_capacity_changed() -> None:
+    """A local instance started, stopped or was resized: the room this node reported is stale."""
+    from src.utils.tools.query_cache import QueryCache
+    QueryCache().invalidate("GetResourceAvailability")
+
+
 class SQLConnection(metaclass=Singleton):
     _connection = None
     _lock = Lock()
@@ -561,6 +567,7 @@ class SQLConnection(metaclass=Singleton):
         ''', (container_id, name, container_ip, father_id, str(balance_mu), int(mem_limit or 0),
               disk_space, int(cpu_period or 0), int(cpu_quota or 0),
               serialized_instance, service_id, virtualizer, envs, arch))
+        _local_capacity_changed()
         log.LOGGER(f'Saved instance {container_id} ({name}) as dependency of {father_id}')
 
     def set_local_instance_definition(self, id: str, serialized_instance) -> bool:
@@ -647,6 +654,7 @@ class SQLConnection(metaclass=Singleton):
                 f"UPDATE local_instances SET {', '.join(assignments)} WHERE id = ?",
                 tuple(params),
             )
+            _local_capacity_changed()
             return True
         except:
             return False
@@ -979,6 +987,7 @@ class SQLConnection(metaclass=Singleton):
         self._execute('''
             DELETE FROM local_instances WHERE id = ?
         ''', (id,))
+        _local_capacity_changed()
         # Drop the burn-rate row and its in-memory window together with the instance,
         # so a later instance that reuses this id never inherits a stale rate.
         self._execute('''

@@ -1190,7 +1190,7 @@ running on this host.
   value, `/` filters values, and `x` clears the filter. Secrets are masked, comments are
   preserved, and each write snapshots the previous file to
   `config-<timestamp>-<nnnn>.yaml` — one snapshot per write, not per second.
-- On Cell, the node's policies are laid out as a cell: Right/Left move between organelles,
+- On Cell, the node's policies are grouped into sections (Network, Workload, Publishing, Identity, Security, Resources, Payments, Storage): Right/Left move between sections,
   Up/Down between the decisions inside one, and Enter moves a decision to its next position
   (after showing every key it would change). `p` applies a whole posture — "just me",
   "cautious renter", "open renter", "lan lab", "workbench" — and `d` shows exactly where

@@ -392,22 +392,21 @@ The Config page is the whole YAML tree, ordered by where a key lives in the file
 That is what you want when you already know the key. The Cell page is the other half:
 a closed catalogue of *decisions*, each named by the question it answers.
 
-The layout is a cell because the anatomy carries the grouping — the part of a cell
-responsible for something is the part of the config responsible for it too:
+The page groups the decisions by what they govern, one section per concern:
 
-| Organelle | What it decides |
+| Section | What it decides |
 |---|---|
-| `CHANNELS · reach` | The gateway port, whether this node publishes its address, whether an instance gets a port of its own |
-| `RIBOSOMES · work` | Whether outside work is taken at all, foreign architectures, descendant admission, spare-capacity work |
-| `VESICLES · voice` | Delegating work to peers and paying for it, announcing to peers, how much an announcement carries |
-| `NUCLEUS · identity & wallet` | Three headed runs. GENERAL: the identity mnemonic and whether payments are real. ERGO and BITCOIN: each chain's wallet mnemonic (replacing one first shows what it holds and that peers may know its address), cold wallet, hot limit and price rate (MU per nanoERG / per satoshi); Ergo also has `assets`, the tokens accepted besides ERG (`a` opens a form to add one, `d` removes the highlighted) |
-| `IMMUNE · trust` | Service egress, child isolation, integrity checks, device nodes, manifest claims |
-| `WALL · footprint & hours` | How much of this machine may be held at once (CPU, RAM, disk, network), and the hours of the day work is taken in |
-| `MITOCHONDRIA · money` | The scarcity surcharge, the free tier, instance debt, the display unit — and a link to Pricing, which owns the prices themselves |
-| `VACUOLE · upkeep` | Debug logging, failure retention, downloaded files |
+| `NETWORK · reach` | The gateway port, whether this node publishes its address, whether an instance gets a port of its own |
+| `WORKLOAD · services offered` | Whether outside work is taken at all, foreign architectures, descendant admission, spare-capacity work |
+| `PUBLISHING · announcements` | Delegating work to peers and paying for it, announcing to peers, how much an announcement carries |
+| `IDENTITY · keys & wallets` | Three headed runs. GENERAL: the identity mnemonic and whether payments are real. ERGO and BITCOIN: each chain's wallet mnemonic (replacing one first shows what it holds and that peers may know its address), cold wallet, hot limit and price rate (MU per nanoERG / per satoshi); Ergo also has `assets`, the tokens accepted besides ERG (`a` opens a form to add one, `d` removes the highlighted) |
+| `SECURITY · trust` | Service egress, child isolation, integrity checks, device nodes, manifest claims |
+| `RESOURCES · footprint & hours` | How much of this machine may be held at once (CPU, RAM, disk, network), and the hours of the day work is taken in |
+| `PAYMENTS · pricing & earnings` | The scarcity surcharge, the free tier, instance debt, the display unit — and a link to Pricing, which owns the prices themselves |
+| `STORAGE · disk & upkeep` | Debug logging, failure retention, downloaded files |
 
 A wide terminal draws all eight; a narrow one collapses to one column with the
-focused organelle open. The keys are the same either way. A box shorter than its own
+focused section open. The keys are the same either way. A box shorter than its own
 list of levers scrolls to whatever is selected, so nothing in it becomes unreachable.
 
 ### Levers

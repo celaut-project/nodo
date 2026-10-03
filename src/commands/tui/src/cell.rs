@@ -60,29 +60,29 @@ impl Organelle {
 
     pub fn title(self) -> &'static str {
         match self {
-            Organelle::Channels => "CHANNELS",
-            Organelle::Ribosomes => "RIBOSOMES",
-            Organelle::Vesicles => "VESICLES",
-            Organelle::Nucleus => "NUCLEUS",
-            Organelle::Immune => "IMMUNE",
-            Organelle::Wall => "WALL",
-            Organelle::Mitochondria => "MITOCHONDRIA",
-            Organelle::Vacuole => "VACUOLE",
+            Organelle::Channels => "NETWORK",
+            Organelle::Ribosomes => "WORKLOAD",
+            Organelle::Vesicles => "PUBLISHING",
+            Organelle::Nucleus => "IDENTITY",
+            Organelle::Immune => "SECURITY",
+            Organelle::Wall => "RESOURCES",
+            Organelle::Mitochondria => "PAYMENTS",
+            Organelle::Vacuole => "STORAGE",
         }
     }
 
     /// What the organelle governs, in the operator's words. Rendered beside the
-    /// title, because "CHANNELS" alone tells nobody anything.
+    /// title, because "NETWORK" alone tells nobody anything.
     pub fn subtitle(self) -> &'static str {
         match self {
             Organelle::Channels => "reach",
-            Organelle::Ribosomes => "work",
-            Organelle::Vesicles => "voice",
-            Organelle::Nucleus => "identity & wallet",
+            Organelle::Ribosomes => "services offered",
+            Organelle::Vesicles => "announcements",
+            Organelle::Nucleus => "keys & wallets",
             Organelle::Immune => "trust",
             Organelle::Wall => "footprint & hours",
-            Organelle::Mitochondria => "money",
-            Organelle::Vacuole => "upkeep",
+            Organelle::Mitochondria => "pricing & earnings",
+            Organelle::Vacuole => "disk & upkeep",
         }
     }
 
