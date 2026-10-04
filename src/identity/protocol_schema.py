@@ -19,8 +19,11 @@ One line per message, keyed ``schema.<full message name>``, each field written a
 
 ``<cardinality>``
     ``singular`` (proto3 implicit presence), ``optional`` (explicit presence),
-    ``repeated``, ``map``, or ``oneof.<name>`` for a member of a real oneof -- the
+    ``repeated``, ``map``, or ``oneof.<number>`` for a member of a real oneof -- the
     members of one oneof replace each other on the wire, which a reader has to know.
+    ``<number>`` is the lowest field number of the oneof's members. Each member
+    already has its own field number on the wire, but the oneof's name does not
+    travel, so the name is not part of the protocol.
 ``<type>``
     The protobuf scalar name (``int32``, ``bytes``, ...), the full name of a message,
     or ``map<key,value>`` for a map.
@@ -86,7 +89,7 @@ def _field(field: FieldDescriptor) -> str:
     if _is_repeated(field):
         cardinality = "repeated"
     elif field.containing_oneof is not None and not _is_synthetic_oneof(field):
-        cardinality = f"oneof.{field.containing_oneof.name}"
+        cardinality = f"oneof.{min(f.number for f in field.containing_oneof.fields)}"
     elif _is_synthetic_oneof(field) or field.type == FieldDescriptor.TYPE_MESSAGE:
         # A singular message field always tracks presence, in proto3 too.
         cardinality = "optional"

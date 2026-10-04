@@ -110,6 +110,14 @@ class DeclarationTests(unittest.TestCase):
         for method in celaut_pb2.DESCRIPTOR.services_by_name["Gateway"].methods:
             self.assertIn(method.name, gateway, f"{method.name} is announced but not described")
 
+    def test_a_oneof_is_named_by_its_lowest_field_number(self):
+        # The name of a oneof does not travel on the wire, so two nodes that named it
+        # differently still talk. Its members do: each has its own field number.
+        line = _formal("celaut-gateway")["schema.celaut.ObserveEvent"]
+        self.assertIn("10:oneof.10:celaut.ObserveEvent.Session", line)
+        self.assertIn("13:oneof.10:celaut.ObserveEvent.Notice", line)
+        self.assertNotIn("payload", line)
+
     def test_formal_is_canonical(self):
         # Compared byte for byte and covered by the announcement's signature, so it
         # must not depend on the order anything was built in.
