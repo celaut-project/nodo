@@ -78,6 +78,19 @@ class ComparisonTests(unittest.TestCase):
         layer = next(l for l in report["uris"][0]["layers"] if "tls" in l["tags"])
         self.assertEqual(list(layer["formal_difference"]), ["min_version"])
 
+    def test_a_peer_with_one_rpc_more_is_compatible_and_says_which(self):
+        peer = _peer()
+        gateway = next(c for c in peer.uri[0].protocol_stack if "celaut-gateway" in c.tags)
+        gateway.formal += b"\nrpc.ZNewMethod=in:1=celaut.Client;out:;auth:none"
+        report = protocol.compare_with(peer, "ab" * 32)
+        self.assertTrue(report["compatible"])
+        layer = report["uris"][0]["layers"][-1]
+        self.assertEqual(layer["status"], "compatible")
+        self.assertEqual(
+            layer["formal_difference"],
+            {"rpc.ZNewMethod": {"ours": None, "theirs": "in:1=celaut.Client;out:;auth:none"}},
+        )
+
     def test_an_undeclared_stack_is_not_compatible(self):
         # The same reading add_peer_instance makes: nothing declared, nothing spoken.
         report = protocol.compare_with(_peer(stack=False), "ab" * 32)

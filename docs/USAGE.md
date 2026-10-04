@@ -484,7 +484,9 @@ These commands offer extended management and exploration features:
   the signature scheme, the transport and the stack of layers (tls, http2, grpc,
   bee-rpc, celaut-gateway), each with its `formal` parameters and its prose. With a
   peer, asks it for its announcement and compares it with this node's, layer by layer,
-  naming every `formal` key that differs. Exits 0 when the peer speaks this node's
+  naming every `formal` key that differs. A layer is `compatible` when it differs
+  only by message fields or RPCs that one side declares and the other does not:
+  protobuf and gRPC let the two nodes talk. Exits 0 when the peer speaks this node's
   protocol on at least one address.  
   **Example:**  
   `nodo protocol`  

@@ -346,12 +346,13 @@ def same_declaration(a, b) -> bool:
     """Whether two components declare the very same thing, in full.
 
     The strict form of :func:`same_component`, for the places where the whole
-    declaration is what has to agree -- a layer of the transport stack, and a ledger a
-    node pays into or reads proofs from. There a tag cannot stand in: a tag-only
-    ``ergo`` ledger says nothing about the network, the units or how a deposit is
-    bound, and a tag-only layer nothing about the framing or the schema, so a peer
-    that declares only tags has not said what this node needs to check. Both sides
-    must therefore carry a non-empty ``formal``, and those bytes must be equal.
+    declaration is what has to agree -- a ledger a node pays into or reads proofs
+    from. There a tag cannot stand in: a tag-only ``ergo`` ledger says nothing about
+    the network, the units or how a deposit is bound, so a peer that declares only
+    tags has not said what this node needs to check. Both sides must therefore carry
+    a non-empty ``formal``, and those bytes must be equal. A layer of the transport
+    stack also needs a non-empty ``formal``, but it is compared by protobuf's rules
+    (``transport_stack.compatible_layers``), not byte for byte.
 
     ``same_component``'s tag fallback stays for descriptors that are loose by design
     (signature-scheme building blocks, a URI's transport, network slots).

@@ -21,7 +21,9 @@ change did to the declaration before peers started refusing it.
         node's protocol on at least one address -- what ``add_peer_instance`` needs
         to store the peer -- and 1 otherwise. A ledger that differs is reported, and
         is what this node will not pay into, but does not by itself make the peer
-        unreachable.
+        unreachable. A layer shown as ``compatible`` differs only by message fields
+        or RPCs that one side declares and the other does not. The two nodes still
+        talk (``transport_stack.formal_conflicts``).
 
         Not read-only on the remote side: ``GetPeerInfo`` refuses a caller without a
         client, so given an ``ip:port`` it mints one on that node first -- the same
@@ -235,9 +237,9 @@ def _print_declaration(declaration: Dict) -> None:
 
 def _print_layers(layers: List[Dict], indent: str = "    ") -> None:
     for layer in layers:
-        print(f"{indent}{layer['status']:<8} {' '.join(layer['tags'])}")
+        print(f"{indent}{layer['status']:<10} {' '.join(layer['tags'])}")
         for key, values in layer.get("formal_difference", {}).items():
-            print(f"{indent}           {key}: ours={values['ours']!r} theirs={values['theirs']!r}")
+            print(f"{indent}             {key}: ours={values['ours']!r} theirs={values['theirs']!r}")
 
 
 def _print_comparison(report: Dict) -> None:
@@ -257,7 +259,7 @@ def _print_comparison(report: Dict) -> None:
         verdict = "speaks our protocol" if uri["speaks"] and uri["transport"]["match"] \
             else "does NOT speak our protocol"
         print(f"\n{uri['uri']}  {verdict}")
-        print(f"    {'match' if uri['transport']['match'] else 'differs':<8} "
+        print(f"    {'match' if uri['transport']['match'] else 'differs':<10} "
               f"transport {' '.join(uri['transport']['tags']) or '(none)'}")
         _print_layers(uri["layers"])
 

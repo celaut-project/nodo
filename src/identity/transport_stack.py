@@ -27,10 +27,10 @@ field. Each entry is declared the way every replaceable component in celaut is:
     The parameters, as canonical ``key=value`` lines sorted by key
     (``node_identity.component_formal``). This is what decides a comparison, so any
     difference that would stop two nodes from talking -- a different OID, a different
-    signed payload, a different field number, an RPC added, removed or carrying other
-    messages -- shows up as different bytes here. Complete, not a pointer: the
-    celaut-gateway and bee-rpc layers carry their whole message schema
-    (``protocol_schema``), and every signed payload is written out with its prefix.
+    signed payload, a field number with another type, an RPC that carries other
+    messages -- shows up here. Complete, not a pointer: the celaut-gateway and bee-rpc
+    layers carry their whole message schema (``protocol_schema``), and every signed
+    payload is written out with its prefix.
 
 ``prose``
     The same thing written out for a reader, in ASD-STE100 Simplified Technical
@@ -49,9 +49,14 @@ message schema from the compiled descriptors, the TLS constants from ``tls_ident
 the signed payloads from the functions that build them. Changing any of those changes
 what this node announces without anyone remembering to.
 
-Comparison is positional (:func:`same_layer_stack`): layer ``i`` against layer ``i``.
-There is no fallback for a node that declares something else, or nothing: it does not
-speak this protocol, and it is not spoken to.
+Comparison is positional (:func:`compatible_layer_stacks`): layer ``i`` against layer
+``i``. There are no version numbers: two layers are compatible or they are not
+(:func:`formal_conflicts`). Most keys must be equal on both sides. The ``schema.*`` and
+``rpc.*`` keys follow protobuf and gRPC instead. A message field or an RPC that only
+one side declares does not stop the two nodes from talking, because a protobuf reader
+ignores a field it does not know, and a node does not call an RPC it does not know.
+What both sides declare must agree. There is no fallback for a node that declares
+something else, or nothing: it does not speak this protocol, and it is not spoken to.
 """
 import hashlib
 from typing import Dict, Final, Iterable, List, Optional, Tuple
@@ -69,7 +74,6 @@ from src.identity.node_identity import (
     component_formal,
     parse_component_formal,
     same_component,
-    same_declaration,
 )
 from src.identity.protocol_schema import schema_pairs
 from src.utils.config import ConfigManager
@@ -630,35 +634,47 @@ def carries_prose(peer) -> bool:
     )
 
 
-def same_layer_stack(a_layers, b_layers) -> bool:
-    """Whether two ordered stacks of layers denote the same protocol.
+def compatible_layers(a, b) -> bool:
+    """Whether two layers at the same position let two nodes talk.
 
-    Layer ``i`` against layer ``i``, with :func:`node_identity.same_declaration` for each
-    pair -- a non-empty ``formal`` on both sides, byte for byte; a layer declaring only
-    tags names a protocol without saying which version of it -- and the same number of
-    layers on both sides. Unlike a signature scheme, whose building blocks
-    have no order, a stack does: ``grpc`` over ``tls`` is not ``tls`` over ``grpc``, and
-    reading it in order is also what keeps the comparison linear in a length a peer
-    chooses. A layer without a formal is never the same as anything.
+    Both sides must carry a non-empty ``formal``: a layer that declares only tags names
+    a protocol without its parameters, so it gives this node nothing to check. Equal
+    bytes are compatible. Other bytes are compatible only when :func:`formal_conflicts`
+    finds no key on which the two contradict each other.
+    """
+    formal_a, formal_b = bytes(a.formal), bytes(b.formal)
+    if not formal_a or not formal_b:
+        return False
+    return formal_a == formal_b or not formal_conflicts(formal_a, formal_b)
+
+
+def compatible_layer_stacks(a_layers, b_layers) -> bool:
+    """Whether two ordered stacks of layers let two nodes talk.
+
+    Layer ``i`` against layer ``i``, with :func:`compatible_layers` for each pair, and
+    the same number of layers on both sides. Unlike a signature scheme, whose building
+    blocks have no order, a stack does: ``grpc`` over ``tls`` is not ``tls`` over
+    ``grpc``, and reading it in order is also what keeps the comparison linear in a
+    length a peer chooses.
     """
     a_layers, b_layers = list(a_layers), list(b_layers)
     if len(a_layers) != len(b_layers):
         return False
-    return all(same_declaration(a, b) for a, b in zip(a_layers, b_layers))
+    return all(compatible_layers(a, b) for a, b in zip(a_layers, b_layers))
 
 
 def speaks_our_transport_stack(protocol_stack: Iterable) -> bool:
     """Whether an announced stack is the one this node speaks.
 
-    Compared in order (:func:`same_layer_stack`). So a peer whose TLS extension OID,
-    signed payload, message schema or set of RPCs differs from this node's is correctly
-    seen as speaking something else, while one that only worded its prose differently
-    is not.
+    Compared in order (:func:`compatible_layer_stacks`). So a peer whose TLS extension
+    OID, signed payload, field types or RPC messages differ from this node's is seen as
+    speaking something else. A peer that only worded its prose differently, or that
+    has a message field or an RPC more or less than this node, is not.
 
     An empty stack is refused like any other: an address that declares nothing gives a
     caller nothing to check before dialling it, and every node declares its stack.
     """
-    return same_layer_stack(list(protocol_stack), node_transport_stack(prose=False))
+    return compatible_layer_stacks(list(protocol_stack), node_transport_stack(prose=False))
 
 
 def _formal_pairs(formal: bytes) -> Dict[str, str]:
@@ -687,6 +703,66 @@ def formal_difference(ours: bytes, theirs: bytes) -> Dict[str, Dict[str, Optiona
         for key in sorted(set(a) | set(b))
         if a.get(key) != b.get(key)
     }
+
+
+# Keys whose values are items of a set that protobuf and gRPC let grow: a message of the
+# schema, and an RPC. One side can declare an item the other does not.
+_EXTENSIBLE_KEY_PREFIXES: Final = ("schema.", "rpc.")
+
+
+def _schema_fields(value: str) -> Optional[Dict[str, str]]:
+    """A ``schema.<message>`` value as ``{field number: "cardinality:type"}``.
+
+    None when the value does not have the form ``protocol_schema`` writes.
+    """
+    fields: Dict[str, str] = {}
+    for item in value.split(",") if value else ():
+        number, sep, rest = item.partition(":")
+        if not sep or not number.isdigit() or number in fields:
+            return None
+        fields[number] = rest
+    return fields
+
+
+def _schemas_agree(a: str, b: str) -> bool:
+    """Whether two declarations of one message agree on every field both declare.
+
+    A field number that only one side declares is not a contradiction: the protobuf
+    reader on the other side ignores it, or reads its default value.
+    """
+    fields_a, fields_b = _schema_fields(a), _schema_fields(b)
+    if fields_a is None or fields_b is None:
+        return False
+    return all(fields_a[n] == fields_b[n] for n in set(fields_a) & set(fields_b))
+
+
+def formal_conflicts(ours: bytes, theirs: bytes) -> Dict[str, Dict[str, Optional[str]]]:
+    """The keys on which two ``formal`` fields contradict each other.
+
+    The rules:
+
+    - A ``schema.<message>`` key that both sides declare must agree on each field
+      number that both sides declare (the same cardinality and the same type).
+    - An ``rpc.<Method>`` key that both sides declare must be equal: the bee-rpc
+      indices and the auth kind are what both ends of the call read.
+    - A ``schema.*`` or ``rpc.*`` key that only one side declares is not a conflict.
+    - Every other key must be on both sides, with the same value.
+
+    The same form as :func:`formal_difference`, with ``None`` for a key one side does
+    not declare. An empty result means the two layers are compatible.
+    """
+    a, b = _formal_pairs(ours), _formal_pairs(theirs)
+    conflicts: Dict[str, Dict[str, Optional[str]]] = {}
+    for key in sorted(set(a) | set(b)):
+        if a.get(key) == b.get(key):
+            continue
+        if key.startswith(_EXTENSIBLE_KEY_PREFIXES):
+            if key not in a or key not in b:
+                continue
+            if key.startswith("schema.") and _schemas_agree(a[key], b[key]):
+                continue
+        conflicts[key] = {"ours": a.get(key), "theirs": b.get(key)}
+    return conflicts
 
 
 def compare_component_sets(ours: Iterable, theirs: Iterable) -> List[Dict]:
@@ -737,16 +813,21 @@ def compare_component_sets(ours: Iterable, theirs: Iterable) -> List[Dict]:
 def compare_layer_stacks(ours: Iterable, theirs: Iterable) -> List[Dict]:
     """Layer by layer, where two ordered stacks agree and where not.
 
-    The explanation of :func:`same_layer_stack`'s verdict, for whoever has to act on it
+    The explanation of :func:`compatible_layer_stacks`'s verdict, for whoever has to act on it
     -- an operator whose peer was skipped, a developer whose change altered what the
     node announces. One entry per position, each with a ``status``:
 
     ``match``
-        The two layers at that position match (:func:`node_identity.same_declaration`).
+        The two layers at that position declare the same ``formal``, byte for byte.
+    ``compatible``
+        The two layers differ, but only by ``schema.*`` or ``rpc.*`` items that one
+        side declares and the other does not (:func:`formal_conflicts`).
+        ``formal_difference`` names them.
     ``differs``
-        Both sides have a layer there and they do not match; ``formal_difference``
-        names the keys that differ when the two share a tag -- the same protocol with
-        other parameters -- and is left out when they name different protocols.
+        Both sides have a layer there and they are not compatible.
+        ``formal_difference`` names the conflicting keys when the two share a tag --
+        the same protocol with other parameters -- and is left out when they name
+        different protocols.
     ``missing``
         A layer of ours with nothing at that position in theirs.
     ``extra``
@@ -763,13 +844,15 @@ def compare_layer_stacks(ours: Iterable, theirs: Iterable) -> List[Dict]:
             continue
         a, b = ours[position], theirs[position]
         entry = {"tags": list(a.tags), "their_tags": list(b.tags)}
-        if same_layer_stack([a], [b]):
+        formal_a, formal_b = bytes(a.formal), bytes(b.formal)
+        if formal_a and formal_a == formal_b:
             entry["status"] = "match"
+        elif compatible_layers(a, b):
+            entry["status"] = "compatible"
+            entry["formal_difference"] = formal_difference(formal_a, formal_b)
         else:
             entry["status"] = "differs"
             if set(a.tags) & set(b.tags):
-                entry["formal_difference"] = formal_difference(
-                    bytes(a.formal), bytes(b.formal)
-                )
+                entry["formal_difference"] = formal_conflicts(formal_a, formal_b)
         layers.append(entry)
     return layers

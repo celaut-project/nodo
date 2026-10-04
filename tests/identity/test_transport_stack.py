@@ -1,12 +1,13 @@
 """What an address says it speaks, and what a peer can check about it (issue #257).
 
-An announced stack is a claim about parameters a caller has to agree with byte for byte
--- the extension OID it will look the host key up by, what the signature in it covers,
-the bee-rpc framing, which RPCs the address answers and with which messages. These pin
+An announced stack is a claim about parameters a caller has to agree with -- the
+extension OID it will look the host key up by, what the signature in it covers, the
+bee-rpc framing, which RPCs the address answers and with which messages. These pin
 that the claim is *made* (the tags alone never said any of it), that it is *complete*
 (every layer, the schema, the signed payloads), and that it is *checkable*: a node
-differing in any of those parameters is seen as speaking something else, while one that
-merely worded its description differently is not.
+that contradicts any of those parameters is seen as speaking something else. A node
+that only worded its description differently, or that declares a message field or an
+RPC more or less (protobuf and gRPC let the two talk), is not.
 """
 import unittest
 from unittest import mock
@@ -18,7 +19,7 @@ try:
     from protos import celaut_pb2
     from protos.gateway_bee import GATEWAY_RPCS
     from src.identity import transport_stack
-    from src.identity.node_identity import parse_component_formal
+    from src.identity.node_identity import component_formal, parse_component_formal
     from src.identity.tls_identity import HOST_KEY_EXTENSION_OID, signature_prefix
 except Exception as import_exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = import_exc
@@ -144,21 +145,87 @@ class ComparisonTests(unittest.TestCase):
         )
         self.assertFalse(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
 
-    def test_one_missing_rpc_is_a_different_protocol(self):
+    def _gateway(self, edit):
+        """Our stack, with ``edit`` applied to the gateway layer's ``formal`` pairs."""
         uri = _stack()
         gateway = _component(uri.protocol_stack, "celaut-gateway")
-        gateway.formal = b"\n".join(
-            line for line in gateway.formal.split(b"\n") if not line.startswith(b"rpc.Observe=")
-        )
+        pairs = parse_component_formal(gateway.formal)
+        edit(pairs)
+        gateway.formal = component_formal(pairs)
+        return uri
+
+    def test_an_rpc_only_one_side_declares_is_compatible(self):
+        # A node does not call an RPC it does not know, so a peer with one RPC less
+        # (or more) still talks with this node.
+        fewer = self._gateway(lambda p: p.pop("rpc.Observe"))
+        self.assertTrue(transport_stack.speaks_our_transport_stack(fewer.protocol_stack))
+        more = self._gateway(lambda p: p.update({"rpc.NewMethod": "in:1=celaut.Client;out:;auth:none"}))
+        self.assertTrue(transport_stack.speaks_our_transport_stack(more.protocol_stack))
+
+    def test_an_rpc_with_other_messages_is_a_different_protocol(self):
+        uri = self._gateway(lambda p: p.update({"rpc.Observe": "in:1=celaut.Client;out:1=celaut.Client;auth:token"}))
         self.assertFalse(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
 
-    def test_one_moved_field_number_is_a_different_protocol(self):
-        uri = _stack()
-        gateway = _component(uri.protocol_stack, "celaut-gateway")
-        gateway.formal = gateway.formal.replace(
-            b"schema.celaut.Client=1:singular:string", b"schema.celaut.Client=9:singular:string"
-        )
+    def test_an_rpc_with_another_auth_kind_is_a_different_protocol(self):
+        def edit(pairs):
+            pairs["rpc.Observe"] = pairs["rpc.Observe"].replace("auth:token", "auth:client")
+        self.assertFalse(transport_stack.speaks_our_transport_stack(self._gateway(edit).protocol_stack))
+
+    def test_a_field_only_one_side_declares_is_compatible(self):
+        # A protobuf reader ignores a field it does not know, and reads a missing one
+        # as its default value.
+        def add(pairs):
+            pairs["schema.celaut.Client"] += ",99:singular:uint64"
+        self.assertTrue(transport_stack.speaks_our_transport_stack(self._gateway(add).protocol_stack))
+
+        def remove(pairs):
+            pairs["schema.celaut.Client"] = ""
+        self.assertTrue(transport_stack.speaks_our_transport_stack(self._gateway(remove).protocol_stack))
+
+    def test_a_message_only_one_side_declares_is_compatible(self):
+        uri = self._gateway(lambda p: p.update({"schema.celaut.NewMessage": "1:singular:bytes"}))
+        self.assertTrue(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
+
+    def test_one_moved_field_number_is_compatible(self):
+        # Field 1 is gone and field 9 is new: neither side contradicts the other.
+        def edit(pairs):
+            pairs["schema.celaut.Client"] = pairs["schema.celaut.Client"].replace(
+                "1:singular:string", "9:singular:string"
+            )
+        self.assertTrue(transport_stack.speaks_our_transport_stack(self._gateway(edit).protocol_stack))
+
+    def test_a_field_with_another_type_is_a_different_protocol(self):
+        def edit(pairs):
+            pairs["schema.celaut.Client"] = pairs["schema.celaut.Client"].replace(
+                "1:singular:string", "1:singular:bytes"
+            )
+        self.assertFalse(transport_stack.speaks_our_transport_stack(self._gateway(edit).protocol_stack))
+
+    def test_a_field_with_another_cardinality_is_a_different_protocol(self):
+        def edit(pairs):
+            pairs["schema.celaut.Client"] = pairs["schema.celaut.Client"].replace(
+                "1:singular:string", "1:repeated:string"
+            )
+        self.assertFalse(transport_stack.speaks_our_transport_stack(self._gateway(edit).protocol_stack))
+
+    def test_a_malformed_schema_line_is_a_different_protocol(self):
+        uri = self._gateway(lambda p: p.update({"schema.celaut.Client": "not a field list"}))
         self.assertFalse(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
+
+    def test_a_rule_only_one_side_declares_is_a_different_protocol(self):
+        # Only messages and RPCs can grow. Any other key is a rule both sides follow.
+        added = self._gateway(lambda p: p.update({"pow.extra": "a new rule"}))
+        self.assertFalse(transport_stack.speaks_our_transport_stack(added.protocol_stack))
+        removed = self._gateway(lambda p: p.pop("keyvalue"))
+        self.assertFalse(transport_stack.speaks_our_transport_stack(removed.protocol_stack))
+
+    def test_the_bee_rpc_schema_follows_the_same_rule(self):
+        uri = _stack()
+        bee = _component(uri.protocol_stack, "bee-rpc")
+        pairs = parse_component_formal(bee.formal)
+        pairs["schema.buffer.Buffer"] += ",99:singular:bool"
+        bee.formal = component_formal(pairs)
+        self.assertTrue(transport_stack.speaks_our_transport_stack(uri.protocol_stack))
 
     def test_the_layers_out_of_order_are_a_different_protocol(self):
         uri = _stack()
@@ -207,7 +274,7 @@ class ComparisonTests(unittest.TestCase):
         with mock.patch.object(hashing, "get_configured_hash_id", return_value=hashing.SHA3_256_ID):
             sha3 = _stack()
         self.assertTrue(
-            transport_stack.same_layer_stack(sha2.protocol_stack, sha3.protocol_stack)
+            transport_stack.compatible_layer_stacks(sha2.protocol_stack, sha3.protocol_stack)
         )
         declared = _formal("celaut-gateway")["service_id.hash_types"].split(",")
         self.assertEqual(declared, sorted(h.hex() for h in hashing.HASH_SPECS))
@@ -250,7 +317,7 @@ class LayerReportTests(unittest.TestCase):
             }},
         )
 
-    def test_a_dropped_rpc_shows_on_the_gateway_layer_only(self):
+    def test_a_dropped_rpc_shows_as_compatible_on_the_gateway_layer_only(self):
         uri = _stack()
         gateway = _component(uri.protocol_stack, "celaut-gateway")
         gateway.formal = b"\n".join(
@@ -258,9 +325,22 @@ class LayerReportTests(unittest.TestCase):
         )
         report = self._report(uri)
         self.assertEqual(
-            [l["status"] for l in report], ["match"] * (len(LAYERS) - 1) + ["differs"]
+            [l["status"] for l in report], ["match"] * (len(LAYERS) - 1) + ["compatible"]
         )
         self.assertEqual(list(report[-1]["formal_difference"]), ["rpc.Observe"])
+
+    def test_a_differing_layer_names_only_its_conflicts(self):
+        uri = _stack()
+        gateway = _component(uri.protocol_stack, "celaut-gateway")
+        pairs = parse_component_formal(gateway.formal)
+        pairs.pop("rpc.Observe")  # compatible on its own
+        pairs["schema.celaut.Client"] = pairs["schema.celaut.Client"].replace(
+            "1:singular:string", "1:singular:bytes"
+        )
+        gateway.formal = component_formal(pairs)
+        layer = self._report(uri)[-1]
+        self.assertEqual(layer["status"], "differs")
+        self.assertEqual(list(layer["formal_difference"]), ["schema.celaut.Client"])
 
     def test_missing_and_extra_layers_are_told_apart(self):
         short = _stack()

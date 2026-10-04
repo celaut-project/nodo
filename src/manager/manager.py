@@ -353,7 +353,7 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
             # then fail in the handshake, with nothing in the error saying why, so the
             # address is skipped here and the reason logged from what the peer itself
             # declared. Only `formal` and the tags are read: prose is the same protocol
-            # worded differently (transport_stack.same_layer_stack).
+            # worded differently (transport_stack.compatible_layer_stacks).
             # The layers by name and which of them differ; the keys that differ are what
             # `nodo protocol <peer>` prints -- a formal carries the whole schema, far too
             # much for a log line.
@@ -363,7 +363,7 @@ def _store_peer_uris(peer: celaut_pb2.Peer, peer_id: str) -> List[Tuple[str, int
                 for layer in compare_layer_stacks(
                     node_transport_stack(prose=False), uri.protocol_stack
                 )
-                if layer["status"] != "match"
+                if layer["status"] not in ("match", "compatible")
             ]
             log.LOGGER(
                 f"[PEER][{peer_id}] Address {uri.ip}:{uri.port} speaks another protocol "
