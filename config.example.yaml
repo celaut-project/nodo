@@ -280,6 +280,12 @@ packer:
   # warning) when packer.local is false: the packer-service builds inside its
   # own external microVM, which does not read this setting.
   fast: false
+  # Largest exported image (bytes) a fast pack inlines into its one block. Over
+  # it, or when fast mode's memory reservation (PACKER_MEMORY_SIZE_FACTOR x the
+  # image) exceeds the RAM available, the pack falls back to per-file blocks and
+  # says so. Kept well under protobuf's 2 GiB message limit: the single
+  # filesystem message is larger than the raw image.
+  FAST_MAX_BYTES: 1073741824
   # nodo no longer builds services locally *by default*. `nodo pack` sends the
   # project to a packer-service microVM (it runs Docker/buildx inside a sealed VM,
   # so Docker is never installed on this host) and imports the returned

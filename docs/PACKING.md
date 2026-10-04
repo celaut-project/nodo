@@ -34,6 +34,12 @@
 > behaviour back on for one invocation. `packer.fast: true` makes fast mode the
 > node's default; see `packer.fast` and `packer.MIN_BUFFER_BLOCK_SIZE` in
 > `config.example.yaml`. Both modes produce the identical service id.
+>
+> A fast-packed service costs its whole image in memory at every build of it, not
+> just once at pack time, until it is re-packed with `--optimize`: that replaces
+> the stored single filesystem block with the per-file-block form under the same
+> id. A fast pack falls back to per-file blocks (and says so) when the image is
+> over `packer.FAST_MAX_BYTES` or the node lacks the RAM fast mode would reserve.
 
 ## Table of Contents
 1. [Directory Structure](#directory-structure)

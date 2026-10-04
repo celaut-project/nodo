@@ -323,5 +323,201 @@ class SameIdsTests(unittest.TestCase):
         self.assertGreater(normal_blocks, 1)
 
 
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class FastFallbackReasonTests(unittest.TestCase):
+    """A fast pack that cannot work packs with per-file blocks instead."""
+
+    def test_small_image_with_room_stays_fast(self):
+        self.assertIsNone(packer.fast_fallback_reason(10 << 20, ram_available=1 << 40))
+
+    def test_over_the_size_ceiling(self):
+        with mock.patch.object(packer, "FAST_MAX_BYTES", 100 << 20):
+            reason = packer.fast_fallback_reason(101 << 20, ram_available=1 << 40)
+        self.assertIn("packer.FAST_MAX_BYTES", reason)
+
+    def test_default_ceiling_is_well_under_the_protobuf_limit(self):
+        self.assertLessEqual(int(packer.FAST_MAX_BYTES), 1 << 30)
+
+    def test_not_enough_ram_for_the_whole_image(self):
+        image = 50 << 20
+        needed = packer.packing_memory_estimate(inline_len=image)
+        self.assertIn("RAM", packer.fast_fallback_reason(image, ram_available=needed - 1))
+        self.assertIsNone(packer.fast_fallback_reason(image, ram_available=needed))
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class OkFallsBackTests(unittest.TestCase):
+    """ok() drops fast before locking memory, and locks the per-file-block amount."""
+
+    IMAGE, SMALL, BLOCKS = 300 << 20, 2 << 20, 40
+
+    def _ok(self, ram_available, max_bytes=1 << 30):
+        spec = packer.ZipContainerPacker.__new__(packer.ZipContainerPacker)
+        spec.fast, spec.error_msg, spec.buffer_len = True, None, self.IMAGE
+        spec._blocked_inline_len, spec._blocked_block_count = self.SMALL, self.BLOCKS
+        spec._apply_mode()
+        for name in ("parseContainer", "parseApi", "parseNetwork"):
+            setattr(spec, name, mock.Mock())
+        spec.save = mock.Mock(return_value=("sid", None, "/dir"))
+        locked = []
+
+        class Lock:
+            def __init__(self, len, timeout=None):
+                locked.append(len)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        iobd = mock.Mock()
+        iobd.get_ram_avaliable.return_value = ram_available
+        notes = {}
+        with mock.patch.object(packer, "ZipContainerPacker", return_value=spec), \
+             mock.patch.object(packer, "IOBigData", return_value=iobd), \
+             mock.patch.object(packer.resources, "mem_manager", Lock), \
+             mock.patch.object(packer, "FAST_MAX_BYTES", max_bytes), \
+             mock.patch.object(packer, "CACHE", tempfile.gettempdir()):
+            self.assertEqual(packer.ok("p/", "aux", fast=True, notes=notes)[0], "sid")
+        return spec, locked[0], notes
+
+    def test_stays_fast_with_room(self):
+        spec, locked, notes = self._ok(ram_available=1 << 40)
+        self.assertTrue(spec.fast)
+        self.assertEqual(locked, packer.packing_memory_estimate(inline_len=self.IMAGE))
+        self.assertEqual(notes, {})
+
+    def test_falls_back_over_the_size_ceiling(self):
+        spec, locked, notes = self._ok(ram_available=1 << 40, max_bytes=self.IMAGE - 1)
+        self.assertFalse(spec.fast)
+        self.assertEqual(locked, packer.packing_memory_estimate(self.SMALL, self.BLOCKS))
+        self.assertIn("packer.FAST_MAX_BYTES", notes["fast_fallback"])
+
+    def test_falls_back_without_the_ram(self):
+        spec, locked, notes = self._ok(ram_available=1 << 30)  # 6 x 300 MB does not fit
+        self.assertFalse(spec.fast)
+        self.assertEqual(locked, packer.packing_memory_estimate(self.SMALL, self.BLOCKS))
+        self.assertIn("RAM", notes["fast_fallback"])
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class FallbackIsReportedTests(unittest.TestCase):
+    """The worker hands the reason to pack_zip, which prints it and sets the stage."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="nodo packer fast test-")
+        self.addCleanup(self._tmp.cleanup)
+        patch_ = mock.patch.object(packer, "CACHE", self._tmp.name + os.sep)
+        patch_.start()
+        self.addCleanup(patch_.stop)
+
+    def test_worker_writes_the_reason(self):
+        import json
+
+        def zipfile_ok(zip, fast=False, notes=None):
+            notes["fast_fallback"] = "too big"
+            return "sid", None, "/dir"
+
+        result = os.path.join(self._tmp.name, "result.json")
+        with mock.patch.object(packer, "zipfile_ok", zipfile_ok), \
+             mock.patch.object(packer.sys, "argv", ["w", "--worker", "z.zip", result, "--fast"]):
+            packer._worker_main()
+        with open(result) as f:
+            self.assertEqual(json.load(f)["fast_fallback"], "too big")
+
+    def test_pack_zip_reports_it(self):
+        import json
+
+        def run(cmd, cwd=None):
+            with open(cmd[cmd.index("--worker") + 2], "w") as f:
+                json.dump({"error": "stop here", "fast_fallback": "too big"}, f)
+            return mock.Mock(returncode=0)
+
+        from src.utils import pack_registry
+        with mock.patch("subprocess.run", run), \
+             mock.patch.object(pack_registry, "stage") as stage, \
+             mock.patch("builtins.print") as printed:
+            list(packer.pack_zip(zip=os.path.join(self._tmp.name, "s.zip"), fast=True))
+        self.assertIn("too big", stage.call_args.args[0])
+        self.assertIn("fell back", stage.call_args.args[0])
+        self.assertTrue(any("too big" in str(c) for c in printed.call_args_list))
+
+
+@unittest.skipIf(IMPORT_ERROR is not None, f"Missing runtime dependencies: {IMPORT_ERROR}")
+class OptimizeReplacesFastBlockTests(unittest.TestCase):
+    """A normal pack replaces a stored fast filesystem block (same id, other form)."""
+
+    def setUp(self):
+        import shutil
+        from bee_rpc.utils import modify_env
+        self.root = tempfile.mkdtemp(prefix="nodo-fast-replace-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.blocks = os.path.join(self.root, "blocks")
+        os.makedirs(self.blocks)
+        modify_env(cache_dir=self.root + os.sep, block_dir=self.blocks + os.sep)
+        self.addCleanup(modify_env, cache_dir=packer.CACHE, block_dir=packer.BLOCKDIR)
+        patch_ = mock.patch.object(packer, "BLOCKDIR", self.blocks + os.sep)
+        patch_.start()
+        self.addCleanup(patch_.stop)
+        t = packer.MIN_BUFFER_BLOCK_SIZE
+        self.files = [("small", b"s" * 300), ("big", os.urandom(t * 3)), ("big2", os.urandom(t * 2))]
+
+    def _pack(self, fast):
+        from bee_rpc import block_builder
+        from bee_rpc.utils import block_pointer, hash_types_for_packing
+        from protos import celaut_pb2 as celaut
+        tree, pointed = celaut.Service.Container.Filesystem(), []
+        for name, data in self.files:
+            path = os.path.join(self.root, name)
+            with open(path, "wb") as f:
+                f.write(data)
+            branch = tree.branch.add()
+            branch.name = name
+            if packer._is_inline(len(data), fast):
+                branch.file = data
+            else:
+                block_hash, _ = block_builder.create_block(file_path=path, copy=True)
+                branch.file = block_pointer(block_id=block_hash, omit_types=True).SerializeToString()
+                pointed.append(block_hash)
+        return packer._install_as_block(*block_builder.build_multiblock(
+            pf_object_with_block_pointers=tree, blocks=pointed, inherited=hash_types_for_packing()))
+
+    def _stored(self, block_id):
+        from bee_rpc import client as grpcbb
+        directory = os.path.join(self.blocks, block_id.hex())
+        wbp = os.path.getsize(os.path.join(directory, "wbp.bin"))
+        content = b"".join(grpcbb.read_block(block_id=block_id.hex(), ignore_blocks=True))
+        return wbp, packer._points_at_blocks(directory), content
+
+    def _fast_then_optimize(self):
+        fast_id = self._pack(fast=True)
+        fast_wbp, fast_points, fast_content = self._stored(fast_id)
+        self.assertFalse(fast_points)
+        self.assertGreater(fast_wbp, sum(len(d) for _, d in self.files))
+        opt_id = self._pack(fast=False)
+        self.assertEqual(opt_id, fast_id)
+        wbp, points, content = self._stored(opt_id)
+        self.assertTrue(points)
+        self.assertLess(wbp, packer.MIN_BUFFER_BLOCK_SIZE)  # only the small file
+        self.assertEqual(content, fast_content)
+        leftovers = [n for n in os.listdir(self.blocks) if ".tmp-" in n or ".old-" in n]
+        self.assertEqual(leftovers, [])
+
+    def test_fast_then_optimize_replaces_the_inlined_form(self):
+        self._fast_then_optimize()
+
+    def test_without_an_atomic_exchange(self):
+        with mock.patch.object(packer, "_exchange", return_value=False):
+            self._fast_then_optimize()
+
+    def test_fast_after_optimize_keeps_the_block_form(self):
+        block_id = self._pack(fast=False)
+        before = self._stored(block_id)
+        self._pack(fast=True)
+        self.assertEqual(self._stored(block_id), before)
+
+
 if __name__ == "__main__":
     unittest.main()

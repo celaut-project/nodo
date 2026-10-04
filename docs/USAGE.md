@@ -380,6 +380,12 @@ These are the most commonly used commands for daily tasks:
   `packer.fast: true` in `config.yaml` makes fast the node's default. Both modes
   produce the same service id. The packer service ignores them (with a warning).
 
+  A fast-packed service costs its whole image in memory at **every build**, not
+  only at pack time, until it is re-packed with `--optimize` — which replaces the
+  stored single block with the per-file one (same id). A fast pack falls back to
+  per-file blocks by itself, and says so, when the image is over
+  `packer.FAST_MAX_BYTES` (1 GiB) or the node lacks the RAM fast mode reserves.
+
   Every pack records itself in `<main.STORAGE>/packs/<id>.json` while it runs and
   keeps the record afterwards with its outcome, so `nodo packs` and the TUI's PACKS
   page see packs started anywhere — a terminal, a script, the TUI. **`--detach`**
