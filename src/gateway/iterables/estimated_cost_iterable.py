@@ -2,6 +2,7 @@ from src.utils.utils import read_service_from_disk
 from typing import Generator, Optional, Tuple
 
 from protos import celaut_pb2
+from protos.gateway_bee import rpc_output
 from src.utils.tools.query_cache import QueryCache, canonical_key, quote_ttl, with_sorted_hashes
 from src.virtualizers.architecture import UnsupportedArchitectureException, get_arch_tag
 from src.gateway.iterables.abstract_input_service_iterable import AbstractInputServiceIterable, BreakIteration
@@ -16,6 +17,7 @@ from src.utils.utils import from_amount, get_only_the_ip_from_context, to_amount
 
 
 class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
+    RPC = "GetServiceEstimatedCost"
     
     # https://github.com/celaut-project/nodo/issues/70
     
@@ -75,14 +77,22 @@ class GetServiceEstimatedCostIterable(AbstractInputServiceIterable):
                 self._quote,
             )
             # No room, no offer (#280): the same gate `generate_estimated_cost` applies
-            # when it is not split from its price.
-            estimated_cost = price \
-                if get_resource_availability(resources=resources, arch=arch)["can_execute"] \
-                else None
+            # when it is not split from its price. Checked on every request, outside
+            # the cache: the cache keeps the price, never the refusal, so a quote
+            # refused for lack of room is offered again as soon as room frees.
+            availability = get_resource_availability(resources=resources, arch=arch)
+            if not availability["can_execute"]:
+                # Handing None to respond() used to fail inside the serializer, so
+                # the caller got an UNKNOWN status naming a KeyError rather than
+                # the reason the node refused.
+                raise Exception(
+                    "This node cannot run the service right now: "
+                    f"{availability.get('reason') or 'not enough resources.'}"
+                )
 
             yield from BeeClient.respond(
-                message_iterator=estimated_cost,
-                indices=celaut_pb2.EstimatedCost
+                message_iterator=price,
+                indices=rpc_output("GetServiceEstimatedCost")
             )
 
         except UnsupportedArchitectureException as e:

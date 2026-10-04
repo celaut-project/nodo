@@ -60,7 +60,7 @@ pub struct Peer {
 
 /// One `contract_instance` row: the ledger a peer settles on, the contract it
 /// charges through, the address it gets paid at, and what one of its units is worth.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PeerContract {
     /// Ledger tag (e.g. "ergo"), falling back to the raw stored hash when the
     /// ledger row can't be resolved or carries no tag.
@@ -598,6 +598,32 @@ fn announced_resources_summary(resources: &Announced) -> String {
 ///
 /// `compact` collapses each contract onto one line for terminals too short for the
 /// full card.
+/// A peer's advertised rate, as a person reads it.
+///
+/// On the wire (`ContractRate.mu_per_unit`) the rate is MU per BASE unit -- per nanoERG,
+/// per satoshi, per smallest unit of a token -- because between nodes nothing else is
+/// needed. A person thinks in whole ERG or BTC, so a native asset's rate is shown per
+/// whole unit: the base rate followed by as many zeros as the asset has decimals, which
+/// is exact for any size of number. A token's decimals are not on the wire, so its rate
+/// stays per base unit and says so.
+fn rate_for_a_person(contract: &PeerContract) -> String {
+    let rate = contract.mu_per_unit.trim();
+    if rate.is_empty() {
+        return "rate —".to_string();
+    }
+    let native = match (contract.asset.as_str(), contract.ledger.as_str()) {
+        ("ERG", _) | ("", "ergo") => Some(("ERG", 9)),
+        ("BTC", _) | ("", "bitcoin") => Some(("BTC", 8)),
+        _ => None,
+    };
+    match native {
+        Some((symbol, decimals)) if rate.chars().all(|c| c.is_ascii_digit()) && rate != "0" => {
+            format!("1 {} = {}{} MU", symbol, rate, "0".repeat(decimals))
+        }
+        _ => format!("1 base unit = {} MU", rate),
+    }
+}
+
 fn peer_detail_lines(
     money: &Money,
     peer: Option<&Peer>,
@@ -732,12 +758,11 @@ fn peer_detail_lines(
                 Span::styled(contract.ledger.clone(), Style::default().fg(good()).bold()),
                 Span::styled(
                     format!(
-                        "  {}  {}  {}  1 {} = {} MU",
+                        "  {}  {}  {}  {}",
                         asset,
                         shorten(&contract.contract_hash, 14),
                         shorten(nonempty(&contract.address, "—"), 14),
-                        asset,
-                        nonempty(&contract.mu_per_unit, "—")
+                        rate_for_a_person(contract)
                     ),
                     Style::default().fg(text_colour()),
                 ),
@@ -762,10 +787,10 @@ fn peer_detail_lines(
         lines.push(Line::from(vec![
             Span::styled("      rate     ", Style::default().fg(muted())),
             Span::styled(
-                // What this peer says one unit of its ledger buys in ITS MU. This is
-                // what makes a price it quotes convertible into money we understand,
-                // so it is stated as an equation rather than as a bare number.
-                format!("1 {} = {} MU", asset, nonempty(&contract.mu_per_unit, "—")),
+                // What this peer says its money buys in ITS MU. This is what makes a
+                // price it quotes convertible into money we understand, so it is
+                // stated as an equation rather than as a bare number.
+                rate_for_a_person(contract),
                 Style::default().fg(text_colour()),
             ),
         ]));
@@ -867,6 +892,25 @@ mod tests {
         assert_eq!(contract.address, "addr-1");
         assert_eq!(contract.mu_per_unit, "500");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_native_rate_is_shown_per_whole_unit_and_a_token_rate_per_base_unit() {
+        // The wire carries MU per base unit; a person reads whole ERG / BTC.
+        let contract = |ledger: &str, asset: &str, rate: &str| PeerContract {
+            ledger: ledger.to_string(),
+            asset: asset.to_string(),
+            mu_per_unit: rate.to_string(),
+            ..Default::default()
+        };
+        assert_eq!(rate_for_a_person(&contract("ergo", "ERG", "1")), "1 ERG = 1000000000 MU");
+        assert_eq!(rate_for_a_person(&contract("bitcoin", "BTC", "1400000")), "1 BTC = 140000000000000 MU");
+        assert_eq!(rate_for_a_person(&contract("ergo", "", "2")), "1 ERG = 2000000000 MU");
+        assert_eq!(
+            rate_for_a_person(&contract("ergo", &"ab".repeat(32), "20000000")),
+            "1 base unit = 20000000 MU"
+        );
+        assert_eq!(rate_for_a_person(&contract("ergo", "ERG", "")), "rate —");
     }
 
     #[test]

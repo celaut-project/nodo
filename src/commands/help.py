@@ -81,6 +81,7 @@ GROUPS: List[Group] = [
         None,
         [
             ("peers [<peer>]", "list peers, or one with its payments (--json)"),
+            ("protocol [<peer>]", "ours, or compare a peer's (adds a client there)"),
             ("peer_reputation <peer> <N>", "move our local score of a peer (+/-)"),
             ("resources", "what this node announces it can run (--json)"),
             ("connect <ip:port>", "introduce this node to a peer"),

@@ -14,6 +14,7 @@ from src.utils import logger as log
 from src.utils import keyvalue
 from src.utils.config import ConfigManager
 from src.identity.transport_stack import (
+    declare_transport,
     declare_transport_stack,
     share_prose_on_get_peer_info,
 )
@@ -385,9 +386,10 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
     # address itself rather than on a separate slot: tcp:8080 and udp:9000 would be
     # different endpoints, so a reader needs to know which without matching the two
     # by port number.
+    prose = share_prose_on_get_peer_info()
     for uri in uris:
         announced = peer.uri.add(ip=uri.ip, port=uri.port)
-        announced.transport.tags.append("tcp")
+        declare_transport(announced, prose=prose)
         # What the endpoint actually speaks, spelled out rather than named: the tags
         # alone would let two nodes both write "tls" while disagreeing on the extension
         # OID, on what the signature covers or on which RPCs exist, and neither could
@@ -395,11 +397,12 @@ def _build_peer(uris: List[celaut.Instance.Uri]) -> celaut_pb2.Peer:
         # comparison reads; the prose is there so a reader can implement the thing (see
         # src/identity/transport_stack.py). Covered by the signature below, so a relay can
         # neither strip the declaration nor edit a parameter out of it.
-        declare_transport_stack(announced, prose=share_prose_on_get_peer_info())
+        declare_transport_stack(announced, prose=prose)
 
     # Advertise what this node charges on a recurring basis, so a peer knows the
     # rate before negotiating anything. The price of a *specific service* is not
-    # here: that is what GetServiceEstimatedCost is for. Values are ceilings; see
+    # here: that is what GetServiceEstimatedCost is for. Values are base prices (the
+    # node scales RAM, CPU and disk up to scarcity_max_multiplier); see
     # node_advertised_rates(). Node-wide rather than per-address, because a node's
     # rates do not depend on which of its addresses you reach it through.
     #

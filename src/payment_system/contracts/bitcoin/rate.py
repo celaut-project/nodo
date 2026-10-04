@@ -60,10 +60,10 @@ def rate_reason() -> Optional[str]:
         return str(exc)
     if rate <= 0:
         return f"{RATE_KEY} must be positive, got {rate}."
-    if rate * SATOSHI_PER_BTC != (rate * SATOSHI_PER_BTC).to_integral_value():
+    if rate != rate.to_integral_value():
         return (
-            f"{RATE_KEY}={rate} makes one BTC {rate * SATOSHI_PER_BTC} MU, which is not "
-            "a whole number of MU. MU is the unit of account; there is nothing smaller."
+            f"{RATE_KEY}={rate} is not a whole number of MU per satoshi. It travels to "
+            "peers as is (ContractRate.mu_per_unit, an integer), so it has to be one."
         )
     return None
 
@@ -80,8 +80,19 @@ def mu_per_satoshi() -> Decimal:
     return _decimal(ConfigManager().get(RATE_KEY), what=RATE_KEY)
 
 
+def advertised_mu_per_satoshi() -> int:
+    """MU per satoshi, as peers are told it in ``ContractRate.mu_per_unit``.
+
+    Per base unit: between nodes a rate is MU per the smallest unit the chain moves.
+    """
+    return int(mu_per_satoshi())
+
+
 def mu_per_unit() -> int:
-    """MU bought by one **whole** BTC. This is what a peer is told as ``ContractRate``."""
+    """MU bought by one **whole** BTC, for a person to read and type amounts in.
+
+    Not what a peer is told: that is :func:`advertised_mu_per_satoshi`.
+    """
     value = mu_per_satoshi() * SATOSHI_PER_BTC
     return int(value)
 

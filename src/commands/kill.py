@@ -31,7 +31,7 @@ def kill(instance: str, as_json: bool = False) -> bool:
     # whatever the operator typed here.
     token = resolve_instance_token(reference=instance) or instance
 
-    if stop_instance(token=instance) is None:
+    if stop_instance(token=token) is None:
         return emit_error(as_json, "Something was wrong.")
 
     tunnels = close_instance_tunnels({instance, token})

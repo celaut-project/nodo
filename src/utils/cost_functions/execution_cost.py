@@ -58,10 +58,14 @@ def requested_units(system_resources: celaut.Sysresources) -> Dict[str, Decimal]
     """
     mem_bytes = int(getattr(system_resources, "mem_limit", 0) or 0)
     disk_bytes = int(getattr(system_resources, "disk_space", 0) or 0)
-    period = int(getattr(system_resources, "cpu_period", 0) or 0)
+    # No period is the kernel's default period (Sysresources.cpu_period), not "no
+    # CPU": billing 0 vCPUs for a quota with no period gave the CPU away.
+    from src.utils.cost_functions.resource_availability import _DEFAULT_CPU_PERIOD_US
+
+    period = int(getattr(system_resources, "cpu_period", 0) or 0) or _DEFAULT_CPU_PERIOD_US
     quota = int(getattr(system_resources, "cpu_quota", 0) or 0)
 
-    vcpus = Decimal(quota) / Decimal(period) if period > 0 and quota > 0 else Decimal(0)
+    vcpus = Decimal(quota) / Decimal(period) if quota > 0 else Decimal(0)
     return {
         MEM: bytes_to_gib(mem_bytes),
         DISK: bytes_to_gib(disk_bytes),

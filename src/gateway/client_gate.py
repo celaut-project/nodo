@@ -32,11 +32,12 @@ gated RPC together (not a separate budget per method: ``IntroducePeer`` and
 import threading
 import time
 from collections import OrderedDict, deque
-from typing import Deque, Optional, Type, Union
+from typing import Deque, Optional
 
 from google.protobuf.message import Message
 
 from protos import celaut_pb2
+from protos.gateway_bee import rpc_input
 from src.database.sql_connection import SQLConnection
 from src.gateway.client_pow import is_uuid4_hex
 from src.manager.manager import get_internal_service_id_by_uri
@@ -197,12 +198,14 @@ def require_caller(context, client_id: str = "") -> str:
 
 def parse_with_client(
         request_iterator,
-        payload_type: Union[Type[Message], Message],
-        payload_index: int = 1,
-        client_index: int = 2,
+        method: str,
         timeout: Optional[float] = None,
 ) -> "tuple[Optional[Message], str]":
-    """Parse a request stream that may carry ``payload_type`` and/or a ``Client``.
+    """Parse a ``method`` request stream that may carry its payload and/or a ``Client``.
+
+    The indices come from ``protos.gateway_bee.GATEWAY_RPCS``, which is also what this
+    node announces for ``method``. The method must take one payload message and one
+    ``Client``.
 
     Returns ``(payload_or_None, client_id)`` -- ``client_id`` is ``""`` when no
     ``Client`` was sent, the same empty-string convention ``require_caller`` and
@@ -214,13 +217,21 @@ def parse_with_client(
     ``next()`` to hang on. ``timeout`` defaults to ``simple_rpc_timeout_seconds()``,
     since every caller of this is exactly that: a handful of small control messages.
     """
+    indices = rpc_input(method)
+    payload_types = [t for t in indices.values() if t is not celaut_pb2.Client]
+    if len(indices) != 2 or len(payload_types) != 1:
+        raise ValueError(
+            f"{method} does not take one payload and one Client "
+            "(protos.gateway_bee.GATEWAY_RPCS)."
+        )
+    payload_type = payload_types[0]
     if timeout is None:
         timeout = simple_rpc_timeout_seconds()
     payload = None
     client_id = ""
     for r in BeeClient.parse(
             request_iterator,
-            indices={payload_index: payload_type, client_index: celaut_pb2.Client},
+            indices=indices,
             timeout=timeout,
     ):
         if isinstance(r, celaut_pb2.Client):

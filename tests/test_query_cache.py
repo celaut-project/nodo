@@ -425,7 +425,9 @@ class EstimatedCostRpcTests(unittest.TestCase):
     def test_room_is_checked_on_every_answer_not_remembered(self):
         self.assertIsInstance(self._quote()[0], celaut.EstimatedCost)
         self.room = False
-        self.assertIsNone(self._quote()[0])  # full now: no offer, whatever was remembered
+        with self.assertRaises(Exception) as ctx:  # full now: no offer, whatever was remembered
+            self._quote()
+        self.assertIn("cannot run the service right now", str(ctx.exception))
         self.room = True
         self.assertIsInstance(self._quote()[0], celaut.EstimatedCost)  # room again: offered
         self._quote_mock.assert_not_called()  # the price itself came from memory

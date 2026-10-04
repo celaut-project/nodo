@@ -416,11 +416,10 @@ def _validate_payment_rate(config: Dict[str, Any]) -> Decimal:
         raise ConfigValidationError(
             f"ledgers.ergo.payments.MU_PER_NANOERG must be positive, got {rate}"
         )
-    per_erg = rate * 1_000_000_000
-    if per_erg != per_erg.to_integral_value():
+    if rate != rate.to_integral_value():
         raise ConfigValidationError(
-            f"ledgers.ergo.payments.MU_PER_NANOERG={rate} makes one ERG {per_erg} MU, "
-            "which is not a whole number of MU."
+            f"ledgers.ergo.payments.MU_PER_NANOERG={rate} is not a whole number of MU per "
+            "nanoERG. Peers are told it as is (ContractRate.mu_per_unit, an integer)."
         )
     return rate
 
@@ -1010,6 +1009,12 @@ def validate_bitcoin_config(config: Dict[str, Any], *, warn=None) -> None:
     if rate_value <= 0:
         raise ConfigValidationError(
             f"ledgers.bitcoin.payments.MU_PER_SATOSHI must be positive, got {rate_value}"
+        )
+    if rate_value != rate_value.to_integral_value():
+        raise ConfigValidationError(
+            f"ledgers.bitcoin.payments.MU_PER_SATOSHI={rate_value} is not a whole number "
+            "of MU per satoshi. Peers are told it as is (ContractRate.mu_per_unit, an "
+            "integer)."
         )
     if warn is not None and rate_value == 1:
         # The specific mistake worth naming: 1 is what MU_PER_NANOERG is, and copying it

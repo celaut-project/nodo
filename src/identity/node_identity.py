@@ -169,8 +169,8 @@ class SignatureSchemeComponent(NamedTuple):
 # at all) needs no proto migration to be expressed, only a different-length stack.
 #
 # A descriptor, not an id derived from one: celaut never names a tags/prose/formal
-# component by a hash of itself (compare ``envs.ergo_ledger``, whose ``formal`` is
-# even empty), and doing it here would invent a naming rule for signature schemes that
+# component by a hash of itself (compare ``ledger_descriptors.ergo_payment_ledger``, whose
+# ``formal`` is the declaration itself), and doing it here would invent a naming rule for signature schemes that
 # nothing else in the protocol follows. The descriptor IS the name, and deciding
 # whether two of them denote the same thing is a comparison -- one a service of the
 # shape ``(scheme_a, scheme_b) -> bool`` can eventually make better than this node
@@ -183,8 +183,8 @@ class SignatureSchemeComponent(NamedTuple):
 # nothing about this implementation of it: a reader holding only the Peer message --
 # off a gRPC response, or off an Ergo register -- cannot follow a path into some
 # repository, and naming other projects only moves the question along ("and what is
-# that?"). Same reason envs.PROSE describes the Ergo system and not nodo's client for
-# it. It says everything a verification has to be written from and stands on its own,
+# that?"). Same reason a ledger's prose (src/utils/ledger_descriptors.py) describes the
+# chain and not nodo's client for it. It says everything a verification has to be written from and stands on its own,
 # because `formal` beside it names the same parameters without describing any of them:
 # the two are one declaration read at two levels of detail, and only `formal` is
 # compared.
@@ -342,6 +342,25 @@ def same_component(a, b) -> bool:
     return bool(set(a.tags) & set(b.tags))
 
 
+def same_declaration(a, b) -> bool:
+    """Whether two components declare the very same thing, in full.
+
+    The strict form of :func:`same_component`, for the places where the whole
+    declaration is what has to agree -- a ledger a node pays into or reads proofs
+    from. There a tag cannot stand in: a tag-only ``ergo`` ledger says nothing about
+    the network, the units or how a deposit is bound, so a peer that declares only
+    tags has not said what this node needs to check. Both sides must therefore carry
+    a non-empty ``formal``, and those bytes must be equal. A layer of the transport
+    stack also needs a non-empty ``formal``, but it is compared by protobuf's rules
+    (``transport_stack.compatible_layers``), not byte for byte.
+
+    ``same_component``'s tag fallback stays for descriptors that are loose by design
+    (signature-scheme building blocks, a URI's transport, network slots).
+    """
+    formal_a, formal_b = bytes(a.formal), bytes(b.formal)
+    return bool(formal_a) and bool(formal_b) and formal_a == formal_b
+
+
 def same_signature_scheme(a, b) -> bool:
     """Whether two scheme descriptors denote the same cryptography.
 
@@ -411,14 +430,11 @@ def speaks_our_signature_scheme(peer) -> bool:
     length, their encoding, the verification procedure -- is exactly what the scheme
     decides.
 
-    A descriptor with no components is the pre-field default rather than a wildcard:
-    back when the field did not exist there was only one scheme an announcement could
-    mean, so it resolves to this one, and a peer meaning anything else has to say so.
+    A descriptor with no components is refused: an announcement that does not say
+    which cryptography it is signed in gives a verifier nothing to verify it with, and
+    every node declares its scheme.
     """
-    scheme = peer.signature_scheme
-    if not scheme.components:
-        return True
-    return same_signature_scheme(scheme, node_signature_scheme())
+    return same_signature_scheme(peer.signature_scheme, node_signature_scheme())
 
 
 def normalize_public_key_hex(public_key_hex: str) -> Optional[str]:

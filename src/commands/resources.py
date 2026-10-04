@@ -23,9 +23,13 @@ from typing import List, Optional
 
 
 def _cores(entry) -> Optional[float]:
+    """``cpu_quota / cpu_period``, with the kernel's default period when none is given
+    (Sysresources.cpu_period). None when no quota is given."""
+    from src.utils.cost_functions.resource_availability import _DEFAULT_CPU_PERIOD_US
+
     at_most = entry.resources
-    if at_most.HasField("cpu_quota") and at_most.HasField("cpu_period") and at_most.cpu_period:
-        return at_most.cpu_quota / at_most.cpu_period
+    if at_most.cpu_quota:
+        return at_most.cpu_quota / (at_most.cpu_period or _DEFAULT_CPU_PERIOD_US)
     return None
 
 

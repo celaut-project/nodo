@@ -46,8 +46,11 @@ integer MU, everywhere, so no amount goes through a float. MU has no intrinsic v
 it is the node's own accounting unit, like a ledger's internal cents.
 
 **What an MU is worth belongs to the payment contract, not to MU.** A contract declares
-how many MU one of its units buys; that is exactly what `ContractRate.mu_per_unit`
-carries on the wire, so a peer reading a price can convert it into money it understands.
+how many MU one *base* unit of its asset buys (a nanoERG, a satoshi, a token's smallest
+unit); that is exactly what `ContractRate.mu_per_unit` carries on the wire, so a peer
+reading a price can convert it into money it understands. Whole ERG or BTC are only how
+an amount is shown to a person. Because the rate is an integer on the wire,
+`MU_PER_NANOERG`, `MU_PER_SATOSHI` and an asset's `MU_PER_UNIT` must be whole numbers.
 It also belongs there *in the code*: each rate and its conversions live in that
 contract's own `rate.py` — `contracts/ergo/rate.py`, `contracts/bitcoin/rate.py` — not
 in the accounting core, which names no ledger. Ergo is the default; **Bitcoin is
